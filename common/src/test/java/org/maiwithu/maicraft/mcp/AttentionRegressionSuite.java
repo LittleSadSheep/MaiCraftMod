@@ -12,6 +12,7 @@ import org.maiwithu.maicraft.client.runtime.SleepReminderTest;
 import org.maiwithu.maicraft.intent.IntentAttentionEvidenceTest;
 import org.maiwithu.maicraft.intent.ChatFlowTest;
 import org.maiwithu.maicraft.intent.McpTaskLifecycleTest;
+import org.maiwithu.maicraft.intent.ParameterNormalizerTest;
 import org.maiwithu.maicraft.intent.WaitGoalTest;
 import org.maiwithu.maicraft.intent.GoalCheckpointCompatibilityTest;
 import org.maiwithu.maicraft.intent.persistence.CheckpointCapacityTest;
@@ -46,6 +47,9 @@ public final class AttentionRegressionSuite {
         IntentAttentionEvidenceTest.main(args);
         // 各宿主先发现内联对象再提交目标，非法嵌套参数必须在进入游戏动作前被拒绝。
         McpSchemaCompatibilityTest.main(args);
+        // 宿主把整数、布尔写成字符串或把数组包成 {"item":...} 时先按契约类型还原，同一编码差异不能反复拒收。
+        ParameterNormalizerTest.main(args);
+        PublicArgumentNormalizationTest.main(args);
         // 已存的大蓝图和失败历史可分页找回，常规状态须保留当前待答问题与消费不确定性。
         TaskViewTest.main(args);
         // 背包和当前主手都携带组件身份，半成品无需先投进机器才能查看进度。

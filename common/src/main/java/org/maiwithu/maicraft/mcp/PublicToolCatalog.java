@@ -7,6 +7,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -15,6 +16,7 @@ import java.util.regex.Pattern;
 import org.maiwithu.maicraft.intent.Goal;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.MachineDesignBindings;
+import org.maiwithu.maicraft.intent.ParameterNormalizer;
 
 import org.maiwithu.maicraft.mcp.knowledge.web.WebKnowledgeService;
 
@@ -211,6 +213,11 @@ final class PublicToolCatalog {
     }
 
     static JsonObject validateAndNormalize(String name, JsonElement rawArguments) {
+        return validateAndNormalize(name, rawArguments, new ArrayList<>());
+    }
+
+    /** 同上，并把按声明类型做过的编码还原逐条记入 notes，供回执如实说明。 */
+    static JsonObject validateAndNormalize(String name, JsonElement rawArguments, List<String> notes) {
         // 复制请求后补默认值、查格式，不直接改调用者传进来的原对象。
         if (rawArguments == null || rawArguments.isJsonNull()) {
             rawArguments = new JsonObject();
@@ -219,6 +226,9 @@ final class PublicToolCatalog {
             throw bad("arguments must be an object");
         }
         JsonObject arguments = rawArguments.getAsJsonObject().deepCopy();
+        // 宿主把整数、布尔写成字符串或把数组包成 {"item":...} 时先按契约类型还原，再做原有的严格检查；
+        // 这样拉杆、取料、走坐标不会因为同一个编码差异被反复拒收。
+        normalizeEncoding(name, arguments, notes);
         switch (name) {
             case PERCEIVE -> validatePerceive(arguments);
             case PLAN -> validatePlan(arguments);
@@ -227,6 +237,20 @@ final class PublicToolCatalog {
             default -> throw bad("unknown tool: " + name);
         }
         return arguments;
+    }
+
+    private static void normalizeEncoding(String name, JsonObject arguments, List<String> notes) {
+        // 顶层字段已有逐项类型的输入 Schema，宿主不会改写；只还原 goal.parameters 这类自由对象里的编码。
+        if (arguments.has("goal") && arguments.get("goal").isJsonObject())
+            ParameterNormalizer.normalizeGoal(arguments.getAsJsonObject("goal"), "goal", notes);
+        // 决策应答里改写的新目标同样还原；details.parameters 的能力要到任务内才知道，由合并处还原。
+        if (TASK.equals(name) && arguments.has("answer") && arguments.get("answer").isJsonObject()) {
+            JsonObject details = arguments.getAsJsonObject("answer").has("details")
+                    && arguments.getAsJsonObject("answer").get("details").isJsonObject()
+                    ? arguments.getAsJsonObject("answer").getAsJsonObject("details") : null;
+            if (details != null && details.has("goal") && details.get("goal").isJsonObject())
+                ParameterNormalizer.normalizeGoal(details.getAsJsonObject("goal"), "answer.details.goal", notes);
+        }
     }
 
     private static void validatePerceive(JsonObject value) {

@@ -54,9 +54,14 @@ public final class McpSchemaCompatibilityTest {
                 JsonObject badChild = nestedGoal(1);
                 badChild.getAsJsonArray("children").set(0, JsonParser.parseString("\"{}\""));
                 reject(tool, arguments(tool, badChild), runtime, "字符串冒充子目标");
+                // 宿主把整数坐标写成 "0" 时入口按声明类型还原后受理；无法还原成整数的写法仍拒收。
+                JsonObject spelledTarget = nestedGoal(1);
+                spelledTarget.getAsJsonArray("children").get(0).getAsJsonObject().getAsJsonObject("target")
+                        .getAsJsonObject("position").addProperty("x", "0");
+                check(!call(tool, arguments(tool, spelledTarget)).get("isError").getAsBoolean(), "字符串整数坐标还原后受理");
                 JsonObject badTarget = nestedGoal(1);
                 badTarget.getAsJsonArray("children").get(0).getAsJsonObject().getAsJsonObject("target")
-                        .getAsJsonObject("position").addProperty("x", "0");
+                        .getAsJsonObject("position").addProperty("x", "zero");
                 reject(tool, arguments(tool, badTarget), runtime, "子目标坐标仍须为整数");
                 JsonObject badConstraint = nestedGoal(0);
                 badConstraint.getAsJsonArray("constraints").get(0).getAsJsonObject().addProperty("hard", "true");

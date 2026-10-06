@@ -19,6 +19,7 @@ import org.maiwithu.maicraft.core.pathing.transport.TransportMode;
 import org.maiwithu.maicraft.core.data.WorldTimeSemantics;
 import org.maiwithu.maicraft.core.scan.TargetIndex;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.Locale;
@@ -106,8 +107,10 @@ final class AbilityAdapter {
         // 这里只合并调用者认可的语义参数，不解析地点或创建动作；总任务先保存这份目标，再启动实际执行。
         JsonObject details = answer.details();
         JsonObject updates = details.has("parameters") && details.get("parameters").isJsonObject()
-                ? details.getAsJsonObject("parameters")
-                : details;
+                ? details.getAsJsonObject("parameters").deepCopy()
+                : details.deepCopy();
+        // 重试应答里的 "6"、"true"、{"item":[...]} 与新提交走同一套按声明类型的编码还原，避免重试再因同一写法失败。
+        ParameterNormalizer.normalizeParameters(goal.ability(), updates, "answer.details.parameters", new ArrayList<>());
         JsonObject merged = goal.parameters();
         merge(merged, updates);
         return goal.withParameters(merged);

@@ -291,7 +291,7 @@ def regressionSuites = [
     attentionRegression: [
         entry: 'org.maiwithu.maicraft.mcp.AttentionRegressionSuite',
         heap: '512m', directory: 'attention-regression', timeoutSeconds: 45,
-        purpose: '验证任务事件、状态查询与等待'
+        purpose: '验证任务事件、状态查询、等待与公开参数编码还原'
     ],
     combatRegression: [
         entry: 'org.maiwithu.maicraft.client.actor.CombatThreatsTest',

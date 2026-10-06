@@ -12,6 +12,8 @@ import com.google.gson.JsonParseException;
 import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import org.maiwithu.maicraft.intent.IntentRuntime;
+import org.maiwithu.maicraft.intent.SemanticAbilityCatalog;
 import org.maiwithu.maicraft.intent.SemanticContractException;
 
 import java.io.ByteArrayOutputStream;
@@ -403,10 +405,14 @@ public final class EmbeddedMcpService implements AutoCloseable {
         if (!PublicToolCatalog.contains(name)) throw new RpcException(-32602, "Unknown tool");
 
         JsonObject arguments;
+        List<String> normalized = new ArrayList<>();
         try {
-            arguments = PublicToolCatalog.validateAndNormalize(name, params.get("arguments"));
+            arguments = PublicToolCatalog.validateAndNormalize(name, params.get("arguments"), normalized);
         } catch (IllegalArgumentException exception) {
-            return toolError("invalid_arguments", message(exception), true, true, null, MachineDesignRejection.inspectRequest(params.get("arguments")));
+            // 入口拒收时同样附上已做的编码还原和该能力的简版签名，宿主改正这一份请求即可，不必再查契约。
+            JsonObject details = correctionDetails(MachineDesignRejection.inspectRequest(params.get("arguments")),
+                    normalized, goalAbility(params.get("arguments")));
+            return toolError("invalid_arguments", message(exception), true, true, null, details);
         }
 
         String requestKey = null;
@@ -453,7 +459,8 @@ public final class EmbeddedMcpService implements AutoCloseable {
             }
             JsonElement value = await(stage, requestTimeout(name, arguments));
             return knowledge && arguments.has("resource_uri") && !arguments.get("resource_uri").isJsonNull()
-                    ? knowledgeToolResult(presentDocuments(value.getAsJsonObject())) : toolResult(value, false);
+                    ? knowledgeToolResult(presentDocuments(value.getAsJsonObject()))
+                    : toolResult(withNormalization(value, normalized), false);
         } catch (CancellationException cancelled) {
             return toolError("attention_wait_cancelled", "Attention wait cancelled; the game task is unchanged.",
                     false, true, null);
@@ -483,7 +490,8 @@ public final class EmbeddedMcpService implements AutoCloseable {
         } catch (Exception exception) {
             Throwable failure = unwrap(exception);
             if (failure instanceof SemanticContractException violation) {
-                return semanticContractError(violation, requestKey, MachineDesignRejection.inspectRequest(arguments));
+                return semanticContractError(violation, requestKey,
+                        correctionDetails(MachineDesignRejection.inspectRequest(arguments), normalized, null));
             }
             if (!(failure instanceof IllegalArgumentException || failure instanceof IllegalStateException)) {
                 Constants.LOG.error("[maicraft-mcp] Runtime call failed: {}", name, failure);
@@ -933,8 +941,47 @@ public final class EmbeddedMcpService implements AutoCloseable {
         details.addProperty("violation", violation.violationCode());
         details.addProperty("path", violation.path());
         details.addProperty("ability", violation.ability());
+        // 被拒能力的字段名、类型和地点种类直接随错误返回，改正时不需要另读一轮能力契约。
+        if (violation.ability() != null && !details.has("ability_signature"))
+            details.add("ability_signature", SemanticAbilityCatalog.signature(violation.ability()));
         return toolError("invalid_semantic_goal", violation.getMessage(),
                 true, true, requestKey, details);
+    }
+
+    /** 成功回执带上入口做过的编码还原，宿主据此知道哪些写法被改正，不把它当成自己原样送达的值。 */
+    private static JsonElement withNormalization(JsonElement value, List<String> normalized) {
+        if (normalized.isEmpty() || value == null || !value.isJsonObject()) return value;
+        JsonObject result = value.getAsJsonObject().deepCopy();
+        JsonArray notes = new JsonArray();
+        normalized.forEach(notes::add);
+        result.add("normalized_arguments", notes);
+        return result;
+    }
+
+    /** 拒收错误的修正材料：原有诊断、已做的编码还原，以及（已知能力时）该能力的简版签名。 */
+    private static JsonObject correctionDetails(JsonObject diagnostics, List<String> normalized, String ability) {
+        JsonObject details = diagnostics == null ? new JsonObject() : diagnostics.deepCopy();
+        if (!normalized.isEmpty()) {
+            JsonArray notes = new JsonArray();
+            normalized.forEach(notes::add);
+            details.add("normalized_arguments", notes);
+        }
+        if (ability != null && IntentRuntime.KNOWN_ABILITIES.contains(ability))
+            details.add("ability_signature", SemanticAbilityCatalog.signature(ability));
+        return details.size() == 0 ? null : details;
+    }
+
+    /** 从原始请求里读出 goal.ability（含应答改写的新目标），读不到返回 null。 */
+    private static String goalAbility(JsonElement arguments) {
+        if (arguments == null || !arguments.isJsonObject()) return null;
+        JsonObject object = arguments.getAsJsonObject();
+        JsonElement goal = object.get("goal");
+        if ((goal == null || !goal.isJsonObject()) && object.get("answer") instanceof JsonObject answer
+                && answer.get("details") instanceof JsonObject details) goal = details.get("goal");
+        if (goal == null || !goal.isJsonObject()) return null;
+        JsonElement ability = goal.getAsJsonObject().get("ability");
+        return ability != null && ability.isJsonPrimitive() && ability.getAsJsonPrimitive().isString()
+                ? ability.getAsString() : null;
     }
 
     private Duration requestTimeout(String toolName, JsonObject arguments) {

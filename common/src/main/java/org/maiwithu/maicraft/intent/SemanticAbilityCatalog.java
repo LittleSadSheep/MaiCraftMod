@@ -4,7 +4,9 @@ package org.maiwithu.maicraft.intent;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Set;
 import org.maiwithu.maicraft.core.build.BuildingBudgetReport;
 import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
@@ -826,7 +828,8 @@ public final class SemanticAbilityCatalog {
         result.add("accepted_hard_constraints", targets());
         result.addProperty(
                 "execution_boundary",
-                "Use only fields declared by this ability. Build accepts LLM-authored scenes and explicit block blueprints; machine blueprints also accept exported tutorial structures. MaiCraft owns native routes, gestures, transactions, retries and verification. Never supply click scripts. Construction verifies structure; operation requires separate evidence.");
+                "Use only fields declared by this ability. Build accepts LLM-authored scenes and explicit block blueprints; machine blueprints also accept exported tutorial structures. MaiCraft owns native routes, gestures, transactions, retries and verification. Never supply click scripts. Construction verifies structure; operation requires separate evidence. "
+                        + "Encoding: before validation the public entry restores exact string spellings of declared integer/number/boolean fields (\"-86\", \"4\", \"true\"), target.position x/y/z, {\"item\":...} wrappers and single values for array fields, and moves a declared parameter written beside goal into goal.parameters; the receipt lists these as normalized_arguments. Field notes that reject strings or booleans refer to values still invalid after this restoration, such as \"8.5\" or \"yes\".");
         return result;
     }
 
@@ -862,6 +865,31 @@ public final class SemanticAbilityCatalog {
 
     static Set<String> parameterNames(String ability) {
         return names(describe(ability).getAsJsonObject("parameters"));
+    }
+
+    /** 参数名到声明类型的对照；公开入口据此还原宿主模型改写过的 JSON 编码，不读取说明正文。 */
+    public static Map<String, String> parameterTypes(String ability) {
+        JsonObject fields = describeContract(ability).getAsJsonObject("parameters");
+        Map<String, String> result = new LinkedHashMap<>();
+        if (fields != null) fields.entrySet().forEach(entry -> result.put(entry.getKey(),
+                entry.getValue().getAsJsonObject().get("type").getAsString()));
+        return result;
+    }
+
+    /**
+     * 参数被拒时随错误附上的简版签名：只有字段名、声明类型和可接受地点种类。
+     * 宿主模型照此改正当前请求即可，不必再花一轮读取整份能力契约。
+     */
+    public static JsonObject signature(String ability) {
+        JsonObject contract = describeContract(ability);
+        JsonObject parameters = new JsonObject();
+        parameterTypes(ability).forEach(parameters::addProperty);
+        JsonObject result = new JsonObject();
+        result.addProperty("ability", ability);
+        result.addProperty("location", "goal.parameters");
+        result.add("parameters", parameters);
+        result.add("accepted_target_kinds", contract.getAsJsonArray("accepted_target_kinds").deepCopy());
+        return result;
     }
 
     static Set<String> preferenceNames(String ability) {
