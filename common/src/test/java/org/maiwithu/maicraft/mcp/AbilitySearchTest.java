@@ -77,6 +77,19 @@ public final class AbilitySearchTest {
             var row = rows.get(i).getAsJsonObject();
             check(row.size() == 2 && row.get("ability").equals(names.get(i)) && row.has("summary"), "summary layer keeps ID and purpose only");
         }
+        // 签名层同样一次给全：每项带用途、参数类型与地点种类，宿主开局常驻后不必逐个读契约。
+        request.addProperty("detail", "signatures");
+        var signatures = AbilitySearch.index(PublicToolCatalog.validateAndNormalize("perceive", request));
+        var signed = signatures.getAsJsonArray("semantic_abilities");
+        check(signed.size() == names.size(), "signatures cover every public ability");
+        for (int i = 0; i < signed.size(); i++) {
+            var row = signed.get(i).getAsJsonObject();
+            check(row.get("ability").equals(names.get(i)) && row.has("summary") && row.has("parameters")
+                    && row.has("accepted_target_kinds"), "signature row keeps purpose, parameter types and target kinds");
+        }
+        var operate = SemanticAbilityCatalog.signature("maicraft:operate_machine").getAsJsonObject("parameters");
+        check(operate.has("max_wait_seconds") && "integer".equals(operate.get("count").getAsString()), "signature lists declared types");
+        System.out.println("AbilitySearchTest: signatures index=" + signatures.toString().length() + " chars");
         // 目录层级不能混入其他观察或精确契约读取，避免参数被悄悄忽略后返回错误层级。
         for (String detail : new String[]{"full", ""}) {
             request.addProperty("detail", detail);

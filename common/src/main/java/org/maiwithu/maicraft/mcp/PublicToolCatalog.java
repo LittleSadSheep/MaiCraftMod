@@ -112,7 +112,7 @@ final class PublicToolCatalog {
                                 "radius":{"type":"integer","minimum":1,"maximum":64,"description":"Use 1..8 for construction_site (default 8), or 8..64 for kinetic_sources (default 32). Power scans also cap height and exclude hidden or protected outlets."},
                                 "query":{"type":["string","null"],"minLength":1,"maxLength":256,"description":"Search knowledge, abilities, exploration, web_knowledge or kinetic_sources by keyword. Only exploration allows a catalog focus with query. Omit resource_uri and url."},
                                 "focus":{"type":["string","null"],"maxLength":256,"description":"Read an ability's full contract by ID, or maicraft:server_assistance; omit for all ability names. For situation, prefix travel, elevators, physical_structures, navigation or transport with maicraft:. Use sign text for surroundings, a block ID for kinetic_sources, or search words for knowledge. Exploration accepts discoveries (default), biomes, biome_tags, structures, pending, run:<id> or returned details_focus."},
-                                "detail":{"type":["string","null"],"enum":["names","summary",null],"description":"Abilities index only: names (default) returns all IDs; summary adds descriptions for all. Omit query/focus. Use focus for parameters."},
+                                "detail":{"type":["string","null"],"enum":["names","summary","signatures",null],"description":"Abilities index only: names (default) returns all IDs; summary adds descriptions for all; signatures adds every ability's parameter names/types and target kinds. Omit query/focus. Use focus for full parameter rules."},
                                 "resource_uri":{"type":["string","null"],"maxLength":2048,"description":"Read a returned resource_uri, details_uri or next_uri. Selects knowledge. Receipt pages are frozen and temporary; unread contents remain unknown."},
                                  "task_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$","description":"Follow this task plus important body events in attention. tasks gives its summary; use task with get and path for evidence."},
                                  "stream_id":{"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$","description":"Attention only: copy from next_attention to detect restart or world change."},
@@ -267,8 +267,8 @@ final class PublicToolCatalog {
         boolean abilityIndex = "abilities".equals(view) && !present(value, "query") && !present(value, "focus");
         if (present(value, "detail")) {
             if (!abilityIndex) throw bad("detail is only supported by the abilities index without query or focus");
-            if (!Set.of("names", "summary").contains(string(value, "detail", 1, 16, false)))
-                throw bad("detail must be names or summary");
+            if (!Set.of("names", "summary", "signatures").contains(string(value, "detail", 1, 16, false)))
+                throw bad("detail must be names, summary or signatures");
         } else if (abilityIndex) value.addProperty("detail", "names");
         // 查外部机制沿资料线程读取，专用参数不能混入身体观察或原生配方查询。
         if (WebKnowledgeService.VIEW.equals(view)) {

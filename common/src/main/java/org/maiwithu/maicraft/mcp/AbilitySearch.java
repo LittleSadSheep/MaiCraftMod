@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.mcp;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import java.util.ArrayList;
+import java.util.List;
 import org.maiwithu.maicraft.intent.IntentRuntime;
 import org.maiwithu.maicraft.intent.SemanticAbilityCatalog;
 
@@ -13,9 +14,11 @@ final class AbilitySearch {
 
     static JsonObject index(JsonObject arguments) {
         // 首次选取采集、移动或施工能力时一次给全名称；比较用途时展开全部概要，两层都不分页。
-        boolean summary = arguments.has("detail") && !arguments.get("detail").isJsonNull()
-                && "summary".equals(arguments.get("detail").getAsString());
+        String detail = arguments.has("detail") && !arguments.get("detail").isJsonNull()
+                ? arguments.get("detail").getAsString() : "names";
+        boolean summary = "summary".equals(detail);
         var ids = IntentRuntime.KNOWN_ABILITIES.stream().filter(id -> !SemanticAbilityCatalog.compatibilityAlias(id)).sorted().toList();
+        if ("signatures".equals(detail)) return signatures(ids);
         JsonArray rows = new JsonArray();
         for (String id : ids) {
             if (summary) {
@@ -26,6 +29,28 @@ final class AbilitySearch {
         }
         JsonObject result = new JsonObject(); result.add("semantic_abilities", rows);
         if (summary) { result.addProperty("total", ids.size()); result.addProperty("contract_loaded", false); }
+        return result;
+    }
+
+    /**
+     * 全部能力的简版签名：一句用途、参数名与声明类型、可接受的地点种类，不含逐字段长说明。
+     * 宿主开局一次读入并常驻上下文，提交动作时按签名填写，不必每个能力先读一轮完整契约；
+     * 单位、范围、互斥等细节仍以 focus 读到的完整契约为准，被拒时错误里也会附同一份签名。
+     */
+    private static JsonObject signatures(List<String> ids) {
+        JsonArray rows = new JsonArray();
+        for (String id : ids) {
+            JsonObject row = SemanticAbilityCatalog.signature(id);
+            row.remove("location");
+            row.add("summary", SemanticAbilityCatalog.describe(id).get("summary"));
+            rows.add(row);
+        }
+        JsonObject result = new JsonObject();
+        result.add("semantic_abilities", rows);
+        result.addProperty("total", ids.size());
+        result.addProperty("parameters_location", "goal.parameters");
+        result.addProperty("contract_loaded", false);
+        result.addProperty("note", "Types and target kinds only; read perceive(view=abilities,focus=ability) for units, ranges, defaults and mutual exclusions.");
         return result;
     }
 

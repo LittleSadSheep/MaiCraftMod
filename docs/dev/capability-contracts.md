@@ -15,7 +15,7 @@
 5. **回执与恢复**：接单、动作完成、目标满足和结果未知分别意味着什么；说明失败、待决策、暂停和恢复的入口与依据。
 6. **有效示例**：提供可解析的完整 `plan` 请求，覆盖普通情况和最容易误用的边界；引用必须来自真实观察，不编造 UUID、配方或注册 ID。
 
-字段的声明类型（`integer`、`number`、`boolean`、`array<…>`、`object` 等）同时决定公开入口的编码还原。部分宿主会把 `-86` 写成 `"-86"`、把 `true` 写成 `"true"`、把数组包成 `{"item": [...]}`，或把已声明参数写在 `goal` 顶层。[ParameterNormalizer](../../common/src/main/java/org/maiwithu/maicraft/intent/ParameterNormalizer.java) 在 `PublicToolCatalog.validateAndNormalize` 和决策应答合并 `details.parameters` 前，按声明类型还原这些语义唯一的写法：对象字段只还原 `x/y/z` 与 `schema_version`，字符串字段一律不动；`"8.5"`、`"yes"` 这类无法唯一还原的值原样交给契约拒绝。成功回执以 `normalized_arguments` 列出每处还原。被拒的请求随错误附 `ability_signature`，内容是该能力的字段名、声明类型和可接受的地点种类，宿主据此改正即可，不必再读一轮完整契约。顶层工具字段已有逐项类型的输入 Schema，保持严格校验，不做还原。
+字段的声明类型（`integer`、`number`、`boolean`、`array<…>`、`object` 等）同时决定公开入口的编码还原。部分宿主会把 `-86` 写成 `"-86"`、把 `true` 写成 `"true"`、把数组包成 `{"item": [...]}`，或把已声明参数写在 `goal` 顶层。[ParameterNormalizer](../../common/src/main/java/org/maiwithu/maicraft/intent/ParameterNormalizer.java) 在 `PublicToolCatalog.validateAndNormalize` 和决策应答合并 `details.parameters` 前，按声明类型还原这些语义唯一的写法：对象字段只还原 `x/y/z` 与 `schema_version`，字符串字段一律不动；`"8.5"`、`"yes"` 这类无法唯一还原的值原样交给契约拒绝。成功回执以 `normalized_arguments` 列出每处还原。被拒的请求随错误附 `ability_signature`，内容是该能力的字段名、声明类型和可接受的地点种类，宿主据此改正即可，不必再读一轮完整契约。同一份签名也可以一次全部读取：`perceive(view="abilities", detail="signatures")` 返回每个公开能力的一句用途、参数名与声明类型、可接受的地点种类（约 2.3 万字符），供宿主开局常驻上下文；单位、范围、默认值和互斥条件仍以 `focus` 读到的完整契约为准。顶层工具字段已有逐项类型的输入 Schema，保持严格校验，不做还原。
 
 自然语言的 `outcome` 不替代结构化参数。例如“精确到这一层”必须对应实际可用的精度参数，不能只在一句描述中承诺执行器没有收到的限制。
 
