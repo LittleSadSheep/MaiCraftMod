@@ -41,6 +41,8 @@ public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTask
     private boolean siteReady;
     private DiscardFire fire;
     private DiscardRecovery recovery;
+    /** 原地丢弃后的走开阶段；只在原地形态（物品落在身边）时创建。 */
+    private DiscardStepAway stepAway;
     private boolean recoveryAccounted;
     private boolean allowBurn = true;
     private int recovered, thrown;
@@ -114,6 +116,11 @@ public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTask
                     return TaskState.RUNNING;
                 }
             }
+            // 原地丢弃：物品撞到前方障碍落在身边，先走出拾取范围再收场，免得 2 秒冷却一过被自己捡回。
+            if (state == TaskState.SUCCESS && site.plan().inPlace()) {
+                if (stepAway == null) stepAway = new DiscardStepAway(watches);
+                if (!stepAway.tick(player)) return TaskState.RUNNING;
+            }
             return state;
         }
         if (Vec3.atBottomCenterOf(site.plan().stance()).subtract(player.position()).horizontalDistanceSqr() > .09) {
@@ -164,6 +171,7 @@ public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTask
         uncertain |= pendingClick != null
                 && (receipt == null || receipt.status() != MenuReceipt.Status.CONFIRMED_NOT_APPLIED);
         menuSession.cleanup(player);
+        if (stepAway != null) stepAway.stop();
         try {
             var context = ClientRuntime.requireContext(player); site.close(context);
             if (fire != null) fire.close(context);
@@ -188,6 +196,7 @@ public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTask
         data.put("discarded_item_avoidance", watches.stream().map(DiscardedItems.Watch::result).toList());
         data.put("discard_site", site.result());
         if (fire != null) data.put("discard_fire", fire.result());
+        if (stepAway != null) data.put("discard_step_away", stepAway.result());
         return data;
     }
 
@@ -200,6 +209,10 @@ public final class DropCompanionTask extends AbstractCompanionTask<DropItemsTask
 
     @Override
     protected String successMessage() {
+        // 原地丢完没能走出拾取范围：丢弃本身已确认，但物品可能被自动捡回，提醒调用方复核背包。
+        if (stepAway != null && stepAway.pickupRisk())
+            return doneMessage + "; could not step out of the dropped items' pickup range, so they may be picked back up"
+                    + " — check the inventory before relying on this drop";
         return doneMessage;
     }
 
