@@ -63,8 +63,9 @@ public final class EquipCompanionTask extends AbstractCompanionTask<EquipTaskRec
     // 主背包没有该物品时从副手取：物品身份与目标栏位都按副手里那一叠认定。
     @Override protected void onStart() {
         int mainSlot = findItem(player.getInventory());
-        // 主背包没有该物品时，前置检查已确认副手握着它且有空主格可接；身份与目标栏位按副手那一叠认定。
+        // 主背包没有该物品时，前置检查已确认副手握着它且有空主格可接；身份与目标栏位都按副手里那一叠认定。
         boolean fromOffhand = mainSlot < 0;
+        if (!fromOffhand) sourceSlot = mainSlot;
         var stack = fromOffhand ? player.getOffhandItem() : player.getInventory().getItem(mainSlot);
         item = stack.getItem();
         EquipmentSlot naturalSlot = player.getEquipmentSlotForItem(stack);
