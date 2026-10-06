@@ -98,7 +98,7 @@ public final class AcquisitionProspectingHandoffTest {
                     "矿方块 ID + 授权开 → 照常派出统一探矿任务，实际: " + active);
             if (active instanceof MineBlockTaskRecord mine) {
                 check(mine.prospecting() && mine.prospectY() == 1,
-                        "y=1 在铁带内：探矿腿目标层就近取当前层，不得回退为 band_unknown 拒绝");
+                        "y=1 在铁带内：探矿行程目标层就近取当前层，不得回退为 band_unknown 拒绝");
             }
         }
     }
@@ -130,7 +130,7 @@ public final class AcquisitionProspectingHandoffTest {
                 check(mine.searchCenter() == null, "探矿掘进不冻结地表扫描范围");
             }
             check(booleanField(get(task, "rootNeed"), "prospectingMineStarted"),
-                    "需求侧记录探矿腿已派出");
+                    "需求侧记录探矿行程已派出");
         }
     }
 
@@ -336,7 +336,7 @@ public final class AcquisitionProspectingHandoffTest {
     }
 
     /**
-     * 接近腿规划在飞的宽上限（117 harvest 接近腿样本：calc_started:1 后二十分钟零事件）：
+     * 接近段规划在飞的宽上限（harvest 接近段样本：calc_started:1 后二十分钟零事件）：
      * 单次搜索永不返回时接近段如实收场（planning_stall，阶段名与不构成证据声明进回执），
      * 宽上限内的合法慢搜索不误杀，搜索返回即停表。
      */
@@ -523,7 +523,7 @@ public final class AcquisitionProspectingHandoffTest {
         set(task, "activeChild", new StubMineChild(failureType));
     }
 
-    /** 派一张真实下降记录再换成 stub 成功回执；完成处理按记录类型识别这是探矿下降腿。 */
+    /** 派一张真实下降记录再换成 stub 成功回执；完成处理按记录类型识别这是探矿下降段。 */
     private static void startStubDescend(SemanticAcquireCompanionTask task, int prospectY) throws Exception {
         task.onStart();
         Object need = get(task, "rootNeed");

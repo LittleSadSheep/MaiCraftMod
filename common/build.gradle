@@ -360,7 +360,7 @@ def regressionSuites = [
     sleepBedFallbackRegression: [
         entry: 'org.maiwithu.maicraft.intent.SleepBedFallbackRegression',
         heap: '512m', directory: 'sleep-bed-fallback-regression', timeoutSeconds: 60,
-        purpose: '验证携带床时现成床不可用触发自带床回退腿，回执诚实披露换床与双重失败'
+        purpose: '验证携带床时现成床不可用触发自带床回退，回执诚实披露换床与双重失败'
     ],
     optionalServerRegression: [
         entry: 'org.maiwithu.maicraft.intent.OptionalServerRegressionSuite',

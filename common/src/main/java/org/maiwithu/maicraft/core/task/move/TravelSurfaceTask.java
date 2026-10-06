@@ -71,7 +71,7 @@ public final class TravelSurfaceTask extends AbstractCompanionTask<TravelSurface
         // 站立即露天时无需起飞；飞行进行中不抢判，落地的稳定性仍由交通会话确认。
         if(flight==null && player.onGround() && openSkyAt(player.blockPosition())) return arrived();
         // 已授权动土且明显被埋（所在列顶盖高于脚下）时，先沿本列竖直上掘到顶盖再破出：
-        // 坑道里的地面腿只会原地绕圈，授权一次就消费一次，而不是等地面探索耗尽。
+        // 坑道里的地面段只会原地绕圈，授权一次就消费一次，而不是等地面探索耗尽。
         if(walk==null && flight==null && r.mayAlterTerrain && !shaftTried) {
             shaftTried=true;
             var leg=verticalLeg();
@@ -125,7 +125,7 @@ public final class TravelSurfaceTask extends AbstractCompanionTask<TravelSurface
         return (openSkyAt(feet) ? 0 : 1000)+surface.point().distanceTo(player.position());
     }
     /**
-     * 授权动土且所在列顶盖明显高于脚下时，生成本列竖直上掘的精确腿：目标即 heightmap 顶，
+     * 授权动土且所在列顶盖明显高于脚下时，生成本列竖直上掘的精确段：目标即 heightmap 顶，
      * 逐格破头顶方块上来（与 exact 坐标上掘同一条已实测的路径链路），破出顶格后露天判定在常规检查处收口。
      * 顶盖是液体或非实体方块时竖井无法通过，记下位置证据后仍走原有地面流程，不臆造换位。
      */

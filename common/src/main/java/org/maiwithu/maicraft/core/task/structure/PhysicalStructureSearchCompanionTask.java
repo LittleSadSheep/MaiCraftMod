@@ -70,7 +70,7 @@ public final class PhysicalStructureSearchCompanionTask
 
     private static final String STRONGHOLD = "minecraft:stronghold";
     private static final String OVERWORLD = "minecraft:overworld";
-    /** 观察等待上限：超时按本视角未见证据转入下一腿，检测由行进中的移动扫描继续。 */
+    /** 观察等待上限：超时按本视角未见证据转入下一段行程，检测由行进中的移动扫描继续。 */
     private static final int OBSERVE_MAX_TICKS = 100;
     private static final int EVIDENCE_SCAN_RADIUS = 192;
     private static final int FRONTIER_GRID = 64;
@@ -92,16 +92,16 @@ public final class PhysicalStructureSearchCompanionTask
     private static final double MIN_DIRECTION_STEP = 8.0;
     private static final double REVERSE_DOT = -0.15;
     private static final int SCOPE_TOLERANCE = 8;
-    /** 换锚的小半径：沿垂直方位横移这段距离再继续前沿腿，不远离原搜索扇区。 */
+    /** 换锚的小半径：沿垂直方位横移这段距离再继续前沿行程，不远离原搜索扇区。 */
     private static final double RELOCATION_HOP_BLOCKS = 32.0;
-    /** 主动路线腿意外丢失时允许的重建次数；再丢才按内部错误终态失败。 */
+    /** 主动路线段意外丢失时允许的重建次数；再丢才按内部错误终态失败。 */
     private static final int MAX_INTERNAL_ROUTE_RECOVERIES = 1;
 
     private final FirstPersonActionGate eyeSelection = new FirstPersonActionGate();
     private final Set<Long> rejectedEvidence = new HashSet<>();
     private final Set<Long> attemptedFrontiers = new HashSet<>();
     private final List<String> routeFailureKinds = new ArrayList<>();
-    /** 逐腿失败明细：目标位置、移动子任务原话与已拉近距离；回执不按固定条数丢弃卡点。 */
+    /** 逐段行程失败明细：目标位置、移动子任务原话与已拉近距离；回执不按固定条数丢弃卡点。 */
     private final List<Map<String, Object>> legFailures = new ArrayList<>();
     private final FrontierLegBreaker frontierBreaker = new FrontierLegBreaker();
     private StructureEvidenceProfiles.ResolvedProfile profile;
@@ -152,7 +152,7 @@ public final class PhysicalStructureSearchCompanionTask
     private BlockPos activeMoveTarget;
     private boolean eyeConsumptionUnverified;
     private int internalRouteRecoveries;
-    /** 行进涉水守卫的记数：当前腿的连续滞水刻、最近一次逼近目标的时刻与已弃腿次数。 */
+    /** 行进涉水守卫的记数：当前行程的连续滞水刻、最近一次逼近目标的时刻与已放弃行程次数。 */
     private int legWaterTicks;
     private long lastWaterApproachTick;
     private double legWaterBestDistance = Double.MAX_VALUE;
@@ -247,8 +247,8 @@ public final class PhysicalStructureSearchCompanionTask
         Constants.LOG.info(
                 "[maicraft-task] stronghold search resumed along remembered eye direction {} (age {} ticks)",
                 stored.direction(), player.level().getGameTime() - stored.gameTime());
-        // 续走必须先经路线截取建立移动腿，不能空腿直接进入行进阶段：
-        // 空腿会在首个行进刻命中路线丢失检查，且方向记忆跨任务共享，会让每次重提都立刻失败。
+        // 续走必须先经路线截取建立移动段，不能空手直接进入行进阶段：
+        // 没有移动段会在首个行进刻命中路线丢失检查，且方向记忆跨任务共享，会让每次重提都立刻失败。
         continueDirectionTravel();
     }
 
@@ -308,7 +308,7 @@ public final class PhysicalStructureSearchCompanionTask
     }
 
     // 先等本轮已加载方块查完；有剩余投眼方向就继续走，否则要塞进入投眼准备，其他结构换一个探索方向。
-    // 观察等待有时长上限：超时按本视角未见证据转入下一腿，不在原地停滞到入夜；
+    // 观察等待有时长上限：超时按本视角未见证据转入下一段行程，不在原地停滞到入夜；
     // 未完成的扫描随行进中的移动扫描继续，命中线索仍会改道，等待不会漏掉证据。
     private TaskState tickObserve(EvidenceScan scan) {
         if (!scan.complete()) {
@@ -603,8 +603,8 @@ public final class PhysicalStructureSearchCompanionTask
             terminal = runChild(moveChild);
             if (terminal == null) {
                 r.extendDeadlineTo(moveRecord.getDeadlineGameTime());
-                // 行进涉水守卫：身体被腿带进水里且不再逼近目标（或连续涉水越过硬上限）
-                // 时立即弃腿换向，不等九十秒租约烧完，更不靠漂浮续命（175）。
+                // 行进涉水守卫：身体被行程带进水里且不再逼近目标（或连续涉水越过硬上限）
+                // 时立即放弃当前行程换向，不等九十秒租约烧完，更不靠漂浮续命。
                 if (tickWaterLegGuard()) {
                     return abandonLegInWater(evidenceMove, directionMove, false);
                 }
@@ -662,7 +662,7 @@ public final class PhysicalStructureSearchCompanionTask
                     FailureType.NO_PATH);
             return TaskState.FAILED;
         }
-        // 前沿腿高频走不到时按 换锚→轮换→受阻 升级：先挪发射位置，再换候选扇区，
+        // 前沿行程高频走不到时按 换锚→轮换→受阻 升级：先挪发射位置，再换候选扇区，
         // 都失败就宣布受阻并给出远距换区建议，不在不可行地形带无限重付寻路成本。
         frontierFailed++;
         stage = Stage.OBSERVE;
@@ -670,7 +670,7 @@ public final class PhysicalStructureSearchCompanionTask
     }
 
     /**
-     * 主动路线腿意外丢失时的有界自恢复：按当前阶段重建一次移动腿，再丢才按内部错误
+     * 主动路线段意外丢失时的有界自恢复：按当前阶段重建一次移动段，再丢才按内部错误
      * 终态失败。重建本身可能如实失败（前沿耗尽、方向截不出路段），话术随失败路径携带。
      */
     private TaskState recoverLostRouteLeg(boolean evidenceMove, boolean directionMove) {
@@ -697,7 +697,7 @@ public final class PhysicalStructureSearchCompanionTask
         return beginFrontierTravel();
     }
 
-    /** 行进涉水守卫的一刻：更新滞水计数与最近逼近时刻，返回是否应弃腿；离水即清零。 */
+    /** 行进涉水守卫的一刻：更新滞水计数与最近逼近时刻，返回是否应放弃当前行程；离水即清零。 */
     private boolean tickWaterLegGuard() {
         long now = player.level().getGameTime();
         if (!player.isInWater()) {
@@ -718,7 +718,7 @@ public final class PhysicalStructureSearchCompanionTask
     }
 
     /**
-     * 滞水弃腿：停掉移动子任务，回执与日志如实记录弃腿原因，再走对应阶段的失败升级。
+     * 滞水放弃行程：停掉移动子任务，回执与日志如实记录放弃原因，再走对应阶段的失败升级。
      * 子任务行进中被打断，消费可能已发生，不自动重试同一路线。
      */
     private TaskState abandonLegInWater(boolean evidenceMove, boolean directionMove,
@@ -777,7 +777,7 @@ public final class PhysicalStructureSearchCompanionTask
     }
 
     /**
-     * 前沿腿失败的升级处置。RELOCATED 时沿建议方位截取已加载落点发起换锚腿；
+     * 前沿行程失败的升级处置。RELOCATED 时沿建议方位截取已加载落点发起换锚行程；
      * 截不出落点视同换锚失败，继续下一级（第二次换锚用对侧方位），轮换与受阻语义不变。
      */
     private TaskState handleFrontierLegFailure(boolean fromRelocationLeg) {
@@ -808,7 +808,7 @@ public final class PhysicalStructureSearchCompanionTask
         return TaskState.RUNNING;
     }
 
-    /** 换锚腿结束：到达即从新发射点继续前沿腿；失败按换锚失败继续升级，不在坏锚点原地再烧一窗腿。 */
+    /** 换锚行程结束：到达即从新发射点继续前沿行程；失败按换锚失败继续升级，不在坏锚点原地再烧一窗尝试。 */
     private TaskState tickRelocateAnchor() {
         if (moveChild == null) {
             if (internalRouteRecoveries >= MAX_INTERNAL_ROUTE_RECOVERIES) {
@@ -1086,7 +1086,7 @@ public final class PhysicalStructureSearchCompanionTask
     /** 换位移动结束：到达即回到投眼选择；失败或超时按原站姿话术失败，不无限换位。 */
     private TaskState tickRelocateStance() {
         if (moveChild == null) {
-            // 换位腿意外丢失时回到投眼选择：站姿检查会再次发起有界换位，次数上限仍由 stanceEscapes 把守。
+            // 换位段意外丢失时回到投眼选择：站姿检查会再次发起有界换位，次数上限仍由 stanceEscapes 把守。
             stage = Stage.SELECT_EYE;
             return TaskState.RUNNING;
         }
@@ -1098,8 +1098,8 @@ public final class PhysicalStructureSearchCompanionTask
             terminal = runChild(moveChild);
             if (terminal == null) {
                 r.extendDeadlineTo(moveRecord.getDeadlineGameTime());
-                // 换位腿同样受涉水守卫：落点本是干燥站位，身体落水说明路线已不可信，
-                // 不等超时，按站姿话术如实失败（175：任何腿不允许无限期滞水）。
+                // 换位段同样受涉水守卫：落点本是干燥站位，身体落水说明路线已不可信，
+                // 不等超时，按站姿话术如实失败（任何行程不允许无限期滞水）。
                 if (tickWaterLegGuard()) {
                     waterAbandonments++;
                     stopActiveChild(TaskState.FAILED);
@@ -1176,7 +1176,7 @@ public final class PhysicalStructureSearchCompanionTask
         });
     }
 
-    /** 逐腿失败明细：目标位置、移动子任务原话与已拉近距离，调用方据此区分规划失败与行走超时。 */
+    /** 逐段行程失败明细：目标位置、移动子任务原话与已拉近距离，调用方据此区分规划失败与行走超时。 */
     private void recordLegFailure(String kind, TaskResult result) {
         Map<String, Object> failure = new LinkedHashMap<>();
         failure.put("kind", kind);
@@ -1281,7 +1281,7 @@ public final class PhysicalStructureSearchCompanionTask
             double dz = player.getZ() - moveRecord.z;
             data.put("move_leg_remaining", Math.sqrt(dx * dx + dz * dz));
         }
-        // 滞水守卫对调用方可见：行进中身体落水要能从进度流里看出，弃腿不等楔死才暴露。
+        // 滞水守卫对调用方可见：行进中身体落水要能从进度流里看出，放弃行程不等楔死才暴露。
         if (legWaterTicks > 0) {
             data.put("leg_water_ticks", legWaterTicks);
             data.put("leg_water_stall_limit", WaterCrossingProbe.WATER_LEG_STALL_TICKS);

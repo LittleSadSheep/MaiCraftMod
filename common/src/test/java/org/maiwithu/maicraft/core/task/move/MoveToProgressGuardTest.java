@@ -126,7 +126,7 @@ public final class MoveToProgressGuardTest {
     }
 
     /**
-     * 接近静默窗心跳（117 接近腿楔死形态）：导航既不报规划在飞、身体也不挪窝、又不给终态时，
+     * 接近静默窗心跳（接近段楔死形态）：导航既不报规划在飞、身体也不挪窝、又不给终态时，
      * 记分牌靠单调增长的 planning_seconds 每过地板间隔仍有一条进度可读，不再零事件静默。
      */
     private static void approachSilentWindowHeartbeats(Unsafe memory) throws Exception {
@@ -148,7 +148,7 @@ public final class MoveToProgressGuardTest {
         }
     }
 
-    /** 接近静默窗宽上限：既不规划也不挪窝的接近腿在分钟级上限处 planning_stall 终态，不再无限 running。 */
+    /** 接近静默窗宽上限：既不规划也不挪窝的接近段在分钟级上限处 planning_stall 终态，不再无限 running。 */
     private static void approachSilentWindowWideCapTerminates(Unsafe memory) throws Exception {
         try (Fixture f = new Fixture(memory)) {
             f.runSessionWithoutPlanning();
@@ -323,7 +323,7 @@ public final class MoveToProgressGuardTest {
             invoke(body, "beginTick", long.class, tick);
         }
 
-        /** 把导航会话换成非规划阶段并清掉在飞目标：接近腿既不规划在飞也不给终态的静默楔死形态。 */
+        /** 把导航会话换成非规划阶段并清掉在飞目标：接近段既不规划在飞也不给终态的静默楔死形态。 */
         void runSessionWithoutPlanning() throws Exception {
             session = new Session(TransportSession.Result.running("moving"));
             field(TransportNavigator.class, "session").set(navigator, session);

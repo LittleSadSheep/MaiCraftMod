@@ -2,7 +2,7 @@ package org.maiwithu.maicraft.core.task.explore;
 
 import java.util.List;
 
-/** 探索腿失败先小半径换锚再轮换方位，都耗尽才宣布受阻；触发看观察窗失败占比，不要求失败严格连续。 */
+/** 探索行程失败先小半径换锚再轮换方位，都耗尽才宣布受阻；触发看观察窗失败占比，不要求失败严格连续。 */
 public final class FrontierLegBreakerTest {
     public static void main(String[] args) {
         escalationLadderRelocatesBeforeRotating();
@@ -46,7 +46,7 @@ public final class FrontierLegBreakerTest {
                 && !breaker.rotated(narrow).contains(0, -64), "rotated cone points northeast");
     }
 
-    // 093 活锁形态：五腿四败（其中一腿到达）在第五腿触发升级，不再因偶发到达永远清零。
+    // 活锁形态：五次尝试四次失败（其中一次到达）在第五次尝试触发升级，不再因偶发到达永远清零。
     private static void windowRatioTriggersEvenWhenOneLegArrives() {
         var sector = ExplorationSector.of("north", 90, 0, 256).at(0, 0, 0);
         var breaker = new FrontierLegBreaker();
@@ -72,7 +72,7 @@ public final class FrontierLegBreakerTest {
                 "no escalation below the trigger ratio");
     }
 
-    // 到达仍清零连续计数；但观察窗占比语义下，紧跟到达的四连败已满足五腿四败。
+    // 到达仍清零连续计数；但观察窗占比语义下，紧跟到达的四连败已满足五次尝试四次失败。
     private static void consecutiveSuccessStillResetsFailureBudget() {
         var sector = ExplorationSector.of("north", 90, 0, 256).at(0, 0, 0);
         var breaker = new FrontierLegBreaker();
@@ -89,7 +89,7 @@ public final class FrontierLegBreakerTest {
                 "four consecutive failures after an arrival fill the ratio trigger");
     }
 
-    // 换锚耗尽后每个方位仍保有整窗腿的预算；七次轮换后第八窗失败宣布受阻。
+    // 换锚耗尽后每个方位仍保有整窗尝试的预算；七次轮换后第八窗失败宣布受阻。
     private static void exhaustedAfterRelocationsAndAllBearings() {
         var current = ExplorationSector.of("north", 20, 0, 256).at(0, 0, 0);
         var breaker = new FrontierLegBreaker();

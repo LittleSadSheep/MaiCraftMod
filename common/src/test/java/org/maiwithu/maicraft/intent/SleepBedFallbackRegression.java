@@ -346,7 +346,7 @@ public final class SleepBedFallbackRegression {
                 "ordinary decisions keep the generic path");
     }
 
-    /** recover 消费后转入等待腿：同门换新编号的重提被按住，窗口打开后才恢复睡觉步骤。 */
+    /** recover 消费后转入等待阶段：同门换新编号的重提被按住，窗口打开后才恢复睡觉步骤。 */
     private static void recoverConsumesIntoWindowWait() throws Exception {
         try (var world = new InteractionWorldTestHarness()) {
             day(world);
@@ -374,7 +374,7 @@ public final class SleepBedFallbackRegression {
         }
     }
 
-    /** skip 与 cancel 走通用消费分支：skip 一次消费成功、两种答复都不进入等待腿。 */
+    /** skip 与 cancel 走通用消费分支：skip 一次消费成功、两种答复都不进入等待阶段。 */
     private static void skipAnswerStaysGeneric() throws Exception {
         try (var world = new InteractionWorldTestHarness()) {
             day(world);
@@ -393,7 +393,7 @@ public final class SleepBedFallbackRegression {
         }
     }
 
-    /** 等待腿随检查点持久化：重启恢复后同一扇已答复的门继续等窗口，不重提。 */
+    /** 等待阶段随检查点持久化：重启恢复后同一扇已答复的门继续等窗口，不重提。 */
     private static void gateWaitSurvivesCheckpoint() {
         var goal = new Goal("maicraft:sleep", "sleep", null, "{}", "{}", List.of(), List.of());
         var record = new IntentTaskRecord(UUID.randomUUID(), null, goal);

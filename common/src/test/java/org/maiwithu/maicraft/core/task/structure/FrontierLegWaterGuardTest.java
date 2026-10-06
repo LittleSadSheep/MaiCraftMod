@@ -21,9 +21,9 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * 勘察腿涉水守卫（175）的三个场景：
- * ① 航点选址把「落点列是纯水面」与「路线穿水」同口径拒斥，浅滩短渡到对岸干地不误伤（130 豁免）；
- * ② 行进中连续滞水且不再逼近目标时当场弃腿，失败明细与回执如实记录弃腿原因并升级处置；
+ * 勘察行程涉水守卫的三个场景：
+ * ① 航点选址把「落点列是纯水面」与「路线穿水」同口径拒斥，浅滩短渡到对岸干地不误伤（豁免口径）；
+ * ② 行进中连续滞水且不再逼近目标时当场放弃行程，失败明细与回执如实记录放弃原因并升级处置；
  * ③ 守卫阈值判定对「仍在逼近目标」「未达窗口」的滞水放行，正常短促涉水不被打断。
  */
 public final class FrontierLegWaterGuardTest {
@@ -54,7 +54,7 @@ public final class FrontierLegWaterGuardTest {
         }
     }
 
-    /** 场景③：硬上限无条件弃腿；滞水窗口只在不再逼近时触发；窗口内放行。 */
+    /** 场景③：硬上限无条件放弃该段行程；滞水窗口只在不再逼近时触发；窗口内放行。 */
     private static void guardDecisionThresholds() {
         check(WaterCrossingProbe.waterLegExpired(600, 0),
                 "reaching the absolute in-water cap abandons the leg even while approaching");
@@ -94,15 +94,15 @@ public final class FrontierLegWaterGuardTest {
     }
 
     /**
-     * 场景②：航点腿行进中身体滞水且不再逼近目标——守卫触发并当场弃腿：失败明细记录弃腿
-     * 原因，计入弃腿次数与前沿失败并升级处置，而不是任由身体在水里漂到租约烧完。
+     * 场景②：航点行程行进中身体滞水且不再逼近目标——守卫触发并当场放弃行程：失败明细记录放弃
+     * 原因，计入放弃次数与前沿失败并升级处置，而不是任由身体在水里漂到租约烧完。
      */
     private static void stalledWaterLegIsAbandoned(InteractionWorldTestHarness w) throws Exception {
         var task = newTask(w);
         set(task, "origin", w.player.blockPosition().immutable());
         attachSector(task, w);
         set(task, "stage", stageEnum("MOVE_FRONTIER"));
-        // 目标列 (8,?,8) 是干地石面；移动子任务保持未启动的真实实例，只验证父任务侧的守卫与弃腿处置。
+        // 目标列 (8,?,8) 是干地石面；移动子任务保持未启动的真实实例，只验证父任务侧的守卫与放弃行程处置。
         w.set(new BlockPos(8, 1, 8), Blocks.STONE.defaultBlockState());
         long now = w.level.getGameTime();
         var record = new MoveToTaskRecord(
@@ -117,11 +117,11 @@ public final class FrontierLegWaterGuardTest {
                 .getDeclaredMethod("abandonLegInWater", boolean.class, boolean.class, boolean.class);
         abandon.setAccessible(true);
 
-        // 对照刻：身体离水，守卫放行，不做弃腿。
+        // 对照刻：身体离水，守卫放行，不做放弃。
         check(!(Boolean) guard.invoke(task), "a dry body keeps the leg alive");
         check((int) get(task, "waterAbandonments") == 0, "no abandonment while dry");
 
-        // 滞水刻：身体入水，连续滞水已到窗口且距离不再拉近——守卫触发，弃腿并升级处置。
+        // 滞水刻：身体入水，连续滞水已到窗口且距离不再拉近——守卫触发，放弃行程并升级处置。
         setInWater(w);
         set(task, "legWaterTicks", 99);
         set(task, "legWaterBestDistance", 0.0);

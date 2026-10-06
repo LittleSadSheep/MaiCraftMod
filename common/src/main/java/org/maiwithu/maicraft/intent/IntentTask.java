@@ -75,7 +75,7 @@ final class IntentTask implements Task {
     private TaskResult interruptedChildResult;
     private boolean terminalPublished;
     private long childSerial;
-    /** 自带床回退：现成床失败已触发过一次回退腿，同一个步骤内不重复回退。 */
+    /** 自带床回退：现成床失败已触发过一次回退步骤，同一个步骤内不重复回退。 */
     private boolean bedFallbackEngaged;
     /** 触发回退的那次失败原文，回执里说明为什么改用了自带床。 */
     private String bedFallbackFailure;
@@ -167,7 +167,7 @@ final class IntentTask implements Task {
                 // 白天门答复只在本分支消费；编号随即作废，迟到的重复答复不再匹配同一扇门。
                 sleepGateDecision = null;
                 if ("recover".equals(answer.choice())) {
-                    // recover 的语义是「等到可睡窗口再睡」：消费后转入等待腿，绝不对同一扇
+                    // recover 的语义是「等到可睡窗口再睡」：消费后转入等待阶段，绝不对同一扇
                     // 关着的门重问（实机三连 4123f34f→c885717c→d3697403：每个 recover 都
                     // 换来同门新决策，睡觉永远到不了点击那一步）。
                     record.armSleepGateWait();
@@ -204,7 +204,7 @@ final class IntentTask implements Task {
             return begin(AbilityAdapter.adapt(resolvedCurrentGoal(), player, runtime, continuationFor(currentGoal())));
         }
 
-        // 白天门 recover 的等待腿：窗口关着就原地等，不重新翻译当前目标——翻译会再次撞上
+        // 白天门 recover 的等待阶段：窗口关着就原地等，不重新翻译当前目标——翻译会再次撞上
         // 同一扇关着的门（发射点 AbilityAdapter.waitForNightDecision），重提就是这么来的。
         if (record.sleepGateWaiting() && child == null && wait == null && chain.isEmpty()) {
             if (!WorldTimeSemantics.canAttemptSleep(player.level())) return TaskState.RUNNING;
@@ -613,7 +613,7 @@ final class IntentTask implements Task {
         Goal failedGoal = currentGoal();
         // 现场和效果账本已经结清，知识提示从同一份失败事实生成并一起落盘，不再要求模型先重复观察。
         failure = RecoveryKnowledge.attach(failedGoal, failure);
-        // 回退腿已经用过一次还再失败：终局话术把两段失败都带全，调用方不必翻历史就能对账。
+        // 回退步骤已经用过一次还再失败：终局话术把两段失败都带全，调用方不必翻历史就能对账。
         // 换位重试后的再次失败会第二次走到这里，前缀已带第一段就不再叠一层。
         if (bedFallbackEngaged && bedFallbackFailure != null
                 && !failure.message().startsWith("the carried-bed fallback also failed")) {
@@ -878,7 +878,7 @@ final class IntentTask implements Task {
     /**
      * 中继判定纯函数：
      * - 语义决策快照还开着（未被回答）：PARK，等 task action=answer；
-     * - 白天门且 recover 已消费（等待腿接管，窗口未开）：HOLD_REISSUE——此刻若放行发射点，
+     * - 白天门且 recover 已消费（等待阶段接管，窗口未开）：HOLD_REISSUE——此刻若放行发射点，
      *   翻译会对同一扇关着的门换发新决策编号，每个 recover 都换来一次重问（实机三连形态）；
      * - 其余（全新决策，或非白天门的普通决策）：ISSUE 照常发出。
      */

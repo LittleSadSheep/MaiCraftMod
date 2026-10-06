@@ -221,9 +221,9 @@ public final class MoveToTransportCompletionTest {
     }
 
     /**
-     * 收敛熔断触发后先走一次「井口旁楼梯头」降级腿（110）：目标在脚下且授权动土时，
-     * 熔断不再直接收场，而是先站到目标柱旁一格再用全新搜索恢复原目标；降级腿之后
-     * 再次不收敛才诚实失败，回执声明降级腿已尝试。
+     * 收敛熔断触发后先走一次「井口旁楼梯头」降级行程：目标在脚下且授权动土时，
+     * 熔断不再直接收场，而是先站到目标柱旁一格再用全新搜索恢复原目标；降级行程之后
+     * 再次不收敛才诚实失败，回执声明降级行程已尝试。
      */
     private static void degradedShaftLegBeforeFuseFailure(Unsafe memory) throws Exception {
         try (var f = new Fixture(memory, .5)) {
@@ -247,7 +247,7 @@ public final class MoveToTransportCompletionTest {
                 state = task.onTick();
                 if (!legStarted && field(MoveToCompanionTask.class, "degradedShaftLegTried").getBoolean(task)) {
                     legStarted = true;
-                    // 降级腿的导航在 onTick 里新建；给这条新腿打上同一套 planning 桩再继续驱动。
+                    // 降级行程的导航在 onTick 里新建；给这一段打上同一套 planning 桩再继续驱动。
                     f.navigator = (TransportNavigator) field(PlayerNav.class, "navigator")
                             .get(field(AbstractCompanionTask.class, "nav").get(task));
                     session = planningSession(f);
@@ -255,13 +255,13 @@ public final class MoveToTransportCompletionTest {
                     highWater = 0;
                 }
             }
-            check(legStarted, "收敛熔断必须先尝试一次井口旁降级腿，而不是直接收场");
-            check(state == TaskState.FAILED, "降级腿之后再次不收敛必须诚实收场");
+            check(legStarted, "收敛熔断必须先尝试一次井口旁降级行程，而不是直接收场");
+            check(state == TaskState.FAILED, "降级行程之后再次不收敛必须诚实收场");
             var result = task.result(TaskState.FAILED);
             check(String.valueOf(result.message()).contains("planning did not converge"),
-                    "降级腿后的失败仍要携带不收敛证据与工作量");
+                    "降级行程后的失败仍要携带不收敛证据与工作量");
             check(Boolean.TRUE.equals(result.data().get("degraded_shaft_leg_tried")),
-                    "回执要声明降级腿已尝试过");
+                    "回执要声明降级行程已尝试过");
         }
     }
 
@@ -532,7 +532,7 @@ public final class MoveToTransportCompletionTest {
         throw new NoSuchFieldException(name);
     }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }
-    /** 自掘竖井场景（地表目标在邻近井底）：收敛熔断先派一次已知格中转腿，腿也熔断才诚实失败并在回执声明。 */
+    /** 自掘竖井场景（地表目标在邻近井底）：收敛熔断先派一次已知格中转段，该段也熔断才诚实失败并在回执声明。 */
     private static void knownCellWaypointLegRunsBeforeConcedeFuse(Unsafe memory) throws Exception {
         try (var f = new Fixture(memory, .5)) {
             BlockPos waypoint = new BlockPos(58, 0, 60);
@@ -560,8 +560,8 @@ public final class MoveToTransportCompletionTest {
                 if (!legStarted && state == TaskState.RUNNING
                         && field(MoveToCompanionTask.class, "knownCellLegTarget").get(task) != null) {
                     legStarted = true;
-                    check(highWater > 60_000, "中转腿必须在收敛熔断之后才启用，不能替代正常规划");
-                    // 中转腿是全新的导航实例，桩要打在它身上再继续喂工作单位。
+                    check(highWater > 60_000, "中转段必须在收敛熔断之后才启用，不能替代正常规划");
+                    // 中转段是全新的导航实例，桩要打在它身上再继续喂工作单位。
                     f.navigator = (TransportNavigator) field(PlayerNav.class, "navigator")
                             .get(field(AbstractCompanionTask.class, "nav").get(task));
                     session = planningSession(f);
@@ -571,20 +571,20 @@ public final class MoveToTransportCompletionTest {
                     probe = bareGround(memory, f);
                 }
             }
-            check(legStarted, "规划收敛熔断必须先走一次已知格中转腿，而不是直接失败 state=" + state
+            check(legStarted, "规划收敛熔断必须先走一次已知格中转段，而不是直接失败 state=" + state
                     + " cells=" + record.knownStandableCells().size());
-            check(state == TaskState.FAILED, "中转腿与恢复搜索都熔断后必须诚实失败");
+            check(state == TaskState.FAILED, "中转段与恢复搜索都熔断后必须诚实失败");
             var result = task.result(TaskState.FAILED);
             check(Boolean.TRUE.equals(result.data().get("known_cell_waypoint_tried")),
-                    "回执必须声明已知格中转腿已启用");
+                    "回执必须声明已知格中转段已启用");
             check(String.valueOf(result.data().get("known_cell_waypoint")).startsWith("58"),
                     "回执要交付实际选中的中转格（两格候选中增量最大的那格）");
             check(String.valueOf(result.message()).contains("known standable cell waypoint leg"),
-                    "失败说明要交代中转腿的结果与后续出路");
+                    "失败说明要交代中转段的结果与后续出路");
         }
     }
 
-    /** 中转腿走到已知格站稳后不判到达：停掉腿导航，用全新搜索恢复原目标；恢复腿仍熔断时如实收场。 */
+    /** 中转段走到已知格站稳后不判到达：停掉该段导航，用全新搜索恢复原目标；恢复段仍熔断时如实收场。 */
     private static void knownCellWaypointLegReachesCellAndRestoresTarget(Unsafe memory) throws Exception {
         try (var f = new Fixture(memory, .5)) {
             BlockPos waypoint = new BlockPos(58, 0, 60);
@@ -611,7 +611,7 @@ public final class MoveToTransportCompletionTest {
                 if (state != TaskState.RUNNING) break;
                 if (!legStarted && field(MoveToCompanionTask.class, "knownCellLegTarget").get(task) != null) {
                     legStarted = true;
-                    // 中转腿导航不给规划会话：身体到达中转格后由到达判定直接收腿。
+                    // 中转段导航不给规划会话：身体到达中转格后由到达判定直接收段。
                     f.navigator = (TransportNavigator) field(PlayerNav.class, "navigator")
                             .get(field(AbstractCompanionTask.class, "nav").get(task));
                     probe = bareGround(memory, f);
@@ -626,25 +626,25 @@ public final class MoveToTransportCompletionTest {
                 if (legStarted && !legArrived
                         && field(MoveToCompanionTask.class, "knownCellLegTarget").get(task) == null) {
                     legArrived = true;
-                    // 腿已被消费、原目标导航已重建：恢复搜索是另一个导航实例，桩打在它身上继续熔断。
+                    // 该段已被消费、原目标导航已重建：恢复搜索是另一个导航实例，桩打在它身上继续熔断。
                     f.navigator = (TransportNavigator) field(PlayerNav.class, "navigator")
                             .get(field(AbstractCompanionTask.class, "nav").get(task));
                     session = planningSession(f);
                     probe = bareGround(memory, f);
                 }
             }
-            check(legStarted && legArrived, "中转腿必须到达已知格并用全新搜索恢复原目标");
+            check(legStarted && legArrived, "中转段必须到达已知格并用全新搜索恢复原目标");
             check(state == TaskState.FAILED, "恢复搜索仍不收敛时必须诚实失败");
             var result = task.result(TaskState.FAILED);
             check(Boolean.TRUE.equals(result.data().get("known_cell_waypoint_tried"))
                             && result.data().get("known_cell_waypoint") == null,
-                    "腿已走完时回执不再携带进行中的中转格");
+                    "该段已走完时回执不再携带进行中的中转格");
             check(String.valueOf(result.message()).contains("reached its cell, but the restored search still failed"),
-                    "失败说明要区分「腿没走通」与「到格后恢复搜索仍不收敛」");
+                    "失败说明要区分「中转段没走通」与「到格后恢复搜索仍不收敛」");
         }
     }
 
-    /** 已知格都没有准入增量（都比当前站位距目标更远）时不派腿：熔断直接失败，回执不伪造中转格。 */
+    /** 已知格都没有准入增量（都比当前站位距目标更远）时不派段：熔断直接失败，回执不伪造中转格。 */
     private static void knownCellWaypointLegSkippedWithoutIncrement(Unsafe memory) throws Exception {
         try (var f = new Fixture(memory, .5)) {
             var record = new MoveToTaskRecord("fuse-no-increment", 600_000, 2D, 0D, 2D, null,
@@ -670,9 +670,9 @@ public final class MoveToTransportCompletionTest {
             var result = task.result(TaskState.FAILED);
             check(!result.data().containsKey("known_cell_waypoint_tried")
                             && !result.data().containsKey("known_cell_waypoint"),
-                    "没有真正派出中转腿时回执不得声明腿已启用");
+                    "没有真正派出中转段时回执不得声明该段已启用");
             check(!String.valueOf(result.message()).contains("known standable cell waypoint leg"),
-                    "没派腿的失败说明不掺中转腿叙述");
+                    "没派段的失败说明不掺中转段叙述");
         }
     }
 

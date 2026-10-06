@@ -22,15 +22,15 @@ public final class WaterCrossingProbe {
     /** 深水连段门槛：连续两个采样段判深水（每段步长 {@link #SAMPLE_STEP} 格）即视为穿水路线。 */
     private static final int DEEP_RUN_SAMPLES = 2;
     /**
-     * 腿行进涉水守卫（175）的两个弃腿阈值，方向探索与结构搜索两个勘察任务共用同一口径：
-     * 滞水窗口要求「连续滞水且未再逼近目标」，短促渡水（130 豁免，实测最长约半分钟上岸）
-     * 全程在拉近目标不会命中；硬上限是连续涉水的绝对界，超过它无论是否仍在逼近都弃腿——
-     * 任何腿不允许无限期滞水。
+     * 行程行进涉水守卫的两个放弃阈值，方向探索与结构搜索两个勘察任务共用同一口径：
+     * 滞水窗口要求「连续滞水且未再逼近目标」，短促渡水有豁免口径（实测最长约半分钟上岸）
+     * 全程在拉近目标不会命中；硬上限是连续涉水的绝对界，超过它无论是否仍在逼近都放弃该段行程——
+     * 任何行程不允许无限期滞水。
      */
     public static final int WATER_LEG_STALL_TICKS = 100;
     public static final int WATER_LEG_MAX_TICKS = 600;
 
-    /** 连续滞水不逼近目标超过窗口，或连续涉水越过硬上限，即弃腿；供回归直测。 */
+    /** 连续滞水不逼近目标超过窗口，或连续涉水越过硬上限，即放弃当前行程；供回归直测。 */
     public static boolean waterLegExpired(int waterTicks, long ticksSinceLastApproach) {
         return waterTicks >= WATER_LEG_MAX_TICKS
                 || ticksSinceLastApproach >= WATER_LEG_STALL_TICKS;

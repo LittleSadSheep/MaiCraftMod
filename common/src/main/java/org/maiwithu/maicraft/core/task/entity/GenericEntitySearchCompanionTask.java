@@ -748,7 +748,7 @@ public final class GenericEntitySearchCompanionTask
         super.cleanup();
     }
 
-    /** 搜索进度对调用方可见：离起点最远距离与前沿腿计数让长途搜索可中途决策，不必等伤害发生后取消。 */
+    /** 搜索进度对调用方可见：离起点最远距离与前沿行程计数让长途搜索可中途决策，不必等伤害发生后取消。 */
     @Override
     public Map<String, Object> progress() {
         Map<String, Object> data = new LinkedHashMap<>();

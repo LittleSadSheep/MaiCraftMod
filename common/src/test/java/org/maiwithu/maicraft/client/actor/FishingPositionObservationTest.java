@@ -100,7 +100,7 @@ public final class FishingPositionObservationTest {
     }
 
     /**
-     * 站位接近腿的宽上限（fish 静默楔死样本：十分钟零事件零终态）：接近段超限按
+     * 站位接近段的宽上限（fish 静默楔死样本：十分钟零事件零终态）：接近段超限按
      * planning_stall 如实失败并携带阶段名与已等待时长，宽上限内的合法慢接近不误杀；
      * 记分牌带 phase 与 done，接近静默窗靠 planning_seconds 单调心跳可见。
      */

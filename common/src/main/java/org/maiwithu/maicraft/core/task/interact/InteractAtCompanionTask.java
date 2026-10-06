@@ -522,7 +522,7 @@ public final class InteractAtCompanionTask extends GoToThenDoTask<InteractAtTask
                 yield verifiedOutcome();
             }
             case FAILED -> {
-                // 写字腿点击未确认时补上告示牌两侧现状：蜡封、带样式文字的一侧都会让编辑屏开不出来。
+                // 写字一步的点击未确认时补上告示牌两侧现状：蜡封、带样式文字的一侧都会让编辑屏开不出来。
                 if (r.signLines != null && interaction.submittedBlockHit() != null)
                     fail(interaction.failReason() + ". Observed sign text: " + signLinesForReceipt(),
                             interaction.failType());

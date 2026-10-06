@@ -124,7 +124,7 @@ public final class AttackCompanionTask extends AbstractCompanionTask<AttackTaskR
     private final Map<Integer, Vec3> lastTargetPositions = new HashMap<>();
     /**
      * 这一刻 {@link #FIELD_RADIUS} 内活着的敌对生物——<b>一刻只扫一次</b>,在 {@link #surveyField}
-     * 里;举盾、走位的躲避场都读这一份。"场上有哪些怪"各算各的,就会出现判据说打、腿说没人的局面。
+     * 里;举盾、走位的躲避场都读这一份。"场上有哪些怪"各算各的,就会出现判据说打、移动搜索却报没人的局面。
      */
     private List<LivingEntity> hostiles = List.of();
 

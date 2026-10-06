@@ -497,7 +497,7 @@ public final class IntentTaskRecord extends TaskRecord {
         changed();
     }
 
-    /** 可睡窗口打开、等待腿结束：清掉标记，任务恢复普通翻译。 */
+    /** 可睡窗口打开、等待阶段结束：清掉标记，任务恢复普通翻译。 */
     void disarmSleepGateWait() {
         sleepGateWait = false;
         changed();

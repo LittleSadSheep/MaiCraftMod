@@ -64,7 +64,7 @@ public final class SemanticExploreCompanionTask
     private static final int BIOME_SAMPLES_PER_TICK = 192;
     private static final int WAYPOINT_GRID = 64;
     private static final int MAX_LEG_DISTANCE = 80;
-    /** 换锚的小半径：沿垂直方位横移这段距离再继续航点腿，不远离原探索扇区。 */
+    /** 换锚的小半径：沿垂直方位横移这段距离再继续航点行程，不远离原探索扇区。 */
     private static final double RELOCATION_HOP_BLOCKS = 32.0;
     private static final int SCOPE_TOLERANCE = 8;
     private static final int MAX_SPIRAL_PROBES = 10_000;
@@ -130,7 +130,7 @@ public final class SemanticExploreCompanionTask
     private final Set<Long> attemptedWaypoints = new HashSet<>();
     private final List<Map<String, Object>> legFailures = new ArrayList<>();
     private final FrontierLegBreaker waypointBreaker = new FrontierLegBreaker();
-    /** 行进涉水守卫的记数：当前腿的连续滞水刻、最近一次逼近目标的时刻与已弃腿次数。 */
+    /** 行进涉水守卫的记数：当前行程的连续滞水刻、最近一次逼近目标的时刻与已放弃行程次数。 */
     private int legWaterTicks;
     private long lastWaterApproachTick;
     private double legWaterBestDistance = Double.MAX_VALUE;
@@ -177,10 +177,10 @@ public final class SemanticExploreCompanionTask
         double bodyDistance = horizontalDistance(origin, player.blockPosition());
         farthestBodyDistance = Math.max(farthestBodyDistance, bodyDistance);
         // 「到达半径即达成」优先于「走完航点」：跑图身体一进到达容差带就按 radius_reached 成功收尾，
-        // 不等当前航点腿走完，也不会再向边界外推进；真越过硬边界才按越界截停如实失败。
+        // 不等当前航点行程走完，也不会再向边界外推进；真越过硬边界才按越界截停如实失败。
         RadiusVerdict verdict = radiusVerdict(survey, bodyDistance, r.maxDistance);
         if (verdict == RadiusVerdict.RADIUS_REACHED) {
-            // 航点腿未走完也被达成覆盖：子腿按取消记录，父任务按 radius_reached 成功收尾。
+            // 航点行程未走完也被达成覆盖：子任务按取消记录，父任务按 radius_reached 成功收尾。
             stopActiveChild(TaskState.CANCELLED);
             surveyStopReason = "radius_reached";
             succeed();
@@ -462,7 +462,7 @@ public final class SemanticExploreCompanionTask
     }
 
     private TaskState startNextWaypoint(ClientLevel level) {
-        // 抵达请求半径的收尾判定统一在 onTick 的 radius_reached 检查里做；这里只负责选下一条航点腿。
+        // 抵达请求半径的收尾判定统一在 onTick 的 radius_reached 检查里做；这里只负责选下一条航点行程。
         if (waypointAttempts >= r.maxWaypoints) {
             return exhausted();
         }
@@ -505,8 +505,8 @@ public final class SemanticExploreCompanionTask
             if (terminal == null) {
                 // 只要实际执行的子任务持续续期已核实进度期限，耗时较长但健康的旅程就继续存活。语义半径和航点边界仍限制搜索范围，墙上时间不会改变目标含义。
                 r.extendDeadlineTo(moveRecord.getDeadlineGameTime());
-                // 行进涉水守卫：身体被腿带进水里且不再逼近目标（或连续涉水越过硬上限）
-                // 时立即弃腿换向，不等租约烧完，更不靠漂浮续命（175）。
+                // 行进涉水守卫：身体被行程带进水里且不再逼近目标（或连续涉水越过硬上限）
+                // 时立即放弃当前行程换向，不等租约烧完，更不靠漂浮续命。
                 if (tickWaterLegGuard()) {
                     abandonedInWater = true;
                 } else {
@@ -574,7 +574,7 @@ public final class SemanticExploreCompanionTask
         return TaskState.RUNNING;
     }
 
-    /** 换锚腿结束：到达即在新发射点重新观察选航点；失败按换锚失败继续升级，不在坏锚点原地再烧一窗腿。 */
+    /** 换锚行程结束：到达即在新发射点重新观察选航点；失败按换锚失败继续升级，不在坏锚点原地再烧一窗尝试。 */
     private TaskState tickRelocation() {
         TaskState terminal = null;
         TaskResult result = null;
@@ -633,7 +633,7 @@ public final class SemanticExploreCompanionTask
         return TaskState.RUNNING;
     }
 
-    /** 行进涉水守卫的一刻：更新滞水计数与最近逼近时刻，返回是否应弃腿；离水即清零。 */
+    /** 行进涉水守卫的一刻：更新滞水计数与最近逼近时刻，返回是否应放弃当前行程；离水即清零。 */
     private boolean tickWaterLegGuard() {
         long now = player.level().getGameTime();
         if (!player.isInWater()) {
@@ -654,7 +654,7 @@ public final class SemanticExploreCompanionTask
                 legWaterTicks, now - lastWaterApproachTick);
     }
 
-    /** 滞水弃腿的如实话术：回执与 travel_failures 都能看出弃腿原因是涉水楔死。 */
+    /** 滞水放弃行程的如实话术：回执与 travel_failures 都能看出放弃原因是涉水楔死。 */
     private String waterAbandonMessage() {
         return "leg abandoned: the body stayed in water for " + legWaterTicks
                 + " continuous ticks without approaching the leg target"
@@ -913,7 +913,7 @@ public final class SemanticExploreCompanionTask
     }
 
     // 包内可见：跑图半径收尾判定由回归直测。越界判定优先——身体一次跳到硬边界外
-    // （传送、失控等不可控位移）不冒充达成；达成带内的正常推进不等航点腿走完即收尾。
+    // （传送、失控等不可控位移）不冒充达成；达成带内的正常推进不等航点行程走完即收尾。
     enum RadiusVerdict { WITHIN_RADIUS, RADIUS_REACHED, RADIUS_BOUND_EXIT }
 
     static RadiusVerdict radiusVerdict(boolean survey, double bodyDistance, int maxDistance) {
@@ -971,7 +971,7 @@ public final class SemanticExploreCompanionTask
         data.put("waypoint_recent_failures", waypointBreaker.recentWindowFailures());
         data.put("waypoint_sector_rotations", waypointBreaker.rotations());
         data.put("waypoint_relocations", waypointBreaker.relocations());
-        // 滞水守卫对调用方可见：行进中身体落水要能从进度流里看出，弃腿不等楔死才暴露。
+        // 滞水守卫对调用方可见：行进中身体落水要能从进度流里看出，放弃行程不等楔死才暴露。
         if (legWaterTicks > 0) {
             data.put("leg_water_ticks", legWaterTicks);
             data.put("leg_water_stall_limit", WaterCrossingProbe.WATER_LEG_STALL_TICKS);

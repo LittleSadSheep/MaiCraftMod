@@ -34,7 +34,7 @@ public final class ExplorationRegressionSuite {
         StructureSightingMemoryTest.main(args);
         SurfaceColumnClassificationTest.main(args);
         WaterCrossingDecisionTest.main(args);
-        // 勘察腿涉水守卫：航点不落水面、滞水楔死弃腿并如实汇报、短促涉水豁免不误伤。
+        // 勘察行程涉水守卫：航点不落水面、滞水楔死放弃行程并如实汇报、短促涉水豁免不误伤。
         org.maiwithu.maicraft.core.task.structure.FrontierLegWaterGuardTest.main(args);
         ExplorationMemoryStoreTest.main(args);
         McpProtocolBudgetTest.main(args);

@@ -768,7 +768,7 @@ public final class SemanticAcquireCompanionTask
         }
         List<String> refs = new ArrayList<>();
         if (need.prospectingMineStarted) {
-            // 探矿腿的目标方块族来自生成带表：普通矿与深层矿变体一并覆盖，不再按物品直翻方块。
+            // 探矿行程的目标方块族来自生成带表：普通矿与深层矿变体一并覆盖，不再按物品直翻方块。
             OreGenerationBand band = OreGenerationBand.forItems(need.itemIds);
             if (band == null) {
                 addIssue("mine", "prospecting_band_unknown",

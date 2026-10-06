@@ -8,7 +8,7 @@ public final class SurveyRadiusVerdictTest {
         double threshold = SemanticExploreCompanionTask.surveyRadiusReachThreshold(maxDistance);
         check(threshold == 56.0, "arrival margin leaves headroom before the hard bound");
 
-        // 达成带内（含容差上限）按 radius_reached 收尾，不等航点腿走完。
+        // 达成带内（含容差上限）按 radius_reached 收尾，不等航点行程走完。
         check(SemanticExploreCompanionTask.radiusVerdict(true, 0, maxDistance)
                 == SemanticExploreCompanionTask.RadiusVerdict.WITHIN_RADIUS, "start position stays within radius");
         check(SemanticExploreCompanionTask.radiusVerdict(true, 55.9, maxDistance)

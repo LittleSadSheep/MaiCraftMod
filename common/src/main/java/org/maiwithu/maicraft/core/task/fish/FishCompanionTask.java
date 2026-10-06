@@ -68,7 +68,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
     private static final int WATER_SCAN_VERTICAL_RANGE = 8;
     private static final int MAX_STANCE_CHECKS = 256;
     private static final int MAX_POSITION_FAILURES = 3;
-    /** 站位接近腿的宽上限（三分钟）：导航停在既不规划也不终态的假运行里时（fish 十分钟静默
+    /** 站位接近段的宽上限（三分钟）：导航停在既不规划也不终态的假运行里时（fish 十分钟静默
      *  楔死样本），只有这张分钟级总表能把 POSITION 收进有界终态；健康步行接近用不满。 */
     private static final long POSITION_PHASE_LIMIT_TICKS = 3 * 60 * 20;
     private static final double NAV_SPEED = 1.0;
@@ -172,7 +172,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
 
     // 找到一组站位和水面后走到站位；找不到路会排除这一站位，最多换三次，而不是一直撞同一条路。
     private TaskState positionForFishing() {
-        // 接近站位腿的宽上限：无论导航规划在飞还是行走假运行，整段 POSITION 都有界，
+        // 接近站位段的宽上限：无论导航规划在飞还是行走假运行，整段 POSITION 都有界，
         // 超限按 planning_stall 如实收场并携带阶段名与已等待时长。
         if (nav != null) {
             TaskState bounded = positionApproachBound(nav.planningInFlight(), nav.outcomeSummary());
@@ -227,7 +227,7 @@ public final class FishCompanionTask extends AbstractCompanionTask<FishTaskRecor
     }
 
     /**
-     * 站位接近腿（POSITION 段）的宽上限守卫：进入接近即起表，超限按 planning_stall
+     * 站位接近段（POSITION 段）的宽上限守卫：进入接近即起表，超限按 planning_stall
      * 如实收场并携带阶段名与已等待秒数——导航停在既不规划也不终态的假运行里时
      * （fish 十分钟静默楔死样本），只有这张表能把 POSITION 收进有界终态。参数化导航
      * 状态是为了回归可以直接驱动守卫，不必先起一次真实寻路。

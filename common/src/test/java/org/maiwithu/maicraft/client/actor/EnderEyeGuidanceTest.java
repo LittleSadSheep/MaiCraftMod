@@ -28,7 +28,7 @@ import org.maiwithu.maicraft.core.task.structure.PhysicalStructureSearchTaskReco
 /**
  * 投眼引导的四个实机卡点：站姿不合格先有界换位再失败；眼实体已确认而消耗不可证
  * （创造模式或自返眼被拾回）时声明后继续跟踪而不中止；死亡或任务重启后沿上次
- * 掷出的方向免掷续走一段且续走必须先建立移动腿；主动路线腿丢失时先有界重建一次，
+ * 掷出的方向免掷续走一段且续走必须先建立移动段；主动路线段丢失时先有界重建一次，
  * 再丢才终态失败并携带复位证据。
  */
 public final class EnderEyeGuidanceTest {
@@ -93,8 +93,8 @@ public final class EnderEyeGuidanceTest {
                 "声明后应进入本眼方向跟踪");
     }
 
-    /** 点 3：保鲜期内的方向记忆让新任务免掷续走——先经路线截取建立移动腿或进入有界等待，
-     * 不再空腿直接进入行进阶段；方向截不出已加载路段时有界等待后如实失败。 */
+    /** 点 3：保鲜期内的方向记忆让新任务免掷续走——先经路线截取建立移动段或进入有界等待，
+     * 不再没有移动段直接进入行进阶段；方向截不出已加载路段时有界等待后如实失败。 */
     private static void rememberedDirectionResumesWithoutThrow(InteractionWorldTestHarness w) throws Exception {
         var task = newTask(w);
         set(task, "stronghold", true);
@@ -110,8 +110,8 @@ public final class EnderEyeGuidanceTest {
                 "续走方向应来自记忆");
         check((int) get(task, "directionSegments") == 1, "续走段计入方向段计数");
         check(get(task, "moveChild") != null || String.valueOf(stage(task)).equals("OBSERVE"),
-                "续走必须建立移动腿或进入有界等待，不得空腿进入行进阶段"
-                        + "（空腿会在首刻路线丢失且跨任务复现）");
+                "续走必须建立移动段或进入有界等待，不得空手进入行进阶段"
+                        + "（没有移动段会在首刻路线丢失且跨任务复现）");
 
         // 夹具世界只有原点区块已加载、截不出十二格以上的路段：有界等待耗尽后按方向话术如实失败，
         // 而不是 internal_route_lost。
@@ -138,15 +138,15 @@ public final class EnderEyeGuidanceTest {
     }
 
     /**
-     * 点 4：主动路线腿丢失先有界重建一次（116：原实现立即 internal_route_lost 且每次
-     * 重提复现）；重建不出路线腿时有界降级，第二次丢失才终态失败且回执携带复位证据。
+     * 点 4：主动路线段丢失先有界重建一次（原实现立即 internal_route_lost 且每次
+     * 重提复现）；重建不出路线段时有界降级，第二次丢失才终态失败且回执携带复位证据。
      */
     private static void lostRouteRecoversOnceThenFailsHonest(InteractionWorldTestHarness w) throws Exception {
         Method tickMove = PhysicalStructureSearchCompanionTask.class
                 .getDeclaredMethod("tickMove", boolean.class, boolean.class);
         tickMove.setAccessible(true);
 
-        // 证据接近腿丢失：按已确认线索位置直接重建移动腿。
+        // 证据接近段丢失：按已确认线索位置直接重建移动段。
         var task = newTask(w);
         set(task, "stronghold", true);
         set(task, "origin", w.player.blockPosition().immutable());
@@ -154,11 +154,11 @@ public final class EnderEyeGuidanceTest {
         set(task, "stage", stageEnum("MOVE_EVIDENCE"));
         var state = (org.maiwithu.maicraft.task.TaskState) tickMove.invoke(task, true, false);
         check(state == org.maiwithu.maicraft.task.TaskState.RUNNING,
-                "路线腿丢失应先重建一次而不是立即失败");
-        check(get(task, "moveChild") != null, "复位应重建出移动腿");
+                "路线段丢失应先重建一次而不是立即失败");
+        check(get(task, "moveChild") != null, "复位应重建出移动段");
         check((int) get(task, "internalRouteRecoveries") == 1, "复位应计入回执证据");
 
-        // 方向腿丢失而截不出已加载路段：有界降级进入观察等待，不按内部错误终止。
+        // 方向段丢失而截不出已加载路段：有界降级进入观察等待，不按内部错误终止。
         var bounded = newTask(w);
         set(bounded, "stronghold", true);
         set(bounded, "origin", w.player.blockPosition().immutable());
@@ -177,7 +177,7 @@ public final class EnderEyeGuidanceTest {
         set(bounded, "moveRecord", null);
         state = (org.maiwithu.maicraft.task.TaskState) tickMove.invoke(bounded, false, true);
         check(state == org.maiwithu.maicraft.task.TaskState.FAILED,
-                "复位后再次丢腿应终态失败");
+                "复位后再次丢段应终态失败");
         check(issueCode(bounded).equals("internal_route_lost"), "终态失败沿用原问题码");
         Method resultData = PhysicalStructureSearchCompanionTask.class
                 .getDeclaredMethod("resultData");
@@ -187,7 +187,7 @@ public final class EnderEyeGuidanceTest {
         check(Integer.valueOf(1).equals(((Number) data.get("internal_route_recoveries")).intValue()),
                 "失败回执应携带复位计数");
 
-        // 换位腿丢失：回到投眼选择重新做有界换位，不按内部错误终止。
+        // 换位段丢失：回到投眼选择重新做有界换位，不按内部错误终止。
         var stance = newTask(w);
         set(stance, "stronghold", true);
         set(stance, "origin", w.player.blockPosition().immutable());
@@ -197,9 +197,9 @@ public final class EnderEyeGuidanceTest {
         tickRelocate.setAccessible(true);
         var stanceState = (org.maiwithu.maicraft.task.TaskState) tickRelocate.invoke(stance);
         check(stanceState == org.maiwithu.maicraft.task.TaskState.RUNNING,
-                "换位腿丢失应回到投眼选择重试");
+                "换位段丢失应回到投眼选择重试");
         check(String.valueOf(stage(stance)).equals("SELECT_EYE"),
-                "换位腿丢失后回到投眼选择阶段");
+                "换位段丢失后回到投眼选择阶段");
     }
 
     private static Object evidenceMatch(InteractionWorldTestHarness w) throws Exception {
