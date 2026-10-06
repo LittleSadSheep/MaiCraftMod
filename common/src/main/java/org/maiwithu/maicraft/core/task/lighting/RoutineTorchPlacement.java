@@ -20,6 +20,9 @@ import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 
 /** 暗处补光只选站在原地就能照见的岩壁或地面，不为插火把挖洞、垫脚或覆盖已有方块。 */
 public final class RoutineTorchPlacement {
+    /** 算作"前方"的视线对齐下限：约 78° 以内才值得为这支灯转头，避免补光把镜头整圈甩到身后。 */
+    private static final double AHEAD_ALIGNMENT = 0.2;
+
     private RoutineTorchPlacement() {}
 
     public static boolean needsLight(int feetLight, int eyeLight) {
@@ -28,6 +31,15 @@ public final class RoutineTorchPlacement {
     }
 
     public static BuildTaskRecord.Target find(LocalPlayer player, Set<BlockPos> protectedCells) {
+        var candidates = collect(player, protectedCells);
+        // 只有前方视野内的灯位才值得为它转头：补光跟着路线走，不该为了身后两格的壁面把镜头整圈甩过去。
+        // 前方两格与斜前都够不着时宁可这一轮不出手，等角色走到下一处再补，也不要大幅回头再转回来。
+        var ahead = candidates.stream().filter(candidate -> viewAlignment(player, candidate) >= AHEAD_ALIGNMENT).toList();
+        return (ahead.isEmpty() ? candidates : ahead).stream()
+                .max(Comparator.comparingDouble(candidate -> viewAlignment(player, candidate))).orElse(null);
+    }
+
+    private static ArrayList<BuildTaskRecord.Target> collect(LocalPlayer player, Set<BlockPos> protectedCells) {
         BlockPos origin = player.blockPosition();
         var candidates = new ArrayList<BuildTaskRecord.Target>();
         // 收集本来就够得着的墙面和地面，再优先选择当前视线附近的落点，避免固定方向顺序导致频繁回头。
@@ -47,7 +59,7 @@ public final class RoutineTorchPlacement {
             if (usable(player, at, Blocks.TORCH.defaultBlockState(), at.below(), Direction.UP, protectedCells))
                 candidates.add(target(at, Blocks.TORCH.defaultBlockState()));
         }
-        return candidates.stream().max(Comparator.comparingDouble(candidate -> viewAlignment(player, candidate))).orElse(null);
+        return candidates;
     }
 
     private static double viewAlignment(LocalPlayer player, BuildTaskRecord.Target candidate) {

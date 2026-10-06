@@ -65,6 +65,8 @@ public final class AutomaticLighting {
         try { advance(context, allowed); observationProblem = null; }
         catch (RuntimeException unavailable) {
             // 补光只是助手；光照、背包或模组观察暂时不可用时保留事实，不能让主任务跟着异常退出。
+            // 观察失败也要撤回还没提交的补光转向，避免镜头停在半路等一支永远不会出手的火把。
+            placer.releaseAim(context);
             state = "observation_unavailable"; observationProblem = unavailable.toString();
         }
     }
@@ -78,26 +80,46 @@ public final class AutomaticLighting {
             state = receipt.status() == NativeActionReceipt.Status.CONFIRMED_APPLIED ? "light_settling" : "placement_unconfirmed";
         }
         // 关闭只停止新动作，已经发出的火把继续读回执；自救、暂停与区域补光独占时同样只观察。
-        if (!enabled) { state = "disabled"; return; }
-        if (!context.permitsNativeActions()) return;
-        if (CompanionTickDispatcher.current() instanceof SemanticLightAreaTaskRecord) return;
+        if (!enabled) { placer.releaseAim(context); state = "disabled"; return; }
+        if (!context.permitsNativeActions()) { placer.releaseAim(context); return; }
+        if (CompanionTickDispatcher.current() instanceof SemanticLightAreaTaskRecord) { placer.releaseAim(context); return; }
         // 指定区域拥有自己的灯位与验收；随行助手不能同时插灯污染该任务的材料和覆盖回执。
         if (CompanionTickDispatcher.current() instanceof IntentTaskRecord intent && (intent.paused()
-                || intent.stepIndex() < intent.steps().size() && intent.steps().get(intent.stepIndex()).ability().equals("maicraft:light_area"))) return;
+                || intent.stepIndex() < intent.steps().size() && intent.steps().get(intent.stepIndex()).ability().equals("maicraft:light_area"))) {
+            placer.releaseAim(context);
+            return;
+        }
         BlockPos feet = context.player().blockPosition(), eye = BlockPos.containing(context.player().getEyePosition());
-        if (!context.level().isLoaded(feet) || !context.level().isLoaded(eye)) { state = "light_sample_unloaded"; return; }
+        if (!context.level().isLoaded(feet) || !context.level().isLoaded(eye)) { placer.releaseAim(context); state = "light_sample_unloaded"; return; }
         visited.add(feet.immutable()); visited.add(eye.immutable());
+        // 补光正在把镜头转向某一支还没提交的火把时，本刻继续喂给它同一步转向；
+        // 此时准星已记在补光名下，若按"没出手就让位"处理会立刻撤回，镜头只能在灯位和路线之间来回甩。
+        if (placer.aiming()) {
+            if (!context.permitsNativeActions()) { placer.releaseAim(context); state = "yielding_to_primary"; return; }
+            var pendingTarget = placer.target();
+            // 转向期间出手同样要受"走够两格才补下一支"的限制，否则同一个位置会一直撒灯。
+            if (lastAttemptOrigin != null && feet.distSqr(lastAttemptOrigin) < 4) {
+                placer.releaseAim(context);
+                state = "waiting_for_route_progress";
+                return;
+            }
+            if (protection(context.player()).run(() -> placer.place(context, pendingTarget, Set.of())))
+                lastAttemptOrigin = feet.immutable();
+            state = placer.state();
+            return;
+        }
         // 主任务忙碌时经过的暗格也属于真实路线，先保留观察再让位，不能只抽取成功插灯的片段宣称覆盖。
-        if (!allowed || !OffhandTorchPlacer.idle(context)) { state = "yielding_to_primary"; return; }
+        // 让位时撤回还没提交的补光转向，镜头立刻平滑转回主任务方向，不占用主任务的准星。
+        if (!allowed || !OffhandTorchPlacer.idle(context)) { placer.releaseAim(context); state = "yielding_to_primary"; return; }
         int light = Math.min(context.level().getBrightness(LightLayer.BLOCK, feet), context.level().getBrightness(LightLayer.BLOCK, eye));
-        if (light >= minimum) { state = "bright_enough"; return; }
+        if (light >= minimum) { placer.releaseAim(context); state = "bright_enough"; return; }
         // 距上次提交站位不足两格时不再出手；原生拒绝也保留这个限制，避免遮挡或高阈值造成原地撒灯。
-        if (lastAttemptOrigin != null && feet.distSqr(lastAttemptOrigin) < 4) { state = "waiting_for_route_progress"; return; }
+        if (lastAttemptOrigin != null && feet.distSqr(lastAttemptOrigin) < 4) { placer.releaseAim(context); state = "waiting_for_route_progress"; return; }
         var protection = protection(context.player());
-        if (!protection.problems().isEmpty()) { state = "unresolved_protection"; return; }
-        if (!placer.prepare(context)) { state = placer.state(); return; }
+        if (!protection.problems().isEmpty()) { placer.releaseAim(context); state = "unresolved_protection"; return; }
+        if (!placer.prepare(context)) { placer.releaseAim(context); state = placer.state(); return; }
         var target = protection.run(() -> RoutineTorchPlacement.find(context.player(), Set.of()));
-        if (target == null) { state = "no_reachable_support"; return; }
+        if (target == null) { placer.releaseAim(context); state = "no_reachable_support"; return; }
         if (protection.run(() -> placer.place(context, target, Set.of()))) lastAttemptOrigin = feet.immutable();
         state = placer.state();
     }

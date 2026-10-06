@@ -137,6 +137,19 @@ public final class InteractionWorldTestHarness implements AutoCloseable {
         ActorControlTestHarness.field(ClientActorBoundary.class, "activeContext").set(actor, h.context);
     }
 
+    /**
+     * 推进若干渲染帧的平滑转头；每帧把上次采样时间前移半个上限，等价于 60fps 下每帧 16.7ms。
+     * 没有真实渲染循环的夹具靠它跑完补光转向，而不是把补光改成瞬转来迁就测试。
+     */
+    public void renderFrames(int frames) throws Exception {
+        var lastUpdate = ActorControlTestHarness.field(DefaultBodyControlPort.class, "lastLookUpdateNanos");
+        for (int frame = 0; frame < frames; frame++) {
+            // 反过来把上次采样时间提前一帧，渲染帧才会照 60fps 的步长推进转向。
+            lastUpdate.setLong(h.body, System.nanoTime() - 16_666_667L);
+            h.body.renderFrame(player);
+        }
+    }
+
     public int itemUses() { return mode.items; }
     public int blockUses() { return mode.blocks; }
 

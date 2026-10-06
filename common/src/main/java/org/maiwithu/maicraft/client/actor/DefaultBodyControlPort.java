@@ -42,24 +42,28 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     private float pitchVelocity;
     private long lastLookUpdateNanos;
     private boolean cameraInitialized;
-    private AuxiliaryLook auxiliaryLook;
+    private AuxiliaryAim auxiliaryAim;
 
-    /** 保存借用前的真实姿态和镜头控制状态；原生点击被拒绝时不能把试探转头留给主任务。 */
-    private record PlayerLook(float yaw, float pitch, float head, float body,
-                              float oldYaw, float oldPitch, float oldHead, float oldBody) {
-        static PlayerLook capture(LocalPlayer player) {
-            return new PlayerLook(player.getYRot(), player.getXRot(), player.yHeadRot, player.yBodyRot,
-                    player.yRotO, player.xRotO, player.yHeadRotO, player.yBodyRotO);
+    /**
+     * 辅助借用的记录：主任务已续订的路线视角、借用前的移动策略与镜头动力学。
+     * 辅助视角只借用转向通道，不新增接管权限；归还时按目标平滑转回，不靠瞬跳恢复角度。
+     * previousYaw/previousPitch 为 null 表示借用前主任务并没有视角目标，归还时就该彻底放开准星。
+     */
+    private record AuxiliaryAim(Float previousYaw, Float previousPitch, Float aimYaw, Float aimPitch,
+                               long interventionLease, long mainAimLease, Movement movement, Steering steering,
+                               boolean navigationRelative, float speedYaw, float speedPitch,
+                               boolean initialized) {
+        /** 只换瞄准方向，其余借用事实原样保留；续订转向时不能顺手覆盖归还所需的信息。 */
+        AuxiliaryAim withAim(Float yaw, Float pitch) {
+            return new AuxiliaryAim(previousYaw, previousPitch, yaw, pitch, interventionLease, mainAimLease,
+                    movement, steering, navigationRelative, speedYaw, speedPitch, initialized);
         }
-        void restore(LocalPlayer player) {
-            player.setYRot(yaw); player.setXRot(pitch); player.setYHeadRot(head); player.setYBodyRot(body);
-            player.yRotO = oldYaw; player.xRotO = oldPitch; player.yHeadRotO = oldHead; player.yBodyRotO = oldBody;
+        /** 只换借用前的移动策略；转向续订不能覆盖它，否则归还时收不回原来那套按键补偿。 */
+        AuxiliaryAim withSteering(Steering restored) {
+            return new AuxiliaryAim(previousYaw, previousPitch, aimYaw, aimPitch, interventionLease, mainAimLease,
+                    movement, restored, navigationRelative, speedYaw, speedPitch, initialized);
         }
     }
-    private record AuxiliaryLook(Float yaw, Float pitch, long lookLease, long interactionLease,
-                                 float cameraYaw, float cameraPitch, float yawVelocity, float pitchVelocity,
-                                 long lastUpdate, boolean initialized, Movement movement, Steering steering,
-                                 boolean navigationRelative, PlayerLook pose) {}
 
     @Override
     public boolean automationOwnsControls() {
@@ -108,7 +112,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     public void requestLook(float yaw, float pitch, long leaseTickRevision) {
         requireLease(leaseTickRevision);
         // 主动作重新要求瞄准时立即拥有镜头，迟到的辅助收尾不能把它改回旧路线。
-        auxiliaryLook = null;
+        auxiliaryAim = null;
         interactionLookLease = leaseTickRevision;
         setLook(yaw, pitch, leaseTickRevision);
     }
@@ -120,40 +124,64 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         setLook(yaw, pitch, leaseTickRevision);
     }
 
+    @Override
+    // 随行补光只登记方向：镜头按正常转头速度逐帧转过去，不再瞬转，等对准后调用方才提交点击。
+    public void requestSmoothLook(float yaw, float pitch, long leaseTickRevision) {
+        if (auxiliaryAim != null && auxiliaryAim.interventionLease() == leaseTickRevision) {
+            auxiliaryAim = auxiliaryAim.withAim(Mth.wrapDegrees(yaw), Mth.clamp(pitch, -90.0f, 90.0f));
+            return;
+        }
+        requestLook(yaw, pitch, leaseTickRevision);
+    }
+
     @Override public boolean tryAuxiliaryLook(float yaw, float pitch, long leaseTickRevision) {
         requireLease(leaseTickRevision);
         if (!auxiliaryLookAvailable(leaseTickRevision)) return false;
-        var saved = new AuxiliaryLook(targetYaw, targetPitch, lookLease, interactionLookLease,
-                cameraYaw, cameraPitch, yawVelocity, pitchVelocity, lastLookUpdateNanos, cameraInitialized,
-                movement, steering, navigationRelativeMovement, PlayerLook.capture(controlledPlayer));
+        // 借来的瞄准方向先按本次请求记下，任何一帧都不能出现"有借用记录却没有目标角"的空目标。
+        Float aimYaw = Mth.wrapDegrees(yaw), aimPitch = Mth.clamp(pitch, -90.0f, 90.0f);
+        AuxiliaryAim saved = new AuxiliaryAim(targetYaw, targetPitch, aimYaw, aimPitch, leaseTickRevision,
+                interactionLookLease, movement, steering, navigationRelativeMovement, yawVelocity, pitchVelocity,
+                cameraInitialized);
         // 跑动中低头插灯只改变视线；已有路线转向器继续工作，普通移动则按原世界方向补偿横移。
         if (movementLease == leaseTickRevision && steering == null && !navigationRelativeMovement) {
             Movement original = movement;
             float oldYaw = controlledPlayer.getYRot();
-            steering = nextYaw -> preserveHeading(original, oldYaw, nextYaw);
+            saved = saved.withSteering(nextYaw -> preserveHeading(original, oldYaw, nextYaw));
         }
-        requestImmediateLook(yaw, pitch, leaseTickRevision);
-        auxiliaryLook = saved;
+        requestSmoothLook(yaw, pitch, leaseTickRevision);
+        auxiliaryAim = saved;
         return true;
     }
 
     @Override public void finishAuxiliaryLook(boolean submitted, long leaseTickRevision) {
-        // 交还身体、换刻或主任务已经接管时，不得用旧快照覆盖新的操作者。
-        if (!automationOwnsControls() || activeTick != leaseTickRevision || auxiliaryLook == null) return;
-        var saved = auxiliaryLook; auxiliaryLook = null;
-        targetYaw = saved.yaw(); targetPitch = saved.pitch();
-        lookLease = saved.lookLease(); interactionLookLease = saved.interactionLease();
-        if (submitted) return;
-        cameraYaw = saved.cameraYaw(); cameraPitch = saved.cameraPitch();
-        yawVelocity = saved.yawVelocity(); pitchVelocity = saved.pitchVelocity();
-        lastLookUpdateNanos = saved.lastUpdate(); cameraInitialized = saved.initialized();
+        // 交还身体、换刻或主任务已经接管时，不得用旧记录覆盖新的操作者。
+        if (!automationOwnsControls() || activeTick != leaseTickRevision || auxiliaryAim == null) return;
+        var saved = auxiliaryAim;
+        auxiliaryAim = null;
+        Float restoreYaw = saved.previousYaw() == null ? saved.aimYaw() : saved.previousYaw();
+        Float restorePitch = saved.previousPitch() == null ? saved.aimPitch() : saved.previousPitch();
+        // 归还目标而不是归还角度：镜头沿用当前角速度平滑转回主任务方向，既不瞬跳也不停顿。
+        targetYaw = restoreYaw;
+        targetPitch = restorePitch;
+        // 借用会顺带把本刻登记成"精确瞄准"；归还时只有借用前真的另有瞄准才保留这个登记，
+        // 否则同一刻的路线续订会被当成抢瞄准挡掉，镜头只能等下一刻才转得回去。
+        // 借用会顺带把本刻登记成"精确瞄准"；归还时恢复借用前的登记，
+        // 否则同一刻主任务想按路线续订视角时，会被当成"正在精确瞄准"挡掉。
+        interactionLookLease = saved.mainAimLease();
+        lookLease = leaseTickRevision;
+        yawVelocity = saved.speedYaw();
+        pitchVelocity = saved.speedPitch();
+        lastLookUpdateNanos = 0L;
+        cameraInitialized = saved.initialized();
         // 只撤回辅助转头追加的移动补偿；原生回调若更新了主移动指令，保留后来者的要求。
         if (movement == saved.movement() && navigationRelativeMovement == saved.navigationRelative()) steering = saved.steering();
-        saved.pose().restore(controlledPlayer);
     }
 
     @Override public boolean auxiliaryLookAvailable(long leaseTickRevision) {
         requireLease(leaseTickRevision);
+        // 补光正在转向时本刻准星已经记在它名下：续订继续推进即可，否则连自己都续订不上，镜头会卡在半路。
+        // 新的一刻起跳、潜行、主任务瞄准都仍按下面的条件拦下，不会借到新的准星。
+        if (auxiliaryAim != null) return true;
         // 即将起跳或沿边缘潜行时身体仍在地面，但下一次物理更新已经有精确动作，不能借准星插灯。
         return interactionLookLease != leaseTickRevision
                 && (movementLease != leaseTickRevision || !movement.jumping() && !movement.sneaking());
@@ -175,7 +203,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     @Override
     // 取消继续转头，同时清除转动惯性，避免下一次看向别处时继承旧速度。
     public void clearLook() {
-        auxiliaryLook = null;
+        auxiliaryAim = null;
         interactionLookLease = Long.MIN_VALUE;
         targetYaw = null;
         targetPitch = null;
@@ -206,7 +234,8 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     }
 
     void beginTick(long tickRevision) {
-        auxiliaryLook = null;
+        // 辅助借用不跨刻：下一刻没人重新申请就自然归还，镜头按主任务方向继续平滑推进。
+        auxiliaryAim = null;
         activeTick = tickRevision;
         // 上一刻按着前进，不代表这一刻还要前进；执行器必须每刻重新发出指令。
         if (movementLease != tickRevision) { movement = Movement.STOPPED; steering = null; }
@@ -421,6 +450,10 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     // 按实际经过的时间转动；卡顿后单次最多按 0.05 秒推进，避免镜头一下跳过很远。
     private void advanceLook(LocalPlayer player, long nowNanos) {
         if (!cameraInitialized) synchronizeCamera(player);
+        // 补光借用期间平滑器追的是借来的瞄准方向，主任务的路线视角目标原样留到归还后再追上。
+        boolean aiming = auxiliaryAim != null;
+        float desiredYaw = aiming ? auxiliaryAim.aimYaw() : targetYaw;
+        float desiredPitch = aiming ? auxiliaryAim.aimPitch() : targetPitch;
         float dt;
         if (lastLookUpdateNanos == 0L) {
             // 首次采样也推进一小段转向，避免低帧率时镜头迟迟不动。
@@ -433,9 +466,9 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         if (dt <= 0.0f) return;
 
         AxisStep yaw = smoothDampAngle(
-                cameraYaw, targetYaw, yawVelocity, YAW_SMOOTH_TIME, MAX_YAW_SPEED, dt);
+                cameraYaw, desiredYaw, yawVelocity, YAW_SMOOTH_TIME, MAX_YAW_SPEED, dt);
         AxisStep pitch = smoothDamp(
-                cameraPitch, targetPitch, pitchVelocity,
+                cameraPitch, desiredPitch, pitchVelocity,
                 PITCH_SMOOTH_TIME, MAX_PITCH_SPEED, dt);
         cameraYaw = yaw.value();
         cameraPitch = Mth.clamp(pitch.value(), -90.0f, 90.0f);
@@ -496,6 +529,8 @@ public final class DefaultBodyControlPort implements BodyControlPort {
             output = current;
             nextVelocity = 0;
         }
+        // 阻尼每帧只按剩余误差的一小部分收敛，永远差一点点；贴到目标就停住，让调用方能看到真实对准。
+        if (Math.abs(target - output) <= SETTLE_TOLERANCE_DEGREES) return new AxisStep(target, 0);
         return new AxisStep(output, nextVelocity);
     }
 
@@ -537,4 +572,6 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     /** 大转角的缓入/缓出加速度上限(度/秒²):240°/s 巡航在 ~0.12s 内爬升,90° 转角全程 ~0.45s。 */
     private static final float ANGULAR_ACCELERATION = 2000.0f;
     private static final float MAX_LOOK_DELTA_SECONDS = 0.05f;
+    /** 余差小到肉眼不可分辨时直接吸附到目标(度)；否则阻尼只会无限接近，调用方的"已对准"判定永远不成立。 */
+    private static final float SETTLE_TOLERANCE_DEGREES = 0.3f;
 }

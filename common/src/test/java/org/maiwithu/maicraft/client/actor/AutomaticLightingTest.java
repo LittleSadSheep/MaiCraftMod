@@ -11,6 +11,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
+import org.maiwithu.maicraft.core.task.build.BuildTaskRecord;
 import org.maiwithu.maicraft.core.task.lighting.AutomaticLighting;
 import org.maiwithu.maicraft.core.task.lighting.OffhandTorchPlacer;
 import org.maiwithu.maicraft.intent.SemanticResultView;
@@ -49,10 +50,12 @@ public final class AutomaticLightingTest {
             check(h.player.getOffhandItem().is(Items.TORCH) && h.player.getMainHandItem().is(Items.IRON_PICKAXE),
                     "暗处先准备副手，不选择主手火把");
             h.nextTick(); tick(h, lighting, true);
+            // 补光先按正常转头速度转向灯位，对准后才出手；夹具按真实渲染帧推进这段转向。
+            check(waitForNextPlacement(h, lighting, 60, 2) != null, "补光应当在转向预算内出手");
             check(h.blockUses() == 1 && h.mode.usedHand == InteractionHand.OFF_HAND, "副手原生出手一次: " + lighting.snapshot(h.player));
             var placer = (OffhandTorchPlacer) ActorControlTestHarness.field(AutomaticLighting.class, "placer").get(lighting);
             var target = placer.target();
-            h.set(target.pos(), target.desiredState()); h.player.getOffhandItem().shrink(1);
+            h.player.getOffhandItem().shrink(1); h.set(target.pos(), target.desiredState());
             for (int i = 0; i < 6; i++) { h.nextTick(); tick(h, lighting, true); }
             check(h.blockUses() == 1 && ((List<?>) lighting.snapshot(h.player).get("placements")).isEmpty(),
                     "客户端预测和扣料先到时等服务器，不抢放第二支");
@@ -70,12 +73,15 @@ public final class AutomaticLightingTest {
             h.position(new Vec3(8.5, 1, 4.5)); h.level.blockLight = 0;
             h.nextTick(); tick(h, lighting, false);
             check(h.blockUses() == 1, "主任务独占时让位");
-            h.nextTick(); tick(h, lighting, true);
-            check(h.blockUses() == 2, "走进下一片暗处才再次放置");
-            lighting.configure(h.player, false, 8, List.of());
-            target = placer.target(); h.set(target.pos(), target.desiredState()); h.player.getOffhandItem().shrink(1);
+            // 走够两格后补光会挑新灯位并平滑转向它；每刻喂两帧推进转向，直到它真的再次出手。
+            var placed = waitForNextPlacement(h, lighting, 90, 2);
+            check(placed != null && h.blockUses() == 2, "走进下一片暗处才再次放置");
+            // 照实机补上客户端预测的落点与副手扣料，服务器才能确认这一支。
+            h.player.getOffhandItem().shrink(1); h.set(placed.pos(), placed.desiredState());
             h.level.acknowledgedSequence = h.level.blockSequence;
-            for (int i = 0; i < 8; i++) { h.nextTick(); tick(h, lighting, true); }
+            for (int i = 0; i < 6; i++) { h.nextTick(); tick(h, lighting, true); }
+            lighting.configure(h.player, false, 8, List.of());
+            for (int i = 0; i < 4; i++) { h.nextTick(); tick(h, lighting, true); }
             status = lighting.snapshot(h.player);
             check(h.blockUses() == 2 && ((List<?>) status.get("placements")).size() == 2, "关闭仍结算已提交的那支灯");
             check(!(boolean) status.get("enabled") && status.get("state").equals("disabled"), "旧回执结清后仍保持关闭");
@@ -112,6 +118,24 @@ public final class AutomaticLightingTest {
         ((DefaultNativeActionPort) context.actions()).advance(context);
         context.body().applyMovement(new BodyControlPort.Movement(1, 0, false, false, true), context.tickRevision());
         lighting.tick(context, allowed);
+    }
+
+    /**
+     * 推进补光直到再递上一支火把，返回这次提交的灯位；一直没有出手则返回 null。
+     * 每刻喂若干渲染帧，等价于真实客户端在游戏刻之间跑的那几帧：补光必须先平滑转到灯位，测试不能靠瞬转绕过这段等待。
+     * 落点方块与副手扣料由调用方按实际提交的那一支注入，避免这里和用例正文各扣一次。
+     */
+    private static BuildTaskRecord.Target waitForNextPlacement(InteractionWorldTestHarness h, AutomaticLighting lighting,
+                                                               int ticks, int framesPerTick) throws Exception {
+        var placer = (OffhandTorchPlacer) ActorControlTestHarness.field(AutomaticLighting.class, "placer").get(lighting);
+        int before = h.blockUses();
+        for (int tick = 0; tick < ticks; tick++) {
+            h.nextTick();
+            tick(h, lighting, true);
+            h.renderFrames(framesPerTick);
+            if (h.blockUses() > before) return placer.target();
+        }
+        return null;
     }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }
 }

@@ -9,12 +9,13 @@ import baritone.utils.InputOverrideHandler;
 import java.lang.reflect.Proxy;
 import java.util.HashMap;
 import java.util.function.Function;
+import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.client.runtime.ClientRuntime;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneNavigator;
 import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
 
-/** 使用真实导航输入桥回放插灯转头；物理移动仍按 Baritone 路线朝向，不能再次按相机旋转按键。 */
+/** 使用真实导航输入桥回放插灯转头；转向按正常转头逐帧推进，物理移动仍按 Baritone 路线朝向，不能再次按相机旋转按键。 */
 public final class AuxiliaryNavigationTest {
     public static void main(String[] args) throws Exception {
         try (var h = new InteractionWorldTestHarness()) {
@@ -47,6 +48,15 @@ public final class AuxiliaryNavigationTest {
                     EmbeddedBaritoneRuntime.applyInputState(inputs);
                     context.body().requestNavigationLook(routeYaw, 8, context.tickRevision());
                     check(context.body().tryAuxiliaryLook(routeYaw + 90, 60, context.tickRevision()), "平地跑动允许借准星插灯");
+                    float turnStart = h.player.getYRot();
+                    // 借用只登记方向：镜头必须按正常转头逐帧靠近灯位，而不是越过中间角度的瞬转。
+                    h.renderFrames(3);
+                    check(Math.abs(Mth.wrapDegrees(h.player.getYRot() - turnStart)) > 0.5f
+                                    && Math.abs(Mth.wrapDegrees(h.player.getYRot() - (routeYaw + 90))) > 1
+                                    && Math.abs(h.player.getXRot() - 60) > 1,
+                            "插灯转向必须逐帧推进，不能一帧就到灯位: yaw=" + h.player.getYRot() + " pitch=" + h.player.getXRot());
+                    boolean borrowed = context.body().tryAuxiliaryLook(routeYaw + 90, 60, context.tickRevision());
+                    check(borrowed, "同一灯位的下一刻应能继续推进转向");
                     ((DefaultBodyControlPort) context.body()).endTick((DefaultLocalPlayerContext) context);
                     // MixinEntity 在 moveRelative 内使用路线朝向；这里按相同的原版旋转规则核对真实世界运动方向。
                     Vec3 actual = new Vec3(h.player.input.leftImpulse, 0, h.player.input.forwardImpulse)

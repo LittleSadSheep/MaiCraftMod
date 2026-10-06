@@ -68,7 +68,15 @@ public final class AreaLightingTest {
             pass.stop(h.player, Task.StopReason.PREEMPTED);
             AfterNavigationAction.run(ClientRuntime.requireContext(h.player));
             check(h.blockUses() == 0, "暂停撤销尚未执行的帧末点击");
-            h.nextTick(); pass.tick(h.player); AfterNavigationAction.run(ClientRuntime.requireContext(h.player));
+            h.nextTick();
+            // 补光转向要按正常角速度推进；夹具像真实客户端那样在游戏刻之间喂渲染帧，直到它真的出手。
+            for (int i = 0; i < 60 && h.blockUses() == 0; i++) {
+                pass.tick(h.player);
+                AfterNavigationAction.run(ClientRuntime.requireContext(h.player));
+                h.renderFrames(2);
+                if (h.blockUses() > 0) break;
+                h.nextTick();
+            }
             check(h.blockUses() == 1 && h.mode.usedHand == InteractionHand.OFF_HAND, "恢复后只用副手出手一次");
             h.set(target.pos(), target.desiredState()); h.player.getOffhandItem().shrink(1);
             h.level.acknowledgedSequence = h.level.blockSequence;
@@ -105,8 +113,14 @@ public final class AreaLightingTest {
             var build = new BuildTaskRecord("lighting-grass", 600, List.of(target), false, true, false);
             var pass = new TorchLightingPass(h.player, build, List.of(new BlockPos(4, 1, 4)), 8, Set.of(), Set.of());
             pass.start(h.player);
-            pass.tick(h.player);
-            AfterNavigationAction.run(ClientRuntime.requireContext(h.player));
+            // 草丛灯位同样要等补光平滑转到它；逐刻喂渲染帧直到真实出手。
+            for (int i = 0; i < 60 && h.blockUses() == 0; i++) {
+                pass.tick(h.player);
+                AfterNavigationAction.run(ClientRuntime.requireContext(h.player));
+                h.renderFrames(2);
+                if (h.blockUses() > 0) break;
+                h.nextTick();
+            }
             check(h.blockUses() == 1, "草丛灯位必须真实提交副手放置，不能静默拒绝空转到停滞");
             h.set(grassCell, torchState);
             h.player.getOffhandItem().shrink(1);
@@ -144,6 +158,8 @@ public final class AreaLightingTest {
             for (int i = 0; i < 300 && !state.isTerminal(); i++) {
                 state = pass.tick(h.player);
                 AfterNavigationAction.run(ClientRuntime.requireContext(h.player));
+                // 这里的补光转向也要按真实帧率推进，不然镜头永远到不了灯位。
+                h.renderFrames(2);
                 if (h.blockUses() == 1) {
                     h.set(reachable, torchState);
                     h.player.getOffhandItem().shrink(1);

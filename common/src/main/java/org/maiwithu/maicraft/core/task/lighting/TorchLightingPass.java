@@ -108,6 +108,10 @@ public final class TorchLightingPass extends AbstractCompanionTask<BuildTaskReco
                                             "support or cell state no longer qualified when reached");
                                 } else if (placer.place(context, candidate, protectedCells)) {
                                     attempted.add(candidate.pos());
+                                } else if (placer.state().equals("site_not_usable")) {
+                                    // 转向途中这一格失效时补光已撤回转向；同步淘汰灯位，不然下一轮还会再挑到它。
+                                    rejectSite(candidate, "site_not_usable",
+                                            "cell stopped qualifying while the camera was turning to it");
                                 }
                                 return true;
                             });

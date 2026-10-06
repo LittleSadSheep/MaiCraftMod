@@ -60,6 +60,14 @@ public interface BodyControlPort {
         requestLook(yaw,pitch,leaseTickRevision);
     }
 
+    /**
+     * 多刻借用准星时按正常转头速度转向目标：只登记方向，由镜头平滑推进逐帧到位。
+     * 随行补光要靠真实射线点击，不能像紧急自救那样瞬转瞬回，否则角色会看起来在闪现。
+     */
+    default void requestSmoothLook(float yaw, float pitch, long leaseTickRevision) {
+        requestLook(yaw, pitch, leaseTickRevision);
+    }
+
     void clearLook();
 
     /** 立即清空自动注入的移动与按键信号；停止输入本身不发送交互包。 */
