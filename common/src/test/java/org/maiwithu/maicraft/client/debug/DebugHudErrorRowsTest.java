@@ -35,6 +35,7 @@ public final class DebugHudErrorRowsTest {
         eventWrapKeepsLongTokenWholeAndWithinPanel();
         continuationLinesFillPanelWidthAfterWidePrefix();
         contentDemandWidensPanelToFinalWrapWidth();
+        latestEventLineCollapsesNewestEventToSingleRow();
         perfTextFollowsTickBudget();
         perfColorSeparatesThreeSpeedBands();
         System.out.println("DebugHudErrorRowsTest: latest error rows wrap, truncate and stay visible; panel width is the single wrap-and-box source widened by unwrapped content; continuation lines fill the panel width; perf row follows tick budget");
@@ -138,6 +139,37 @@ public final class DebugHudErrorRowsTest {
                 "unwrapped content demand clamps to the screen budget");
         check(DebugHudController.panelWidthWithContent(SPLITTER, 160, List.of(), "m".repeat(300), 1000) == 6 + 300,
                 "a pending error widens the panel to label plus full unwrapped message width");
+    }
+
+    // 单行档：升序列表（最旧在前）取末尾最新事件，压成恰好一行；长消息以 … 收尾，短消息原样，空列表整段缺席。
+    private static void latestEventLineCollapsesNewestEventToSingleRow() {
+        check(DebugHudController.latestEventLine(SPLITTER, List.of(), 200).isEmpty(),
+                "no events leaves the single-line feed empty");
+        IntentRuntime.AttentionItem older = new IntentRuntime.AttentionItem(
+                Instant.now(), "older_type", "task", "old event body");
+        IntentRuntime.AttentionItem newest = new IntentRuntime.AttentionItem(
+                Instant.now(), "newest_type", "task", "word ".repeat(60).strip());
+        List<DebugHudController.EventLine> lines = DebugHudController.latestEventLine(
+                SPLITTER, List.of(older, newest), 200);
+        check(lines.size() == 1, "the single-line feed renders exactly one row");
+        String joined = joinSegments(lines.getFirst());
+        check(joined.contains("newest_type") && !joined.contains("old event body"),
+                "the single-line feed shows the newest (last) event only");
+        check(joined.endsWith("…"), "an overlong message truncates within the single row");
+
+        IntentRuntime.AttentionItem shortEvent = new IntentRuntime.AttentionItem(
+                Instant.now(), "tick", "world", "short body");
+        List<DebugHudController.EventLine> single = DebugHudController.latestEventLine(
+                SPLITTER, List.of(shortEvent), 200);
+        check(single.size() == 1, "a short event still renders exactly one row");
+        String shortJoined = joinSegments(single.getFirst());
+        check(shortJoined.contains("short body") && !shortJoined.endsWith("…"),
+                "a short message stays whole without an ellipsis");
+    }
+
+    private static String joinSegments(DebugHudController.EventLine line) {
+        return line.segments().stream().map(DebugHudController.Segment::text)
+                .collect(Collectors.joining());
     }
 
     // 预算内（含边界）给满速 1000÷目标，超出按 1000÷MSPT 等比掉速；目标随 tick rate 走，不写死 50/20。
