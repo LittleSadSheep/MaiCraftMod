@@ -212,6 +212,17 @@ public final class BreathChain implements Task, Reflex {
         }
     }
 
+    /**
+     * 换气让位：任务正在连续驾驶身体把水排出去（水中攀沿等需要按跳攒抬升的段）时，
+     * 每秒接管一次会把驾驶切碎成永远凑不齐的碎片，角色反而更晚离水。让位只在驾驶
+     * 段持有身体且空气仍在兜底触发线之上时生效（见驾驶侧 drivesBodyContinuously
+     * 的空气守卫）；头顶封闭等真密封处境不受影响——那时驾驶段自己会放弃并把身体交回。
+     */
+    @Override
+    public boolean yieldsToContinuousDriving() {
+        return true;
+    }
+
     @Override
     public String name() {
         return "breath";

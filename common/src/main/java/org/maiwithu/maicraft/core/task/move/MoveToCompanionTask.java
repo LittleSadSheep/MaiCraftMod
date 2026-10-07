@@ -800,6 +800,17 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 + (waterBreathePause ? " The trip was interrupted once to breathe at the surface." : "");
     }
 
+    /**
+     * 登岸段驾驶期间持有身体做连续输入（贴岸游 + 全程按跳攒抬升），换气反射按秒打断
+     * 会把驾驶切碎成永远凑不齐的碎片。空气仍在换气兜底触发线之上时声明连续驾驶让
+     * 非致命反射让位；跌破触发线则让换气照常接管——驾驶段本身也有 10 秒上限兜底。
+     */
+    @Override
+    public boolean drivesBodyContinuously(LocalPlayer companion) {
+        return companion == player && waterLegKind != null
+                && companion.getAirSupply() * LOW_AIR_RESERVE_DIVISOR > companion.getMaxAirSupply();
+    }
+
     /** 从脚位向上找水面顶层节点；身体所在水列找不到顶层时返回 Integer.MIN_VALUE。 */
     private int waterSurfaceNodeY() {
         BlockPos cursor = feet();
