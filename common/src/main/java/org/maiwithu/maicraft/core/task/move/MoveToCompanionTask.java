@@ -9,6 +9,9 @@ import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
 import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import org.maiwithu.maicraft.core.task.base.AbstractCompanionTask;
 import net.minecraft.core.BlockPos;
+import net.minecraft.tags.FluidTags;
+import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.entity.InputDriver;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -106,6 +109,33 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
 
     /** 规划烧尽后就近收尾成立；回执与成功话术据此声明这份成功来自容差内结算而非规划到达。 */
     private boolean settledNearbyAfterPlanningBurnout;
+
+    // ---- 水中贴岸登岸段（深水贴岸 travel 的直达出路与换气安全兜底）----
+
+    /** 水面贴着一格高岸沿时，贴岸游并按跳即可爬上沿顶；目标柱在身体这个水平范围内才走直达登岸段。 */
+    private static final double WATER_SHORE_REACH_BLOCKS = 2.5;
+    /** 登岸段超过此时长身体仍未离水就收场，不无限按跳。 */
+    private static final int WATER_CLIMB_LEG_MAX_TICKS = 200;
+    /** 憋气兜底的空气储备线：权威空气跌破上限的三分之一时开始寻岸。 */
+    private static final int LOW_AIR_RESERVE_DIVISOR = 3;
+    /** 空气走低后还要再观察这么长的原地不动，才判定卡死并放弃当前目标去登岸，正常潜水穿越不误伤。 */
+    private static final long LOW_AIR_STUCK_WINDOW_TICKS = 10 * 20;
+    /** 憋气兜底在身体周围这个水平半径内找可攀的干岸格。 */
+    private static final int NEAR_SHORE_SCAN_RADIUS = 5;
+
+    /** 进行中的登岸段：REACH_TARGET 直接朝目标沿攀爬，REACH_AIR 放弃目标就近登岸换气。 */
+    private enum WaterLegKind { REACH_TARGET, REACH_AIR }
+    private WaterLegKind waterLegKind;
+    /** 本段要爬上去的干燥站立格。 */
+    private BlockPos waterLegCell;
+    private int waterLegTicks;
+    /** 憋气兜底的卡点观察锚：水平位移超过一格就重设，原地不动满一个窗口才触发。 */
+    private Vec3 waterStuckAnchor;
+    private long waterStuckAnchorTick;
+    /** 本次到达经由水中贴岸登岸段完成；回执据此声明这份成功不是规划路线走出来的。 */
+    private boolean waterShoreClimbUsed;
+    /** 本次任务因憋气兜底中断过行程：回执要点名角色已安全离水。 */
+    private boolean waterBreathePause;
 
     public MoveToCompanionTask(LocalPlayer player, MoveToTaskRecord record) {
         super(player, record);
@@ -275,6 +305,10 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     protected TaskState onTick() {
         // 先处理已经开始的交通和导航，再判断是否到达；飞行刚碰地、电梯刚到楼层，都可能还没完成收尾。
         observeLanding();
+        // 登岸段优先于到达短路：爬上沿顶那一刻身体已满足到达条件，回执注记要经登岸段收尾才能声明。
+        if (waterLegKind != null) {
+            return tickWaterClimbLeg();
+        }
         // 现有导航必须先消费其原生完成回执，之后任务清理才可停止它；仅仅碰到船舱地板或喷气背包触地，不代表退出或模式恢复已经完成。
         if (nav == null && reached()) return successAtBody();
         // 只有本次移动开始前明确退出旧页面；后续导航换装备或交通准备自己的菜单不被每刻抢关。
@@ -293,6 +327,20 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
             if(!groundFlight.prepare(context)) {
                 context.body().releaseAll();
                 if(groundFlight.failed()) { fail(groundFlight.diagnostics().toString(),FailureType.UNKNOWN); return TaskState.FAILED; }
+                return TaskState.RUNNING;
+            }
+        }
+        if (player.isInWater() && !player.isPassenger() && !reached()
+                && r.transportMode != TransportMode.JETPACK
+                && r.transportMode != TransportMode.ELEVATOR) {
+            BlockPos shore = nearbyShoreTargetCell();
+            boolean forAir = false;
+            if (shore == null && breathReserveAtRisk()) {
+                shore = nearestClimbableShoreCell();
+                forAir = shore != null;
+            }
+            if (shore != null) {
+                enterWaterClimbLeg(shore, forAir);
                 return TaskState.RUNNING;
             }
         }
@@ -543,6 +591,177 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 player.blockPosition().toShortString());
         startWalkingNav();
         return TaskState.RUNNING;
+    }
+
+    // ==================== 水中贴岸登岸段 ====================
+
+    /**
+     * 目标本身就是贴岸一格沿（干燥可站、高出水面不超过两格、水平紧邻）时返回目标格：
+     * 贴岸游并按跳的原版助推就能把身体抬上沿顶，不必等完整规划——规划器对水陆过渡
+     * 反复算路失败时，这是唯一的直达出路。适用条件不满足返回 null。
+     */
+    private BlockPos nearbyShoreTargetCell() {
+        if (r.kind != MoveToTaskRecord.Kind.BLOCK) return null;
+        // 测试桩的 level 没有区块源，isLoaded 会沿高度评估链 NPE：跳过已加载过滤（生产 Level 恒有区块源，语义不变）。
+        if (player.level().getChunkSource() != null && !player.level().isLoaded(blockTarget)) return null;
+        if (!BlockHelper.isDryStandable(player.level(), blockTarget)) return null;
+        int surfaceY = waterSurfaceNodeY();
+        if (surfaceY == Integer.MIN_VALUE) return null;
+        int rise = by - surfaceY;
+        if (rise < 1 || rise > 2) return null;
+        double dx = (bx + 0.5) - player.getX();
+        double dz = (bz + 0.5) - player.getZ();
+        if (Math.sqrt(dx * dx + dz * dz) > WATER_SHORE_REACH_BLOCKS) return null;
+        return blockTarget;
+    }
+
+    /** 憋气兜底判定：权威空气跌破储备线，且身体已原地不动满一个观察窗口。 */
+    private boolean breathReserveAtRisk() {
+        if (player.getAirSupply() * LOW_AIR_RESERVE_DIVISOR > player.getMaxAirSupply()) {
+            waterStuckAnchor = null;
+            return false;
+        }
+        long now = player.level().getGameTime();
+        Vec3 here = player.position();
+        if (waterStuckAnchor == null) {
+            waterStuckAnchor = here;
+            waterStuckAnchorTick = now;
+            return false;
+        }
+        double moved = Math.hypot(here.x - waterStuckAnchor.x, here.z - waterStuckAnchor.z);
+        if (moved > 1.0) {
+            waterStuckAnchor = here;
+            waterStuckAnchorTick = now;
+            return false;
+        }
+        return now - waterStuckAnchorTick >= LOW_AIR_STUCK_WINDOW_TICKS;
+    }
+
+    /** 憋气兜底找岸：身体周围的水平扫描圈内挑一个「高出水面不超过两格」的干燥站立格，就近优先。 */
+    private BlockPos nearestClimbableShoreCell() {
+        int surfaceY = waterSurfaceNodeY();
+        if (surfaceY == Integer.MIN_VALUE) return null;
+        BlockPos feet = feet();
+        boolean chunkFilter = player.level().getChunkSource() != null;
+        BlockPos best = null;
+        double bestScore = Double.MAX_VALUE;
+        for (int dx = -NEAR_SHORE_SCAN_RADIUS; dx <= NEAR_SHORE_SCAN_RADIUS; dx++) {
+            for (int dz = -NEAR_SHORE_SCAN_RADIUS; dz <= NEAR_SHORE_SCAN_RADIUS; dz++) {
+                // 支撑面比水面最多高一格：更高的岸沿按跳爬不上去，不把身体带到爬不上的墙边。
+                for (int cellY = surfaceY + 1; cellY <= surfaceY + 2; cellY++) {
+                    BlockPos cell = new BlockPos(feet.getX() + dx, cellY, feet.getZ() + dz);
+                    if (chunkFilter && !player.level().isLoaded(cell)) continue;
+                    if (!BlockHelper.isDryStandable(player.level(), cell)) continue;
+                    double score = dx * dx + dz * dz + (cellY - surfaceY) * (cellY - surfaceY);
+                    if (score < bestScore) {
+                        bestScore = score;
+                        best = cell;
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    private void enterWaterClimbLeg(BlockPos cell, boolean forAir) {
+        waterLegKind = forAir ? WaterLegKind.REACH_AIR : WaterLegKind.REACH_TARGET;
+        waterLegCell = cell;
+        waterLegTicks = 0;
+        stopNav();
+        r.extendDeadlineTo(player.level().getGameTime() + WATER_CLIMB_LEG_MAX_TICKS + 100);
+        Constants.LOG.info(
+                "[maicraft-task] goto 水中贴岸登岸段启动 for_air={} cell={} feet={} air={}/{}",
+                forAir, cell.toShortString(), player.blockPosition().toShortString(),
+                player.getAirSupply(), player.getMaxAirSupply());
+    }
+
+    private TaskState tickWaterClimbLeg() {
+        waterLegTicks++;
+        // 成功只认真的离水：身体站上干燥格才算上岸，留在水里的「就近」不算到达。
+        if (!player.isInWater() && player.onGround()) {
+            // 目标沿顶不止一格时上岸后可能差一格：已在岸上就按普通步行走回目标格。
+            if (!reached() && waterLegKind == WaterLegKind.REACH_TARGET
+                    && waterLegTicks <= WATER_CLIMB_LEG_MAX_TICKS) {
+                driveWaterClimb(waterLegCell);
+                return TaskState.RUNNING;
+            }
+            return finishWaterClimbLeg(reached());
+        }
+        if (waterLegTicks > WATER_CLIMB_LEG_MAX_TICKS) return finishWaterClimbLeg(false);
+        driveWaterClimb(waterLegCell);
+        return TaskState.RUNNING;
+    }
+
+    /** 贴岸游并按跳：水中水平碰撞的原版竖直助推把身体抬上一格沿顶；离水后差最后一段就按普通上台阶补跳。 */
+    private void driveWaterClimb(BlockPos cell) {
+        double dx = (cell.getX() + 0.5) - player.getX();
+        double dz = (cell.getZ() + 0.5) - player.getZ();
+        InputDriver.lookForNavigation(player, (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0), 0);
+        boolean forward = Math.hypot(dx, dz) > 0.2;
+        boolean jump = player.isInWater()
+                || (player.onGround() && player.blockPosition().getY() < cell.getY());
+        InputDriver.applyNavigationMovement(player, forward ? 1F : 0F, 0F, jump, false, false);
+    }
+
+    private TaskState finishWaterClimbLeg(boolean arrived) {
+        InputDriver.halt(player);
+        WaterLegKind kind = waterLegKind;
+        waterLegKind = null;
+        waterLegCell = null;
+        if (arrived) {
+            waterShoreClimbUsed = true;
+            if (kind == WaterLegKind.REACH_AIR) waterBreathePause = true;
+            Constants.LOG.info(
+                    "[maicraft-task] goto 登岸段完成 for_air={} feet={} air={}/{}",
+                    kind == WaterLegKind.REACH_AIR, player.blockPosition().toShortString(),
+                    player.getAirSupply(), player.getMaxAirSupply());
+            return successAtBody();
+        }
+        // 已离水但目标没到：换气兜底到此为保命收场，到达与否如实交给调用方重发。
+        if (!player.isInWater()) {
+            waterBreathePause = true;
+            Constants.LOG.info(
+                    "[maicraft-task] goto 换气兜底离水收场 feet={} air={}/{}",
+                    player.blockPosition().toShortString(),
+                    player.getAirSupply(), player.getMaxAirSupply());
+            fail("travel was interrupted so the body could climb out of the water and breathe;"
+                            + " it is now on dry ground at " + player.blockPosition().toShortString()
+                            + " (air " + player.getAirSupply() + "/" + player.getMaxAirSupply() + "),"
+                            + " but the destination was not reached. Resubmit travel from shore"
+                            + " to continue toward it.",
+                    FailureType.NO_PATH);
+            return TaskState.FAILED;
+        }
+        fail("climb-out leg did not get the body out of the water within about "
+                        + WATER_CLIMB_LEG_MAX_TICKS / 20 + " seconds; it is still in the water at "
+                        + player.blockPosition().toShortString() + " with "
+                        + player.getAirSupply() + "/" + player.getMaxAirSupply() + " air."
+                        + " The nearest shore may be out of reach or its ledge more than one"
+                        + " block above the water surface; pick another destination or approach"
+                        + " from a different direction.",
+                FailureType.NO_PATH);
+        return TaskState.FAILED;
+    }
+
+    /** 到达经由水中登岸段完成时的话术注记：这份成功来自贴岸攀爬，不是规划路线走出来的。 */
+    private String waterClimbNote() {
+        if (!waterShoreClimbUsed) return "";
+        return " Reached by swimming to the shore and climbing out of the water onto the ledge."
+                + (waterBreathePause ? " The trip was interrupted once to breathe at the surface." : "");
+    }
+
+    /** 从脚位向上找水面顶层节点；身体所在水列找不到顶层时返回 Integer.MIN_VALUE。 */
+    private int waterSurfaceNodeY() {
+        BlockPos cursor = feet();
+        if (!isWaterCell(cursor)) return Integer.MIN_VALUE;
+        for (int i = 0; i < 4 && isWaterCell(cursor.above()); i++) cursor = cursor.above();
+        return cursor.getY();
+    }
+
+    private boolean isWaterCell(BlockPos pos) {
+        var state = player.level().getBlockState(pos);
+        return state.getFluidState().is(FluidTags.WATER)
+                && state.getCollisionShape(player.level(), pos).isEmpty();
     }
 
     /** 失败后的再试目标：完整坐标仍用原范围，只给 x/z 时改成附近三格。 */
@@ -809,6 +1028,9 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
             data.put("best_distance_blocks", Math.round(bestDist * 10) / 10.0);
         }
         if (settledNearbyAfterPlanningBurnout) data.put("settled_nearby_after_planning_burnout", true);
+        // 水中贴岸登岸段的交代：到达经由攀沿完成、或行程曾为换气中断，调用方据此核对真实身位。
+        if (waterShoreClimbUsed) data.put("water_shore_climb_out", true);
+        if (waterBreathePause) data.put("interrupted_to_breathe", true);
         data.put("ground_flight_mode",groundFlight.diagnostics());
         // 任务终局直接交付导航证据，避免模型为一次无路结果另开多轮观察。
         if (!finalNavigationEvidence.isEmpty()) data.put("navigation", finalNavigationEvidence);
@@ -877,7 +1099,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                         : "arrived beside " + r.block + " at " + n.getX() + "," + n.getY()
                                 + "," + n.getZ() + " — within reach to use." + landingNote();
             }
-        } + recovery + burnoutSettlementNote();
+        } + recovery + burnoutSettlementNote() + waterClimbNote();
     }
 
     @Override

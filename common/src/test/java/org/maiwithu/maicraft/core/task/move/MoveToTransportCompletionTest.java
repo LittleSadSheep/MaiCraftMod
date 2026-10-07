@@ -5,6 +5,7 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -15,13 +16,21 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.Input;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.util.valueproviders.ConstantInt;
 import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.dimension.DimensionType;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.Vec3;
+import java.util.OptionalLong;
 import org.maiwithu.maicraft.client.actor.BodyControlPort;
 import org.maiwithu.maicraft.client.actor.ClientActorBoundary;
 import org.maiwithu.maicraft.client.actor.DefaultBodyControlPort;
@@ -79,6 +88,8 @@ public final class MoveToTransportCompletionTest {
         ordinaryNearArrival(memory);
         automaticLandingResult(memory);
         observationDoesNotCompleteTravel(memory);
+        waterShoreClimbDeliversArrival(memory);
+        lowAirClimbsOutToBreathe(memory);
         System.out.println("MoveToTransportCompletionTest: passed");
     }
 
@@ -446,6 +457,91 @@ public final class MoveToTransportCompletionTest {
         return new MoveToTaskRecord("move", 600, x, y, 0D, null, false);
     }
 
+    /**
+     * 深水贴岸 travel（176 实机失败场景）：身体在水里、目标就是贴岸一格沿的沿顶站立格时，
+     * 任务必须直接进入登岸段并停掉导航，爬上沿顶后按到达交付，不再等规划空转 30 秒后报
+     * planning_stall。成功只认真的离水：身体站上干燥沿顶才算到达。
+     */
+    private static void waterShoreClimbDeliversArrival(Unsafe memory) throws Exception {
+        try (var f = new Fixture(memory, .5)) {
+            // 水面顶层节点 (0,0,0)（上方是空气），岸沿地板 (1,1,0) 实心，目标沿顶站立格 (1,2,0)。
+            f.world.blocks.put(new BlockPos(0, 0, 0).asLong(), Blocks.WATER.defaultBlockState());
+            f.world.blocks.put(new BlockPos(1, 1, 0).asLong(), Blocks.STONE.defaultBlockState());
+            f.player.wet = true;
+            field(LocalPlayer.class, "onGround").setBoolean(f.player, false);
+            var record = new MoveToTaskRecord("water-shore", 600_000, 1D, 2D, 0D, null, false);
+            var task = f.task(record, false);
+            task.onStart();
+            f.nextTick();
+            check(task.onTick() == TaskState.RUNNING, "贴岸目标在水中应进入登岸段而不是立刻失败");
+            check(field(MoveToCompanionTask.class, "waterLegKind").get(task) != null,
+                    "目标就是贴岸一格沿时必须直接进入登岸段");
+            check(field(AbstractCompanionTask.class, "nav").get(task) == null,
+                    "登岸段接管身体时必须停掉原导航，不能两套驾驶并存");
+            // 模拟原版水中水平碰撞助推：身体被抬上沿顶并站稳。
+            f.player.wet = false;
+            field(LocalPlayer.class, "position").set(f.player, new Vec3(1.5, 2, .5));
+            field(LocalPlayer.class, "blockPosition").set(f.player, new BlockPos(1, 2, 0));
+            field(LocalPlayer.class, "onGround").setBoolean(f.player, true);
+            f.nextTick();
+            check(task.onTick() == TaskState.SUCCESS, "爬上沿顶站进目标格必须按到达交付");
+            var result = task.result(TaskState.SUCCESS);
+            check(Boolean.TRUE.equals(result.data().get("water_shore_climb_out")),
+                    "回执要声明到达经由水中登岸段完成");
+            check(String.valueOf(result.message()).contains("climbing out of the water"),
+                    "成功话术要说明这份到达来自贴岸攀爬");
+        }
+    }
+
+    /**
+     * 憋气兜底：水中空气跌破储备线且身体原地不动满观察窗口时，放弃当前目标就近登岸换气；
+     * 离水后目标未到必须如实失败，回执声明行程已为换气中断、身体已安全离水。
+     */
+    private static void lowAirClimbsOutToBreathe(Unsafe memory) throws Exception {
+        try (var f = new Fixture(memory, .5)) {
+            f.world.blocks.put(new BlockPos(0, 0, 0).asLong(), Blocks.WATER.defaultBlockState());
+            // 可攀干岸：支撑 (2,1,0) 实心，站立格 (2,2,0)。
+            f.world.blocks.put(new BlockPos(2, 1, 0).asLong(), Blocks.STONE.defaultBlockState());
+            f.player.wet = true;
+            f.player.airSupply = 60;
+            field(LocalPlayer.class, "onGround").setBoolean(f.player, false);
+            var record = new MoveToTaskRecord("breathe-pause", 600_000, 60D, 0D, 60D, null, false);
+            var task = f.task(record, false);
+            task.onStart();
+            f.navigator = (TransportNavigator) field(PlayerNav.class, "navigator")
+                    .get(field(AbstractCompanionTask.class, "nav").get(task));
+            planningSession(f);
+            bareGround(memory, f);
+            // 空气已低于储备线：原地不动满 10 秒观察窗口后必须放弃目标进入换气登岸段。
+            TaskState state = TaskState.RUNNING;
+            boolean legStarted = false;
+            for (int tick = 0; tick < 400 && state == TaskState.RUNNING; tick++) {
+                f.nextTick();
+                state = task.onTick();
+                if (field(MoveToCompanionTask.class, "waterLegKind").get(task) != null) {
+                    legStarted = true;
+                    check(tick >= 190, "观察窗口未满不得提前抢方向盘");
+                    break;
+                }
+            }
+            check(legStarted, "空气走低且原地不动满窗口必须进入换气登岸段");
+            check(field(AbstractCompanionTask.class, "nav").get(task) == null,
+                    "换气兜底必须停掉原导航");
+            // 身体游到岸边爬上沿顶：目标未到，任务如实失败并声明已安全离水。
+            f.player.wet = false;
+            field(LocalPlayer.class, "position").set(f.player, new Vec3(2.5, 2, .5));
+            field(LocalPlayer.class, "blockPosition").set(f.player, new BlockPos(2, 2, 0));
+            field(LocalPlayer.class, "onGround").setBoolean(f.player, true);
+            f.nextTick();
+            check(task.onTick() == TaskState.FAILED, "换气兜底离水后目标未到必须如实失败");
+            var result = task.result(TaskState.FAILED);
+            check(Boolean.TRUE.equals(result.data().get("interrupted_to_breathe")),
+                    "回执要声明行程已为换气中断");
+            check(String.valueOf(result.message()).contains("climb out of the water and breathe"),
+                    "失败说明要交代身体已离水、可从岸上重发");
+        }
+    }
+
     private static final class Session implements TransportSession {
         Result result;
         int ticks, stops;
@@ -508,6 +604,14 @@ public final class MoveToTransportCompletionTest {
             inventoryMenu.setCarried(ItemStack.EMPTY);
             field(LocalPlayer.class, "inventoryMenu").set(player, inventoryMenu); player.containerMenu = inventoryMenu;
             world = (FlatLevel) memory.allocateInstance(FlatLevel.class);
+            // Unsafe 裸实例不跑字段初始化器；逐格覆盖表由构造器补上。
+            world.blocks = new HashMap<>();
+            // 水域用例要读流体状态，流体查询沿高度链先取维度类型：补上真实维度注册值。
+            var dimensionType = new DimensionType(OptionalLong.empty(), true, false, false, true, 1, true, false,
+                    0, 16, 16, BlockTags.INFINIBURN_OVERWORLD,
+                    ResourceLocation.withDefaultNamespace("overworld"), 0,
+                    new DimensionType.MonsterSettings(false, false, ConstantInt.of(0), 0));
+            field(Level.class, "dimensionTypeRegistration").set(world, Holder.direct(dimensionType));
             minecraft.player = player; minecraft.level = world;
             field(Minecraft.class, "gameThread").set(minecraft, Thread.currentThread());
             field(Level.class, "dimension").set(world, Level.OVERWORLD);
@@ -581,14 +685,22 @@ public final class MoveToTransportCompletionTest {
 
     private static final class FlatLevel extends ClientLevel {
         long time;
+        /** 测试自放的方块与水体：按格覆盖默认平地（STONE/AIR），用于构造水池与岸沿。 */
+        Map<Long, BlockState> blocks;
         private FlatLevel() { super(null, null, null, null, 0, 0, null, null, false, 0); }
         @Override public long getGameTime() { return time; }
+        @Override public FluidState getFluidState(BlockPos pos) { return getBlockState(pos).getFluidState(); }
         @Override public BlockState getBlockState(BlockPos pos) {
+            var custom = blocks.get(pos.asLong());
+            if (custom != null) return custom;
             return (pos.getY() < 0 ? Blocks.STONE : Blocks.AIR).defaultBlockState();
         }
     }
 
     private static final class TestPlayer extends LocalPlayer {
+        /** 水域与空气的假状态：默认干地满气，水域用例按需打开。 */
+        boolean wet;
+        int airSupply = 300;
         @Override public ItemStack getItemBySlot(EquipmentSlot slot) { return ItemStack.EMPTY; }
         private TestPlayer() { super(null, null, null, null, null, false, false); }
         @Override public boolean isAlive() { return true; }
@@ -597,6 +709,9 @@ public final class MoveToTransportCompletionTest {
         @Override public float getHealth() { return 20; }
         @Override public float getAbsorptionAmount() { return 0; }
         @Override public void setSprinting(boolean sprinting) { }
+        @Override public boolean isInWater() { return wet; }
+        @Override public int getAirSupply() { return airSupply; }
+        @Override public int getMaxAirSupply() { return 300; }
     }
 
     private static void invoke(Object owner, String name, Class<?> parameter, Object value) throws Exception {
