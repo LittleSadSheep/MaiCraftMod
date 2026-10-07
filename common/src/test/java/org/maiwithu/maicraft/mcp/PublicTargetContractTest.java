@@ -40,9 +40,16 @@ public final class PublicTargetContractTest {
             var tool = raw.getAsJsonObject();
             if (tool.get("name").getAsString().equals("perceive")) continue;
             var goal = McpSchemaCompatibilityTest.goalSchema(tool);
-            var target = goal.getAsJsonObject("properties").getAsJsonObject("target").getAsJsonArray("anyOf").get(0).getAsJsonObject();
-            if (target.getAsJsonArray("oneOf").size() != 4)
+            // 四类地点分支都限定为对象，另有单独的空目标分支，null 与任一对象都恰好命中一个分支。
+            var target = goal.getAsJsonObject("properties").getAsJsonObject("target");
+            var variants = target.getAsJsonArray("oneOf");
+            if (variants.size() != 5)
                 throw new AssertionError("public target variants missing");
+            for (int i = 0; i < 4; i++)
+                if (!"object".equals(variants.get(i).getAsJsonObject().get("type").getAsString()))
+                    throw new AssertionError("target variant is not restricted to objects");
+            if (!"null".equals(variants.get(4).getAsJsonObject().get("type").getAsString()))
+                throw new AssertionError("null target branch missing");
         }
     }
     private static void check(String tool, String target, boolean valid) {

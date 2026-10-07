@@ -40,10 +40,12 @@ final class PublicToolCatalog {
     private static final Set<String> TASK_ACTIONS = Set.of("get", "list", "pause", "resume", "cancel", "answer");
 
     // 规划、执行和恢复共用目标说明；保留未知高度时的行走入口及能力限制，避免重复解释挤占工具预算。
+    // 目标与坐标直接声明 ["object","null"]，不再包一层 anyOf：按 Schema 把 XML 参数转成 JSON 的宿主
+    // （直播实测的 MiniMax）解析不进 anyOf 分支，会把 position.x 的 -86 留成字符串 "-86"。
     private static final JsonObject GOAL_DEFINITIONS = JsonParser.parseString("""
             {
               "worldPosition": {
-                "type":"object",
+                "type":["object","null"],
                 "description":"For travel without a known y, omit target and set parameters.destination={x,z}.",
                 "properties": {
                   "x":{"type":"integer"}, "y":{"type":"integer"}, "z":{"type":"integer"},
@@ -52,11 +54,11 @@ final class PublicToolCatalog {
                 "required":["x","y","z"], "additionalProperties":false
               },
               "semanticTarget": {
-                "type":"object",
+                "type":["object","null"],
                 "properties": {
                   "kind":{"type":"string","enum":["current_place","coordinates","landmark","player","entity","nearest","area","prior_result"]},
                   "label":{"type":["string","null"],"minLength":1,"maxLength":160,"description":"landmark/area: a remembered place, or the exact text of one sign within 32 blocks."},
-                  "position":{"anyOf":[{"$ref":"#/$defs/worldPosition"},{"type":"null"}]},
+                  "position":{"$ref":"#/$defs/worldPosition"},
                   "relation":{"type":["string","null"],"minLength":1,"maxLength":120,"description":"Name the earlier ability or outcome for prior_result. Do not copy coordinates."}
                 },
                 "required":["kind"], "additionalProperties":false
@@ -76,7 +78,7 @@ final class PublicToolCatalog {
                 "properties": {
                   "ability":{"type":"string","pattern":"^[a-z0-9_.-]+:[a-z0-9_./-]+$"},
                   "outcome":{"type":"string","minLength":1,"maxLength":500,"description":"Desired outcome."},
-                  "target":{"anyOf":[{"$ref":"#/$defs/semanticTarget"},{"type":"null"}]},
+                  "target":{"$ref":"#/$defs/semanticTarget"},
                   "parameters":{"type":"object","default":{},"description":"Use fields from perceive(view=abilities,focus=ability)."},
                   "preferences":{"type":"object","default":{},"description":"Leave empty unless this ability declares accepted_preferences."},
                   "constraints":{"type":"array","items":{"$ref":"#/$defs/constraint"},"maxItems":32,"default":[],"description":"Use only this ability's parameter-free hard constraints."},

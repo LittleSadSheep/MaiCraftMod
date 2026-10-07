@@ -107,9 +107,13 @@ public final class McpSchemaCompatibilityTest {
         check(goal.get("type").getAsString().equals("object"), "目标明确声明对象类型");
         check(goal.getAsJsonArray("required").equals(JsonParser.parseString("[\"ability\",\"outcome\"]")), "保留必填目标字段");
         var fields = goal.getAsJsonObject("properties");
-        var target = fields.getAsJsonObject("target").getAsJsonArray("anyOf").get(0).getAsJsonObject();
-        check(target.getAsJsonArray("oneOf").size() == 4, "保留地点规则");
-        var position = target.getAsJsonObject("properties").getAsJsonObject("position").getAsJsonArray("anyOf").get(0).getAsJsonObject();
+        // 目标与坐标直接声明可空对象，不包 anyOf：按 Schema 转换 XML 参数的宿主能一路找到 x 的整数类型。
+        var nullableObject = JsonParser.parseString("[\"object\",\"null\"]");
+        var target = fields.getAsJsonObject("target");
+        check(!target.has("anyOf") && target.get("type").equals(nullableObject), "目标直接声明可空对象");
+        check(target.getAsJsonArray("oneOf").size() == 5, "保留四类地点规则与空目标分支");
+        var position = target.getAsJsonObject("properties").getAsJsonObject("position");
+        check(!position.has("anyOf") && position.get("type").equals(nullableObject), "坐标直接声明可空对象");
         check(position.getAsJsonObject("properties").getAsJsonObject("x").get("type").getAsString().equals("integer"), "坐标内联为整数");
         var constraint = fields.getAsJsonObject("constraints").getAsJsonObject("items");
         check(constraint.getAsJsonObject("properties").has("hard"), "约束保留字段定义");

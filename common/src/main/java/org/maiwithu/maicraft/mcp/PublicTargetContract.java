@@ -21,6 +21,8 @@ final class PublicTargetContract {
         JsonArray kinds = new JsonArray(), branches = new JsonArray();
         for (Shape shape : SHAPES) {
             JsonObject branch = new JsonObject(), properties = new JsonObject(), kind = new JsonObject();
+            // 目标本身可为 null；各地点分支限定为对象，null 才只命中下面单独的空目标分支，不会同时满足多个分支。
+            branch.addProperty("type", "object");
             JsonArray choices = new JsonArray(); shape.kinds().forEach(value -> { choices.add(value); kinds.add(value); });
             kind.add("enum", choices); properties.add("kind", kind);
             properties.add("position", type(shape.position() ? "object" : "null"));
@@ -30,6 +32,8 @@ final class PublicTargetContract {
             }
             branch.add("properties", properties); branches.add(branch);
         }
+        // 省略地点时写 null 与不写同义，由入口按缺省目标处理。
+        branches.add(type("null"));
         schema.getAsJsonObject("properties").getAsJsonObject("kind").add("enum", kinds);
         schema.add("oneOf", branches);
         // 模型选择地点时仍能看到坐标、命名区域与先前结果的区别；精简表述不改变取物等能力的 nearest 规则。
