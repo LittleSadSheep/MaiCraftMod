@@ -42,6 +42,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import it.unimi.dsi.fastutil.longs.LongSet;
+import it.unimi.dsi.fastutil.longs.LongSets;
+import net.minecraft.world.level.block.Blocks;
+import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
+
 import static baritone.api.pathing.movement.ActionCosts.COST_INF;
 
 /**
@@ -89,6 +95,12 @@ public class CalculationContext {
     public final BetterWorldBorder worldBorder;
     /** Frozen task safety policy; safe for the calculation worker. */
     public final EmbeddedBaritonePolicy.Snapshot maicraftPolicy;
+
+    /**
+     * 允许脚位进入的下界传送门内格键：只收导航目标本身要求站进的格子（exact 站位、走近类目标的中心格）。
+     * 普通途经的门格不在此列——路线会把门内格当不可通行方块绕开，身体不会未经调用方意图就跨维度。
+     */
+    public final LongSet portalEntryCells;
 
     /**
      * Fluid-placement settings are copied into the context for the same reason as the other
@@ -238,6 +250,9 @@ public class CalculationContext {
         // then you get a wildly inconsistent path that isn't optimal for either scenario.
         this.worldBorder = new BetterWorldBorder(world.getWorldBorder());
         this.maicraftPolicy = Objects.requireNonNull(frozenPolicy, "frozenPolicy");
+        this.portalEntryCells = portalEntryCells(
+                org.maiwithu.maicraft.core.pathing.baritone.MaiCraftGoals.unwrap(
+                        baritone.getPathingBehavior().getGoal()));
     }
 
     public final IBaritone getBaritone() {
@@ -392,5 +407,36 @@ public class CalculationContext {
     public boolean hasForbiddenBodyCells() {
         return maicraftPolicy.minimumFeetY() != Integer.MIN_VALUE
                 || !maicraftPolicy.forbiddenBodyCells().isEmpty();
+    }
+
+    /**
+     * 下界传送门内格是否放行：默认拒绝（误入即被原版机制传去另一维度），
+     * 只有这一格本身是导航目标要求站进的格子，或其净空验证所需的上方格（脚位放行格的上一、上两格）
+     * 时才放行——受控跨维度流程把门格作为最终走近点、exact travel 直接进格，都走这条放行。
+     */
+    public boolean mayEnterPortalCell(BlockPos pos) {
+        return portalEntryCells.contains(pos.asLong())
+                || portalEntryCells.contains(pos.below().asLong())
+                || portalEntryCells.contains(pos.below().below().asLong());
+    }
+
+    static LongSet portalEntryCells(NavGoal goal) {
+        if (goal == null) return LongSets.emptySet();
+        LongOpenHashSet cells = new LongOpenHashSet();
+        collectPortalEntryCells(goal, cells);
+        return LongSets.unmodifiable(cells);
+    }
+
+    static void collectPortalEntryCells(NavGoal goal, LongOpenHashSet cells) {
+        if (goal instanceof NavGoal.Exact exact) {
+            cells.add(exact.goal.asLong());
+        } else if (goal instanceof NavGoal.NearGround near) {
+            cells.add(near.goal.asLong());
+        } else if (goal instanceof NavGoal.Composite composite) {
+            for (NavGoal member : composite.members) {
+                collectPortalEntryCells(member, cells);
+            }
+        }
+        // 其他目标形态（柱列、高度层、避险、逃离）没有"必须站进的具体一格"，门内格一律不放行。
     }
 }

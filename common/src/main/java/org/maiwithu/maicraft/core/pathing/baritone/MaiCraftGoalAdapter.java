@@ -23,6 +23,11 @@ final class MaiCraftGoalAdapter implements Goal {
         return delegate;
     }
 
+    /** 取回包装前的项目目标；非本适配器包装的目标（调试或原版目标）返回 null。 */
+    static NavGoal unwrap(Goal goal) {
+        return goal instanceof MaiCraftGoalAdapter adapter ? adapter.delegate() : null;
+    }
+
     @Override
     public boolean isInGoal(int x, int y, int z) {
         return delegate.isAt(new BlockPos(x, y, z));

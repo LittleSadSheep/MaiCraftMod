@@ -155,11 +155,16 @@ public interface MovementHelper extends ActionCosts, Helper {
     }
 
     static boolean canWalkThrough(CalculationContext context, int x, int y, int z, BlockState state) {
+        // 下界传送门内格默认不可通行：走进去会被原版机制传去另一维度，任务作废。
+        // 只有目标本身要求站进这一格（受控跨维度走近门格、exact travel 进格）时才放行。
+        if (state.getBlock() == Blocks.NETHER_PORTAL) {
+            return context.mayEnterPortalCell(new BlockPos(x, y, z));
+        }
         return context.precomputedData.canWalkThrough(context.bsi, x, y, z, state);
     }
 
     static boolean canWalkThrough(CalculationContext context, int x, int y, int z) {
-        return context.precomputedData.canWalkThrough(context.bsi, x, y, z, context.get(x, y, z));
+        return canWalkThrough(context, x, y, z, context.get(x, y, z));
     }
 
     static boolean canWalkThrough(BlockStateInterface bsi, int x, int y, int z, BlockState state) {
