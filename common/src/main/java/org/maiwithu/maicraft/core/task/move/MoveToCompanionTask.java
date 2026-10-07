@@ -110,6 +110,19 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     /** 规划烧尽后就近收尾成立；回执与成功话术据此声明这份成功来自容差内结算而非规划到达。 */
     private boolean settledNearbyAfterPlanningBurnout;
 
+    // ---- 到达回执的停稳采样（成功结算等到身体真正停稳后再取位置）----
+
+    /** 到达后等待身体停稳的最长 tick 数；超过则按当前位置结算，不无限拖延收场。 */
+    private static final int MAX_ARRIVAL_SETTLE_TICKS = 20;
+    /** 相邻两刻水平位移小于该值视为已停稳（步行惯性滑行通常一至三刻内低于此值）。 */
+    private static final double ARRIVAL_SETTLE_MOVE_EPSILON = 0.05;
+    /** 非精确到达已被认证成立；此后等待停稳期间即使惯性滑出容差圈也不回退成失败。 */
+    private boolean arrivalCertified;
+    private int arrivalSettleTicks;
+    private double lastSettleX;
+    private double lastSettleZ;
+    private boolean hasSettleSample;
+
     // ---- 水中贴岸登岸段（深水贴岸 travel 的直达出路与换气安全兜底）----
 
     /** 水面贴着一格高岸沿时，贴岸游并按跳即可爬上沿顶；目标柱在身体这个水平范围内才走直达登岸段。 */
@@ -478,11 +491,19 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                             FailureType.NO_PATH);
                     yield TaskState.FAILED;
                 }
-                if (!reached()) {
+                // 到达认证只认第一次满足；此后等待停稳期间即使惯性滑出容差圈，
+                // 也不再回退成失败——分级与剩余距离按最终停稳位置如实交付。
+                if (reached()) {
+                    arrivalCertified = true;
+                    // 停稳等待挤占的是收尾阶段；截止时间顺延，避免最后几刻到达时被超时抢先结算。
+                    r.extendDeadlineTo(player.level().getGameTime() + MAX_ARRIVAL_SETTLE_TICKS + 20);
+                }
+                if (!arrivalCertified) {
                     if (!player.onGround() && !player.isInWater()) yield TaskState.RUNNING;
                     fail(blockedMessage("the route ended outside the supported destination region"), FailureType.NO_PATH);
                     yield TaskState.FAILED;
                 }
+                if (waitingArrivalSettle()) yield TaskState.RUNNING;
                 yield successAtBody();
             }
             case FAILED -> {
@@ -1001,6 +1022,29 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 bx, by, bz, r.y != null);
     }
 
+    /**
+     * 到达回执的采样口径：地面步行到达后等身体真正停稳再结算，
+     * 让成功话术与结构化字段里的剩余距离取停稳位置，而不是落定前的滑行快照。
+     * 返回 true 表示还在收尾移动，本刻继续等待；水中、载具与精确站位各自有到达语义，不在此等待。
+     */
+    private boolean waitingArrivalSettle() {
+        if (!player.onGround() || player.isInWater() || player.isPassenger()) {
+            hasSettleSample = false;
+            return false;
+        }
+        if (arrivalSettleTicks >= MAX_ARRIVAL_SETTLE_TICKS) return false;
+        double x = player.getX();
+        double z = player.getZ();
+        boolean still = hasSettleSample
+                && Math.abs(x - lastSettleX) < ARRIVAL_SETTLE_MOVE_EPSILON
+                && Math.abs(z - lastSettleZ) < ARRIVAL_SETTLE_MOVE_EPSILON;
+        lastSettleX = x;
+        lastSettleZ = z;
+        hasSettleSample = true;
+        arrivalSettleTicks++;
+        return !still || arrivalSettleTicks < 2;
+    }
+
     /** 到达成立但安全层未验证时的注记；调用方据此自行复检脚下支撑。 */
     private String landingNote() {
         return landingProtectionUnverified
@@ -1012,7 +1056,14 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
 
     /** 到达分级的可读后缀：等级 + 剩余水平距离与方向。 */
     private String arrivalGradeNote() {
-        ArrivalVerdict verdict = arrivalVerdict();
+        return arrivalGradeNote(arrivalVerdict());
+    }
+
+    /**
+     * 精确到达与容差内到达共用同一分级句格式（「; arrival 等级 (距离 blocks 方向)」），
+     * 只读消息文本的调用方用一套匹配逻辑即可覆盖两种成功话术；static 便于回归钉住这份同构。
+     */
+    static String arrivalGradeNote(ArrivalVerdict verdict) {
         if (verdict == null) return "";
         return "; arrival " + verdict.grade()
                 + " (" + String.format(java.util.Locale.ROOT, "%.1f", verdict.remainingHorizontal())
@@ -1145,7 +1196,8 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 + "); they were left in place, so dig them back separately if they should not stay.";
         return switch (r.kind) {
             case BLOCK -> r.requiresStrictStance()
-                    ? "reached the exact cell " + bx + "," + by + "," + bz + "." + landingNote()
+                    ? "reached the exact cell " + bx + "," + by + "," + bz + "."
+                            + arrivalGradeNote() + heightHintNote(gy) + landingNote()
                     : "arrived within " + r.horizontalRadius + " blocks horizontally and " + r.verticalTolerance
                             + " blocks vertically of the destination; supported at y=" + gy + "."
                             + arrivalGradeNote() + heightHintNote(gy) + landingNote();
