@@ -30,11 +30,27 @@ public final class EmergencyLanding {
         boolean grounded = player.onGround() || player.isInWater() || player.isSwimming() || player.onClimbable();
         if (grounded || WorkProfile.of(player).fearless()
                 || player.getDeltaMovement().y >= 0) return false;
+        // 身体还没有可用的世界位置（同步间隙）时按未知支撑处理，沿用原快速下坠判据。
+        BlockPos ground = player.position() == null || player.level() == null
+                ? null : groundBelow(player);
+        // 落点为水（或下落路径上有任何液体）时原版会清空摔落伤害，不存在即将到来的撞击，
+        // 不触发防摔反射——否则水中攀沿等会周期性离水的驾驶会被无动作的接管切碎。
+        if (ground != null && liquidCushionsImpact(player, ground)) return false;
         // 首次检测到会造成伤害的下落时，就从下降 tick 开始准备着陆保护；若同步或模组估算过时，快速下降仍是独立的回退方案。
         if (SurvivalDecisions.mlgTriggered(false,
                 player.getDeltaMovement().y, true)) return true;
-        BlockPos ground = groundBelow(player);
         return ground != null && predictedDamage(player, ground) > 0;
+    }
+
+    /** 从支撑面到身体所在高度逐格检查液体；遇未加载区段按无液体处理，保留真实防摔机会。 */
+    private static boolean liquidCushionsImpact(LocalPlayer player, BlockPos ground) {
+        var level = player.level();
+        int top = player.blockPosition().getY();
+        for (BlockPos pos = ground; pos.getY() <= top; pos = pos.above()) {
+            if (!level.isLoaded(pos)) return false;
+            if (!level.getFluidState(pos).isEmpty()) return true;
+        }
+        return false;
     }
     private static float predictedDamage(LocalPlayer player, BlockPos support) {
         double height = CollisionGeometry.supportHeight(player.level(), support);

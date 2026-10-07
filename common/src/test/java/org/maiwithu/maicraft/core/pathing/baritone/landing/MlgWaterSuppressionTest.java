@@ -22,6 +22,7 @@ public final class MlgWaterSuppressionTest {
         confirmedWaterIsRetained();
         pendingWaterIsNotRepeated();
         preparedCandidateDoesNotRevive();
+        airborneAboveWaterDoesNotTakeControl();
         System.out.println("MlgWaterSuppressionTest: passed");
     }
 
@@ -75,6 +76,8 @@ public final class MlgWaterSuppressionTest {
                 && !Boolean.TRUE.equals(LandingAssistPolicy.diagnosticState().get("removed_own_aid")), "放置与未回收事实都保留");
         f.player.wet = false; f.position(0, 0, true);
         check(!reflex.canRun(f.player), "上岸后不会复活已结束的旧会话");
+        // 落点为水的下落按新谓词不算紧急撞击；这里移开先前放置的水源，用真实的硬地坠落验证新救援仍可启动。
+        f.world.water = false;
         f.position(12, -1, false);
         check(reflex.canRun(f.player), "新的真实空中坠落仍可触发 MLG");
     }
@@ -100,6 +103,16 @@ public final class MlgWaterSuppressionTest {
                 "入水时作废尚未接管的候选，不等待下一次调度");
         f.player.wet = false; f.position(0, 0, true);
         check(!reflex.canRun(f.player) && f.uses == 0, "上岸后不为旧候选重新启动自救");
+    }
+
+    // 水面上空的下落必落水中、零伤害：触发谓词不判定为紧急撞击，反射不抢走正在连续驾驶的身体。
+    private static void airborneAboveWaterDoesNotTakeControl() throws Exception {
+        var f = new WaterLandingReplayTest.Fixture(true);
+        f.position(3, -0.9, false);
+        f.player.inventory.setItem(0, ItemStack.EMPTY);
+        var reflex = new MLGChain();
+        check(!EmergencyLanding.triggered(f.player), "落点为水的快速下落不构成紧急撞击");
+        check(!reflex.canRun(f.player), "落点为水时防摔反射不接管身体控制权");
     }
 
     private static MLGChain running(WaterLandingReplayTest.Fixture f) throws Exception {
