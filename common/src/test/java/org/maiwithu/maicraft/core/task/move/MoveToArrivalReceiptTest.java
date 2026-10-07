@@ -14,6 +14,7 @@ public final class MoveToArrivalReceiptTest {
         toleranceArrivalCarriesRemainingDistanceAndDirection();
         verticalHintSeparatesSameLayerFromAbove();
         landingProtectionFailureDowngradesToAnnotation();
+        exactAndToleranceNotesShareOneShape();
         System.out.println("MoveToArrivalReceiptTest: passed");
     }
 
@@ -66,5 +67,28 @@ public final class MoveToArrivalReceiptTest {
                 "an unfinished landing protection must not claim a conclusion");
         check(!MoveToCompanionTask.landingProtectionUnverified(Map.of()),
                 "no landing facts means no annotation");
+    }
+
+    /**
+     * 两条成功话术同构：exact 与容差分支共用同一分级句格式「; arrival 等级 (距离 blocks 方向)」，
+     * 只读消息文本的调用方一套匹配逻辑即可覆盖两种成功；剩余距离统一按 0.1 格取整。
+     */
+    private static void exactAndToleranceNotesShareOneShape() {
+        ArrivalVerdict exact = ArrivalVerdict.of(358.5, 55.0, -74.5, 358, 55, -75, true);
+        ArrivalVerdict tolerance = ArrivalVerdict.of(356.25, 55.0, -72.5, 358, 55, -75, true);
+        String exactNote = MoveToCompanionTask.arrivalGradeNote(exact);
+        String toleranceNote = MoveToCompanionTask.arrivalGradeNote(tolerance);
+        check(exactNote.startsWith("; arrival " + ArrivalVerdict.EXACT + " ("),
+                "exact arrival note must carry the arrived_exact grade word, got " + exactNote);
+        check(toleranceNote.startsWith("; arrival " + ArrivalVerdict.WITHIN_TOLERANCE + " ("),
+                "tolerance arrival note must carry the tolerance grade word, got " + toleranceNote);
+        check(exactNote.contains(" blocks ") && toleranceNote.contains(" blocks "),
+                "both arrival notes must carry a remaining distance in blocks");
+        check(exactNote.endsWith(")") && toleranceNote.endsWith(")"),
+                "both arrival notes must end with the direction clause");
+        check(exactNote.contains("0.0 blocks "),
+                "standing on the cell centre must report 0.0 remaining blocks, got " + exactNote);
+        check(exactNote.endsWith("same layer)") && toleranceNote.endsWith("same layer)"),
+                "same-layer arrivals must say so in both grades");
     }
 }

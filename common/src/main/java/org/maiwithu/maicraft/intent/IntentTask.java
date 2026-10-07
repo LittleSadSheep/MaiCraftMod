@@ -75,6 +75,8 @@ final class IntentTask implements Task {
     private List<IntentAction.Tool> chain = List.of();
     private int chainIndex;
     private TaskResult terminalResult;
+    /** 外部入睡的终局回执：完成结算时优先于通用结算，回执顶层携带入睡事实字段。 */
+    private TaskResult externalSleepCompletion;
     private TaskResult interruptedChildResult;
     private boolean terminalPublished;
     private long childSerial;
@@ -94,6 +96,11 @@ final class IntentTask implements Task {
     private String sleepRepositionFailure;
     /** 单次机械续建凭据只保留在 Mod 内部，调用方仍通过语义重试选择下一步。 */
     private final Map<String, UUID> mechanicalContinuations = new LinkedHashMap<>();
+    /** 等待夜窗期间的世界时间观察基线；入睡跳夜会让 dayTime 超出自然 tick 推进，据此识别外部已完成的入睡。 */
+    private long waitObservedDayTime = Long.MIN_VALUE;
+    private long waitObservedGameTime = Long.MIN_VALUE;
+    /** 本轮等待中已观察到的最大跳刻数；正数说明入睡事实已发生（反射或本任务之外的路径完成）。 */
+    private long observedSleepSkipTicks;
     private String cachedProtectionDimension;
     private int cachedProtectionStep = -1;
     private LongSet cachedProtectedMutationCells = LongSets.emptySet();
@@ -191,7 +198,7 @@ final class IntentTask implements Task {
                     // recover 的语义是「等到可睡窗口再睡」：消费后转入等待阶段，绝不对同一扇
                     // 关着的门重问（实机三连 4123f34f→c885717c→d3697403：每个 recover 都
                     // 换来同门新决策，睡觉永远到不了点击那一步）。
-                    record.armSleepGateWait();
+                    armWindowWait();
                     Constants.LOG.info("[maicraft-sleep] 白天门 recover 已消费（decision {}），转入等待原版可睡窗口",
                             answer.decisionId());
                     return TaskState.RUNNING;
@@ -228,6 +235,16 @@ final class IntentTask implements Task {
         // 白天门 recover 的等待阶段：窗口关着就原地等，不重新翻译当前目标——翻译会再次撞上
         // 同一扇关着的门（发射点 AbilityAdapter.waitForNightDecision），重提就是这么来的。
         if (record.sleepGateWaiting() && child == null && wait == null && chain.isEmpty()) {
+            long skipped = observeWaitTimeSkip(player.level());
+            if (skipped > 0) {
+                // 等待期间世界时间比自然 tick 多走了：原版只有睡床会这样把整夜跳过。
+                // 入睡事实已发生（夜休反射短暂接管身体完成入睡是常见路径），按事实完成本步，
+                // 不把已经睡成的任务留成等待或说成取消（197）。
+                Constants.LOG.info("[maicraft-sleep] 等待夜窗期间世界时间额外前进了 {} 刻，入睡事实已发生，按完成结算",
+                        skipped);
+                creditExternalSleep(skipped);
+                return afterImmediate();
+            }
             if (!WorldTimeSemantics.canAttemptSleep(player.level())) return TaskState.RUNNING;
             record.disarmSleepGateWait();
             Constants.LOG.info("[maicraft-sleep] 可睡窗口已打开，恢复睡觉步骤");
@@ -360,7 +377,7 @@ final class IntentTask implements Task {
                 if (shouldRearmSleepGateWait(
                         record.sleepGateWaiting(), record.sleepGateRecoverConsumed(),
                         isSleepGateDecision(decision.snapshot()))) {
-                    record.armSleepGateWait();
+                    armWindowWait();
                 }
                 yield switch (sleepGateRelayAction(
                         record.decisionSnapshot() != null,
@@ -858,7 +875,7 @@ final class IntentTask implements Task {
                 // 窗口真打开后由等待分支恢复翻译，睡产行为按原授权自动继续。
                 chain = List.of();
                 chainIndex = 0;
-                record.armSleepGateWait();
+                armWindowWait();
                 Constants.LOG.info("[maicraft-sleep] 失败回退路径撞上已答复的白天门，重新等待窗口不重问");
                 return TaskState.RUNNING;
             }
@@ -1051,6 +1068,60 @@ final class IntentTask implements Task {
     /** 白天门中继处置：等答复、按住已答复门的重发、放行新决策——与 explore 兴趣中继同一三态。 */
     enum SleepGateRelayAction { PARK, HOLD_REISSUE, ISSUE }
 
+    /** 进入等待夜窗阶段：置位等待标记并重置时间观察基线，上一轮等待的旧基线不能算进新一轮。 */
+    private void armWindowWait() {
+        record.armSleepGateWait();
+        waitObservedDayTime = Long.MIN_VALUE;
+        waitObservedGameTime = Long.MIN_VALUE;
+        observedSleepSkipTicks = 0;
+    }
+
+    /**
+     * 观察等待期间的世界时间推进并累计跳刻数。dayTime 每刻随 gameTime 自然推进，二者差值恒定；
+     * 差值变大只有睡床跳夜（或外部时间指令）能造成——正差即入睡事实已发生的实物证据。
+     * 基线未建立（首轮）或时间倒退（外部指令回拨）时不计跳刻。
+     */
+    private long observeWaitTimeSkip(net.minecraft.world.level.Level level) {
+        long dayTime = level.getDayTime();
+        long gameTime = level.getGameTime();
+        long skipped = sleepSkipTicks(waitObservedDayTime, waitObservedGameTime, dayTime, gameTime);
+        if (skipped > observedSleepSkipTicks) observedSleepSkipTicks = skipped;
+        waitObservedDayTime = dayTime;
+        waitObservedGameTime = gameTime;
+        return observedSleepSkipTicks;
+    }
+
+    /** 一次观察间隔内 dayTime 超出自然 tick 推进的刻数；基线未建立或时间倒退时返回 0。 */
+    static long sleepSkipTicks(long prevDayTime, long prevGameTime, long dayTime, long gameTime) {
+        if (prevGameTime < 0 || prevDayTime == Long.MIN_VALUE
+                || gameTime < prevGameTime || dayTime <= prevDayTime) return 0;
+        long natural = Math.max(0L, gameTime - prevGameTime);
+        return Math.max(0L, (dayTime - prevDayTime) - natural);
+    }
+
+    /** 外部入睡的步骤回执：写明事实依据与可能的完成者，调用方据此对账世界状态，不再只见「任务已取消」。 */
+    static TaskResult externalSleepReceipt(long skipTicks) {
+        return TaskResult.ok(
+                "sleep already happened while this task waited for the night window: the world clock advanced "
+                        + skipTicks + " ticks beyond the elapsed game ticks, which only native bed sleep causes. "
+                        + "The automatic night-rest reflex likely completed the sleep while briefly holding the "
+                        + "body; the task settles as success on this observed fact.",
+                Map.of("sleep_completed_externally", true, "observed_time_skip_ticks", skipTicks));
+    }
+
+    /**
+     * 把已发生的外部入睡结算成本步完成：最后一步时同时固定终局回执，任务以 success 收尾，
+     * 回执顶层带入睡事实字段——通用完成结算不携带本步数据，调用方只能看到「完成」两个字。
+     */
+    private void creditExternalSleep(long skipped) {
+        record.disarmSleepGateWait();
+        completeStep(externalSleepReceipt(skipped));
+        if (record.stepIndex() + 1 >= record.steps().size()) {
+            terminalResult = externalSleepReceipt(skipped);
+            externalSleepCompletion = terminalResult;
+        }
+    }
+
     /**
      * 中继判定纯函数：
      * - 语义决策快照还开着（未被回答）：PARK，等 task action=answer；
@@ -1161,7 +1232,9 @@ final class IntentTask implements Task {
 
     /** 清单全部处理后的统一结算：部分失败也算完全失败，账本承担诚实披露。 */
     private TaskState finishCompletion() {
-        TaskResult completion = completionResult();
+        // 外部入睡按事实收尾时，终局回执用它自己的字段；通用结算不携带本步数据。
+        TaskResult completion = externalSleepCompletion != null
+                ? externalSleepCompletion : completionResult();
         terminalResult = completion;
         return completion.success() ? TaskState.SUCCESS : TaskState.FAILED;
     }
@@ -1204,6 +1277,19 @@ final class IntentTask implements Task {
 
     @Override
     public void stop(LocalPlayer ignored, StopReason reason) {
+        // 等待夜窗期间入睡事实已经发生（时间跳夜已在世界可观察）时才到来的接管取消：
+        // 把已成立的睡眠按完成结算，不把睡成的任务说成 cancelled（197）。
+        if (reason == StopReason.REPLACED && child == null && record.sleepGateWaiting()) {
+            long skipped = sleepSkipTicks(waitObservedDayTime, waitObservedGameTime,
+                    player.level().getDayTime(), player.level().getGameTime());
+            if (skipped > 0) {
+                observedSleepSkipTicks = Math.max(observedSleepSkipTicks, skipped);
+                Constants.LOG.info("[maicraft-sleep] 接管取消时入睡事实已发生（跳夜 {} 刻），按完成结算", skipped);
+                creditExternalSleep(observedSleepSkipTicks);
+                record.setState(TaskState.SUCCESS);
+                return;
+            }
+        }
         // 临时暂停只通知小任务停下，保留它做到哪；取消或离开旧玩家则还要收取结果、移走小任务。
         Task stoppingChild = child;
         TaskRecord stoppingRecord = childRecord;

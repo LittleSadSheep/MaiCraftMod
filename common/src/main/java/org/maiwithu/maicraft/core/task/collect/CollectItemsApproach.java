@@ -154,7 +154,18 @@ public final class CollectItemsApproach {
         var corridor = corridor(player);
         // 走下 1 格凹格属普通行走：落点格经原版落点检查、到坑沿的走行段干净时放行；
         // 两格深坑与水面掉落格在层差或落点检查上不过关，仍走同高度的拒绝路径。
-        if (descent(player, item, corridor)) return corridor.clear(from, lipPoint(from, item));
+        if (descent(player, item, corridor)) {
+            Vec3 lip = lipPoint(from, item);
+            if (corridor.clear(from, lip)) return true;
+            // 对角下坑：走行段末端悬在坑口上方，支撑覆盖在坑沿断开属预期。断口跨过的柱列必须
+            // 本身也是恰低一格的可站立开口，普通行走的每一步都有落脚点时才放行；更深的落差、
+            // 水面与障碍仍被拒绝。柱列表面低一格时站立格在脚下那层，两档都探。
+            return corridor.descentWalk(from, lip, cell -> {
+                Vec3 landing = corridor.stance(cell);
+                if (landing == null) landing = corridor.stance(cell.below());
+                return landing != null && Math.abs(landing.y - (from.y - 1)) <= 1e-4;
+            });
+        }
         // 除了目的地，还验证当前惯性会滑到的整段身体范围，不能到格后靠无约束前进穿入保护区。
         Vec3 drift = from.add(player.getDeltaMovement().multiply(4, 0, 4));
         return corridor.clear(from, target) && corridor.clear(from, drift);

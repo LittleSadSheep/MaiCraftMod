@@ -62,6 +62,21 @@ public interface Task {
      */
     default boolean urgentBodyRescue(LocalPlayer companion) { return false; }
 
+    /**
+     * 在岗任务此刻正持有身体做需要连续输入的驾驶（水中攀沿这类靠连续按跳攒抬升的段）。
+     * 驾驶被反射按秒切碎就永远凑不齐所需输入，实机证据见爬沿驾驶被换气反射反复打断。
+     * 声明为 {@code true} 的当前任务会让声明了 {@link #yieldsToContinuousDriving()} 的
+     * 非致命反射让位；真紧急（着火、窒息、致命坠落）不在此列，照样接管。
+     */
+    default boolean drivesBodyContinuously(LocalPlayer companion) { return false; }
+
+    /**
+     * 让位声明：任务连续驾驶身体期间，本反射暂不参与抢占。只应被非致命、
+     * 且让位期间不会立即掉血的反射声明（如换气上浮——驾驶段自己也在把身体
+     * 带离水域）；致命处境的自救反射不得声明，紧急自救豁免不受让位约束。
+     */
+    default boolean yieldsToContinuousDriving() { return false; }
+
     /** 死亡观察先于普通任务 tick；只有以死亡为目标且已有执行证据的任务可以在这里结清目标。 */
     default boolean observeDeath(LocalPlayer companion) { return false; }
 

@@ -30,7 +30,9 @@ import org.maiwithu.maicraft.task.TaskState;
 import com.google.gson.JsonObject;
 
 /**
- * F9 切换的常驻调试面板，F9+H 在状态页与任务列表页间切换，F9+P 切换导航路线显示。
+ * F9 切换的常驻调试面板，F9+H 在状态页与任务列表页间切换，F9+P 切换导航路线显示，
+ * F9+A 在全部、只看最新一行、隐藏三档间循环切换下方 attention 事件区
+ * （只影响面板展示，MCP 感知照常产出）。
  * 每刻构建一次只读快照，渲染只画快照；本类不提交任何操作。布局分两段：上方固定状态行
  * （标签行文与 /maicraft status 各自独立），下方聊天框式事件区，长消息按面板宽度自动换行，
  * 新事件把旧事件挤出预算，固定行布局不受事件多少影响。
@@ -66,6 +68,7 @@ public final class DebugHudController {
     private static boolean toggleWasDown;
     private static boolean comboWasDown;
     private static boolean pathComboWasDown;
+    private static boolean attentionComboWasDown;
     /** 面板当前页：false 为状态页（任务/动作等固定行），true 为任务列表页；面板隐藏期间保留。 */
     private static boolean listMode;
     private DebugHudController() {}
@@ -76,8 +79,10 @@ public final class DebugHudController {
         boolean f9Down = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_F9) == GLFW.GLFW_PRESS;
         boolean hDown = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_H) == GLFW.GLFW_PRESS;
         boolean pDown = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_P) == GLFW.GLFW_PRESS;
+        boolean aDown = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_A) == GLFW.GLFW_PRESS;
         boolean listCombo = f9Down && hDown;
         boolean pathCombo = f9Down && pDown;
+        boolean attentionCombo = f9Down && aDown;
         if (listCombo && !comboWasDown) {
             // F9+H 是无条件手势：面板没开就先打开，保证任何时候一步就能看到任务列表。
             listMode = !listMode;
@@ -86,14 +91,18 @@ public final class DebugHudController {
         if (pathCombo && !pathComboWasDown) {
             togglePathLines(minecraft);
         }
+        if (attentionCombo && !attentionComboWasDown) {
+            toggleAttentionFeed(minecraft);
+        }
         // 和弦按住的每一刻都记下 F9 已按下：字母键后松开不会误触发单独 F9 的显隐，
         // 单独 F9 也只在没有任何和弦时生效，避免 F9+P 第一刻同时翻转面板和路线。
-        if (f9Down && !toggleWasDown && !listCombo && !pathCombo) {
+        if (f9Down && !toggleWasDown && !listCombo && !pathCombo && !attentionCombo) {
             toggle(minecraft);
         }
         toggleWasDown = f9Down;
         comboWasDown = listCombo;
         pathComboWasDown = pathCombo;
+        attentionComboWasDown = attentionCombo;
         snapshot = minecraft.player == null
                 || !PreviewConfig.hudVisible(minecraft.gameDirectory.toPath())
                 ? new Snapshot(List.of(), List.of(), 0) : buildSnapshot(minecraft);
@@ -141,16 +150,30 @@ public final class DebugHudController {
                     panelWidth(rows, splitter, maxPanelWidth(minecraft)));
         }
         // 最新报错行与事件区按最终面板宽度折行后再入行集：先由固定行与未折行正文共同定宽，
-        // 折行与背景框再共用这一个值，右缘因此对齐。
-        List<IntentRuntime.AttentionItem> events = IntentRuntime.get().recentAttention(8);
+        // 折行与背景框再共用这一个值，右缘因此对齐。单行与隐藏档的事件不参与撑宽，
+        // 面板宽度只由状态行决定，单行档的最新事件在这个宽度内截断。
+        PreviewConfig.AttentionFeedMode feedMode = PreviewConfig.attentionFeed(minecraft.gameDirectory.toPath());
+        List<IntentRuntime.AttentionItem> recent = switch (feedMode) {
+            // 单行档只要最新一条；AttentionFeed.tail 升序返回，末尾就是最新事件。
+            case ALL -> IntentRuntime.get().recentAttention(8);
+            case LATEST -> IntentRuntime.get().recentAttention(1);
+            case OFF -> List.of();
+        };
+        List<IntentRuntime.AttentionItem> widthEvents = feedMode == PreviewConfig.AttentionFeedMode.ALL
+                ? recent : List.of();
         int maxWidth = maxPanelWidth(minecraft);
         String pendingError = appendTaskStatusRows(rows, minecraft);
         int panel = panelWidthWithContent(splitter,
-                panelWidth(rows, splitter, maxWidth), events, pendingError, maxWidth);
+                panelWidth(rows, splitter, maxWidth), widthEvents, pendingError, maxWidth);
         if (pendingError != null) {
             rows.addAll(errorRows(pendingError, panel, splitter));
         }
-        return new Snapshot(List.copyOf(rows), eventLines(splitter, events, panel), panel);
+        List<EventLine> feedLines = switch (feedMode) {
+            case ALL -> eventLines(splitter, recent, panel);
+            case LATEST -> latestEventLine(splitter, recent, panel);
+            case OFF -> List.of();
+        };
+        return new Snapshot(List.copyOf(rows), feedLines, panel);
     }
 
     // 面板宽度上限随屏宽走：取缩放后屏宽的九成，长内容撑到这个上限就折行，不会把面板推出屏幕。
@@ -289,6 +312,12 @@ public final class DebugHudController {
     // 纯函数：宽度全部经 StringSplitter 测量，回归用假宽度函数即可脱离游戏实例覆盖。
     // 首行折行宽是面板宽扣掉时间与类型前缀后的余量；续行没有前缀，按整个面板宽折行。
     static EventLine[] wrapEvent(StringSplitter splitter, IntentRuntime.AttentionItem event, int contentWidth) {
+        return wrapEvent(splitter, event, contentWidth, EVENT_MAX_LINES);
+    }
+
+    // maxLines 是单条事件的行数上限：全量档沿用 4 行预算，单行档传 1 把正文压进一行、超宽以 … 收尾。
+    static EventLine[] wrapEvent(StringSplitter splitter, IntentRuntime.AttentionItem event,
+            int contentWidth, int maxLines) {
         String time = eventTimeText(event);
         ChatFormatting priorityColor = switch (event.priority()) {
             case "important" -> ChatFormatting.YELLOW;
@@ -300,7 +329,7 @@ public final class DebugHudController {
         Segment typeSegment = new Segment(head, priorityColor);
         int headWidth = (int) splitter.stringWidth(time) + (int) splitter.stringWidth(head);
         List<String> messageLines = wrapWithHead(splitter, event.message(),
-                Math.max(80, contentWidth - headWidth), Math.max(80, contentWidth));
+                Math.max(80, contentWidth - headWidth), Math.max(80, contentWidth), maxLines);
         EventLine[] lines = new EventLine[messageLines.size()];
         for (int i = 0; i < messageLines.size(); i++) {
             lines[i] = i == 0
@@ -312,8 +341,9 @@ public final class DebugHudController {
     }
 
     /** 首行按 headWidth 折出，其余行按 restWidth 折行：续行没有前缀，可用整个面板宽度。
-     *  按字形宽度断行（中英文都不断在词中间），超过 EVENT_MAX_LINES 行在末行尾补 …。 */
-    private static List<String> wrapWithHead(StringSplitter splitter, String text, int headWidth, int restWidth) {
+     *  按字形宽度断行（中英文都不断在词中间），超过 maxLines 行在末行尾补 …。 */
+    private static List<String> wrapWithHead(StringSplitter splitter, String text, int headWidth, int restWidth,
+            int maxLines) {
         String singleLine = normalize(text);
         List<String> lines = new ArrayList<>();
         List<FormattedText> headLines = splitter.splitLines(singleLine, headWidth, Style.EMPTY);
@@ -325,9 +355,9 @@ public final class DebugHudController {
                 lines.add(line.getString());
             }
         }
-        if (lines.size() > EVENT_MAX_LINES) {
-            lines = new ArrayList<>(lines.subList(0, EVENT_MAX_LINES));
-            lines.set(EVENT_MAX_LINES - 1, lines.getLast() + "…");
+        if (lines.size() > maxLines) {
+            lines = new ArrayList<>(lines.subList(0, maxLines));
+            lines.set(maxLines - 1, lines.getLast() + "…");
         }
         return lines;
     }
@@ -349,6 +379,14 @@ public final class DebugHudController {
     // 事件首行前缀：时间戳加尾随空格，与渲染时的片段文本严格一致，测宽与折行同源。
     private static String eventTimeText(IntentRuntime.AttentionItem event) {
         return EVENT_TIME.format(event.timestamp().atZone(ZoneId.systemDefault())) + " ";
+    }
+
+    // 单行档：升序列表（最旧在前）取末尾的最新事件，压成恰好一行，前缀与全量档同源，
+    // 正文超宽以 … 收尾；没有事件时整段缺席。
+    static List<EventLine> latestEventLine(StringSplitter splitter,
+            List<IntentRuntime.AttentionItem> events, int contentWidth) {
+        if (events.isEmpty()) return List.of();
+        return List.of(wrapEvent(splitter, events.getLast(), contentWidth, 1)[0]);
     }
 
     // 任务行以标题为主体：能力短名加目标陈述，状态前缀只标注它此刻在等什么。
@@ -428,7 +466,7 @@ public final class DebugHudController {
     static List<Row> errorRows(String message, int panelWidth, StringSplitter splitter) {
         String safe = message == null || message.isBlank() ? "未知" : message;
         int firstWidth = Math.max(80, panelWidth - (int) splitter.stringWidth("最新报错: "));
-        List<String> lines = wrapWithHead(splitter, safe, firstWidth, Math.max(80, panelWidth));
+        List<String> lines = wrapWithHead(splitter, safe, firstWidth, Math.max(80, panelWidth), EVENT_MAX_LINES);
         List<Row> rows = new ArrayList<>();
         for (int i = 0; i < lines.size(); i++) {
             rows.add(new Row(i == 0 ? "最新报错" : "", lines.get(i), ChatFormatting.RED));
@@ -562,7 +600,7 @@ public final class DebugHudController {
                     + "，但配置保存失败：" + failure.getMessage(), ChatFormatting.YELLOW);
             return;
         }
-        message(minecraft, show ? "调试面板已显示，再按 F9 隐藏；F9+H 切任务列表页，F9+P 切导航路线。"
+        message(minecraft, show ? "调试面板已显示，再按 F9 隐藏；F9+H 切任务列表页，F9+P 切导航路线，F9+A 切 attention 流档位。"
                 : "调试面板已隐藏。", ChatFormatting.GREEN);
     }
 
@@ -578,6 +616,37 @@ public final class DebugHudController {
         }
         message(minecraft, show ? "导航路线已显示，再按 F9+P 隐藏。" : "导航路线已隐藏。",
                 ChatFormatting.GREEN);
+    }
+
+    // F9+A 循环切换事件流显示档位：全部 → 只看最新一行 → 隐藏 → 全部，
+    // 给画面让位时不必连状态行一起藏掉；MCP 感知与任务运行不受影响。
+    private static void toggleAttentionFeed(Minecraft minecraft) {
+        PreviewConfig.AttentionFeedMode next =
+                PreviewConfig.attentionFeed(minecraft.gameDirectory.toPath()).next();
+        try {
+            PreviewConfig.attentionFeed(next);
+        } catch (IOException failure) {
+            message(minecraft, feedModeText(next) + "，但配置保存失败：" + failure.getMessage(),
+                    ChatFormatting.YELLOW);
+            return;
+        }
+        message(minecraft, feedModeText(next) + "，" + feedModeNext(next), ChatFormatting.GREEN);
+    }
+
+    private static String feedModeText(PreviewConfig.AttentionFeedMode mode) {
+        return switch (mode) {
+            case ALL -> "attention 流已全部显示";
+            case LATEST -> "attention 流只显示最新一行";
+            case OFF -> "attention 流已隐藏";
+        };
+    }
+
+    private static String feedModeNext(PreviewConfig.AttentionFeedMode mode) {
+        return switch (mode) {
+            case ALL -> "再按 F9+A 只看最新一行";
+            case LATEST -> "再按 F9+A 隐藏";
+            case OFF -> "再按 F9+A 恢复全部";
+        };
     }
 
     private static void message(Minecraft minecraft, String text, ChatFormatting color) {

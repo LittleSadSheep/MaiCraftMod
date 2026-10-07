@@ -44,6 +44,28 @@ public final class PreviewSessionTest {
             else System.setProperty("maicraft.preview.enabled", prior);
         }
         check(PreviewConfig.pathLines() == pathBefore, "路线开关翻回原状");
+        // F9+A 的事件流档位与 Dev、路线开关分离：默认全部显示，三档循环会记住，也不受审图启动覆盖影响。
+        PreviewConfig.AttentionFeedMode feedBefore = PreviewConfig.attentionFeed();
+        check(feedBefore == PreviewConfig.AttentionFeedMode.ALL, "attention 事件流默认全部显示");
+        check(PreviewConfig.AttentionFeedMode.ALL.next() == PreviewConfig.AttentionFeedMode.LATEST
+                && PreviewConfig.AttentionFeedMode.LATEST.next() == PreviewConfig.AttentionFeedMode.OFF
+                && PreviewConfig.AttentionFeedMode.OFF.next() == PreviewConfig.AttentionFeedMode.ALL,
+                "F9+A 循环次序：全部、只看最新一行、隐藏");
+        try {
+            PreviewConfig.attentionFeed(PreviewConfig.AttentionFeedMode.LATEST);
+            check(PreviewConfig.attentionFeed() == PreviewConfig.AttentionFeedMode.LATEST, "可以切到只看最新一行");
+            PreviewConfig.attentionFeed(PreviewConfig.AttentionFeedMode.OFF);
+            check(PreviewConfig.attentionFeed() == PreviewConfig.AttentionFeedMode.OFF, "可以切到隐藏");
+            System.setProperty("maicraft.preview.enabled", "false");
+            check(PreviewConfig.attentionFeed() == PreviewConfig.AttentionFeedMode.OFF, "事件流档位独立于审图启动覆盖");
+            PreviewConfig.attentionFeed(feedBefore);
+        } catch (IOException impossible) {
+            throw new AssertionError("配置文件未初始化时 persist 不产生 IO", impossible);
+        } finally {
+            if (prior == null) System.clearProperty("maicraft.preview.enabled");
+            else System.setProperty("maicraft.preview.enabled", prior);
+        }
+        check(PreviewConfig.attentionFeed() == feedBefore, "事件流档位翻回原状");
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
         BlockPos.MutableBlockPos mutable = new BlockPos.MutableBlockPos(1, 64, 2);
@@ -80,7 +102,32 @@ public final class PreviewSessionTest {
                 && PreviewPartGeometry.localBox("south").minZ > .5
                 && PreviewPartGeometry.localBox("center").getXsize() < 1,
                 "multipart side and centre geometry retain their distinct physical locations");
+        // 事件流档位的落盘解析必须最后跑：load 会把配置路径定到临时目录，影响此后同 JVM 的 persist 去向。
+        try {
+            feedModeValuesParseThroughLoad();
+        } catch (IOException impossible) {
+            throw new AssertionError("临时配置文件读写不应失败", impossible);
+        }
         System.out.println("PreviewSessionTest: passed");
+    }
+
+    /** 旧版布尔迁移（true=全部、false=隐藏）、latest 新档、非法值与缺键回退，全部经 load 读真实属性文件验证。 */
+    private static void feedModeValuesParseThroughLoad() throws IOException {
+        java.nio.file.Path dir = java.nio.file.Files.createTempDirectory("maicraft-preview-config");
+        java.nio.file.Path file = dir.resolve("config/maicraft-preview.properties");
+        java.nio.file.Files.createDirectories(file.getParent());
+        checkFeedMode(dir, file, "attentionFeed=false\n", PreviewConfig.AttentionFeedMode.OFF, "旧布尔 false 迁移为隐藏");
+        checkFeedMode(dir, file, "attentionFeed=true\n", PreviewConfig.AttentionFeedMode.ALL, "旧布尔 true 迁移为全部");
+        checkFeedMode(dir, file, "attentionFeed=latest\n", PreviewConfig.AttentionFeedMode.LATEST, "latest 档位可读回");
+        checkFeedMode(dir, file, "attentionFeed=banana\n", PreviewConfig.AttentionFeedMode.ALL, "非法值回退全部");
+        checkFeedMode(dir, file, "", PreviewConfig.AttentionFeedMode.ALL, "缺键默认全部");
+    }
+
+    private static void checkFeedMode(java.nio.file.Path dir, java.nio.file.Path file, String content,
+            PreviewConfig.AttentionFeedMode expected, String message) throws IOException {
+        java.nio.file.Files.writeString(file, content);
+        PreviewConfig.load(dir);
+        check(PreviewConfig.attentionFeed() == expected, message);
     }
 
     private static void rejects(Runnable action) {

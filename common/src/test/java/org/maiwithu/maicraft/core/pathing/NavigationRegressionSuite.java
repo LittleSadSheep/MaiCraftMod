@@ -183,6 +183,8 @@ public final class NavigationRegressionSuite {
         PathTickBudgetTest.main(args);
         DoorPassageTest.main(args);
         DiagonalHazardTest.main(args);
+        // travel 路线不再把下界传送门内格当普通可走格，只有 exact 目标门格放行。
+        baritone.pathing.movement.PortalRouteAvoidanceTest.main(args);
         // 寻路保护耕地:行走耕地加罚让路径默认绕行,跳跃/跌落落点在耕地直接禁行。
         baritone.pathing.movement.FarmlandProtectionTest.main(args);
         CollisionGeometryTest.main(args);

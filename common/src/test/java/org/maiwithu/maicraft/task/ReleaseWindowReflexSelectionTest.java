@@ -7,6 +7,7 @@ import net.minecraft.SharedConstants;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.server.Bootstrap;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
+import org.maiwithu.maicraft.core.task.chain.BreathChain;
 import org.maiwithu.maicraft.core.task.chain.SettleChain;
 
 /**
@@ -22,9 +23,9 @@ public final class ReleaseWindowReflexSelectionTest {
         Bootstrap.bootStrap();
         try (var world = new InteractionWorldTestHarness()) {
             LocalPlayer player = world.player;
-            Task settleLike = new StubReflex("settle_like", true, false);
-            Task rescue = new StubReflex("rescue", false, false);
-            Task urgentLike = new StubReflex("urgent_like", true, true);
+            Task settleLike = new StubReflex("settle_like", true, false, false, false);
+            Task rescue = new StubReflex("rescue", false, false, false, false);
+            Task urgentLike = new StubReflex("urgent_like", true, true, false, false);
 
             check(new SettleChain().onlyWhenBodyReleased(), "贴边安定反射必须声明为释放窗口反射");
             check(!rescue.onlyWhenBodyReleased(), "普通自救反射不得默认声明释放窗口");
@@ -46,6 +47,21 @@ public final class ReleaseWindowReflexSelectionTest {
             // 只有释放窗口反射可跑而身体被任务持有时，不得为它换手——结果为空，身体留给在岗任务。
             check(TaskSelector.select(List.of(settleLike), null, null, List.of(), player, true) == null,
                     "身体被在岗任务持有时释放窗口反射不应胜出");
+
+            // 连续驾驶让位：任务靠连续输入驾驶身体（水中攀沿等）时，声明让位的非致命反射
+            // 暂不参与抢占——按秒切碎的驾驶永远凑不齐所需输入；普通反射与紧急豁免照常。
+            Task driver = new StubReflex("driver", false, false, true, false);
+            Task breathing = new StubReflex("breathing", false, false, false, true);
+            Task urgentBreathing = new StubReflex("urgent_breathing", false, true, false, true);
+            check(TaskSelector.select(List.of(breathing, rescue), null, driver, List.of(), player, true) == rescue,
+                    "连续驾驶期间声明让位的反射不得抢占，普通反射照常参与");
+            check(TaskSelector.select(List.of(urgentBreathing, rescue), null, driver, List.of(), player, true) == urgentBreathing,
+                    "紧急自救豁免不受连续驾驶让位约束");
+            Task idleStance = new StubReflex("not_driving", false, false, false, false);
+            check(TaskSelector.select(List.of(breathing, rescue), null, idleStance, List.of(), player, true) == breathing,
+                    "驾驶结束后让位反射恢复第一顺位");
+            check(new BreathChain().yieldsToContinuousDriving(),
+                    "换气反射必须声明连续驾驶让位（爬沿驾驶被按秒切碎的实机形态）");
 
             // 5 参旧入口等价于身体已释放，既有调用方的语义不变。
             check(TaskSelector.select(List.of(settleLike, rescue), null, null, List.of(), player) == settleLike,
@@ -85,10 +101,13 @@ public final class ReleaseWindowReflexSelectionTest {
     }
 
     /** 只参与选人排序的桩反射：canRun 恒真，不触碰玩家状态。 */
-    private record StubReflex(String label, boolean releaseWindow, boolean urgent) implements Task {
+    private record StubReflex(String label, boolean releaseWindow, boolean urgent,
+                              boolean driving, boolean yields) implements Task {
         @Override public boolean canRun(LocalPlayer companion) { return true; }
         @Override public boolean onlyWhenBodyReleased() { return releaseWindow; }
         @Override public boolean urgentBodyRescue(LocalPlayer companion) { return urgent; }
+        @Override public boolean drivesBodyContinuously(LocalPlayer companion) { return driving; }
+        @Override public boolean yieldsToContinuousDriving() { return yields; }
         @Override public TaskState tick(LocalPlayer companion) { return TaskState.RUNNING; }
         @Override public void stop(LocalPlayer companion, StopReason why) { }
         @Override public String name() { return label; }

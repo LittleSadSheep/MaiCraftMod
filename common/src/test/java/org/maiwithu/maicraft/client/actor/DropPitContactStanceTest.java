@@ -24,6 +24,8 @@ public final class DropPitContactStanceTest {
         pitRimStanceAcceptedWithoutTerrainPermit();
         rimToPitDescentFormsExecutableApproach();
         pitBottomContactStillNudgesInPlace();
+        diagonalDescentOverShallowLedgePasses();
+        diagonalDescentOverDeepHoleStillRejected();
         deeperPitStillNeedsThePitCell();
         deeperPitDescentStillRejected();
         System.out.println("DropPitContactStanceTest: pit-rim contact stances and task entry passed");
@@ -79,6 +81,40 @@ public final class DropPitContactStanceTest {
             check(point.x == 8.5 && point.y == 1 && point.z == 8.5,
                     "坑底站位经原版接触核查取得同格接触点");
             check(CollectItemsApproach.safeNudge(world.player, point), "坑底同格短走保持放行");
+        }
+    }
+
+    /**
+     * 对角下坑（2026-10-07 批七实机签名）：掉落格与玩家格斜向相邻，到坑沿的水平走行段悬在
+     * 开口柱列上方，同高度支撑覆盖必然断开。断口跨过的柱列本身也是恰低一格的可站立开口时，
+     * 普通行走的每一步都有落脚点，安全闸放行。
+     */
+    private static void diagonalDescentOverShallowLedgePasses() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            // 平台只铺两行（z=5、6），z=7、8 是低一格的开口台阶；夹具默认 y=0 全铺石头作台阶底。
+            for (int x = 5; x <= 10; x++) for (int z = 5; z <= 6; z++)
+                world.set(new BlockPos(x, 1, z), Blocks.STONE.defaultBlockState());
+            world.position(new Vec3(7.8, 2, 7.5));
+            var drop = ItemEntityReceiptsTest.item(world, 576, new Vec3(8.5, 1, 8.5), new ItemStack(Items.RAW_IRON));
+            Vec3 point = CollectItemsApproach.nudgePoint(world.player, drop);
+            check(point.y == 1, "对角开口地形下接近目标落在低一格的落脚点");
+            check(CollectItemsApproach.safeNudge(world.player, point),
+                    "对角下坑走行段悬在开口柱列上方但每步都可落脚时，踏面安全闸放行");
+        }
+    }
+
+    /** 断口柱列下面是超过一格的深洞时仍拒绝：普通行走没有落脚点，不能冒进。 */
+    private static void diagonalDescentOverDeepHoleStillRejected() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            for (int x = 5; x <= 10; x++) for (int z = 5; z <= 6; z++)
+                world.set(new BlockPos(x, 1, z), Blocks.STONE.defaultBlockState());
+            // 走行段跨过的两根柱列在 y=0 也掏空，只有掉落格 (8,0,8) 保留支撑。
+            world.set(new BlockPos(7, 0, 7), Blocks.AIR.defaultBlockState());
+            world.set(new BlockPos(8, 0, 7), Blocks.AIR.defaultBlockState());
+            world.position(new Vec3(7.8, 2, 7.5));
+            var drop = ItemEntityReceiptsTest.item(world, 577, new Vec3(8.5, 1, 8.5), new ItemStack(Items.RAW_IRON));
+            check(!CollectItemsApproach.safeNudge(world.player, CollectItemsApproach.nudgePoint(world.player, drop)),
+                    "对角下坑走行段的断口柱列下面是深洞时，踏面安全闸仍拒绝");
         }
     }
 

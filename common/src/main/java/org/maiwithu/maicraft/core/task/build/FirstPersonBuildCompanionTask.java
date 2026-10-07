@@ -1540,6 +1540,9 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
                 && !BuildPlacementGeometry.isProgress(cell.target(), before, predicted))) {
             return waitForAim("native_placement_state_mismatch", aimConvergence.ready(player, gesture.point().subtract(eye)));
         }
+        // 床等双格方块的朝向由原生放置按当时的视角决定；作者没有点名属性时，图纸默认朝向不构成要求。
+        // 预测落法与图纸脚印不一致时把本格目标改按原生落法重排，随后的确认、占用检查与收尾验收都核对真实两格。
+        cell = reanchoredToNativeFootprint(cell, predicted);
         // 转动镜头跨过朝向边界时，可能短暂出现有效射线和方块状态；点击前先让实际视角稳定，给普通玩家 tick 时间同步。
         if (!placementSettling.ready(player, gesture, cell.target().pos(), hit, predicted))
             return waitForAim("waiting_for_view_settle", false);
@@ -2489,6 +2492,29 @@ class FirstPersonBuildCompanionTask extends AbstractCompanionTask<BuildTaskRecor
         // 上下两半沿用本次原生预测，同时保留每格作者明确指定的摆放属性；只确认这次点击，不拆掉已正确放好的门。
         lastUseConfirmation = new BuildPlacementConfirmation(plan.target(), plan.generated(), before, predicted, targets).trackMaterial(player);
         return lastUseConfirmation;
+    }
+
+    /**
+     * 原生放置按点击时的视角决定床等双格方块的朝向；作者没有点名属性时，图纸里的默认朝向不构成要求。
+     * 预测落法与图纸脚印不一致时，把本格目标与随之生成的另一半改按原生落法重排——点击后确认、
+     * 实体占用检查与收尾验收都以重排后的真实两格为准，避免床已放好却被判 placement_diverged。
+     * 作者点名了朝向时预测过不了摆放校验，到不了这里；朝向一致时本方法原样返回。
+     */
+    private CellPlan reanchoredToNativeFootprint(CellPlan plan, BlockState predicted) {
+        if (predicted.getBlock() != plan.target().block()) return plan;
+        var projection = new BuildTaskRecord.Target(predicted, plan.target().item(), plan.target().pos(),
+                plan.target().label(), null, null, null);
+        List<BuildPlacementGeometry.GeneratedCell> nativeCells = BuildPlacementGeometry.generatedBy(projection);
+        if (nativeCells.equals(plan.generated())) return plan;
+        var target = new BuildTaskRecord.Target(predicted, plan.target().item(), plan.target().pos(),
+                plan.target().label(), null, null, null, plan.target().itemPlace(), plan.target().exactProperties(),
+                plan.target().strictIdentity(), plan.target().finalProperties());
+        var reanchored = new CellPlan(target, nativeCells);
+        for (int i = 0; i < plans.size(); i++) if (plans.get(i) == plan) plans.set(i, reanchored);
+        for (int i = 0; i < queue.size(); i++) if (queue.get(i) == plan) queue.set(i, reanchored);
+        if (plansByPrimary.get(plan.target().pos().asLong()) == plan)
+            plansByPrimary.put(plan.target().pos().asLong(), reanchored);
+        return reanchored;
     }
 
     private Map<Long, BlockState> freeze(CellPlan plan) {

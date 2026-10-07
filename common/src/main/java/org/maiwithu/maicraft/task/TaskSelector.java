@@ -41,11 +41,16 @@ public final class TaskSelector {
             return current;
         }
         if (reflexes != null) {
+            // 连续驾驶期间的让位：任务正靠连续输入驾驶身体（水中攀沿等），声明让位的
+            // 非致命反射暂不参与抢占——按秒切碎的驾驶永远凑不齐所需输入；紧急自救豁免照常。
+            boolean continuousDriving = current != null && current.drivesBodyContinuously(companion);
             for (Task reflex : reflexes) {
                 if (reflex == null) continue;
                 // 在岗任务把身体留在边缘是它的正当姿态，释放窗口反射不得按秒抢回；
                 // 围困窒息这类紧急自救豁免（urgentBodyRescue）仍照常接管。
                 if (taskHoldsBody && reflex.onlyWhenBodyReleased() && !reflex.urgentBodyRescue(companion)) continue;
+                if (continuousDriving && reflex.yieldsToContinuousDriving()
+                        && !reflex.urgentBodyRescue(companion)) continue;
                 if (reflex.canRun(companion)) {
                     return reflex;
                 }

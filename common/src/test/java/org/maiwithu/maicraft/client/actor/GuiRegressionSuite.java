@@ -67,6 +67,7 @@ import org.maiwithu.maicraft.core.task.build.BuildAeSpoilReceiptTest;
 import org.maiwithu.maicraft.core.task.build.BuildAimRetryTest;
 import org.maiwithu.maicraft.core.task.build.BuildAnchorDriftTest;
 import org.maiwithu.maicraft.core.task.build.BuildBasementSupportAccessTest;
+import org.maiwithu.maicraft.core.task.build.BuildBedPlacementFacingTest;
 import org.maiwithu.maicraft.core.task.build.BuildDoorPlacementPredictionTest;
 import org.maiwithu.maicraft.core.task.build.BuildDoorStateRepairTest;
 import org.maiwithu.maicraft.core.task.build.BuildEavePlacementProofTest;
@@ -262,6 +263,8 @@ public final class GuiRegressionSuite {
         BuildDoorStateRepairTest.main(args);
         // 门的原生门轴与两半生成结果要结合作者要求确认，生存模式还须等一件物品实际扣除。
         BuildDoorPlacementPredictionTest.main(args);
+        // 床的原生朝向随视角决定：未点名朝向时按原生落法收尾成功，点名了仍维持原判。
+        BuildBedPlacementFacingTest.main(args);
         BuildFailureEvidenceTest.main(args);
         BuildWorksitePlannerTest.main(args);
         BuildStanceNavigationTest.main(args);
