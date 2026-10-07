@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.intent;
 import com.google.gson.JsonObject;
 import net.minecraft.resources.ResourceLocation;
 import java.util.Set;
+import org.maiwithu.maicraft.core.tools.SemanticParameters;
 
 /** 移动目的地可省略高度；其他功能使用的已核实世界位置则必须包含高度。 */
 record TravelDestination(double x, Double y, double z, String dimension) {
@@ -15,9 +16,12 @@ record TravelDestination(double x, Double y, double z, String dimension) {
                 || parameters.has("semantic_target") || parameters.has("biome_id") || parameters.has("biome_tag"))
             throw new IllegalArgumentException("travel destination cannot be combined with another target or discovery request");
         JsonObject value = parameters.getAsJsonObject("destination");
+        // 目的地只认 x/y/z/dimension；写成 pos、height 等名字时连同合法键报出，模型直接改正坐标对象。
+        Set<String> destinationFields = Set.of("x", "y", "z", "dimension");
         for (String key : value.keySet()) {
-            if (!Set.of("x", "y", "z", "dimension").contains(key))
-                throw new IllegalArgumentException("Unknown travel destination field: " + key);
+            if (!destinationFields.contains(key))
+                throw new IllegalArgumentException("Unknown travel destination field: " + key
+                        + SemanticParameters.acceptedKeys(destinationFields));
         }
         Double y = value.has("y") && !value.get("y").isJsonNull() ? number(value, "y") : null;
         String dimension = null;

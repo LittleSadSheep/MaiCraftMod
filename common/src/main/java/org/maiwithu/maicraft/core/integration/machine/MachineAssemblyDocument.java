@@ -15,6 +15,7 @@ import net.minecraft.core.Direction;
 import org.maiwithu.maicraft.core.integration.create.CreateBeltGeometry;
 import org.maiwithu.maicraft.core.integration.create.CreateBeltAccess;
 import org.maiwithu.maicraft.core.integration.machine.layout.SemanticMachineLayout;
+import org.maiwithu.maicraft.core.tools.SemanticParameters;
 
 /** 显式蓝图的组件关系与原生安装声明；所有坐标、承载面和运输技术都由作者选择。 */
 public final class MachineAssemblyDocument {
@@ -162,6 +163,10 @@ public final class MachineAssemblyDocument {
         if (!object.get(name).isJsonArray() || object.getAsJsonArray(name).size() > MachinePlanningBudget.current().maxConnections()) throw bad("invalid assembly " + name);
         return object.getAsJsonArray(name);
     }
-    private static void keys(JsonObject object, Set<String> allowed) { for (String key : object.keySet()) if (!allowed.contains(key)) throw bad("unknown assembly field: " + key); }
+    // 带安装与加工引用里猜错的字段名连同合法键一起报出，模型直接改正安装声明。
+    private static void keys(JsonObject object, Set<String> allowed) {
+        for (String key : object.keySet()) if (!allowed.contains(key))
+            throw bad("unknown assembly field: " + key + SemanticParameters.acceptedKeys(allowed));
+    }
     private static IllegalArgumentException bad(String detail) { return new IllegalArgumentException(detail); }
 }

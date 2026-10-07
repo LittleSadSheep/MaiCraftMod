@@ -51,6 +51,7 @@ import org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInpu
 import org.maiwithu.maicraft.core.integration.machine.utility.UtilityConnectionTaskRecord;
 import org.maiwithu.maicraft.mcp.knowledge.RecipeKnowledgeSource;
 import org.maiwithu.maicraft.task.TaskRecord;
+import org.maiwithu.maicraft.core.tools.SemanticParameters;
 
 /** 把“查看、设计、操作、修改或建造机器”交给相应实现；用户只给目标，具体放置和菜单点击由 Mod 负责。 */
 final class MachineAbilityAdapter {
@@ -739,7 +740,9 @@ final class MachineAbilityAdapter {
     }
     private static void only(JsonObject p, String... keys) {
         Set<String> allowed = Set.of(keys);
-        for (String key : p.keySet()) if (!allowed.contains(key)) throw bad("Unsupported field for this machine operation: " + key);
+        // 不同机器操作接受的字段不同，写错时报出本操作的合法键，不让模型在各操作的字段间盲试。
+        for (String key : p.keySet()) if (!allowed.contains(key))
+            throw bad("Unsupported field for this machine operation: " + key + SemanticParameters.acceptedKeys(allowed));
     }
     private static String optionalString(JsonObject p, String key, int max) {
         if (!p.has(key)) return null;

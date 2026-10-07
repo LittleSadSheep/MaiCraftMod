@@ -15,6 +15,7 @@ import java.util.Set;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
 import org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs;
+import org.maiwithu.maicraft.core.tools.SemanticParameters;
 
 /**
  * 先检查机器设计写得是否完整：部件叫什么、要多少个、两端怎么连接、物品是否已安装。这里不读取场地，也不施工。
@@ -432,7 +433,9 @@ public final class MachineDesignReview {
 
     private static void checkFields(JsonObject object, Set<String> allowed, String path, JsonArray errors) {
         for (String key : object.keySet()) {
-            if (!allowed.contains(key)) error(errors, path, "unknown_field", "Unsupported field: " + key.substring(0, Math.min(key.length(), 96)));
+            // 设计审阅逐条列出未知字段，并附上该路径的合法键，审阅结果即可指导改正。
+            if (!allowed.contains(key)) error(errors, path, "unknown_field", "Unsupported field: "
+                    + key.substring(0, Math.min(key.length(), 96)) + SemanticParameters.acceptedKeys(allowed));
             if (errors.size() >= MAX_ERRORS) return;
         }
     }

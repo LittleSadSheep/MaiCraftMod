@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.core.integration.ftbquests;
 import com.google.gson.JsonObject;
 import java.util.Locale;
 import java.util.Set;
+import org.maiwithu.maicraft.core.tools.SemanticParameters;
 
 /** 精确指定一次原生任务书动作；任务、奖励和选择项不能互相替代，长编号始终按十六进制字符串传递。 */
 public record FtbQuestActionRequest(String operation, String questId, String subjectId, String choiceUri) {
@@ -11,8 +12,10 @@ public record FtbQuestActionRequest(String operation, String questId, String sub
 
     public static FtbQuestActionRequest parse(JsonObject args) {
         // 每次只处理一个明确按钮；省略另一种对象编号，不能用 null、false 或零代替“本次不领奖/不提交”。
-        for (String key : args.keySet()) if (!Set.of("operation", "quest_id", "task_id", "reward_id", "choice_uri").contains(key))
-            throw new IllegalArgumentException("Unknown quest action parameter: " + key);
+        // 任务书按钮参数写错名字时连同合法键报出，模型改正后重新提交同一个按钮动作。
+        Set<String> questFields = Set.of("operation", "quest_id", "task_id", "reward_id", "choice_uri");
+        for (String key : args.keySet()) if (!questFields.contains(key))
+            throw new IllegalArgumentException("Unknown quest action parameter: " + key + SemanticParameters.acceptedKeys(questFields));
         String operation = string(args, "operation", true);
         if (!Set.of("submit", "confirm", "claim").contains(operation)) throw new IllegalArgumentException("operation must be submit, confirm or claim");
         String quest = id(string(args, "quest_id", true)); boolean claim = operation.equals("claim");

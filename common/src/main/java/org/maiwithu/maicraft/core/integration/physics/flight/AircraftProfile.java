@@ -10,6 +10,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.task.physics.TypewriterKeyInput;
+import org.maiwithu.maicraft.core.tools.SemanticParameters;
 
 /** 飞机设计者登记本机的座位、打字机、机头朝向和原生键位；保存映射不等于已经通过飞行验收。 */
 public record AircraftProfile(BlockPos seat,BlockPos typewriter,Direction forward,FlightEnvelope envelope,
@@ -17,9 +18,11 @@ public record AircraftProfile(BlockPos seat,BlockPos typewriter,Direction forwar
     public AircraftProfile {seat=seat.immutable();typewriter=typewriter.immutable();keys=Map.copyOf(keys);}
     public Vec3 forwardVector(){return new Vec3(forward.getStepX(),0,forward.getStepZ());}
     public static AircraftProfile parse(JsonObject p) {
-        for(String key:p.keySet())if(!Set.of("kind","seat_position","typewriter_position","forward","keys","takeoff_speed",
-                "cruise_speed","max_bank_degrees","climb_pitch_degrees","approach_pitch_degrees","climb_rate","descent_rate").contains(key))
-            throw new IllegalArgumentException("unknown aircraft profile field: "+key);
+        // 飞行档案写错字段名时连同合法键报出，模型改正 profile 后即可重新提交起飞。
+        Set<String> profileFields=Set.of("kind","seat_position","typewriter_position","forward","keys","takeoff_speed",
+                "cruise_speed","max_bank_degrees","climb_pitch_degrees","approach_pitch_degrees","climb_rate","descent_rate");
+        for(String key:p.keySet())if(!profileFields.contains(key))
+            throw new IllegalArgumentException("unknown aircraft profile field: "+key+SemanticParameters.acceptedKeys(profileFields));
         FlightEnvelope.Kind kind=FlightEnvelope.Kind.valueOf(text(p,"kind").toUpperCase(Locale.ROOT));
         var defaults=kind==FlightEnvelope.Kind.FIXED_WING?FlightEnvelope.fixedWing():FlightEnvelope.airship();
         Direction forward=Direction.byName(p.has("forward")?text(p,"forward"):"south");

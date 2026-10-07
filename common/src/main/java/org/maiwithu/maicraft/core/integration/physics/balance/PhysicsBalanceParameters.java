@@ -6,6 +6,7 @@ import java.util.LinkedHashMap;
 import java.util.Set;
 import java.util.HashSet;
 import java.util.UUID;
+import org.maiwithu.maicraft.core.tools.SemanticParameters;
 
 /** 计划阶段明确船体、试算工况及补丁，分析不会被隐式升级为真实施工或启动推进器。 */
 public record PhysicsBalanceParameters(UUID structureId, String operation, double rpm, String balloonFill,
@@ -18,7 +19,9 @@ public record PhysicsBalanceParameters(UUID structureId, String operation, doubl
         Set<String> accepted=Set.of("structure_id","operation","reference_rpm","balloon_fill","max_ballast_blocks",
                 "duration_seconds","max_tilt_degrees","max_vertical_acceleration","max_angular_acceleration",
                 "perturbation_degrees","controls","edits","ballast_candidates","reference_velocity","wheel_brakes");
-        for(String key:args.keySet()) if(!accepted.contains(key)) throw new IllegalArgumentException("未知配平参数: "+key);
+        // 配平参数写错名字时连同合法键报出，模型改正后重新提交同一次配平。
+        for(String key:args.keySet()) if(!accepted.contains(key))
+            throw new IllegalArgumentException("未知配平参数: "+key+SemanticParameters.acceptedKeys(accepted));
         if(!args.has("structure_id")||!args.get("structure_id").isJsonPrimitive()||!args.getAsJsonPrimitive("structure_id").isString())
             throw new IllegalArgumentException("需要观察到的结构 UUID");
         UUID id=UUID.fromString(args.get("structure_id").getAsString());
@@ -51,7 +54,10 @@ public record PhysicsBalanceParameters(UUID structureId, String operation, doubl
             Set<String> cells=new HashSet<>();
             for(var raw:args.getAsJsonArray("edits")) {
                 var edit=raw.getAsJsonObject();
-                for(String key:edit.keySet()) if(!Set.of("position","block_id","properties").contains(key)) throw new IllegalArgumentException("未知补丁字段: "+key);
+                // 补丁格只认 position/block_id/properties，写错字段名时一并报出合法键。
+                Set<String> editFields=Set.of("position","block_id","properties");
+                for(String key:edit.keySet()) if(!editFields.contains(key))
+                    throw new IllegalArgumentException("未知补丁字段: "+key+SemanticParameters.acceptedKeys(editFields));
                 if(!edit.has("block_id")||!edit.get("block_id").getAsString().matches("[a-z0-9_.-]+:[a-z0-9_./-]+"))
                     throw new IllegalArgumentException("补丁需要明确方块编号；拆除用 minecraft:air");
                 var p=edit.getAsJsonObject("position");

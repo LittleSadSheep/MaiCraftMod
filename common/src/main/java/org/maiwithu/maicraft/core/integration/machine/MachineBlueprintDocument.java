@@ -12,6 +12,7 @@ import java.util.Set;
 import org.maiwithu.maicraft.core.integration.machine.layout.SemanticMachineLayout;
 import org.maiwithu.maicraft.core.integration.machine.utility.MachineUtilityInputs;
 import org.maiwithu.maicraft.core.build.BuildingBudgets;
+import org.maiwithu.maicraft.core.tools.SemanticParameters;
 
 /**
  * 处理当前版本的逐格机器蓝图：普通方块占整格，AE2 部件可以共用宿主的不同安装面。
@@ -203,7 +204,9 @@ public final class MachineBlueprintDocument {
         return result;
     }
     private static void keys(JsonObject object, Set<String> fields, String context) {
-        for (String key : object.keySet()) if (!fields.contains(key)) throw bad("unsupported " + context + " field: " + key);
+        // 蓝图里猜错的字段名连同本层合法键一起报出，模型照此改正同一份图纸，不必另读整份契约。
+        for (String key : object.keySet()) if (!fields.contains(key))
+            throw bad("unsupported " + context + " field: " + key + SemanticParameters.acceptedKeys(fields));
     }
     private static IllegalArgumentException bad(String message) { return new IllegalArgumentException(message); }
 }

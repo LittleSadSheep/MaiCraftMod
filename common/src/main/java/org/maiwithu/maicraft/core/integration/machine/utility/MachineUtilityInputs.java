@@ -15,6 +15,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
 import org.maiwithu.maicraft.core.integration.machine.MachineAssemblyPorts;
+import org.maiwithu.maicraft.core.tools.SemanticParameters;
 
 /** 声明被动公用设施的边界，绝不代表发电机或已连通证明。 */
 public final class MachineUtilityInputs {
@@ -239,7 +240,12 @@ public final class MachineUtilityInputs {
     }
     private static JsonObject object(JsonElement value) { if (!value.isJsonObject()) throw bad("external input must be an object"); return value.getAsJsonObject(); }
     private static void keys(JsonObject object, Set<String> additional) {
-        for (String key : object.keySet()) if (!REQUIREMENTS.contains(key) && !additional.contains(key)) throw bad("unsupported external input field: " + key);
+        // 外部输入的通用字段与本类专属字段合并成一份合法键清单，随未知字段一起报出。
+        for (String key : object.keySet()) if (!REQUIREMENTS.contains(key) && !additional.contains(key)) {
+            Set<String> accepted = new HashSet<>(REQUIREMENTS);
+            accepted.addAll(additional);
+            throw bad("unsupported external input field: " + key + SemanticParameters.acceptedKeys(accepted));
+        }
     }
     private static IllegalArgumentException bad(String message) { return new IllegalArgumentException(message); }
 }

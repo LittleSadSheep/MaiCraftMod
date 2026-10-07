@@ -9,6 +9,7 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.core.integration.physics.flight.AircraftFlightTaskRecord;
 import org.maiwithu.maicraft.core.integration.physics.flight.AircraftProfile;
+import org.maiwithu.maicraft.core.tools.SemanticParameters;
 
 /** LLM 只提供飞机、操纵声明和目的地；飞控任务在 Mod 内持续执行，不能接收逐帧点击脚本。 */
 final class AircraftFlightAbilityAdapter {
@@ -16,8 +17,10 @@ final class AircraftFlightAbilityAdapter {
     private AircraftFlightAbilityAdapter() {}
     static void validate(Goal goal) {
         JsonObject p=goal.parameters();
-        for(String key:p.keySet())if(!Set.of("structure_id","operation","profile","direction","distance","cruise_altitude").contains(key))
-            throw new IllegalArgumentException("unknown fly_vehicle parameter: "+key);
+        // 驾驶参数写错名字时连同合法键报出，模型改正后重新提交同一次飞行。
+        Set<String> flightFields=Set.of("structure_id","operation","profile","direction","distance","cruise_altitude");
+        for(String key:p.keySet())if(!flightFields.contains(key))
+            throw new IllegalArgumentException("unknown fly_vehicle parameter: "+key+SemanticParameters.acceptedKeys(flightFields));
         String id=text(p,"structure_id",null);if(id==null)throw new IllegalArgumentException("structure_id is required");
         UUID.fromString(id);String operation=text(p,"operation","fly");
         if(!Set.of("inspect","configure","fly").contains(operation))throw new IllegalArgumentException("flight operation must be inspect, configure or fly");

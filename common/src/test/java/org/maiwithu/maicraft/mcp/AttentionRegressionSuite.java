@@ -50,6 +50,8 @@ public final class AttentionRegressionSuite {
         // 宿主把整数、布尔写成字符串或把数组包成 {"item":...} 时先按契约类型还原，同一编码差异不能反复拒收。
         ParameterNormalizerTest.main(args);
         PublicArgumentNormalizationTest.main(args);
+        // 嵌套对象里猜错字段名时，拒收错误给出本层合法键和该参数完整说明，不必再 focus 整份契约。
+        NestedFieldCorrectionTest.main(args);
         // 已存的大蓝图和失败历史可分页找回，常规状态须保留当前待答问题与消费不确定性。
         TaskViewTest.main(args);
         // 背包和当前主手都携带组件身份，半成品无需先投进机器才能查看进度。

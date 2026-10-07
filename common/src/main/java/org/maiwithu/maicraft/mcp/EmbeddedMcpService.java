@@ -27,6 +27,7 @@ import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
@@ -413,8 +414,9 @@ public final class EmbeddedMcpService implements AutoCloseable {
             arguments = PublicToolCatalog.validateAndNormalize(name, params.get("arguments"), normalized);
         } catch (IllegalArgumentException exception) {
             // 入口拒收时同样附上已做的编码还原和该能力的简版签名，宿主改正这一份请求即可，不必再查契约。
+            // 入口拒收时还不知道是哪一层出错，按整棵目标树附上实际出现的嵌套参数说明。
             JsonObject details = correctionDetails(MachineDesignRejection.inspectRequest(params.get("arguments")),
-                    normalized, goalAbility(params.get("arguments")));
+                    normalized, goalAbility(params.get("arguments")), parameterContracts(params.get("arguments"), null));
             return toolError("invalid_arguments", message(exception), true, true, null, details);
         }
 
@@ -493,8 +495,10 @@ public final class EmbeddedMcpService implements AutoCloseable {
         } catch (Exception exception) {
             Throwable failure = unwrap(exception);
             if (failure instanceof SemanticContractException violation) {
+                // 语义契约已指出被拒能力，只附该能力在请求里用到的嵌套参数说明，不带上同序列里其他能力的。
                 return semanticContractError(violation, requestKey,
-                        correctionDetails(MachineDesignRejection.inspectRequest(arguments), normalized, null));
+                        correctionDetails(MachineDesignRejection.inspectRequest(arguments), normalized, null,
+                                parameterContracts(arguments, violation.ability())));
             }
             if (!(failure instanceof IllegalArgumentException || failure instanceof IllegalStateException)) {
                 Constants.LOG.error("[maicraft-mcp] Runtime call failed: {}", name, failure);
@@ -965,8 +969,12 @@ public final class EmbeddedMcpService implements AutoCloseable {
         return result;
     }
 
-    /** 拒收错误的修正材料：原有诊断、已做的编码还原，以及（已知能力时）该能力的简版签名。 */
-    private static JsonObject correctionDetails(JsonObject diagnostics, List<String> normalized, String ability) {
+    /**
+     * 拒收错误的修正材料：原有诊断、已做的编码还原、（已知能力时）该能力的简版签名，
+     * 以及请求里实际用到的嵌套参数的完整字段说明。
+     */
+    private static JsonObject correctionDetails(JsonObject diagnostics, List<String> normalized, String ability,
+                                                JsonArray parameterContracts) {
         JsonObject details = diagnostics == null ? new JsonObject() : diagnostics.deepCopy();
         if (!normalized.isEmpty()) {
             JsonArray notes = new JsonArray();
@@ -975,20 +983,72 @@ public final class EmbeddedMcpService implements AutoCloseable {
         }
         if (ability != null && IntentRuntime.KNOWN_ABILITIES.contains(ability))
             details.add("ability_signature", SemanticAbilityCatalog.signature(ability));
+        // 签名只到顶层参数，对 blueprint、production 只写 object；猜错内层字段名时要靠这份原文改正。
+        if (!parameterContracts.isEmpty()) details.add("parameter_contracts", parameterContracts);
         return details.size() == 0 ? null : details;
     }
 
-    /** 从原始请求里读出 goal.ability（含应答改写的新目标），读不到返回 null。 */
-    private static String goalAbility(JsonElement arguments) {
+    /** 从原始请求里取出 goal（含应答改写的新目标），读不到返回 null。 */
+    private static JsonObject requestGoal(JsonElement arguments) {
         if (arguments == null || !arguments.isJsonObject()) return null;
         JsonObject object = arguments.getAsJsonObject();
         JsonElement goal = object.get("goal");
         if ((goal == null || !goal.isJsonObject()) && object.get("answer") instanceof JsonObject answer
                 && answer.get("details") instanceof JsonObject details) goal = details.get("goal");
-        if (goal == null || !goal.isJsonObject()) return null;
-        JsonElement ability = goal.getAsJsonObject().get("ability");
+        return goal != null && goal.isJsonObject() ? goal.getAsJsonObject() : null;
+    }
+
+    /** 从原始请求里读出 goal.ability（含应答改写的新目标），读不到返回 null。 */
+    private static String goalAbility(JsonElement arguments) {
+        JsonObject goal = requestGoal(arguments);
+        return goal == null ? null : abilityOf(goal);
+    }
+
+    private static String abilityOf(JsonObject goal) {
+        JsonElement ability = goal.get("ability");
         return ability != null && ability.isJsonPrimitive() && ability.getAsJsonPrimitive().isString()
                 ? ability.getAsString() : null;
+    }
+
+    /**
+     * 请求里实际出现的嵌套参数（对象、对象数组）的完整字段说明，沿 sequence 子目标逐层收集；
+     * 指定能力时只收被拒能力的。只在拒收时附带：模型猜错蓝图、生产网络等的内层字段名时照此改正，
+     * 写对的调用不付这份上下文，也不必为一处字段名再花一轮 focus 整份契约。
+     */
+    private static JsonArray parameterContracts(JsonElement arguments, String ability) {
+        JsonArray result = new JsonArray();
+        JsonObject goal = requestGoal(arguments);
+        if (goal != null) {
+            collectParameterContracts(goal, ability, new HashSet<>(), result, 0);
+        } else if (ability != null && arguments != null && arguments.isJsonObject()
+                && arguments.getAsJsonObject().get("answer") instanceof JsonObject answer
+                && answer.get("details") instanceof JsonObject details
+                && details.get("parameters") instanceof JsonObject parameters) {
+            // 重试应答只带 details.parameters，能力来自原任务；同样按其中出现的嵌套参数附说明。
+            addParameterContracts(ability, parameters, new HashSet<>(), result);
+        }
+        return result;
+    }
+
+    private static void collectParameterContracts(JsonObject goal, String ability, Set<String> seen,
+                                                  JsonArray result, int depth) {
+        if (depth > 32) return;
+        String own = abilityOf(goal);
+        if (own != null && (ability == null || ability.equals(own)) && goal.get("parameters") instanceof JsonObject parameters)
+            addParameterContracts(own, parameters, seen, result);
+        if (goal.get("children") instanceof JsonArray children)
+            for (JsonElement child : children)
+                if (child.isJsonObject()) collectParameterContracts(child.getAsJsonObject(), ability, seen, result, depth + 1);
+    }
+
+    private static void addParameterContracts(String ability, JsonObject parameters, Set<String> seen, JsonArray result) {
+        if (!IntentRuntime.KNOWN_ABILITIES.contains(ability)) return;
+        // 同一能力的同一参数在多个子目标里出现时只附一次，避免顺序施工的报错把同一段说明重复多遍。
+        for (String name : parameters.keySet()) {
+            if (!seen.add(ability + "\n" + name)) continue;
+            JsonObject contract = SemanticAbilityCatalog.nestedParameterContract(ability, name);
+            if (contract != null) result.add(contract);
+        }
     }
 
     private Duration requestTimeout(String toolName, JsonObject arguments) {

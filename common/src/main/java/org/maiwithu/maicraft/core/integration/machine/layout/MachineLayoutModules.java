@@ -14,6 +14,7 @@ import org.maiwithu.maicraft.core.integration.machine.assembly.MekanismMatrixTem
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Cell;
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Pos;
 import org.maiwithu.maicraft.core.integration.machine.layout.MachineLayoutRouting.Side;
+import org.maiwithu.maicraft.core.tools.SemanticParameters;
 import java.util.Locale;
 
 /**
@@ -94,7 +95,10 @@ final class MachineLayoutModules {
     // 生成网络设备、电缆、终端和驱动器要装的存储元件；合成小组另加样板供应器、分子装配室与合成存储器，但不会自动编码配方。
     private static void aeCluster(Builder b, boolean crafting, JsonObject component, SemanticMachineLayout.Registry registry) {
         JsonObject options = component.has("module_options") ? component.getAsJsonObject("module_options") : new JsonObject();
-        for (String key : options.keySet()) if (!Set.of("storage_tier", "storage_cells").contains(key)) throw new IllegalArgumentException("unsupported AE module option: " + key);
+        // AE 模块选项只有存储档位与盘数两项，写错名字时一并报出合法键。
+        Set<String> moduleOptions = Set.of("storage_tier", "storage_cells");
+        for (String key : options.keySet()) if (!moduleOptions.contains(key))
+            throw new IllegalArgumentException("unsupported AE module option: " + key + SemanticParameters.acceptedKeys(moduleOptions));
         String tier = options.has("storage_tier") ? options.get("storage_tier").getAsString() : "1k";
         if (!Set.of("1k", "4k", "16k", "64k", "256k").contains(tier)) throw new IllegalArgumentException("AE storage_tier must be 1k, 4k, 16k, 64k or 256k");
         int count = options.has("storage_cells") ? options.get("storage_cells").getAsInt() : 1;

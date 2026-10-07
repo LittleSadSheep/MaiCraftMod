@@ -9,6 +9,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import org.maiwithu.maicraft.core.integration.machine.MachinePlanningBudget;
+import org.maiwithu.maicraft.core.tools.SemanticParameters;
 
 /** 由手工布局和 Ponder 派生布局共用的声明式生产意图；不包含原生句柄，也不访问世界。 */
 public record ProductionManifest(List<Node> nodes, List<Port> ports, List<Link> links,
@@ -138,7 +139,9 @@ public record ProductionManifest(List<Node> nodes, List<Port> ports, List<Link> 
     private static JsonObject object(JsonElement value, String label) { if (value == null || !value.isJsonObject()) throw bad(label + " must be an object"); return value.getAsJsonObject(); }
     private static void keys(JsonObject object, String... names) {
         if (object == null) throw bad("Production manifest is required"); Set<String> allowed = Set.of(names);
-        for (String key : object.keySet()) if (!allowed.contains(key)) throw bad("Unknown production field " + key);
+        // 生产网络各层（节点、端口、连线、配置）写错字段名时，连同该层合法键一起报出。
+        for (String key : object.keySet()) if (!allowed.contains(key))
+            throw bad("Unknown production field " + key + SemanticParameters.acceptedKeys(allowed));
     }
     private static IllegalArgumentException bad(String message) { return new IllegalArgumentException(message); }
 }

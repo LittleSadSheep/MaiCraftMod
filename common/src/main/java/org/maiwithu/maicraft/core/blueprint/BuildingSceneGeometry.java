@@ -6,6 +6,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.math.BigDecimal;
 import java.util.Set;
+import org.maiwithu.maicraft.core.tools.SemanticParameters;
 
 /**
  * 把对象的中心位置、尺寸和直角旋转换成方块范围。location 指几何中心，例如宽三格的盒子中心可以在半格处。
@@ -116,7 +117,9 @@ final class BuildingSceneGeometry {
         return result;
     }
     static void keys(JsonObject object, Set<String> allowed, String field) {
-        for (String key : object.keySet()) if (!allowed.contains(key)) throw bad("unsupported " + field + " field: " + key);
+        // 建筑场景与模型节点写错字段名时，连同本层合法键一起报出，模型据此改正同一份场景。
+        for (String key : object.keySet()) if (!allowed.contains(key))
+            throw bad("unsupported " + field + " field: " + key + SemanticParameters.acceptedKeys(allowed));
     }
     static IllegalArgumentException bad(String message) { return new IllegalArgumentException(message); }
 }

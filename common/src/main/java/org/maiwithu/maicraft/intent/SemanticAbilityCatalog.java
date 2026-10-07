@@ -896,6 +896,25 @@ public final class SemanticAbilityCatalog {
         return result;
     }
 
+    /**
+     * 嵌套参数（对象、对象数组）的完整字段说明，也就是 focus 契约里这一项的原文；不是嵌套参数时返回 null。
+     * 拒收错误只为请求里实际出现的嵌套参数附带它：模型猜错蓝图、生产网络等的内层字段名时直接照此改正，
+     * 写对的调用不多花上下文，也不必为一处字段名再 focus 整份契约。
+     */
+    public static JsonObject nestedParameterContract(String ability, String parameter) {
+        JsonObject fields = describeContract(ability).getAsJsonObject("parameters");
+        if (fields == null || !fields.has(parameter) || !fields.get(parameter).isJsonObject()) return null;
+        JsonObject field = fields.getAsJsonObject(parameter);
+        String type = field.get("type").getAsString();
+        if (!"object".equals(type) && !"array".equals(type) && !"array<object>".equals(type)) return null;
+        JsonObject result = new JsonObject();
+        result.addProperty("ability", ability);
+        result.addProperty("parameter", parameter);
+        result.addProperty("type", type);
+        result.add("description", field.get("description").deepCopy());
+        return result;
+    }
+
     static Set<String> preferenceNames(String ability) {
         return names(describe(ability).getAsJsonObject("accepted_preferences"));
     }

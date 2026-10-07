@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.core.tools;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 
@@ -86,9 +87,15 @@ public final class SemanticParameters {
         for (String key : object.keySet()) {
             if (allowed.contains(key)) continue;
             // 拒绝必须带出合法键集合：调用方只能看到这条文本，不说合法集合它只能逐键盲试。
-            String accepted = String.join(", ", allowed.stream().sorted().toList());
-            throw new IllegalArgumentException(label + " does not accept " + key
-                    + "; accepted keys: " + accepted);
+            throw new IllegalArgumentException(label + " does not accept " + key + acceptedKeys(allowed));
         }
+    }
+
+    /**
+     * 各嵌套对象（蓝图方块、带安装、生产网络、目的地等）拒收未知字段时接在原报错后的合法键清单。
+     * 模型猜错嵌套字段名时照此改正同一份请求，不必再花一轮 focus 去读整份能力契约。
+     */
+    public static String acceptedKeys(Collection<String> allowed) {
+        return "; accepted keys: " + String.join(", ", allowed.stream().sorted().toList());
     }
 }

@@ -8,6 +8,7 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import org.maiwithu.maicraft.task.TaskRecord;
+import org.maiwithu.maicraft.core.tools.SemanticParameters;
 
 /** 为整个原生流体转化配方族提供机器过程入口；物品、数量、条件均来自安装配方，没有按产物命名的特殊分支。 */
 public final class WorldTransformProcessAdapter implements NativeProcessAdapter {
@@ -24,8 +25,11 @@ public final class WorldTransformProcessAdapter implements NativeProcessAdapter 
         return out;
     }
     @Override public void validate(JsonObject parameters) {
-        for (String key : parameters.keySet()) if (!Set.of("recipe_id", "batches").contains(key))
-            throw new IllegalArgumentException("unexpected_world_process_parameter: " + key);
+        // 世界转化流程只认配方与批次；写错参数名时一并报出合法键。
+        Set<String> processFields = Set.of("recipe_id", "batches");
+        for (String key : parameters.keySet()) if (!processFields.contains(key))
+            throw new IllegalArgumentException("unexpected_world_process_parameter: " + key
+                    + SemanticParameters.acceptedKeys(processFields));
         recipeId(parameters); batches(parameters);
     }
     @Override public boolean matches(LocalPlayer player, BlockPos position) {
