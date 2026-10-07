@@ -89,6 +89,7 @@ public final class MoveToTransportCompletionTest {
         automaticLandingResult(memory);
         observationDoesNotCompleteTravel(memory);
         waterShoreClimbDeliversArrival(memory);
+        waterClimbTimeoutHandsBackToPlanning(memory);
         lowAirClimbsOutToBreathe(memory);
         System.out.println("MoveToTransportCompletionTest: passed");
     }
@@ -499,6 +500,56 @@ public final class MoveToTransportCompletionTest {
                     "回执要声明到达经由水中登岸段完成");
             check(String.valueOf(result.message()).contains("climbing out of the water"),
                     "成功话术要说明这份到达来自贴岸攀爬");
+        }
+    }
+
+    /**
+     * 登岸段爬不上沿顶时（实机第二轮的形态：贴沿弹跳够不到顶），任务先把身体交还规划
+     * 从当前贴沿身位重算一次路线（实机证据：贴沿身位重发后规划数秒内自己登顶），
+     * 而不是立刻以仍在水中如实失败；重试只给一次。
+     */
+    private static void waterClimbTimeoutHandsBackToPlanning(Unsafe memory) throws Exception {
+        try (var f = new Fixture(memory, .5)) {
+            for (int y = 0; y <= 2; y++) {
+                f.world.blocks.put(new BlockPos(0, y, 0).asLong(), Blocks.WATER.defaultBlockState());
+            }
+            f.world.blocks.put(new BlockPos(1, 3, 0).asLong(), Blocks.STONE.defaultBlockState());
+            f.player.wet = true;
+            field(LocalPlayer.class, "onGround").setBoolean(f.player, false);
+            var record = new MoveToTaskRecord("water-shore-retry", 600_000, 1D, 4D, 0D, null, false);
+            var task = f.task(record, false);
+            task.onStart();
+            f.nextTick();
+            check(task.onTick() == TaskState.RUNNING
+                    && field(MoveToCompanionTask.class, "waterLegKind").get(task) != null,
+                    "贴岸目标应先进入登岸段");
+            // 身体贴沿弹跳但始终没能离水：满 10 秒窗口后必须交还规划，而不是直接失败。
+            TaskState state = TaskState.RUNNING;
+            boolean handedOff = false;
+            for (int tick = 0; tick < 260 && state == TaskState.RUNNING; tick++) {
+                f.nextTick();
+                state = task.onTick();
+                if (!handedOff && Boolean.TRUE.equals(
+                        field(MoveToCompanionTask.class, "waterClimbReplanTried").get(task))) {
+                    handedOff = true;
+                    Object nav = field(AbstractCompanionTask.class, "nav").get(task);
+                    check(nav != null, "交还规划必须重建导航");
+                    f.navigator = (TransportNavigator) field(PlayerNav.class, "navigator").get(nav);
+                    planningSession(f);
+                    bareGround(memory, f);
+                }
+            }
+            check(handedOff && state == TaskState.RUNNING,
+                    "登岸段超时后应交还规划继续任务，实际 handedOff=" + handedOff + " state=" + state);
+            check(Boolean.TRUE.equals(field(MoveToCompanionTask.class, "waterClimbReplanWindow").get(task)),
+                    "接棒窗口期间贴岸直达触发要让路给规划");
+            // 接棒窗口内规划停驻不触发贴岸直达抢占；任务保持运行直到规划自己给出终态。
+            for (int tick = 0; tick < 60; tick++) {
+                f.nextTick();
+                check(task.onTick() == TaskState.RUNNING, "接棒窗口内应让规划运行而不是抢回身体");
+            }
+            check(field(MoveToCompanionTask.class, "waterLegKind").get(task) == null,
+                    "接棒窗口内不得重新进入登岸段");
         }
     }
 

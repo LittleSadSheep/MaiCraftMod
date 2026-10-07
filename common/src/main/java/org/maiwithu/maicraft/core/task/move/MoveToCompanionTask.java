@@ -137,6 +137,10 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     private boolean waterShoreClimbUsed;
     /** 本次任务因憋气兜底中断过行程：回执要点名角色已安全离水。 */
     private boolean waterBreathePause;
+    /** 登岸段没爬上沿顶后，交还规划从当前身位重试的一次机会（实机证据：贴沿身位重发后规划能自己登顶）。 */
+    private boolean waterClimbReplanTried;
+    /** 规划接棒窗口进行中：贴岸直达触发暂让路，给规划一个从沿壁身位算路的机会；换气兜底不受影响。 */
+    private boolean waterClimbReplanWindow;
 
     public MoveToCompanionTask(LocalPlayer player, MoveToTaskRecord record) {
         super(player, record);
@@ -334,8 +338,9 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         if (player.isInWater() && !player.isPassenger() && !reached()
                 && r.transportMode != TransportMode.JETPACK
                 && r.transportMode != TransportMode.ELEVATOR) {
-            BlockPos shore = nearbyShoreTargetCell();
-            boolean forAir = false;
+        // 规划接棒窗口期间不让贴岸直达触发抢回身体，给规划一个从贴沿身位算路的机会；换气兜底照常。
+        BlockPos shore = waterClimbReplanWindow ? null : nearbyShoreTargetCell();
+        boolean forAir = false;
             if (shore == null && breathReserveAtRisk()) {
                 shore = nearestClimbableShoreCell();
                 forAir = shore != null;
@@ -434,6 +439,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         return switch (nav.tick()) {
             case RUNNING -> TaskState.RUNNING;
             case ARRIVED -> {
+                waterClimbReplanWindow = false;
                 // 中转段走到已知格后不在此判到达：站稳即停掉该段导航，用全新搜索恢复原目标。
                 if (knownCellLegTarget != null) {
                     if (!nav.isSafeToCancel()) yield TaskState.RUNNING;
@@ -480,6 +486,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 yield successAtBody();
             }
             case FAILED -> {
+                waterClimbReplanWindow = false;
                 // 交通已经可能产生副作用而结果不明时，不因“已经很近”就当成功，也不自动换目标重试。
                 if (nav.failType() == FailureType.UNKNOWN) {
                     fail(blockedMessage(nav.failReason()), nav.failType());
@@ -703,9 +710,10 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     }
 
     /**
-     * 贴岸游并按跳：水中前进跟随视线俯仰，贴近岸壁时抬头看向沿顶向上游，才能在水面以上
-     * 攒出越过沿顶的弹出高度——平视游泳的身体只会贴着沿壁在水面上下浮动，永远差半格上不去。
-     * 跳跃全程持续按住：原版浅水跳（水深低于跳跃阈值时原地真跳一次）靠的就是不松开跳跃键。
+     * 贴岸游并全程按住跳跃。水中垂直推力只来自按跳（每刻 +0.04 上游）与贴沿时的碰撞助推，
+     * 游戏没有其他向上手段；跳跃键不松开是浅水原地真跳（越过沿顶的主要抬升）能按节奏
+     * 触发的前提。实机证据显示贴沿身位的弹跳高度够不到一格沿顶时，直达驾驶到不了顶——
+     * 此时由 {@code finishWaterClimbLeg} 交还规划从当前身位重算路线接棒。
      */
     private void driveWaterClimb(BlockPos cell) {
         double dx = (cell.getX() + 0.5) - player.getX();
@@ -723,9 +731,9 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         }
     }
 
-    /** 贴近岸壁时把视线抬向沿顶（水中前进跟随视线俯仰，向上游才上得去）；远处接近段与陆地段保持平视。 */
+    /** 贴近岸壁时把视线对准沿顶（便于观察爬沿进程，不改变水中的垂直推力）；远处接近段与陆地段保持平视。 */
     private float pitchTowardLedge(BlockPos cell, double horizontal) {
-        if (!player.isInWater() || horizontal > 1.6) return 0F;
+        if (horizontal > 1.6) return 0F;
         double dy = (cell.getY() + 0.5) - player.getEyeY();
         float pitch = (float) -Math.toDegrees(Math.atan2(dy, Math.max(0.2, horizontal)));
         return Math.max(-60F, pitch);
@@ -734,6 +742,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     private TaskState finishWaterClimbLeg(boolean arrived) {
         InputDriver.halt(player);
         WaterLegKind kind = waterLegKind;
+        BlockPos start = waterLegStart;
         waterLegKind = null;
         waterLegCell = null;
         waterLegStart = null;
@@ -761,9 +770,20 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                     FailureType.NO_PATH);
             return TaskState.FAILED;
         }
+        // 直达目标沿的登岸段没爬上沿顶：先把身体交还规划，从当前贴沿身位重算一次路线
+        // （实机证据：贴沿身位重发后规划数秒内自己登顶）。这段没走通或再次失败才如实收场。
+        if (kind == WaterLegKind.REACH_TARGET && !waterClimbReplanTried) {
+            waterClimbReplanTried = true;
+            waterClimbReplanWindow = true;
+            Constants.LOG.info(
+                    "[maicraft-task] goto 登岸段未过沿顶，交还规划从贴沿身位重试 feet={} 目标={},{},{}",
+                    player.blockPosition().toShortString(), bx, by, bz);
+            startWalkingNav();
+            return TaskState.RUNNING;
+        }
         fail("climb-out leg did not get the body out of the water within about "
                         + WATER_CLIMB_LEG_MAX_TICKS / 20 + " seconds; it started at "
-                        + waterLegStart.toShortString() + " and is still in the water at "
+                        + start.toShortString() + " and is still in the water at "
                         + player.blockPosition().toShortString() + " with "
                         + player.getAirSupply() + "/" + player.getMaxAirSupply() + " air."
                         + " The nearest shore may be out of reach or its ledge more than one"
@@ -1061,6 +1081,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         // 水中贴岸登岸段的交代：到达经由攀沿完成、或行程曾为换气中断，调用方据此核对真实身位。
         if (waterShoreClimbUsed) data.put("water_shore_climb_out", true);
         if (waterBreathePause) data.put("interrupted_to_breathe", true);
+        if (waterClimbReplanTried) data.put("water_climb_handoff_to_planning", true);
         data.put("ground_flight_mode",groundFlight.diagnostics());
         // 任务终局直接交付导航证据，避免模型为一次无路结果另开多轮观察。
         if (!finalNavigationEvidence.isEmpty()) data.put("navigation", finalNavigationEvidence);
