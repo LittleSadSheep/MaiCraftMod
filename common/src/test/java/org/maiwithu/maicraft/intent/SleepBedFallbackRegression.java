@@ -23,6 +23,7 @@ import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.client.actor.InteractionWorldTestHarness;
 import org.maiwithu.maicraft.core.data.WorldTimeSemantics;
 import org.maiwithu.maicraft.intent.persistence.IntentStateCodec;
+import org.maiwithu.maicraft.task.Task;
 import org.maiwithu.maicraft.task.TaskResult;
 import org.maiwithu.maicraft.task.TaskState;
 
@@ -59,6 +60,9 @@ public final class SleepBedFallbackRegression {
         failurePathGateAfterRecoverRearmsWaitInsteadOfAsking();
         skipAnswerStaysGeneric();
         gateWaitSurvivesCheckpoint();
+        waitCreditsExternallySkippedNight();
+        waitKeepsWaitingThroughNaturalNight();
+        takeoverAfterSkippedNightSettlesSuccess();
         System.out.println("SleepBedFallbackRegression: passed");
     }
 
@@ -744,5 +748,92 @@ public final class SleepBedFallbackRegression {
         world.position(new net.minecraft.world.phys.Vec3(8.5, 1, 8.5));
     }
 
+    /** 夹具世界的 tick 计数是测试夹具自有字段，这里按反射对齐推进，模拟时间与 tick 同速流逝。 */
+    private static void setFixtureGameTime(InteractionWorldTestHarness world, long gameTime) throws Exception {
+        field(world.level.getClass(), "time").setLong(world.level, gameTime);
+    }
+
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }
+
+    // ------------------ 等待夜窗期间的入睡事实结算（197） ------------------
+
+    /**
+     * recover 后原地等待夜窗时，夜休反射短暂接管身体完成原生入睡：世界时间比自然 tick
+     * 多走了一大截。这是入睡已发生的实物证据，等待中的任务按 success 收尾，回执写明入睡
+     * 由外部完成，不再留成等待或被接管取消（197）。
+     */
+    private static void waitCreditsExternallySkippedNight() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            day(world);
+            var task = waitingTask(world);
+            check(task.tick(world.player) == TaskState.RUNNING && record.stepResults().isEmpty(),
+                    "the armed wait holds without translating while the window waits");
+            var time = (ClientLevel.ClientLevelData) field(Level.class, "levelData").get(world.level);
+            // 原生入睡跳夜：一夜约一万多刻在两次观察之间直接跳过，gameTime 未同步前进。
+            time.setDayTime(time.getDayTime() + 14_000L);
+            check(task.tick(world.player) == TaskState.SUCCESS,
+                    "an externally skipped night settles the waiting sleep task as success");
+            var step = record.stepResults().getLast();
+            check(step.success() && step.message().contains("night-rest"),
+                    "the credited step names the likely night-rest reflex: " + step.message());
+            var result = task.result(TaskState.SUCCESS);
+            check(Boolean.TRUE.equals(result.data().get("sleep_completed_externally")),
+                    "the receipt flags the sleep as completed externally");
+            check(result.data().get("observed_time_skip_ticks") instanceof Number skips && skips.longValue() > 0,
+                    "the receipt carries the observed skip size for reconciliation");
+            check(!record.sleepGateWaiting(), "a settled wait disarms the window wait");
+        }
+    }
+
+    /** 对照：时间按 tick 自然推进（含跨过午夜进入次日）不算跳夜，任务继续等待，不虚报成功。 */
+    private static void waitKeepsWaitingThroughNaturalNight() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            day(world);
+            var task = waitingTask(world);
+            check(task.tick(world.player) == TaskState.RUNNING, "fixture: the wait is armed and observed");
+            var time = (ClientLevel.ClientLevelData) field(Level.class, "levelData").get(world.level);
+            // 挪到午夜前三刻：世界 tick 计数与 dayTime 一起挪，推进速度仍然一致，不构成跳夜。
+            long midnight = 17 * 24_000L + 23_997L;
+            setFixtureGameTime(world, midnight);
+            time.setDayTime(midnight);
+            check(task.tick(world.player) == TaskState.RUNNING,
+                    "fixture: baseline re-observed before midnight");
+            for (int i = 0; i < 4; i++) {
+                setFixtureGameTime(world, midnight + i + 1);
+                time.setDayTime(midnight + i + 1);
+                check(task.tick(world.player) == TaskState.RUNNING,
+                        "natural tick-aligned time advance keeps the task waiting");
+            }
+            // 跨过午夜进入次日清晨：dayIndex 前进了，但推进速度与 tick 一致，不是入睡跳夜。
+            check(WorldTimeSemantics.dayIndex(world.level) > 17,
+                    "fixture: the natural passage really crossed into the next day");
+            check(record.stepResults().isEmpty(),
+                    "a naturally passed night without sleep is never credited as success");
+        }
+    }
+
+    /** 跳夜已经发生后才到来的接管取消：stop 把睡成的任务按 success 交回，不落成 cancelled/takeover。 */
+    private static void takeoverAfterSkippedNightSettlesSuccess() throws Exception {
+        try (var world = new InteractionWorldTestHarness()) {
+            day(world);
+            var task = waitingTask(world);
+            check(task.tick(world.player) == TaskState.RUNNING, "fixture: the wait is armed and observed");
+            var time = (ClientLevel.ClientLevelData) field(Level.class, "levelData").get(world.level);
+            time.setDayTime(time.getDayTime() + 14_000L);
+            task.stop(world.player, Task.StopReason.REPLACED);
+            check(record.getState() == TaskState.SUCCESS,
+                    "a takeover arriving after the sleep fact keeps the success state");
+            var result = task.result(TaskState.SUCCESS);
+            check(result.success() && Boolean.TRUE.equals(result.data().get("sleep_completed_externally")),
+                    "the settled receipt still reports the external sleep fact");
+        }
+    }
+
+    /** 已答 recover 的等待任务：置位等待标记，等待分支每刻先观察时间推进再决定继续或结算。 */
+    private static IntentTask waitingTask(InteractionWorldTestHarness world) throws Exception {
+        var goal = new Goal("maicraft:sleep", "sleep", null, "{}", "{}", List.of(), List.of());
+        record = new IntentTaskRecord(UUID.randomUUID(), null, goal);
+        record.armSleepGateWait();
+        return new IntentTask(world.player, record, runtime());
+    }
 }
