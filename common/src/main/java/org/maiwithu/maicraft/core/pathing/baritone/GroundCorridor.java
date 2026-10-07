@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.List;
 import java.util.function.Predicate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.Mth;
@@ -79,6 +80,86 @@ public final class GroundCorridor {
         var view = new LoadedView(world, loaded, this::charge);
         try { return inspect(view, from, to); }
         catch (RuntimeException | LinkageError unavailable) { return false; }
+    }
+
+    /**
+     * 下坑走行段：碰撞、禁入格与危险格的检查与 {@link #clear} 完全相同，但支撑覆盖允许在坑口断开——
+     * 走向低一格凹格的水平段末端本来就悬在坑口上方。断口处身体跨过的每个无支撑柱列必须经 gap 放行，
+     * 调用方用“该柱列本身也是恰低一格的可站立开口”兜底，保证每一步要么踩着支撑、要么是普通的一格下踏。
+     */
+    public boolean descentWalk(Vec3 from, Vec3 to, Predicate<BlockPos> gapAllowed) {
+        if (exhausted() || from == null || to == null || !Double.isFinite(from.lengthSqr() + to.lengthSqr())
+                || !Double.isFinite(width + height) || width <= 0 || width > 2 || height <= 0 || height > 4
+                || Math.abs(from.y - to.y) > EPS || from.distanceToSqr(to) > MAX_LENGTH * MAX_LENGTH
+                || !physical.clearSegment(from, to, width, height)) return false;
+        var view = new LoadedView(world, loaded, this::charge);
+        try { return inspectDescent(view, from, to, gapAllowed); }
+        catch (RuntimeException | LinkageError unavailable) { return false; }
+    }
+
+    private boolean inspectDescent(BlockGetter view, Vec3 from, Vec3 to, Predicate<BlockPos> gapAllowed) {
+        double half = width / 2;
+        var supports = new ArrayList<double[]>();
+        var gapCells = new ArrayList<BlockPos>();
+        var gapSpans = new ArrayList<double[]>();
+        for (int x = Mth.floor(Math.min(from.x, to.x) - half) - 1; x <= Math.floor(Math.max(from.x, to.x) + half) + 1; x++) {
+            for (int z = Mth.floor(Math.min(from.z, to.z) - half) - 1; z <= Math.floor(Math.max(from.z, to.z) + half) + 1; z++) {
+                // 位于身体扫掠范围外一格的形状所有者也可能向路线凸出。
+                if (interval(from, to, x - half - 1, x + half + 2, z - half - 1, z + half + 2) == null) continue;
+                var columnSpans = new ArrayList<double[]>();
+                for (int y = Mth.floor(from.y) - 2; y <= Math.floor(from.y + height) + 1; y++) {
+                    BlockPos cell = new BlockPos(x, y, z);
+                    BlockState state = view.getBlockState(cell);
+                    AABB owner = new AABB(cell);
+                    if (hits(from, to, owner, half, height, false) && forbidden.contains(cell.asLong())
+                            || hits(from, to, owner, half, height, true) && TransportLanding.unsafe(view, cell, state)) return false;
+                    for (AABB local : state.getCollisionShape(view, cell, CollisionContext.empty()).toAabbs()) {
+                        AABB box = local.move(cell);
+                        if (hits(from, to, box, half, height, false)) return false;
+                        if (Math.abs(box.maxY - from.y) > EPS) continue;
+                        // 保证脚底轮廓仍有真实支撑，包括方块格交界处。
+                        double contact = Math.max(0, half - Math.min(0.05, half / 2));
+                        double[] span = interval(from, to, box.minX - contact, box.maxX + contact,
+                                box.minZ - contact, box.maxZ + contact);
+                        if (span != null) { supports.add(span); columnSpans.add(span); }
+                    }
+                }
+                // 身体扫过该柱列而站立层的可踩顶面盖不住扫掠段时记为断口柱列（含整列无顶面的开口）；
+                // 脚位取站立层那格，供调用方核它能否落脚。
+                double[] over = interval(from, to, x - half, x + 1 + half, z - half, z + 1 + half);
+                if (over != null && !covers(columnSpans, over)) {
+                    gapCells.add(new BlockPos(x, Mth.floor(from.y), z));
+                    gapSpans.add(over);
+                }
+            }
+        }
+        // 支撑未覆盖的路段即断口；断口柱列的扫掠区间与之重叠时要求调用方逐柱放行。
+        supports.sort(Comparator.comparingDouble(span -> span[0]));
+        double covered = 0;
+        var gaps = new ArrayList<double[]>();
+        for (double[] span : supports) {
+            if (span[0] > covered + EPS) gaps.add(new double[]{covered, span[0]});
+            covered = Math.max(covered, span[1]);
+        }
+        if (covered < 1 - EPS) gaps.add(new double[]{covered, 1});
+        for (int i = 0; i < gapCells.size(); i++) {
+            double[] span = gapSpans.get(i);
+            boolean overGap = gaps.stream().anyMatch(gap -> span[0] <= gap[1] - EPS && span[1] >= gap[0] + EPS);
+            if (overGap && !gapAllowed.test(gapCells.get(i))) return false;
+        }
+        return true;
+    }
+
+    /** 各段排序后能否连续盖住整个区间。 */
+    private static boolean covers(List<double[]> spans, double[] range) {
+        spans.sort(Comparator.comparingDouble(span -> span[0]));
+        double covered = range[0];
+        for (double[] span : spans) {
+            if (span[0] > covered + EPS) return false;
+            covered = Math.max(covered, span[1]);
+            if (covered >= range[1] - EPS) return true;
+        }
+        return covered >= range[1] - EPS;
     }
 
     private boolean inspect(BlockGetter view, Vec3 from, Vec3 to) {
