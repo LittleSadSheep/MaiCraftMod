@@ -9,13 +9,15 @@ import java.nio.file.Path;
 import java.util.Properties;
 
 /**
- * 读取并保存客户端的 Dev 预览开关、F9 调试面板可见性与导航路线显示，文件是 config/maicraft-preview.properties；不修改服务器设置。
+ * 读取并保存客户端的 Dev 预览开关、F9 调试面板可见性、导航路线显示与 attention 事件流显示，
+ * 文件是 config/maicraft-preview.properties；不修改服务器设置。
  */
 public final class PreviewConfig {
     private static Path file;
     private static boolean enabled;
     private static boolean hudVisible;
     private static boolean pathLines;
+    private static boolean attentionFeed = true;
     private PreviewConfig() {}
 
     // 没有配置、读坏或键不是 true 时默认关闭。状态保存在内存里，不会每次查询都重读文件。
@@ -25,12 +27,13 @@ public final class PreviewConfig {
         if (Files.isRegularFile(file)) {
             try (Reader reader = Files.newBufferedReader(file)) { values.load(reader); }
             catch (IOException | IllegalArgumentException ignored) {
-                enabled = false; hudVisible = false; pathLines = false; return;
+                enabled = false; hudVisible = false; pathLines = false; attentionFeed = true; return;
             }
         }
         enabled = Boolean.parseBoolean(values.getProperty("devMode", "false"));
         hudVisible = Boolean.parseBoolean(values.getProperty("debugHud", "false"));
         pathLines = Boolean.parseBoolean(values.getProperty("pathLines", "false"));
+        attentionFeed = Boolean.parseBoolean(values.getProperty("attentionFeed", "true"));
     }
 
     static boolean enabled() {
@@ -74,7 +77,20 @@ public final class PreviewConfig {
         persist();
     }
 
-    // 两个开关共用同一份文件，每次都整体重写，避免互相覆盖对方刚保存的值。
+    /** attention 事件流显示是 F9+A 的独立开关，只影响调试面板下方的事件区；MCP 感知照常产出。 */
+    public static boolean attentionFeed(Path gameDirectory) {
+        if (file == null) load(gameDirectory);
+        return attentionFeed;
+    }
+
+    static boolean attentionFeed() { return attentionFeed; }
+
+    public static void attentionFeed(boolean value) throws IOException {
+        attentionFeed = value;
+        persist();
+    }
+
+    // 各开关共用同一份文件，每次都整体重写，避免互相覆盖对方刚保存的值。
     private static void persist() throws IOException {
         if (file == null) return;
         Files.createDirectories(file.getParent());
@@ -82,9 +98,10 @@ public final class PreviewConfig {
         values.setProperty("devMode", Boolean.toString(enabled));
         values.setProperty("debugHud", Boolean.toString(hudVisible));
         values.setProperty("pathLines", Boolean.toString(pathLines));
+        values.setProperty("attentionFeed", Boolean.toString(attentionFeed));
         try (Writer writer = Files.newBufferedWriter(file)) {
             values.store(writer,
-                    "MaiCraft client debug; /maicraft dev on|off; F9 panel; F9+H task list; F9+P path lines");
+                    "MaiCraft client debug; /maicraft dev on|off; F9 panel; F9+H task list; F9+P path lines; F9+A attention feed");
         }
     }
 }

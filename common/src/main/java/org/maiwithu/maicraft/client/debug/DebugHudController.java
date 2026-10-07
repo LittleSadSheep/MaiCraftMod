@@ -30,7 +30,8 @@ import org.maiwithu.maicraft.task.TaskState;
 import com.google.gson.JsonObject;
 
 /**
- * F9 切换的常驻调试面板，F9+H 在状态页与任务列表页间切换，F9+P 切换导航路线显示。
+ * F9 切换的常驻调试面板，F9+H 在状态页与任务列表页间切换，F9+P 切换导航路线显示，
+ * F9+A 切换下方 attention 事件区的显示（只影响面板展示，MCP 感知照常产出）。
  * 每刻构建一次只读快照，渲染只画快照；本类不提交任何操作。布局分两段：上方固定状态行
  * （标签行文与 /maicraft status 各自独立），下方聊天框式事件区，长消息按面板宽度自动换行，
  * 新事件把旧事件挤出预算，固定行布局不受事件多少影响。
@@ -66,6 +67,7 @@ public final class DebugHudController {
     private static boolean toggleWasDown;
     private static boolean comboWasDown;
     private static boolean pathComboWasDown;
+    private static boolean attentionComboWasDown;
     /** 面板当前页：false 为状态页（任务/动作等固定行），true 为任务列表页；面板隐藏期间保留。 */
     private static boolean listMode;
     private DebugHudController() {}
@@ -76,8 +78,10 @@ public final class DebugHudController {
         boolean f9Down = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_F9) == GLFW.GLFW_PRESS;
         boolean hDown = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_H) == GLFW.GLFW_PRESS;
         boolean pDown = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_P) == GLFW.GLFW_PRESS;
+        boolean aDown = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_A) == GLFW.GLFW_PRESS;
         boolean listCombo = f9Down && hDown;
         boolean pathCombo = f9Down && pDown;
+        boolean attentionCombo = f9Down && aDown;
         if (listCombo && !comboWasDown) {
             // F9+H 是无条件手势：面板没开就先打开，保证任何时候一步就能看到任务列表。
             listMode = !listMode;
@@ -86,14 +90,18 @@ public final class DebugHudController {
         if (pathCombo && !pathComboWasDown) {
             togglePathLines(minecraft);
         }
+        if (attentionCombo && !attentionComboWasDown) {
+            toggleAttentionFeed(minecraft);
+        }
         // 和弦按住的每一刻都记下 F9 已按下：字母键后松开不会误触发单独 F9 的显隐，
         // 单独 F9 也只在没有任何和弦时生效，避免 F9+P 第一刻同时翻转面板和路线。
-        if (f9Down && !toggleWasDown && !listCombo && !pathCombo) {
+        if (f9Down && !toggleWasDown && !listCombo && !pathCombo && !attentionCombo) {
             toggle(minecraft);
         }
         toggleWasDown = f9Down;
         comboWasDown = listCombo;
         pathComboWasDown = pathCombo;
+        attentionComboWasDown = attentionCombo;
         snapshot = minecraft.player == null
                 || !PreviewConfig.hudVisible(minecraft.gameDirectory.toPath())
                 ? new Snapshot(List.of(), List.of(), 0) : buildSnapshot(minecraft);
@@ -141,8 +149,10 @@ public final class DebugHudController {
                     panelWidth(rows, splitter, maxPanelWidth(minecraft)));
         }
         // 最新报错行与事件区按最终面板宽度折行后再入行集：先由固定行与未折行正文共同定宽，
-        // 折行与背景框再共用这一个值，右缘因此对齐。
-        List<IntentRuntime.AttentionItem> events = IntentRuntime.get().recentAttention(8);
+        // 折行与背景框再共用这一个值，右缘因此对齐。F9+A 关掉事件流后事件整体缺席，
+        // 面板宽度也不再被事件内容撑宽。
+        List<IntentRuntime.AttentionItem> events = PreviewConfig.attentionFeed(minecraft.gameDirectory.toPath())
+                ? IntentRuntime.get().recentAttention(8) : List.of();
         int maxWidth = maxPanelWidth(minecraft);
         String pendingError = appendTaskStatusRows(rows, minecraft);
         int panel = panelWidthWithContent(splitter,
@@ -562,7 +572,7 @@ public final class DebugHudController {
                     + "，但配置保存失败：" + failure.getMessage(), ChatFormatting.YELLOW);
             return;
         }
-        message(minecraft, show ? "调试面板已显示，再按 F9 隐藏；F9+H 切任务列表页，F9+P 切导航路线。"
+        message(minecraft, show ? "调试面板已显示，再按 F9 隐藏；F9+H 切任务列表页，F9+P 切导航路线，F9+A 切 attention 流。"
                 : "调试面板已隐藏。", ChatFormatting.GREEN);
     }
 
@@ -577,6 +587,20 @@ public final class DebugHudController {
             return;
         }
         message(minecraft, show ? "导航路线已显示，再按 F9+P 隐藏。" : "导航路线已隐藏。",
+                ChatFormatting.GREEN);
+    }
+
+    // F9+A 只切调试面板下方 attention 事件流的显示，给画面让位；MCP 感知与任务运行不受影响。
+    private static void toggleAttentionFeed(Minecraft minecraft) {
+        boolean show = !PreviewConfig.attentionFeed(minecraft.gameDirectory.toPath());
+        try {
+            PreviewConfig.attentionFeed(show);
+        } catch (IOException failure) {
+            message(minecraft, "attention 流 " + (show ? "已显示" : "已隐藏")
+                    + "，但配置保存失败：" + failure.getMessage(), ChatFormatting.YELLOW);
+            return;
+        }
+        message(minecraft, show ? "attention 流已显示，再按 F9+A 隐藏。" : "attention 流已隐藏，再按 F9+A 恢复。",
                 ChatFormatting.GREEN);
     }
 

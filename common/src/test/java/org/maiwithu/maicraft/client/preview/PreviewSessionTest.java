@@ -44,6 +44,22 @@ public final class PreviewSessionTest {
             else System.setProperty("maicraft.preview.enabled", prior);
         }
         check(PreviewConfig.pathLines() == pathBefore, "路线开关翻回原状");
+        // F9+A 的事件流开关只影响调试面板事件区：默认显示，翻转会记住，也不受审图启动覆盖影响。
+        boolean attentionBefore = PreviewConfig.attentionFeed();
+        check(attentionBefore, "attention 事件流默认显示");
+        try {
+            PreviewConfig.attentionFeed(false);
+            check(!PreviewConfig.attentionFeed(), "attention 事件流可以隐藏");
+            System.setProperty("maicraft.preview.enabled", "false");
+            check(!PreviewConfig.attentionFeed(), "attention 事件流开关独立于审图启动覆盖");
+            PreviewConfig.attentionFeed(attentionBefore);
+        } catch (IOException impossible) {
+            throw new AssertionError("配置文件未初始化时 persist 不产生 IO", impossible);
+        } finally {
+            if (prior == null) System.clearProperty("maicraft.preview.enabled");
+            else System.setProperty("maicraft.preview.enabled", prior);
+        }
+        check(PreviewConfig.attentionFeed() == attentionBefore, "attention 事件流开关翻回原状");
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
         BlockPos.MutableBlockPos mutable = new BlockPos.MutableBlockPos(1, 64, 2);
