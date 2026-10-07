@@ -66,6 +66,8 @@ public final class MoveToTransportCompletionTest {
         transportFailure(memory, false, 8.5);
         planningStallFailsAfterCeiling(memory);
         planningWorkFuseTripsWithoutApproach(memory);
+        planningBurnoutSettlesWithinTolerance(memory);
+        planningBurnoutKeepsExactStanceHonest(memory);
         degradedShaftLegBeforeFuseFailure(memory);
         knownCellWaypointLegRunsBeforeConcedeFuse(memory);
         knownCellWaypointLegReachesCellAndRestoresTarget(memory);
@@ -189,9 +191,13 @@ public final class MoveToTransportCompletionTest {
 
     /** 规划持续产出工作单位却永不接近目标（地下挖洞寻路的病态形态）时，按收敛熔断收场。 */
     private static void planningWorkFuseTripsWithoutApproach(Unsafe memory) throws Exception {
-        try (var f = new Fixture(memory, .5)) {
+        // 角色站在容差外（4 格）：贴身容差内的烧尽场景由 planningBurnoutSettlesWithinTolerance 单独覆盖。
+        try (var f = new Fixture(memory, 4.5)) {
             var record = new MoveToTaskRecord("planning-fuse", 6000, 0D, 0D, 0D, null, false);
             var task = f.task(record, true); task.onStart();
+            // 目标在容差外时 onStart 走过 startWalkingNav，任务用的是重建的导航，桩要打在它身上。
+            f.navigator = (TransportNavigator) field(PlayerNav.class, "navigator")
+                    .get(field(AbstractCompanionTask.class, "nav").get(task));
             var session = planningSession(f);
             var probe = bareGround(memory, f);
             long highWater = 0;
@@ -217,6 +223,74 @@ public final class MoveToTransportCompletionTest {
                     "回执要暴露搜索预算的实际消耗");
             check(result.data().get("best_distance_blocks") instanceof Number,
                     "回执要暴露收敛趋势（曾达到的最近距离）");
+        }
+    }
+
+    /**
+     * 贴身目标（容差内）规划烧尽时就近收尾：身体立定在本任务单容差内、目标区域已加载，
+     * 收敛熔断不再以 planning_stall 失败，而是按到达结算并声明结算来源，不再烧穿预算后交付误导性失败。
+     */
+    private static void planningBurnoutSettlesWithinTolerance(Unsafe memory) throws Exception {
+        try (var f = new Fixture(memory, 2.5)) {
+            // 只给 x/z 的柱列目标，零半径：导航容差收不下身体，但失败路径的教学性成功按三格算。
+            var record = new MoveToTaskRecord("burnout-settle", 600_000, 0D, null, 0D, null, false);
+            var task = f.task(record, true); task.onStart();
+            f.navigator = (TransportNavigator) field(PlayerNav.class, "navigator")
+                    .get(field(AbstractCompanionTask.class, "nav").get(task));
+            var session = planningSession(f);
+            var probe = bareGround(memory, f);
+            long highWater = 0;
+            TaskState state = TaskState.RUNNING;
+            for (int tick = 0; tick < 1500 && state == TaskState.RUNNING; tick++) {
+                f.nextTick();
+                if (tick > 0 && tick % 100 == 0) {
+                    session.verifiedProgressTick = f.player.level().getGameTime();
+                    highWater += 6000;
+                    probe.observe(highWater);
+                }
+                state = task.onTick();
+            }
+            check(state == TaskState.SUCCESS,
+                    "贴身容差内目标规划烧尽应就近收尾而不是 planning_stall，实际 " + state);
+            var result = task.result(TaskState.SUCCESS);
+            check(Boolean.TRUE.equals(result.data().get("settled_nearby_after_planning_burnout")),
+                    "就近收尾回执要声明结算来源");
+            check(result.data().get("arrival_grade") != null,
+                    "就近收尾要携带到达分级与剩余距离，供调用方自行复检");
+            check(result.message().contains("closest stance within the arrival tolerance"),
+                    "就近收尾话术要说明规划未能把身体带得更近");
+        }
+    }
+
+    /** 精确站位目标没有容差短路：贴身烧尽仍诚实失败，但失败说明要点名身体已站在近旁并给出容差重发出路。 */
+    private static void planningBurnoutKeepsExactStanceHonest(Unsafe memory) throws Exception {
+        try (var f = new Fixture(memory, 2.5)) {
+            var record = new MoveToTaskRecord("burnout-exact", 600_000, 0D, 0D, 0D, null,
+                    false, false, TransportMode.GROUND, false, true, 0, 0);
+            var task = f.task(record, true); task.onStart();
+            f.navigator = (TransportNavigator) field(PlayerNav.class, "navigator")
+                    .get(field(AbstractCompanionTask.class, "nav").get(task));
+            var session = planningSession(f);
+            var probe = bareGround(memory, f);
+            long highWater = 0;
+            TaskState state = TaskState.RUNNING;
+            for (int tick = 0; tick < 1500 && state == TaskState.RUNNING; tick++) {
+                f.nextTick();
+                if (tick > 0 && tick % 100 == 0) {
+                    session.verifiedProgressTick = f.player.level().getGameTime();
+                    highWater += 6000;
+                    probe.observe(highWater);
+                }
+                state = task.onTick();
+            }
+            check(state == TaskState.FAILED, "精确站位贴身烧尽必须诚实失败，不能冒充到达");
+            var result = task.result(TaskState.FAILED);
+            check(String.valueOf(result.data().get("failure_type")).equalsIgnoreCase("planning_stall"),
+                    "精确站位烧尽仍按规划不收敛失败");
+            check(String.valueOf(result.message()).contains("already standing about 2.0 blocks from the exact cell"),
+                    "失败说明要点名身体已站在精确格近旁");
+            check(String.valueOf(result.message()).contains("resubmit travel without exact"),
+                    "失败说明要给出容差重发的出路");
         }
     }
 
