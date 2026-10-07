@@ -23,6 +23,8 @@ public final class ParameterNormalizerTest {
         movesDeclaredParameterIntoParameters();
         keepsUnrestorableValuesForRejection();
         keepsStringFieldsUntouched();
+        restoresNestedBlueprintCoordinates();
+        restoresConstraintAndRuntimeKeys();
         System.out.println("ParameterNormalizerTest OK: host encodings restored by declared contract types");
     }
 
@@ -117,6 +119,66 @@ public final class ParameterNormalizerTest {
         normalize(goal);
         check(goal.getAsJsonObject("parameters").get("label").getAsJsonPrimitive().isString(), "label stays a string");
         check(goal.getAsJsonObject("parameters").get("radius").getAsJsonPrimitive().isNumber(), "radius restored");
+    }
+
+    private static void restoresNestedBlueprintCoordinates() {
+        // 显式蓝图里的版本号、偏移三元组、传送带端点和带轮列表都被写成字符串时，按坐标逐层还原；
+        // 方块状态值本来就是字符串，含小数的"三元组"也不是方块坐标，两者都保持原样交给施工解析。
+        JsonObject goal = goal("""
+                {"ability":"maicraft:design_machine","outcome":"审阅置物台与传送带",
+                 "parameters":{"blueprint":{"schema_version":"1",
+                   "blocks":[{"offset":["0","1","-2"],"block_id":"minecraft:stone",
+                              "properties":{"count":"2","powered":"true"}},
+                             {"offset":["0.5","1","0"],"block_id":"minecraft:dirt"}],
+                   "assembly":{"installations":[{"type":"create:belt","first":["0","0","0"],"second":[2,"0",0],
+                                                 "pulleys":[["1","0","0"]]}]}}}}""");
+        normalize(goal);
+        JsonObject blueprint = goal.getAsJsonObject("parameters").getAsJsonObject("blueprint");
+        check(blueprint.get("schema_version").getAsJsonPrimitive().isNumber(), "schema_version restored");
+        JsonObject first = blueprint.getAsJsonArray("blocks").get(0).getAsJsonObject();
+        check(first.getAsJsonArray("offset").get(2).getAsJsonPrimitive().isNumber()
+                && first.getAsJsonArray("offset").get(2).getAsInt() == -2, "offset triple restored");
+        check(first.getAsJsonObject("properties").get("count").getAsJsonPrimitive().isString()
+                && first.getAsJsonObject("properties").get("powered").getAsJsonPrimitive().isString(),
+                "block-state properties stay serialized strings");
+        check(blueprint.getAsJsonArray("blocks").get(1).getAsJsonObject().getAsJsonArray("offset").get(0)
+                .getAsJsonPrimitive().isString(), "fractional triple is not treated as block coordinates");
+        JsonObject belt = blueprint.getAsJsonObject("assembly").getAsJsonArray("installations").get(0).getAsJsonObject();
+        check(belt.getAsJsonArray("second").get(1).getAsJsonPrimitive().isNumber(), "mixed belt endpoint restored");
+        check(belt.getAsJsonArray("pulleys").get(0).getAsJsonArray().get(0).getAsJsonPrimitive().isNumber(),
+                "pulley triple inside list restored");
+    }
+
+    private static void restoresConstraintAndRuntimeKeys() {
+        // 约束 hard 与死亡自恢复授权键都只有真假含义：parameters 与 preferences 两处的 "true"/"false" 都还原为布尔。
+        JsonObject goal = goal("""
+                {"ability":"maicraft:acquire_items","outcome":"取铁锭",
+                 "parameters":{"item_id":"minecraft:iron_ingot","auto_respawn":"true"},
+                 "preferences":{"recover_after_death":"false"},
+                 "constraints":[{"kind":"maicraft:keep_area","description":"不碰仓库","hard":"false"}]}""");
+        List<String> notes = normalize(goal);
+        check(goal.getAsJsonObject("parameters").get("auto_respawn").getAsJsonPrimitive().isBoolean(),
+                "auto_respawn in parameters restored");
+        check(!goal.getAsJsonObject("preferences").get("recover_after_death").getAsBoolean()
+                && goal.getAsJsonObject("preferences").get("recover_after_death").getAsJsonPrimitive().isBoolean(),
+                "recover_after_death in preferences restored to false");
+        check(!goal.getAsJsonArray("constraints").get(0).getAsJsonObject().get("hard").getAsBoolean(),
+                "constraint hard restored to false");
+        check(notes.size() == 3, "three restorations reported: " + notes);
+        // 顺序任务根只收 protected_labels 与运行时键，根上的字符串布尔同样还原。
+        JsonObject sequence = goal("""
+                {"ability":"maicraft:sequence","outcome":"先取料再返回","parameters":{"auto_respawn":"false"},
+                 "children":[{"ability":"maicraft:acquire_items","outcome":"取铁锭",
+                              "parameters":{"item_id":"minecraft:iron_ingot","count":"2"}}]}""");
+        normalize(sequence);
+        check(sequence.getAsJsonObject("parameters").get("auto_respawn").getAsJsonPrimitive().isBoolean(),
+                "sequence root runtime key restored");
+        // "yes" 没有唯一真假含义，保留原样。
+        JsonObject vague = goal("""
+                {"ability":"maicraft:acquire_items","outcome":"取铁锭","parameters":{"item_id":"minecraft:iron_ingot",
+                 "auto_respawn":"yes"}}""");
+        normalize(vague);
+        check(vague.getAsJsonObject("parameters").get("auto_respawn").getAsJsonPrimitive().isString(), "yes stays a string");
     }
 
     private static List<String> normalize(JsonObject goal) {

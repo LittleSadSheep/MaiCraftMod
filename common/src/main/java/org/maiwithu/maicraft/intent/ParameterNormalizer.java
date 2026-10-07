@@ -23,8 +23,10 @@ public final class ParameterNormalizer {
 
     private static final Pattern INTEGER = Pattern.compile("[+-]?\\d{1,18}");
     private static final Pattern NUMBER = Pattern.compile("[+-]?(\\d+(\\.\\d*)?|\\.\\d+)([eE][+-]?\\d+)?");
-    /** 对象字段里只还原方块坐标和版本号这类固定为整数的键，其他字符串（标签、文字）一律不碰。 */
-    private static final Set<String> INTEGER_KEYS = Set.of("x", "y", "z", "schema_version");
+    /** 嵌套对象里只还原方块坐标、版本号和物品件数这类固定为整数的键，其他字符串（标签、文字）一律不碰。 */
+    private static final Set<String> INTEGER_KEYS = Set.of("x", "y", "z", "schema_version", "count");
+    /** 方块状态值按原版序列化为字符串（如 "true"、"3"），整棵子树原样交给施工解析。 */
+    private static final Set<String> OPAQUE_KEYS = Set.of("properties");
     /** goal 顶层字段；其余键若是该能力声明的参数，说明被放错了层级。 */
     private static final Set<String> GOAL_FIELDS = Set.of("ability", "outcome", "target", "parameters",
             "preferences", "constraints", "children", "on_failure");
@@ -32,7 +34,8 @@ public final class ParameterNormalizer {
     private ParameterNormalizer() {}
 
     /**
-     * 原地还原一份公开 goal：目标坐标、参数类型、放错层级的参数，以及 sequence 子目标。
+     * 原地还原一份公开 goal：目标坐标、参数类型（含嵌套坐标）、放错层级的参数、约束 hard、
+     * 运行时授权键，以及 sequence 子目标。
      * 每处改写都记进 notes，回执据此如实说明 Mod 收到后做了哪些编码还原。
      */
     public static void normalizeGoal(JsonObject goal, String path, List<String> notes) {
@@ -42,8 +45,20 @@ public final class ParameterNormalizer {
         if (goal.has("target") && goal.get("target").isJsonObject()) {
             JsonObject target = goal.getAsJsonObject("target");
             if (target.has("position") && target.get("position").isJsonObject())
-                normalizeIntegerKeys(target.getAsJsonObject("position"), path + ".target.position", notes);
+                nested(target.get("position"), path + ".target.position", notes);
         }
+        // 约束的 hard 只有真假两种含义："true"/"false" 先还原为布尔，再由约束校验检查种类和参数。
+        if (goal.has("constraints") && goal.get("constraints").isJsonArray()) {
+            JsonArray constraints = goal.getAsJsonArray("constraints");
+            for (int i = 0; i < constraints.size(); i++)
+                if (constraints.get(i).isJsonObject())
+                    normalizeBoolean(constraints.get(i).getAsJsonObject(), "hard", path + ".constraints[" + i + "]", notes);
+        }
+        // 死亡后自动重生、死后找回这两个运行时授权键也可写在 preferences，按布尔还原，
+        // 角色死亡时运行时读到的就是确定的真假，不再依赖宽松读取去猜字符串含义。
+        if (goal.has("preferences") && goal.get("preferences").isJsonObject())
+            for (String key : SemanticGoalContract.runtimeAuthorizationKeys())
+                normalizeBoolean(goal.getAsJsonObject("preferences"), key, path + ".preferences", notes);
         Map<String, String> types = SemanticAbilityCatalog.parameterTypes(ability);
         // 参数被写在 goal 顶层（如 goal.count）时，只有该能力确实声明了这个参数、且 parameters 里没有同名值，
         // 才搬进 goal.parameters；有冲突时保留原样，由入口按"未知字段"拒绝并指出位置。
@@ -75,14 +90,17 @@ public final class ParameterNormalizer {
         Map<String, String> types = SemanticAbilityCatalog.parameterTypes(ability);
         for (String key : List.copyOf(parameters.keySet())) {
             String type = types.get(key);
+            // 运行时授权键不在各能力参数表里，但任何能力（含 sequence 根）都接受，同样按布尔还原。
+            if (type == null && SemanticGoalContract.runtimeAuthorizationKeys().contains(key)) type = "boolean";
             if (type == null) continue;
             JsonElement before = parameters.get(key);
-            JsonElement after = normalizeValue(type, before, path + "." + key, notes);
+            JsonElement after = normalizeValue(type, before, OPAQUE_KEYS.contains(key), path + "." + key, notes);
             if (after != before) parameters.add(key, after);
         }
     }
 
-    private static JsonElement normalizeValue(String type, JsonElement value, String path, List<String> notes) {
+    private static JsonElement normalizeValue(String type, JsonElement value, boolean opaque, String path,
+                                              List<String> notes) {
         if (value == null || value.isJsonNull()) return value;
         JsonElement current = value;
         // XML 风格的工具调用会把数组项包成 {"item": ...}；除对象字段外，这层包装没有业务含义。
@@ -94,8 +112,12 @@ public final class ParameterNormalizer {
         if ("integer".equals(type)) return converted(current, integer(current), path, "integer", notes);
         if ("number".equals(type)) return converted(current, number(current), path, "number", notes);
         if ("boolean".equals(type)) return converted(current, bool(current), path, "boolean", notes);
-        if (type.startsWith("array")) return array(current, path, notes);
-        if ("object".equals(type)) return object(current, path, notes);
+        if (type.startsWith("array")) {
+            JsonElement array = array(current, path, notes);
+            // 对象数组（观察点、拼装声明、编辑列表）逐项还原坐标；字符串与资源 ID 数组保持原样。
+            return "array<object>".equals(type) || "array".equals(type) ? nested(array, path, notes) : array;
+        }
+        if ("object".equals(type)) return object(current, opaque, path, notes);
         return current;
     }
 
@@ -132,7 +154,7 @@ public final class ParameterNormalizer {
         return value;
     }
 
-    private static JsonElement object(JsonElement value, String path, List<String> notes) {
+    private static JsonElement object(JsonElement value, boolean opaque, String path, List<String> notes) {
         JsonElement current = value;
         // 整个对象被写成 JSON 字符串时先解析；解析失败保留原值。
         if (isString(current) && current.getAsString().trim().startsWith("{")) {
@@ -146,19 +168,72 @@ public final class ParameterNormalizer {
                 // 非法对象文本交给契约检查，不在这里猜测含义。
             }
         }
-        if (current.isJsonObject()) normalizeIntegerKeys(current.getAsJsonObject(), path, notes);
+        // 放置单格的方块状态整份是序列化字符串，不进坐标还原；其余对象（蓝图、目的地、生产网络）逐层还原。
+        if (current.isJsonObject() && !opaque) nested(current, path, notes);
         return current;
     }
 
-    private static void normalizeIntegerKeys(JsonObject object, String path, List<String> notes) {
+    /**
+     * 递归还原自由对象里的坐标与件数编码：固定整数键（x/y/z、schema_version、count）和 [x,y,z] 三元组。
+     * 蓝图 offset、传送带 first/second/pulleys、目的地坐标都属于这类；对象和数组原地改写，
+     * 只有整段三元组被换成新数组时才返回新值，由调用处写回。
+     */
+    private static JsonElement nested(JsonElement value, String path, List<String> notes) {
+        if (value.isJsonArray()) {
+            JsonArray array = value.getAsJsonArray();
+            JsonArray triple = integerTriple(array);
+            if (triple != null) {
+                notes.add(path + ": string -> integer coordinates");
+                return triple;
+            }
+            for (int i = 0; i < array.size(); i++) {
+                JsonElement before = array.get(i);
+                JsonElement after = nested(before, path + "[" + i + "]", notes);
+                if (after != before) array.set(i, after);
+            }
+            return value;
+        }
+        if (!value.isJsonObject()) return value;
+        JsonObject object = value.getAsJsonObject();
         for (String key : List.copyOf(object.keySet())) {
-            if (!INTEGER_KEYS.contains(key)) continue;
-            JsonElement integer = integer(object.get(key));
+            // 方块状态子树的值本来就是字符串，保留原样，避免把 "3"、"true" 改成数字或布尔后施工比对失配。
+            if (OPAQUE_KEYS.contains(key)) continue;
+            JsonElement before = object.get(key);
+            JsonElement integer = INTEGER_KEYS.contains(key) ? integer(before) : null;
             if (integer != null) {
                 object.add(key, integer);
                 notes.add(path + "." + key + ": string -> integer");
+                continue;
             }
+            JsonElement after = nested(before, path + "." + key, notes);
+            if (after != before) object.add(key, after);
         }
+        return value;
+    }
+
+    /** 三项都是整数或整数字符串、且至少一项是字符串时，按方块坐标还原；含小数或文字的数组保持原样。 */
+    private static JsonArray integerTriple(JsonArray array) {
+        if (array.size() != 3) return null;
+        JsonArray result = new JsonArray();
+        boolean restored = false;
+        for (JsonElement item : array) {
+            if (item.isJsonPrimitive() && item.getAsJsonPrimitive().isNumber()) {
+                result.add(item);
+                continue;
+            }
+            JsonElement integer = integer(item);
+            if (integer == null) return null;
+            result.add(integer);
+            restored = true;
+        }
+        return restored ? result : null;
+    }
+
+    private static void normalizeBoolean(JsonObject object, String key, String path, List<String> notes) {
+        JsonElement bool = bool(object.get(key));
+        if (bool == null) return;
+        object.add(key, bool);
+        notes.add(path + "." + key + ": string -> boolean");
     }
 
     private static JsonElement integer(JsonElement value) {

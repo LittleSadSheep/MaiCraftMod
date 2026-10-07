@@ -36,6 +36,12 @@ public final class PublicArgumentNormalizationTest {
                  "parameters":{"operation":"ae2_supply","item_id":"minecraft:iron_ingot","allow_use":"true"}}}}}"""), answered);
         check(task.getAsJsonObject("answer").getAsJsonObject("details").getAsJsonObject("goal")
                 .getAsJsonObject("parameters").get("allow_use").getAsBoolean(), "answer goal boolean restored");
+        // 约束 hard 写成 "true" 时先还原，原先的 "hard must be a boolean" 不再出现。
+        JsonObject constrained = PublicToolCatalog.validateAndNormalize(PublicToolCatalog.EXECUTE, JsonParser.parseString("""
+                {"goal":{"ability":"maicraft:acquire_items","outcome":"取铁锭","parameters":{"item_id":"minecraft:iron_ingot"},
+                 "constraints":[{"kind":"maicraft:keep_area","description":"不碰仓库","hard":"true"}]}}"""), new ArrayList<>());
+        check(constrained.getAsJsonObject("goal").getAsJsonArray("constraints").get(0).getAsJsonObject()
+                .get("hard").getAsJsonPrimitive().isBoolean(), "constraint hard restored at the public entry");
         // 顶层字段有逐项类型的输入 Schema，仍保持严格：字符串半径照旧拒收。
         boolean strict = false;
         try {

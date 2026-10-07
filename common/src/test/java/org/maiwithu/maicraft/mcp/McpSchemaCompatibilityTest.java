@@ -63,9 +63,17 @@ public final class McpSchemaCompatibilityTest {
                 badTarget.getAsJsonArray("children").get(0).getAsJsonObject().getAsJsonObject("target")
                         .getAsJsonObject("position").addProperty("x", "zero");
                 reject(tool, arguments(tool, badTarget), runtime, "子目标坐标仍须为整数");
+                // 约束 hard 写成 "true" 时同样按布尔还原后受理，运行时拿到的是真布尔；"yes" 没有唯一含义仍拒收。
+                JsonObject spelledConstraint = nestedGoal(0);
+                spelledConstraint.getAsJsonArray("constraints").get(0).getAsJsonObject().addProperty("hard", "true");
+                check(!call(tool, arguments(tool, spelledConstraint)).get("isError").getAsBoolean(), "字符串约束布尔值还原后受理");
+                JsonObject handed = tool.equals("task") ? runtime.last.getAsJsonObject("answer").getAsJsonObject("details")
+                        .getAsJsonObject("goal") : runtime.last.getAsJsonObject("goal");
+                check(handed.getAsJsonArray("constraints").get(0).getAsJsonObject().get("hard").getAsJsonPrimitive().isBoolean(),
+                        "运行时收到布尔约束");
                 JsonObject badConstraint = nestedGoal(0);
-                badConstraint.getAsJsonArray("constraints").get(0).getAsJsonObject().addProperty("hard", "true");
-                reject(tool, arguments(tool, badConstraint), runtime, "约束布尔值不能字符串化");
+                badConstraint.getAsJsonArray("constraints").get(0).getAsJsonObject().addProperty("hard", "yes");
+                reject(tool, arguments(tool, badConstraint), runtime, "约束布尔值须能唯一还原");
             }
             // JSON 外观的聊天文本属于玩家要求的字面内容，不能因兼容宿主而擅自解析成对象。
             JsonObject literal = json("{\"ability\":\"maicraft:chat\",\"outcome\":\"发送原文\",\"parameters\":{}}");
