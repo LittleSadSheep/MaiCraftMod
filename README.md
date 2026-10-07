@@ -182,7 +182,7 @@ Linux 或 macOS 使用：
 
 将与你的加载器匹配、文件名不含 `sources` 的 JAR 放入服务器及 AI 所在客户端的 `mods` 目录。普通玩家可以不安装 MaiCraft。Fabric 版本还需要 Fabric API。
 
-CI 构建通过后，也可以从 [GitHub Actions](https://github.com/LittleSadSheep/MaiCraftMod/actions/workflows/ci.yml) 对应运行的 Artifacts 下载双加载器测试包；产物保留 14 天，不会自动发布 Release。自动检查与日志说明见[开发指南](docs/dev/contributing.md#github-自动检查)。
+两个平台的 CI 构建都通过后会自动发布 [Release](https://github.com/LittleSadSheep/MaiCraftMod/releases)：附件就是上面两个加载器的安装包，说明取自 `CHANGELOG.md` 中该版本的条目。构建期间的测试包也可以从 [GitHub Actions](https://github.com/LittleSadSheep/MaiCraftMod/actions/workflows/ci.yml) 对应运行的 Artifacts 下载，保留 14 天。自动检查与日志说明见[开发指南](docs/dev/contributing.md#github-自动检查)。
 
 建议 AI 客户端与服务端使用相同版本。单人世界由同一个客户端安装提供集成服务端支持，无需另装一份。AI 客户端入服后最多等待 200 个客户端游戏刻（通常 10 秒）完成服务端确认；等待期间禁止世界感知、F8 接管及自动化操作，超时后显示安装提示并断开连接。换服必须重新确认，普通玩家不受此客户端检查影响。
 

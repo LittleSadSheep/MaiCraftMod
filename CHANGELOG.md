@@ -1,6 +1,6 @@
 # 更新日志
 
-MaiCraft 按版本记录玩家和 Agent 能感受到的变化。版本号即 `gradle.properties` 里的 `version`，由 CI 在合入 `main` 时递增补丁号。
+MaiCraft 按版本记录玩家和 Agent 能感受到的变化。版本号即 `gradle.properties` 里的 `version`，由 CI 在合入 `main` 时递增补丁号；构建通过后按该版本号发布 Release，说明就是这里的对应条目。
 
 每改一个功能、行为或契约（包括修复），在同一个提交里于“未发布”下加一条；合入 `main` 时把“未发布”改成即将产出的版本号和日期。约定见 [docs/dev/contributing.md](docs/dev/contributing.md) 的“每改一个功能，同步记一条更新日志”。
 

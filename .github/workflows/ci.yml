@@ -29,8 +29,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Verify version handling
-        run: node --test .github/scripts/bump-version.test.cjs
+      - name: Verify version handling and release notes
+        run: node --test .github/scripts/bump-version.test.cjs .github/scripts/release-notes.test.cjs
       - name: Write signed version commit
         id: version
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -83,6 +83,7 @@ jobs:
       - name: Upload installable mods
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
+          # 名字按版本、系统、构建提交组成，发布任务按同一公式取 ubuntu 那份作为 Release 附件。
           name: maicraft-${{ needs.version.outputs.version }}-${{ runner.os }}-${{ needs.version.outputs.commit }}
           # 只交付两个加载器的安装包；公共模块、源码和开发包不能直接放进玩家的 mods 目录。
           path: |
@@ -105,3 +106,93 @@ jobs:
             **/build/test-results/
           if-no-files-found: ignore
           retention-days: 14
+
+  release:
+    name: Publish release
+    needs: [version, build]
+    if: needs.version.outputs.ready == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      # 发布要创建标签和 Release；取同一次运行的构建产物另需读取 Actions 产物。
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.version.outputs.version }}
+      COMMIT: ${{ needs.version.outputs.commit }}
+      ASSETS: build/ci/release-assets
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout version commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.version.outputs.commit }}
+          persist-credentials: false
+
+      - name: Take release notes from changelog
+        # 正文来自 CHANGELOG.md 中该版本的段落；维护者尚未把“未发布”改成版本号时用“未发布”段落。
+        run: |
+          mkdir -p build/ci "$ASSETS"
+          node .github/scripts/release-notes.cjs "$VERSION" build/ci/release-notes.md
+
+      - name: Download build artifacts
+        # 直接取同一次运行里 ubuntu 构建上传的产物：两个平台产出内容一致的 JAR，只发布其中一份。
+        run: |
+          name="maicraft-$VERSION-Linux-$COMMIT"
+          gh api "repos/$GH_REPO/actions/runs/$GITHUB_RUN_ID/artifacts" --paginate \
+            --jq '.artifacts[] | "\(.id)\t\(.name)"' > build/ci/artifacts.tsv
+          mapfile -t found < <(awk -F'\t' -v name="$name" '$2 == name { print $1 }' build/ci/artifacts.tsv)
+          if [ "${#found[@]}" -ne 1 ]; then
+            echo "::error::期望恰好一个名为 $name 的构建产物，实际 ${#found[@]} 个"
+            cat build/ci/artifacts.tsv
+            exit 1
+          fi
+          gh api -H "Accept: application/vnd.github+json" \
+            "repos/$GH_REPO/actions/artifacts/${found[0]}/zip" > build/ci/assets.zip
+          unzip -q -o build/ci/assets.zip -d "$ASSETS"
+
+      - name: Require both loader jars
+        # 产物压缩包可能保留 fabric/build/libs、neoforge/build/libs 这样的目录层级，因此递归找 JAR；
+        # 玩家把对应加载器的 JAR 放进 mods 就能用，数量或名字不对就停止发布，不发出缺包的 Release。
+        run: |
+          mapfile -t jars < <(find "$ASSETS" -type f -name '*.jar' | sort)
+          mapfile -t fabric < <(find "$ASSETS" -type f -name "maicraft-fabric-*-$VERSION.jar")
+          mapfile -t neoforge < <(find "$ASSETS" -type f -name "maicraft-neoforge-*-$VERSION.jar")
+          if [ "${#jars[@]}" -ne 2 ] || [ "${#fabric[@]}" -ne 1 ] || [ "${#neoforge[@]}" -ne 1 ]; then
+            echo "::error::期望 $VERSION 的 Fabric 与 NeoForge 各一个 JAR，实际：${jars[*]}"
+            find "$ASSETS" -type f
+            exit 1
+          fi
+          # 发布步骤按这份清单上传，附件名就是文件名，两个加载器各一个。
+          printf '%s\n' "${jars[@]}" > build/ci/release-jars.txt
+          ls -l "${jars[@]}"
+
+      - name: Publish release
+        # 先建成草稿，附件核对通过才公开，避免半发布；同一次集成重跑时更新已有 Release，
+        # 不重复建标签，也不动其他版本。
+        run: |
+          tag="v$VERSION"
+          title="MaiCraft $VERSION"
+          test -s build/ci/release-jars.txt || { echo "::error::没有可发布的安装包清单"; exit 1; }
+          mapfile -t jars < build/ci/release-jars.txt
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" --title "$title" --notes-file build/ci/release-notes.md
+            gh release upload "$tag" "${jars[@]}" --clobber
+          else
+            gh release create "$tag" --draft --target "$COMMIT" --title "$title" \
+              --notes-file build/ci/release-notes.md "${jars[@]}"
+          fi
+          # 玩家看到的是 Release 上的附件名，逐个比对本次构建的安装包，名字或数量不对就不公开。
+          expected="$(for jar in "${jars[@]}"; do basename "$jar"; done | sort)"
+          actual="$(gh release view "$tag" --json assets --jq '.assets[].name' | sort)"
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::$tag 上的附件与本次构建的安装包不一致"
+            printf '期望：\n%s\n实际：\n%s\n' "$expected" "$actual"
+            exit 1
+          fi
+          gh release edit "$tag" --draft=false
+          echo "$tag 已发布：$(gh release view "$tag" --json url --jq '.url')"
