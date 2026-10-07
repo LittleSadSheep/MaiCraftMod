@@ -47,6 +47,8 @@ docs/
 /docs/*
 !/docs/dev/
 !/docs/architecture/
+# 重构设计、领域清册与规格需要在两位开发者之间共享，随仓库一起维护。
+!/docs/refactor/
 # 项目工作规则只在根目录保留，不进入 Git 历史。
 AGENTS.md
 experiments/
