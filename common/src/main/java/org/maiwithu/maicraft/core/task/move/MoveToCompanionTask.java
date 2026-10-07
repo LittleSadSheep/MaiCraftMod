@@ -104,6 +104,9 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     /** 单条垫柱认领的高度上限，与施工侧整柱证明同一量级；只用于回执说明，不触发任何拆除。 */
     private static final int OWN_PILLAR_REPORT_LIMIT = 32;
 
+    /** 规划烧尽后就近收尾成立；回执与成功话术据此声明这份成功来自容差内结算而非规划到达。 */
+    private boolean settledNearbyAfterPlanningBurnout;
+
     public MoveToCompanionTask(LocalPlayer player, MoveToTaskRecord record) {
         super(player, record);
         planningBudget = record.progressBudget(PLANNING_IDLE_TICKS);
@@ -333,6 +336,17 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 && planningWorkHighWater > PLANNING_WORK_FUSE_UNITS
                 && lastApproachTick != Long.MIN_VALUE
                 && now - lastApproachTick >= PLANNING_CONVERGENCE_WINDOW_TICKS) {
+            // 烧尽时身体已安全立定在本任务单自身的到达容差内（且目标区域已加载），按就近收尾结案：
+            // 与无路失败路径的教学性成功同一口径，不把「离目标 1.4 格却判规划未收敛」这类误导性失败交给调用方。
+            // 精确站位目标不适用——到达语义没有容差短路，由下方失败话术就近旁事实给出出路。
+            if (canSettleNearbyAfterPlanningBurnout()) {
+                settledNearbyAfterPlanningBurnout = true;
+                Constants.LOG.info(
+                        "[maicraft-task] goto 规划烧尽后就近收尾 kind={} target={},{},{} feet={} 最近距离={} 格",
+                        r.kind, bx, by, bz, player.blockPosition().toShortString(),
+                        String.format(java.util.Locale.ROOT, "%.1f", bestDist));
+                return successAtBody();
+            }
             // 规划从原站位不收敛时，先试一次已知格中转：例如本会话亲自挖出并站立过的井底格，
             // 从那里恢复原目标比在远处扩展搜索有增量得多。无候选（未交付已知格）时自然落空。
             if (tryKnownCellWaypointLeg("planning did not converge")) return TaskState.RUNNING;
@@ -362,7 +376,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                     + " work units while the closest approach stayed " + String.format("%.1f", bestDist)
                     + " blocks from the target for about " + (PLANNING_CONVERGENCE_WINDOW_TICKS / 20)
                     + " seconds with no improvement; " + nav.outcomeSummary()
-                    + belowTargetEgressAdvice()
+                    + belowTargetEgressAdvice() + nearbyExactCellAdvice()
                     + " Pick a nearer waypoint, approach the target from another direction,"
                     + " or abandon this destination." + knownCellLegSummary(),
                     FailureType.PLANNING_STALL);
@@ -615,6 +629,39 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                 + " Travel to a verified underground cell first (or pick a nearer waypoint) and retry from there.";
     }
 
+    /**
+     * 规划烧尽时的就近收尾判定：身体安全立定（地面或水中）、目标格已加载，且已站在本任务单
+     * 自身的到达容差内。与无路失败路径的教学性成功同一谓词；精确站位目标不适用——它的到达
+     * 语义没有容差短路，失败话术改为就近旁事实给出出路。
+     */
+    private boolean canSettleNearbyAfterPlanningBurnout() {
+        if (r.requiresStrictStance()) return false;
+        // 测试桩的 level 没有区块源，isLoaded 会沿高度评估链 NPE：跳过已加载过滤（生产 Level 恒有区块源，语义不变）。
+        boolean chunkFilter = player.level().getChunkSource() != null;
+        if (r.kind == MoveToTaskRecord.Kind.BLOCK
+                && chunkFilter && !player.level().isLoaded(blockTarget)) return false;
+        return closeEnoughToSucceed();
+    }
+
+    /** 精确站位目标规划烧尽而身体已站在近旁时的出路：容差重发可就地结算，或换方向接近。 */
+    private String nearbyExactCellAdvice() {
+        if (!r.requiresStrictStance() || bestDist == Double.MAX_VALUE
+                || bestDist > NEAR_SUCCESS_RADIUS) return "";
+        if (player.level().getChunkSource() != null && !player.level().isLoaded(blockTarget)) return "";
+        return " The body is already standing about " + String.format(java.util.Locale.ROOT, "%.1f", bestDist)
+                + " blocks from the exact cell, but planning could not occupy it from this side."
+                + " If this nearby stance is acceptable, resubmit travel without exact so tolerance"
+                + " arrival settles here; otherwise approach the exact cell from another direction.";
+    }
+
+    /** 就近收尾成功时的话术注记：这份成功来自容差内结算，规划未能把身体带得离目标更近。 */
+    private String burnoutSettlementNote() {
+        return settledNearbyAfterPlanningBurnout
+                ? " Planning burned out without converging; the body settled at the closest stance"
+                  + " within the arrival tolerance."
+                : "";
+    }
+
     /** 找路失败后是否仍可接受当前落脚点；COLUMN 的零半径会在这里按三格算，高度目标也额外接受一格偏差。 */
     private boolean closeEnoughToSucceed() {
         if (!player.onGround() && !player.isInWater()) {
@@ -761,6 +808,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         if (bestDist != Double.MAX_VALUE) {
             data.put("best_distance_blocks", Math.round(bestDist * 10) / 10.0);
         }
+        if (settledNearbyAfterPlanningBurnout) data.put("settled_nearby_after_planning_burnout", true);
         data.put("ground_flight_mode",groundFlight.diagnostics());
         // 任务终局直接交付导航证据，避免模型为一次无路结果另开多轮观察。
         if (!finalNavigationEvidence.isEmpty()) data.put("navigation", finalNavigationEvidence);
@@ -829,7 +877,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
                         : "arrived beside " + r.block + " at " + n.getX() + "," + n.getY()
                                 + "," + n.getZ() + " — within reach to use." + landingNote();
             }
-        } + recovery;
+        } + recovery + burnoutSettlementNote();
     }
 
     @Override
