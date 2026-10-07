@@ -461,15 +461,18 @@ public final class MoveToTransportCompletionTest {
      * 深水贴岸 travel（176 实机失败场景）：身体在水里、目标就是贴岸一格沿的沿顶站立格时，
      * 任务必须直接进入登岸段并停掉导航，爬上沿顶后按到达交付，不再等规划空转 30 秒后报
      * planning_stall。成功只认真的离水：身体站上干燥沿顶才算到达。
+     * 几何对齐实机受控场景：三格深水（脚位从池底出发）、沿顶高出水面格一格。
      */
     private static void waterShoreClimbDeliversArrival(Unsafe memory) throws Exception {
         try (var f = new Fixture(memory, .5)) {
-            // 水面顶层节点 (0,0,0)（上方是空气），岸沿地板 (1,1,0) 实心，目标沿顶站立格 (1,2,0)。
-            f.world.blocks.put(new BlockPos(0, 0, 0).asLong(), Blocks.WATER.defaultBlockState());
-            f.world.blocks.put(new BlockPos(1, 1, 0).asLong(), Blocks.STONE.defaultBlockState());
+            // 水柱 y0..2（顶层水面节点 y2），岸沿地板 (1,3,0) 实心，目标沿顶站立格 (1,4,0)。
+            for (int y = 0; y <= 2; y++) {
+                f.world.blocks.put(new BlockPos(0, y, 0).asLong(), Blocks.WATER.defaultBlockState());
+            }
+            f.world.blocks.put(new BlockPos(1, 3, 0).asLong(), Blocks.STONE.defaultBlockState());
             f.player.wet = true;
-            field(LocalPlayer.class, "onGround").setBoolean(f.player, false);
-            var record = new MoveToTaskRecord("water-shore", 600_000, 1D, 2D, 0D, null, false);
+            field(LocalPlayer.class, "onGround").setBoolean(f.player, true);
+            var record = new MoveToTaskRecord("water-shore", 600_000, 1D, 4D, 0D, null, false);
             var task = f.task(record, false);
             task.onStart();
             f.nextTick();
@@ -478,10 +481,16 @@ public final class MoveToTransportCompletionTest {
                     "目标就是贴岸一格沿时必须直接进入登岸段");
             check(field(AbstractCompanionTask.class, "nav").get(task) == null,
                     "登岸段接管身体时必须停掉原导航，不能两套驾驶并存");
-            // 模拟原版水中水平碰撞助推：身体被抬上沿顶并站稳。
+            // 驾驶输入要真的发出：贴岸游前进、跳跃按住（实机首版的卡点就是驾驶没生效）。
+            f.nextTick();
+            check(task.onTick() == TaskState.RUNNING, "登岸段驾驶中应保持运行");
+            var applied = (BodyControlPort.Movement) field(DefaultBodyControlPort.class, "movement").get(f.body);
+            check(applied.forward() > 0 && applied.jumping(),
+                    "登岸段必须每刻发出前进与跳跃输入，实际 " + applied);
+            // 模拟原版水中抬头游的助推：身体被抬上沿顶并站稳。
             f.player.wet = false;
-            field(LocalPlayer.class, "position").set(f.player, new Vec3(1.5, 2, .5));
-            field(LocalPlayer.class, "blockPosition").set(f.player, new BlockPos(1, 2, 0));
+            field(LocalPlayer.class, "position").set(f.player, new Vec3(1.5, 4, .5));
+            field(LocalPlayer.class, "blockPosition").set(f.player, new BlockPos(1, 4, 0));
             field(LocalPlayer.class, "onGround").setBoolean(f.player, true);
             f.nextTick();
             check(task.onTick() == TaskState.SUCCESS, "爬上沿顶站进目标格必须按到达交付");
@@ -499,9 +508,11 @@ public final class MoveToTransportCompletionTest {
      */
     private static void lowAirClimbsOutToBreathe(Unsafe memory) throws Exception {
         try (var f = new Fixture(memory, .5)) {
-            f.world.blocks.put(new BlockPos(0, 0, 0).asLong(), Blocks.WATER.defaultBlockState());
-            // 可攀干岸：支撑 (2,1,0) 实心，站立格 (2,2,0)。
-            f.world.blocks.put(new BlockPos(2, 1, 0).asLong(), Blocks.STONE.defaultBlockState());
+            // 三格深水柱 y0..2（水面节点 y2）；可攀干岸：支撑 (2,3,0) 实心，站立格 (2,4,0)。
+            for (int y = 0; y <= 2; y++) {
+                f.world.blocks.put(new BlockPos(0, y, 0).asLong(), Blocks.WATER.defaultBlockState());
+            }
+            f.world.blocks.put(new BlockPos(2, 3, 0).asLong(), Blocks.STONE.defaultBlockState());
             f.player.wet = true;
             f.player.airSupply = 60;
             field(LocalPlayer.class, "onGround").setBoolean(f.player, false);
@@ -529,8 +540,8 @@ public final class MoveToTransportCompletionTest {
                     "换气兜底必须停掉原导航");
             // 身体游到岸边爬上沿顶：目标未到，任务如实失败并声明已安全离水。
             f.player.wet = false;
-            field(LocalPlayer.class, "position").set(f.player, new Vec3(2.5, 2, .5));
-            field(LocalPlayer.class, "blockPosition").set(f.player, new BlockPos(2, 2, 0));
+            field(LocalPlayer.class, "position").set(f.player, new Vec3(2.5, 4, .5));
+            field(LocalPlayer.class, "blockPosition").set(f.player, new BlockPos(2, 4, 0));
             field(LocalPlayer.class, "onGround").setBoolean(f.player, true);
             f.nextTick();
             check(task.onTick() == TaskState.FAILED, "换气兜底离水后目标未到必须如实失败");

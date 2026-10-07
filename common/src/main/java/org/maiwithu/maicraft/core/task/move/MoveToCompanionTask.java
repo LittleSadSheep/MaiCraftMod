@@ -128,6 +128,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     private WaterLegKind waterLegKind;
     /** 本段要爬上去的干燥站立格。 */
     private BlockPos waterLegCell;
+    private BlockPos waterLegStart;
     private int waterLegTicks;
     /** 憋气兜底的卡点观察锚：水平位移超过一格就重设，原地不动满一个窗口才触发。 */
     private Vec3 waterStuckAnchor;
@@ -666,6 +667,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
     private void enterWaterClimbLeg(BlockPos cell, boolean forAir) {
         waterLegKind = forAir ? WaterLegKind.REACH_AIR : WaterLegKind.REACH_TARGET;
         waterLegCell = cell;
+        waterLegStart = player.blockPosition().immutable();
         waterLegTicks = 0;
         stopNav();
         r.extendDeadlineTo(player.level().getGameTime() + WATER_CLIMB_LEG_MAX_TICKS + 100);
@@ -677,6 +679,14 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
 
     private TaskState tickWaterClimbLeg() {
         waterLegTicks++;
+        // 每两秒留一次行进痕迹：实机排障靠它分辨「没走到沿壁」与「到了沿壁上不去」。
+        if (waterLegTicks % 40 == 0) {
+            Constants.LOG.info(
+                    "[maicraft-task] goto 登岸段进行中 cell={} feet={} in_water={} grounded={} air={}/{}",
+                    waterLegCell.toShortString(), player.blockPosition().toShortString(),
+                    player.isInWater(), player.onGround(),
+                    player.getAirSupply(), player.getMaxAirSupply());
+        }
         // 成功只认真的离水：身体站上干燥格才算上岸，留在水里的「就近」不算到达。
         if (!player.isInWater() && player.onGround()) {
             // 目标沿顶不止一格时上岸后可能差一格：已在岸上就按普通步行走回目标格。
@@ -692,15 +702,33 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         return TaskState.RUNNING;
     }
 
-    /** 贴岸游并按跳：水中水平碰撞的原版竖直助推把身体抬上一格沿顶；离水后差最后一段就按普通上台阶补跳。 */
+    /**
+     * 贴岸游并按跳：水中前进跟随视线俯仰，贴近岸壁时抬头看向沿顶向上游，才能在水面以上
+     * 攒出越过沿顶的弹出高度——平视游泳的身体只会贴着沿壁在水面上下浮动，永远差半格上不去。
+     * 跳跃全程持续按住：原版浅水跳（水深低于跳跃阈值时原地真跳一次）靠的就是不松开跳跃键。
+     */
     private void driveWaterClimb(BlockPos cell) {
         double dx = (cell.getX() + 0.5) - player.getX();
         double dz = (cell.getZ() + 0.5) - player.getZ();
-        InputDriver.lookForNavigation(player, (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0), 0);
-        boolean forward = Math.hypot(dx, dz) > 0.2;
-        boolean jump = player.isInWater()
-                || (player.onGround() && player.blockPosition().getY() < cell.getY());
-        InputDriver.applyNavigationMovement(player, forward ? 1F : 0F, 0F, jump, false, false);
+        double horizontal = Math.hypot(dx, dz);
+        InputDriver.lookForNavigation(player,
+                (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0),
+                pitchTowardLedge(cell, horizontal));
+        boolean forward = horizontal > 0.15;
+        boolean jump = player.isInWater() || player.getBlockY() < cell.getY();
+        if (forward || jump) {
+            InputDriver.applyNavigationMovement(player, forward ? 1F : 0F, 0F, jump, false, forward);
+        } else {
+            InputDriver.halt(player);
+        }
+    }
+
+    /** 贴近岸壁时把视线抬向沿顶（水中前进跟随视线俯仰，向上游才上得去）；远处接近段与陆地段保持平视。 */
+    private float pitchTowardLedge(BlockPos cell, double horizontal) {
+        if (!player.isInWater() || horizontal > 1.6) return 0F;
+        double dy = (cell.getY() + 0.5) - player.getEyeY();
+        float pitch = (float) -Math.toDegrees(Math.atan2(dy, Math.max(0.2, horizontal)));
+        return Math.max(-60F, pitch);
     }
 
     private TaskState finishWaterClimbLeg(boolean arrived) {
@@ -708,6 +736,7 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
         WaterLegKind kind = waterLegKind;
         waterLegKind = null;
         waterLegCell = null;
+        waterLegStart = null;
         if (arrived) {
             waterShoreClimbUsed = true;
             if (kind == WaterLegKind.REACH_AIR) waterBreathePause = true;
@@ -733,7 +762,8 @@ public final class MoveToCompanionTask extends AbstractCompanionTask<MoveToTaskR
             return TaskState.FAILED;
         }
         fail("climb-out leg did not get the body out of the water within about "
-                        + WATER_CLIMB_LEG_MAX_TICKS / 20 + " seconds; it is still in the water at "
+                        + WATER_CLIMB_LEG_MAX_TICKS / 20 + " seconds; it started at "
+                        + waterLegStart.toShortString() + " and is still in the water at "
                         + player.blockPosition().toShortString() + " with "
                         + player.getAirSupply() + "/" + player.getMaxAirSupply() + " air."
                         + " The nearest shore may be out of reach or its ledge more than one"
