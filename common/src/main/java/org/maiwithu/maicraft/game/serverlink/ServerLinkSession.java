@@ -6,6 +6,8 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.network.chat.Component;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.maiwithu.maicraft.network.ProtocolJson;
 
 /**
@@ -14,6 +16,7 @@ import org.maiwithu.maicraft.network.ProtocolJson;
  * 当前连接完成服务端确认之前不开放游戏能力；换服务器后旧确认不算数，必须重新握手。
  */
 public final class ServerLinkSession {
+    private static final Logger LOG = LoggerFactory.getLogger(ServerLinkSession.class);
     private final RequestRouter router;
     private final ReceivedConfirmations confirmations = new ReceivedConfirmations();
     private final ConcurrentLinkedQueue<Runnable> callbacks = new ConcurrentLinkedQueue<>();
@@ -81,6 +84,7 @@ public final class ServerLinkSession {
         JsonObject envelope;
         try { envelope = ProtocolJson.decode(json); }
         catch (RuntimeException malformed) { return; }
+        LOG.info("[serverlink] 客户端线路收到信封 kind={}", ServerCapabilityState.text(envelope, "kind"));
         enqueue(() -> {
             if (ServerCapabilityState.text(envelope, "kind").equals("confirmation")) {
                 confirmations.receive(envelope);
