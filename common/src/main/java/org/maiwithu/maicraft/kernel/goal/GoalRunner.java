@@ -17,8 +17,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Supplier;
 
 /**
@@ -63,6 +65,10 @@ public final class GoalRunner implements Task {
     private WaitCondition waiting;
     /** 这一刻之前不检查等待的条件。 */
     private long waitNotBefore;
+    /** sequence：正在跑的子目标推进器；轮到步骤之间为 null。 */
+    private GoalRunner stepRunner;
+    /** sequence：没做成但被允许继续的步骤结果（onFailure 为 CONTINUE 时）。 */
+    private final List<TaskResult> failedSteps = new ArrayList<>();
     /** 结束后的结果；没结束时为 null。 */
     private TaskResult result;
 
@@ -115,6 +121,11 @@ public final class GoalRunner implements Task {
 
     /** LLM 回答了这条推进挂起的问题：记下回答，下一刻继续推进。 */
     public void answer(String text) {
+        // sequence 自己没在等回答时，回答交给正在跑的子目标。
+        if (run.question() == null && stepRunner != null && stepRunner.run().question() != null) {
+            stepRunner.answer(text);
+            return;
+        }
         run.answer(text);
         save();
         LOG.info("目标 {} 的步骤 {} 得到回答：{}", run.id(), run.stepIndex(), text);
@@ -188,6 +199,10 @@ public final class GoalRunner implements Task {
         if (run.state() == GoalRunState.AWAITING_ANSWER) {
             // 在等 LLM 回答：不决定、不推进任务，等 answer() 把它带回来。
             return TickResult.RUNNING;
+        }
+        if (!goal.steps().isEmpty()) {
+            // sequence：目标里列了几步，逐步跑，不走能力的决定。
+            return advanceSequence(context);
         }
         if (child != null && !child.finished()) {
             return tickChild(context);
@@ -303,6 +318,79 @@ public final class GoalRunner implements Task {
         currentInput = input;
         child = new ChildTaskRunner(new ProgressTracker(1, stepBudgetTicks));
         child.begin(currentInput, registry.taskFactories(), context);
+    }
+
+    /**
+     * 逐步跑 sequence 的子目标：每个子目标是一个完整的目标推进，经子任务运行器跑完再轮到下一步。
+     * 某步没做成时按目标的 onFailure 决定整件事停下还是继续；都允许失败时目标以部分完成收尾。
+     */
+    private TickResult advanceSequence(TickContext context) {
+        if (child == null || child.finished()) {
+            if (run.stepIndex() >= goal.steps().size()) {
+                // 步骤已经轮完却还没收尾，是调用方写错了：如实报程序错误，不悄悄当成完成。
+                throw new IllegalStateException("sequence 的步骤已经轮完，却没有收尾");
+            }
+            beginStep(goal.steps().get(run.stepIndex()), context);
+            return TickResult.RUNNING;
+        }
+        TickResult tickResult = child.tick(context);
+        if (tickResult instanceof TickResult.Running) {
+            return TickResult.RUNNING;
+        }
+        TaskResult stepResult = ((TickResult.Finished) tickResult).result();
+        child = null;
+        stepRunner = null;
+        if (stepResult.status() != TaskResult.Status.DONE && goal.onFailure() == Goal.OnFailure.STOP) {
+            // 这一步没做成就整件事停下：失败的事实原样作为目标的结果。
+            settle(stepResult, context);
+            return TickResult.finished(result);
+        }
+        if (stepResult.status() != TaskResult.Status.DONE) {
+            failedSteps.add(stepResult);
+        }
+        run.advanceToStep(run.stepIndex() + 1);
+        if (run.stepIndex() >= goal.steps().size()) {
+            settle(sequenceResult(), context);
+            return TickResult.finished(result);
+        }
+        save();
+        beginStep(goal.steps().get(run.stepIndex()), context);
+        return TickResult.RUNNING;
+    }
+
+    /** 轮到一步：这条推进中断过就接着用它自己的记录恢复（也是暂停态），否则开一条新的。 */
+    private void beginStep(Goal step, TickContext context) {
+        stepRunner = findUnfinishedStep(step)
+                .map(restored -> {
+                    restored.unpause();
+                    return new GoalRunner(restored, registry, store, remembers, stepBudgetTicks);
+                })
+                .orElseGet(() -> new GoalRunner(new GoalRun(store.nextId(), step, run.id()),
+                        registry, store, remembers, stepBudgetTicks));
+        child = new ChildTaskRunner(new ProgressTracker(1, stepBudgetTicks));
+        child.begin(stepRunner, context);
+    }
+
+    /** 找这条 sequence 里属于当前步骤、还没结束的记录（重启前中断的）。 */
+    private Optional<GoalRun> findUnfinishedStep(Goal step) {
+        return store.unfinished().stream()
+                .filter(candidate -> candidate.parentRunId() == run.id())
+                .filter(candidate -> candidate.goal().ability().equals(step.ability()))
+                .findFirst();
+    }
+
+    /** sequence 的收尾结果：有步骤没做成就是部分完成，剩下的与第一个失败都写清楚。 */
+    private TaskResult sequenceResult() {
+        if (failedSteps.isEmpty()) {
+            return TaskResult.done("按顺序做完了全部 " + goal.steps().size() + " 步");
+        }
+        TaskResult.Builder builder = TaskResult.builder(TaskResult.Status.PARTIAL,
+                        goal.steps().size() - failedSteps.size() + " / " + goal.steps().size() + " 步做成")
+                .problem(failedSteps.get(0).problem());
+        for (TaskResult failed : failedSteps) {
+            builder.remaining(failed.summary());
+        }
+        return builder.build();
     }
 
     /** 这一步的子任务已经结算完，把步骤之间的空当清出来。 */

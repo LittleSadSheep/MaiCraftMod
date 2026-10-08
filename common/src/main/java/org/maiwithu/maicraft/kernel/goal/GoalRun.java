@@ -21,6 +21,8 @@ import java.util.Objects;
 public final class GoalRun {
     private final long id;
     private final Goal goal;
+    /** 所属的目标运行编号；LLM 直接下达的目标没有所属，为 -1。重启后恢复时要靠它分辨哪些是步骤自己的记录。 */
+    private final long parentRunId;
     private GoalRunState state = GoalRunState.RUNNING;
     /** 进行到第几步（从 0 开始）；普通目标固定 0，sequence 是它包含的第几个子目标。 */
     private int stepIndex;
@@ -33,10 +35,16 @@ public final class GoalRun {
     private long startedTick = -1;
     private long finishedTick = -1;
 
-    /** 编号由目标运行存储分配，这里不持有全局计数器。 */
+    /** 编号由目标运行存储分配，这里不持有全局计数器；LLM 直接下达的目标没有所属运行。 */
     public GoalRun(long id, Goal goal) {
+        this(id, goal, -1);
+    }
+
+    /** sequence 的某一步：记录它所属的目标运行。 */
+    public GoalRun(long id, Goal goal, long parentRunId) {
         this.id = id;
         this.goal = Objects.requireNonNull(goal, "goal");
+        this.parentRunId = parentRunId;
     }
 
     /** 第一次被推进时调用：记下开始时刻。 */
@@ -99,6 +107,11 @@ public final class GoalRun {
 
     public Goal goal() {
         return goal;
+    }
+
+    /** 所属的目标运行编号；LLM 直接下达的目标为 -1。 */
+    public long parentRunId() {
+        return parentRunId;
     }
 
     public GoalRunState state() {
