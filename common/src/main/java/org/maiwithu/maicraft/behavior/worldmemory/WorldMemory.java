@@ -8,6 +8,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.UnaryOperator;
+import org.maiwithu.maicraft.behavior.perception.RemembersSightings;
 import org.maiwithu.maicraft.kernel.goal.RemembersPlaces;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
@@ -23,7 +24,7 @@ import org.maiwithu.maicraft.kernel.storage.DocumentStore;
  * <p>记忆按世界身份分开存：构造时传入文档库与世界身份编号，连到另一个世界时
  * 由身份编号隔离，读不到上一个世界的记忆。
  */
-public final class WorldMemory implements RemembersPlaces, RemembersRegions {
+public final class WorldMemory implements RemembersPlaces, RemembersRegions, RemembersSightings {
 
     /** 文档库里的范围名：世界记忆的数据都存这个范围下，与别的用途互不覆盖。 */
     public static final String SCOPE = "world-memory";
@@ -47,6 +48,26 @@ public final class WorldMemory implements RemembersPlaces, RemembersRegions {
      */
     public void rememberContainerSeen(WorldPosition position, String blockType, Instant when) {
         upsert(new MemoryRecord(MemoryKind.CONTAINER, position, blockType, null, MemoryOrigin.SEEN, when));
+    }
+
+    /**
+     * 记一个亲眼看到的工作站：看见它在这里，来源只算亲眼看到，用过一次才升"亲手用过"。
+     */
+    @Override
+    public void workstationSeen(WorldPosition position, String blockType, Instant when) {
+        upsert(new MemoryRecord(MemoryKind.WORKSTATION, position, blockType, null, MemoryOrigin.SEEN, when));
+    }
+
+    /** 感知写来的亲眼看到的容器：看见这里有只箱子，但没打开过，规矩与直接写入一致。 */
+    @Override
+    public void containerSeen(WorldPosition position, String blockType, Instant when) {
+        rememberContainerSeen(position, blockType, when);
+    }
+
+    /** 感知写来的产地线索：路过看见的这一片有什么，规矩与 rememberSite 一致。 */
+    @Override
+    public void siteSeen(WorldPosition position, List<String> roughlyThere, Instant when) {
+        rememberSite(position, roughlyThere, when);
     }
 
     /**

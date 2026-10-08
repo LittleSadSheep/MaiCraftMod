@@ -37,6 +37,21 @@ class WorldMemoryTest {
     }
 
     @Test
+    void 感知写来的看见记录与直接写入走同一条规矩(@TempDir Path temp) {
+        var memory = memory(temp);
+        // 感知只报"亲眼看到"：工作台看见就是看见，来源不冒充亲手用过。
+        memory.workstationSeen(CHEST, "minecraft:crafting_table", NOW);
+        memory.containerSeen(FAR_CHEST, "minecraft:barrel", NOW);
+        assertEquals(MemoryOrigin.SEEN,
+                memory.recordAt(MemoryKind.WORKSTATION, CHEST).orElseThrow().origin());
+        assertEquals(MemoryOrigin.SEEN,
+                memory.recordAt(MemoryKind.CONTAINER, FAR_CHEST).orElseThrow().origin());
+        // 同一个位置看见两次，合并成一条而不是记两条。
+        memory.containerSeen(FAR_CHEST, "minecraft:barrel", NOW);
+        assertEquals(1, memory.recordsNear(FAR_CHEST, 1).size());
+    }
+
+    @Test
     void 开过的容器记住里面有什么_确认是空的记成空(@TempDir Path temp) {
         var memory = memory(temp);
         memory.rememberContainerOpened(CHEST, "minecraft:chest", List.of("minecraft:coal"), NOW);
