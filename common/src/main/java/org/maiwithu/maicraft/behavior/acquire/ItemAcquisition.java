@@ -30,7 +30,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 背包要满时先请腾背包的模型腾地方，用途标签原样传过去。
  * need 返回的动作逐刻推进：问价、腾格子、执行来源，做完算拿到，弄不到以问题失败。
  */
-public final class ItemAcquisition implements ItemNeeds {
+public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
 
     /** 递归备料的深度上限：工具 → 锭 → 矿石，再往上多半是请求写岔了。 */
     public static final int DEFAULT_MAX_DEPTH = 4;
@@ -77,7 +77,8 @@ public final class ItemAcquisition implements ItemNeeds {
      * 限定只管最外层这一次；来源备料（原料、工具、燃料）仍然问遍所有来源——
      * 指定了"烧炼"不等于烧之前连挖煤都不许。
      */
-    public Action need(ItemRequest request, Permissions permissions, Scope scope, Consumer<String> onDelivered) {
+    @Override public Action need(ItemRequest request, Permissions permissions, Scope scope,
+            Consumer<String> onDelivered) {
         if (activeRequests.contains(request.wanted().specifier())) {
             throw new IllegalArgumentException("同一个需求已经在外层办着，不能再发一次："
                     + request.wanted().specifier());

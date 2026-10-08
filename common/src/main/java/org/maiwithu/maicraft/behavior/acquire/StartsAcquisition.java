@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.behavior.acquire;
+
+import java.util.function.Consumer;
+
+import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.maiwithu.maicraft.kernel.task.Action;
+
+/**
+ * 发起一次拿东西的入口：拿到物品的引擎以这个样子交给能力与任务，
+ * 判断与任务用替身测的时候不必造出一台真引擎。
+ * 语义与 {@link ItemAcquisition#need} 一致；引擎是它目前的唯一实现。
+ */
+public interface StartsAcquisition {
+
+    /**
+     * 带限定的一次拿东西：只走指定途径、只考虑愿意走的距离、只在给定的半径里找，
+     * 实际拿到东西时把途径报告给回调。
+     */
+    Action need(ItemRequest request, Permissions permissions,
+            ItemAcquisition.Scope scope, Consumer<String> onDelivered);
+}
