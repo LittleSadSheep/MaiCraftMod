@@ -1,8 +1,9 @@
+// SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.game.mixin;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.prediction.BlockStatePredictionHandler;
-import org.maiwithu.maicraft.client.actor.BlockUseAcknowledgement;
+import org.maiwithu.maicraft.game.interaction.BlockUseAcknowledgement;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -11,7 +12,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-// 把原版每个世界的预测编号接给动作确认层。此处只记录编号，不自行改变方块。
+/** 把原版每个世界的预测编号接给动作确认层：只记录编号，不自行改变方块。 */
 @Mixin(ClientLevel.class)
 public abstract class BlockUseAcknowledgementMixin implements BlockUseAcknowledgement {
     @Shadow @Final private BlockStatePredictionHandler blockStatePredictionHandler;

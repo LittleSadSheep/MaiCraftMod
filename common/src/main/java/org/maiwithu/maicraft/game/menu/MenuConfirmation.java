@@ -1,22 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.game.menu;
 
-import net.minecraft.world.item.ItemStack;
 import java.util.function.BiPredicate;
+
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.item.ItemStack;
+
+import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /** 描述一次菜单操作预期看到的变化；只读取当前菜单，不在确认过程中再点别的槽位。 */
 @FunctionalInterface
 public interface MenuConfirmation {
     enum Verdict { PENDING, APPLIED, NOT_APPLIED, DIVERGED }
 
-    Verdict observe(LocalPlayerContext context, MenuReceipt receipt);
+    Verdict observe(PlayerContext context, PendingMenuAction pending);
 
     static MenuConfirmation stateChanged() {
         // 只证明同一菜单的版本变过；真正需要某物品出现时，调用方还要核对具体槽位。
-        return (context, receipt) -> {
-            var menu = context.player().containerMenu;
-            return menu.containerId == receipt.containerId()
-                    && menu.getStateId() != receipt.beforeStateId()
+        return (context, pending) -> {
+            var menu = context.localPlayer().containerMenu;
+            return menu.containerId == pending.containerId()
+                    && menu.getStateId() != pending.beforeStateId()
                     ? Verdict.APPLIED : Verdict.PENDING;
         };
     }
@@ -35,9 +39,9 @@ public interface MenuConfirmation {
         // 保存交换前两叠物品，之后区分已对调、完全没变和出现第三种情况。
         ItemStack frozenSource = sourceBefore.copy();
         ItemStack frozenHotbar = hotbarBefore.copy();
-        return (context, receipt) -> {
-            ItemStack source = context.player().getInventory().getItem(sourceInventorySlot);
-            ItemStack hotbar = context.player().getInventory().getItem(hotbarSlot);
+        return (context, pending) -> {
+            ItemStack source = context.localPlayer().getInventory().getItem(sourceInventorySlot);
+            ItemStack hotbar = context.localPlayer().getInventory().getItem(hotbarSlot);
             if (equivalent.test(source, frozenHotbar) && equivalent.test(hotbar, frozenSource)) return Verdict.APPLIED;
             if (equivalent.test(source, frozenSource) && equivalent.test(hotbar, frozenHotbar)) return Verdict.NOT_APPLIED;
             return Verdict.DIVERGED;
@@ -46,13 +50,14 @@ public interface MenuConfirmation {
 
     static MenuConfirmation closedToInventory() {
         // 页面先消失而返料稍后同步时继续等待；回到默认菜单且鼠标、背包合成余料均结清，才完成关闭。
-        return (context, receipt) -> context.player().containerMenu == context.player().inventoryMenu
-                && context.minecraft().screen == null && context.player().inventoryMenu.getCarried().isEmpty()
-                && !GuiPreparation.inventoryGridOccupied(context) ? Verdict.APPLIED : Verdict.PENDING;
+        return (context, pending) -> context.localPlayer().containerMenu == context.localPlayer().inventoryMenu
+                && Minecraft.getInstance().screen == null
+                && context.localPlayer().inventoryMenu.getCarried().isEmpty()
+                && !GuiPreparation.inventoryGridOccupied(context.localPlayer()) ? Verdict.APPLIED : Verdict.PENDING;
     }
 
     static MenuConfirmation pending() {
-        return (context, receipt) -> Verdict.PENDING;
+        return (context, pending) -> Verdict.PENDING;
     }
 
     private static boolean same(ItemStack left, ItemStack right) {

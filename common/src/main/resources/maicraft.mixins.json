@@ -4,11 +4,16 @@
   "package": "org.maiwithu.maicraft.game.mixin",
   "refmap": "${mod_id}.refmap.json",
   "compatibilityLevel": "JAVA_21",
-  "mixins": [],
+  "mixins": [
+    "MenuSyncedIntsAccessor"
+  ],
   "client": [
     "ClientLevelBlockChangeMixin",
     "GameRendererCameraMixin",
-    "MouseHandlerControlMixin"
+    "MouseHandlerControlMixin",
+    "BlockUseAcknowledgementMixin",
+    "ScreenVisibilityMixin",
+    "InventoryScreenModeMixin"
   ],
   "server": [],
   "injectors": {

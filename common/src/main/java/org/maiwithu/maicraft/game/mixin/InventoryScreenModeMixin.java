@@ -3,7 +3,7 @@ package org.maiwithu.maicraft.game.mixin;
 
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.client.multiplayer.MultiPlayerGameMode;
-import org.maiwithu.maicraft.client.actor.MenuVisibility;
+import org.maiwithu.maicraft.game.menu.MenuVisibility;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
