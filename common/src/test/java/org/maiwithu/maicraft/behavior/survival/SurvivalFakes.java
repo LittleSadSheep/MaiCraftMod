@@ -73,6 +73,8 @@ final class SurvivalFakes {
         @Override public net.minecraft.client.player.LocalPlayer localPlayer() { return null; }
         @Override public net.minecraft.client.multiplayer.ClientLevel level() { return null; }
         @Override public net.minecraft.client.multiplayer.ClientPacketListener connection() { return null; }
+        @Override public org.maiwithu.maicraft.game.interaction.InteractionSender interactionSender() { return null; }
+        @Override public org.maiwithu.maicraft.game.menu.MenuActions menuActions() { return null; }
         @Override public PlayerInput input() { return input; }
         @Override public long clientTick() { return tick; }
         @Override public boolean isCurrent() { return true; }
