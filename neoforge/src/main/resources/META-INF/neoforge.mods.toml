@@ -20,9 +20,6 @@ config = "${mod_id}.mixins.json"
 [[mixins]]
 config = "${mod_id}-server.mixins.json"
 
-# 内嵌 Baritone 的客户端钩子；只保留实际生效的五个 Mixin。
-[[mixins]]
-config = "maicraft-baritone.mixins.json"
 
 # 通用入口在两端加载；客户端部分由单独的 dist=CLIENT 入口限定。
 [[dependencies.${mod_id}]]
