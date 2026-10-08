@@ -5,7 +5,11 @@
   "refmap": "${mod_id}.refmap.json",
   "compatibilityLevel": "JAVA_21",
   "mixins": [],
-  "client": [],
+  "client": [
+    "ClientLevelBlockChangeMixin",
+    "GameRendererCameraMixin",
+    "MouseHandlerControlMixin"
+  ],
   "server": [],
   "injectors": {
     "defaultRequire": 1

@@ -16,7 +16,7 @@ public final class MaiCraftFabricClient implements ClientModInitializer {
         ClientLifecycle client = Bootstrap.startClient(new FabricLoaderEnvironment());
         // 客户端启动完成后创建内核与能力 -> 每刻结束推进角色当前的任务 -> 退出前收尾。
         ClientLifecycleEvents.CLIENT_STARTED.register(minecraft -> client.started());
-        ClientTickEvents.END_CLIENT_TICK.register(minecraft -> client.tickEnd());
+        ClientTickEvents.END_CLIENT_TICK.register(minecraft -> client.tickEnd(minecraft));
         ClientLifecycleEvents.CLIENT_STOPPING.register(minecraft -> client.stopping());
     }
 }

@@ -7,6 +7,7 @@ import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.common.NeoForge;
+import net.minecraft.client.Minecraft;
 import net.neoforged.neoforge.event.GameShuttingDownEvent;
 import org.maiwithu.maicraft.bootstrap.Bootstrap;
 import org.maiwithu.maicraft.bootstrap.ClientLifecycle;
@@ -34,7 +35,7 @@ public final class MaiCraftNeoForgeClient {
     }
 
     private void onClientTick(ClientTickEvent.Post event) {
-        client.tickEnd();
+        client.tickEnd(Minecraft.getInstance());
     }
 
     private void onGameShuttingDown(GameShuttingDownEvent event) {
