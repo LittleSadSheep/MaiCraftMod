@@ -106,7 +106,7 @@ public final class WebHttpClient implements WebFetch, AutoCloseable {
                 .header("Accept", "application/json, text/html, text/plain")
                 .header("Accept-Encoding", "identity").GET().build();
         // 使用有界订阅器读完响应；不返回仍可能无限等待的流，也不伪装浏览器突破验证。
-        try { return client.send(request, info -> new LimitedBody(maximum)); }
+        try { return client.send(request, info -> new BoundedDownload(maximum)); }
         catch (IOException failure) {
             // HTTP 客户端会包装正文订阅器的异常，仍把明确的超限原因交给模型，避免误判为条目不存在。
             for (Throwable cause = failure; cause != null; cause = cause.getCause())

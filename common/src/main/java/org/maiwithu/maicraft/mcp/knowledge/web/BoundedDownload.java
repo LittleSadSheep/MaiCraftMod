@@ -10,13 +10,13 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Flow;
 
 /** 正文超限时明确失败，不把半张合成表当完整资料交给正在规划制作的角色。 */
-final class LimitedBody implements BodySubscriber<byte[]> {
+final class BoundedDownload implements BodySubscriber<byte[]> {
     private final int maximum;
     private final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
     private final CompletableFuture<byte[]> result = new CompletableFuture<>();
     private Flow.Subscription subscription;
 
-    LimitedBody(int maximum) { this.maximum = maximum; }
+    BoundedDownload(int maximum) { this.maximum = maximum; }
     @Override public CompletionStage<byte[]> getBody() { return result; }
     @Override public void onSubscribe(Flow.Subscription value) { subscription = value; value.request(1); }
     @Override public void onNext(List<ByteBuffer> buffers) {
