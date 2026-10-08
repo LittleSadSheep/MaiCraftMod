@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.game.interaction;
 
 import net.minecraft.client.player.LocalPlayer;

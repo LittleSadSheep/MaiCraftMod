@@ -1,20 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.game.interaction;
-import org.maiwithu.maicraft.client.actor.DefaultNativeActionPort;
-import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
-import org.maiwithu.maicraft.client.actor.MenuReceipt;
-import org.maiwithu.maicraft.client.actor.NativeActionReceipt;
-import org.maiwithu.maicraft.client.runtime.ClientRuntime;
-import org.maiwithu.maicraft.core.Constants;
 
+import java.util.Objects;
+import java.util.function.Predicate;
 
-import org.maiwithu.maicraft.entity.InputDriver;
-import org.maiwithu.maicraft.core.pathing.execute.NavigationSafetyContext;
-
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
-import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
@@ -23,47 +17,46 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
-import java.util.Objects;
-import java.util.function.Predicate;
-import net.minecraft.client.Minecraft;
-import net.minecraft.world.item.ItemStack;
-import org.maiwithu.maicraft.client.actor.MenuVisibility;
-import org.maiwithu.maicraft.client.actor.VanillaHotbar;
-import org.maiwithu.maicraft.core.pathing.moves.AimGeometry;
-import org.maiwithu.maicraft.core.pathing.settings.NavSettings;
+
+import org.maiwithu.maicraft.game.menu.MenuActions;
+import org.maiwithu.maicraft.game.menu.MenuVisibility;
+import org.maiwithu.maicraft.game.menu.PendingMenuAction;
+import org.maiwithu.maicraft.game.menu.VanillaHotbar;
+import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.player.PlayerInput;
+import org.maiwithu.maicraft.game.world.InteractionRange;
 
 /**
  * 把挖一个方块拆成选工具、关背包、瞄准、持续挖、等结果几步。
  * 每一刻调用一次，不会在一个循环里瞬间挖完；目标和未完成动作保存在本对象中。
  * 它有“可先拆遮挡物”和“只挖目标”两种入口，是否允许碰别的方块由调用方选择。
- * 这里使用公共动作接口的确认结果；该接口当前的客户端预测误判见审计记录 A26。
+ * 交互与界面入口从构造函数传入，每刻推进时传入当刻的角色上下文。
  */
 public final class BlockDigger {
 
     private static final int BREAK_TIMEOUT_TICKS = 20 * 60 * 5;
     private static final int TOOL_TIMEOUT_TICKS = 20 * 5;
-
-    /** 生存模式破坏一个方块后，到下一次开挖前等待的游戏刻数；遵循 blockBreakSpeed 设置（周期等于设置值，延迟为设置值减一）。 */
-    private static int postBreakDelay() {
-        return Math.max(0,
-                NavSettings.get().blockBreakSpeed - 1);
-    }
+    /** 生存模式破坏一个方块后，到下一次开挖前等待的游戏刻数；与原版破坏间隔一致。 */
+    private static final int POST_BREAK_DELAY_TICKS = 5;
 
     private final LocalPlayer player;
+    private final InteractionSender sender;
+    private final MenuActions menuActions;
+    private final PlayerInput playerInput;
     private BlockPos pos;
-    private NativeActionReceipt receipt;
-    private NativeActionReceipt toolSelectReceipt;
-    private MenuReceipt toolCloseReceipt;
-    private MenuReceipt toolStageReceipt;
+    private PendingInteraction pending;
+    private PendingInteraction toolSelectPending;
+    private PendingMenuAction toolClosePending;
+    private PendingMenuAction toolStagePending;
     private int pendingToolSlot = -1;
     private int minimumToolDurability;
     public void minimumToolDurability(int remaining) { minimumToolDurability = Math.max(0, remaining); }
     private Predicate<BlockHitResult> preparation = hit -> true;
-    /** 工具真正拿好、界面关闭且准星对准后，才检查连锁准备；未通过前不提交第一下破坏。 */
+    /** 工具真正拿好、界面关闭且准星对准后，才检查调用方的附加准备；未通过前不提交第一下破坏。 */
     public void beforeBreak(Predicate<BlockHitResult> gate) {
         preparation = Objects.requireNonNull(gate);
     }
-    public boolean hasPendingBreak() { return receipt != null && !receipt.terminal(); }
+    public boolean hasPendingBreak() { return pending != null && !pending.terminal(); }
     private boolean preferTopFace;
     private Direction requiredFace;
     /** 通道形状由命中面决定；只接受射线真实命中的指定面，不能把顶面点击伪装成水平开路。 */
@@ -73,8 +66,12 @@ public final class BlockDigger {
     /** 开挖时的主手物品快照;中途换持(物品/组件级)即重开进度。 */
     private ItemStack destroyingItem;
 
-    public BlockDigger(LocalPlayer player) {
+    public BlockDigger(LocalPlayer player, InteractionSender sender, MenuActions menuActions,
+                       PlayerInput playerInput) {
         this.player = player;
+        this.sender = sender;
+        this.menuActions = menuActions;
+        this.playerInput = playerInput;
     }
 
     /** 当前正在挖掘的方块；空闲时为 {@code null}。 */
@@ -82,7 +79,7 @@ public final class BlockDigger {
         return pos;
     }
 
-    /** 一次 {@link #digStep} 的结果，让调用方区分“仍在挖掘”和“当前无法实际命中”；旧布尔值把两种情况混在一起。 */
+    /** 一次 {@link #digStep} 的结果，让调用方区分“仍在挖掘”和“当前无法实际命中”。 */
     public enum DigResult {
         /** 破坏仍在进行、处于冷却，或本刻刚开始；调用方应继续推进。 */
         PROGRESSING,
@@ -90,7 +87,7 @@ public final class BlockDigger {
         BROKE_TARGET,
         /** 本刻只破坏了挡路方块而非目标，这是继续接近目标的一步。 */
         BROKE_OCCLUDER,
-        /** 目标所有面都不可命中，且没有可安全清除的遮挡；当前无法继续，映射为 OCCLUDED。 */
+        /** 目标所有面都不可命中，且没有可安全清除的遮挡；当前无法继续。 */
         NO_SHOT;
 
         /** 本 tick 有方块真的没了(目标或遮挡物)。 */
@@ -99,40 +96,23 @@ public final class BlockDigger {
         }
     }
 
-    /** 兼容旧布尔接口：只有目标方块破坏的那一刻才返回 {@code true}。
-     *  保留它是为了让迁移前的 {@link Interaction} 调用方继续编译；所有调用方改用 {@link #digStep} 后即可移除。 */
-    public boolean dig(BlockPos target) {
-        return digStep(target) == DigResult.BROKE_TARGET;
-    }
-
-    /**
-     * 将 {@code target} 的挖掘推进一刻；目标变化时先干净地重启，再转向方块、驱动原生破坏动作并挥手。
-     *
-     * @return 本刻对应的 {@link DigResult}。
-     */
-    /**
-     * 使用调用方已解析的准星命中结果推进一刻：只挖视线射线实际命中的方块和面，不在内部另找瞄准点；命中方块就是本次目标。
-     */
+    /** 使用调用方已解析的准星命中结果推进一刻：只挖视线射线实际命中的方块和面，不在内部另找瞄准点。 */
     // 调用方已经选好准星命中面时，直接挖这一格，不再找别的方块，也不自动选工具。
-    public DigResult digStep(BlockHitResult crosshairHit) {
+    public DigResult digStep(PlayerContext context, BlockHitResult crosshairHit) {
         if (blockHitDelay > 0) {                    // 先等待上一次破坏效果生效。
             blockHitDelay--;
-            InputDriver.halt(player);
+            playerInput.halt(player);
             return DigResult.PROGRESSING;
         }
-        InputDriver.halt(player);
+        playerInput.halt(player);
         BlockPos effective = crosshairHit.getBlockPos();
-        if (NavigationSafetyContext.protectsMutation(effective)) {
-            cancel();
-            return DigResult.NO_SHOT;
-        }
         if (pos == null || !pos.equals(effective)) {
-            // 工具由外层(移动原语按意图格)选择,这里不按命中格改选
-            if (!start(effective, false)) {
+            // 工具由外层按意图格选择，这里不按命中格改选。
+            if (!start(context, effective, false)) {
                 return DigResult.PROGRESSING;
             }
         }
-        return advance(crosshairHit, true);
+        return advance(context, crosshairHit, true);
     }
 
     /** 破块后冷却按游戏刻递减;本 tick 没走 digStep 的驱动方调用此保持计时。 */
@@ -144,26 +124,25 @@ public final class BlockDigger {
 
     /**
      * 客户端世界已将有效方块同步为空气后，完成一次原生破坏结算。此时射线无法再命中已消失的方块，
-     * 因此调用方必须轮询现有回执，而不是再次提交 {@link #digStep(BlockPos)}。
+     * 因此调用方必须轮询现有确认，而不是再次提交挖掘。
      */
     // 方块从画面上消失后，仍要核对之前发出的挖掘记录。没有本次记录，不能把别人挖掉算作自己挖成。
-    public DigResult settleGone(boolean targetBreak) {
-        if (receipt == null) {
-            // 选择或准备工具期间，目标也可能先消失；reset() 会遗留角色或菜单回执，cancel() 则先结束本挖掘器拥有的所有交易再清本地状态。
-            cancel();
+    public DigResult settleGone(PlayerContext context, boolean targetBreak) {
+        if (pending == null) {
+            // 选择或准备工具期间，目标也可能先消失；cancel() 会先结束本挖掘器拥有的所有交易再清本地状态。
+            cancel(context);
             return DigResult.NO_SHOT;
         }
-        LocalPlayerContext context = ClientRuntime.requireContext(player);
-        if (!receipt.terminal()) {
-            receipt = context.actions().poll(context, receipt);
+        if (!pending.terminal()) {
+            pending = sender.poll(context, pending);
         }
-        if (!receipt.terminal()) {
+        if (!pending.terminal()) {
             return DigResult.PROGRESSING;
         }
-        NativeActionReceipt.Status status = receipt.status();
+        PendingInteraction.Status status = pending.status();
         reset();
-        if (status == NativeActionReceipt.Status.CONFIRMED_APPLIED) {
-            blockHitDelay = postBreakDelay();
+        if (status == PendingInteraction.Status.CONFIRMED_APPLIED) {
+            blockHitDelay = POST_BREAK_DELAY_TICKS;
             return targetBreak ? DigResult.BROKE_TARGET : DigResult.BROKE_OCCLUDER;
         }
         return DigResult.NO_SHOT;
@@ -171,158 +150,152 @@ public final class BlockDigger {
 
     // 坐标入口先找能看到的目标面；找不到时还可能改挖眼睛与目标之间的遮挡物。
     // 只许挖指定格的调用方应使用 digTargetStep，否则“挖目标”可能顺便拆掉别的格。
-    public DigResult digStep(BlockPos target) {
+    public DigResult digStep(PlayerContext context, BlockPos target) {
         Level level = player.level();
-        if (NavigationSafetyContext.protectsMutation(target)) {
-            cancel();
-            InputDriver.halt(player);
-            return DigResult.NO_SHOT;
-        }
         if (blockHitDelay > 0) {                    // 先等待上一次破坏效果生效。
             blockHitDelay--;
-            InputDriver.halt(player);
+            playerInput.halt(player);
             return DigResult.PROGRESSING;
         }
         // 决定本刻实际挥向哪里：先尝试射线确认可见的目标表面；若目标被树叶或狭窄顶棚遮挡，则瞄准目标中心并破坏准星实际命中的遮挡物来开路。
-        // 这样角色不必永远等待理想角度；但 do_not_break 或容器方块绝不能作为遮挡物破坏。
+        // 这样角色不必永远等待理想角度；但带方块实体的格子（箱子、机器等）绝不能作为遮挡物破坏。
         BlockHitResult hit = reachableHit(target);
         BlockPos effective = target;
         if (hit == null) {
             BlockHitResult center = centerRaycast(target);
             if (center != null && !center.getBlockPos().equals(target)
-                    && !BlockHelper.shouldAvoidBreaking(level, center.getBlockPos())
-                    && !NavigationSafetyContext.protectsMutation(center.getBlockPos())) {
+                    && !level.getBlockState(center.getBlockPos()).hasBlockEntity()) {
                 hit = center;
                 effective = center.getBlockPos();
             }
         }
-        InputDriver.halt(player);
+        playerInput.halt(player);
         if (hit == null) {
             return DigResult.NO_SHOT;                // 没有清晰射线，也没有安全可清除的遮挡——当前卡住。
         }
         if (pos == null || !pos.equals(effective)) {
-            if (!start(effective, true)) {
+            if (!start(context, effective, true)) {
                 return DigResult.PROGRESSING;
             }
         }
-        // 本刻可能只清除了遮挡物而未破坏目标；只有目标本身消失才报告 true，避免调用方把为了打开视线而砍掉的树叶计作已采集目标。
-        return advance(hit, effective.equals(target));
+        // 本刻可能只清除了遮挡物而未破坏目标；只有目标本身消失才报告完成，避免把开视线砍掉的树叶计作已采集目标。
+        return advance(context, hit, effective.equals(target));
     }
 
-
     // 只尝试目标自身可见的面，绝不改挖前面的遮挡块；看不到就交回调用方换站位。
-    public DigResult digTargetStep(BlockPos target) {
-        if (NavigationSafetyContext.protectsMutation(target)) {
-            cancel();
-            InputDriver.halt(player);
-            return DigResult.NO_SHOT;
-        }
+    public DigResult digTargetStep(PlayerContext context, BlockPos target) {
         if (blockHitDelay > 0) {
             blockHitDelay--;
-            InputDriver.halt(player);
+            playerInput.halt(player);
             return DigResult.PROGRESSING;
         }
         BlockHitResult hit = reachableHit(target);
-        InputDriver.halt(player);
+        playerInput.halt(player);
         if (hit == null) {
             return DigResult.NO_SHOT;
         }
         if (pos == null || !pos.equals(target)) {
-            if (!start(target, true)) {
+            if (!start(context, target, true)) {
                 return DigResult.PROGRESSING;
             }
         }
-        return advance(hit, true);
+        return advance(context, hit, true);
     }
+
     /** 使用已解析的命中面和瞄准点，统一推进本刻挖掘。 */
-    // 真正开挖前再次检查保护格，接着按顺序等工具搬运、关闭背包、快捷栏选择完成。
+    // 真正开挖前，接着按顺序等工具搬运、关闭背包、快捷栏选择完成。
     // 这些步骤都是跨刻等待；中途失败就不继续挖。
-    private DigResult advance(BlockHitResult hit, boolean targetBreak) {
-        if (NavigationSafetyContext.protectsMutation(hit.getBlockPos())) {
-            cancel();
-            InputDriver.halt(player);
-            return DigResult.NO_SHOT;
-        }
-        LocalPlayerContext toolContext = ClientRuntime.requireContext(player);
-        if (toolCloseReceipt != null) {
-            if (!toolCloseReceipt.terminal()) {
-                toolCloseReceipt = toolContext.menus().poll(toolContext, toolCloseReceipt);
-            }
-            if (!toolCloseReceipt.terminal()) {
-                return DigResult.PROGRESSING;
-            }
-            MenuReceipt.Status status = toolCloseReceipt.status();
-            toolCloseReceipt = null;
-            if (status != MenuReceipt.Status.CONFIRMED_APPLIED) {
-                reset();
-                return DigResult.NO_SHOT;
-            }
-            submitToolSelection(toolContext);
-            return DigResult.PROGRESSING;
-        }
-        // 从背包搬到快捷栏后要先确认物品到位，再关掉背包回到世界操作。
-        if (toolStageReceipt != null) {
-            if (!toolStageReceipt.terminal()) {
-                toolStageReceipt = toolContext.menus().poll(toolContext, toolStageReceipt);
-            }
-            if (!toolStageReceipt.terminal()) {
-                return DigResult.PROGRESSING;
-            }
-            MenuReceipt.Status status = toolStageReceipt.status();
-            toolStageReceipt = null;
-            if (status != MenuReceipt.Status.CONFIRMED_APPLIED) {
-                cancel();
-                return DigResult.NO_SHOT;
-            }
-            toolCloseReceipt = toolContext.menus().close(toolContext, TOOL_TIMEOUT_TICKS);
-            return DigResult.PROGRESSING;
-        }
+    private DigResult advance(PlayerContext context, BlockHitResult hit, boolean targetBreak) {
+        // 关背包与搬工具两步都可能在等待；先结清它们，再轮到快捷栏选择和破坏本体。
+        DigResult toolStep = advanceToolPreparation(context);
+        if (toolStep != null) return toolStep;
         if (pendingToolSlot >= 0) {
-            submitToolSelection(toolContext);
+            submitToolSelection(context);
             return DigResult.PROGRESSING;
         }
-        if (toolSelectReceipt != null) {
-            if (!toolSelectReceipt.terminal()) {
-                toolSelectReceipt = toolContext.actions().poll(toolContext, toolSelectReceipt);
+        if (toolSelectPending != null) {
+            if (!toolSelectPending.terminal()) {
+                toolSelectPending = sender.poll(context, toolSelectPending);
             }
-            if (!toolSelectReceipt.terminal()) {
+            if (!toolSelectPending.terminal()) {
                 return DigResult.PROGRESSING;
             }
-            NativeActionReceipt.Status status = toolSelectReceipt.status();
-            toolSelectReceipt = null;
-            if (status != NativeActionReceipt.Status.CONFIRMED_APPLIED) {
+            PendingInteraction.Status status = toolSelectPending.status();
+            toolSelectPending = null;
+            if (status != PendingInteraction.Status.CONFIRMED_APPLIED) {
                 reset();
                 return DigResult.NO_SHOT;
             }
         }
         // 挖到一半换了手中物品或其附带数据，就取消旧挖掘，以免继续使用旧工具的进度。
-        if (receipt != null && !receipt.terminal() && destroyingItem != null
+        if (pending != null && !pending.terminal() && destroyingItem != null
                 && !ItemStack.isSameItemSameComponents(
                         destroyingItem, player.getMainHandItem())) {
-            cancel();
+            cancel(context);
             return DigResult.PROGRESSING;
         }
-        InputDriver.lookAt(player, hit.getLocation());
-        LocalPlayerContext context = ClientRuntime.requireContext(player);
+        playerInput.lookAt(player, hit.getLocation());
         // 第一次出手先等视角靠近目标；开始以后继续推进同一份挖掘记录，不每刻重新开挖。
-        if (receipt == null) {
+        if (pending == null) {
             if (!aimReady(hit.getLocation())) {
                 return DigResult.PROGRESSING;
             }
             if (!preparation.test(hit)) return DigResult.PROGRESSING;
-            receipt = context.actions().startBreaking(context, hit, BREAK_TIMEOUT_TICKS);
+            pending = sender.startBreaking(context, hit, BREAK_TIMEOUT_TICKS);
             destroyingItem = player.getMainHandItem().copy();
         } else {
-            receipt = context.actions().continueBreaking(context, receipt);
+            pending = sender.continueBreaking(context, pending);
         }
+        return settleBreak(context, targetBreak);
+    }
 
-        if (!receipt.terminal()) {
+    /** 关闭背包与搬工具两步的逐刻推进；还在等待或本刻只推进了准备时返回非空结果。 */
+    private DigResult advanceToolPreparation(PlayerContext context) {
+        if (toolClosePending != null) {
+            if (!toolClosePending.terminal()) {
+                toolClosePending = menuActions.poll(context, toolClosePending);
+            }
+            if (!toolClosePending.terminal()) {
+                return DigResult.PROGRESSING;
+            }
+            PendingMenuAction.Status status = toolClosePending.status();
+            toolClosePending = null;
+            if (status != PendingMenuAction.Status.CONFIRMED_APPLIED) {
+                reset();
+                return DigResult.NO_SHOT;
+            }
+            submitToolSelection(context);
             return DigResult.PROGRESSING;
         }
-        NativeActionReceipt.Status status = receipt.status();
+        // 从背包搬到快捷栏后要先确认物品到位，再关掉背包回到世界操作。
+        if (toolStagePending != null) {
+            if (!toolStagePending.terminal()) {
+                toolStagePending = menuActions.poll(context, toolStagePending);
+            }
+            if (!toolStagePending.terminal()) {
+                return DigResult.PROGRESSING;
+            }
+            PendingMenuAction.Status status = toolStagePending.status();
+            toolStagePending = null;
+            if (status != PendingMenuAction.Status.CONFIRMED_APPLIED) {
+                cancel(context);
+                return DigResult.NO_SHOT;
+            }
+            toolClosePending = menuActions.close(context, TOOL_TIMEOUT_TICKS);
+            return DigResult.PROGRESSING;
+        }
+        return null;
+    }
+
+    /** 挖掘确认结束后统一收口：成功按目标或遮挡物结算，失败如实报无法命中。 */
+    private DigResult settleBreak(PlayerContext context, boolean targetBreak) {
+        if (!pending.terminal()) {
+            return DigResult.PROGRESSING;
+        }
+        PendingInteraction.Status status = pending.status();
         reset();
-        if (status == NativeActionReceipt.Status.CONFIRMED_APPLIED) {
-            blockHitDelay = postBreakDelay();
+        if (status == PendingInteraction.Status.CONFIRMED_APPLIED) {
+            blockHitDelay = POST_BREAK_DELAY_TICKS;
             return targetBreak ? DigResult.BROKE_TARGET : DigResult.BROKE_OCCLUDER;
         }
         return DigResult.NO_SHOT;
@@ -330,12 +303,12 @@ public final class BlockDigger {
 
     // 换目标之前先结束旧挖掘和未完成的工具操作，下一次 tick 才开始新目标。
     // 随后查适合的工具槽位；此时只是选出编号，还没保证它已经拿在手里。
-    private boolean start(BlockPos target, boolean selectTool) {
-        if (receipt != null && !receipt.terminal()
-                || toolStageReceipt != null && !toolStageReceipt.terminal()
-                || toolSelectReceipt != null && !toolSelectReceipt.terminal()
-                || toolCloseReceipt != null && !toolCloseReceipt.terminal()) {
-            cancel();
+    private boolean start(PlayerContext context, BlockPos target, boolean selectTool) {
+        if (pending != null && !pending.terminal()
+                || toolStagePending != null && !toolStagePending.terminal()
+                || toolSelectPending != null && !toolSelectPending.terminal()
+                || toolClosePending != null && !toolClosePending.terminal()) {
+            cancel(context);
             return false;
         }
         reset();
@@ -343,87 +316,63 @@ public final class BlockDigger {
         pendingToolSlot = selectTool && player.level().isLoaded(pos)
                 ? ToolSelect.bestSlot(player, player.level().getBlockState(pos), minimumToolDurability)
                 : -1;
-        LocalPlayerContext context = ClientRuntime.requireContext(player);
-        if (context.minecraft().screen != null || player.containerMenu != player.inventoryMenu) {
-            toolCloseReceipt = context.menus().close(context, TOOL_TIMEOUT_TICKS);
+        if (Minecraft.getInstance().screen != null || player.containerMenu != player.inventoryMenu) {
+            toolClosePending = menuActions.close(context, TOOL_TIMEOUT_TICKS);
         } else {
             submitToolSelection(context);
         }
         // 存活引用而非副本:主手栈原地变异(修补吸经验改耐久)时引用相等,
-        // 不触发重置;只有真正换持(不同栈对象且物品/组件不同)才重开
+        // 不触发重置;只有真正换持(不同栈对象且物品/组件不同)才重开。
         destroyingItem = player.getMainHandItem();
         return true;
     }
 
     // 工具在快捷栏就切换选中格；在背包第 9～35 格则先显示背包，再与当前快捷栏格交换。
-    private void submitToolSelection(LocalPlayerContext context) {
+    private void submitToolSelection(PlayerContext context) {
         int bestSlot = pendingToolSlot;
-        if (bestSlot >= 9 && bestSlot < 36 && !context.menus().ensureVisible(context)) return;
+        if (bestSlot >= 9 && bestSlot < 36 && !menuActions.ensureVisible(context)) return;
         pendingToolSlot = -1;
         int selected = player.getInventory().selected;
         if (bestSlot >= 0 && bestSlot < 9 && bestSlot != selected) {
-            toolSelectReceipt = context.actions().selectHotbar(
+            toolSelectPending = sender.selectHotbar(
                     context, bestSlot, TOOL_TIMEOUT_TICKS);
         } else if (bestSlot >= 9 && bestSlot < 36) {
             // 工具在背包里时换到“当前手上那格”；扩展快捷栏模组可能让 selected 越出 0~8，
             // 原版 SWAP 交换只认 0~8，先折回原版范围再交换。
-            toolStageReceipt = context.menus().swapInventoryToHotbar(
+            toolStagePending = menuActions.swapInventoryToHotbar(
                     context, bestSlot, VanillaHotbar.swapTarget(selected), TOOL_TIMEOUT_TICKS);
         }
     }
+
     /**
      * 结束此挖掘器拥有的所有角色操作交易。
      *
-     * <p>挖掘器可能在第一次挥动之前、仍处于选择或准备工具阶段时被取消。这些回执占用与破坏动作相同的角色或菜单串行槽位；
-     * 只清空本地字段会遗留占用，使下一任务因“仍在等待确认”而失败。因此要实际停止破坏，将已提交的一次性快捷栏选择标记为结果不确定，并在任务边界关闭待处理的菜单准备操作。
+     * <p>挖掘器可能在第一次挥动之前、仍处于选择或准备工具阶段时被取消。这些确认占用与破坏动作相同的
+     * 交互串行槽位；只清空本地字段会遗留占用，使下一任务因“仍在等待确认”而失败。因此要实际停止破坏，
+     * 将已提交的一次性快捷栏选择标记为结果不确定，并在任务边界关闭待处理的菜单准备操作。
      */
     // 取消不只是清变量：要通知游戏停止挖掘，结束未确认的切工具操作，并处理还开着的背包。
-    // 这些停止动作交给公共动作／菜单接口收尾，最后才清掉本对象记录。
-    public void cancel() {
-        boolean pendingBreak = receipt != null && !receipt.terminal();
-        boolean pendingSelection = toolSelectReceipt != null && !toolSelectReceipt.terminal();
-        boolean pendingMenu = (toolCloseReceipt != null && !toolCloseReceipt.terminal())
-                || (toolStageReceipt != null && !toolStageReceipt.terminal())
+    public void cancel(PlayerContext context) {
+        boolean pendingBreak = pending != null && !pending.terminal();
+        boolean pendingSelection = toolSelectPending != null && !toolSelectPending.terminal();
+        boolean pendingMenu = (toolClosePending != null && !toolClosePending.terminal())
+                || (toolStagePending != null && !toolStagePending.terminal())
                 || MenuVisibility.inventoryVisible(
                         Minecraft.getInstance(), player);
-        LocalPlayerContext context = null;
-        if (pendingBreak || pendingSelection || pendingMenu) {
-            try {
-                context = ClientRuntime.requireContext(player);
-            } catch (RuntimeException unavailable) {
-                // MCP 取消等刻外收尾没有当刻上下文：发不了停止包，但不允许就此把 PENDING 回执留在动作
-                // 队列里占位数千刻（实机楔死事故的来源正是这条路径）。交给端口延迟收尾，下一刻先停挖再结算。
-                DefaultNativeActionPort actions = ClientRuntime.actor().actions();
-                if (pendingBreak) {
-                    actions.deferBreakCancellationForTaskBoundary(receipt,
-                            "the block-digging task ended before its native break was confirmed");
-                }
-                if (pendingSelection) {
-                    actions.abandonOneShotForTaskBoundary(toolSelectReceipt,
-                            "the block-digging task ended while tool selection was awaiting confirmation");
-                }
-                Constants.LOG.warn(
-                        "[maicraft-actor] task-boundary digger cancel ran without an active tick context ({});"
-                                + " pending break deferred to next tick, one-shot receipts settled uncertain",
-                        unavailable.getMessage());
-                reset();
-                return;
-            }
-        }
         if (pendingBreak) {
-            context.actions().cancelBreakingForTaskBoundary(
+            sender.cancelBreakingForTaskBoundary(
                     context,
-                    receipt,
+                    pending,
                     "the block-digging task ended before its native break was confirmed");
         }
         if (pendingSelection) {
-            context.actions().retireOneShotForTaskBoundary(
+            sender.retireOneShotForTaskBoundary(
                     context,
-                    toolSelectReceipt,
+                    toolSelectPending,
                     "the block-digging task ended while tool selection was awaiting confirmation");
         }
         if (pendingMenu) {
-            context.menus().closeForTaskBoundary(
+            menuActions.closeForTaskBoundary(
                     context,
                     TOOL_TIMEOUT_TICKS,
                     "the block-digging task ended while tool staging was awaiting confirmation");
@@ -435,10 +384,10 @@ public final class BlockDigger {
     // 只清本次挖掘的局部记录；挖完后的冷却仍保留，避免连续挖掘绕过速度设置。
     private void reset() {
         pos = null;
-        receipt = null;
-        toolSelectReceipt = null;
-        toolCloseReceipt = null;
-        toolStageReceipt = null;
+        pending = null;
+        toolSelectPending = null;
+        toolClosePending = null;
+        toolStagePending = null;
         pendingToolSlot = -1;
         destroyingItem = null;
     }
@@ -465,7 +414,7 @@ public final class BlockDigger {
             return null;
         }
         Vec3 eye = player.getEyePosition();
-        double reach = AimGeometry.blockReachDistance(player);
+        double reach = InteractionRange.blockReach(player);
         BlockState state = level.getBlockState(pos);
         VoxelShape shape = state.getShape(level, pos);
         if (shape.isEmpty()) {
@@ -473,7 +422,7 @@ public final class BlockDigger {
         }
         // 先检查碰撞形状中心（形状为空时改用整个方块中心），再检查选择形状的六个面中心。
         Vec3[] aims = {
-                AimGeometry.collisionCenter(level, pos, state),
+                shapeCenter(pos, shape),
                 offsetOn(pos, shape, 0.5, 0.0, 0.5),
                 offsetOn(pos, shape, 0.5, 1.0, 0.5),
                 offsetOn(pos, shape, 0.5, 0.5, 0.0),
@@ -492,13 +441,20 @@ public final class BlockDigger {
             BlockHitResult res = level.clip(new ClipContext(
                     eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
             if (res.getType() == HitResult.Type.BLOCK && res.getBlockPos().equals(pos)
-                    && (requiredFace == null || res.getDirection() == requiredFace)
-                    // 油门把手不在普通方块选择形状里；被原生把手抢先命中的瞄准点需换面或换站位。
-                    && NativeBreakingTargeting.visible(level,eye,dir,res)) {
+                    && (requiredFace == null || res.getDirection() == requiredFace)) {
                 return res;
             }
         }
         return null;
+    }
+
+    /** 选择形状的中心；形状为空时退回整格中心。 */
+    private static Vec3 shapeCenter(BlockPos pos, VoxelShape shape) {
+        if (shape.isEmpty()) return Vec3.atCenterOf(pos);
+        return new Vec3(
+                pos.getX() + (shape.min(Direction.Axis.X) + shape.max(Direction.Axis.X)) / 2.0,
+                pos.getY() + (shape.min(Direction.Axis.Y) + shape.max(Direction.Axis.Y)) / 2.0,
+                pos.getZ() + (shape.min(Direction.Axis.Z) + shape.max(Direction.Axis.Z)) / 2.0);
     }
 
     /**
@@ -513,7 +469,7 @@ public final class BlockDigger {
             return null;
         }
         Vec3 eye = player.getEyePosition();
-        double reach = AimGeometry.blockReachDistance(player);
+        double reach = InteractionRange.blockReach(player);
         Vec3 center = Vec3.atCenterOf(target);
         Vec3 dir = center.subtract(eye);
         if (dir.lengthSqr() < 1.0e-8) {
@@ -533,5 +489,4 @@ public final class BlockDigger {
         double z = shape.min(Direction.Axis.Z) * mz + shape.max(Direction.Axis.Z) * (1 - mz);
         return new Vec3(pos.getX() + x, pos.getY() + y, pos.getZ() + z);
     }
-
 }

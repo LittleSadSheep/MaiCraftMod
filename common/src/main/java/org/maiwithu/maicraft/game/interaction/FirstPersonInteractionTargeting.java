@@ -27,7 +27,6 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 import java.util.Comparator;
 import java.util.Set;
 import java.util.List;
-import org.maiwithu.maicraft.core.pathing.execute.PlayerNav;
 import java.util.ArrayList;
 import java.util.function.Predicate;
 
@@ -240,7 +239,7 @@ public final class FirstPersonInteractionTargeting {
     public static BlockPos nearestVisibleStand(
             LocalPlayer player, BlockPos target, double reach, Set<Long> excluded) {
         if (target == null || !player.level().isLoaded(target)) return null;
-        BlockPos current = PlayerNav.playerFeet(player);
+        BlockPos current = player.blockPosition();
         ArrayList<BlockPos> candidates = new ArrayList<>();
         for (int radius = 1; radius <= 3; radius++) {
             for (int dx = -radius; dx <= radius; dx++) {
@@ -284,7 +283,7 @@ public final class FirstPersonInteractionTargeting {
             LocalPlayer player, BlockPos target, Set<Long> excluded, Predicate<Vec3> visibleFrom) {
         ArrayList<BlockPos> candidates = new ArrayList<>();
         // 角色已在真实眼位够到目标时保留原姿态，不用格心眼位或干燥整格筛选否决当前可执行的动作。
-        BlockPos current = PlayerNav.playerFeet(player);
+        BlockPos current = player.blockPosition();
         if (!excluded.contains(current.asLong()) && visibleFrom.test(player.getEyePosition())) candidates.add(current);
         // 眼睛高于脚位，低于目标三到五格也可能够得到；最终以原生射线和真实触及距离筛选。
         for (int dx = -4; dx <= 4; dx++) for (int dz = -4; dz <= 4; dz++) for (int dy = -5; dy <= 3; dy++) {

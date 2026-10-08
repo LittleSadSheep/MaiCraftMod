@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.game.player;
 
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.phys.Vec3;
+
 /**
  * 角色的移动与视角输入入口：所有走路、按键、转头指令都通过它写进同一个本地玩家。
  *
@@ -59,7 +62,7 @@ public interface PlayerInput {
 
     /** 当前游戏刻就要交互时，先让真实镜头射线对准目标，避免点击落到别处。 */
     default void requestImmediateLook(float yaw, float pitch, long leaseTickRevision) {
-        requestLook(yaw,pitch,leaseTickRevision);
+        requestLook(yaw, pitch, leaseTickRevision);
     }
 
     /**
@@ -74,4 +77,17 @@ public interface PlayerInput {
 
     /** 立即清空自动注入的移动与按键信号；停止输入本身不发送交互包。 */
     void releaseAll();
+
+    // ---- 交互侧的便捷入口：交互与容器界面在出手前定住身位、对准目标时使用。----
+
+    /** 把镜头转向世界坐标里的一个点：实现按眼位换算偏航与俯仰，走本刻立即瞄准通道。 */
+    void lookAt(LocalPlayer player, Vec3 point);
+
+    /** 本刻把移动按键落成"停住"；实现按当前刻的修订号落，调用方不需要知道修订号。 */
+    void halt(LocalPlayer player);
+
+    /** 松开全部按键（含使用、攻击与视角保持），把身体交回给下一个动作或玩家。 */
+    default void releaseAll(LocalPlayer player) {
+        releaseAll();
+    }
 }

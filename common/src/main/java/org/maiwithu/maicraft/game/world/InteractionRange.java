@@ -31,19 +31,19 @@ public final class InteractionRange {
         }
 
         @Override public double bedDistance() {
-            return blockRange(player);
+            return blockReach(player);
         }
     }
 
     private InteractionRange() {}
 
-    /** 方块交互距离：原版生存模式约 4.5 格，属性可被装备与效果改变。 */
-    public static double blockRange(LocalPlayer player) {
+    /** 方块交互触及距离：原版生存模式约 4.5 格，属性可被装备与效果改变。 */
+    public static double blockReach(LocalPlayer player) {
         return player.getAttributeValue(Attributes.BLOCK_INTERACTION_RANGE);
     }
 
-    /** 实体交互距离：原版生存模式为 3 格，同样读属性。 */
-    public static double entityRange(LocalPlayer player) {
+    /** 近战攻击实体的触及距离：原版生存模式为 3 格，同样读属性。 */
+    public static double entityReach(LocalPlayer player) {
         return player.getAttributeValue(Attributes.ENTITY_INTERACTION_RANGE);
     }
 }

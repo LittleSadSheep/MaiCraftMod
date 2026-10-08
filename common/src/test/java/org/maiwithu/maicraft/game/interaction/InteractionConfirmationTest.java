@@ -1,0 +1,45 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.game.interaction;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import org.junit.jupiter.api.Test;
+
+/**
+ * 组合确认的结算顺序：任一匹配即通过，还有等待项就继续等，全部结束才综合未生效或不一致；
+ * 已拥有服务器发来的新实体证据时不再多等稳定刻。
+ * 挖掉含水方块留下原液体的替换判定表依赖注册的原版方块，放到带离线引导的实机验收里核。
+ */
+class InteractionConfirmationTest {
+
+    @Test
+    void anyOfPassesOnTheFirstAppliedAndWaitsWhileAnythingIsPending() {
+        InteractionConfirmation applied = c -> InteractionConfirmation.Verdict.APPLIED;
+        InteractionConfirmation notApplied = c -> InteractionConfirmation.Verdict.NOT_APPLIED;
+        InteractionConfirmation diverged = c -> InteractionConfirmation.Verdict.DIVERGED;
+        assertEquals(InteractionConfirmation.Verdict.APPLIED,
+                InteractionConfirmation.anyOf(notApplied, applied).observe(null));
+        assertEquals(InteractionConfirmation.Verdict.PENDING,
+                InteractionConfirmation.anyOf(notApplied, c -> InteractionConfirmation.Verdict.PENDING).observe(null));
+        assertEquals(InteractionConfirmation.Verdict.NOT_APPLIED,
+                InteractionConfirmation.anyOf(notApplied, notApplied).observe(null));
+        assertEquals(InteractionConfirmation.Verdict.DIVERGED,
+                InteractionConfirmation.anyOf(diverged, diverged).observe(null));
+    }
+
+    @Test
+    void anyOfRejectsAnEmptyConditionList() {
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                InteractionConfirmation::anyOf);
+    }
+
+    @Test
+    void serverObservedEntitySkipsTheDwell() {
+        InteractionConfirmation evidence = c -> InteractionConfirmation.Verdict.APPLIED;
+        assertEquals(2, evidence.stableTicksRequired(), "普通观察默认要连续两刻稳定");
+        assertEquals(1, InteractionConfirmation.serverObservedEntity(evidence).stableTicksRequired(),
+                "已拥有服务器发来的新实体证据时，不再多等一次稳定刻");
+        assertTrue(InteractionConfirmation.pending().observe(null) == InteractionConfirmation.Verdict.PENDING);
+    }
+}
