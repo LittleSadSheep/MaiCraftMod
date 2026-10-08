@@ -6,12 +6,15 @@
 对嵌套 JSON 参数序列化失真时的绕行。
 
 用法：
-  python tools/maicraft_cli.py init                                  # 强制重新握手
-  python tools/maicraft_cli.py call perceive '{"view":"situation"}'  # 内联 JSON 参数
-  python tools/maicraft_cli.py call execute @payload.json            # UTF-8 文件载荷
+  python tools/maicraft_cli.py init                                # 强制重新握手
+  python tools/maicraft_cli.py call observe '{"what":"self"}'      # 内联 JSON 参数
+  python tools/maicraft_cli.py call execute @payload.json          # UTF-8 文件载荷（含中文时推荐）
   python tools/maicraft_cli.py call task '{"action":"list"}'
-  python tools/maicraft_cli.py read maicraft://chatflow              # 读 MCP 资源
-  python tools/maicraft_cli.py --raw call perceive '{"view":"surroundings"}'
+  python tools/maicraft_cli.py --raw call lookup '{"topic":"abilities"}'  # 打印完整响应
+
+五个工具：observe / lookup / execute / task / events。工具的真实行为尚未接入时，
+调用返回结构化的 not_ready 错误（isError=true、code=not_ready），这本身就是
+传输与空壳分发的验收口径。v1 端点目前不提供 MCP 资源。
 
 Windows 注意：Git Bash 里 curl/argv 会把中文按本地代码页发出造成乱码，
 含非 ASCII 参数一律走 @file（UTF-8），本脚本内部全程 UTF-8 读写。
