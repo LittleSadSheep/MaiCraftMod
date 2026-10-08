@@ -10,8 +10,6 @@ import java.util.function.Consumer;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.maiwithu.maicraft.network.MaiCraftPayload;
 import org.maiwithu.maicraft.network.ProtocolJson;
 import org.maiwithu.maicraft.network.ProtocolReplies;
@@ -23,7 +21,6 @@ import org.maiwithu.maicraft.network.ServerProtocolDispatcher;
  * 绝不使用客户端自己报的身份，只认当前连接上的玩家对象；普通玩家没有会话，照常游玩。
  */
 public final class ServerLinkNetwork {
-    private static final Logger LOG = LoggerFactory.getLogger(ServerLinkNetwork.class);
     private final ServerOperationRegistry operations;
     private final Map<ServerGamePacketListenerImpl, ServerProtocolDispatcher> connections =
             Collections.synchronizedMap(new IdentityHashMap<>());
@@ -48,8 +45,6 @@ public final class ServerLinkNetwork {
 
     public void receive(ServerPlayer player, JsonObject envelope, Consumer<JsonObject> reply) {
         MinecraftServer server = player.serverLevel().getServer();
-        LOG.info("[serverlink] 服务端收到信封 kind={}，来自 {}", ServerProtocolDispatcher.probeKind(envelope),
-                player.getGameProfile().getName());
         if (!server.isSameThread()) throw new IllegalStateException("Network dispatch requires the server game thread");
         if (player.hasDisconnected() || player.connection.player != player) return;
         var dispatcher = connections.computeIfAbsent(player.connection, ignored -> new ServerProtocolDispatcher());

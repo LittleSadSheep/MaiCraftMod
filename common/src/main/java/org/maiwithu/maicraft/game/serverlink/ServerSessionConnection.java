@@ -5,13 +5,10 @@ import com.google.gson.JsonObject;
 import java.util.Collection;
 import java.util.UUID;
 import java.util.function.BooleanSupplier;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import java.util.function.Predicate;
 
 /** 在客户端线程完成能力协商和控制许可续订，不重放任何业务操作。 */
 final class ServerSessionConnection {
-    private static final Logger LOG = LoggerFactory.getLogger(ServerSessionConnection.class);
     final ServerCapabilityState capabilities = new ServerCapabilityState();
     final BooleanSupplier available;
     final Predicate<JsonObject> sender;
@@ -66,7 +63,6 @@ final class ServerSessionConnection {
         operations.forEach(operation -> versions.addProperty(operation.id(), operation.version()));
         envelope.add("features", versions);
         capabilities.reset(ServerCapabilityState.State.NEGOTIATING, "awaiting_welcome");
-        LOG.info("[serverlink] 客户端已发送 hello（等待 welcome）");
         helloDeadline = tick + 100;
         if (!send(envelope)) capabilities.reset(ServerCapabilityState.State.UNCONFIRMED, "hello_not_sent");
     }
@@ -98,7 +94,6 @@ final class ServerSessionConnection {
     boolean receive(JsonObject envelope, long receivedConnection) {
         if (receivedConnection != connection) return false;
         String kind = ServerCapabilityState.text(envelope, "kind");
-        LOG.info("[serverlink] 客户端收到信封 kind={}", kind);
         if (kind.equals("welcome")) {
             if (!nonce.equals(ServerCapabilityState.text(envelope, "clientNonce"))
                     || capabilities.state != ServerCapabilityState.State.NEGOTIATING) return true;

@@ -24,6 +24,7 @@ public final class ServerLinkSession {
     private long connectionRevision = -1;
     private long bindingRevision = -1;
     private ClientPacketListener connection;
+    private String boundDimension;
 
     public ServerLinkSession(LinkTransport transport) {
         this.router = new RequestRouter(transport::available,
@@ -55,14 +56,16 @@ public final class ServerLinkSession {
             bindingRevision = -1;
             router.disconnect();
         } else {
-            // 换了连接就换一个会话身份，旧服务器的确认作废；同一连接换世界只更新绑定，握手沿用。
-            if (connection != current) {
+            // 换了连接就换一个会话身份，旧服务器的确认作废；同一连接换维度只更新绑定，握手沿用。
+            // 重绑只发生在连接或维度真正变化时——每刻重绑会重置握手随机数，welcome 永远对不上。
+            var dimension = minecraft.level.dimension().location().toString();
+            if (connection != current || !dimension.equals(boundDimension)) {
                 connection = current;
                 connectionRevision++;
+                boundDimension = dimension;
+                bindingRevision++;
+                router.bind(connectionRevision, bindingRevision, dimension, 0, true, tick);
             }
-            bindingRevision++;
-            router.bind(connectionRevision, bindingRevision, minecraft.level.dimension().location().toString(),
-                    0, true, tick);
         }
         for (int i = 0; i < 256; i++) {
             Runnable callback = callbacks.poll();
@@ -84,7 +87,6 @@ public final class ServerLinkSession {
         JsonObject envelope;
         try { envelope = ProtocolJson.decode(json); }
         catch (RuntimeException malformed) { return; }
-        LOG.info("[serverlink] 客户端线路收到信封 kind={}", ServerCapabilityState.text(envelope, "kind"));
         enqueue(() -> {
             if (ServerCapabilityState.text(envelope, "kind").equals("confirmation")) {
                 confirmations.receive(envelope);

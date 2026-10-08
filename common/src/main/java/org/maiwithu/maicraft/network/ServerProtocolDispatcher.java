@@ -23,12 +23,6 @@ public final class ServerProtocolDispatcher {
     private long rateTick = Long.MIN_VALUE;
     private int requestsThisTick;
 
-    /** 诊断探针：读信封 kind 供日志使用；不改变任何状态。 */
-    public static String probeKind(JsonObject envelope) {
-        try { return ProtocolJson.string(envelope, "kind"); }
-        catch (RuntimeException malformed) { return "<unreadable>"; }
-    }
-
     public JsonObject receive(JsonObject request, Peer peer) {
         try {
             ProtocolJson.encodeRequest(request);
