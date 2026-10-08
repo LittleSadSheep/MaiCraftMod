@@ -12,6 +12,9 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.game.ModIdentity;
 import org.maiwithu.maicraft.game.loader.LoaderEnvironment;
 import org.maiwithu.maicraft.game.ClientHooks;
+import org.maiwithu.maicraft.game.interaction.DefaultInteractionSender;
+import org.maiwithu.maicraft.game.interaction.InteractionOpportunity;
+import org.maiwithu.maicraft.game.menu.DefaultMenuActions;
 import org.maiwithu.maicraft.game.player.PlayerControlBoundary;
 import org.maiwithu.maicraft.game.serverlink.ClientOperation;
 import org.maiwithu.maicraft.game.serverlink.LinkTransport;
@@ -108,6 +111,12 @@ public final class Bootstrap {
                 ModIdentity.NAME, loader.loaderName(), loader.isDevelopment());
         PlayerControlBoundary playerControl = new PlayerControlBoundary();
         BlockScanService blockScans = new BlockScanService();
+        // 交互提交与容器界面操作共用同一份每刻一次的交互机会；两边都建好后互相接上，再挂进角色上下文。
+        InteractionOpportunity opportunity = new InteractionOpportunity();
+        DefaultMenuActions menuActions = new DefaultMenuActions(opportunity, playerControl.input());
+        DefaultInteractionSender interactionSender = new DefaultInteractionSender(menuActions, opportunity);
+        menuActions.attachSender(interactionSender);
+        playerControl.attachInteractionEntries(interactionSender, menuActions);
         // Mixin 钩子拿不到构造注入，只能在这里登记；服务本体仍以实例传递。
         ClientHooks.registerPlayerControl(playerControl);
         ClientHooks.registerBlockScans(blockScans);

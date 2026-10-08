@@ -9,6 +9,9 @@ import net.minecraft.client.player.LocalPlayer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.maiwithu.maicraft.game.interaction.InteractionSender;
+import org.maiwithu.maicraft.game.menu.MenuActions;
+
 /**
  * 玩家控制权的每刻边界：每个客户端刻先确认“现在操作哪个玩家、自动化是否拥有控制权”，
  * 再发给外界一份只在这一刻有效的 {@link PlayerContext}。
@@ -17,14 +20,16 @@ import org.slf4j.LoggerFactory;
  * 再用来操作角色，避免旧任务拿着过期的入口乱动新的身体。本刻只允许提交一次游戏操作：
  * 读写分开，读世界不受限制，动手的机会每刻只有一次。
  *
- * <p>交互提交与容器界面两个入口由原生交互轨的端口在每刻推进时接上；这里只保留
- * 占用与失效的判定，不认识任何具体交互。
+ * <p>交互提交与容器界面两个入口在启动时接上来（彼此与交互机会共享构造顺序，接上来之前
+ * 上下文交出 {@code null}）；边界本身只保留占用与失效的判定，不认识任何具体交互。
  */
 public final class PlayerControlBoundary {
     private static final Logger LOG = LoggerFactory.getLogger(PlayerControlBoundary.class);
 
     private final Minecraft minecraft;
     private final LocalPlayerInput input = new LocalPlayerInput();
+    private InteractionSender interactionSender;
+    private MenuActions menuActions;
     private LocalPlayer observedPlayer;
     private long bodyEpoch;
     private long controlRevision;
@@ -44,6 +49,21 @@ public final class PlayerControlBoundary {
 
     /** 请求接管后若创建任务失败，用这个编号只撤回本次新增的接管请求。 */
     public record AutomationRequest(long revision, boolean created) {}
+
+    /**
+     * 启动时接上交互提交与容器界面两个入口；它们与角色上下文互相引用，只能等双方都建好后再接。
+     * 只允许接一次，避免运行中途换成另一套入口让已发出的等待失联。
+     */
+    public void attachInteractionEntries(InteractionSender interactionSender, MenuActions menuActions) {
+        if (interactionSender == null || menuActions == null) {
+            throw new IllegalArgumentException("interaction entries must not be null");
+        }
+        if (this.interactionSender != null || this.menuActions != null) {
+            throw new IllegalStateException("interaction entries are already attached");
+        }
+        this.interactionSender = interactionSender;
+        this.menuActions = menuActions;
+    }
 
     /** 开始一个客户端刻：核对玩家与控制权，返回只在本刻有效的角色上下文。 */
     public Optional<PlayerContext> beginTick() {
@@ -95,6 +115,8 @@ public final class PlayerControlBoundary {
                 player,
                 minecraft.level,
                 minecraft.getConnection(),
+                interactionSender,
+                menuActions,
                 bodyEpoch,
                 controlRevision,
                 tickRevision,

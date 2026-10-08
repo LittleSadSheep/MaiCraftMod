@@ -5,11 +5,14 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.player.LocalPlayer;
 
+import org.maiwithu.maicraft.game.interaction.InteractionSender;
+import org.maiwithu.maicraft.game.menu.MenuActions;
+
 /**
  * 本刻的角色上下文：这一刻 Mod 控制的本地玩家、所在世界，以及本刻还能不能向游戏提交交互。
  *
  * <p>每刻由游戏接口层重新取得，只在本刻有效，不能留到下一刻使用：重生、换世界之后玩家对象会换掉。
- * 移动输入、交互提交与容器界面三个入口之后也挂在这里。
+ * 移动输入、交互提交与容器界面三个入口都挂在这里。
  */
 public interface PlayerContext {
 
@@ -24,6 +27,15 @@ public interface PlayerContext {
 
     /** 本刻角色的移动与视角输入入口；只有自动化拥有控制权时指令才会被接受。 */
     PlayerInput input();
+
+    /**
+     * 本刻角色的交互提交入口：向游戏提交一次原生交互并逐刻等确认。
+     * 世界动作与容器界面点击共享同一份每刻一次的交互机会；启动时接上之前为 {@code null}。
+     */
+    InteractionSender interactionSender();
+
+    /** 本刻角色的容器界面操作入口：点击、搬运与关闭都经它提交；启动时接上之前为 {@code null}。 */
+    MenuActions menuActions();
 
     /** 客户端刻号；同一刻内重复读取得到相同的值，用来判断手里的上下文是不是已经过期。 */
     long clientTick();

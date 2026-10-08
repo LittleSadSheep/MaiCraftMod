@@ -11,6 +11,9 @@ public final class FakePlayerContext implements PlayerContext {
     public long tick;
     public boolean current = true;
     public boolean canInteract = true;
+    /** 需要经过上下文取动手入口的测试，先在这里放进替身；默认没有，读的时候如实报缺。 */
+    public InteractionSender sender;
+    public org.maiwithu.maicraft.game.menu.MenuActions menu;
     public final LocalPlayer player;
 
     public FakePlayerContext(LocalPlayer player) {
@@ -36,5 +39,13 @@ public final class FakePlayerContext implements PlayerContext {
     @Override public org.maiwithu.maicraft.game.player.PlayerInput input() {
         // 交互协议测试不经过按键输入；哪天真用到了，把这个占位换成输入替身。
         throw new UnsupportedOperationException("FakePlayerContext 没有输入入口");
+    }
+    @Override public InteractionSender interactionSender() {
+        if (sender == null) throw new UnsupportedOperationException("FakePlayerContext 没有交互提交入口");
+        return sender;
+    }
+    @Override public org.maiwithu.maicraft.game.menu.MenuActions menuActions() {
+        if (menu == null) throw new UnsupportedOperationException("FakePlayerContext 没有容器界面入口");
+        return menu;
     }
 }
