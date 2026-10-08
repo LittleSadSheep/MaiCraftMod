@@ -30,4 +30,12 @@ public interface AbilityModule {
     default AbilityHooks hooks() {
         return AbilityHooks.NONE;
     }
+
+    /**
+     * 目标里列的 steps 是否交给这个能力：只有"按顺序做几件事"的能力返回 true，
+     * 目标推进器会把每一步当作一个完整的目标逐步跑。其他能力收到 steps 时，MCP 入口直接报参数错误。
+     */
+    default boolean acceptsSteps() {
+        return false;
+    }
 }
