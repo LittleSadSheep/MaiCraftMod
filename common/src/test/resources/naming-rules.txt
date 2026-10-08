@@ -27,6 +27,7 @@ word Intent 已改名：LLM 想要的结果用 Goal，能力对一步的决定�
 word Upkeep 已改名：生存需求用 SurvivalNeed
 word Reflex 会和 Java 反射混淆；生存需求用 SurvivalNeed
 word Body 已改名：Mod 控制的本地玩家叫角色，代码里用 Player
+word Actor 已改名：控制本地玩家的每刻入口按实际职责起名，例如 PlayerControlBoundary
 word Contract 已改名：写给 LLM 的用法用 AbilityDoc，能力的静态信息用 AbilitySpec
 word Descriptor 已改名：能力的静态信息用 AbilitySpec
 word Gateway 会被读成 API 网关；MCP 入口在 mcp 包
