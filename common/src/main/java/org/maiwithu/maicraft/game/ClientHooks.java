@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.game.mixin;
+package org.maiwithu.maicraft.game;
 
 import org.maiwithu.maicraft.game.player.PlayerControlBoundary;
 import org.maiwithu.maicraft.game.world.BlockScanService;
@@ -26,11 +26,12 @@ public final class ClientHooks {
         blockScans = service;
     }
 
-    static PlayerControlBoundary playerControl() {
+    /** Mixin 类跨包读取；这里是与 Mixin 之间唯一允许的静态通道。 */
+    public static PlayerControlBoundary playerControl() {
         return playerControl;
     }
 
-    static BlockScanService blockScans() {
+    public static BlockScanService blockScans() {
         return blockScans;
     }
 }

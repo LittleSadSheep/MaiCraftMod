@@ -10,7 +10,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.game.ModIdentity;
 import org.maiwithu.maicraft.game.loader.LoaderEnvironment;
-import org.maiwithu.maicraft.game.mixin.ClientHooks;
+import org.maiwithu.maicraft.game.ClientHooks;
 import org.maiwithu.maicraft.game.player.PlayerControlBoundary;
 import org.maiwithu.maicraft.game.serverlink.ClientOperation;
 import org.maiwithu.maicraft.game.serverlink.LinkTransport;

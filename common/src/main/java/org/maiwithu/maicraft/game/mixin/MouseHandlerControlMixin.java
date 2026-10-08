@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.game.mixin;
 
 import net.minecraft.client.MouseHandler;
 
+import org.maiwithu.maicraft.game.ClientHooks;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
