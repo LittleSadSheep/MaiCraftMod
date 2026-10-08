@@ -1,4 +1,5 @@
-package org.maiwithu.maicraft.core.scan;
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.game.world;
 
 /**
  * 从中心区块向外一圈圈枚举方形边界，不在这里访问世界。

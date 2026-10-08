@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.core.scan;
+package org.maiwithu.maicraft.game.world;
 
 import net.minecraft.core.BlockPos;
 

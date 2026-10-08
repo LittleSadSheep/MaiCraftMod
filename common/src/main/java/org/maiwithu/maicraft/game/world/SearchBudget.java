@@ -1,8 +1,11 @@
-package org.maiwithu.maicraft.core.scan;
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.game.world;
 
 /**
- * 给 BlockSearch 等使用它的扫描共享一份每刻预算，防止多个请求各自把游戏主线程占满。
- * 当前先调用者先用，不保证轮流分配。TargetIndex 另有自己的两毫秒预算，所以这里不是全项目所有搜索的唯一上限。
+ * 给分刻扫描共享的一份每刻预算，防止多个请求各自把游戏主线程占满。
+ *
+ * <p>当前先调用者先用，不保证轮流分配。目标索引另有自己的两毫秒预算，所以这里不是全项目所有搜索的唯一上限。
+ * 实例由扫描服务在启动时创建并传给各个扫描，不再有全局静态状态。
  */
 public final class SearchBudget {
 
@@ -30,16 +33,14 @@ public final class SearchBudget {
      */
     private static final long MAX_NANOS_PER_TICK = 4_000_000L;
 
-    private static long stampTick = Long.MIN_VALUE;
-    private static int checksLeft;
-    private static int biomeSamplesLeft;
-    private static int sectionScansLeft;
-    private static long deadlineNanos;
-
-    private SearchBudget() {}
+    private long stampTick = Long.MIN_VALUE;
+    private int checksLeft;
+    private int biomeSamplesLeft;
+    private int sectionScansLeft;
+    private long deadlineNanos;
 
     /** 观察到客户端世界 tick 推进后，重置共享配额池。 */
-    public static void refresh(long gameTime) {
+    public void refresh(long gameTime) {
         if (gameTime != stampTick) {
             resetForTick(gameTime);
         }
@@ -47,7 +48,7 @@ public final class SearchBudget {
 
     /** 执行实际的配额池重置，也作为测试替换点。 */
     // 每个新的游戏刻重新给列检查、群系采样和区块段扫描发额度，并设置本轮时间截止点。
-    public static void resetForTick(long tick) {
+    public void resetForTick(long tick) {
         stampTick = tick;
         checksLeft = MAX_CHECKS_PER_TICK;
         biomeSamplesLeft = MAX_BIOME_SAMPLES_PER_TICK;
@@ -57,21 +58,21 @@ public final class SearchBudget {
 
     /** 消耗一个区段扫描许可（一个 16³ 区段）；返回 false 表示下个 tick 继续。 */
     // 额度或时间用完就让调用方留到下一刻；已经开始的一段扫描不会在这里被中途打断。
-    public static boolean trySectionScan() {
+    public boolean trySectionScan() {
         if (sectionScansLeft <= 0 || System.nanoTime() >= deadlineNanos) return false;
         sectionScansLeft--;
         return true;
     }
 
     /** 消耗一个生物群系采样许可；返回 false 表示配额耗尽，下个 tick 继续。 */
-    public static boolean tryBiomeSample() {
+    public boolean tryBiomeSample() {
         if (biomeSamplesLeft <= 0 || System.nanoTime() >= deadlineNanos) return false;
         biomeSamplesLeft--;
         return true;
     }
 
     /** 消耗一个候选检查许可；返回 false 表示配额耗尽，下个 tick 继续。 */
-    public static boolean tryCheck() {
+    public boolean tryCheck() {
         if (checksLeft <= 0 || System.nanoTime() >= deadlineNanos) return false;
         checksLeft--;
         return true;

@@ -1,4 +1,5 @@
-package org.maiwithu.maicraft.core.scan;
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.game.world;
 
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.objects.Reference2IntOpenHashMap;
@@ -28,8 +29,6 @@ import java.util.stream.Collectors;
  */
 public final class TargetIndex {
 
-    private TargetIndex() {}
-
     /** 段内某目标超过该数即记"饱和",不枚举位置(4096 格的 1/16)。 */
     private static final int SATURATION = 256;
     /** 饱和标记(位置永远非负,-1 不会与真实位置冲突)。 */
@@ -39,16 +38,16 @@ public final class TargetIndex {
     private static final long QUERY_NANOS_PER_TICK = 2_000_000L;
     private static final int MAX_PENDING_QUERIES = 32;
     private static final int COMPLETED_QUERY_TICKS = 20;
-    private static long queryTick = Long.MIN_VALUE;
-    private static long queryDeadline;
+    private long queryTick = Long.MIN_VALUE;
+    private long queryDeadline;
 
     /** 有任何维度有注册目标时为 true——方块变更钩子的最外层免费闸门。 */
-    private static volatile boolean anyActive;
-    private static final Map<ResourceKey<Level>, LevelIndex> INDEXES = new HashMap<>();
-    private static int sweepTimer;
+    private volatile boolean anyActive;
+    private final Map<ResourceKey<Level>, LevelIndex> indexes = new HashMap<>();
+    private int sweepTimer;
 
     /** 一个维度的索引。 */
-    private static final class LevelIndex {
+    private final class LevelIndex {
         /** 目标方块 → 注册计数(多个任务可共享同一目标)。 */
         final Reference2IntOpenHashMap<Block> targetRefs = new Reference2IntOpenHashMap<>();
         /** SectionPos.asLong → 条目。 */
@@ -72,7 +71,7 @@ public final class TargetIndex {
     }
 
     /** 冷查询会从下一 section 继续，而不重复遍历已扫描的热前缀。 */
-    private static final class QueryProgress {
+    private final class QueryProgress {
         final int[] sectionOrder;
         final SearchGeometry.NearestPositions nearest;
         int ring, perimeterIndex, sectionIndex;
@@ -88,7 +87,7 @@ public final class TargetIndex {
 
     /** 一个 section 的条目:该段内每种目标的打包位置(y<<8|z<<4|x),或饱和标记。 */
     // 每个区块段按方块种类保存位置；同种超过 256 个时只记饱和标志，查询时再现场读取，避免存大量重复坐标。
-    private static final class SectionEntry {
+    private final class SectionEntry {
         final int version;
         final LevelChunkSection source;
         final Reference2ObjectOpenHashMap<Block, short[]> hits = new Reference2ObjectOpenHashMap<>();
@@ -145,8 +144,8 @@ public final class TargetIndex {
 
     /** 任务开始时登记其目标方块(计数式,可重入)。 */
     // 登记任务关心的方块类型并增加引用数；加入新类型时让旧段索引过期，下一次访问再补建。
-    public static void register(ClientLevel level, Collection<Block> blocks) {
-        LevelIndex idx = INDEXES.computeIfAbsent(level.dimension(), k -> new LevelIndex());
+    public void register(ClientLevel level, Collection<Block> blocks) {
+        LevelIndex idx = indexes.computeIfAbsent(level.dimension(), k -> new LevelIndex());
         boolean changed = false;
         for (Block b : blocks) {
             if (!idx.targetRefs.containsKey(b)) changed = true;
@@ -163,8 +162,8 @@ public final class TargetIndex {
 
     /** 释放所有权；下一次清除扫描会回收连续 200 tick 未使用的缓存。 */
     // 释放任务的使用计数，暂留类型供跨刻登记／注销的查询复用；整个维度闲置后按清扫周期退出。
-    public static void unregister(ClientLevel level, Collection<Block> blocks) {
-        LevelIndex idx = INDEXES.get(level.dimension());
+    public void unregister(ClientLevel level, Collection<Block> blocks) {
+        LevelIndex idx = indexes.get(level.dimension());
         if (idx == null) {
             return;
         }
@@ -176,7 +175,7 @@ public final class TargetIndex {
         }
         // 保留短期热缓存，包括当前引用数为零的目标类型。规划探测可能在相邻 tick 之间注册并注销，仍需有机会完成待处理扫描。
         idx.lastUseTick = level.getGameTime();
-        anyActive = !INDEXES.isEmpty();
+        anyActive = !indexes.isEmpty();
     }
 
     // ==================== 供给:方块变更钩子 ====================
@@ -184,11 +183,11 @@ public final class TargetIndex {
     /** 可选的客户端观察钩子，用于刷新已构建的 section 条目。 */
     // 客户端观察到关心的方块种类变化时更新索引；这也可能是客户端预测，使用位置前仍需核对实际世界。
     // 零引用类型仍可能被跨刻查询复用，因此维护其段缓存；只重置目标和范围确实受影响的查询。
-    public static void onBlockChange(ClientLevel level, BlockPos pos, BlockState oldState, BlockState newState) {
+    public void onBlockChange(ClientLevel level, BlockPos pos, BlockState oldState, BlockState newState) {
         if (!anyActive) {
             return;
         }
-        LevelIndex idx = INDEXES.get(level.dimension());
+        LevelIndex idx = indexes.get(level.dimension());
         if (idx == null) {
             return;
         }
@@ -231,22 +230,22 @@ public final class TargetIndex {
      * 包括热索引遍历和饱和段取位；游标跨 tick 续进，避免反复遍历前缀饿死冷段。未加载区块
      * 跳过——索引只回答已加载世界。
      */
-    public static Result query(ClientLevel level, BlockPos center, Collection<Block> targets,
+    public Result query(ClientLevel level, BlockPos center, Collection<Block> targets,
                                int want, int maxChunkRadius, int buildBudget) {
         return query(level, center, targets, want, maxChunkRadius, buildBudget, Set.of());
     }
 
     /** 排除条件必须参与最近目标选择，不能在结果窗口截断后才应用。 */
     // 按起点、目标、数量、半径和排除位置复用扫描进度；一刻最多约两毫秒，未完成时返回当前已找到的部分。
-    public static Result query(ClientLevel level, BlockPos center, Collection<Block> targets,
+    public Result query(ClientLevel level, BlockPos center, Collection<Block> targets,
                                int want, int maxChunkRadius, int buildBudget, Set<BlockPos> excluded) {
         return query(level, center, targets, want, maxChunkRadius, buildBudget, excluded, false);
     }
 
     /** 取桶时先筛源流体再比较远近，近处大量流水不能占满候选窗口而遮住稍远的真水源。 */
-    public static Result query(ClientLevel level, BlockPos center, Collection<Block> targets,
+    public Result query(ClientLevel level, BlockPos center, Collection<Block> targets,
                                int want, int maxChunkRadius, int buildBudget, Set<BlockPos> excluded, boolean sourcesOnly) {
-        LevelIndex idx = INDEXES.get(level.dimension());
+        LevelIndex idx = indexes.get(level.dimension());
         if (idx == null || targets.isEmpty() || want <= 0) {
             return new Result(List.of(), true);
         }
@@ -311,7 +310,7 @@ public final class TargetIndex {
     }
 
     /** palette 预筛:这个 section 一定不含任何目标(纯空气,或调色板里就没有)。 */
-    private static boolean triviallyEmpty(LevelChunkSection section, LevelIndex idx) {
+    private boolean triviallyEmpty(LevelChunkSection section, LevelIndex idx) {
         var targets = idx.targetRefs.keySet();
         return section == null || section.hasOnlyAir()
                 || !section.maybeHas(state -> targets.contains(state.getBlock()));
@@ -319,7 +318,7 @@ public final class TargetIndex {
 
     /** 构建一个 section 的条目:palette 预筛 → 一趟计数定饱和 → 一趟收位。 */
     // 先统计这一段包含哪些目标类型；稀少类型保存具体位置，很多的类型用饱和标志。
-    private static SectionEntry build(LevelChunkSection section, LevelIndex idx) {
+    private SectionEntry build(LevelChunkSection section, LevelIndex idx) {
         SectionEntry e = new SectionEntry(idx.version, section);
         if (triviallyEmpty(section, idx)) {
             return e;
@@ -366,7 +365,7 @@ public final class TargetIndex {
 
     /** 把条目中所请求目标的位置追加进 {@code out};饱和目标对该一个 section 现场取位。 */
     // 普通条目直接解码位置；饱和条目当场遍历该段，再交给最近位置容器排序。
-    private static void collect(SectionEntry e, LevelChunkSection section,
+    private void collect(SectionEntry e, LevelChunkSection section,
                                 int cx, int sy, int cz, Collection<Block> targets,
                                 SearchGeometry.NearestPositions nearest, boolean sourcesOnly) {
         if (e.hits.isEmpty()) {
@@ -407,15 +406,15 @@ public final class TargetIndex {
 
     /** 在 END_CLIENT_TICK 调用，定期回收所属区块已卸载的条目。 */
     // 周期性清理没人使用的维度索引与已卸载区块；活动索引的零引用类型目前不在这里单独清理。
-    public static void clientTick(ClientLevel level) {
-        if (INDEXES.isEmpty() || ++sweepTimer < EVICT_SWEEP_TICKS) {
+    public void clientTick(ClientLevel level) {
+        if (indexes.isEmpty() || ++sweepTimer < EVICT_SWEEP_TICKS) {
             return;
         }
         sweepTimer = 0;
-        INDEXES.entrySet().removeIf(entry -> entry.getValue().activeRefs == 0
+        indexes.entrySet().removeIf(entry -> entry.getValue().activeRefs == 0
                 && level.getGameTime() - entry.getValue().lastUseTick >= EVICT_SWEEP_TICKS);
-        anyActive = !INDEXES.isEmpty();
-        for (Map.Entry<ResourceKey<Level>, LevelIndex> entry : INDEXES.entrySet()) {
+        anyActive = !indexes.isEmpty();
+        for (Map.Entry<ResourceKey<Level>, LevelIndex> entry : indexes.entrySet()) {
             if (!entry.getKey().equals(level.dimension())) {
                 entry.getValue().sections.clear();
                 continue;
@@ -441,8 +440,8 @@ public final class TargetIndex {
 
     /** 本地角色或世界退出时清除所有观察结果。 */
     // 世界会话结束时清空全部索引和查询时钟；客户端运行时负责在相应边界调用。
-    public static void dropAll() {
-        INDEXES.clear();
+    public void dropAll() {
+        indexes.clear();
         anyActive = false;
         sweepTimer = 0;
         queryTick = Long.MIN_VALUE;

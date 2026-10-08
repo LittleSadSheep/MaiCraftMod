@@ -1,7 +1,9 @@
-package org.maiwithu.maicraft.core.scan;
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.game.world;
 
-import org.maiwithu.maicraft.core.Constants;
-import org.maiwithu.maicraft.core.scan.BlockScanner;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.maiwithu.maicraft.game.world.BlockScanner;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -26,16 +28,14 @@ import java.util.function.Predicate;
  * 扫描围绕发起时的位置进行，最多保留 8192 个较近结果；它返回的是观察，不是到目标的可行路线。
  */
 public final class BlockSearch {
+    private static final Logger LOG = LoggerFactory.getLogger(BlockSearch.class);
 
     /** 最长扫描时间；超时后返回部分结果（约 30 秒）。 */
     private static final int DEADLINE_TICKS = 600;
     /** 与同步扫描器使用相同的结果数量上限，限制内存占用和排序成本。 */
     private static final int MAX_COLLECT = 8_192;
 
-    private static final List<BlockSearch> JOBS = new ArrayList<>();
-    private static int nextId = 1;
-
-    private final int id = nextId++;
+    final int id;
     /** 本次查询的简短目标描述，便于记录在一行日志中，例如 {@code iron_ore} 或 {@code iron_ore+1}。 */
     private final String label;
     private long startTick = -1;
@@ -46,6 +46,7 @@ public final class BlockSearch {
     private final double radiusSq;
     private final Predicate<BlockState> filter;
     private final Consumer<ScanResult> onDone;
+    private final SearchBudget budget;
 
     private final int centerChunkX, centerChunkZ, maxRing;
     /** 按访问顺序排列的区块层 Y 值，先扫描最近层（{@link SearchGeometry#sectionOrder}）。 */
@@ -84,8 +85,10 @@ public final class BlockSearch {
         }
     }
 
-    private BlockSearch(UUID entityUuid, ClientLevel level, BlockPos center, int radius, int want,
-                          Set<Block> targets, Consumer<ScanResult> onDone) {
+    BlockSearch(SearchBudget budget, int id, UUID entityUuid, ClientLevel level, BlockPos center, int radius, int want,
+                Set<Block> targets, Consumer<ScanResult> onDone) {
+        this.budget = budget;
+        this.id = id;
         this.entityUuid = entityUuid;
         this.dimension = level.dimension();
         this.center = center.immutable();
@@ -110,45 +113,10 @@ public final class BlockSearch {
         this.columnsTotal = side * side;
     }
 
-    /**
-     * 登记一次搜索；结果会在后续 tick 通过回调返回。
-     *
-     * @param want 调用方实际需要的最近命中数量，也是停止规则的配额。按实际用途设置；配额越大，扫描距离越远。
-     * @return 供 {@link #cancel(int)} 使用的搜索句柄；每次搜索单独编号，而非每个同伴共用。一个同伴可能同时执行 {@code scan_blocks} 和 {@code goto} 查询，取消其中一个不能影响另一个。
-     */
-    // 登记一个分刻扫描任务并返回编号，暂不扫描；完成时才调用 onDone。
-    public static int start(UUID entityUuid, ClientLevel level, BlockPos center, int radius, int want,
-                            Set<Block> targets, Consumer<ScanResult> onDone) {
-        BlockSearch job = new BlockSearch(entityUuid, level, center, radius, want, targets, onDone);
-        JOBS.add(job);
-        return job.id;
-    }
-
-    /** 放弃指定搜索且不再触发回调；未知或已完成的编号不产生任何操作。 */
-    // 只从扫描列表移除，不调用完成回调；取消后的调用结算由外层负责。
-    public static void cancel(int id) {
-        JOBS.removeIf(job -> job.id == id);
-    }
-
-    /** 本地角色或世界退出时，放弃所有等待中的扫描。 */
-    public static void cancelAll() {
-        JOBS.clear();
-    }
-
-    /** 在共享客户端 tick 预算内推进所有等待中的扫描。 */
-    // 按列表顺序给任务机会，共享本刻扫描预算；前面的任务可能先用完额度。
-    public static void tick(ClientLevel level) {
-        if (JOBS.isEmpty()) return;
-        SearchBudget.refresh(level.getGameTime());
-        for (BlockSearch job : List.copyOf(JOBS)) {
-            if (JOBS.contains(job) && job.tickOne(level)) JOBS.remove(job);
-        }
-    }
-
     /** @return 已完成并发送答复时返回 true。 */
     // 记住扫到哪一圈、哪列和哪个高度段；用完额度就暂停在这里，下刻接着扫。
     // 三十秒左右的游戏刻期限从首次推进时开始，不按每个任务实际获得的 CPU 时间计。
-    private boolean tickOne(ClientLevel level) {
+    boolean tickOne(ClientLevel level) {
         long now = level.getGameTime();
         if (!level.dimension().equals(dimension)) {
             finish(now, true);
@@ -170,7 +138,7 @@ public final class BlockSearch {
             }
             // 每次按预算扫描当前柱列的一层区块，并从最近层开始。
             while (sectionCursor < sectionOrder.length) {
-                if (!SearchBudget.trySectionScan()) return false;
+                if (!budget.trySectionScan()) return false;
                 BlockScanner.scanChunkSection(level, currentChunk,
                         currentChunkX, sectionOrder[sectionCursor], currentChunkZ,
                         center, radius, radiusSq, filter, matches);
@@ -207,7 +175,7 @@ public final class BlockSearch {
                 perimIdx = 0;
                 continue;
             }
-            if (!SearchBudget.tryCheck()) return false;
+            if (!budget.tryCheck()) return false;
             int[] d = RingSpiral.offset(ring, perimIdx++);
             int cx = centerChunkX + d[0];
             int cz = centerChunkZ + d[1];
@@ -235,12 +203,11 @@ public final class BlockSearch {
 
     // 先移除任务再调用回调，返回扫描覆盖、未加载、提前停止和截断信息；找到一些结果不等于范围全部查完。
     private void finish(long now, boolean deadlineHit) {
-        // 先移除当前搜索再调用外部回调，因为回调可能新增、取消搜索或抛出异常。
-        JOBS.remove(this);
+        // 先把自己标记为已结束再调用外部回调，因为回调可能新增、取消搜索或抛出异常；服务随后把已完成的移出列表。
         matches.sort(Comparator.comparingDouble(BlockScanner.Hit::distance));
         // 每次搜索只记一行，但必须包含排障所需信息：查询内容、返回结果、停止原因和扫描成本。
         // 即使没有调试构建，也可通过停止原因和未加载数量解释角色为何找不到目标。
-        Constants.LOG.info("[maicraft-scan] {} r={} → {} hit(s){} | {} | {}/{} columns read,"
+        LOG.info("[maicraft-scan] {} r={} → {} hit(s){} | {} | {}/{} columns read,"
                         + " {} not loaded | {} tick(s)",
                 label, radius, matches.size(),
                 matches.isEmpty() ? "" : String.format(", nearest %.1f", matches.get(0).distance()),

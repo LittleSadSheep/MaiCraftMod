@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.core.scan;
+package org.maiwithu.maicraft.game.world;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -23,14 +23,12 @@ public final class RecentBlockWrites {
 
     private record Entry(long gameTime, BlockPos pos) {}
 
-    private static final Map<ClientLevel, ArrayDeque<Entry>> WRITES = new WeakHashMap<>();
-
-    private RecentBlockWrites() {}
+    private final Map<ClientLevel, ArrayDeque<Entry>> writes = new WeakHashMap<>();
 
     /** 客户端方块状态每次变化时记录；只记位置，不区分放置、破坏或状态改写。 */
-    public static void record(ClientLevel level, BlockPos pos) {
-        synchronized (WRITES) {
-            ArrayDeque<Entry> trail = WRITES.computeIfAbsent(level, key -> new ArrayDeque<>());
+    public void record(ClientLevel level, BlockPos pos) {
+        synchronized (writes) {
+            ArrayDeque<Entry> trail = writes.computeIfAbsent(level, key -> new ArrayDeque<>());
             long now = level.getGameTime();
             while (!trail.isEmpty() && now - trail.peekFirst().gameTime() > FRESH_TICKS) trail.pollFirst();
             if (trail.size() >= CAPACITY) trail.pollFirst();
@@ -39,9 +37,9 @@ public final class RecentBlockWrites {
     }
 
     /** 最新的变化排在前面；同刻多次变化按发生顺序倒排，供读侧从最近事实开始核查。 */
-    public static List<BlockPos> recent(ClientLevel level) {
-        synchronized (WRITES) {
-            ArrayDeque<Entry> trail = WRITES.get(level);
+    public List<BlockPos> recent(ClientLevel level) {
+        synchronized (writes) {
+            ArrayDeque<Entry> trail = writes.get(level);
             if (trail == null) return List.of();
             long now = level.getGameTime();
             List<BlockPos> fresh = new ArrayList<>();
@@ -56,9 +54,9 @@ public final class RecentBlockWrites {
     }
 
     /** 测试隔离用；正常运行不需要清空，世界实例回收后条目随之失效。 */
-    public static void clear() {
-        synchronized (WRITES) {
-            WRITES.clear();
+    public void clear() {
+        synchronized (writes) {
+            writes.clear();
         }
     }
 }
