@@ -40,6 +40,11 @@ class SourceRulesTest {
             REPO.resolve("neoforge/src/main/java"));
     // 内嵌 Baritone 是原样保留的第三方源码，上面的源码规则只约束本仓自己写的代码，不扫它的目录。
     private static final Path THIRD_PARTY_ROOT = REPO.resolve("common/src/main/java/baritone");
+    // Litematica 与 Schematica 的编译垫片按第三方模组的原样类型名与结构编写，同样只约束本仓自己写的代码。
+    private static final List<Path> THIRD_PARTY_ROOTS = List.of(
+            THIRD_PARTY_ROOT,
+            REPO.resolve("common/src/main/java/com/github"),
+            REPO.resolve("common/src/main/java/fi"));
     private static final Path TEST_ROOT = REPO.resolve("common/src/test/java");
     private static final Path ABILITY_DOC_ROOT = REPO.resolve("common/src/main/resources");
     private static final String LICENSE_HEADER = "// SPDX-License-Identifier: GPL-3.0-only";
@@ -327,7 +332,8 @@ class SourceRulesTest {
     private static Stream<Path> javaFiles(Path root) {
         try (Stream<Path> files = Files.walk(root)) {
             return files.filter(path -> path.toString().endsWith(".java"))
-                    .filter(path -> !path.toAbsolutePath().normalize().startsWith(THIRD_PARTY_ROOT))
+                    .filter(path -> THIRD_PARTY_ROOTS.stream().noneMatch(
+                            thirdParty -> path.toAbsolutePath().normalize().startsWith(thirdParty)))
                     .toList().stream();
         } catch (IOException exception) {
             throw new UncheckedIOException(exception);

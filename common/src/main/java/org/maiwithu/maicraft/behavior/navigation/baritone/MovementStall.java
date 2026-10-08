@@ -11,7 +11,7 @@ import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * 路线执行器放弃某一步时留下的卡点：哪一步、因何放弃、角色面前是哪一格，以及这一步途经、可能需要开关的格子。
+ * 路线路线执行段放弃某一步时留下的卡住的位置：哪一步、因何放弃、角色面前是哪一格，以及这一步途经、可能需要开关的格子。
  * 导航按面前格累计失败次数：第一次先切换途经的门再试，第二次仍卡住才把面前格列为本次导航的障碍并重算绕行。
  */
 public record MovementStall(Cause cause, String movement, BlockPos src, BlockPos dest, BlockPos front,
@@ -34,7 +34,7 @@ public record MovementStall(Cause cause, String movement, BlockPos src, BlockPos
         // 门可能在起点（从门洞里走出）、终点或这一步需要清开的格子里；面前格也一起检查。
         var cells = new LinkedHashSet<BlockPos>();
         cells.add(src); cells.add(src.above()); cells.add(dest); cells.add(dest.above());
-        // 记录卡点只是收集现场，缺少清障格时照样记下，不能反过来让执行器这一刻出错。
+        // 记录卡住的位置只是收集现场，缺少清障格时照样记下，不能反过来让路线执行段这一刻出错。
         BlockPos[] toBreak = movement.toBreakAll();
         if (toBreak != null) for (BlockPos cell : toBreak) if (cell != null) cells.add(plain(cell));
         if (front != null) { cells.add(front); cells.add(front.above()); }

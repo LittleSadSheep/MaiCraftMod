@@ -154,8 +154,7 @@ public class MovementDescend extends Movement {
             return false;
         }
         // 下落柱的通行检查只利用现场已有缓冲物，准备新放用品的完整证明留给真正的最终落点。
-        if (!MovementHelper.canWalkThrough(context, destX, y - 2, destZ, below)
-                && context.existingLandingPlans(new BlockPos(destX, y - 2, destZ)).isEmpty()) {
+        if (!MovementHelper.canWalkThrough(context, destX, y - 2, destZ, below)) {
             return false;
         }
         double costSoFar = 0;
@@ -171,11 +170,6 @@ public class MovementDescend extends Movement {
             BlockState ontoBlock = context.get(destX, newY, destZ);
             int unprotectedFallHeight = fallHeight - (y - effectiveStartHeight); // equal to fallHeight - y + effectiveFallHeight, which is equal to -newY + effectiveFallHeight, which is equal to effectiveFallHeight - newY
             double tentativeCost = WALK_OFF_BLOCK_COST + FALL_N_BLOCKS_COST[unprotectedFallHeight] + frontBreak + costSoFar;
-            if (reachedMinimum && !context.existingLandingPlans(new BlockPos(destX, newY, destZ), effectiveStartHeight - newY).isEmpty()
-                    && MovementHelper.canWalkOn(context, destX, newY - 1, destZ)) {
-                res.x = destX; res.y = newY; res.z = destZ; res.cost = tentativeCost;
-                return true;
-            }
             if (reachedMinimum && MovementHelper.isWater(ontoBlock)) {
                 if (!MovementHelper.canWalkThrough(context, destX, newY, destZ, ontoBlock)) {
                     return false;
@@ -225,24 +219,7 @@ public class MovementDescend extends Movement {
             if (ontoBlock.getBlock() == Blocks.FARMLAND) {
                 return false; // 长距离坠落在农田上会把耕地踩回泥土,落点禁耕地
             }
-            boolean harmless = context.canLandWithoutDamage(x, y, z, effectiveStartHeight, destX, newY, destZ, ontoBlock);
-            var dropPlans = reachedMinimum && !harmless
-                    ? context.landingPlans(new BlockPos(destX, newY + 1, destZ), effectiveStartHeight - newY - 1)
-                    : List.of();
-            var dropBoat = reachedMinimum && !harmless
-                    ? context.landingBoatPlan(new BlockPos(x, y, z), new BlockPos(destX, newY + 1, destZ))
-                    : null;
-            if (reachedMinimum && !harmless && dropPlans.isEmpty() && dropBoat == null) {
-                // 有预测伤害且既无既有辅助也不可自动布置：准入闸门在此拒绝，样本留给接近回执对账。
-                DescentAdmissionLog.rejected(BlockPos.asLong(destX, newY, destZ), effectiveStartHeight - newY,
-                        "injurious_drop_without_protection");
-            }
-            if (reachedMinimum && !harmless && (!dropPlans.isEmpty() || dropBoat != null)) {
-                res.x = destX; res.y = newY + 1; res.z = destZ;
-                res.cost = tentativeCost + context.placeBucketCost();
-                return true;
-            }
-            if (reachedMinimum && harmless && context.canSurviveFall(x, y, z, effectiveStartHeight,
+            if (reachedMinimum && context.canSurviveFall(x, y, z, effectiveStartHeight,
                     destX, newY, destZ, ontoBlock)) {
                 res.x = destX;
                 res.y = newY + 1;

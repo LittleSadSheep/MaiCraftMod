@@ -19,6 +19,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
+import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -52,7 +53,7 @@ public final class ClearanceWhitelist {
             pumpkin melon lily_pad seagrass tall_seagrass kelp kelp_plant chorus_plant chorus_flower
             torch wall_torch
             """).trim().split("\\s+")).map(name -> "minecraft:" + name).toList();
-    private static volatile Rules current = parse(DEFAULTS);
+    private static final AtomicReference<Rules> CURRENT = new AtomicReference<>(parse(DEFAULTS));
 
     private ClearanceWhitelist() {}
 
@@ -73,15 +74,15 @@ public final class ClearanceWhitelist {
                     throw new IllegalArgumentException("whitelist entries must be strings");
                 entries.add(value.getAsString());
             }
-            current = parse(entries);
+            CURRENT.set(parse(entries));
         } catch (IOException | RuntimeException invalid) {
-            current = parse(List.of());
+            CURRENT.set(parse(List.of()));
             LOG.warn("[clearance] 清障白名单读取失败，已禁止自动清障：{}: {}", file, invalid.getMessage());
         }
     }
 
-    /** 已经是空气就无需清障；其他格严格按类型匹配，替换许可、流体和保护格仍由各执行器另行核验。 */
-    public static boolean allows(BlockState state) { return state.isAir() || current.allows(state); }
+    /** 已经是空气就无需清障；其他格严格按类型匹配，替换许可、流体和保护格仍由各执行段另行核验。 */
+    public static boolean allows(BlockState state) { return state.isAir() || CURRENT.get().allows(state); }
 
     // 明确列举方块或引用实际同步的标签；不凭名称包含 stone、ore 等文字猜测模组机器是否属于自然地形。
     static Rules parse(List<String> entries) {

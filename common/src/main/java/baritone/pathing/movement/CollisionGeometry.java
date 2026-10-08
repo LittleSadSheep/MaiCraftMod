@@ -13,6 +13,7 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.BooleanOp;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.Shapes;
+import org.maiwithu.maicraft.behavior.navigation.baritone.PhysicalObstacleSnapshot;
 
 /** Extra collision outside a block's own cell, absent from Baritone's per-cell costs. */
 public final class CollisionGeometry {
@@ -21,17 +22,17 @@ public final class CollisionGeometry {
     private final boolean frozen;
     private final Vec3 initialPosition;
     private final BlockPos initialCell;
-    private final java.util.function.Supplier<org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot> physical;
+    private final java.util.function.Supplier<org.maiwithu.maicraft.behavior.navigation.baritone.PhysicalObstacleSnapshot> physical;
     private final double bodyWidth, bodyHeight;
     private final Long2ObjectOpenHashMap<List<AABB>> protrusions = new Long2ObjectOpenHashMap<>();
 
     public CollisionGeometry(BlockGetter view, boolean frozen, Vec3 initialPosition, BlockPos initialCell) {
         this(view, frozen, initialPosition, initialCell,
-                () -> org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot.EMPTY, .6, 1.8);
+                () -> org.maiwithu.maicraft.behavior.navigation.baritone.PhysicalObstacleSnapshot.EMPTY, .6, 1.8);
     }
 
     public CollisionGeometry(BlockGetter view, boolean frozen, Vec3 initialPosition, BlockPos initialCell,
-            java.util.function.Supplier<org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot> physical,
+            java.util.function.Supplier<org.maiwithu.maicraft.behavior.navigation.baritone.PhysicalObstacleSnapshot> physical,
             double bodyWidth, double bodyHeight) {
         this.view = view;
         this.frozen = frozen;
@@ -41,8 +42,8 @@ public final class CollisionGeometry {
         this.bodyWidth = bodyWidth; this.bodyHeight = bodyHeight;
     }
 
-    private static java.util.function.Supplier<org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot> constant(
-            org.maiwithu.maicraft.core.integration.physics.PhysicalObstacleSnapshot snapshot) { return () -> snapshot; }
+    private static java.util.function.Supplier<org.maiwithu.maicraft.behavior.navigation.baritone.PhysicalObstacleSnapshot> constant(
+            org.maiwithu.maicraft.behavior.navigation.baritone.PhysicalObstacleSnapshot snapshot) { return () -> snapshot; }
 
     public boolean clear(int x, int y, int z, int toX, int toY, int toZ) {
         Vec3 from = initialCell != null && initialCell.getX() == x && initialCell.getY() == y && initialCell.getZ() == z

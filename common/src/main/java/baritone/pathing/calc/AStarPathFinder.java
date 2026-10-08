@@ -15,8 +15,8 @@
  */
 
 package baritone.pathing.calc;
-import org.maiwithu.maicraft.core.pathing.calc.PathPlannerPool;
-import org.maiwithu.maicraft.task.ProgressBudget;
+
+
 import java.util.concurrent.TimeUnit;
 
 import baritone.Baritone;
@@ -34,6 +34,8 @@ import baritone.utils.pathing.Favoring;
 import baritone.utils.pathing.MutableMoveResult;
 
 import java.util.Optional;
+import org.maiwithu.maicraft.behavior.navigation.baritone.ProgressBudget;
+import org.maiwithu.maicraft.behavior.navigation.baritone.PathPlannerPool;
 
 /**
  * The actual A* pathfinding

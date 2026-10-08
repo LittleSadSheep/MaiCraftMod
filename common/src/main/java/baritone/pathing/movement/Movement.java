@@ -24,15 +24,18 @@ import baritone.api.utils.*;
 import baritone.api.utils.input.Input;
 import baritone.behavior.PathingBehavior;
 import baritone.utils.BlockStateInterface;
-import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritonePolicy;
-import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
-import org.maiwithu.maicraft.core.pathing.settings.ClearanceWhitelist;
+
+
+
 import java.util.*;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.entity.item.FallingBlockEntity;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.AABB;
+import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationProtection;
+import org.maiwithu.maicraft.behavior.navigation.baritone.ClearanceWhitelist;
+import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 
 public abstract class Movement implements IMovement, MovementHelper {
 
@@ -152,7 +155,7 @@ public abstract class Movement implements IMovement, MovementHelper {
         if (ctx.player().isInWall()) {
             ctx.getSelectedBlock().ifPresent(pos -> {
                 // 身体卡墙也不能擅自拆名单外建筑，仍由正常路线重新寻找出口。
-                if (!EmbeddedBaritonePolicy.protects(pos) && ClearanceWhitelist.allows(BlockStateInterface.get(ctx, pos))) {
+                if (!NavigationProtection.protects(pos) && ClearanceWhitelist.allows(BlockStateInterface.get(ctx, pos))) {
                     MovementHelper.switchToBestToolFor(ctx, BlockStateInterface.get(ctx, pos));
                     currentState.setInput(Input.CLICK_LEFT, true);
                 }
@@ -181,7 +184,7 @@ public abstract class Movement implements IMovement, MovementHelper {
     private boolean entersLiveForbiddenBodyCell() {
         BetterBlockPos occupied = ctx.playerFeet();
         for (BetterBlockPos candidate : getValidPositions()) {
-            if (!candidate.equals(occupied) && EmbeddedBaritonePolicy.forbidsBody(candidate)) {
+            if (!candidate.equals(occupied) && NavigationProtection.forbidsBody(candidate)) {
                 return true;
             }
         }
@@ -204,7 +207,7 @@ public abstract class Movement implements IMovement, MovementHelper {
             if (!MovementHelper.canWalkThrough(ctx, blockPos)) { // can't break air, so don't try
                 // Protection forbids mutation, not walking through air or using a doorway.
                 // 路线算好后有人换上名单外方块时，立即使这一段失效并重算绕路，不继续挥镐。
-                if (EmbeddedBaritonePolicy.protects(blockPos)
+                if (NavigationProtection.protects(blockPos)
                         || !ClearanceWhitelist.allows(BlockStateInterface.get(ctx, blockPos))) {
                     state.setStatus(MovementStatus.UNREACHABLE);
                     return true;
@@ -251,7 +254,7 @@ public abstract class Movement implements IMovement, MovementHelper {
         var blockState = BlockStateInterface.get(ctx, pos);
         // 同一面前格卡住过一次后，导航为这扇门／栅栏门登记了目标开关状态：已是该状态就通行，否则先右键切换，
         // 不再按门板朝向推断，避免推断失误时一直顶门或来回开关。
-        Boolean wantOpen = EmbeddedBaritoneRuntime.passageOpenOverride(pos, blockState);
+        Boolean wantOpen = BaritoneInternals.passageOpenOverride(pos, blockState);
         if (wantOpen != null) {
             if (blockState.getValue(BlockStateProperties.OPEN) == wantOpen) return true;
         } else if (!MovementHelper.passageNeedsInteraction(blockState, src, dest)) {

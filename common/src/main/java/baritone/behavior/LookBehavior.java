@@ -26,11 +26,12 @@ import baritone.api.utils.IPlayerContext;
 import baritone.api.utils.Rotation;
 import baritone.behavior.look.ForkableRandom;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
-import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
+
 
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.Optional;
+import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 
 public final class LookBehavior extends Behavior implements ILookBehavior {
 
@@ -69,7 +70,7 @@ public final class LookBehavior extends Behavior implements ILookBehavior {
         // The target remains Baritone's pathing/ray contract, but the visible first-person camera
         // is leased and curved by MaiCraft's render-cadence body port. blockInteract marks
         // precision block-interaction aims, which must bypass the movement-aim deadband there.
-        EmbeddedBaritoneRuntime.requestLook(rotation.getYaw(), rotation.getPitch(), blockInteract);
+        BaritoneInternals.requestLook(rotation.getYaw(), rotation.getPitch(), blockInteract);
     }
 
     /** Release a stale movement target when MaiCraft ends the owning navigation. */

@@ -43,16 +43,7 @@ import net.minecraft.world.level.material.WaterFluid;
 import net.minecraft.world.phys.Vec3;
 
 public class MovementFall extends Movement {
-    private org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistSession landingAssist;
-    private org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingAssist landingBoat;
-    private org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingAssist.State boatState;
     private boolean departureObserved;
-
-    public org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistSession landingAssist() { return landingAssist; }
-    public org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingAssist landingBoat() { return landingBoat; }
-    public void tickLandingBoat(org.maiwithu.maicraft.client.actor.LocalPlayerContext context) {
-        boatState = landingBoat.tick(context);
-    }
 
     /** Shared by ordinary execution and the executor's optional straight-line fall extension. */
     public static boolean reachedLanding(IPlayerContext context, BlockPos destination, BlockState state) {
@@ -84,44 +75,12 @@ public class MovementFall extends Movement {
         return set;
     }
 
-    private boolean needsLandingAssist() {
-        CalculationContext context = new CalculationContext(baritone);
-        MutableMoveResult result = new MutableMoveResult();
-        return MovementDescend.dynamicFallCost(context, src.x, src.y, src.z, dest.x, dest.z, 0,
-                context.get(dest.x, src.y - 2, dest.z), result) && result.y == dest.y;
-    }
-
     @Override
     public MovementState updateState(MovementState state) {
-        // Completion already includes supported ground, water or climbable stability evidence.
-        // Requiring onGround again strands safely failed sessions that finished in another cell.
-        if (landingAssist != null && landingAssist.complete()) {
-            return state.setStatus(!landingAssist.failed() && ctx.playerFeet().equals(dest)
-                    ? MovementStatus.SUCCESS : MovementStatus.UNREACHABLE);
-        }
-        if (landingAssist == null && landingBoat == null && !ctx.player().onGround()
-                && (org.maiwithu.maicraft.core.pathing.baritone.landing.EmergencyLanding.triggered(ctx.player())
-                    || org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget.capture(ctx.player()).damage(
-                        Math.max(0, ctx.player().getY() - dest.getY()),
-                        org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget.Landing.of(ctx.world().getBlockState(dest.below())), true) > 0)) {
-            var context = org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(ctx.player());
-            adoptEmergencyLanding(context);
-        }
         super.updateState(state);
         if (state.getStatus() != MovementStatus.RUNNING) {
             return state;
         }
-        if (landingBoat != null) {
-            state.setTarget(new MovementTarget(RotationUtils.calcRotationFromVec3d(
-                    ctx.playerHead(), landingBoat.aimPoint(), ctx.playerRotations()), true));
-            state.setInput(Input.SNEAK, landingBoat.wantsSneak());
-            if (boatState == org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingAssist.State.SETTLED)
-                return state.setStatus(ctx.playerFeet().equals(dest) ? MovementStatus.SUCCESS : MovementStatus.UNREACHABLE);
-            if (!landingBoat.failed()) return state;
-            if (ctx.player().onGround()) return state.setStatus(MovementStatus.UNREACHABLE);
-            // A failed opportunistic mount leaves the proven ordinary fall's steering active.
-        }
-
         BlockPos playerFeet = ctx.playerFeet();
         Rotation toDest = RotationUtils.calcRotationFromVec3d(ctx.playerHead(), VecUtils.getBlockPosCenter(dest), ctx.playerRotations());
         BlockState destState = ctx.world().getBlockState(dest);
@@ -135,14 +94,6 @@ public class MovementFall extends Movement {
         // Slab feet are represented by the cell above the half-height support. Matching that
         // cell is not a landing until collision has actually put the player on the ground.
         if (reachedLanding(ctx, dest, destState)) {
-            if (landingAssist != null) {
-                var context = org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(ctx.player());
-                state.setTarget(new MovementTarget(RotationUtils.calcRotationFromVec3d(
-                        ctx.playerHead(), landingAssist.aimPoint(), ctx.playerRotations()), true));
-                state.setInput(Input.SNEAK, landingAssist.wantsSneak(context));
-                if (!landingAssist.complete()) return state;
-                return state.setStatus(landingAssist.failed() ? MovementStatus.UNREACHABLE : MovementStatus.SUCCESS);
-            }
             if (!isWater || ctx.player().getDeltaMovement().y >= 0) return state.setStatus(MovementStatus.SUCCESS);
         }
         Vec3 destCenter = VecUtils.getBlockPosCenter(dest); // we are moving to the 0.5 center not the edge (like if we were falling on a ladder)
@@ -165,34 +116,7 @@ public class MovementFall extends Movement {
         }
         Vec3 destCenterOffset = new Vec3(destCenter.x + 0.125 * avoid.getX(), destCenter.y, destCenter.z + 0.125 * avoid.getZ());
         state.setTarget(new MovementTarget(RotationUtils.calcRotationFromVec3d(ctx.playerHead(), destCenterOffset, ctx.playerRotations()), false));
-        if (landingAssist != null) {
-            var context = org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(ctx.player());
-            state.setTarget(new MovementTarget(RotationUtils.calcRotationFromVec3d(
-                    ctx.playerHead(), landingAssist.aimPoint(), ctx.playerRotations()), true));
-            state.setInput(Input.SNEAK, landingAssist.wantsSneak(context));
-        }
         return state;
-    }
-
-    private void adoptEmergencyLanding(org.maiwithu.maicraft.client.actor.LocalPlayerContext context) {
-        // The scheduler cannot safely suspend a launched fall. Adopt its rescue in this owner
-        // instead of waiting for a reflex hand-off that cannot occur until after impact.
-        if (landingAssist != null || landingBoat != null) return;
-        var candidate = org.maiwithu.maicraft.core.pathing.baritone.landing.EmergencyLanding.findNear(context, dest);
-        var inventory = org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan.InventorySnapshot.capture(
-                context.player(), org.maiwithu.maicraft.core.pathing.moves.TerrainPermit.LANDING_ONLY,
-                context.level().dimensionType().ultraWarm());
-        boolean available = candidate != null && (candidate.plan().existing() || inventory.available().contains(candidate.plan().kind()));
-        if (!available && org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget.capture(context.player()).survives(
-                Math.max(0, context.player().getY() - dest.getY()),
-                org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget.Landing.ORDINARY, true)) {
-            var boat = org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingAssist.airbornePlan(context, dest);
-            if (boat != null) {
-                landingBoat = new org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingAssist(boat);
-                return;
-            }
-        }
-        landingAssist = candidate;
     }
 
     private Direction avoid() {
@@ -228,45 +152,16 @@ public class MovementFall extends Movement {
     @Override
     protected boolean prepared(MovementState state) {
         boolean atDeparture = groundedBeforeDeparture();
-        // Once airborne, source-column doors or mining cannot delay the owned rescue. Its
-        // native placement/recovery session and fall steering run until a supported outcome.
+        // 一旦离地，下落柱的挖掘不再重查；坠落按已选定的路线走完，由安全取消判断决定能不能中途接手。
         if (departureObserved) return true;
-        // 先挖通再备落地物品：人站在出发点上，先用镐子把旁边下落柱最上面几格挖开，挖通之后才建落地保护、
-        // 拿出水桶并瞄准落点。若先备水桶，挖掘要镐子、落地准备要水桶，每刻来回切换，动作桥也会被落地保护
-        // 抢先处理而跳过挖掘点击，脚下那格永远挖不开。落点格本身留给落地方案处理，不在这里挖。
-        if (atDeparture && landingAssist == null && landingBoat == null) {
+        // 先挖通下落柱再谈落地：人还站在出发点上时，把下落柱最上面几格挖开，落点格本身留给落地判断。
+        if (atDeparture) {
             for (int i = 0; i < 4 && i < positionsToBreak.length; i++) {
                 if (positionsToBreak[i].equals(dest)) continue;
                 if (!MovementHelper.canWalkThrough(ctx, positionsToBreak[i])) return super.prepared(state);
             }
         }
-        if (landingAssist == null && atDeparture && needsLandingAssist()) {
-            var calculation = new CalculationContext(baritone);
-            var plans = calculation.landingPlans(dest, src.y - dest.y);
-            var boatPlan = plans.stream().anyMatch(plan -> plan.existing() || calculation.landingInventory.available().contains(plan.kind()))
-                    ? null : calculation.landingBoatPlan(src, dest);
-            if (boatPlan != null) landingBoat = new org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingAssist(boatPlan);
-            else if (!plans.isEmpty()) landingAssist = org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistSession.automatic(plans, false);
-        }
-        if (landingBoat != null) {
-            var context = org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(ctx.player());
-            // PREPPING is cancellable upstream. An in-air opportunity or a native mount
-            // must remain RUNNING until the boat session observes a supported exit.
-            if (!ctx.player().onGround()) return true;
-            if (!landingBoat.prepare(context)) {
-                if (landingBoat.failed() && ctx.player().onGround()) state.setStatus(MovementStatus.UNREACHABLE);
-                return false;
-            }
-            return true;
-        }
-        if (landingAssist != null && atDeparture) {
-            var context = org.maiwithu.maicraft.client.runtime.ClientRuntime.requireContext(ctx.player());
-            if (!prepareLanding(state, context)) return false;
-        }
-        // Runs before every tick that could leave the source, including RUNNING. A prior fall,
-        // incoming damage, an expired buff or removed boots must invalidate the stale A* budget.
-        // After departure retain the selected landing through cleanup, including a neighboring
-        // supported cell: the bucket consumed by this fall cannot invalidate its own recovery.
+        // 每次可能离开出发点的刻都重算一次伤害预算：先前的坠落、伤害、失效的增益或脱下的靴子都要让旧预算作废。
         if (atDeparture
                 && calculateCost(new CalculationContext(baritone)) >= COST_INF) {
             state.setStatus(MovementStatus.UNREACHABLE);
@@ -278,7 +173,6 @@ public class MovementFall extends Movement {
         // only break if one of the first three needs to be broken
         // specifically ignore the last one which might be water
         for (int i = 0; i < 4 && i < positionsToBreak.length; i++) {
-            if (landingAssist != null && positionsToBreak[i].equals(landingAssist.plan().cell())) continue;
             if (!MovementHelper.canWalkThrough(ctx, positionsToBreak[i])) {
                 return super.prepared(state);
             }
@@ -291,20 +185,4 @@ public class MovementFall extends Movement {
         return !departureObserved;
     }
 
-    private boolean prepareLanding(MovementState state, org.maiwithu.maicraft.client.actor.LocalPlayerContext context) {
-        state.setInput(Input.SNEAK, true); // Native edge restraint while equipment and aim become ready.
-        if (!landingAssist.prepare(context)) {
-            if (landingAssist.failed() && !landingAssist.cleanupPending()) state.setStatus(MovementStatus.UNREACHABLE);
-            return false;
-        }
-        // Material access can need the view for a fixed terminal. Only take the camera after
-        // preparation has confirmed the item and closed its inventory/terminal transaction.
-        var eye = context.player().getEyePosition();
-        var aim = landingAssist.aimPoint();
-        state.setTarget(new MovementTarget(RotationUtils.calcRotationFromVec3d(eye, aim,
-                new Rotation(context.player().getYRot(), context.player().getXRot())), true));
-        if (aim.subtract(eye).normalize().dot(context.player().getViewVector(1)) < Math.cos(Math.toRadians(2))) return false;
-        state.setInput(Input.SNEAK, false);
-        return true;
-    }
 }

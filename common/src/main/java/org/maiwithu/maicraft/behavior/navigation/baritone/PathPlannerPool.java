@@ -7,6 +7,7 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
@@ -32,8 +33,8 @@ public final class PathPlannerPool {
     /** 通常只运行一个搜索；第二个 worker 仅用于处理取消过程中的短暂重叠。 */
     private static final int POOL_SIZE = Math.max(1, Math.min(2, Runtime.getRuntime().availableProcessors() - 2));
 
-    private static volatile Generation current = new Generation(0);
-    private static Generation retired;
+    private static final AtomicReference<Generation> CURRENT = new AtomicReference<>(new Generation(0));
+    private static final AtomicReference<Generation> RETIRED = new AtomicReference<>();
 
     /** 一代只持有自己的搜索与线程；旧搜索不响应取消时最多隔离一代，防止反复重试无限增开线程。 */
     private static final class Generation {
@@ -92,12 +93,13 @@ public final class PathPlannerPool {
     /** 在规划线程池中执行 {@code task}，并将结果写入返回的 future。 */
     // 把计算排到后台并立即返回一个等待结果的对象；如果连队列也进不去，返回的对象直接带失败原因。
     public static synchronized <T> CompletableFuture<T> submit(Supplier<T> task) {
-        var work = new Work<>(current, task); current.jobs.add(work);
+        var generation = CURRENT.get();
+        var work = new Work<>(generation, task); generation.jobs.add(work);
         try {
-            current.executor.execute(work);
+            generation.executor.execute(work);
         } catch (RejectedExecutionException rejected) {
             // 绝不能回退到 CallerRunsPolicy，因为提交者就是 Minecraft 客户端线程。
-            current.jobs.remove(work); work.completeExceptionally(rejected);
+            generation.jobs.remove(work); work.completeExceptionally(rejected);
         }
         return work;
     }
@@ -159,9 +161,11 @@ public final class PathPlannerPool {
     public static boolean recover(CompletableFuture<?> stalled) {
         Generation previous;
         synchronized (PathPlannerPool.class) {
-            if (!(stalled instanceof Work<?> work) || work.generation != current || work.isDone()) return false;
-            if (retired != null && !retired.executor.isTerminated()) return false;
-            previous = current; retired = previous; current = new Generation(previous.number + 1);
+            if (!(stalled instanceof Work<?> work) || work.generation != CURRENT.get() || work.isDone()) return false;
+            if (RETIRED.get() != null && !RETIRED.get().executor.isTerminated()) return false;
+            previous = CURRENT.get();
+            RETIRED.set(previous);
+            CURRENT.set(new Generation(previous.number + 1));
         }
         // 取消会唤醒 future 的回调；在全局锁外结算，避免回调提交新搜索时与旧工作的锁互相等待。
         for (var job : List.copyOf(previous.jobs)) job.cancel(true);
@@ -173,12 +177,12 @@ public final class PathPlannerPool {
 
     /** 包括隔离代的实际存活线程；最多两代，已隔离线程未退出时拒绝再次扩容。 */
     public static synchronized int liveThreads() {
-        return current.executor.getPoolSize() + (retired == null ? 0 : retired.executor.getPoolSize());
+        return CURRENT.get().executor.getPoolSize() + (RETIRED.get() == null ? 0 : RETIRED.get().executor.getPoolSize());
     }
 
     /** 当前正在跑搜索的线程数。 */
     public static synchronized int activeThreads() {
-        return current.executor.getActiveCount() + (retired == null ? 0 : retired.executor.getActiveCount());
+        return CURRENT.get().executor.getActiveCount() + (RETIRED.get() == null ? 0 : RETIRED.get().executor.getActiveCount());
     }
 
     /** 跨计算代保留线程峰值，恢复不能把已发生的线程占用洗掉。 */

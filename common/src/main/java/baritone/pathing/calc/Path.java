@@ -15,7 +15,7 @@
  */
 
 package baritone.pathing.calc;
-import org.maiwithu.maicraft.core.pathing.calc.PathPlannerPool;
+
 
 import baritone.api.pathing.calc.IPath;
 import baritone.api.pathing.goals.Goal;
@@ -34,6 +34,7 @@ import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Set;
+import org.maiwithu.maicraft.behavior.navigation.baritone.PathPlannerPool;
 
 /**
  * A node based implementation of IPath

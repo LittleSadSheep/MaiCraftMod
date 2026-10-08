@@ -25,7 +25,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.HitResult;
-import org.maiwithu.maicraft.core.pathing.util.BlockHelper;
+import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
 
 /**
  * Implementation of {@link IPlayerContext} that provides information about the primary player.
@@ -63,7 +63,7 @@ public final class BaritonePlayerContext implements IPlayerContext {
         // 半砖和楼梯下半都与施工任务共用“支撑上方格”约定，不能让寻路从楼梯实体内部的格子起步。
         // 未加载时只保留实际坐标所在格；不补读区块，也不把任意半格高度一律向上取整。
         return BetterBlockPos.from(level == null || !level.isLoaded(occupied) ? occupied
-                : BlockHelper.playerFeet(level, position.x, position.y, position.z));
+                : BlockPassability.playerFeet(level, position.x, position.y, position.z));
     }
 
     @Override

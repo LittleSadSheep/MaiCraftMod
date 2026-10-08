@@ -28,7 +28,7 @@ import baritone.pathing.movement.MovementState.MovementTarget;
 import baritone.pathing.precompute.Ternary;
 import baritone.utils.BlockStateInterface;
 import baritone.utils.ToolSet;
-import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Holder;
@@ -61,6 +61,7 @@ import java.util.*;
 import static baritone.api.utils.RotationUtils.DEG_TO_RAD_F;
 import static baritone.pathing.movement.Movement.HORIZONTALS_BUT_ALSO_DOWN_____SO_EVERY_DIRECTION_EXCEPT_UP;
 import static baritone.pathing.precompute.Ternary.*;
+import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 
 /**
  * Static helpers for cost calculation
@@ -85,7 +86,7 @@ public interface MovementHelper extends ActionCosts, Helper {
      * 常规的「邻格有岩浆禁挖」会把所有出逃路线全数拒绝；其余规则原样不变。
      */
     static boolean avoidBreaking(BlockStateInterface bsi,
-                                 org.maiwithu.maicraft.core.pathing.HazardEscapePolicy escape,
+                                 org.maiwithu.maicraft.behavior.navigation.HazardEscapePolicy escape,
                                  net.minecraft.core.BlockPos escapeBody,
                                  int x, int y, int z, BlockState state) {
         if (!bsi.worldBorder.canPlaceAt(x, z)) {
@@ -712,7 +713,7 @@ public interface MovementHelper extends ActionCosts, Helper {
      */
     static void switchToBestToolFor(IPlayerContext ctx, BlockState b, ToolSet ts, boolean preferSilkTouch) {
         if (Baritone.settings().autoTool.value && !Baritone.settings().assumeExternalAutoTool.value) {
-            EmbeddedBaritoneRuntime.ensureHotbarSelected(
+            BaritoneInternals.ensureHotbarSelected(
                     ctx.player(), ts.getBestSlot(b.getBlock(), preferSilkTouch));
         }
     }

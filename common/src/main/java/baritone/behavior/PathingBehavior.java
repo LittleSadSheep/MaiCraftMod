@@ -15,8 +15,10 @@
  */
 
 package baritone.behavior;
-import org.maiwithu.maicraft.core.pathing.calc.PlanningWorkProgress;
 
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import baritone.Baritone;
 import baritone.api.behavior.IPathingBehavior;
 import baritone.api.event.events.*;
@@ -48,12 +50,16 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
-import org.maiwithu.maicraft.core.pathing.calc.PathPlannerPool;
-import org.maiwithu.maicraft.core.pathing.baritone.MovementStall;
-import org.maiwithu.maicraft.core.pathing.baritone.SwimTravelControl;
-import org.maiwithu.maicraft.core.Constants;
+import org.maiwithu.maicraft.behavior.navigation.baritone.SwimTravelControl;
+import org.maiwithu.maicraft.behavior.navigation.baritone.PlanningWorkProgress;
+import org.maiwithu.maicraft.behavior.navigation.baritone.PathPlannerPool;
+import org.maiwithu.maicraft.behavior.navigation.baritone.MovementStall;
+
+
+
 
 public final class PathingBehavior extends Behavior implements IPathingBehavior, Helper {
+    private static final Logger LOG = LoggerFactory.getLogger(PathingBehavior.class);
 
     private PathExecutor current;
     private PathExecutor next;
@@ -95,7 +101,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
     private LoadedFrontier workFrontier;
     private BlockPos failedPlanAheadStart;
     private LoadedFrontier calculationFrontier, failedPlanAheadFrontier;
-    private final SwimTravelControl.BodyState swimBodyState = new SwimTravelControl.BodyState();
+    private final SwimTravelControl.PlayerSwimState swimBodyState = new SwimTravelControl.PlayerSwimState();
 
     private boolean lastAutoJump;
 
@@ -595,7 +601,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         if (current == null) {
             if (path.isPresent()) {
                 if (path.get().positions().contains(expectedSegmentStart)) {
-                    current = new PathExecutor(this, org.maiwithu.maicraft.core.pathing.baritone.GroundPathSmoothing.apply(baritone, path.get()));
+                    current = new PathExecutor(this, org.maiwithu.maicraft.behavior.navigation.baritone.GroundPathSmoothing.apply(baritone, path.get()));
                     resetEstimatedTicksToGoal(start);
                     queuePathEvent(PathEvent.CALC_FINISHED_NOW_EXECUTING);
                 } else {
@@ -609,7 +615,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         } else if (next == null) {
             if (path.isPresent()) {
                 if (path.get().getSrc().equals(current.getPath().getDest())) {
-                    next = new PathExecutor(this, org.maiwithu.maicraft.core.pathing.baritone.GroundPathSmoothing.apply(baritone, path.get()));
+                    next = new PathExecutor(this, org.maiwithu.maicraft.behavior.navigation.baritone.GroundPathSmoothing.apply(baritone, path.get()));
                     queuePathEvent(PathEvent.NEXT_SEGMENT_CALC_FINISHED);
                 } else {
                     logDebug("Discarding next path whose start no longer matches this segment");
@@ -632,10 +638,10 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         if (recovered) {
             searchRecoveries++;
             if (current == null) context = null; // 前瞻卡住时仍保留正在落地的执行上下文。
-            Constants.LOG.warn("[maicraft-path] planning_stall: isolated search generation and retrying the same route; {}", lastRecovery);
+            LOG.warn("[maicraft-path] planning_stall: isolated search generation and retrying the same route; {}", lastRecovery);
         } else {
             calculationStalled = true;
-            Constants.LOG.warn("[maicraft-path] planning_stall: bounded recovery unavailable or exhausted; {}", lastRecovery);
+            LOG.warn("[maicraft-path] planning_stall: bounded recovery unavailable or exhausted; {}", lastRecovery);
             queuePathEvent(PathEvent.CALC_FAILED);
         }
     }

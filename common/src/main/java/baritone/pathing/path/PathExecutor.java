@@ -36,12 +36,15 @@ import net.minecraft.core.Vec3i;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.util.Tuple;
 import net.minecraft.world.phys.Vec3;
-import org.maiwithu.maicraft.core.pathing.baritone.MovementStall;
-import org.maiwithu.maicraft.core.pathing.baritone.SubmergedWaterTravelPolicy;
-import org.maiwithu.maicraft.core.pathing.baritone.TravelJumpPolicy;
+
+
+
 import java.util.*;
 
 import static baritone.api.pathing.movement.MovementStatus.*;
+import org.maiwithu.maicraft.behavior.navigation.baritone.SubmergedWaterTravelPolicy;
+import org.maiwithu.maicraft.behavior.navigation.baritone.MovementStall;
+import org.maiwithu.maicraft.behavior.navigation.baritone.GroundJumpContinuation;
 
 /**
  * Behavior to execute a precomputed path
@@ -87,8 +90,8 @@ public class PathExecutor implements IPathExecutor, Helper {
     private final PathTickBudget tickBudget = new PathTickBudget();
     private boolean advanceAgain;
     private boolean jumpAfterAdvance;
-    private org.maiwithu.maicraft.core.pathing.baritone.GroundJumpContinuation groundJump =
-            new org.maiwithu.maicraft.core.pathing.baritone.GroundJumpContinuation();
+    private GroundJumpContinuation groundJump =
+            new GroundJumpContinuation();
 
     public PathExecutor(PathingBehavior behavior, IPath path) {
         this.behavior = behavior;
@@ -304,9 +307,9 @@ public class PathExecutor implements IPathExecutor, Helper {
         return false;
     }
 
+    // 落地救援还没有接入：坠落不再有独立的救援窗口，只按移动自身的安全取消判断。
     private static boolean ownsUnsettledLanding(Movement movement) {
-        return movement instanceof MovementFall fall
-                && (fall.landingAssist() != null || fall.landingBoat() != null) && !movement.safeToCancel();
+        return false;
     }
 
     private boolean cancelIfTimedOut(Movement movement) {
@@ -476,12 +479,7 @@ public class PathExecutor implements IPathExecutor, Helper {
 
         // if the movement requested sprinting, then we're done
         if (requested) {
-            // 赶路跑跳:已经决定疾跑,且跳跃可达走廊里任何落点都无摔伤(深洞/流体/立柱
-            // 会否决这一跳),按住跳跃把疾跑换成跑跳;顶头走廊自动获得更短的连跳节奏。
-            if (TravelJumpPolicy.shouldTravelJump(behavior.baritone, path.movements(), pathPosition,
-                    runway -> groundJump.launch(current.getSrc().getY(), ctx.player().getY(), runway))) {
-                behavior.baritone.getInputOverrideHandler().setInputForceState(Input.JUMP, true);
-            }
+            // 赶路跑跳（连续疾跑跳走廊）还没有接回：这里只保留普通的疾跑与跳跃按键。
             return true;
         }
 
@@ -585,8 +583,6 @@ public class PathExecutor implements IPathExecutor, Helper {
     }
 
     private Tuple<Vec3, BlockPos> overrideFall(MovementFall movement) {
-        // A longer landing skips the selected aid and its receipt/recovery owner.
-        if (movement.landingAssist() != null || movement.landingBoat() != null) return null;
         Vec3i dir = movement.getDirection();
         if (dir.getY() < -3) {
             return null;

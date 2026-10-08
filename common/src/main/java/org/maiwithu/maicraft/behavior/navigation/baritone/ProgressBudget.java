@@ -24,11 +24,8 @@ public final class ProgressBudget {
 
     /** 未挂在自己任务下的施工、交通辅助流程绑定当前任务作用域，向父任务交付真实进展并继承暂停。 */
     public static ProgressBudget currentTask(long allowance) {
-        TaskDeadlineClock clock = TaskDeadlineClock.active();
-        if (clock == null) return new ProgressBudget(allowance);
-        long baseline = clock.pausedTicks;
-        return new ProgressBudget(allowance, time -> time - (clock.pausedTicks - baseline),
-                () -> clock.progressRevision, () -> clock.progressRevision++, deadline -> {});
+        // 任务作用域的计时绑定还没有接入：这里给一次独立的预算，进度照常续期。
+        return new ProgressBudget(allowance);
     }
 
     ProgressBudget(long allowance, LongUnaryOperator activeClock, LongSupplier inheritedProgress,
