@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.obtain;
 
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -45,7 +46,7 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
     /** 任务开始时身上有几件；结算"这次拿到几件"的基准。 */
     private int carriedAtStart;
     /** 实际拿到东西的途径，按拿到先后排，一条不重复。 */
-    private final Set<String> obtainedRoutes = new java.util.LinkedHashSet<>();
+    private final Set<String> obtainedRoutes = new LinkedHashSet<>();
 
     ObtainTask(ObtainItems input, StartsAcquisition acquisition, BackpackView backpack,
             OffhandContents offhand, ReadsItemTags tags) {
