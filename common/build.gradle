@@ -23,6 +23,11 @@ dependencies {
     implementation "org.xerial:sqlite-jdbc:${sqlite_jdbc_version}"
 
     compileOnly group: 'org.spongepowered', name: 'mixin', version: '0.8.5'
+    // 内嵌 Baritone 源码保留上游可空性注解，公共编译需要对应的注解类型。
+    compileOnly group: 'com.google.code.findbugs', name: 'jsr305', version: '3.0.2'
+    // 内嵌 Baritone 的 Mixin 源码直接使用 ASM 的指令常量。
+    compileOnly group: 'org.ow2.asm', name: 'asm', version: '9.7.1'
+    compileOnly group: 'org.ow2.asm', name: 'asm-tree', version: '9.7.1'
     compileOnly group: 'io.github.llamalad7', name: 'mixinextras-common', version: '0.5.3'
     annotationProcessor group: 'io.github.llamalad7', name: 'mixinextras-common', version: '0.5.3'
 

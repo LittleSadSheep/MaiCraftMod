@@ -5,3 +5,24 @@ plugins {
     // 新版本信息见 https://projects.neoforged.net/neoforged/moddevgradle。
     id 'net.neoforged.moddev' version '2.0.141' apply false
 }
+
+// 内嵌 Baritone 源码随 Mod 一起编译，产物里排除它独立启动时使用的接线和未启用的 Mixin，避免游戏里出现两套控制逻辑。
+subprojects {
+    tasks.withType(Jar).configureEach {
+        // MaiCraft 自己驱动 Baritone，只保留配置里实际使用的五个 Mixin，其余不进包。
+        exclude 'baritone/launch/BaritoneMixinConnector*'
+        exclude 'baritone/launch/mixins/MixinClientPlayNetHandler*'
+        exclude 'baritone/launch/mixins/MixinClientPlayerEntity*'
+        exclude 'baritone/launch/mixins/MixinCommandSuggestionHelper*'
+        exclude 'baritone/launch/mixins/MixinEntityRenderManager*'
+        exclude 'baritone/launch/mixins/MixinFireworkRocketEntity*'
+        exclude 'baritone/launch/mixins/MixinItemStack*'
+        exclude 'baritone/launch/mixins/MixinLootContextBuilder*'
+        exclude 'baritone/launch/mixins/MixinLootTable*'
+        exclude 'baritone/launch/mixins/MixinMinecraft*'
+        exclude 'baritone/launch/mixins/MixinNetworkManager*'
+        exclude 'baritone/launch/mixins/MixinPalettedContainer*'
+        exclude 'baritone/launch/mixins/MixinScreen*'
+        exclude 'baritone/launch/mixins/MixinWorldRenderer*'
+    }
+}
