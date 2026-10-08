@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.client.actor;
+package org.maiwithu.maicraft.game.player;
 
 /**
- * 所有走路、转头指令都通过这个接口操作同一个本地玩家。
- * 动作需要每刻续发；releaseAll 用来松开这些按键和停止转头。
+ * 角色的移动与视角输入入口：所有走路、按键、转头指令都通过它写进同一个本地玩家。
+ *
+ * <p>动作必须每刻续发：下一刻没有重新发出，输入就自动松开，旧任务残留的指令不会一直生效。
+ * 主动作本刻占用准星时，随行的小动作（例如补光）只能通过辅助瞄准通道借用，不能抢主线。
  */
-public interface BodyControlPort {
+public interface PlayerInput {
     // 一刻内的按键状态：前后、左右、跳跃、潜行和疾跑。两个方向量只允许 -1～1 的有限数值。
     record Movement(float forward, float strafe, boolean jumping, boolean sneaking, boolean sprinting) {
         public static final Movement STOPPED = new Movement(0.0f, 0.0f, false, false, false);

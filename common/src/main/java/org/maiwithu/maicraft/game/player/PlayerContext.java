@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.game.player;
 
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.player.LocalPlayer;
 
 /**
@@ -17,6 +18,12 @@ public interface PlayerContext {
 
     /** 本刻角色所在的客户端世界。 */
     ClientLevel level();
+
+    /** 本刻角色使用的网络连接；交互确认按连接核对，防止换服后还用旧连接发操作。 */
+    ClientPacketListener connection();
+
+    /** 本刻角色的移动与视角输入入口；只有自动化拥有控制权时指令才会被接受。 */
+    PlayerInput input();
 
     /** 客户端刻号；同一刻内重复读取得到相同的值，用来判断手里的上下文是不是已经过期。 */
     long clientTick();

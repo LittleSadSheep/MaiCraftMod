@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.client.actor;
+package org.maiwithu.maicraft.game.player;
 
 import net.minecraft.client.player.Input;
 import net.minecraft.client.gui.screens.Screen;
@@ -12,10 +12,13 @@ import org.lwjgl.glfw.GLFW;
 import net.minecraft.client.Minecraft;
 
 /**
- * 把本地玩家的键盘和转头交给自动任务，也负责按 F8 后还给玩家。
- * 任务每一刻都要重新说“继续前进”或“继续看向这里”；漏发时自动松键，不让旧输入一直生效。
+ * {@link PlayerInput} 的客户端实现：把本地玩家的键盘和转头交给自动化控制，按 F8 后还给人类玩家。
+ *
+ * <p>接管不是直接改键盘事件，而是把玩家身上的 {@code Input} 换成只消费注入信号的替身；
+ * 归还时只恢复自己换掉的那个对象，其他模组已经换走就不覆盖。任务每一刻都要重新说
+ * “继续前进”或“继续看向这里”；漏发时自动松键，不让旧输入一直生效。
  */
-public final class DefaultBodyControlPort implements BodyControlPort {
+public final class LocalPlayerInput implements PlayerInput {
     // controlledPlayer 是已接管的玩家，requestedPlayer 是正在等待接管的玩家。
     // 先记住玩家原来的键盘输入对象，交回控制时才能恢复它。
     private LocalPlayer controlledPlayer;
@@ -23,7 +26,6 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     private Input humanInput;
     private BotInput botInput;
     private boolean automationRequested;
-    private boolean reviewSuspended;
     private boolean toggleWasDown;
     private long requestRevision;
     private long activeTick;
@@ -74,15 +76,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         return automationRequested;
     }
 
-    boolean effectiveAutomationRequested() { return automationRequested && !reviewSuspended; }
-
-    /** 玩家检查预览时释放自动输入，确认预览本身不额外创建一份接管授权。 */
-    // 让玩家查看预览时先还回键盘，但保留自动任务想继续操作的请求。
-    void suspendForReview(boolean suspended) {
-        if (reviewSuspended == suspended) return;
-        reviewSuspended = suspended;
-        if (suspended) detachBody();
-    }
+    boolean effectiveAutomationRequested() { return automationRequested; }
 
     @Override
     // 只保存本刻想按哪些键；真正写进玩家输入发生在本刻收尾。
@@ -237,7 +231,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         // 辅助借用不跨刻：下一刻没人重新申请就自然归还，镜头按主任务方向继续平滑推进。
         auxiliaryAim = null;
         activeTick = tickRevision;
-        // 上一刻按着前进，不代表这一刻还要前进；执行器必须每刻重新发出指令。
+        // 上一刻按着前进，不代表这一刻还要前进；任务必须每刻重新发出指令。
         if (movementLease != tickRevision) { movement = Movement.STOPPED; steering = null; }
         if (lookLease != tickRevision) {
             targetYaw = null;
@@ -249,7 +243,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
     }
 
     /**
-     * 先登记“要接管这个玩家”，到后续玩家更新时才安装自动输入。
+     * 先登记“要控制这个玩家”，到后续玩家更新时才安装自动输入。
      * 这样提交请求的线程不用直接改玩家正在使用的键盘对象。
      */
     AutomationRequest requestAutomation(LocalPlayer player) {
@@ -269,8 +263,8 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         return new AutomationRequest(requestRevision, true);
     }
 
-    // 提交任务失败时，只能撤销这次刚创建、尚未接管的请求。
-    // 若后来的请求已改变编号，或已经接管身体，就不能拿旧请求把它关掉。
+    // 提交任务失败时，只能撤销这次刚创建、尚未生效的请求。
+    // 若后来的请求已改变编号，或已经控制角色，就不能拿旧请求把它关掉。
     void rollbackAutomationRequest(AutomationRequest request) {
         if (request == null || !request.created() || request.revision() != requestRevision
                 || controlledPlayer != null) {
@@ -281,7 +275,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
 
     /**
      * 换维度或重生会更换玩家对象，先还回旧对象的键盘输入。
-     * 调用方确认这是允许继续的传送后，可保留自动接管请求；否则取消。
+     * 调用方确认这是允许继续的传送后，可保留自动控制请求；否则取消。
      */
     void bodyReplaced(LocalPlayer replacement, boolean preserveRequest) {
         boolean exactPendingTarget = automationRequested && controlledPlayer == null
@@ -332,14 +326,14 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         return automationRequested;
     }
 
-    // 只把当前这一个玩家、这一刻的指令写出去。没有新转头要求时，以玩家现有视角为准。
-    void endTick(DefaultLocalPlayerContext context) {
-        if (!context.isCurrent() || !automationOwnsControls() || controlledPlayer != context.player()) return;
+    // 只把当前这一个玩家、这一刻的指令写出去；上下文是否仍属于本刻由边界核对后才调用。
+    // 没有新转头要求时，以玩家现有视角为准。
+    void endTick(LocalPlayer player, long tickRevision, Screen screen) {
+        if (!automationOwnsControls() || controlledPlayer != player) return;
         BotInput input = botInput;
-        LocalPlayer player = controlledPlayer;
         if (input == null || player == null) return;
 
-        if (lookLease == context.tickRevision() && targetYaw != null && targetPitch != null) {
+        if (lookLease == tickRevision && targetYaw != null && targetPitch != null) {
             advanceLook(player, System.nanoTime());
         } else {
             synchronizeCamera(player);
@@ -347,7 +341,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
             pitchVelocity = 0.0f;
             lastLookUpdateNanos = 0L;
         }
-        writeMovement(player, input, context.minecraft().screen);
+        writeMovement(player, input, screen);
     }
 
     // 箱子等界面打开时停止走路；没有界面或只有聊天框时才允许移动。
@@ -365,7 +359,7 @@ public final class DefaultBodyControlPort implements BodyControlPort {
         player.setSprinting(command.sprinting());
     }
 
-    /** 判断当前界面是否允许角色在已有移动授权下继续行走。 */
+    /** 判断当前界面是否允许角色在已有移动指令下继续行走。 */
     public static boolean permitsWorldMovement(Screen screen) {
         // BotInput 提供移动信号而非键盘事件，因此沿指定路线行走时可以保留聊天框。
         // 床上的聊天界面必须保持静止等待自然醒；不能因继承普通聊天框而让旧导航继续移动。
@@ -386,7 +380,6 @@ public final class DefaultBodyControlPort implements BodyControlPort {
 
     void shutdown() {
         cancelAutomationRequest();
-        reviewSuspended = false;
         toggleWasDown = false;
     }
 
