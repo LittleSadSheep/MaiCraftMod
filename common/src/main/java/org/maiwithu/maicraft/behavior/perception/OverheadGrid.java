@@ -94,8 +94,8 @@ public final class OverheadGrid {
         return new View(center.immutable(), clamped, grid);
     }
 
-    /** 将 (x,z) 柱列汇总为一个位于角色当前 Y 高度带的语义移动符号。 */
-    private static char classify(BlockGetter level, int x, int feetY, int z) {
+    /** 将 (x,z) 柱列汇总为一个位于角色当前 Y 高度带的语义移动符号；包内可见，测试用替身世界直接驱动。 */
+    static char classify(BlockGetter level, int x, int feetY, int z) {
         BlockPos pos = new BlockPos(x, feetY, z);
         BlockState feetState = level.getBlockState(pos);
         BlockState headState = level.getBlockState(pos.above());
