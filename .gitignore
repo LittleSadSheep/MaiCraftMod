@@ -1,4 +1,4 @@
-# eclipse
+# Eclipse
 bin
 *.launch
 .settings
@@ -7,7 +7,7 @@ bin
 .project
 **/.eclipse/
 
-# idea
+# IntelliJ IDEA
 out
 *.ipr
 *.iws
@@ -15,23 +15,21 @@ out
 .idea/
 !.idea/scopes
 
-# 只忽略实际构建输出目录，不能把 Java 源码里也叫 build 的包一起屏蔽。
-# gradle
+# Gradle 构建输出：只忽略实际输出目录，不能把源码里也叫 build 的包一起屏蔽。
 /build/
 /buildSrc/build/
 /common/build/
 /fabric/build/
-/forge/build/
 /neoforge/build/
 **/.gradle/
 
-# other
+# 开发运行目录与日志
 eclipse
 run
 runs
-/logs/
+logs/
 
-
+# 本地 AI 工作文件
 .ai/
 .ai-work/
 .ai-notes/
@@ -40,16 +38,16 @@ runs
 *.generated.md
 .vscode
 .codex/
-
-# 临时审阅和实验继续留在本地；面向贡献者的开发文档随实现一起维护。
-docs/
-!/docs/
-/docs/*
-!/docs/dev/
-!/docs/architecture/
-# 重构设计、领域清册与规格需要在两位开发者之间共享，随仓库一起维护。
-!/docs/refactor/
-# 项目工作规则只在根目录保留，不进入 Git 历史。
-AGENTS.md
-experiments/
 .omo
+.claude/worktrees/
+.claude/settings.local.json
+experiments/
+
+# 文档：设计文档、领域清册与规格、移植清单都在 docs/design，进 Git；
+# 临时计划、日志、草稿、一次性脚本只放 docs/tmp，不进 Git。
+/docs/tmp/
+
+# Agent 规则：AGENTS.md 与 CLAUDE.md 进 Git，是所有 AI 共用的公共规则；
+# 本机路径等本地规则写在下面两个文件里，不进 Git，避免本地信息泄露进仓库。
+AGENTS.local.md
+CLAUDE.local.md
