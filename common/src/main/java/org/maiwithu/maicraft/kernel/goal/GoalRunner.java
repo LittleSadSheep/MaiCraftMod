@@ -119,16 +119,43 @@ public final class GoalRunner implements Task {
         return run;
     }
 
+    /** 解除暂停，继续推进；只有重启恢复出来的暂停态能解除。 */
+    public void unpause() {
+        run.unpause();
+        save();
+    }
+
     /** LLM 回答了这条推进挂起的问题：记下回答，下一刻继续推进。 */
     public void answer(String text) {
-        // sequence 自己没在等回答时，回答交给正在跑的子目标。
-        if (run.question() == null && stepRunner != null && stepRunner.run().question() != null) {
+        if (run.question() != null) {
+            run.answer(text);
+            save();
+            LOG.info("目标 {} 的步骤 {} 得到回答：{}", run.id(), run.stepIndex(), text);
+            return;
+        }
+        // sequence 自己没挂着问题时，回答属于正在跑的子目标；子目标还没被重新拉起（重启后常见），
+        // 就直接把回答写进它在存储里的记录，拉起后照样接着走。
+        if (stepRunner != null && stepRunner.run().question() != null) {
             stepRunner.answer(text);
             return;
         }
-        run.answer(text);
-        save();
-        LOG.info("目标 {} 的步骤 {} 得到回答：{}", run.id(), run.stepIndex(), text);
+        if (!goal.steps().isEmpty()) {
+            answerStoredStep(text);
+            return;
+        }
+        throw new IllegalStateException("目标运行 " + run.id() + " 没有在等回答");
+    }
+
+    /** 把回答写进还挂在存储里、正在等回答的子目标记录。 */
+    private void answerStoredStep(String text) {
+        for (GoalRun candidate : store.unfinished()) {
+            if (candidate.parentRunId() == run.id() && candidate.question() != null) {
+                candidate.answer(text);
+                save();
+                return;
+            }
+        }
+        throw new IllegalStateException("目标运行 " + run.id() + " 的步骤没有在等回答");
     }
 
     @Override public void start(TickContext context) {
@@ -236,13 +263,15 @@ public final class GoalRunner implements Task {
 
     /** 步骤的任务有了结果：失败原样传播，成功按决定决定是重新看这一步还是直接算完成。 */
     private TickResult onStepTaskDone(TaskResult taskResult, TickContext context) {
+        // 先记下"要不要重新看这一步"再清空子任务，清空会把标记一起抹掉。
+        boolean recheck = recheckAfterCurrent;
         forgetChild();
         if (taskResult.status() != TaskResult.Status.DONE) {
             // 步骤没做成：带着完整事实结束目标。换办法重试是玩家行为层的事，不在目标推进里加。
             settle(taskResult, context);
             return TickResult.finished(result);
         }
-        if (recheckAfterCurrent) {
+        if (recheck) {
             // 任务做成了，但这一步是否满足要回来重新看：下一刻重新问能力的决定。
             return TickResult.RUNNING;
         }
@@ -362,7 +391,9 @@ public final class GoalRunner implements Task {
     private void beginStep(Goal step, TickContext context) {
         stepRunner = findUnfinishedStep(step)
                 .map(restored -> {
-                    restored.unpause();
+                    if (restored.state() == GoalRunState.PAUSED) {
+                        restored.unpause();
+                    }
                     return new GoalRunner(restored, registry, store, remembers, stepBudgetTicks);
                 })
                 .orElseGet(() -> new GoalRunner(new GoalRun(store.nextId(), step, run.id()),

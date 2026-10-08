@@ -71,16 +71,21 @@ public final class GoalRun {
         state = GoalRunState.RUNNING;
     }
 
-    /** 暂停推进：重启恢复后的目标运行处于这个状态；已在等回答或已结束时不能改。 */
+    /**
+     * 暂停推进：重启恢复后的目标运行处于这个状态。等回答的目标也能暂停——问题还挂着，
+     * 解除暂停后照样等回答；已结束的不能改。
+     */
     public void pause() {
-        requireState(GoalRunState.RUNNING, "暂停");
+        if (state != GoalRunState.RUNNING && state != GoalRunState.AWAITING_ANSWER) {
+            throw new IllegalStateException("目标运行 " + id + " 只能在推进中或等回答时暂停，当前是 " + state);
+        }
         state = GoalRunState.PAUSED;
     }
 
-    /** 解除暂停，继续推进；只有暂停中的目标运行能解除。 */
+    /** 解除暂停：暂停前在等回答的回到等回答，其余回到推进。 */
     public void unpause() {
         requireState(GoalRunState.PAUSED, "解除暂停");
-        state = GoalRunState.RUNNING;
+        state = question != null ? GoalRunState.AWAITING_ANSWER : GoalRunState.RUNNING;
     }
 
     /** 结束并定下结果；结束只发生一次，之后本记录封存。 */
