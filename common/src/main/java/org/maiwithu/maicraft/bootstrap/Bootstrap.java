@@ -30,6 +30,19 @@ import org.maiwithu.maicraft.game.serverlink.ServerLinkSession;
 import org.maiwithu.maicraft.game.world.BlockScanService;
 import org.maiwithu.maicraft.kernel.interrupt.ControlLoop;
 import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
+import org.maiwithu.maicraft.kernel.event.EventPublishingGoalRunStore;
+import org.maiwithu.maicraft.kernel.event.TaskEventLog;
+import org.maiwithu.maicraft.kernel.goal.GoalRunStore;
+import org.maiwithu.maicraft.kernel.goal.GoalRunTable;
+import org.maiwithu.maicraft.kernel.goal.InMemoryGoalRunStore;
+import org.maiwithu.maicraft.kernel.goal.RemembersPlaces;
+import org.maiwithu.maicraft.kernel.task.TaskFactories;
+import org.maiwithu.maicraft.mcp.tool.EventsTool;
+import org.maiwithu.maicraft.mcp.tool.ExecuteTool;
+import org.maiwithu.maicraft.mcp.tool.LookupTool;
+import org.maiwithu.maicraft.mcp.tool.TaskTool;
+import org.maiwithu.maicraft.mcp.tool.ToolDispatcher;
 import org.maiwithu.maicraft.mcp.transport.EmbeddedMcpService;
 import org.maiwithu.maicraft.mcp.transport.McpConfig;
 import org.maiwithu.maicraft.network.MaiCraftPayload;
@@ -49,7 +62,7 @@ import org.slf4j.LoggerFactory;
  *
  * <p>服务端一侧已接好：方块归属记录、交互确认通道与只读的归属查询。
  * 客户端一侧已接好游戏接口层的每刻服务、和服务端 MaiCraft 的会话，
- * 以及每刻推进的控制循环与三项基本生存需求；目标执行与能力还没有接入。
+ * 每刻推进的控制循环与三项基本生存需求，以及目标执行与 MCP 工具；能力还没有登记。
  */
 public final class Bootstrap {
     private static final Logger LOG = LoggerFactory.getLogger(Bootstrap.class);
@@ -119,7 +132,7 @@ public final class Bootstrap {
         };
     }
 
-    /** 客户端部分：只在客户端执行，创建游戏接口层的每刻服务、和服务端的会话、控制循环与生存需求；能力与 MCP 入口还没有接入。 */
+    /** 客户端部分：只在客户端执行，创建游戏接口层的每刻服务、和服务端的会话、控制循环与生存需求、目标执行与 MCP 入口。 */
     public static ClientLifecycle startClient(LoaderEnvironment loader, LinkTransport transport) {
         LOG.info("{} 客户端部分启动（加载器：{}，开发环境：{}）",
                 ModIdentity.NAME, loader.loaderName(), loader.isDevelopment());
@@ -133,8 +146,8 @@ public final class Bootstrap {
         menuActions.attachSender(interactionSender);
         playerControl.attachInteractionEntries(interactionSender, menuActions);
         // 控制循环登记三项基本生存需求：被埋最急先登记，同样急时它先插进来。
-        // 主任务由目标执行侧接线：LLM 派了活就调 controlLoop.setMainTask(...)，这里暂不挂载，
-        // 因此现在只有生存需求的临时任务在跑——没有主任务时它们同样随时可以插进来。
+        // 主任务由目标运行表挂上：LLM 用 execute 派了活，目标就成为主任务；
+        // 没有主任务时，生存需求的临时任务同样随时可以插进来。
         ControlLoop controlLoop = new ControlLoop(List.of(
                 new DigOutNeed(new SurvivalSituation.FromPlayer(),
                         () -> new NativeBlockBreaking(interactionSender, menuActions)),
@@ -148,34 +161,31 @@ public final class Bootstrap {
         ServerLinkSession session = new ServerLinkSession(transport);
         // 入服前登记客户端知道的操作清单；查询方块归属是第一个只读操作。
         session.router().register(new ClientOperation("ownership.query", 1, false));
-        // 内嵌 MCP 服务：五个工具的空壳已登记在服务内部，这里只负责启动与停止。
+        ClientTickWork clientWork = new ClientTickWork();
+        ToolDispatcher tools = goalTools(controlLoop, clientWork);
+        // 内嵌 MCP 服务：observe 还是空壳，其余四个工具接上了行为。
         McpConfig mcpConfig = McpConfig.localForProcess(8766);
         final EmbeddedMcpService[] mcpHolder = new EmbeddedMcpService[1];
         return new ClientLifecycle() {
             @Override public void started() {
                 try {
-                    mcpHolder[0] = EmbeddedMcpService.startWithFallback(mcpConfig, 2);
-                    LOG.info("{} MCP 服务已启动（端口 {}；五个工具为空壳）",
+                    mcpHolder[0] = EmbeddedMcpService.startWithFallback(mcpConfig, 2, tools);
+                    LOG.info("{} MCP 服务已启动（端口 {}；observe 还是空壳）",
                             ModIdentity.NAME, mcpHolder[0].port());
                 } catch (IOException exception) {
                     LOG.error("{} MCP 服务启动失败", ModIdentity.NAME, exception);
                     return;
                 }
-                LOG.info("{} 客户端启动完成；生存需求与控制循环已接入，目标执行与能力还没有接入", ModIdentity.NAME);
+                LOG.info("{} 客户端启动完成；生存需求、控制循环与目标执行已接入，能力还没有登记", ModIdentity.NAME);
             }
 
             @Override public void tickEnd(Minecraft minecraft) {
                 // 先核对这一刻谁能操作角色，再推进世界扫描与控制循环，最后把本刻输入写进玩家。
                 var context = playerControl.beginTick();
                 if (minecraft.level != null) blockScans.tick(minecraft.level);
-                // 控制循环必须在 beginTick 与 endTick 之间推进：任务此刻发出的移动与转头指令，
-                // 要等 endTick 统一写进角色。自动化没有实际拿到控制权（例如 F8 已归还）时不推进，
-                // 生存需求不能去抢人类手上的角色。
+                if (context.isEmpty()) clientWork.drain(null);
                 context.ifPresent(current -> {
-                    if (playerControl.input().automationOwnsControls()) {
-                        long gameTick = minecraft.level == null ? 0 : minecraft.level.getGameTime();
-                        controlLoop.tick(new ClientTickContext(gameTick, current));
-                    }
+                    tickInsideControlWindow(minecraft, current, playerControl, controlLoop, clientWork);
                     playerControl.endTick(current);
                 });
                 // 与服务端的会话跟着每个客户端刻推进。
@@ -197,5 +207,42 @@ public final class Bootstrap {
                 session.disconnected(minecraft);
             }
         };
+    }
+
+    /**
+     * beginTick 与 endTick 之间要做的事：任务此刻发出的移动与转头指令，要等 endTick 统一写进角色。
+     * MCP 请求排进来的工作（下达、暂停、回答目标）先做，再推进控制循环，新下达的目标本刻就开始。
+     * 自动化没有实际拿到控制权（例如 F8 已归还）时照样处理请求，但不推进控制循环，生存需求不能去抢人类手上的角色。
+     */
+    private static void tickInsideControlWindow(Minecraft minecraft, PlayerContext current,
+                                                PlayerControlBoundary playerControl, ControlLoop controlLoop,
+                                                ClientTickWork clientWork) {
+        long gameTick = minecraft.level == null ? 0 : minecraft.level.getGameTime();
+        ClientTickContext tickContext = new ClientTickContext(gameTick, current);
+        clientWork.drain(tickContext);
+        if (playerControl.input().automationOwnsControls()) {
+            controlLoop.tick(tickContext);
+        }
+    }
+
+    /**
+     * 目标执行与 MCP 工具：能力注册表、目标运行表与任务事件流。LLM 用 execute 下达的目标经目标运行表
+     * 成为控制循环的主任务；目标处境每次变化都发成任务事件，宿主用 events 等。
+     * 能力按里程碑逐个登记在这份注册表里，现在还没有能力。
+     */
+    private static ToolDispatcher goalTools(ControlLoop controlLoop, ClientTickWork clientWork) {
+        AbilityRegistry abilities = new AbilityRegistry(new TaskFactories());
+        TaskEventLog taskEvents = new TaskEventLog();
+        GoalRunStore goalRuns = new EventPublishingGoalRunStore(new InMemoryGoalRunStore(), taskEvents);
+        // 世界记忆按世界创建，还没有接进启动流程：要记地点的目标如实以程序错误收场，不悄悄丢掉。
+        RemembersPlaces places = (name, position) -> {
+            throw new IllegalStateException("世界记忆还没有接进启动流程，记不住地点 " + name);
+        };
+        GoalRunTable goals = new GoalRunTable(abilities, goalRuns, places, controlLoop);
+        return new ToolDispatcher(List.of(
+                new LookupTool(abilities),
+                new ExecuteTool(abilities, goals, clientWork),
+                new TaskTool(goals, clientWork),
+                new EventsTool(taskEvents, goals, clientWork)));
     }
 }

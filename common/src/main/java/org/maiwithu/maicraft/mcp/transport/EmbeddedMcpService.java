@@ -32,6 +32,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.maiwithu.maicraft.mcp.tool.ToolCatalog;
+import org.maiwithu.maicraft.mcp.tool.ToolDispatcher;
 
 /**
  * 游戏进程里的内嵌 MCP 服务：接收请求、检查连接和格式，再把工具调用交给工具层。
@@ -55,6 +56,8 @@ public final class EmbeddedMcpService implements AutoCloseable {
 
     private final McpConfig config;
     private final long sessionTtlNanos;
+    /** 已经接上行为的工具；还没接上的工具照旧回答"还没接入"。 */
+    private final ToolDispatcher tools;
     private final ConcurrentMap<String, McpSession> sessions = new ConcurrentHashMap<>();
     private final AtomicBoolean stopping = new AtomicBoolean();
 
@@ -64,13 +67,22 @@ public final class EmbeddedMcpService implements AutoCloseable {
     private Thread shutdownHook;
 
     public EmbeddedMcpService(McpConfig config) {
-        this(config, DEFAULT_SESSION_TTL_NANOS);
+        this(config, DEFAULT_SESSION_TTL_NANOS, new ToolDispatcher(List.of()));
+    }
+
+    public EmbeddedMcpService(McpConfig config, ToolDispatcher tools) {
+        this(config, DEFAULT_SESSION_TTL_NANOS, tools);
     }
 
     /** 会话时限按纳秒注入，供离线测试把空闲回收压缩到可控时长。 */
     EmbeddedMcpService(McpConfig config, long sessionTtlNanos) {
+        this(config, sessionTtlNanos, new ToolDispatcher(List.of()));
+    }
+
+    private EmbeddedMcpService(McpConfig config, long sessionTtlNanos, ToolDispatcher tools) {
         this.config = Objects.requireNonNull(config, "config");
         this.sessionTtlNanos = sessionTtlNanos;
+        this.tools = Objects.requireNonNull(tools, "tools");
     }
 
     /** 启动本地端口和网络线程；已经启动时不重复开一个服务。 */
@@ -110,12 +122,19 @@ public final class EmbeddedMcpService implements AutoCloseable {
      * 最后一次绑定异常。配置端口为 0 时由系统分配，不会触发让行。
      */
     public static EmbeddedMcpService startWithFallback(McpConfig config, int extraAttempts) throws IOException {
+        return startWithFallback(config, extraAttempts, new ToolDispatcher(List.of()));
+    }
+
+    /** 同上，并把调用交给已经接上行为的工具。 */
+    public static EmbeddedMcpService startWithFallback(McpConfig config, int extraAttempts, ToolDispatcher tools)
+            throws IOException {
         IOException lastBindFailure = null;
         for (int attempt = 0; attempt <= extraAttempts; attempt++) {
             int port = config.port() + attempt;
             if (port > 65_535) break;
             EmbeddedMcpService candidate = new EmbeddedMcpService(new McpConfig(
-                    config.host(), port, config.bearerToken(), config.maxRequestBytes(), config.requestTimeout()));
+                    config.host(), port, config.bearerToken(), config.maxRequestBytes(), config.requestTimeout()),
+                    DEFAULT_SESSION_TTL_NANOS, tools);
             try {
                 candidate.start();
                 return candidate;
@@ -315,12 +334,20 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private JsonObject callTool(JsonObject params) {
-        // 真实的参数校验与游戏侧执行接入后在这里转交；目前五个工具都还没有行为，明确说明尚未接入。
+        // 接上行为的工具在这里转交；工具自己的结果（含参数错误）放进一段文字内容，失败时标 isError。
+        // 还没接上的工具明确说明尚未接入。
         JsonRpc.only(params, "name", "arguments", "_meta");
         JsonRpc.optionalMeta(params);
         String name = JsonRpc.requiredString(params, "name");
         if (!ToolCatalog.contains(name)) throw new JsonRpc.RpcException(-32602, "Unknown tool");
-        return ToolCatalog.notReadyResult(name);
+        if (!tools.has(name)) return ToolCatalog.notReadyResult(name);
+        JsonElement arguments = params.get("arguments");
+        if (arguments != null && !arguments.isJsonNull() && !arguments.isJsonObject()) {
+            throw new JsonRpc.RpcException(-32602, "arguments must be an object");
+        }
+        JsonObject reply = tools.call(name, arguments == null || arguments.isJsonNull()
+                ? new JsonObject() : arguments.getAsJsonObject());
+        return ToolCatalog.wrap(reply);
     }
 
     private void handleDelete(HttpExchange exchange) throws IOException {
