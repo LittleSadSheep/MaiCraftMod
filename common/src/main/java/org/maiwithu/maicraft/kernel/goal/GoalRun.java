@@ -47,12 +47,17 @@ public final class GoalRun {
         this.parentRunId = parentRunId;
     }
 
-    /** 第一次被推进时调用：记下开始时刻。 */
+    /**
+     * 被控制循环第一次推进时调用：记下开始时刻。下达后还没轮到推进就被暂停，或者重启恢复时
+     * 正挂着问题，都会在非 RUNNING 的处境下开始，处境保持不变；再次开始不改开始时刻。
+     */
     public void start(long gameTick) {
-        if (state != GoalRunState.RUNNING) {
-            throw new IllegalStateException("目标运行 " + id + " 只能从 RUNNING 开始推进，当前是 " + state);
+        if (state == GoalRunState.FINISHED) {
+            throw new IllegalStateException("目标运行 " + id + " 已经结束，不能再开始");
         }
-        startedTick = gameTick;
+        if (startedTick < 0) {
+            startedTick = gameTick;
+        }
     }
 
     /** 停下来向 LLM 提问：从 RUNNING 进入等回答。 */

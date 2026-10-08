@@ -146,6 +146,29 @@ public final class GoalRunner implements Task {
         throw new IllegalStateException("目标运行 " + run.id() + " 没有在等回答");
     }
 
+    /**
+     * 此刻在等的问题：自己挂着的，或者 sequence 正在跑的那一步挂着的；不在等回答时为 null。
+     * 回答之前要先看它，确认 LLM 选的是问题给出的选项之一。
+     */
+    public Question pendingQuestion() {
+        if (run.question() != null) {
+            return run.question();
+        }
+        if (stepRunner != null) {
+            return stepRunner.pendingQuestion();
+        }
+        if (goal.steps().isEmpty()) {
+            return null;
+        }
+        // 重启后步骤还没被重新拉起：问题挂在存储里那一步自己的记录上。
+        for (GoalRun candidate : store.unfinished()) {
+            if (candidate.parentRunId() == run.id() && candidate.question() != null) {
+                return candidate.question();
+            }
+        }
+        return null;
+    }
+
     /** 把回答写进还挂在存储里、正在等回答的子目标记录。 */
     private void answerStoredStep(String text) {
         for (GoalRun candidate : store.unfinished()) {
@@ -159,6 +182,10 @@ public final class GoalRunner implements Task {
     }
 
     @Override public void start(TickContext context) {
+        // 下达后还没轮到推进就被取消了：结果已经定下，控制循环下一刻就会把它移走，不再开始。
+        if (result != null) {
+            return;
+        }
         run.start(context.gameTick());
         save();
     }
