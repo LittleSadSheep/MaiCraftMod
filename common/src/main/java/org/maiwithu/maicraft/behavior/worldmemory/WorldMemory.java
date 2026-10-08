@@ -23,7 +23,7 @@ import org.maiwithu.maicraft.kernel.storage.DocumentStore;
  * <p>记忆按世界身份分开存：构造时传入文档库与世界身份编号，连到另一个世界时
  * 由身份编号隔离，读不到上一个世界的记忆。
  */
-public final class WorldMemory implements RemembersPlaces {
+public final class WorldMemory implements RemembersPlaces, RemembersRegions {
 
     /** 文档库里的范围名：世界记忆的数据都存这个范围下，与别的用途互不覆盖。 */
     public static final String SCOPE = "world-memory";
@@ -78,6 +78,27 @@ public final class WorldMemory implements RemembersPlaces {
     @Override
     public void remember(String name, WorldPosition position) {
         modify(book -> book.withPlace(name, position));
+    }
+
+    /**
+     * 记住一块"这是玩家的地盘"：亲眼看着别人圈出来、盖起来的一片，保护判断把里面的东西都当受保护。
+     * 半径必须为正；同名区域用新范围覆盖。记区域的入口在世界记忆上，读的接缝是 RemembersRegions。
+     */
+    public void rememberRegion(String name, WorldPosition center, int radiusBlocks) {
+        modify(book -> book.withRegion(new RememberedRegion(name, center, radiusBlocks)));
+    }
+
+    /** 忘掉一块区域：地界变了或记错了；名字没记过就不动。 */
+    public void forgetRegion(String name) {
+        modify(book -> book.withoutRegion(name));
+    }
+
+    /** 全部记住的区域，按名字排好；保护判断逐块核对位置在不在里面。 */
+    @Override
+    public List<RememberedRegion> regions() {
+        return readBook().regions().values().stream()
+                .sorted(Comparator.comparing(RememberedRegion::name))
+                .toList();
     }
 
     /** 查某个位置某类东西的记忆；没有就给空。 */

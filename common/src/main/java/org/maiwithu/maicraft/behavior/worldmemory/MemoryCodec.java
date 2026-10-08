@@ -24,6 +24,8 @@ final class MemoryCodec {
     private static final String FORMAT = "format";
     private static final String RECORDS = "records";
     private static final String PLACES = "places";
+    private static final String REGIONS = "regions";
+    private static final String RADIUS = "radius";
     private static final String KIND = "kind";
     private static final String X = "x";
     private static final String Y = "y";
@@ -48,6 +50,13 @@ final class MemoryCodec {
             placeObject.add(entry.getKey(), toJson(entry.getValue()));
         }
         root.add(PLACES, placeObject);
+        JsonObject regionObject = new JsonObject();
+        for (RememberedRegion region : book.regions().values()) {
+            JsonObject json = toJson(region.center());
+            json.addProperty(RADIUS, region.radiusBlocks());
+            regionObject.add(region.name(), json);
+        }
+        root.add(REGIONS, regionObject);
         return root.toString();
     }
 
@@ -66,7 +75,16 @@ final class MemoryCodec {
         for (var entry : root.getAsJsonObject(PLACES).entrySet()) {
             places.put(entry.getKey(), toPosition(entry.getValue().getAsJsonObject()));
         }
-        return new MemoryBook(records, places);
+        // 早先存下的记忆文档没有区域一段：当没有记住过任何区域读，不当作坏文档。
+        Map<String, RememberedRegion> regions = new LinkedHashMap<>();
+        if (root.has(REGIONS)) {
+            for (var entry : root.getAsJsonObject(REGIONS).entrySet()) {
+                JsonObject regionJson = entry.getValue().getAsJsonObject();
+                regions.put(entry.getKey(), new RememberedRegion(entry.getKey(), toPosition(regionJson),
+                        regionJson.get(RADIUS).getAsInt()));
+            }
+        }
+        return new MemoryBook(records, places, regions);
     }
 
     private static JsonObject toJson(MemoryRecord record) {
