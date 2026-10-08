@@ -23,6 +23,8 @@ public record Change(Kind kind, String what, int count, String note) {
         ITEM_DROPPED,
         BLOCK_PLACED,
         BLOCK_BROKEN,
+        /** 方块还是那一格，但状态或种类变了：门开了、锄成了耕地、火点着了。 */
+        BLOCK_CHANGED,
         ENTITY_AFFECTED,
         MOVED,
         OTHER

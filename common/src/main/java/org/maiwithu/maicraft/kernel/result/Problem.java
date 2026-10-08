@@ -25,6 +25,8 @@ public record Problem(Kind kind, String message, String suggestion) {
         UNREACHABLE,
         /** 目标对象没了：方块被拆、实体走远或消失。 */
         TARGET_GONE,
+        /** 查过的范围里没有找到要找的东西；查了多大范围随问题写明，与 TARGET_GONE（原来有、现在没了）分开。 */
+        NOT_FOUND,
         /** 危险：继续下去会死，或大概率重伤。 */
         DANGER,
         /** 游戏或模组拒绝了这次交互（包括服务器的领地保护、权限不够），附上游戏给的原因。 */
