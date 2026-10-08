@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.bootstrap;
 
 import com.google.gson.JsonObject;
+import java.io.IOException;
 import java.util.function.Consumer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
@@ -16,6 +17,8 @@ import org.maiwithu.maicraft.game.serverlink.ClientOperation;
 import org.maiwithu.maicraft.game.serverlink.LinkTransport;
 import org.maiwithu.maicraft.game.serverlink.ServerLinkSession;
 import org.maiwithu.maicraft.game.world.BlockScanService;
+import org.maiwithu.maicraft.mcp.transport.EmbeddedMcpService;
+import org.maiwithu.maicraft.mcp.transport.McpConfig;
 import org.maiwithu.maicraft.network.MaiCraftPayload;
 import org.maiwithu.maicraft.server.BlockOwnershipRecord;
 import org.maiwithu.maicraft.server.ServerConfirmations;
@@ -111,8 +114,17 @@ public final class Bootstrap {
         ServerLinkSession session = new ServerLinkSession(transport);
         // 入服前登记客户端知道的操作清单；查询方块归属是第一个只读操作。
         session.router().register(new ClientOperation("ownership.query", 1, false));
+        // 内嵌 MCP 服务：五个工具的空壳已登记在服务内部，这里只负责启动与停止。
+        McpConfig mcpConfig = McpConfig.localForProcess(8766);
+        EmbeddedMcpService mcp = new EmbeddedMcpService(mcpConfig);
         return new ClientLifecycle() {
             @Override public void started() {
+                try {
+                    mcp.startWithFallback(mcpConfig, 2);
+                    LOG.info("{} MCP 服务已启动（端口 {}；五个工具为空壳）", ModIdentity.NAME, mcp.port());
+                } catch (IOException exception) {
+                    LOG.error("{} MCP 服务启动失败", ModIdentity.NAME, exception);
+                }
                 LOG.info("{} 客户端启动完成；内核与能力还没有接入", ModIdentity.NAME);
             }
 
@@ -128,6 +140,7 @@ public final class Bootstrap {
             @Override public void stopping() {
                 playerControl.shutdown();
                 blockScans.dropAll();
+                mcp.stop();
                 LOG.info("{} 客户端即将退出", ModIdentity.NAME);
             }
 
