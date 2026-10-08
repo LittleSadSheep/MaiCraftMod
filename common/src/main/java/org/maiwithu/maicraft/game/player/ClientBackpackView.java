@@ -65,7 +65,8 @@ public final class ClientBackpackView implements BackpackView {
     }
 
     // 把一格物品读成事实快照：是什么、有多少、腾地方要用的几个分类标记。
-    private BackpackStack snapshot(ItemStack stack) {
+    // 装备栏视图读副手与护甲时用同一张快照，分类判断不写第二份。
+    static BackpackStack snapshot(ItemStack stack) {
         var item = stack.getItem();
         boolean gear = item instanceof SwordItem || item instanceof DiggerItem || item instanceof ProjectileWeaponItem
                 || item instanceof TridentItem || item instanceof ArmorItem || item instanceof ShieldItem;
