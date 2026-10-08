@@ -30,7 +30,8 @@ public final class ParamNames {
             Map.entry("name", "名字，例如要记住的地点名"),
             Map.entry("distance", "保持的距离，单位格，例如跟随时与目标相隔几格"),
             Map.entry("condition", "要等到的条件：elapsed / day / night / health_full / not_hungry"),
-            Map.entry("after_seconds", "先至少经过多少秒，再开始做检查"));
+            Map.entry("after_seconds", "先至少经过多少秒，再开始做检查"),
+            Map.entry("slot", "装备与卸下的目标栏位：mainhand / offhand / head / chest / legs / feet / armor（armor 只配合卸下）"));
 
     private ParamNames() {}
 

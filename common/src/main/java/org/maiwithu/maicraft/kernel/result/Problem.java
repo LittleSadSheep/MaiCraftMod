@@ -44,6 +44,7 @@ public record Problem(Kind kind, String message, String suggestion) {
         STUCK,
         /** 目前还不支持这件事，或者需要的模组没装。 */
         UNSUPPORTED,
+        /** 参数给得不对：缺了必填的、取值超了范围、几个参数凑不到一起；不进游戏就能发现。 */
         /** 程序出错；不是游戏里发生的事，应当修代码。 */
         INTERNAL_ERROR
     }
