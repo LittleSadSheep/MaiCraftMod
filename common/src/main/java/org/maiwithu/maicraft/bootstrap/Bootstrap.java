@@ -116,14 +116,16 @@ public final class Bootstrap {
         session.router().register(new ClientOperation("ownership.query", 1, false));
         // 内嵌 MCP 服务：五个工具的空壳已登记在服务内部，这里只负责启动与停止。
         McpConfig mcpConfig = McpConfig.localForProcess(8766);
-        EmbeddedMcpService mcp = new EmbeddedMcpService(mcpConfig);
+        final EmbeddedMcpService[] mcpHolder = new EmbeddedMcpService[1];
         return new ClientLifecycle() {
             @Override public void started() {
                 try {
-                    mcp.startWithFallback(mcpConfig, 2);
-                    LOG.info("{} MCP 服务已启动（端口 {}；五个工具为空壳）", ModIdentity.NAME, mcp.port());
+                    mcpHolder[0] = EmbeddedMcpService.startWithFallback(mcpConfig, 2);
+                    LOG.info("{} MCP 服务已启动（端口 {}；五个工具为空壳）",
+                            ModIdentity.NAME, mcpHolder[0].port());
                 } catch (IOException exception) {
                     LOG.error("{} MCP 服务启动失败", ModIdentity.NAME, exception);
+                    return;
                 }
                 LOG.info("{} 客户端启动完成；内核与能力还没有接入", ModIdentity.NAME);
             }
@@ -140,7 +142,7 @@ public final class Bootstrap {
             @Override public void stopping() {
                 playerControl.shutdown();
                 blockScans.dropAll();
-                mcp.stop();
+                if (mcpHolder[0] != null) mcpHolder[0].stop();
                 LOG.info("{} 客户端即将退出", ModIdentity.NAME);
             }
 
