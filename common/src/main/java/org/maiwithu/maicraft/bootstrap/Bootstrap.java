@@ -10,13 +10,27 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.state.BlockState;
+import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.survival.BreathNeed;
 import org.maiwithu.maicraft.behavior.survival.DigOutNeed;
 import org.maiwithu.maicraft.behavior.survival.FallNeed;
 import org.maiwithu.maicraft.behavior.survival.NativeBlockBreaking;
+import org.maiwithu.maicraft.behavior.survival.EdgeProximityNeed;
+import org.maiwithu.maicraft.behavior.survival.EatSoonTask;
+import org.maiwithu.maicraft.behavior.survival.HungerNeed;
+import org.maiwithu.maicraft.behavior.survival.LiveCombatMoves;
+import org.maiwithu.maicraft.behavior.survival.LiveCombatSenses;
+import org.maiwithu.maicraft.behavior.survival.LiveEdgeView;
+import org.maiwithu.maicraft.behavior.survival.LiveHungerView;
+import org.maiwithu.maicraft.behavior.survival.LiveNightAndEdgeMoves;
+import org.maiwithu.maicraft.behavior.survival.LiveNightView;
+import org.maiwithu.maicraft.behavior.survival.NightfallNeed;
+import org.maiwithu.maicraft.behavior.survival.SelfDefenseNeed;
 import org.maiwithu.maicraft.behavior.survival.SurvivalSituation;
 import org.maiwithu.maicraft.game.ModIdentity;
 import org.maiwithu.maicraft.game.interaction.DefaultInteractionSender;
+import org.maiwithu.maicraft.game.interaction.InteractionSender;
+import org.maiwithu.maicraft.game.menu.MenuActions;
 import org.maiwithu.maicraft.game.interaction.InteractionOpportunity;
 import org.maiwithu.maicraft.game.loader.LoaderEnvironment;
 import org.maiwithu.maicraft.game.ClientHooks;
@@ -28,6 +42,9 @@ import org.maiwithu.maicraft.game.serverlink.ClientOperation;
 import org.maiwithu.maicraft.game.serverlink.LinkTransport;
 import org.maiwithu.maicraft.game.serverlink.ServerLinkSession;
 import org.maiwithu.maicraft.game.world.BlockScanService;
+import org.maiwithu.maicraft.behavior.survival.CombatMemory;
+import org.maiwithu.maicraft.behavior.survival.CombatSenses;
+import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.interrupt.ControlLoop;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.mcp.transport.EmbeddedMcpService;
@@ -119,6 +136,30 @@ public final class Bootstrap {
         };
     }
 
+    /**
+     * 控制循环的生存需求清单：按急迫程度登记，必须立刻处理的先登记，同样急时先插进来。
+     * 任务事件的真实出口、走到与进食流程由各自的接线轨提供；接上之前相关临时任务会如实报告做不了。
+     */
+    private static ControlLoop withSurvivalNeeds(
+            InteractionSender interactionSender, MenuActions menuActions) {
+        CombatMemory combatMemory = new CombatMemory();
+        CombatSenses combatSenses = new LiveCombatSenses(combatMemory);
+        TaskEventSink events = TaskEventSink.NONE;
+        WalkTo walks = null;
+        EatSoonTask.FoodMoves foodMoves = null;
+        return new ControlLoop(List.of(
+                new DigOutNeed(new SurvivalSituation.FromPlayer(),
+                        () -> new NativeBlockBreaking(interactionSender, menuActions)),
+                new BreathNeed(new SurvivalSituation.FromPlayer()),
+                new FallNeed(new SurvivalSituation.FromPlayer(), interactionSender, menuActions),
+                new SelfDefenseNeed(combatSenses, new LiveCombatMoves(walks), events),
+                new HungerNeed(new LiveHungerView(), foodMoves, events),
+                new NightfallNeed(new LiveNightView(combatSenses),
+                        LiveNightAndEdgeMoves.burrow(events), events),
+                new EdgeProximityNeed(new LiveEdgeView(),
+                        LiveNightAndEdgeMoves.retreat(walks, events))));
+    }
+
     /** 客户端部分：只在客户端执行，创建游戏接口层的每刻服务、和服务端的会话、控制循环与生存需求；能力与 MCP 入口还没有接入。 */
     public static ClientLifecycle startClient(LoaderEnvironment loader, LinkTransport transport) {
         LOG.info("{} 客户端部分启动（加载器：{}，开发环境：{}）",
@@ -132,14 +173,11 @@ public final class Bootstrap {
         DefaultInteractionSender interactionSender = new DefaultInteractionSender(menuActions, opportunity);
         menuActions.attachSender(interactionSender);
         playerControl.attachInteractionEntries(interactionSender, menuActions);
-        // 控制循环登记三项基本生存需求：被埋最急先登记，同样急时它先插进来。
+        // 控制循环按急迫程度登记生存需求：必须立刻处理的先登记，同样急时它先插进来；
+        // 每项需求自己按处境报急，登记顺序只在同样急时定先后。
         // 主任务由目标执行侧接线：LLM 派了活就调 controlLoop.setMainTask(...)，这里暂不挂载，
         // 因此现在只有生存需求的临时任务在跑——没有主任务时它们同样随时可以插进来。
-        ControlLoop controlLoop = new ControlLoop(List.of(
-                new DigOutNeed(new SurvivalSituation.FromPlayer(),
-                        () -> new NativeBlockBreaking(interactionSender, menuActions)),
-                new BreathNeed(new SurvivalSituation.FromPlayer()),
-                new FallNeed(new SurvivalSituation.FromPlayer(), interactionSender, menuActions)));
+        ControlLoop controlLoop = withSurvivalNeeds(interactionSender, menuActions);
         // Mixin 钩子拿不到构造注入，只能在这里登记；服务本体仍以实例传递。
         ClientHooks.registerPlayerControl(playerControl);
         ClientHooks.registerBlockScans(blockScans);
