@@ -17,6 +17,7 @@ public final class ClientHooks {
     private static final AtomicReference<PlayerControlBoundary> PLAYER_CONTROL = new AtomicReference<>();
     private static final AtomicReference<BlockScanService> BLOCK_SCANS = new AtomicReference<>();
     private static final AtomicReference<UseKeyHold> USE_KEY_HOLD = new AtomicReference<>();
+    private static final AtomicReference<SubtitleFeed> SUBTITLE_FEED = new AtomicReference<>();
 
     private ClientHooks() {}
 
@@ -35,6 +36,11 @@ public final class ClientHooks {
         USE_KEY_HOLD.set(useKeyHold);
     }
 
+    /** 启动时登记字幕事件接收端；进世界与退世界的挂接由 Mixin 按 world 变化推进。 */
+    public static void registerSubtitleFeed(SubtitleFeed feed) {
+        SUBTITLE_FEED.set(feed);
+    }
+
     /** Mixin 类跨包读取；这里是与 Mixin 之间唯一允许的静态通道。 */
     public static PlayerControlBoundary playerControl() {
         return PLAYER_CONTROL.get();
@@ -46,5 +52,9 @@ public final class ClientHooks {
 
     public static UseKeyHold useKeyHold() {
         return USE_KEY_HOLD.get();
+    }
+
+    public static SubtitleFeed subtitleFeed() {
+        return SUBTITLE_FEED.get();
     }
 }

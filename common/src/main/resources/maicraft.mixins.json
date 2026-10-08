@@ -14,7 +14,8 @@
     "BlockUseAcknowledgementMixin",
     "UseKeyHoldMixin",
     "ScreenVisibilityMixin",
-    "InventoryScreenModeMixin"
+    "InventoryScreenModeMixin",
+    "MinecraftLevelSubtitleMixin"
   ],
   "server": [],
   "injectors": {
