@@ -1,5 +1,5 @@
 # 粗略统计 Java 文件里每个方法的行数（按缩进 4 格的方法声明切分），用于找巨型方法。
-# 用法（在仓库根目录）：python docs/refactor/tools/methods.py <文件或目录> [最少行数，默认 80]
+# 用法（在仓库根目录）：python docs/design/tools/methods.py <文件或目录> [最少行数，默认 80]
 import os
 import re
 import sys

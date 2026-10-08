@@ -1,15 +1,16 @@
 # 统计 org.maiwithu.maicraft 各包之间的 import 依赖，用于重构诊断与进度跟踪。
 # 用法（在仓库根目录）：
-#   python docs/refactor/tools/deps.py 1          顶层分组（core 下多展开一层）
-#   python docs/refactor/tools/deps.py 2 intent   展开到两层，只看与 intent 有关的边
+#   python docs/design/tools/deps.py 1          顶层分组（core 下多展开一层）
+#   python docs/design/tools/deps.py 2 intent   展开到两层，只看与 intent 有关的边
 # 输出：引用次数  涉及文件数  来源分组 -> 目标分组
 import collections
 import os
 import re
 import sys
 
-# 脚本位于 docs/refactor/tools，源码根相对仓库根定位，不依赖某台机器上的绝对路径。
-REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+# 脚本位于 docs/design/tools，源码根相对仓库根定位，不依赖某台机器上的绝对路径。
+# 默认分析脚本所在的仓库；分析 v1 时用环境变量 MAICRAFT_REPO 指向 v1 工作树。
+REPO = os.environ.get('MAICRAFT_REPO') or os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 SOURCE_ROOT = os.path.join(REPO, 'common', 'src', 'main', 'java')
 PACKAGE_ROOT = 'org/maiwithu/maicraft'
 IMPORT = re.compile(r'^import (?:static )?org\.maiwithu\.maicraft\.([\w.]+?)\.[A-Z]', re.M)
