@@ -7,8 +7,6 @@ import com.google.gson.JsonObject;
 import org.maiwithu.maicraft.game.ModIdentity;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
-import org.maiwithu.maicraft.kernel.ability.AbilitySpec;
-import org.maiwithu.maicraft.kernel.ability.Listing;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.Target;
@@ -18,7 +16,6 @@ import org.maiwithu.maicraft.kernel.param.ParseResult;
 import org.maiwithu.maicraft.kernel.param.Params;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -87,24 +84,9 @@ public final class GoalReader {
         AbilityModule module = registry.find(id).orElse(null);
         if (module == null) {
             check.markUnknownAbility();
-            check.error(path + ".ability", "没有能力 " + raw, suggestions(id));
+            check.error(path + ".ability", "没有能力 " + raw, SimilarAbilities.hint(registry, id));
         }
         return module;
-    }
-
-    /** 相近的能力名：名字互相包含，或者只差几个字母；一个都不像时列出全部能力。 */
-    private String suggestions(String id) {
-        String name = id.substring(id.indexOf(':') + 1);
-        List<AbilitySpec> listed = registry.all().stream().map(AbilityModule::spec)
-                .filter(spec -> spec.listing() == Listing.LISTED).toList();
-        List<String> similar = listed.stream()
-                .filter(spec -> spec.name().contains(name) || name.contains(spec.name())
-                        || editDistance(spec.name(), name) <= Math.max(2, name.length() / 3))
-                .sorted(Comparator.comparingInt(spec -> editDistance(spec.name(), name)))
-                .limit(3).map(AbilitySpec::id).toList();
-        List<String> shown = similar.isEmpty() ? listed.stream().map(AbilitySpec::id).toList() : similar;
-        return shown.isEmpty() ? "lookup() 列出全部能力" : (similar.isEmpty() ? "可用的能力：" : "相近的能力：")
-                + String.join("、", shown);
     }
 
     /** 能力的参数写到了 goal 这一层：挪进 parameters，并说明做过这样的整理。 */
@@ -175,23 +157,6 @@ public final class GoalReader {
 
     private static boolean present(JsonObject object, String key) {
         return object.has(key) && !object.get(key).isJsonNull();
-    }
-
-    private static int editDistance(String a, String b) {
-        int[] previous = new int[b.length() + 1];
-        int[] current = new int[b.length() + 1];
-        for (int j = 0; j <= b.length(); j++) previous[j] = j;
-        for (int i = 1; i <= a.length(); i++) {
-            current[0] = i;
-            for (int j = 1; j <= b.length(); j++) {
-                int replace = previous[j - 1] + (a.charAt(i - 1) == b.charAt(j - 1) ? 0 : 1);
-                current[j] = Math.min(replace, Math.min(previous[j] + 1, current[j - 1] + 1));
-            }
-            int[] swap = previous;
-            previous = current;
-            current = swap;
-        }
-        return previous[b.length()];
     }
 
     /**

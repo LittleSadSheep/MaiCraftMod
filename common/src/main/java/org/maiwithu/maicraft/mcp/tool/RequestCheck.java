@@ -148,7 +148,7 @@ final class RequestCheck {
     void rejectUnknownFields(JsonObject object, String path, List<String> known) {
         for (String key : object.keySet()) {
             if (!known.contains(key)) {
-                error(path + "." + key, (path.isEmpty() ? "" : path + " ") + "没有字段 " + key,
+                error(path.isEmpty() ? key : path + "." + key, (path.isEmpty() ? "" : path + " ") + "没有字段 " + key,
                         "可用的字段：" + String.join("、", known));
             }
         }
