@@ -23,7 +23,7 @@ dependencies {
     commonResources project(path: ':common', configuration: 'commonResources')
 }
 
-// 把公共资源登记为真正的资源目录，让 Fabric Loom 等加载器工具也能发现并后处理公共 Mixin 配置（沿用 v1 的修正）。
+// 把公共资源登记为真正的资源目录，让 Fabric Loom 等加载器工具也能发现并后处理公共 Mixin 配置。
 sourceSets {
     main {
         resources.srcDir(project(':common').file('src/main/resources'))

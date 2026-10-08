@@ -1,12 +1,12 @@
-name: v2 build
+name: v1 build
 
-# v2 分支的推送与指向 v2 的拉取请求：在两个平台上构建两个加载器，并运行公共模块测试（含架构护栏）。
+# v1 分支的推送与指向 v1 的拉取请求：在两个平台上构建两个加载器，并运行公共模块测试（含架构检查）。
 # 只验证，不递增版本、不发布；发布流程仍由 ci.yml 只在 main 上触发。
 on:
   push:
-    branches: [v2]
+    branches: [v1]
   pull_request:
-    branches: [v2]
+    branches: [v1]
 
 permissions:
   contents: read
@@ -24,7 +24,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 与 v1 一样同时验证玩家常用的 Windows 和 Linux 构建环境。
+        # 同时验证玩家常用的 Windows 和 Linux 构建环境。
         os: [ubuntu-24.04, windows-2025]
     defaults:
       run:
@@ -45,8 +45,8 @@ jobs:
         uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           cache-provider: basic
-          # 只有 v2 分支本身的构建写入依赖缓存，拉取请求只读，避免未合入的改动污染缓存。
-          cache-read-only: ${{ github.ref != 'refs/heads/v2' }}
+          # 只有 v1 分支本身的构建写入依赖缓存，拉取请求只读，避免未合入的改动污染缓存。
+          cache-read-only: ${{ github.ref != 'refs/heads/v1' }}
 
       - name: Build both loaders and run tests
         run: bash ./gradlew build --no-daemon --console=plain --stacktrace
@@ -55,8 +55,8 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: v2-test-reports-${{ runner.os }}-${{ github.sha }}
-          # 架构护栏的失败信息写在测试报告里，逐条列出违规的位置与改法。
+          name: v1-test-reports-${{ runner.os }}-${{ github.sha }}
+          # 架构检查的失败信息写在测试报告里，逐条列出违规的位置与改法。
           path: |
             **/build/reports/tests/
             **/build/test-results/
