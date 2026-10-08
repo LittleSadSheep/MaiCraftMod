@@ -24,5 +24,8 @@ subprojects {
         exclude 'baritone/launch/mixins/MixinPalettedContainer*'
         exclude 'baritone/launch/mixins/MixinScreen*'
         exclude 'baritone/launch/mixins/MixinWorldRenderer*'
+        // Litematica 与 Schematica 只有编译期垫片，游戏里不装这两个模组时不把垫片类打进包。
+        exclude 'fi/dy/**'
+        exclude 'com/github/lunatrius/**'
     }
 }
