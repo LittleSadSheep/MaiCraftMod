@@ -37,6 +37,14 @@ public interface PlayerContext {
     /** 本刻角色的容器界面操作入口：点击、搬运与关闭都经它提交；启动时接上之前为 {@code null}。 */
     MenuActions menuActions();
 
+    /**
+     * 本刻角色的背包视图：只读地看背包主格里有什么、还空几格。
+     * 每刻随上下文新建，只包住当刻的玩家对象；测试替身没有背包时为 {@code null}。
+     */
+    default BackpackView backpack() {
+        return null;
+    }
+
     /** 客户端刻号；同一刻内重复读取得到相同的值，用来判断手里的上下文是不是已经过期。 */
     long clientTick();
 

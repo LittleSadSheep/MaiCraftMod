@@ -19,6 +19,8 @@ final class DefaultPlayerContext implements PlayerContext {
     private final ClientPacketListener connection;
     private final InteractionSender interactionSender;
     private final MenuActions menuActions;
+    // 背包视图只包住当刻玩家对象，随上下文一起过期；读它没有副作用，不用等控制权。
+    private final BackpackView backpack;
     private final long bodyEpoch;
     private final long controlRevision;
     private final long tickRevision;
@@ -41,6 +43,7 @@ final class DefaultPlayerContext implements PlayerContext {
         this.connection = connection;
         this.interactionSender = interactionSender;
         this.menuActions = menuActions;
+        this.backpack = new ClientBackpackView(player);
         this.bodyEpoch = bodyEpoch;
         this.controlRevision = controlRevision;
         this.tickRevision = tickRevision;
@@ -54,6 +57,7 @@ final class DefaultPlayerContext implements PlayerContext {
     // 两个动手入口在启动时接进控制边界；没有接上之前上下文如实交出 null，由调用方等待接入。
     @Override public InteractionSender interactionSender() { return interactionSender; }
     @Override public MenuActions menuActions() { return menuActions; }
+    @Override public BackpackView backpack() { return backpack; }
     @Override public long clientTick() { return tickRevision; }
     boolean permitsNativeActions() { return permitsNativeActions && isCurrent(); }
     @Override public boolean canInteractThisTick() { return owner.mutationAvailable(this); }
