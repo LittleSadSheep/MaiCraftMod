@@ -60,3 +60,5 @@ term 对账 改说"确认"
 term 授权 任务的许可改说"许可"；MCP 连接的身份校验写"鉴权"
 term 清册 改说"旧逻辑清单"
 term 换芯 改说"重写"
+word Navigator 已改名：对外的寻路入口叫 WalkTo（走到），一次运行叫 WalkRun（走到运行）
+term 导航器 已改名：对外的寻路入口叫走到（WalkTo），一次运行叫走到运行（WalkRun）
