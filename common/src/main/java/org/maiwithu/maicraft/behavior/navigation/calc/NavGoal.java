@@ -55,6 +55,12 @@ public interface NavGoal {
     boolean isAt(BlockPos feet);
 
     /**
+     * 泅渡到达算不算数：宽松的范围目标（附近、某列、某个高度、距离带）接受水里漂进范围就算到；
+     * 要站进一格、站到方块旁或采矿站位的目标必须站实落地，返回 false。
+     */
+    boolean acceptsWaterArrival();
+
+    /**
      * 给搜索比较候选位置的估计分数。部分宽松到达目标仍朝中心估价，避险还会加入惩罚，因此这里没有统一的最短路下界保证。
      */
     double heuristic(BlockPos from);
@@ -313,6 +319,11 @@ public interface NavGoal {
             return feet.equals(goal);
         }
 
+        @Override public boolean acceptsWaterArrival() {
+            // 站进指定的那一格：水里漂到不算，必须站实落地。
+            return false;
+        }
+
         @Override public double heuristic(BlockPos from) {
             return pointBound(goal, from);
         }
@@ -345,6 +356,11 @@ public interface NavGoal {
             return dx * dx + dz * dz <= radius * radius;
         }
 
+        @Override public boolean acceptsWaterArrival() {
+            // 只看水平范围：泅渡漂进这一列也算到。
+            return true;
+        }
+
         @Override public double heuristic(BlockPos from) {
             double dx = Math.abs(x - from.getX());
             double dz = Math.abs(z - from.getZ());
@@ -369,6 +385,11 @@ public interface NavGoal {
 
         @Override public boolean isAt(BlockPos feet) {
             return feet.getY() == level;
+        }
+
+        @Override public boolean acceptsWaterArrival() {
+            // 只看高度：水里漂到这个高度也算到。
+            return true;
         }
 
         @Override public double heuristic(BlockPos from) {
@@ -399,6 +420,11 @@ public interface NavGoal {
 
         @Override public boolean isAt(BlockPos feet) {
             return feet.distSqr(goal) <= radiusSqr;
+        }
+
+        @Override public boolean acceptsWaterArrival() {
+            // 三维球形范围：泅渡漂进圈里也算到。
+            return true;
         }
 
         @Override public double heuristic(BlockPos from) {
@@ -434,6 +460,11 @@ public interface NavGoal {
         @Override public boolean isAt(BlockPos feet) {
             double d = horizontal(feet);
             return d >= inner && d <= outer;
+        }
+
+        @Override public boolean acceptsWaterArrival() {
+            // 只看水平距离：泅渡漂进距离带也算到。
+            return true;
         }
 
         /** 到带的距离,不是到中心的距离 —— 太近往外、太远往里,两侧都有梯度。 */
@@ -472,6 +503,11 @@ public interface NavGoal {
             return distance >= inner && distance <= outer;
         }
 
+        @Override public boolean acceptsWaterArrival() {
+            // 只看与关注点的距离：泅渡漂进距离带也算到。
+            return true;
+        }
+
         @Override public double heuristic(BlockPos from) {
             // 高差过大时，估价继续引导角色接近有效距离带，不能因水平已经到位就在楼下停住。
             double distance = distance(from);
@@ -505,6 +541,11 @@ public interface NavGoal {
             return dx * dx + dz * dz <= radiusSqr;
         }
 
+        @Override public boolean acceptsWaterArrival() {
+            // 未知高度走到附近：水上漂到算到，落地与否由后续动作再核。
+            return true;
+        }
+
         @Override public double heuristic(BlockPos from) {
             // 使用完整点距离下界，不扣除半径；与 near() 一样有意轻微高估，以目标中心保持稳定排序。
             return pointBound(goal, from);
@@ -530,6 +571,11 @@ public interface NavGoal {
             int dz = Math.abs(feet.getZ() - goal.getZ());
             int dy = Math.abs(feet.getY() - goal.getY());
             return dx + dz == 1 && dy <= 1;
+        }
+
+        @Override public boolean acceptsWaterArrival() {
+            // 要在方块旁交互：水里漂到点不了东西，必须站实。
+            return false;
         }
 
         @Override public double heuristic(BlockPos from) {
@@ -566,6 +612,11 @@ public interface NavGoal {
             return dx + dz + Math.abs(bodyDy) <= 1;
         }
 
+        @Override public boolean acceptsWaterArrival() {
+            // 采矿站位要真的踩得住：水里漂到不能开挖，必须站实。
+            return false;
+        }
+
         @Override public double heuristic(BlockPos from) {
             return Math.max(0.0, pointBound(ore, from) - COST_HEURISTIC - JUMP_ONE_BLOCK);
         }
@@ -593,6 +644,11 @@ public interface NavGoal {
             int dy = feet.getY() - goal.getY();
             int bodyDy = dy < 0 ? dy + 1 : dy;
             return dx + dz + Math.abs(bodyDy) <= 1;
+        }
+
+        @Override public boolean acceptsWaterArrival() {
+            // 要对目标方块动手：水里漂到够不着，必须站实。
+            return false;
         }
 
         @Override public double heuristic(BlockPos from) {
@@ -650,6 +706,14 @@ public interface NavGoal {
         @Override public BlockPos center() {
             return centroid;
         }
+
+        @Override public boolean acceptsWaterArrival() {
+            // 只要有一个成员要求站实（例如一组交互站位），整组就不能靠水里漂到算到达。
+            for (NavGoal g : members) {
+                if (!g.acceptsWaterArrival()) return false;
+            }
+            return true;
+        }
     }
 
     /**
@@ -667,6 +731,11 @@ public interface NavGoal {
         @Override public boolean isAt(BlockPos feet) {
             return feet.getX() == ore.getX() && feet.getZ() == ore.getZ()
                     && feet.getY() <= ore.getY() && feet.getY() >= ore.getY() - maxBelow;
+        }
+
+        @Override public boolean acceptsWaterArrival() {
+            // 要站在矿石正下方的柱里开挖：水里漂到不能开挖，必须站实。
+            return false;
         }
 
         @Override public double heuristic(BlockPos from) {
@@ -703,6 +772,10 @@ public interface NavGoal {
 
         @Override public boolean isAt(BlockPos feet) {
             return false;   // 永不判定到达，以便继续向外探索。
+        }
+
+        @Override public boolean acceptsWaterArrival() {
+            return false;   // 目标永不判到达，这个取值不参与判断。
         }
 
         @Override public double heuristic(BlockPos fromPos) {

@@ -25,6 +25,10 @@ final class ForwardTravelGoal implements NavGoal {
         return origin.distSqr(feet) <= RANGE * RANGE && x * dx + z * dz >= 12
                 && Math.hypot(destination.center().getX() - feet.getX(), destination.center().getZ() - feet.getZ()) < distance - 6;
     }
+    @Override public boolean acceptsWaterArrival() {
+        // 中间路段看真实地形：泅渡漂到能歇脚的水域同样是一段合法进展。
+        return true;
+    }
     @Override public double heuristic(BlockPos from) {
         return Math.max(0, 12 - (from.getX() - origin.getX()) * dx - (from.getZ() - origin.getZ()) * dz) * COST_HEURISTIC;
     }
