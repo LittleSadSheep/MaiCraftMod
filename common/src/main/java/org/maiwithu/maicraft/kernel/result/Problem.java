@@ -17,6 +17,8 @@ public record Problem(Kind kind, String message, String suggestion) {
 
     /** 问题种类。新增种类前先确认现有种类确实表达不了，并同步更新对外接口文档。 */
     public enum Kind {
+        /** 参数在游戏里立不住：物品或方块 ID 不存在、标签下一件注册物品都没有。这类问题不进世界就能发现。 */
+        INVALID_PARAMETER,
         /** 缺东西：材料、食物、床、够格的工具（例如镐的等级不够，挖了不掉落），而且自己弄不到。 */
         NEED_ITEM,
         /** 要做的事超出了这次任务的许可，需要 LLM 同意，例如要拆玩家盖的墙才能过去。 */
