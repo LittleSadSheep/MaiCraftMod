@@ -25,10 +25,11 @@ public record Problem(Kind kind, String message, String suggestion) {
         NEED_APPROVAL,
         /** 到不了：试过的站位和路线都不通。 */
         UNREACHABLE,
+        /** 查无此物：观察编号或名字对不上任何东西，与"曾经见过、后来没了"（TARGET_GONE）分开。 */
+        NOT_FOUND,
         /** 目标对象没了：方块被拆、实体走远或消失。 */
         TARGET_GONE,
         /** 查过的范围里没有找到要找的东西；查了多大范围随问题写明，与 TARGET_GONE（原来有、现在没了）分开。 */
-        NOT_FOUND,
         /** 危险：继续下去会死，或大概率重伤。 */
         DANGER,
         /** 游戏或模组拒绝了这次交互（包括服务器的领地保护、权限不够），附上游戏给的原因。 */

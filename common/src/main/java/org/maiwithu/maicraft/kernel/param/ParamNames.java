@@ -27,7 +27,10 @@ public final class ParamNames {
             Map.entry("via", "指定途径，例如拿东西时指定合成、烧炼或采掘"),
             Map.entry("text", "要发送或书写的文字"),
             Map.entry("message", "要发到游戏聊天的一句话，对全体玩家可见"),
-            Map.entry("name", "名字，例如要记住的地点名"));
+            Map.entry("name", "名字，例如要记住的地点名"),
+            Map.entry("distance", "保持的距离，单位格，例如跟随时与目标相隔几格"),
+            Map.entry("condition", "要等到的条件：elapsed / day / night / health_full / not_hungry"),
+            Map.entry("after_seconds", "先至少经过多少秒，再开始做检查"));
 
     private ParamNames() {}
 

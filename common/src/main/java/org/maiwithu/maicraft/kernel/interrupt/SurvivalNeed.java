@@ -19,6 +19,15 @@ public interface SurvivalNeed {
     /** 此刻有多急；现在不需要处理时返回 null。 */
     Urgency urgency(TickContext context);
 
+    /**
+     * 同上，但能看到此刻被推进的任务（通常是主任务；手上没有任务时为 null）。
+     * 有的需求要看主任务在不在管一件事才决定让不让位，例如手头的活正在还手时被攻击不必再插进来；
+     * 需求通过任务上的特征接口认这件事，内核与需求都不认识任何具体能力。默认不看主任务。
+     */
+    default Urgency urgency(TickContext context, Task currentTask) {
+        return urgency(context);
+    }
+
     /** 需要处理时，创建这一次的临时任务。 */
     Task createTask(TickContext context);
 }

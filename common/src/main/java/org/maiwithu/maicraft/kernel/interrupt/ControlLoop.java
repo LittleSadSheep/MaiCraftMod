@@ -37,6 +37,8 @@ public final class ControlLoop {
     private static final Logger LOG = LoggerFactory.getLogger(ControlLoop.class);
 
     private final List<SurvivalNeed> needs;
+    /** 主任务被停在半路时的一句话说明；没被停过为 null。 */
+    private String parkedWhere;
     /** 从底到顶的运行栈；最底是主任务，上面是插进来的临时任务。只在客户端线程读写。 */
     private final List<Frame> stack = new ArrayList<>();
 
@@ -83,6 +85,15 @@ public final class ControlLoop {
             return Decision.IDLE;
         }
         Frame current = top();
+        // 主任务被停在了半路：只等生存需求先救命，活不接着干。
+        if (current.paused) {
+            for (SurvivalNeed need : needs) {
+                if (need.urgency(context) != null) {
+                    return takeOver(need, context);
+                }
+            }
+            return new Decision.Parked(current.task, parkedWhere == null ? "位置不明" : parkedWhere);
+        }
         Interruptibility interruptibility = current.task.interruptibility(context);
         SurvivalNeed chosen = null;
         Urgency chosenUrgency = null;
@@ -90,7 +101,8 @@ public final class ControlLoop {
         Urgency deferredUrgency = null;
         for (SurvivalNeed need : needs) {
             if (hasLiveTask(need)) continue;
-            Urgency urgency = need.urgency(context);
+            // 需求可以看到此刻被推进的任务：要不要让位给主任务由需求自己结合处境判断。
+            Urgency urgency = need.urgency(context, current.task);
             if (urgency == null) continue;
             if (InterruptRule.canInterrupt(urgency, interruptibility)) {
                 // 同样急的先来先得：只有真的更急才顶掉前面选中的。
@@ -130,6 +142,13 @@ public final class ControlLoop {
             LOG.info("任务结束：{}", frame.task.describe());
             TaskResult value = frame.task.close(CloseReason.FINISHED);
             stack.remove(stack.size() - 1);
+            // 临时任务回不到原来的岗位时不让主任务在新地点悄悄续上：停住等 LLM 决定。
+            if (frame.task instanceof DisplacedTask displaced && displaced.cannotResumeInPlace()
+                    && !stack.isEmpty() && stack.getFirst().from == null) {
+                stack.getFirst().paused = true;
+                parkedWhere = displaced.stoppedWhere();
+                return new Decision.Parked(stack.getFirst().task, parkedWhere);
+            }
             return new Decision.Advanced(frame.task, frame.from, deferred, value);
         }
         return new Decision.Advanced(frame.task, frame.from, deferred, null);
@@ -149,6 +168,8 @@ public final class ControlLoop {
         final Task task;
         final SurvivalNeed from;
         boolean started;
+        /** 主任务被临时任务留在了半路：不能再推进，等 LLM 明确换任务或解除暂停。 */
+        boolean paused;
 
         Frame(Task task, SurvivalNeed from) {
             this.task = Objects.requireNonNull(task, "task");
@@ -172,6 +193,12 @@ public final class ControlLoop {
          */
         record Advanced(Task task, SurvivalNeed interrupting, SurvivalNeed deferred, TaskResult finished)
                 implements Decision {}
+
+        /**
+         * 临时任务收尾时把主任务停在了半路：主任务不再推进，事件里带上停在了哪里。
+         * LLM 明确派新任务（换掉主任务）之前，角色不再替停住的主任务继续干活。
+         */
+        record Parked(Task pausedMain, String where) implements Decision {}
 
         /** 本刻什么都没做。 */
         record Idle() implements Decision {}
