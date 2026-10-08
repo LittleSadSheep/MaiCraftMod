@@ -114,7 +114,7 @@ class GoalRunTableTest {
     void restoringBringsBackUnfinishedGoalsPausedAndSkipsSequenceSteps() {
         GoalRun interrupted = new GoalRun(store.nextId(), GOAL);
         store.save(interrupted);
-        store.save(new GoalRun(store.nextId(), GOAL, interrupted.id()));
+        store.save(new GoalRun(store.nextId(), GOAL, interrupted.id(), 0));
 
         table.restore();
 

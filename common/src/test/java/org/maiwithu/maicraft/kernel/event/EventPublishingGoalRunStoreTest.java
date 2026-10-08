@@ -39,7 +39,7 @@ class EventPublishingGoalRunStoreTest {
         store.save(run);
         run.pause();
         store.save(run);
-        run.unpause();
+        run.resume();
         store.save(run);
         run.finish(TaskResult.done("拆完了"), 300);
         store.save(run);
@@ -70,7 +70,7 @@ class EventPublishingGoalRunStoreTest {
         EventPublishingGoalRunStore store = new EventPublishingGoalRunStore(new InMemoryGoalRunStore(), log);
         GoalRun sequence = new GoalRun(store.nextId(), GOAL);
         store.save(sequence);
-        GoalRun step = new GoalRun(store.nextId(), GOAL, sequence.id());
+        GoalRun step = new GoalRun(store.nextId(), GOAL, sequence.id(), 0);
 
         store.save(step);
         step.ask(QUESTION);

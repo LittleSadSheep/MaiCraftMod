@@ -87,6 +87,30 @@ public record TaskResult(
         return builder;
     }
 
+    /**
+     * 把在它之前结束的那些结果已经确认的事实接到前面：变化、没能确认的交互、试过的办法按先后排在本结果自己的之前；
+     * 结论（状态、一句话、剩下的、问题、细节）仍是本结果的。
+     *
+     * <p>一个目标往往要跑好几个任务，最后由其中一个（或能力的决定）给出结论；前面任务已经发生的事
+     * 不能因为它们不是最后一个就从结果里消失——挖了 40 个铁再被截停，LLM 必须知道这 40 个铁。
+     */
+    public TaskResult withFactsBefore(List<TaskResult> earlier) {
+        if (earlier.isEmpty()) {
+            return this;
+        }
+        Builder builder = new Builder(status, summary).problem(problem).details(details);
+        for (TaskResult before : earlier) {
+            builder.changes.addAll(before.changes);
+            builder.unconfirmed.addAll(before.unconfirmed);
+            builder.attempts.addAll(before.attempts);
+        }
+        builder.changes.addAll(changes);
+        builder.remaining.addAll(remaining);
+        builder.unconfirmed.addAll(unconfirmed);
+        builder.attempts.addAll(attempts);
+        return builder.build();
+    }
+
     /** 结果构建器；任务在运行中逐条记下变化与尝试，结束时一次构建。 */
     public static final class Builder {
         private final Status status;

@@ -4,7 +4,6 @@ package org.maiwithu.maicraft.kernel.goal;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.child.ChildTaskRunner;
-import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
@@ -27,89 +26,83 @@ import java.util.function.Supplier;
  * 目标推进器：把 LLM 给的一个目标逐刻推进到有结果。
  *
  * <p>每刻对当前步骤问能力的决定（{@link AbilityModule#decide}），按决定行事：
- * 直接给结果就收尾；要动手就经子任务运行器把任务跑完，任务成功后按决定决定是"重新看这一步
- * 是否满足"还是"直接算完成"；要问 LLM 就把目标挂起，回答回来接着推进；要记地点就交给记忆；
- * 要等条件就先等，条件成立再重新决定。步骤的任务失败时，失败原样传播成目标的失败。
+ * 直接给结果就收尾；要动手就经子任务运行器把任务跑完，任务的结果按决定要么就是这一步的结果，
+ * 要么回来再决定一次（能力看得到刚结束的结果，成功了看这一步满足没有，失败了换办法）；
+ * 要问 LLM 就把目标挂起，回答回来接着推进；要记地点就交给记忆；要等条件就先等，条件成立再重新决定。
  *
- * <p>它本身是一个任务：控制循环每刻像推进其他任务一样推进它，不用为它单开一条路。
- * 推进中抛出的异常在这里转成程序错误的问题收场，不连累调用方一起崩。
+ * <p>一个目标里每个任务已经发生的事都不丢：最后由谁给出结论，前面任务确认的变化、没能确认的交互、
+ * 试过的办法都并进最终结果。目标被取消、被替换、程序出错时也一样。
+ *
+ * <p>时限不在这里给：任务多久算卡住、最多做多久由任务自己的进度跟踪按自己的节奏判断，
+ * 挖 64 个铁、长途出行这类正常的长活不会被一个统一的时限截停。
+ *
+ * <p>它本身是一个任务：控制循环每刻像推进其他任务一样推进它。推进中抛出的异常在这里转成
+ * 程序错误的问题收场，正在跑的任务先按取消收尾，不留按住的键和开着的界面。
  *
  * <p>推进的记录 {@link GoalRun} 每次处境变化都存进目标运行存储；重启后从存储读回还没结束的
- * 记录，恢复为暂停，明确解除暂停后从当前步骤重新决定（进行中的任务不能跨重启恢复，能力会重新看现场）。
+ * 记录，恢复为暂停，明确恢复后从当前步骤重新决定（进行中的任务不能跨重启恢复，能力会重新看现场）。
  */
 public final class GoalRunner implements Task {
     private static final Logger LOG = LoggerFactory.getLogger(GoalRunner.class);
-
-    /**
-     * 一步的子任务允许推进多久（默认 10 分钟）。卡住判定本来由各任务自己的进度跟踪负责，
-     * 这里只是内核给的兜底时限，防"某个任务自己永远不结束"；离线测试用 {@link #launchWithBudget} 指定更短的时限。
-     */
-    static final long DEFAULT_STEP_BUDGET_TICKS = 20L * 60 * 10;
 
     private final Goal goal;
     private final AbilityRegistry registry;
     private final GoalRunStore store;
     private final RemembersPlaces remembers;
-    private final long stepBudgetTicks;
 
     private final GoalRun run;
-    /** 当前步骤的任务；步骤之间为 null。 */
+    /** 当前任务（sequence 时是当前步骤的子目标）；两件事之间为 null。 */
     private ChildTaskRunner child;
-    /** 当前步骤的任务输入；钩子要看它。 */
+    /** 当前任务的输入；钩子要看它。 */
     private TaskInput currentInput;
-    /** 当前任务成功后要不要重新看这一步是否满足。 */
-    private boolean recheckAfterCurrent;
+    /** 当前任务结束后要不要回来重新决定这一步。 */
+    private boolean decideAgainAfterCurrent;
     /** 按顺序运行几个任务时，还没轮到的输入生成器。 */
     private Deque<Supplier<TaskInput>> queuedInputs;
     /** 在等的条件；不在等时为 null。 */
     private WaitCondition waiting;
     /** 这一刻之前不检查等待的条件。 */
     private long waitNotBefore;
-    /** sequence：正在跑的子目标推进器；轮到步骤之间为 null。 */
+    /** sequence：正在跑的步骤的推进器；步骤之间为 null。 */
     private GoalRunner stepRunner;
-    /** sequence：没做成但被允许继续的步骤结果（onFailure 为 CONTINUE 时）。 */
-    private final List<TaskResult> failedSteps = new ArrayList<>();
+    /** 已经结束的任务的结果，按先后；sequence 时是已经结束的各步骤的结果，下标就是第几步。 */
+    private final List<TaskResult> finishedResults = new ArrayList<>();
     /** 结束后的结果；没结束时为 null。 */
     private TaskResult result;
 
-    private GoalRunner(GoalRun run, AbilityRegistry registry, GoalRunStore store,
-                       RemembersPlaces remembers, long stepBudgetTicks) {
+    private GoalRunner(GoalRun run, AbilityRegistry registry, GoalRunStore store, RemembersPlaces remembers) {
         this.run = run;
         this.goal = run.goal();
         this.registry = registry;
         this.store = store;
         this.remembers = remembers;
-        this.stepBudgetTicks = stepBudgetTicks;
     }
 
     /** 下达一个新目标：分配编号、记一条进行中的目标运行并立即存盘。 */
     public static GoalRunner launch(Goal goal, AbilityRegistry registry, GoalRunStore store, RemembersPlaces remembers) {
-        GoalRunner runner = new GoalRunner(new GoalRun(store.nextId(), goal),
-                registry, store, remembers, DEFAULT_STEP_BUDGET_TICKS);
+        GoalRunner runner = new GoalRunner(new GoalRun(store.nextId(), goal), registry, store, remembers);
         runner.save();
         return runner;
     }
 
     /**
-     * 恢复一条还没结束的目标运行（重启前中断的）：恢复为暂停，明确解除暂停后才继续推进。
-     * 进行中的任务不恢复——任务没法跨重启活下来，解除暂停后能力会重新看现场做决定。
+     * 恢复一条重启前还没结束的目标运行：恢复为暂停，明确恢复后才继续推进。
+     * 进行中的任务不恢复——任务没法跨重启活下来，恢复后能力会重新看现场做决定。
+     * sequence 的步骤记录不单独恢复：它们随所属的 sequence 推进到那一步时自己接上。
      */
-    public static GoalRunner resume(GoalRun restored, AbilityRegistry registry, GoalRunStore store,
-                                    RemembersPlaces remembers) {
+    public static GoalRunner restore(GoalRun restored, AbilityRegistry registry, GoalRunStore store,
+                                     RemembersPlaces remembers) {
         if (!restored.unfinished()) {
             throw new IllegalStateException("目标运行 " + restored.id() + " 已经结束，不能恢复");
         }
-        restored.pause();
-        GoalRunner runner = new GoalRunner(restored, registry, store, remembers, DEFAULT_STEP_BUDGET_TICKS);
-        runner.save();
-        return runner;
-    }
-
-    /** 离线测试用：指定一步的子任务时限，其余同 launch。 */
-    static GoalRunner launchWithBudget(Goal goal, AbilityRegistry registry, GoalRunStore store,
-                                       RemembersPlaces remembers, long stepBudgetTicks) {
-        GoalRunner runner = new GoalRunner(new GoalRun(store.nextId(), goal),
-                registry, store, remembers, stepBudgetTicks);
+        if (restored.parentRunId() != GoalRun.NO_PARENT) {
+            throw new IllegalArgumentException("目标运行 " + restored.id() + " 是 sequence "
+                    + restored.parentRunId() + " 的一步，随所属的 sequence 恢复");
+        }
+        if (restored.state() != GoalRunState.PAUSED) {
+            restored.pause();
+        }
+        GoalRunner runner = new GoalRunner(restored, registry, store, remembers);
         runner.save();
         return runner;
     }
@@ -119,13 +112,45 @@ public final class GoalRunner implements Task {
         return run;
     }
 
-    /** 解除暂停，继续推进；只有重启恢复出来的暂停态能解除。 */
-    public void unpause() {
-        run.unpause();
+    /** LLM 要求暂停：手上的任务先松开按键停手，目标停在原处，等恢复。 */
+    public void pauseGoal() {
+        if (result != null) {
+            throw new IllegalStateException("目标运行 " + run.id() + " 已经结束，不能暂停");
+        }
+        if (run.state() == GoalRunState.PAUSED) {
+            return;
+        }
+        pause();
+        run.pause();
         save();
+        LOG.info("目标 {} 暂停", run.id());
     }
 
-    /** LLM 回答了这条推进挂起的问题：记下回答，下一刻继续推进。 */
+    /** 恢复推进（LLM 要求恢复，或重启后明确恢复）：还挂着问题的接着等回答，其余从原处接着做。 */
+    public void resumeGoal() {
+        run.resume();
+        save();
+        LOG.info("目标 {} 恢复推进", run.id());
+    }
+
+    /**
+     * 现在挂着、等 LLM 回答的问题；没有时为 null。sequence 返回正在跑的那一步的问题，
+     * 重启后那一步还没被重新拉起时，到存储里找它的记录。
+     */
+    public Question pendingQuestion() {
+        if (run.question() != null) {
+            return run.question();
+        }
+        if (goal.steps().isEmpty() || result != null) {
+            return null;
+        }
+        if (stepRunner != null) {
+            return stepRunner.pendingQuestion();
+        }
+        return storedStep(run.stepIndex()).map(GoalRun::question).orElse(null);
+    }
+
+    /** LLM 回答了挂着的问题：记下回答并存盘，之后接着推进（暂停中的目标先收下回答，恢复后不再等它）。 */
     public void answer(String text) {
         if (run.question() != null) {
             run.answer(text);
@@ -133,56 +158,25 @@ public final class GoalRunner implements Task {
             LOG.info("目标 {} 的步骤 {} 得到回答：{}", run.id(), run.stepIndex(), text);
             return;
         }
-        // sequence 自己没挂着问题时，回答属于正在跑的子目标；子目标还没被重新拉起（重启后常见），
-        // 就直接把回答写进它在存储里的记录，拉起后照样接着走。
-        if (stepRunner != null && stepRunner.run().question() != null) {
-            stepRunner.answer(text);
-            return;
-        }
-        if (!goal.steps().isEmpty()) {
-            answerStoredStep(text);
-            return;
+        if (!goal.steps().isEmpty() && result == null) {
+            // sequence 自己不提问，回答属于当前那一步：步骤正在跑就交给它，
+            // 重启后还没被重新拉起就直接写进它在存储里的记录并存盘，拉起后照样接着走。
+            if (stepRunner != null) {
+                stepRunner.answer(text);
+                return;
+            }
+            Optional<GoalRun> stored = storedStep(run.stepIndex()).filter(step -> step.question() != null);
+            if (stored.isPresent()) {
+                stored.get().answer(text);
+                store.save(stored.get());
+                return;
+            }
         }
         throw new IllegalStateException("目标运行 " + run.id() + " 没有在等回答");
     }
 
-    /**
-     * 此刻在等的问题：自己挂着的，或者 sequence 正在跑的那一步挂着的；不在等回答时为 null。
-     * 回答之前要先看它，确认 LLM 选的是问题给出的选项之一。
-     */
-    public Question pendingQuestion() {
-        if (run.question() != null) {
-            return run.question();
-        }
-        if (stepRunner != null) {
-            return stepRunner.pendingQuestion();
-        }
-        if (goal.steps().isEmpty()) {
-            return null;
-        }
-        // 重启后步骤还没被重新拉起：问题挂在存储里那一步自己的记录上。
-        for (GoalRun candidate : store.unfinished()) {
-            if (candidate.parentRunId() == run.id() && candidate.question() != null) {
-                return candidate.question();
-            }
-        }
-        return null;
-    }
-
-    /** 把回答写进还挂在存储里、正在等回答的子目标记录。 */
-    private void answerStoredStep(String text) {
-        for (GoalRun candidate : store.unfinished()) {
-            if (candidate.parentRunId() == run.id() && candidate.question() != null) {
-                candidate.answer(text);
-                save();
-                return;
-            }
-        }
-        throw new IllegalStateException("目标运行 " + run.id() + " 的步骤没有在等回答");
-    }
-
     @Override public void start(TickContext context) {
-        // 下达后还没轮到推进就被取消了：结果已经定下，控制循环下一刻就会把它移走，不再开始。
+        // 下达后还没推进就被取消的目标，控制循环下一刻照样会 start 它：已经结束就什么都不做。
         if (result != null) {
             return;
         }
@@ -194,24 +188,27 @@ public final class GoalRunner implements Task {
         if (result != null) {
             return TickResult.finished(result);
         }
-        // 暂停中的目标运行不推进：控制循环不该挑它，挑到了也原样放着等解除暂停。
+        // 暂停中的目标运行不推进：原样放着等恢复。
         if (run.state() == GoalRunState.PAUSED) {
             return TickResult.RUNNING;
         }
-        // 决定或任务里抛异常都不连累控制循环：转成程序错误的问题，如实收场。
         try {
             return advance(context);
         } catch (RuntimeException exception) {
-            LOG.warn("目标推进时出错", exception);
-            settle(TaskResult.failed("目标推进时程序出错",
-                    Problem.of(Problem.Kind.INTERNAL_ERROR, exception.getClass().getSimpleName()
-                            + (exception.getMessage() == null ? "" : "：" + exception.getMessage()))), context);
-            return TickResult.finished(result);
+            // 决定、钩子或步骤之间的程序出错不连累控制循环：正在跑的任务先按取消收尾交代事实，再如实收场。
+            LOG.warn("目标 {} 推进时出错", run.id(), exception);
+            // 任务刚结束、钩子处理它时出的错：任务的结果已经在手上，照样并进来。
+            TaskResult closed = child != null && child.finished()
+                    ? child.result() : closeRunningChild(CloseReason.CANCELLED);
+            TaskResult failure = TaskResult.failed("目标推进时程序出错", Problem.of(Problem.Kind.INTERNAL_ERROR,
+                    exception.getClass().getSimpleName()
+                            + (exception.getMessage() == null ? "" : "：" + exception.getMessage())));
+            return settle(closed == null ? failure : failure.withFactsBefore(List.of(closed)), context);
         }
     }
 
     @Override public void pause() {
-        // 被生存需求打断：正在跑的子任务松开按键、保留进度；目标本身的处境不变。
+        // 被生存需求打断：正在跑的任务松开按键、保留进度；目标本身的处境不变。
         if (child != null && !child.finished()) {
             child.pause();
         }
@@ -221,19 +218,29 @@ public final class GoalRunner implements Task {
         if (result != null) {
             return result;
         }
-        // 还在跑的子任务先按同样的原因收尾，让它如实交代已经发生的变化。
-        TaskResult fromChild = child != null && !child.finished() ? child.close(reason) : null;
-        TaskResult ending = fromChild != null ? fromChild : cancelledFor(reason);
-        settle(ending, null);
+        // 还在跑的任务按同样的原因收尾，交代已经发生的变化；目标的结论是"被取消 / 被替换 / 角色没了"。
+        TaskResult closed = closeRunningChild(reason);
+        TaskResult.Builder ending = TaskResult.builder(TaskResult.Status.CANCELLED, cancelledSummary(reason));
+        if (closed != null) {
+            ending.remaining(closed.remaining());
+        }
+        ending.remaining(stepsNotStarted(goal.steps().isEmpty() ? 0 : run.stepIndex() + 1));
+        TaskResult cancelled = ending.build();
+        settle(closed == null ? cancelled : cancelled.withFactsBefore(List.of(closed)), null);
         return result;
     }
 
     @Override public Interruptibility interruptibility(TickContext context) {
-        if (child == null || child.finished()) {
-            // 手上没有进行中的子任务（在决定、等回答或等条件），不急的事可以趁这个空当插进来。
+        if (result != null || run.state() == GoalRunState.PAUSED || child == null || child.finished()) {
+            // 手上没有进行中的任务（在决定、等条件或暂停中），不急的事可以趁这个空当插进来。
             return Interruptibility.BETWEEN_ACTIONS;
         }
-        return child.interruptibility(context);
+        Interruptibility childSays = child.interruptibility(context);
+        if (run.state() == GoalRunState.AWAITING_ANSWER && childSays != Interruptibility.UNSAFE_TO_STOP) {
+            // 任务已经停手等 LLM 回答，这段空当可能很长：吃口东西之类不急的事可以插进来。
+            return Interruptibility.BETWEEN_ACTIONS;
+        }
+        return childSays;
     }
 
     @Override public String describe() {
@@ -264,9 +271,9 @@ public final class GoalRunner implements Task {
         return decideStep(context);
     }
 
-    /** 推进当前步骤的任务一刻，并按结果决定这一步怎么走。 */
+    /** 推进当前任务一刻，结束了就按决定处理它的结果。 */
     private TickResult tickChild(TickContext context) {
-        // 能力钩子说任务碰到了必须由 LLM 选择的情况：暂停子任务，停下来问。
+        // 能力钩子说任务碰到了必须由 LLM 选择的情况：任务停手，停下来问。
         Question during = module().hooks().duringTask(stepContext(context), currentInput);
         if (during != null) {
             child.pause();
@@ -278,36 +285,42 @@ public final class GoalRunner implements Task {
         if (tickResult instanceof TickResult.Running) {
             return TickResult.RUNNING;
         }
-        TaskResult taskResult = ((TickResult.Finished) tickResult).result();
-        // 钩子可以改写结果，或换成另一个决定继续这一步。
-        AfterTask after = module().hooks().afterTask(stepContext(context), currentInput, taskResult);
-        if (after instanceof AfterTask.Replace replace) {
-            forgetChild();
-            return applyDecision(replace.decision(), context);
-        }
-        return onStepTaskDone(((AfterTask.Accept) after).result(), context);
+        return taskEnded(((TickResult.Finished) tickResult).result(), context);
     }
 
-    /** 步骤的任务有了结果：失败原样传播，成功按决定决定是重新看这一步还是直接算完成。 */
-    private TickResult onStepTaskDone(TaskResult taskResult, TickContext context) {
-        // 先记下"要不要重新看这一步"再清空子任务，清空会把标记一起抹掉。
-        boolean recheck = recheckAfterCurrent;
-        forgetChild();
-        if (taskResult.status() != TaskResult.Status.DONE) {
-            // 步骤没做成：带着完整事实结束目标。换办法重试是玩家行为层的事，不在目标推进里加。
-            settle(taskResult, context);
-            return TickResult.finished(result);
+    /** 一个任务结束了（包括启动就失败）：先给能力钩子看一眼，再按决定走。 */
+    private TickResult taskEnded(TaskResult taskResult, TickContext context) {
+        AfterTask after = module().hooks().afterTask(stepContext(context), currentInput, taskResult);
+        if (after instanceof AfterTask.Replace replace) {
+            // 钩子换了一个决定：这个任务已经发生的事照样记下，再按新决定走。
+            finishedResults.add(taskResult);
+            forgetChild();
+            queuedInputs = null;
+            return applyDecision(replace.decision(), context);
         }
-        if (recheck) {
-            // 任务做成了，但这一步是否满足要回来重新看：下一刻重新问能力的决定。
+        return onTaskDone(((AfterTask.Accept) after).result(), context);
+    }
+
+    /** 按决定处理任务的结果：回来再决定、轮到下一个排好的任务，或者就此给出目标的结果。 */
+    private TickResult onTaskDone(TaskResult taskResult, TickContext context) {
+        // 先记下"要不要回来再决定"再清空当前任务，清空会把标记一起抹掉。
+        boolean decideAgain = decideAgainAfterCurrent;
+        forgetChild();
+        if (decideAgain) {
+            // 成败都回去问能力：它从 taskResults() 看到这个结果，满足了就结束，失败了换办法或结束。
+            finishedResults.add(taskResult);
             return TickResult.RUNNING;
+        }
+        if (taskResult.status() != TaskResult.Status.DONE) {
+            // 没做成又没要求回来再决定：带着完整事实结束目标，排在后面的任务不再做。
+            queuedInputs = null;
+            return settle(taskResult, context);
         }
         if (queuedInputs != null && !queuedInputs.isEmpty()) {
-            beginChild(queuedInputs.removeFirst().get(), context);
-            return TickResult.RUNNING;
+            finishedResults.add(taskResult);
+            return startTask(queuedInputs.removeFirst().get(), false, context);
         }
-        settle(taskResult, context);
-        return TickResult.finished(result);
+        return settle(taskResult, context);
     }
 
     /** 重新问能力对当前这一步的决定，并按决定行事。 */
@@ -331,24 +344,19 @@ public final class GoalRunner implements Task {
             return TickResult.RUNNING;
         }
         if (decision instanceof StepDecision.Finish finish) {
-            settle(finish.result(), context);
-            return TickResult.finished(result);
+            return settle(finish.result(), context);
         }
         if (decision instanceof StepDecision.Run runTask) {
-            module().hooks().beforeTask(stepContext(context), runTask.input());
-            recheckAfterCurrent = runTask.recheckAfterSuccess();
             queuedInputs = null;
-            beginChild(runTask.input(), context);
-            return TickResult.RUNNING;
+            return startTask(runTask.input(), runTask.decideAgain(), context);
         }
         if (decision instanceof StepDecision.RunInOrder inOrder) {
-            // 按顺序运行几个任务：先跑第一个，剩下的到轮到时才生成输入，保证时限和副作用按顺序发生。
+            // 按顺序运行几个任务：剩下的到轮到时才生成输入，保证副作用按顺序发生；先排好队再开第一个，
+            // 第一个启动就失败时也能按同一条路处理。
             Deque<Supplier<TaskInput>> remaining = new ArrayDeque<>(inOrder.inputs());
-            beginChild(remaining.removeFirst().get(), context);
-            module().hooks().beforeTask(stepContext(context), currentInput);
-            recheckAfterCurrent = false;
+            Supplier<TaskInput> first = remaining.removeFirst();
             queuedInputs = remaining;
-            return TickResult.RUNNING;
+            return startTask(first.get(), false, context);
         }
         if (decision instanceof StepDecision.Ask ask) {
             run.ask(ask.question());
@@ -369,101 +377,158 @@ public final class GoalRunner implements Task {
         throw new IllegalStateException("不认识的决定：" + decision.getClass().getName());
     }
 
-    /** 开始跑当前步骤的一个任务；异常交给 tick 的兜底转成程序错误。 */
-    private void beginChild(TaskInput input, TickContext context) {
+    /**
+     * 开始当前步骤的一个任务：每个任务开始前都先给能力钩子看一眼（按顺序排着的也一样），再创建并启动。
+     * 启动就失败的任务当场按结束处理，失败不会被悄悄吞掉、下一刻再原样重来。
+     */
+    private TickResult startTask(TaskInput input, boolean decideAgain, TickContext context) {
+        module().hooks().beforeTask(stepContext(context), input);
         currentInput = input;
-        child = new ChildTaskRunner(new ProgressTracker(1, stepBudgetTicks));
-        child.begin(currentInput, registry.taskFactories(), context);
+        decideAgainAfterCurrent = decideAgain;
+        child = new ChildTaskRunner(ChildTaskRunner.NO_LIMIT);
+        child.begin(input, registry.taskFactories(), context);
+        if (child.finished()) {
+            return taskEnded(child.result(), context);
+        }
+        return TickResult.RUNNING;
     }
 
     /**
-     * 逐步跑 sequence 的子目标：每个子目标是一个完整的目标推进，经子任务运行器跑完再轮到下一步。
-     * 某步没做成时按目标的 onFailure 决定整件事停下还是继续；都允许失败时目标以部分完成收尾。
+     * 逐步跑 sequence：每一步是一个完整的目标推进，经子任务运行器跑完再轮到下一步。
+     * 某步没做成时按这一步自己的 onFailure 决定整件事停下还是继续。
      */
     private TickResult advanceSequence(TickContext context) {
-        if (child == null || child.finished()) {
-            if (run.stepIndex() >= goal.steps().size()) {
-                // 步骤已经轮完却还没收尾，是调用方写错了：如实报程序错误，不悄悄当成完成。
-                throw new IllegalStateException("sequence 的步骤已经轮完，却没有收尾");
-            }
-            beginStep(goal.steps().get(run.stepIndex()), context);
-            return TickResult.RUNNING;
+        if (child == null) {
+            return beginStep(context);
         }
         TickResult tickResult = child.tick(context);
         if (tickResult instanceof TickResult.Running) {
             return TickResult.RUNNING;
         }
-        TaskResult stepResult = ((TickResult.Finished) tickResult).result();
-        child = null;
-        stepRunner = null;
-        if (stepResult.status() != TaskResult.Status.DONE && goal.onFailure() == Goal.OnFailure.STOP) {
-            // 这一步没做成就整件事停下：失败的事实原样作为目标的结果。
-            settle(stepResult, context);
-            return TickResult.finished(result);
+        return stepEnded(((TickResult.Finished) tickResult).result(), context);
+    }
+
+    /** 轮到一步：这一步重启前有没结束的记录就接着用它，否则开一条新的；启动就失败也按这一步结束处理。 */
+    private TickResult beginStep(TickContext context) {
+        int index = run.stepIndex();
+        if (index >= goal.steps().size()) {
+            // 步骤已经轮完却还没收尾，是调用方写错了：如实报程序错误，不悄悄当成完成。
+            throw new IllegalStateException("sequence 的步骤已经轮完，却没有收尾");
         }
-        if (stepResult.status() != TaskResult.Status.DONE) {
-            failedSteps.add(stepResult);
+        Goal step = goal.steps().get(index);
+        GoalRun record = storedStep(index)
+                .orElseGet(() -> new GoalRun(store.nextId(), step, run.id(), index));
+        if (record.state() == GoalRunState.PAUSED) {
+            // 所属的 sequence 已经在推进，这一步跟着恢复；还挂着的问题照样等回答。
+            record.resume();
         }
-        run.advanceToStep(run.stepIndex() + 1);
-        if (run.stepIndex() >= goal.steps().size()) {
-            settle(sequenceResult(), context);
-            return TickResult.finished(result);
+        stepRunner = new GoalRunner(record, registry, store, remembers);
+        child = new ChildTaskRunner(ChildTaskRunner.NO_LIMIT);
+        child.begin(stepRunner, context);
+        if (child.finished()) {
+            return stepEnded(child.result(), context);
         }
-        save();
-        beginStep(goal.steps().get(run.stepIndex()), context);
         return TickResult.RUNNING;
     }
 
-    /** 轮到一步：这条推进中断过就接着用它自己的记录恢复（也是暂停态），否则开一条新的。 */
-    private void beginStep(Goal step, TickContext context) {
-        stepRunner = findUnfinishedStep(step)
-                .map(restored -> {
-                    if (restored.state() == GoalRunState.PAUSED) {
-                        restored.unpause();
-                    }
-                    return new GoalRunner(restored, registry, store, remembers, stepBudgetTicks);
-                })
-                .orElseGet(() -> new GoalRunner(new GoalRun(store.nextId(), step, run.id()),
-                        registry, store, remembers, stepBudgetTicks));
-        child = new ChildTaskRunner(new ProgressTracker(1, stepBudgetTicks));
-        child.begin(stepRunner, context);
+    /** 一步结束：结果记下，按这一步的 onFailure 决定停下还是轮到下一步；轮完就给出整件事的结果。 */
+    private TickResult stepEnded(TaskResult stepResult, TickContext context) {
+        child = null;
+        stepRunner = null;
+        int index = run.stepIndex();
+        finishedResults.add(stepResult);
+        Goal step = goal.steps().get(index);
+        if (stepResult.status() != TaskResult.Status.DONE && step.onFailure() == Goal.OnFailure.STOP) {
+            return settle(sequenceResult(index + 1), context);
+        }
+        if (index + 1 >= goal.steps().size()) {
+            return settle(sequenceResult(goal.steps().size()), context);
+        }
+        run.advanceToStep(index + 1);
+        save();
+        return beginStep(context);
     }
 
-    /** 找这条 sequence 里属于当前步骤、还没结束的记录（重启前中断的）。 */
-    private Optional<GoalRun> findUnfinishedStep(Goal step) {
+    /** 找这条 sequence 第 index 步还没结束的记录（重启前中断的）。 */
+    private Optional<GoalRun> storedStep(int index) {
         return store.unfinished().stream()
                 .filter(candidate -> candidate.parentRunId() == run.id())
-                .filter(candidate -> candidate.goal().ability().equals(step.ability()))
+                .filter(candidate -> candidate.stepOfParent() == index)
                 .findFirst();
     }
 
-    /** sequence 的收尾结果：有步骤没做成就是部分完成，剩下的与第一个失败都写清楚。 */
-    private TaskResult sequenceResult() {
-        if (failedSteps.isEmpty()) {
-            return TaskResult.done("按顺序做完了全部 " + goal.steps().size() + " 步");
+    /**
+     * sequence 的结论：全部做成就是完成；一步都没做成就是失败；其余是部分完成。
+     * 没做成的步骤和还没开始的步骤都写进剩下的部分，问题取第一个没做成的步骤的问题。
+     * 各步骤已经发生的事实由收尾统一并进来。
+     */
+    private TaskResult sequenceResult(int nextStep) {
+        int total = goal.steps().size();
+        int done = 0;
+        Problem problem = null;
+        List<String> remaining = new ArrayList<>();
+        for (int i = 0; i < finishedResults.size(); i++) {
+            TaskResult stepResult = finishedResults.get(i);
+            if (stepResult.status() == TaskResult.Status.DONE) {
+                done++;
+                continue;
+            }
+            if (problem == null) problem = stepResult.problem();
+            remaining.add(stepLabel(i) + "：" + stepResult.summary());
+            remaining.addAll(stepResult.remaining());
         }
-        TaskResult.Builder builder = TaskResult.builder(TaskResult.Status.PARTIAL,
-                        goal.steps().size() - failedSteps.size() + " / " + goal.steps().size() + " 步做成")
-                .problem(failedSteps.get(0).problem());
-        for (TaskResult failed : failedSteps) {
-            builder.remaining(failed.summary());
+        remaining.addAll(stepsNotStarted(nextStep));
+        if (done == total) {
+            return TaskResult.done("按顺序做完了全部 " + total + " 步");
         }
-        return builder.build();
+        TaskResult.Status status = done == 0 && problem != null ? TaskResult.Status.FAILED : TaskResult.Status.PARTIAL;
+        return TaskResult.builder(status, done + " / " + total + " 步做成")
+                .problem(problem)
+                .remaining(remaining)
+                .build();
     }
 
-    /** 这一步的子任务已经结算完，把步骤之间的空当清出来。 */
+    /** sequence 里从 fromStep 起还没开始的步骤；普通目标没有。 */
+    private List<String> stepsNotStarted(int fromStep) {
+        List<String> notStarted = new ArrayList<>();
+        for (int i = fromStep; i < goal.steps().size(); i++) {
+            notStarted.add(stepLabel(i) + "：没有开始");
+        }
+        return notStarted;
+    }
+
+    private String stepLabel(int index) {
+        Goal step = goal.steps().get(index);
+        String purpose = step.purpose() == null ? "" : "，" + step.purpose();
+        return "第 " + (index + 1) + " 步（" + step.ability() + purpose + "）";
+    }
+
+    /** 当前任务已经结算完，把两件事之间的空当清出来。 */
     private void forgetChild() {
         child = null;
         currentInput = null;
-        recheckAfterCurrent = false;
+        decideAgainAfterCurrent = false;
     }
 
-    /** 结束目标并定下结果；记录随之存盘，之后本推进封存。 */
-    private void settle(TaskResult ending, TickContext context) {
-        result = ending;
-        run.finish(ending, context == null ? -1 : context.gameTick());
+    /** 收尾还在跑的任务（sequence 是当前步骤）并拿它交代的结果；没有在跑的返回 null。 */
+    private TaskResult closeRunningChild(CloseReason reason) {
+        if (child == null || child.finished()) {
+            return null;
+        }
+        TaskResult closed = child.close(reason);
+        forgetChild();
+        stepRunner = null;
+        queuedInputs = null;
+        return closed;
+    }
+
+    /** 结束目标：把前面已经结束的任务的事实并进结论，记录随之存盘，之后本推进封存。 */
+    private TickResult settle(TaskResult ending, TickContext context) {
+        result = ending.withFactsBefore(finishedResults);
+        run.finish(result, context == null ? -1 : context.gameTick());
         save();
-        LOG.info("目标 {} 结束：{}", run.id(), ending.summary());
+        LOG.info("目标 {} 结束：{}", run.id(), result.summary());
+        return TickResult.finished(result);
     }
 
     private void save() {
@@ -477,6 +542,7 @@ public final class GoalRunner implements Task {
 
     private StepContext stepContext(TickContext context) {
         List<String> answers = run.answers();
+        List<TaskResult> results = List.copyOf(finishedResults);
         return new StepContext() {
             @Override public Goal goal() {
                 return goal;
@@ -493,15 +559,19 @@ public final class GoalRunner implements Task {
             @Override public List<String> answers() {
                 return answers;
             }
+
+            @Override public List<TaskResult> taskResults() {
+                return results;
+            }
         };
     }
 
-    private static TaskResult cancelledFor(CloseReason reason) {
-        return TaskResult.cancelled(switch (reason) {
+    private static String cancelledSummary(CloseReason reason) {
+        return switch (reason) {
             case FINISHED -> "目标没有交代结果就结束了";
             case REPLACED -> "目标被新任务替换";
             case CANCELLED -> "目标被取消";
             case PLAYER_GONE -> "角色不在了，目标中止";
-        });
+        };
     }
 }

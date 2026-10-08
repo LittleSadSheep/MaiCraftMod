@@ -50,7 +50,7 @@ public final class EventPublishingGoalRunStore implements GoalRunStore {
 
     /** 处境变了：按"从哪来、到哪去"发一条事件；只是回答了问题、回到推进，不另发事件。 */
     private void publish(GoalRun run, GoalRunState before) {
-        boolean step = run.parentRunId() >= 0;
+        boolean step = run.parentRunId() != GoalRun.NO_PARENT;
         long id = step ? run.parentRunId() : run.id();
         switch (run.state()) {
             case RUNNING -> {

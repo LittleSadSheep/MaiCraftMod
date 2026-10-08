@@ -107,8 +107,8 @@ public final class GoalRunTable {
      */
     public void restore() {
         for (GoalRun run : store.unfinished()) {
-            if (run.parentRunId() < 0 && !runners.containsKey(run.id())) {
-                runners.put(run.id(), GoalRunner.resume(run, registry, store, remembers));
+            if (run.parentRunId() == GoalRun.NO_PARENT && !runners.containsKey(run.id())) {
+                runners.put(run.id(), GoalRunner.restore(run, registry, store, remembers));
             }
         }
     }
@@ -141,9 +141,7 @@ public final class GoalRunTable {
         if (state != GoalRunState.RUNNING && state != GoalRunState.AWAITING_ANSWER) {
             throw new WrongGoalRunState("目标 " + id + " 现在是 " + state + "，不能暂停");
         }
-        runner.pause();
-        runner.run().pause();
-        store.save(runner.run());
+        runner.pauseGoal();
     }
 
     /** 解除暂停；它不是当前的主任务时（例如重启后恢复的），重新成为主任务，原来的主任务按"被替换"收尾。 */
@@ -152,19 +150,25 @@ public final class GoalRunTable {
         if (runner.run().state() != GoalRunState.PAUSED) {
             throw new WrongGoalRunState("目标 " + id + " 现在是 " + runner.run().state() + "，不在暂停");
         }
-        runner.unpause();
+        runner.resumeGoal();
         if (mainRunId != id) {
             makeMain(runner);
         }
     }
 
-    /** 取消：正在跑的任务按"被取消"收尾，已经发生的变化如实记进结果；控制循环下一刻把它移走。 */
+    /** 取消：正在跑的任务按"被取消"收尾，已经发生的变化如实记进结果。 */
     public void cancel(long id) {
         GoalRunner runner = require(id);
         if (!runner.run().unfinished()) {
             throw new WrongGoalRunState("目标 " + id + " 已经结束");
         }
-        runner.close(CloseReason.CANCELLED);
+        if (mainRunId == id) {
+            // 是主任务：经控制循环收尾，它会连同压在上面等它的位置一起清掉。
+            loop.endMainTask(CloseReason.CANCELLED);
+            mainRunId = -1;
+        } else {
+            runner.close(CloseReason.CANCELLED);
+        }
     }
 
     /**
@@ -174,9 +178,6 @@ public final class GoalRunTable {
      */
     public void answer(long id, String optionId) {
         GoalRunner runner = require(id);
-        if (runner.run().state() == GoalRunState.PAUSED) {
-            throw new WrongGoalRunState("目标 " + id + " 暂停中，先解除暂停再回答");
-        }
         Question question = runner.pendingQuestion();
         if (question == null) {
             throw new WrongGoalRunState("目标 " + id + " 没有在等回答");
