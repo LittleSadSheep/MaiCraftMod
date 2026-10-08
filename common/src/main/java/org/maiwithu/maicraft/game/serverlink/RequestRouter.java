@@ -47,6 +47,9 @@ public final class RequestRouter {
         ledger = new ClientRequestLedger(session);
     }
 
+    /** 会话对象供同包的离线测试读取握手随机数与状态；包外不可见。 */
+    ServerSessionConnection session() { return session; }
+
     public void register(ClientOperation operation) {
         requireThread.run();
         ClientOperation old = operations.get(operation.id());
