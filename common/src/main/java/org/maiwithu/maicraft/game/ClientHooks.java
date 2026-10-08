@@ -3,18 +3,20 @@ package org.maiwithu.maicraft.game;
 
 import java.util.concurrent.atomic.AtomicReference;
 import org.maiwithu.maicraft.game.player.PlayerControlBoundary;
+import org.maiwithu.maicraft.game.player.UseKeyHold;
 import org.maiwithu.maicraft.game.world.BlockScanService;
 
 /**
  * Mixin 进入游戏接口层的静态登记点。
  *
  * <p>Mixin 由字节码织入，无法用构造函数拿到服务，所以启动时把当刻创建的实例登记到这里；
- * 没登记时所有钩子安静地不做事。只有这里的两个字段是例外，其余服务照旧从构造函数传入。
+ * 没登记时所有钩子安静地不做事。只有这里的几个字段是例外，其余服务照旧从构造函数传入。
  */
 public final class ClientHooks {
     // 静态 final 持有可变引用：登记点只能启动时写一次语义，但保留停止（置 null）的能力。
     private static final AtomicReference<PlayerControlBoundary> PLAYER_CONTROL = new AtomicReference<>();
     private static final AtomicReference<BlockScanService> BLOCK_SCANS = new AtomicReference<>();
+    private static final AtomicReference<UseKeyHold> USE_KEY_HOLD = new AtomicReference<>();
 
     private ClientHooks() {}
 
@@ -28,6 +30,11 @@ public final class ClientHooks {
         BLOCK_SCANS.set(service);
     }
 
+    /** 启动时登记按住使用键的投影；传 null 表示停止。 */
+    public static void registerUseKeyHold(UseKeyHold useKeyHold) {
+        USE_KEY_HOLD.set(useKeyHold);
+    }
+
     /** Mixin 类跨包读取；这里是与 Mixin 之间唯一允许的静态通道。 */
     public static PlayerControlBoundary playerControl() {
         return PLAYER_CONTROL.get();
@@ -35,5 +42,9 @@ public final class ClientHooks {
 
     public static BlockScanService blockScans() {
         return BLOCK_SCANS.get();
+    }
+
+    public static UseKeyHold useKeyHold() {
+        return USE_KEY_HOLD.get();
     }
 }

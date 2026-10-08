@@ -12,6 +12,7 @@
     "GameRendererCameraMixin",
     "MouseHandlerControlMixin",
     "BlockUseAcknowledgementMixin",
+    "UseKeyHoldMixin",
     "ScreenVisibilityMixin",
     "InventoryScreenModeMixin"
   ],

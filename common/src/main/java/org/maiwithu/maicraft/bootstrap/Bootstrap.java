@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.game.interaction.DefaultInteractionSender;
 import org.maiwithu.maicraft.game.interaction.InteractionOpportunity;
 import org.maiwithu.maicraft.game.menu.DefaultMenuActions;
 import org.maiwithu.maicraft.game.player.PlayerControlBoundary;
+import org.maiwithu.maicraft.game.player.UseKeyHold;
 import org.maiwithu.maicraft.game.serverlink.ClientOperation;
 import org.maiwithu.maicraft.game.serverlink.LinkTransport;
 import org.maiwithu.maicraft.game.serverlink.ServerLinkSession;
@@ -120,6 +121,8 @@ public final class Bootstrap {
         // Mixin 钩子拿不到构造注入，只能在这里登记；服务本体仍以实例传递。
         ClientHooks.registerPlayerControl(playerControl);
         ClientHooks.registerBlockScans(blockScans);
+        // 按住使用键的投影：持续使用的提交方接入前没有任务占用，投影读到的始终是真实键值。
+        ClientHooks.registerUseKeyHold(new UseKeyHold());
         ServerLinkSession session = new ServerLinkSession(transport);
         // 入服前登记客户端知道的操作清单；查询方块归属是第一个只读操作。
         session.router().register(new ClientOperation("ownership.query", 1, false));
