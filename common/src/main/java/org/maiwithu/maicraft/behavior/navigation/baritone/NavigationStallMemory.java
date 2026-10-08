@@ -34,7 +34,7 @@ final class NavigationStallMemory {
 
     /**
      * 记一次卡住并给出下一步：passage 是这一步途经、尚未登记过的门（下半格），open 是它要切到的开关状态；没有门时传 null。
-     * facts 为卡点现场，列为障碍时原样写进回执。
+     * facts 为卡住的现场，列为障碍时原样写进导航诊断。
      */
     Decision observe(BlockPos front, BlockPos passage, boolean open, Map<String, Object> facts) {
         long cell = front.asLong();
@@ -85,7 +85,7 @@ final class NavigationStallMemory {
         return obstacleFacts.stream().map(fact -> String.valueOf(fact.get("cell"))).toList();
     }
 
-    /** 把障碍格和切门登记的完整明细写进导航诊断，回执据此说明在哪、被什么卡住、做过什么。 */
+    /** 把障碍格和切门登记的完整明细写进导航诊断，结果据此说明在哪、被什么挡住、做过什么。 */
     void describeInto(Map<String, Object> facts) {
         if (!obstacleFacts.isEmpty()) facts.put("stuck_obstacles", obstacleFacts.stream().map(Map::copyOf).toList());
         if (!toggleOrder.isEmpty()) facts.put("passage_toggles", toggleOrder.stream().map(Map::copyOf).toList());

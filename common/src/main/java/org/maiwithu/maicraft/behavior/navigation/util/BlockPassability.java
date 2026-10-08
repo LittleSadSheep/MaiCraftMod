@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.navigation.util;
 
 import net.minecraft.core.BlockPos;
@@ -33,15 +34,15 @@ import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import net.minecraft.world.item.Items;
-import org.maiwithu.maicraft.core.init.InitTag;
+import org.maiwithu.maicraft.game.world.InitTag;
 
 /**
- * 多种任务共用的方块判断：哪里可以作为站位、怎样表示半砖上的脚位、方块是否危险、挖开会不会放出液体、工具能否取得掉落物。
+ * 寻路共用的方块判断：哪里可以作为站位、怎样表示半砖上的脚位、方块是否危险、挖开会不会放出液体、工具能否取得掉落物。
  * 可通行分类会把可手开的门视为能通过，不等于此刻身体碰撞盒可以直接穿过；需要精确碰撞时应看相应现场检查。
  */
-public final class BlockHelper {
+public final class BlockPassability {
 
-    private BlockHelper() {}
+    private BlockPassability() {}
 
     private static final Direction[] HORIZONTAL = {
             Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST};
@@ -78,7 +79,7 @@ public final class BlockHelper {
                 || block instanceof CauldronBlock) {
             return false;
         }
-        // 木门和栅栏门即使关闭也可规划通过，执行器会亲手打开；铁门没有红石无法打开，因此继续进入碰撞检测并视为实心障碍。
+        // 木门和栅栏门即使关闭也可规划通过，后续的动作会亲手打开；铁门没有红石无法打开，因此继续进入碰撞检测并视为实心障碍。
         if (isOpenableDoor(state)) {
             return true;
         }
@@ -92,7 +93,7 @@ public final class BlockHelper {
 
     /**
      * 判断门是否能由角色徒手打开：木门和栅栏门可以，铁门需要红石而不可开。寻路将可手动打开的门视为可通过且不破坏，
-     * 到达关闭的门前后由执行器右键打开。
+     * 到达关闭的门前后，由后续的动作右键打开。
      */
     // 这里当前按具体的原版铁门排除，其他 DoorBlock 都归入可打开类；并没有逐个读取门材质的手动开启能力。
     public static boolean isOpenableDoor(BlockState state) {
@@ -112,7 +113,7 @@ public final class BlockHelper {
     /**
      * 判断角色能否从相邻的 {@code fromPos} 穿过 {@code doorPos} 上当前形态的门或栅栏门。栅栏门只有打开时可通行；
      * 门还要结合朝向：{@code (facingAxis == approachAxis) == open} 才能通过。打开但门板横挡路线的门仍不可通行，
-     * 与接近方向平行的关闭门则可通过。若此处判为不可通行，执行器会右键切换门状态，以打开挡路的关闭门或关闭横挡路线的打开门。
+     * 与接近方向平行的关闭门则可通过。若此处判为不可通行，后续的动作会右键切换门状态，以打开挡路的关闭门或关闭横挡路线的打开门。
      * 非门类方块一律视为可通过，由其他判定负责。
      */
     public static boolean isDoorwayPassable(BlockGetter level, BlockPos doorPos, BlockPos fromPos) {
@@ -346,7 +347,7 @@ public final class BlockHelper {
      * 因此成本模型会拒绝该目标，break/mine 工具也会阻止操作。此处与 {@code switchToBestTool} 共用全背包扫描；后者可把背包里的工具换到手上，
      * 所以判定、成本和实际执行都检查完整背包，而不只检查快捷栏。
      */
-    // 看主背包是否有能正常取得掉落物的可用工具；这里只核对实物，切到主手仍由动作执行器完成。
+    // 看主背包是否有能正常取得掉落物的可用工具；这里只核对实物，切到主手由后续的动作完成。
     public static boolean canHarvest(Container inv, BlockState state) {
         if (!state.requiresCorrectToolForDrops()) {
             return true;
@@ -372,7 +373,7 @@ public final class BlockHelper {
      * 命中 do_not_break 方块标签的方块:硬禁挖的唯一真源,任何开关
      * 也不解除。默认成员是设施类(床/门/活板门/栅栏门,见
      * ModBlockTagData);工作台/熔炉/箱子/陷阱箱等常规功能方块不在
-     * 硬禁内,它们走 NavSettings.blocksToAvoidBreaking 软清单
+     * 硬禁内,它们走软清单（可破坏但尽量绕开）
      * (挖掘成本 ×10,无路可走仍会破坏)。数据包可往此标签追加任何要
      * 硬禁挖的方块;带方块实体的方块(漏斗/潜影盒/刷怪笼/信标等)默认
      * 与泥土一样可破坏、无惩罚,除非数据包把它们加进此标签。

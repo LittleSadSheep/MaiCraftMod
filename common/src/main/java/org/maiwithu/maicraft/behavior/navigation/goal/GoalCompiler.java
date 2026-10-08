@@ -1,7 +1,8 @@
+// SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.navigation.goal;
 
 import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
-import org.maiwithu.maicraft.behavior.navigation.util.BlockHelper;
+import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import it.unimi.dsi.fastutil.longs.LongSets;
@@ -85,7 +86,7 @@ public final class GoalCompiler {
 
     /** 替代 {@code resolveBlockGoal}：目标为空地时将其作为站位；目标已被占据时则走到方块旁，不消耗该方块。 */
     public static Compiled block(Level level, BlockPos cell) {
-        return block(BlockHelper.canWalkThrough(level, cell), cell);
+        return block(BlockPassability.canWalkThrough(level, cell), cell);
     }
 
     /** {@link #block(Level, BlockPos)} 的纯逻辑核心，可在无游戏环境下测试。 */

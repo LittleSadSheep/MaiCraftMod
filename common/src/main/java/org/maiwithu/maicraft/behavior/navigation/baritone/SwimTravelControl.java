@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.navigation.baritone;
 
 import org.maiwithu.maicraft.behavior.navigation.util.SwimAirBudget;
@@ -75,16 +76,16 @@ public final class SwimTravelControl {
     }
 
     /**
-     * 同一玩家、同一世界的路线段共用换气进度；重生或换世界时重新开始，避免继承旧身体的状态。
+     * 同一个角色的路线段共用换气进度；重生或换世界后角色对象换了，重新开始，避免继承旧状态。
      */
-    public static final class BodyState {
-        private Object body;
+    public static final class PlayerSwimState {
+        private Object player;
         private Object world;
         private SwimTravelControl control;
 
-        public SwimTravelControl bind(Object body, Object world) {
-            if (control == null || this.body != body || this.world != world) {
-                this.body = body;
+        public SwimTravelControl bind(Object player, Object world) {
+            if (control == null || this.player != player || this.world != world) {
+                this.player = player;
                 this.world = world;
                 control = new SwimTravelControl();
             }
@@ -92,7 +93,7 @@ public final class SwimTravelControl {
         }
 
         public void clear() {
-            body = null;
+            player = null;
             world = null;
             control = null;
         }

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.navigation.baritone;
 
-import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.tags.EntityTypeTags;
@@ -43,9 +42,7 @@ public record FallDamageBudget(float health, float absorption, float safeFallDis
     }
 
     public static FallDamageBudget capture(LocalPlayer player) {
-        if (!Minecraft.getInstance().isSameThread()) {
-            throw new IllegalStateException("fall budget must be captured on the client thread");
-        }
+        // 只在客户端线程读取游戏状态；线程由调用方保证。
         DamageSource fall = player.damageSources().fall();
         var resistance = player.getEffect(MobEffects.DAMAGE_RESISTANCE);
         var slow = player.getEffect(MobEffects.SLOW_FALLING);

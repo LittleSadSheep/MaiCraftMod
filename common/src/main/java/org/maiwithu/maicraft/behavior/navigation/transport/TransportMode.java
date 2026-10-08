@@ -1,8 +1,9 @@
+// SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.navigation.transport;
 
 import java.util.Locale;
 
-/** 用户选择移动方式；auto 可在实际可用的方案中选择，指定方式不会自动授权挖地形或消耗落地材料。 */
+/** 用户选择移动方式；auto 可在实际可用的方案中选择，指定方式不会自动许可挖地形或消耗落地材料。 */
 public enum TransportMode {
     AUTO, GROUND, JETPACK, ELEVATOR;
 

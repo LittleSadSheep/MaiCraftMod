@@ -1,8 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.navigation.calc;
 
-import org.maiwithu.maicraft.behavior.navigation.goals.GoalAvoidEntities;
-import org.maiwithu.maicraft.behavior.navigation.settings.NavSettings;
-import org.maiwithu.maicraft.behavior.navigation.moves.ActionCosts;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 
@@ -12,8 +10,8 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * 集中描述导航走到哪里算到达：精确格、某个高度、目标附近、方块旁边，或远离威胁。
- * 这里判断的是脚所在的导航格；玩家真实距离、视线、能否实际点击，仍由任务执行器继续检查。
+ * 集中描述导航走到哪里算到达：精确格、某个高度、目标附近、方块旁边，或持续远离。
+ * 这里判断的是脚所在的导航格；玩家真实距离、视线、能否实际点击，仍由任务的动作继续检查。
  * 不同目标还提供搜索估价和一个代表位置；代表位置不一定是应站的位置，例如避险目标的代表点在威胁附近。
  */
 public interface NavGoal {
@@ -25,9 +23,31 @@ public interface NavGoal {
     /** 加权 A* 沿用的乐观单格成本(≈疾跑单格)。 */
     double COST_HEURISTIC = 3.563;
     /** 升一格的乐观成本(跳跃抛物线差)。 */
-    double JUMP_ONE_BLOCK = ActionCosts.JUMP_ONE_BLOCK_COST;
+    double JUMP_ONE_BLOCK = fallTicks(1.25) - fallTicks(0.25);
     /** 降一格的乐观成本(坠落两格耗时之半)。 */
-    double DESCEND_ONE_BLOCK = ActionCosts.FALL_N_BLOCKS_COST[2] / 2.0;
+    double DESCEND_ONE_BLOCK = fallTicks(2) / 2.0;
+
+    /** 坠落第 ticks 刻内的位移(格/刻)，来自原版的坠落阻力与重力取值。 */
+    private static double fallVelocity(int ticks) {
+        return (Math.pow(0.98, ticks) - 1) * -3.92;
+    }
+
+    /** 坠落 distance 格所需刻数：逐刻累减位移，末段线性插值。调用者给有限的非负数。 */
+    private static double fallTicks(double distance) {
+        if (distance == 0) {
+            return 0;
+        }
+        double remaining = distance;
+        int tickCount = 0;
+        while (true) {
+            double perTick = fallVelocity(tickCount);
+            if (remaining <= perTick) {
+                return tickCount + remaining / perTick;
+            }
+            remaining -= perTick;
+            tickCount++;
+        }
+    }
 
     /**
      * 判断路线是否可以在这个脚位格结束；不在这里移动玩家或验证实际交互。
@@ -97,13 +117,6 @@ public interface NavGoal {
             if (goal instanceof MineColumn g) {
                 return key("mine_column", g.ore.asLong(), g.maxBelow);
             }
-            if (goal instanceof Avoid g) {
-                return key("avoid", g.penaltyFactor, multiset(g.threats));
-            }
-            if (goal instanceof ApproachAvoiding g) {
-                return key("approach_avoiding", g.approach.semanticFingerprint(),
-                        g.penaltyFactor, multiset(g.threats));
-            }
             if (goal instanceof RunAway g) {
                 return key("run_away", g.from.asLong(), g.maintainY);
             }
@@ -116,7 +129,7 @@ public interface NavGoal {
             return new SemanticFingerprint(kind, List.of(parameters));
         }
 
-        /** 组合目标和避让目标不依赖输入顺序，但会保留重复成员对语义的影响。 */
+        /** 组合目标不依赖输入顺序，但会保留重复成员对语义的影响。 */
         private static <T> Map<T, Integer> multiset(List<T> values) {
             Map<T, Integer> counts = new HashMap<>();
             for (T value : values) {
@@ -284,34 +297,6 @@ public interface NavGoal {
         return new RunAway(from, maintainY);
     }
 
-    /**
-     * 躲开一组威胁,站到每一只的危险半径之外。与 {@link #runAway} 的两点差别:
-     * <b>它认得完所有威胁</b>(runAway 的估价只看最近那一个,两只怪一左一右时会直穿其中一只),
-     * 而且<b>它有终点</b>——出了半径就停,不必在上层每 tick 手动喊停。
-     *
-     * <p>威胁坐标是<b>快照</b>。实体走动由重规划跟上({@code PlayerNav} 比对 {@link #center()}
-     * 的位移),不由估价函数实时跟随——搜索途中变化的估价会让 A* 失去最优性保证。
-     *
-     * @param penaltyFactor 势场强度,见 {@link GoalAvoidEntities}
-     */
-    static NavGoal avoid(double penaltyFactor, List<GoalAvoidEntities.Threat> threats) {
-        return new Avoid(penaltyFactor, threats);
-    }
-
-    /**
-     * 走到一个目标跟前,<b>路上绕开别的敌对生物</b>。到达要两项都点头:走到了,而且脚下这一格
-     * 不在任何一只的危险半径里。
-     *
-     * <p>调用方必须把<b>要去的那个目标本身</b>也放进 {@code threats}——它当然也会打她,
-     * 由它自己的危险半径把她顶在够不着的地方,中间那条缝就是拉扯的位置。
-     *
-     * @return {@code threats} 为空时直接返回 {@code approach},不白包一层
-     */
-    static NavGoal approachAvoiding(NavGoal approach, double penaltyFactor,
-                                    List<GoalAvoidEntities.Threat> threats) {
-        return threats.isEmpty() ? approach : new ApproachAvoiding(approach, penaltyFactor, threats);
-    }
-
     // ---- 工厂产物(具名,参数可读;行为与原匿名类逐字一致) ----
 
     /**
@@ -455,7 +440,7 @@ public interface NavGoal {
         @Override public double heuristic(BlockPos from) {
             double d = horizontal(from);
             double gap = d < inner ? inner - d : d > outer ? d - outer : 0.0;
-            return gap * NavSettings.get().costHeuristic;
+            return gap * COST_HEURISTIC;
         }
 
         @Override public BlockPos center() {
@@ -490,7 +475,7 @@ public interface NavGoal {
         @Override public double heuristic(BlockPos from) {
             // 高差过大时，估价继续引导角色接近有效距离带，不能因水平已经到位就在楼下停住。
             double distance = distance(from);
-            return (distance < inner ? inner - distance : Math.max(0, distance - outer)) * NavSettings.get().costHeuristic;
+            return (distance < inner ? inner - distance : Math.max(0, distance - outer)) * COST_HEURISTIC;
         }
 
         @Override public BlockPos center() { return BlockPos.containing(focus); }
@@ -633,7 +618,7 @@ public interface NavGoal {
             if (gs.isEmpty()) {
                 throw new IllegalArgumentException("composite goal needs at least one member");
             }
-            // 中心点取所有成员的几何中心，而不是 gs.get(0)。成员列表每刻重建并随角色移动重新排序；若取首项，目标中心会抖动，导致 PlayerNav 每刻都重规划。
+            // 中心点取所有成员的几何中心，而不是 gs.get(0)。成员列表每刻重建并随角色移动重新排序；若取首项，目标中心会抖动，导致执行层每刻都重规划。
             // 几何中心只会在成员集合变化（发现或挖掉矿物）时移动，这才代表目标本身确实改变。
             long sx = 0, sy = 0, sz = 0;
             for (NavGoal g : gs) {
@@ -701,90 +686,6 @@ public interface NavGoal {
 
         @Override public BlockPos center() {
             return ore;
-        }
-    }
-
-    /**
-     * 要求离每个威胁都足够远，复用 GoalAvoidEntities 的脱身条件和远近惩罚。
-     */
-    final class Avoid implements NavGoal {
-        public final GoalAvoidEntities engine;
-        public final double penaltyFactor;
-        public final List<GoalAvoidEntities.Threat> threats;
-        private final BlockPos centroid;
-
-        Avoid(double penaltyFactor, List<GoalAvoidEntities.Threat> threats) {
-            this.penaltyFactor = penaltyFactor;
-            this.threats = List.copyOf(threats);
-            this.engine = new GoalAvoidEntities(penaltyFactor,
-                    this.threats.toArray(GoalAvoidEntities.Threat[]::new));
-            double x = 0.0;
-            double y = 0.0;
-            double z = 0.0;
-            for (GoalAvoidEntities.Threat t : this.threats) {
-                x += t.x();
-                y += t.y();
-                z += t.z();
-            }
-            int n = this.threats.size();
-            this.centroid = BlockPos.containing(x / n, y / n, z / n);
-        }
-
-        @Override public boolean isAt(BlockPos feet) {
-            return engine.isInGoal(feet.getX(), feet.getY(), feet.getZ());
-        }
-
-        @Override public double heuristic(BlockPos fromPos) {
-            // 长程撤离必须有到安全范围的距离估价；单靠近敌惩罚会过早衰减，部分路径可能不愿继续向外延伸。
-            double remaining = 0;
-            for (var threat : threats) remaining = Math.max(remaining, threat.clearance()
-                    - Math.hypot(fromPos.getX() + .5 - threat.x(), fromPos.getZ() + .5 - threat.z()));
-            return Math.max(0, remaining) * COST_HEURISTIC + engine.heuristic(fromPos.getX(), fromPos.getY(), fromPos.getZ());
-        }
-
-        /** 威胁群的重心:它一挪动就触发重规划,快照因此不会用旧太久。 */
-        @Override public BlockPos center() {
-            return centroid;
-        }
-    }
-
-    /**
-     * 既要达到原目标，又要离威胁足够远；路线估价含避险惩罚，但判断是否正在接近时只看原目标。
-     */
-    final class ApproachAvoiding implements NavGoal {
-        public final NavGoal approach;
-        public final GoalAvoidEntities repulsion;
-        public final double penaltyFactor;
-        public final List<GoalAvoidEntities.Threat> threats;
-
-        ApproachAvoiding(NavGoal approach, double penaltyFactor,
-                         List<GoalAvoidEntities.Threat> threats) {
-            this.approach = approach;
-            this.penaltyFactor = penaltyFactor;
-            this.threats = List.copyOf(threats);
-            this.repulsion = new GoalAvoidEntities(penaltyFactor,
-                    this.threats.toArray(GoalAvoidEntities.Threat[]::new));
-        }
-
-        /** 走到了,而且脚下这一格不在任何一只的危险半径里。见 GoalApproachAvoiding。 */
-        @Override public boolean isAt(BlockPos feet) {
-            return approach.isAt(feet)
-                    && repulsion.isInGoal(feet.getX(), feet.getY(), feet.getZ());
-        }
-
-        @Override public double heuristic(BlockPos fromPos) {
-            return approach.heuristic(fromPos)
-                    + repulsion.heuristic(fromPos.getX(), fromPos.getY(), fromPos.getZ());
-        }
-
-        /** 进度只看走没走近目标。危险场是"值不值得走那条路",不是"走到哪了"。 */
-        @Override public double progressHeuristic(BlockPos fromPos) {
-            return approach.progressHeuristic(fromPos);
-        }
-
-        /** 跟着要去的那个目标走:它一挪动就触发重规划。 */
-        @Override public BlockPos center() {
-            return approach.center();
         }
     }
 

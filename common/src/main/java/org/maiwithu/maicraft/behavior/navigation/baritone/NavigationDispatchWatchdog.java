@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.navigation.baritone;
 
 /** 只统计真正获准驱动却没有搜索或路线的游戏刻；人工接管、原生确认与暂停不消耗恢复额度。 */

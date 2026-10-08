@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.navigation;
 
 import java.util.LinkedHashMap;
+import java.util.function.Predicate;
 import java.util.List;
 import java.util.Map;
 import net.minecraft.core.BlockPos;
@@ -59,7 +60,7 @@ public final class HazardEscapePolicy {
     }
 
     public static HazardEscapePolicy detect(BlockGetter view, BlockPos feet,
-                                            java.util.function.Predicate<BlockPos> loaded) {
+                                            Predicate<BlockPos> loaded) {
         BlockPos nearest = null;
         double nearestSq = Double.MAX_VALUE;
         for (int dy = -VERTICAL_RANGE; dy <= VERTICAL_RANGE; dy++) {
@@ -109,7 +110,7 @@ public final class HazardEscapePolicy {
         return origin;
     }
 
-    /** 最近的岩浆格，回执证据用。 */
+    /** 最近的岩浆格，失败说明里用。 */
     public BlockPos hazard() {
         return hazard;
     }
@@ -142,7 +143,7 @@ public final class HazardEscapePolicy {
     public String detail() {
         Map<String, Object> facts = evidence();
         @SuppressWarnings("unchecked")
-        var hazardPos = (java.util.List<Integer>) facts.get("nearest_hazard");
+        var hazardPos = (List<Integer>) facts.get("nearest_hazard");
         return "hazard escape hint: nearest lava at " + hazardPos + ", "
                 + facts.get("distance_blocks") + " blocks away; escape direction: "
                 + facts.get("escape_direction") + ", suggested retreat "
