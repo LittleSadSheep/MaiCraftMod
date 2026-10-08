@@ -1,0 +1,222 @@
+/*
+ * This file is part of Baritone.
+ *
+ * Baritone is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, version 3 only.
+ *
+ * Baritone is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Baritone.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+package baritone.behavior;
+
+import baritone.Baritone;
+import baritone.api.event.events.TickEvent;
+import baritone.api.utils.Helper;
+import baritone.utils.ToolSet;
+import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
+import org.maiwithu.maicraft.core.pathing.moves.movements.BuildPlacementRegistry;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.Direction;
+import net.minecraft.core.NonNullList;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.DiggerItem;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.PickaxeItem;
+import net.minecraft.world.item.context.BlockPlaceContext;
+import net.minecraft.world.item.context.UseOnContext;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
+import java.util.ArrayList;
+import java.util.OptionalInt;
+import java.util.Random;
+import java.util.function.Predicate;
+
+public final class InventoryBehavior extends Behavior implements Helper {
+
+    public InventoryBehavior(Baritone baritone) {
+        super(baritone);
+    }
+
+    @Override
+    public void onTick(TickEvent event) {
+        if (!Baritone.settings().allowInventory.value) {
+            return;
+        }
+        if (event.getType() == TickEvent.Type.OUT) {
+            return;
+        }
+        if (ctx.player().containerMenu != ctx.player().inventoryMenu) {
+            // we have a crafting table or a chest or something open
+            return;
+        }
+        if (firstValidThrowaway() >= 9) { // aka there are none on the hotbar, but there are some in main inventory
+            requestSwapWithHotBar(firstValidThrowaway(), 8);
+        }
+        int pick = bestToolAgainst(Blocks.STONE, PickaxeItem.class);
+        if (pick >= 9) {
+            requestSwapWithHotBar(pick, 0);
+        }
+    }
+
+    public boolean attemptToPutOnHotbar(int inMainInvy, Predicate<Integer> disallowedHotbar) {
+        OptionalInt destination = getTempHotbarSlot(disallowedHotbar);
+        return destination.isPresent() && requestSwapWithHotBar(inMainInvy, destination.getAsInt());
+    }
+
+    public OptionalInt getTempHotbarSlot(Predicate<Integer> disallowedHotbar) {
+        // we're using 0 and 8 for pickaxe and throwaway
+        ArrayList<Integer> candidates = new ArrayList<>();
+        for (int i = 1; i < 8; i++) {
+            if (ctx.player().getInventory().items.get(i).isEmpty() && !disallowedHotbar.test(i)) {
+                candidates.add(i);
+            }
+        }
+        if (candidates.isEmpty()) {
+            for (int i = 1; i < 8; i++) {
+                if (!disallowedHotbar.test(i)) {
+                    candidates.add(i);
+                }
+            }
+        }
+        if (candidates.isEmpty()) {
+            return OptionalInt.empty();
+        }
+        return OptionalInt.of(candidates.get(new Random().nextInt(candidates.size())));
+    }
+
+    private boolean requestSwapWithHotBar(int inInventory, int inHotbar) {
+        // Embedded navigation delegates inventory work to FirstPersonActionGate. This legacy
+        // synchronous hook cannot wait for GUI presentation or server receipts, so it must refuse
+        // even if allowInventory is manually enabled; it must never claim an unperformed swap.
+        return false;
+    }
+
+    private int firstValidThrowaway() { // TODO offhand idk
+        NonNullList<ItemStack> invy = ctx.player().getInventory().items;
+        for (int i = 0; i < invy.size(); i++) {
+            if (Baritone.settings().acceptableThrowawayItems.value.contains(invy.get(i).getItem())) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private int bestToolAgainst(Block against, Class<? extends DiggerItem> cla$$) {
+        NonNullList<ItemStack> invy = ctx.player().getInventory().items;
+        int bestInd = -1;
+        double bestSpeed = -1;
+        for (int i = 0; i < invy.size(); i++) {
+            ItemStack stack = invy.get(i);
+            if (stack.isEmpty()) {
+                continue;
+            }
+            if (Baritone.settings().itemSaver.value && (stack.getDamageValue() + Baritone.settings().itemSaverThreshold.value) >= stack.getMaxDamage() && stack.getMaxDamage() > 1) {
+                continue;
+            }
+            if (cla$$.isInstance(stack.getItem())) {
+                double speed = ToolSet.calculateSpeedVsBlock(stack, against.defaultBlockState()); // takes into account enchants
+                if (speed > bestSpeed) {
+                    bestSpeed = speed;
+                    bestInd = i;
+                }
+            }
+        }
+        return bestInd;
+    }
+
+    public boolean hasGenericThrowaway() {
+        // 算路时能看到主背包里的易拆余料，实际使用仍等待原生交换确认，不把“没在快捷栏”误判成完全缺料。
+        var choice = BuildPlacementRegistry.scaffoldChoice(ctx.player());
+        if (choice != null || BuildPlacementRegistry.hasScaffoldMaterialPolicy()) return choice != null;
+        for (Item item : Baritone.settings().acceptableThrowawayItems.value) {
+            if (throwaway(false, stack -> item.equals(stack.getItem()))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public boolean selectThrowawayForLocation(boolean select, int x, int y, int z) {
+        // 普通搭路也走同一选择器，避免已经算出的垫块路线在跳起后才发现无法原生拿到材料。
+        if (BuildPlacementRegistry.scaffoldChoice(ctx.player()) != null || BuildPlacementRegistry.hasScaffoldMaterialPolicy())
+            return EmbeddedBaritoneRuntime.selectBuildScaffold(ctx.player(), select);
+        BlockState maybe = baritone.getBuilderProcess().placeAt(x, y, z, baritone.bsi.get0(x, y, z));
+        if (maybe != null && throwaway(select, stack -> stack.getItem() instanceof BlockItem && maybe.equals(((BlockItem) stack.getItem()).getBlock().getStateForPlacement(new BlockPlaceContext(new UseOnContext(ctx.world(), ctx.player(), InteractionHand.MAIN_HAND, stack, new BlockHitResult(new Vec3(ctx.player().position().x, ctx.player().position().y, ctx.player().position().z), Direction.UP, ctx.playerFeet(), false)) {}))))) {
+            return true; // gotem
+        }
+        if (maybe != null && throwaway(select, stack -> stack.getItem() instanceof BlockItem && ((BlockItem) stack.getItem()).getBlock().equals(maybe.getBlock()))) {
+            return true;
+        }
+        for (Item item : Baritone.settings().acceptableThrowawayItems.value) {
+            if (throwaway(select, stack -> item.equals(stack.getItem()))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public boolean throwaway(boolean select, Predicate<? super ItemStack> desired) {
+        return throwaway(select, desired, Baritone.settings().allowInventory.value);
+    }
+
+    public boolean throwaway(boolean select, Predicate<? super ItemStack> desired, boolean allowInventory) {
+        LocalPlayer p = ctx.player();
+        NonNullList<ItemStack> inv = p.getInventory().items;
+        for (int i = 0; i < 9; i++) {
+            ItemStack item = inv.get(i);
+            // this usage of settings() is okay because it's only called once during pathing
+            // (while creating the CalculationContext at the very beginning)
+            // and then it's called during execution
+            // since this function is never called during cost calculation, we don't need to migrate
+            // acceptableThrowawayItems to the CalculationContext
+            if (desired.test(item)) {
+                if (select) {
+                    return EmbeddedBaritoneRuntime.ensureHotbarSelected(p, i);
+                }
+                return true;
+            }
+        }
+        if (desired.test(p.getInventory().offhand.get(0))) {
+            // main hand takes precedence over off hand
+            // that means that if we have block A selected in main hand and block B in off hand, right clicking places block B
+            // we've already checked above ^ and the main hand can't possible have an acceptablethrowawayitem
+            // so we need to select in the main hand something that doesn't right click
+            // so not a shovel, not a hoe, not a block, etc
+            for (int i = 0; i < 9; i++) {
+                ItemStack item = inv.get(i);
+                if (item.isEmpty() || item.getItem() instanceof PickaxeItem) {
+                    if (select) {
+                        return EmbeddedBaritoneRuntime.ensureHotbarSelected(p, i);
+                    }
+                    return true;
+                }
+            }
+        }
+
+        if (allowInventory) {
+            for (int i = 9; i < 36; i++) {
+                if (desired.test(inv.get(i))) {
+                    if (select) {
+                        if (!requestSwapWithHotBar(i, 7)) return false;
+                        return EmbeddedBaritoneRuntime.ensureHotbarSelected(p, 7);
+                    }
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+}
