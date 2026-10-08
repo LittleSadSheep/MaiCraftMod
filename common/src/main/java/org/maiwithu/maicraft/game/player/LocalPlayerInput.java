@@ -8,6 +8,7 @@ import net.minecraft.client.gui.screens.InBedChatScreen;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
+import net.minecraft.world.phys.Vec3;
 import org.lwjgl.glfw.GLFW;
 import net.minecraft.client.Minecraft;
 
@@ -225,6 +226,29 @@ public final class LocalPlayerInput implements PlayerInput {
         movementLease = Long.MIN_VALUE;
         clearLook();
         writeStoppedInput();
+    }
+
+    @Override
+    public void halt(LocalPlayer player) {
+        // 交互在出手前定住身位：修订号用实现内部掌握的本刻编号，调用方不需要知道。
+        // 控制权不在自动化手上时没有东西可停，也不该把交互流程炸掉，安静返回。
+        if (!automationOwnsControls()) return;
+        applyMovement(Movement.STOPPED, activeTick);
+    }
+
+    @Override
+    public void lookAt(LocalPlayer player, Vec3 point) {
+        // 镜头转向世界坐标里的一个点：按眼位换算偏航与俯仰，走本刻立即瞄准通道。
+        // 载具相机的逆变换属于载具姿势补偿，归对应 compat 移植时再加，这里只处理步行眼位。
+        if (!automationOwnsControls()) return;
+        Vec3 eye = player.getEyePosition();
+        double dx = point.x - eye.x;
+        double dy = point.y - eye.y;
+        double dz = point.z - eye.z;
+        double horizontal = Math.sqrt(dx * dx + dz * dz);
+        float yaw = (float) (Mth.atan2(dz, dx) * (double) Mth.RAD_TO_DEG) - 90.0f;
+        float pitch = (float) -(Mth.atan2(dy, horizontal) * (double) Mth.RAD_TO_DEG);
+        requestImmediateLook(yaw, pitch, activeTick);
     }
 
     void beginTick(long tickRevision) {

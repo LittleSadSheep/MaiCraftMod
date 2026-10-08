@@ -29,7 +29,12 @@ public final class FakePlayerContext implements PlayerContext {
 
     @Override public LocalPlayer localPlayer() { return player; }
     @Override public ClientLevel level() { return null; }
+    @Override public net.minecraft.client.multiplayer.ClientPacketListener connection() { return null; }
     @Override public long clientTick() { return tick; }
     @Override public boolean isCurrent() { return current; }
     @Override public boolean canInteractThisTick() { return canInteract; }
+    @Override public org.maiwithu.maicraft.game.player.PlayerInput input() {
+        // 交互协议测试不经过按键输入；哪天真用到了，把这个占位换成输入替身。
+        throw new UnsupportedOperationException("FakePlayerContext 没有输入入口");
+    }
 }
