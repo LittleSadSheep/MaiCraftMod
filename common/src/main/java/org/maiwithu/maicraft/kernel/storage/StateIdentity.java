@@ -47,11 +47,11 @@ public record StateIdentity(String key, Path directory, Path databaseFile, Strin
         String raw = singleplayerIdentity(minecraft);
         if (raw == null) raw = multiplayerIdentity(minecraft);
         if (raw == null) return Optional.empty();
-        // 数据放在自己的版本目录下，不与旧版本的数据文件混用，互不读到对方的数据。
+        // 库文件放在 state 目录里，与外部工具放在 config 根下的数据文件互不干扰。
         Path directory = minecraft.gameDirectory.toPath()
-                .resolve("config").resolve("maicraft").resolve("v1").resolve("state");
+                .resolve("config").resolve("maicraft").resolve("state");
         return Optional.of(new StateIdentity(sha256(raw), directory,
-                directory.resolveSibling(DocumentStore.FILE_NAME), "state"));
+                directory.resolve(DocumentStore.FILE_NAME), "state"));
     }
 
     /** 单人世界按存档目录区分；Windows 路径不区分大小写，先统一成小写再算，同一存档才算同一个世界。 */
