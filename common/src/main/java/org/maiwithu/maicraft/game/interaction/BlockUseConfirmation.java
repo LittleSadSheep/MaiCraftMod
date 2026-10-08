@@ -1,14 +1,17 @@
+// SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.game.interaction;
 
+import org.maiwithu.maicraft.game.player.PlayerContext;
+
 /** 给方块变化检查再加一层服务器确认：客户端先显示出来的预测方块，不能单独证明这次放置成功。 */
-final class BlockUseConfirmation implements NativeConfirmation {
-    private final NativeConfirmation evidence;
+final class BlockUseConfirmation implements InteractionConfirmation {
+    private final InteractionConfirmation evidence;
     private final BlockUseAcknowledgement acknowledgements;
     private final int beforeSequence;
     private int sequence;
     private boolean submitted;
 
-    BlockUseConfirmation(NativeConfirmation evidence, BlockUseAcknowledgement acknowledgements) {
+    BlockUseConfirmation(InteractionConfirmation evidence, BlockUseAcknowledgement acknowledgements) {
         this.evidence = evidence;
         this.acknowledgements = acknowledgements;
         beforeSequence = acknowledgements.maicraft$currentBlockSequence();
@@ -21,7 +24,7 @@ final class BlockUseConfirmation implements NativeConfirmation {
     }
 
     // 发包后必须等对应编号被服务器确认并完成本地校正，再让里面的检查比较目标方块。
-    @Override public Verdict observe(LocalPlayerContext context) {
+    @Override public Verdict observe(PlayerContext context) {
         if (!submitted || acknowledgements.maicraft$acknowledgedBlockSequence() < sequence
                 && sequence != beforeSequence) return Verdict.PENDING;
         Verdict verdict = evidence.observeAcknowledged(context);
