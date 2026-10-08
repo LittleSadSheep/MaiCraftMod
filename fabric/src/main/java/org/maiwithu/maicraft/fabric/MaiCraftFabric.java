@@ -9,7 +9,7 @@ import org.maiwithu.maicraft.bootstrap.ServerLifecycle;
 
 /**
  * Fabric 的通用入口，独立服务器和客户端都会加载。
- * 只把服务端事件转给公共运行时，不写业务，也不引用任何仅客户端的类。
+ * 只把服务端事件转给公共代码，不写业务，也不引用任何仅客户端的类。
  */
 public final class MaiCraftFabric implements ModInitializer {
     @Override public void onInitialize() {

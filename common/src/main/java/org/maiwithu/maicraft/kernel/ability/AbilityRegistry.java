@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.kernel.ability;
 
-import org.maiwithu.maicraft.kernel.task.ExecutorRegistry;
+import org.maiwithu.maicraft.kernel.task.TaskFactories;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -12,26 +12,26 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * 能力注册表：内核和入口认识能力的唯一途径。由启动装配创建并按显式清单登记，再注入给需要它的服务。
+ * 能力注册表：内核和 MCP 入口认识能力的唯一途径。启动时创建，按清单登记能力，再交给需要它的服务。
  *
- * <p>登记时同时把能力的执行器登记进执行器注册表，保证"有能力就有执行器"，
- * 不会出现 v1 那种只登记了工具、漏登记执行器的情况。
+ * <p>登记能力时同时登记它的任务，保证"有能力就能创建它的任务"，
+ * 不会出现能力列表里有、真去做时却找不到任务的情况。
  */
 public final class AbilityRegistry {
     private final Map<String, AbilityModule> modules = new LinkedHashMap<>();
-    private final ExecutorRegistry executors;
+    private final TaskFactories taskFactories;
 
-    public AbilityRegistry(ExecutorRegistry executors) {
-        this.executors = Objects.requireNonNull(executors, "executors");
+    public AbilityRegistry(TaskFactories taskFactories) {
+        this.taskFactories = Objects.requireNonNull(taskFactories, "taskFactories");
     }
 
     /** 登记一个能力；同一个 ID 重复登记直接报错。 */
     public void register(AbilityModule module) {
-        AbilityDescriptor descriptor = Objects.requireNonNull(module, "module").descriptor();
-        if (modules.putIfAbsent(descriptor.id(), module) != null) {
-            throw new IllegalStateException("能力 " + descriptor.id() + " 重复登记");
+        AbilitySpec spec = Objects.requireNonNull(module, "module").spec();
+        if (modules.putIfAbsent(spec.id(), module) != null) {
+            throw new IllegalStateException("能力 " + spec.id() + " 重复登记");
         }
-        module.executors(executors);
+        module.registerTasks(taskFactories);
     }
 
     public Optional<AbilityModule> find(String id) {
@@ -43,8 +43,8 @@ public final class AbilityRegistry {
         return Collections.unmodifiableList(new ArrayList<>(modules.values()));
     }
 
-    /** 与本注册表配套的执行器注册表。 */
-    public ExecutorRegistry executors() {
-        return executors;
+    /** 与本注册表配套的任务工厂表。 */
+    public TaskFactories taskFactories() {
+        return taskFactories;
     }
 }

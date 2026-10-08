@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** 参数规格：词汇表约束、宽松写法的统一规范化、严格校验、错误一次报全。 */
+/** 参数规格：参数名必须登记、宽松写法统一规范化、严格校验、错误一次报全。 */
 class ParamSpecTest {
     // 模拟"让背包里某样东西再多几件"的参数：物品必填，数量 1..256 默认 1，途径可选。
     private static final ParamSpec OBTAIN = ParamSpec.of(
@@ -26,8 +26,8 @@ class ParamSpecTest {
     }
 
     @Test
-    void namesMustComeFromVocabulary() {
-        // "search_radius" 与已登记的 radius 是同一个意思：不在词汇表里的名字一律拒绝。
+    void namesMustBeRegistered() {
+        // "search_radius" 与已登记的 radius 是同一个意思：没在参数名表里登记的名字一律拒绝。
         assertThrows(IllegalArgumentException.class,
                 () -> Param.of("search_radius", ParamType.INTEGER).doc("搜索范围").build());
     }

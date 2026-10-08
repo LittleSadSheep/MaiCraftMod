@@ -20,71 +20,71 @@ import static com.tngtech.archunit.library.Architectures.layeredArchitecture;
 import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices;
 
 /**
- * 分层护栏（docs/design/02 第 2、7 节的 A1–A6）：依赖只能往下走，违反时构建失败。
+ * 分层检查：依赖只能往下走，违反时构建失败。
  *
- * <p>这些规则从 v2 第一天起严格执行，没有"历史违规基线"。护栏只能收紧，不能为了让构建通过而放宽。
+ * <p>这些规则从第一天起严格执行，没有"历史违规名单"。检查只能收紧，不能为了让构建通过而放宽。
  */
 @AnalyzeClasses(packages = "org.maiwithu.maicraft", importOptions = ImportOption.DoNotIncludeTests.class)
 class LayerRulesTest {
     private static final String ROOT = "org.maiwithu.maicraft.";
 
-    /** A1：层方向。平台 ← 内核 ← 行为 ← 能力与联动 ← 入口 ← 启动装配；协议只给平台与服务端用。 */
+    /** 层的方向：游戏接口 ← 内核 ← 玩家行为 ← 能力与联动模组 ← MCP 入口 ← 启动；网络消息只给游戏接口层与服务端用。 */
     @ArchTest
     static final ArchRule layersOnlyDependDownward = layeredArchitecture()
             .consideringOnlyDependenciesInLayers()
             .withOptionalLayers(true)
-            .layer("Protocol").definedBy(ROOT + "protocol..")
-            .layer("Platform").definedBy(ROOT + "platform..")
+            .layer("Network").definedBy(ROOT + "network..")
+            .layer("Game").definedBy(ROOT + "game..")
             .layer("Kernel").definedBy(ROOT + "kernel..")
             .layer("Behavior").definedBy(ROOT + "behavior..")
             .layer("Ability").definedBy(ROOT + "ability..")
-            .layer("Integration").definedBy(ROOT + "integration..")
-            .layer("Gateway").definedBy(ROOT + "gateway..")
+            .layer("Compat").definedBy(ROOT + "compat..")
+            .layer("Mcp").definedBy(ROOT + "mcp..")
             .layer("Debug").definedBy(ROOT + "debug..")
             .layer("Server").definedBy(ROOT + "server..")
             .layer("Bootstrap").definedBy(ROOT + "bootstrap..")
             .whereLayer("Bootstrap").mayNotBeAccessedByAnyLayer()
             .whereLayer("Debug").mayOnlyBeAccessedByLayers("Bootstrap")
-            .whereLayer("Gateway").mayOnlyBeAccessedByLayers("Bootstrap")
-            .whereLayer("Integration").mayOnlyBeAccessedByLayers("Bootstrap")
-            .whereLayer("Ability").mayOnlyBeAccessedByLayers("Bootstrap", "Gateway", "Integration")
-            .whereLayer("Behavior").mayOnlyBeAccessedByLayers("Ability", "Integration", "Gateway", "Debug", "Bootstrap")
-            .whereLayer("Kernel").mayOnlyBeAccessedByLayers("Behavior", "Ability", "Integration", "Gateway", "Debug", "Bootstrap")
-            .whereLayer("Platform").mayOnlyBeAccessedByLayers("Kernel", "Behavior", "Ability", "Integration", "Gateway", "Debug", "Bootstrap")
+            .whereLayer("Mcp").mayOnlyBeAccessedByLayers("Bootstrap")
+            .whereLayer("Compat").mayOnlyBeAccessedByLayers("Bootstrap")
+            .whereLayer("Ability").mayOnlyBeAccessedByLayers("Bootstrap", "Mcp", "Compat")
+            .whereLayer("Behavior").mayOnlyBeAccessedByLayers("Ability", "Compat", "Mcp", "Debug", "Bootstrap")
+            .whereLayer("Kernel").mayOnlyBeAccessedByLayers("Behavior", "Ability", "Compat", "Mcp", "Debug", "Bootstrap")
+            .whereLayer("Game").mayOnlyBeAccessedByLayers("Kernel", "Behavior", "Ability", "Compat", "Mcp", "Debug", "Bootstrap")
             .whereLayer("Server").mayOnlyBeAccessedByLayers("Bootstrap")
-            .whereLayer("Protocol").mayOnlyBeAccessedByLayers("Platform", "Server", "Bootstrap");
+            .whereLayer("Network").mayOnlyBeAccessedByLayers("Game", "Server", "Bootstrap");
 
-    /** A3：能力之间只能通过对方的 api、spi 子包互相依赖，不能伸进对方的内部包。 */
+    /** 能力之间只能通过对方的 api、spi 子包互相依赖，不能伸进对方的内部包。 */
     @ArchTest
     static final ArchRule abilitiesOnlyMeetThroughApiOrSpi = classes()
             .that().resideInAPackage(ROOT + "ability..")
             .should(onlyUseOtherAbilitiesThroughApiOrSpi())
             .allowEmptyShould(true);
 
-    /** 入口只能看到能力的 api 子包。 */
+    /** MCP 入口只能看到能力的 api 子包。 */
     @ArchTest
-    static final ArchRule gatewaySeesOnlyAbilityApi = noClasses()
-            .that().resideInAPackage(ROOT + "gateway..")
+    static final ArchRule mcpSeesOnlyAbilityApi = noClasses()
+            .that().resideInAPackage(ROOT + "mcp..")
             .should().dependOnClassesThat(resideInAPackage(ROOT + "ability..")
                     .and(not(resideInAPackage(ROOT + "ability.*.api.."))))
             .allowEmptyShould(true);
 
-    /** A4：联动模组只能实现能力的 spi，不能依赖能力的内部包。 */
+    /** 联动模组只能实现能力的 spi，不能依赖能力的内部包。 */
     @ArchTest
-    static final ArchRule integrationsSeeOnlyAbilitySpi = noClasses()
-            .that().resideInAPackage(ROOT + "integration..")
+    static final ArchRule compatSeesOnlyAbilitySpi = noClasses()
+            .that().resideInAPackage(ROOT + "compat..")
             .should().dependOnClassesThat(resideInAPackage(ROOT + "ability..")
                     .and(not(resideInAPackage(ROOT + "ability.*.spi.."))))
             .allowEmptyShould(true);
 
-    /** A4：联动模组之间互不依赖，一个模组没装不会牵连另一个。 */
+    /** 联动模组之间互不依赖，一个模组没装不会牵连另一个。 */
     @ArchTest
-    static final ArchRule integrationsAreIndependent = slices()
-            .matching(ROOT + "integration.(*)..")
+    static final ArchRule compatModsAreIndependent = slices()
+            .matching(ROOT + "compat.(*)..")
             .should().notDependOnEachOther()
             .allowEmptyShould(true);
 
-    /** A5：只有步行引擎的 Baritone 适配层可以使用 Baritone 的非 api 包。 */
+    /** 只有寻路的 Baritone 适配层可以使用 Baritone 的非 api 包。 */
     @ArchTest
     static final ArchRule baritoneInternalsStayInNavigation = noClasses()
             .that().resideInAPackage("org.maiwithu.maicraft..")

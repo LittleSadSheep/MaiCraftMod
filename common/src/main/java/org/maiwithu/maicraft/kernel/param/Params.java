@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 解析、校验并规范化之后的参数取值。翻译和执行器只通过它读参数，不再自己解析 JSON。
+ * 解析、校验并规范化之后的参数取值。能力和任务只通过它读参数，不再自己解析 JSON。
  *
  * <p>取值类型：整数为 long、数字为 double、布尔为 boolean、文字与资源 ID 为 String、列表为 {@code List<String>}。
  * 没有给出且没有默认值的可选参数不在其中，读取前用 {@link #has} 判断。
@@ -51,7 +51,7 @@ public final class Params {
         return (List<String>) require(name);
     }
 
-    /** 写回 JSON，用于持久化与回执里展示 Mod 实际采用的参数。 */
+    /** 写回 JSON，用于存盘，以及在结果里展示 Mod 实际采用的参数。 */
     public JsonObject toJson() {
         JsonObject json = new JsonObject();
         values.forEach((name, value) -> {

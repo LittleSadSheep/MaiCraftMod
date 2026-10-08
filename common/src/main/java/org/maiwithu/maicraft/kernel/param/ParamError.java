@@ -2,7 +2,7 @@
 package org.maiwithu.maicraft.kernel.param;
 
 /**
- * 一条参数错误。入口把同一请求的所有错误一次报全，而不是改一个报一个。
+ * 一条参数错误。MCP 入口把同一请求的所有错误一次报全，而不是改一个报一个。
  *
  * @param field    出错的参数名
  * @param message  错在哪，用调用方能直接照着改的话说

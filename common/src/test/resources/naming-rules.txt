@@ -1,0 +1,61 @@
+# 命名检查的词表，由 SourceRulesTest 读取。完整的命名原则与术语表见 docs/design/09-命名与术语.md。
+#
+# word <英文词> <原因与改法>
+#   自己声明的类型（类、接口、枚举、record）名字里不许出现这个词（按驼峰拆词后整词比较）。
+# term <中文说法> <原因与改法>
+#   Java 源码（含注释与字符串）和能力说明资源里不许再出现这个说法。
+#
+# 新增一行前，先在术语表里写清"不看上下文会被理解成什么"和改用的说法。
+
+word Manager 空泛，看名字不知道它干什么；按它实际做的事起名
+word Helper 空泛；按它实际做的事起名，或者把方法放回真正拥有这件事的类
+word Util 空泛；按它实际做的事起名，或者把方法放回真正拥有这件事的类
+word Utils 空泛；按它实际做的事起名，或者把方法放回真正拥有这件事的类
+word Misc 空泛；拆开，各自放回所属的类
+word Common 空泛，而且和 common 模块同名；按它实际做的事起名
+word Info 空泛；说清是什么信息，例如 AbilitySpec
+word Data 空泛；说清是什么数据，例如 TaskInput、ResultDetails
+word Executor Java 程序员会以为是线程池；任务叫 Task，新任务继承 PhasedTask
+word Port 会被读成网络端口；按用途起名，例如 PlayerInput
+word Receipt 说清是哪一种：任务的结果用 TaskResult，游戏对交互的确认用 Confirmation
+word Lease 说清占用的是什么，例如本刻的交互机会
+word Handle 说清它是什么，例如一次任务运行是 TaskRun
+word Mandate 已改名：任务的许可用 Permissions
+word Blocker 已改名：任务卡在哪用 Problem
+word Outcome 已改名：任务结果用 TaskResult
+word Intent 已改名：LLM 想要的结果用 Goal，能力对一步的决定用 StepDecision
+word Upkeep 已改名：生存需求用 SurvivalNeed
+word Reflex 会和 Java 反射混淆；生存需求用 SurvivalNeed
+word Body 已改名：Mod 控制的本地玩家叫角色，代码里用 Player
+word Contract 已改名：写给 LLM 的用法用 AbilityDoc，能力的静态信息用 AbilitySpec
+word Descriptor 已改名：能力的静态信息用 AbilitySpec
+word Gateway 会被读成 API 网关；MCP 入口在 mcp 包
+word Integration 会被读成集成测试；联动模组在 compat 包
+word Platform 在多加载器模板里专指加载器抽象；和游戏打交道的代码在 game 包
+
+term 回执 说清是哪一种：任务的"结果"，或游戏对交互的"确认"
+term 卡点 改说"问题"（Problem）
+term 差事 改说"临时任务"（生存需求创建的任务）
+term 工位 改说"站位"
+term 仲裁 改说"打断规则"
+term 句柄 改说"观察编号"
+term 作证 改说"提供确认信息"
+term 旁证 改说"服务端确认"
+term 底座 改说"基础代码"
+term 护栏 改说"架构检查"
+term 契约 改说"能力说明"
+term 精细 打断程度改说"停下不安全"（UNSAFE_TO_STOP）
+term 精致 打断程度改说"停下不安全"（UNSAFE_TO_STOP）
+term 身体维护 改说"生存需求"
+term 身体仲裁 改说"打断规则"
+term 身体需求 改说"生存需求"
+term 接管身体 改说"控制角色"
+term 伙伴 改说"角色"（Mod 控制的本地玩家）
+term 讲道理 默认许可改说"像正常玩家一样"
+term 执行器 改说"任务"；所有任务继承分阶段任务 PhasedTask
+term 心跳 改说"每刻推进"
+term 装配 改说"启动时创建、登记"
+term 对账 改说"确认"
+term 授权 任务的许可改说"许可"；MCP 连接的身份校验写"鉴权"
+term 清册 改说"旧逻辑清单"
+term 换芯 改说"重写"

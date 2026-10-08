@@ -6,9 +6,9 @@ import java.util.Objects;
 
 /**
  * 一个参数的完整定义：名字、类型、是否必填、默认值、范围或选项、说明。
- * 对外契约里的字段说明、入口的校验与规范化、能力拿到的类型化取值，都由这一份定义生成。
+ * 能力说明里的参数表、MCP 入口的校验与规范化、能力拿到的带类型取值，都由这一份定义生成。
  *
- * @param name         参数名，必须已登记在 {@link ParamVocabulary}
+ * @param name         参数名，必须已登记在 {@link ParamNames}
  * @param type         参数类型
  * @param required     是否必填；必填参数不能有默认值
  * @param defaultValue 省略时的取值；整数为 Long、数字为 Double、布尔为 Boolean、文字为 String、列表为 List
@@ -32,8 +32,8 @@ public record Param(
         Objects.requireNonNull(type, "type");
         Objects.requireNonNull(doc, "doc");
         choices = choices == null ? List.of() : List.copyOf(choices);
-        if (!ParamVocabulary.contains(name)) {
-            throw new IllegalArgumentException("参数名 " + name + " 不在词汇表里：先在 ParamVocabulary 登记并写清含义，"
+        if (!ParamNames.contains(name)) {
+            throw new IllegalArgumentException("参数名 " + name + " 不在参数名表里：先在 ParamNames 登记并写清含义，"
                     + "确认现有名字确实表达不了，再使用");
         }
         if (doc.isBlank()) throw new IllegalArgumentException("参数 " + name + " 缺少说明");

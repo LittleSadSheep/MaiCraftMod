@@ -5,7 +5,7 @@ package org.maiwithu.maicraft.kernel.param;
  * 参数类型。每种类型的校验与规范化规则对所有能力一致，由 {@link ParamSpec} 统一执行。
  *
  * <p>资源类参数只检查写法（命名空间:路径，标签以 # 开头）；该物品、方块是否真的已注册，
- * 由能力在翻译时结合实际安装的模组判断。
+ * 由能力在决定每一步时结合实际安装的模组判断。
  */
 public enum ParamType {
     /** 整数；"6" 这样的整数字符串会按 6 处理并在 notes 里说明。 */
@@ -39,7 +39,7 @@ public enum ParamType {
         this.list = list;
     }
 
-    /** 对外契约里的 JSON 类型名。 */
+    /** 能力说明里参数表的 JSON 类型名。 */
     public String schemaType() {
         return schemaType;
     }

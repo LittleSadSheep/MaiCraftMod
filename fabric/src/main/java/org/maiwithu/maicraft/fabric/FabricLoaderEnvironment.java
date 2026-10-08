@@ -2,7 +2,7 @@
 package org.maiwithu.maicraft.fabric;
 
 import net.fabricmc.loader.api.FabricLoader;
-import org.maiwithu.maicraft.platform.loader.LoaderEnvironment;
+import org.maiwithu.maicraft.game.loader.LoaderEnvironment;
 
 import java.nio.file.Path;
 import java.util.Optional;

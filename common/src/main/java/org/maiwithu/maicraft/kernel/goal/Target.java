@@ -4,27 +4,30 @@ package org.maiwithu.maicraft.kernel.goal;
 import java.util.Objects;
 
 /**
- * 统一目标模型：全接口只有这一种"指一个地方或一个东西"的方式（docs/design/07 第 4 节）。
+ * 目标对象：能力要去的地方或要处理的东西。全接口只有这一种"指一个地方或一个东西"的方式。
  *
- * <p>"某片区域"等于任意目标加上参数 radius；"最近的某种东西"不是一种目标，
- * 要么先观察拿到句柄再用 {@link Seen}，要么由能力按参数自己去找最近的。
+ * <p>"某片区域"等于任意目标对象加上参数 radius；"最近的某种东西"不是一种目标对象，
+ * 要么先观察拿到观察编号再用 {@link Seen}，要么由能力按参数自己去找最近的。
  */
 public sealed interface Target {
 
     TargetKind kind();
 
-    /** 当前位置。 */
+    /** 角色当前的位置。 */
     record Here() implements Target {
         @Override public TargetKind kind() {
             return TargetKind.HERE;
         }
     }
 
-    /** 观察句柄：e 开头是实体，f 开头是地形特征，b 开头是方块或设施，例如 e12。句柄过期时能力以目标已消失结束。 */
-    record Seen(String ref) implements Target {
+    /**
+     * 观察时看到的东西，用观察编号指定：e 开头是实体，f 开头是地形特征，b 开头是方块或设施，例如 e12。
+     * 编号对应的东西不在了（走远、被拆）时，能力以 TARGET_GONE 结束。
+     */
+    record Seen(String id) implements Target {
         public Seen {
-            if (ref == null || !ref.matches("[efb][0-9]+")) {
-                throw new IllegalArgumentException("观察句柄应形如 e12、f3、b5：" + ref);
+            if (id == null || !id.matches("[efb][0-9]+")) {
+                throw new IllegalArgumentException("观察编号应形如 e12、f3、b5：" + id);
             }
         }
 
@@ -44,7 +47,7 @@ public sealed interface Target {
         }
     }
 
-    /** 坐标；y 可以省略（null），到场后再解析可站立的高度，不把没核实的高度直接交给步行引擎。 */
+    /** 坐标；y 可以省略（null），到了附近再找能站的高度，不把没核实的高度直接交给寻路。 */
     record Position(int x, Integer y, int z, String dimension) implements Target {
         @Override public TargetKind kind() {
             return TargetKind.POSITION;
@@ -62,10 +65,10 @@ public sealed interface Target {
         }
     }
 
-    /** 方向加距离，例如"往北 100 格"、"往前 20 格"。 */
-    record Direction(Bearing bearing, int distance) implements Target {
+    /** 朝某个方向走多远，例如"往北 100 格"、"往前 20 格"。 */
+    record Direction(Toward toward, int distance) implements Target {
         public Direction {
-            Objects.requireNonNull(bearing, "bearing");
+            Objects.requireNonNull(toward, "toward");
             if (distance <= 0) throw new IllegalArgumentException("距离必须为正：" + distance);
         }
 
@@ -81,8 +84,8 @@ public sealed interface Target {
         }
     }
 
-    /** 方向：相对角色朝向的前后左右，或罗盘方向。 */
-    enum Bearing {
+    /** 朝哪边：相对角色朝向的前后左右，或东南西北。 */
+    enum Toward {
         FORWARD, BACKWARD, LEFT, RIGHT, NORTH, SOUTH, EAST, WEST
     }
 }

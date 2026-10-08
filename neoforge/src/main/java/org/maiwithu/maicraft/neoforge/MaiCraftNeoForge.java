@@ -8,11 +8,11 @@ import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import org.maiwithu.maicraft.bootstrap.Bootstrap;
 import org.maiwithu.maicraft.bootstrap.ServerLifecycle;
-import org.maiwithu.maicraft.platform.ModIdentity;
+import org.maiwithu.maicraft.game.ModIdentity;
 
 /**
  * NeoForge 的通用入口，独立服务器和客户端都会加载。
- * 只把服务端事件转给公共运行时，不写业务，也不引用任何仅客户端的类。
+ * 只把服务端事件转给公共代码，不写业务，也不引用任何仅客户端的类。
  */
 @Mod(ModIdentity.MOD_ID)
 public final class MaiCraftNeoForge {

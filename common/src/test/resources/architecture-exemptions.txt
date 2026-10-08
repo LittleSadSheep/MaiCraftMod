@@ -1,4 +1,3 @@
-# 源码规则的例外登记（docs/design/02 第 7 节）。
 # 只有"大小上限"允许例外，每行一条：size <相对仓库根的文件路径> <为什么必须这么长>
 # 例：size common/src/main/java/org/maiwithu/maicraft/behavior/navigation/baritone/BaritoneInternals.java 集中封装 Baritone 内部调用，拆开会让内部依赖重新散开
-# 新增例外须经设计评审；不允许为了让构建通过而随手加。
+# 新增例外须经两位维护者同意；不允许为了让构建通过而随手加。

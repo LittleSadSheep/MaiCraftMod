@@ -16,11 +16,11 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * 一个能力的参数规格：参数的唯一定义（docs/design/02 第 5.2 节）。
+ * 一个能力的参数规格：参数只在这里定义一次。
  *
- * <p>对外契约里的字段说明（{@link #describe}）、入口的校验与规范化（{@link #parse}）、
- * 能力拿到的类型化取值（{@link Params}），都从这一份定义生成。契约正文不再用散文重复校验规则，
- * 也不会出现"契约说一套、参数规范化一套、适配器又一套"的情况。
+ * <p>能力说明里的参数表（{@link #describe}）、MCP 入口的校验与规范化（{@link #parse}）、
+ * 能力拿到的带类型取值（{@link Params}），都从这一份定义生成。能力说明的正文不再用散文重复校验规则，
+ * 也就不会出现"说明里写一套、校验一套、实际取值又一套"的情况。
  *
  * <p>统一规则：
  * <ul>
@@ -92,7 +92,7 @@ public final class ParamSpec {
         return new ParseResult(errors.isEmpty() ? new Params(values) : null, errors, notes);
     }
 
-    /** 对外契约里的参数表，由本规格生成。 */
+    /** 能力说明里的参数表，由本规格生成。 */
     public JsonArray describe() {
         JsonArray fields = new JsonArray();
         for (Param param : params()) {
