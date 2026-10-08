@@ -16,6 +16,10 @@ description = '''${description}'''
 [[mixins]]
 config = "${mod_id}.mixins.json"
 
+# 服务端 Mixin：方块归属记录的放置钩子。
+[[mixins]]
+config = "${mod_id}-server.mixins.json"
+
 # 通用入口在两端加载；客户端部分由单独的 dist=CLIENT 入口限定。
 [[dependencies.${mod_id}]]
 modId = "neoforge"

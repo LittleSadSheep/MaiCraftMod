@@ -4,11 +4,13 @@ package org.maiwithu.maicraft.server;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.Map;
+import java.util.function.Supplier;
 import net.minecraft.server.MinecraftServer;
 
 /**
  * 按服务器实例登记服务端服务的登记表。Mixin 注入的钩子没有任何构造路径能把服务传进来，
- * 只能到这里按当前服务器取；启动在服务器的第一个刻结束时登记，停服时移除。
+ * 只能到这里按当前服务器取；启动在服务器的第一个刻结束时按需创建并登记，停服时移除，
+ * 因此每个服务器实例（包括单人游戏的每次开局）都有自己的归属记录，不跨服残留。
  */
 public final class ServerLinkServices {
     private record Services(BlockOwnershipRecord ownership, ServerConfirmations confirmations) {}
@@ -19,9 +21,10 @@ public final class ServerLinkServices {
     private ServerLinkServices() {}
 
     /** 尚未登记时用给定的工厂创建并登记；同一服务器重复调用不重建。 */
-    public static void attachIfAbsent(MinecraftServer server, BlockOwnershipRecord ownership,
-                                      ServerConfirmations confirmations) {
-        ATTACHED.computeIfAbsent(server, ignored -> new Services(ownership, confirmations));
+    public static void attachIfAbsent(MinecraftServer server,
+                                      Supplier<BlockOwnershipRecord> ownership,
+                                      Supplier<ServerConfirmations> confirmations) {
+        ATTACHED.computeIfAbsent(server, ignored -> new Services(ownership.get(), confirmations.get()));
     }
 
     public static void detach(MinecraftServer server) {
