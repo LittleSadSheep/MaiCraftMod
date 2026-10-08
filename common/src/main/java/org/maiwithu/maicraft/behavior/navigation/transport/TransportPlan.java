@@ -1,0 +1,97 @@
+package org.maiwithu.maicraft.behavior.navigation.transport;
+
+import it.unimi.dsi.fastutil.longs.LongSet;
+import java.util.ArrayList;
+import java.util.ArrayDeque;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Supplier;
+import net.minecraft.core.BlockPos;
+import org.maiwithu.maicraft.client.actor.LocalPlayerContext;
+import org.maiwithu.maicraft.core.integration.create.elevator.CreateElevatorTravel;
+import org.maiwithu.maicraft.core.integration.jetpack.JetpackFlightSession;
+import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
+import org.maiwithu.maicraft.core.integration.jetpack.JetpackPlatform;
+import org.maiwithu.maicraft.core.integration.physics.StructureDeparture;
+
+/** 将当前观察到能尝试的飞行／电梯方案按估计耗时排序；只是挑候选，实际整段路是否可走还要执行时验证。 */
+final class TransportPlan {
+    record Offer(String mode, BlockPos destination, double estimatedTicks, Supplier<TransportSession> create) {}
+    record Options(List<Offer> offers, List<String> unavailable) {}
+
+    static Options prepare(LocalPlayerContext context, NavGoal goal, TransportTargets targets,
+                            TransportMode mode, LongSet forbidden) {
+        // 按用户选的交通方式过滤候选；地面模式不会在这里新开飞行或电梯，同一楼层不重复生成电梯候选。
+        List<Offer> offers = new ArrayList<>();
+        List<String> unavailable = new ArrayList<>();
+        // 下车后可能仍站在活动座面，主世界方块寻路没有这层支撑；先用真实甲板碰撞走到地面再续行。
+        if (mode == TransportMode.AUTO) {
+            var departure = StructureDeparture.find(context, goal.center(), forbidden);
+            if (departure != null) offers.add(new Offer("structure_exit", BlockPos.containing(departure.destination()),
+                    20 + departure.destination().distanceTo(context.player().position()) * 6, () -> departure));
+        }
+        if (targets.destinations().isEmpty()) unavailable.add("no supported, unobstructed landing satisfies the destination; " + targets.diagnostic());
+        var floors = new HashSet<Integer>();
+        if (mode != TransportMode.ELEVATOR && mode != TransportMode.GROUND) {
+            for (var platform : JetpackPlatform.collect(targets.destinations())) {
+                var destination = platform.anchor();
+                var flight = JetpackFlightSession.probe(context, destination.landingPoint(), forbidden);
+                if (flight.available()) offers.add(new Offer("jetpack", destination.feet(), flight.estimatedTicks(),
+                        // 远程方向目标在同一会话里提前延长走廊；终点已在本地时仍使用普通精确落地。
+                        () -> goal instanceof ForwardTravelGoal forward
+                                ? new JetpackFlightSession(new ContinuousTravelTarget(forward.destination, destination.landingPoint(), forbidden), forbidden)
+                                : new JetpackFlightSession(destination.landingPoint(), forbidden, platform.landings())));
+                else if (unavailable.size() < 8) unavailable.add("jetpack: " + flight.reason());
+            }
+        }
+        for (var destination : targets.destinations()) {
+            if (mode != TransportMode.JETPACK && mode != TransportMode.GROUND
+                    && floors.add(destination.feet().getY())) {
+                elevator(context, destination.feet(), forbidden, offers, unavailable);
+            }
+        }
+        // 远处终点可能没加载，但已知电梯仍可先把玩家送到目标高度，再由原导航继续找最终位置。
+        if (offers.isEmpty() && mode != TransportMode.JETPACK && mode != TransportMode.GROUND) {
+            for (BlockPos hint : elevatorHints(goal, context.player().blockPosition())) {
+                if (floors.add(hint.getY())) elevator(context, hint, forbidden, offers, unavailable);
+            }
+        }
+        // 远端接近同时计入本段代价与到原终点的估价，不因一个中继点离身体最近就往侧后方折返。
+        offers.sort(goal instanceof ForwardTravelGoal forward
+                ? Comparator.comparingDouble(offer -> offer.estimatedTicks() + forward.remaining(offer.destination()))
+                : Comparator.comparingDouble(Offer::estimatedTicks));
+        return new Options(List.copyOf(offers), unavailable.stream().distinct().toList());
+    }
+
+    static List<BlockPos> elevatorHints(NavGoal goal, BlockPos origin) {
+        // 从已有目标提取有限的楼层线索；不能把随便一种自定义目标都猜成固定电梯终点。
+        var pending = new ArrayDeque<NavGoal>(); pending.add(goal);
+        List<BlockPos> result = new ArrayList<>();
+        int examined = 0;
+        while (!pending.isEmpty() && examined++ < 256 && result.size() < 32) {
+            NavGoal next = pending.removeFirst();
+            if (next instanceof ForwardTravelGoal forward) pending.addLast(forward.destination);
+            else if (next instanceof NavGoal.Composite composite) {
+                composite.members.stream().limit(Math.max(0, 256 - examined - pending.size())).forEach(pending::addLast);
+            } else if (next instanceof NavGoal.YLevel level) {
+                result.add(new BlockPos(origin.getX(), level.level, origin.getZ()));
+            } else if (next instanceof NavGoal.Exact || next instanceof NavGoal.GetToBlock
+                    || next instanceof NavGoal.Adjacent || next instanceof NavGoal.NearGround
+                    || next instanceof NavGoal.Near || next instanceof NavGoal.MineStance
+                    || next instanceof NavGoal.MineColumn) result.add(next.center());
+        }
+        return result.stream().distinct().sorted(Comparator.comparingDouble(origin::distSqr)).toList();
+    }
+
+    private static void elevator(LocalPlayerContext context, BlockPos destination, LongSet forbidden,
+                                 List<Offer> offers, List<String> unavailable) {
+        Map<String, Object> probe = CreateElevatorTravel.probe(context, destination);
+        if (Boolean.TRUE.equals(probe.get("available"))) {
+            double ticks = probe.get("estimatedTicks") instanceof Number n ? n.doubleValue() : 200;
+            offers.add(new Offer("elevator", destination, Double.isFinite(ticks) ? ticks : 200,
+                    () -> new CreateElevatorTravel(destination, forbidden)));
+        } else if (unavailable.size() < 8) unavailable.add("elevator: " + probe.getOrDefault("reason", "no observed service"));
+    }
+}
