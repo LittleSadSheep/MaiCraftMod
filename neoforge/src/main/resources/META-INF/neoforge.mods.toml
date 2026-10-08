@@ -16,6 +16,10 @@ description = '''${description}'''
 [[mixins]]
 config = "${mod_id}.mixins.json"
 
+# 内嵌 Baritone 的五个世界访问与输入 Mixin；实现类已随引擎补齐。
+[[mixins]]
+config = "maicraft-baritone.mixins.json"
+
 # 服务端 Mixin：方块归属记录的放置钩子。
 [[mixins]]
 config = "${mod_id}-server.mixins.json"
