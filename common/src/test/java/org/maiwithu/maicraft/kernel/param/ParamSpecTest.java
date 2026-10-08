@@ -1,0 +1,91 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.kernel.param;
+
+import com.google.gson.JsonParser;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/** 参数规格：词汇表约束、宽松写法的统一规范化、严格校验、错误一次报全。 */
+class ParamSpecTest {
+    // 模拟"让背包里某样东西再多几件"的参数：物品必填，数量 1..256 默认 1，途径可选。
+    private static final ParamSpec OBTAIN = ParamSpec.of(
+            Param.of("item", ParamType.ITEM_OR_TAG).required().doc("要多拿的物品或标签").build(),
+            Param.of("count", ParamType.INTEGER).range(1, 256).defaultValue(1).doc("要再多几件").build(),
+            Param.of("via", ParamType.CHOICE).choices("any", "craft", "smelt", "mine").defaultValue("any")
+                    .doc("指定途径").build());
+
+    private static ParseResult parse(String json) {
+        return OBTAIN.parse(JsonParser.parseString(json).getAsJsonObject());
+    }
+
+    @Test
+    void namesMustComeFromVocabulary() {
+        // "search_radius" 与已登记的 radius 是同一个意思：不在词汇表里的名字一律拒绝。
+        assertThrows(IllegalArgumentException.class,
+                () -> Param.of("search_radius", ParamType.INTEGER).doc("搜索范围").build());
+    }
+
+    @Test
+    void appliesDefaultsAndTreatsNullAsAbsent() {
+        ParseResult result = parse("{\"item\":\"minecraft:torch\",\"via\":null}");
+
+        assertTrue(result.ok());
+        assertEquals(1L, result.params().integer("count"));
+        assertEquals("any", result.params().text("via"));
+    }
+
+    @Test
+    void normalizesLenientWritingAndSaysSo() {
+        ParseResult result = parse("{\"item\":\"#Minecraft:Logs\",\"count\":\"6\",\"via\":\" CRAFT \"}");
+
+        assertTrue(result.ok(), () -> result.errors().toString());
+        assertEquals("#minecraft:logs", result.params().text("item"));
+        assertEquals(6L, result.params().integer("count"));
+        assertEquals("craft", result.params().text("via"));
+        assertEquals(3, result.notes().size(), "每一处规范化都要告诉调用方");
+    }
+
+    @Test
+    void reportsAllErrorsAtOnce() {
+        ParseResult result = parse("{\"count\":0,\"via\":\"teleport\",\"radius\":8}");
+
+        assertFalse(result.ok());
+        assertNull(result.params());
+        List<String> fields = result.errors().stream().map(ParamError::field).toList();
+        assertTrue(fields.containsAll(List.of("item", "count", "via", "radius")),
+                "缺必填、超范围、选项不对、未声明参数应一次报全：" + fields);
+    }
+
+    @Test
+    void entityTypesDoNotAcceptTags() {
+        ParamSpec spec = ParamSpec.of(Param.of("entity", ParamType.ENTITY_TYPE).required().doc("要找的生物").build());
+
+        assertTrue(spec.parse(JsonParser.parseString("{\"entity\":\"minecraft:sheep\"}").getAsJsonObject()).ok());
+        assertFalse(spec.parse(JsonParser.parseString("{\"entity\":\"#minecraft:raiders\"}").getAsJsonObject()).ok());
+    }
+
+    @Test
+    void wrapsSingleValueIntoList() {
+        ParamSpec spec = ParamSpec.of(Param.of("items", ParamType.ITEM_LIST).required().doc("要存进去的物品").build());
+        ParseResult result = spec.parse(JsonParser.parseString("{\"items\":\"minecraft:cobblestone\"}").getAsJsonObject());
+
+        assertTrue(result.ok());
+        assertEquals(List.of("minecraft:cobblestone"), result.params().list("items"));
+    }
+
+    @Test
+    void describesFieldsFromTheSameDefinition() {
+        var fields = OBTAIN.describe();
+
+        assertEquals(3, fields.size());
+        assertEquals("item", fields.get(0).getAsJsonObject().get("name").getAsString());
+        assertEquals(256, fields.get(1).getAsJsonObject().get("max").getAsInt());
+    }
+}
