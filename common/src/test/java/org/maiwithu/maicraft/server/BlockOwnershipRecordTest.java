@@ -1,0 +1,71 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.server;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.Optional;
+import java.util.UUID;
+import net.minecraft.core.BlockPos;
+import org.junit.jupiter.api.Test;
+
+/** 方块归属记录的离线场景：写入、按维度查询、覆盖与容量淘汰。 */
+class BlockOwnershipRecordTest {
+    private static final String OVERWORLD = "minecraft:overworld";
+    private static final String NETHER = "minecraft:the_nether";
+
+    @Test
+    void 记录之后能查到是谁放的() {
+        var record = new BlockOwnershipRecord();
+        var alice = UUID.randomUUID();
+        var position = new BlockPos(10, 64, -3);
+        record.recordPlacement(OVERWORLD, position, alice, 500);
+        Optional<BlockOwnershipRecord.Owner> owner = record.ownerOf(OVERWORLD, position);
+        assertTrue(owner.isPresent());
+        assertEquals(alice, owner.get().playerId());
+        assertEquals(500, owner.get().tick());
+    }
+
+    @Test
+    void 不同维度互不干扰() {
+        var record = new BlockOwnershipRecord();
+        var alice = UUID.randomUUID();
+        var position = new BlockPos(0, 64, 0);
+        record.recordPlacement(OVERWORLD, position, alice, 1);
+        assertTrue(record.ownerOf(NETHER, position).isEmpty());
+    }
+
+    @Test
+    void 同一格被替换时以后来的为准() {
+        var record = new BlockOwnershipRecord();
+        var alice = UUID.randomUUID();
+        var bob = UUID.randomUUID();
+        var position = new BlockPos(1, 2, 3);
+        record.recordPlacement(OVERWORLD, position, alice, 10);
+        record.recordPlacement(OVERWORLD, position, bob, 20);
+        var owner = record.ownerOf(OVERWORLD, position).orElseThrow();
+        assertEquals(bob, owner.playerId());
+        assertEquals(20, owner.tick());
+    }
+
+    @Test
+    void 没记到的格子返回空() {
+        var record = new BlockOwnershipRecord();
+        assertTrue(record.ownerOf(OVERWORLD, new BlockPos(7, 7, 7)).isEmpty());
+    }
+
+    @Test
+    void 超出容量后淘汰最早的记录() {
+        var record = new BlockOwnershipRecord();
+        var alice = UUID.randomUUID();
+        var oldest = new BlockPos(0, 0, 0);
+        var kept = new BlockPos(BlockOwnershipRecord.MAX_ENTRIES_PER_DIMENSION, 0, 0);
+        record.recordPlacement(OVERWORLD, oldest, alice, 1);
+        // 再放满一整个容量的方块，最早的一条被淘汰，最后一条保留。
+        for (int i = 1; i <= BlockOwnershipRecord.MAX_ENTRIES_PER_DIMENSION; i++) {
+            record.recordPlacement(OVERWORLD, new BlockPos(i, 0, 0), alice, i + 1);
+        }
+        assertTrue(record.ownerOf(OVERWORLD, oldest).isEmpty());
+        assertTrue(record.ownerOf(OVERWORLD, kept).isPresent());
+    }
+}
