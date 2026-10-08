@@ -4,6 +4,8 @@ package org.maiwithu.maicraft.kernel.goal;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.interrupt.ControlLoop;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
+import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.maiwithu.maicraft.kernel.task.TickResult;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -25,6 +27,8 @@ import java.util.Optional;
 public final class GoalRunTable {
     static final int KEPT_FINISHED = 64;
     static final int KEPT_REQUEST_KEYS = 256;
+    /** 不控制角色的目标最多当场推进几刻：记地点、出报告都是一两刻的事。 */
+    static final int ASIDE_TICK_LIMIT = 20;
 
     private final AbilityRegistry registry;
     private final GoalRunStore store;
@@ -68,6 +72,33 @@ public final class GoalRunTable {
         makeMain(runner);
         dropOldFinished();
         return new Launch(runner, false);
+    }
+
+    /**
+     * 不控制角色的目标（只读分析、只改记忆）：当场推进到结果，不交给控制循环，也不打断手上的主任务——
+     * 角色在盖房子时让它记住一个地点，房子照盖。这类能力的决定只该是直接给结果或记地点；
+     * 几刻之内还没有结果（例如提了问题），按取消收尾，不让它挂着没人推进。
+     */
+    public GoalRun runAside(Goal goal, TickContext context) {
+        GoalRunner runner = GoalRunner.launch(goal, registry, store, remembers);
+        runners.put(runner.run().id(), runner);
+        runner.start(context);
+        for (int i = 0; i < ASIDE_TICK_LIMIT && runner.run().state() == GoalRunState.RUNNING; i++) {
+            if (runner.tick(context) instanceof TickResult.Finished) {
+                runner.close(CloseReason.FINISHED);
+            }
+        }
+        if (runner.run().unfinished()) {
+            runner.close(CloseReason.CANCELLED);
+        }
+        dropOldFinished();
+        return runner.run();
+    }
+
+    /** 这个目标此刻在做什么的一句话；已经结束时为空。 */
+    public Optional<String> doing(long id) {
+        GoalRunner runner = require(id);
+        return runner.run().unfinished() ? Optional.of(runner.describe()) : Optional.empty();
     }
 
     /**
