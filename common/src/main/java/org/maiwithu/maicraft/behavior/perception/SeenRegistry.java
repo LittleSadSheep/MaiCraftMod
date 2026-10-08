@@ -75,6 +75,14 @@ public final class SeenRegistry {
         return Optional.ofNullable(entries.get(id));
     }
 
+    /** 观察编号对应的游戏实体编号；编号不是在册实体时给空。跟随这类能力用它找回真实的实体。 */
+    public Optional<Integer> gameEntityOf(String id) {
+        return entityIds.entrySet().stream()
+                .filter(entry -> entry.getValue().equals(id))
+                .map(Map.Entry::getKey)
+                .findFirst();
+    }
+
     /**
      * 把超期没再见到的编号移出登记，并逐条报告它们最后出现在哪个方位、什么位置。
      * 每次刷新场景后调用一次；返回的失效记录交给关心它们的能力。
