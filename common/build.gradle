@@ -3,9 +3,9 @@ plugins {
     id 'net.neoforged.moddev'
 }
 
+// 公共模块借助 NeoForm 编译 Minecraft API；有访问转换配置时才额外启用。
 neoForge {
     neoFormVersion = neo_form_version
-    // Automatically enable AccessTransformers if the file exists
     def at = file('src/main/resources/META-INF/accesstransformer.cfg')
     if (at.exists()) {
         accessTransformers.from(at.absolutePath)
@@ -16,13 +16,14 @@ neoForge {
     }
 }
 
+// Mixin 与 MixinExtras 由两个加载器在运行时提供，公共源码只需编译期依赖。
 dependencies {
     compileOnly group: 'org.spongepowered', name: 'mixin', version: '0.8.5'
-    // fabric and neoforge both bundle mixinextras, so it is safe to use it in common
-    compileOnly group: 'io.github.llamalad7', name: 'mixinextras-common', version: '0.3.5'
-    annotationProcessor group: 'io.github.llamalad7', name: 'mixinextras-common', version: '0.3.5'
+    compileOnly group: 'io.github.llamalad7', name: 'mixinextras-common', version: '0.5.3'
+    annotationProcessor group: 'io.github.llamalad7', name: 'mixinextras-common', version: '0.5.3'
 }
 
+// 把公共 Java 源码与资源目录作为可供两个加载器模块取用的产物。公共模块不反过来解析这两份配置。
 configurations {
     commonJava {
         canBeResolved = false
@@ -38,4 +39,3 @@ artifacts {
     commonJava sourceSets.main.java.sourceDirectories.singleFile
     commonResources sourceSets.main.resources.sourceDirectories.singleFile
 }
-

@@ -1,3 +1,4 @@
+// 告诉 Gradle 去哪些仓库找构建插件；Fabric 与 Sponge 的坐标只向各自仓库解析，减少错误来源匹配。
 pluginManagement {
     repositories {
         gradlePluginPortal()
@@ -10,7 +11,7 @@ pluginManagement {
                 }
             }
             filter {
-                includeGroup('net.fabricmc')
+                includeGroupAndSubgroups('net.fabricmc')
                 includeGroup('fabric-loom')
             }
         }
@@ -22,18 +23,19 @@ pluginManagement {
                 }
             }
             filter {
-                includeGroupAndSubgroups("org.spongepowered")
+                includeGroupAndSubgroups('org.spongepowered')
             }
         }
     }
 }
 
+// 让构建能按项目要求自动寻找合适的 JDK。
 plugins {
-    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.8.0'
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
 }
 
-// This should match the folder name of the project, or else IDEA may complain (see https://youtrack.jetbrains.com/issue/IDEA-317606)
-rootProject.name = 'MultiLoader-Template'
+// 根项目由公共代码、Fabric 版本和 NeoForge 版本三个模块组成。
+rootProject.name = 'MaiCraft'
 include('common')
 include('fabric')
 include('neoforge')

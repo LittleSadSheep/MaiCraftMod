@@ -2,15 +2,17 @@ plugins {
     id 'multiloader-common'
 }
 
+// 加载器模块可解析公共模块导出的源码和资源目录。
 configurations {
-    commonJava{
+    commonJava {
         canBeResolved = true
     }
-    commonResources{
+    commonResources {
         canBeResolved = true
     }
 }
 
+// 编译依赖公共模块的接口，同时取得它的源码目录；最终按各加载器环境重新编译共享源码。
 dependencies {
     compileOnly(project(':common')) {
         capabilities {
@@ -21,6 +23,14 @@ dependencies {
     commonResources project(path: ':common', configuration: 'commonResources')
 }
 
+// 把公共资源登记为真正的资源目录，让 Fabric Loom 等加载器工具也能发现并后处理公共 Mixin 配置（沿用 v1 的修正）。
+sourceSets {
+    main {
+        resources.srcDir(project(':common').file('src/main/resources'))
+    }
+}
+
+// 编译、Javadoc 和源码包都使用同一份公共源码，不手动复制一套文件到加载器目录。
 tasks.named('compileJava', JavaCompile) {
     dependsOn(configurations.commonJava)
     source(configurations.commonJava)
@@ -28,7 +38,6 @@ tasks.named('compileJava', JavaCompile) {
 
 processResources {
     dependsOn(configurations.commonResources)
-    from(configurations.commonResources)
 }
 
 tasks.named('javadoc', Javadoc).configure {
@@ -40,5 +49,4 @@ tasks.named('sourcesJar', Jar) {
     dependsOn(configurations.commonJava)
     from(configurations.commonJava)
     dependsOn(configurations.commonResources)
-    from(configurations.commonResources)
 }

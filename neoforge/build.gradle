@@ -3,9 +3,9 @@ plugins {
     id 'net.neoforged.moddev'
 }
 
+// NeoForge 模块：编译版本、可选访问转换、Parchment 参数名，以及开发时的客户端、服务器与数据生成启动项。
 neoForge {
     version = neoforge_version
-    // Automatically enable neoforge AccessTransformers if the file exists
     def at = project(':common').file('src/main/resources/META-INF/accesstransformer.cfg')
     if (at.exists()) {
         accessTransformers.from(at.absolutePath)
@@ -17,18 +17,18 @@ neoForge {
     runs {
         configureEach {
             systemProperty('neoforge.enabledGameTestNamespaces', mod_id)
-            ideName = "NeoForge ${it.name.capitalize()} (${project.path})" // Unify the run config names with fabric
+            // 与 Fabric 的启动项命名保持一致，IDE 里一眼能分清是哪个加载器。
+            ideName = "NeoForge ${it.name.capitalize()} (${project.path})"
         }
         client {
             client()
+            jvmArgument('-Xmx3072M')
+            programArguments.addAll '--width', '1280', '--height', '720'
         }
         data {
             data()
-
-            // DataGen can be run by - "./gradlew :neoforge:runData" in Terminal.
-            // Specify the modid for data generation, where to output the resulting resource, and where to look for existing resources.
+            // 数据生成：./gradlew :neoforge:runData，输出到 src/generated/resources。
             programArguments.addAll '--mod', project.mod_id, '--all', '--output', file('src/generated/resources/').getAbsolutePath(), '--existing', file('src/main/resources/').getAbsolutePath()
-
         }
         server {
             server()

@@ -2,6 +2,8 @@ plugins {
     id 'multiloader-loader'
     id 'fabric-loom'
 }
+
+// Fabric 模块直接编译公共源码，因此要提供 Minecraft、官方映射加 Parchment 参数名、Fabric Loader 与 API。
 dependencies {
     minecraft "com.mojang:minecraft:${minecraft_version}"
     mappings loom.layered {
@@ -12,6 +14,7 @@ dependencies {
     modImplementation "net.fabricmc.fabric-api:fabric-api:${fabric_version}"
 }
 
+// 配置可选访问扩展、Mixin 映射文件，以及开发时的客户端与服务器启动方式。
 loom {
     def aw = project(':common').file("src/main/resources/${mod_id}.accesswidener")
     if (aw.exists()) {
@@ -26,6 +29,8 @@ loom {
             setConfigName('Fabric Client')
             ideConfigGenerated(true)
             runDir('runs/client')
+            vmArg '-Xmx3072M'
+            programArgs '--width', '1280', '--height', '720'
         }
         server {
             server()
