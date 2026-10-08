@@ -32,7 +32,6 @@ public final class DefaultInteractionSender implements InteractionSender {
     private static final Logger LOG = LoggerFactory.getLogger(DefaultInteractionSender.class);
 
     private final MenuActions menuActions;
-    private final InteractionOpportunity opportunity;
 
     /** 当前正在等确认的动作；副手放置单独记录，与主动作并行等待。 */
     private PendingInteraction active;
@@ -49,9 +48,8 @@ public final class DefaultInteractionSender implements InteractionSender {
     private record HeldCancellation(PendingInteraction pending, ItemStack item) {}
     private HeldCancellation pendingMainHandCancellation;
 
-    public DefaultInteractionSender(MenuActions menuActions, InteractionOpportunity opportunity) {
+    public DefaultInteractionSender(MenuActions menuActions) {
         this.menuActions = menuActions;
-        this.opportunity = opportunity;
     }
 
     String diagnosticState() {
@@ -62,7 +60,7 @@ public final class DefaultInteractionSender implements InteractionSender {
     @Override public PendingInteraction tryAuxiliaryBlockUse(PlayerContext context, BlockHitResult hit,
                                                              InteractionConfirmation confirmation, int timeoutTicks) {
         // 主手持续操作和旧副手点击优先结算；本刻主任务没出手时，才允许一次副手原生放置。
-        if (!settledForRoutinePause() || menuActions.hasPendingTransaction()
+        if (!context.canInteractThisTick() || !settledForRoutinePause() || menuActions.hasPendingTransaction()
                 || auxiliary != null && !auxiliary.terminal()) return null;
         PendingInteraction previous = active;
         auxiliary = useBlock(context, InteractionHand.OFF_HAND, hit, confirmation, timeoutTicks);
@@ -77,7 +75,7 @@ public final class DefaultInteractionSender implements InteractionSender {
     @Override public PendingInteraction dropSelected(PlayerContext context, ItemStack expectedSelected, boolean fullStack,
                                                      InteractionConfirmation confirmation, int timeoutTicks) {
         // 原生 Q 使用服务端朝向，先同步已经实际转到的视角，再调用玩家原生投掷；不创建实体或设置其速度。
-        requireSubmission(context);
+        claimSubmission(context);
         requireIdle(context);
         var player = context.localPlayer();
         if (player.containerMenu != player.inventoryMenu || !player.containerMenu.getCarried().isEmpty()
@@ -111,7 +109,7 @@ public final class DefaultInteractionSender implements InteractionSender {
     @Override
     public PendingInteraction startBreaking(PlayerContext context, BlockHitResult hit, int timeoutTicks) {
         // 先检查当前控制权和有无旧动作，再占用本刻交互机会，记录目标原状态后开始挖。
-        requireSubmission(context);
+        claimSubmission(context);
         requireIdle(context);
         PendingInteraction pending = new PendingInteraction(
                 PendingInteraction.Kind.BREAK_BLOCK,
@@ -136,13 +134,14 @@ public final class DefaultInteractionSender implements InteractionSender {
     @Override
     public PendingInteraction cancelBreaking(PlayerContext context, PendingInteraction pending) {
         // 先看是否已经挖完；仍在挖才发停止，避免把刚确认完成的操作改说成取消。
-        requireSubmission(context);
+        requireCurrent(context);
         requireActive(pending, PendingInteraction.Kind.BREAK_BLOCK);
         poll(context, pending);
         if (pending.terminal()) {
             pendingBreakCancellationReason = null;
             return pending;
         }
+        claimSubmission(context);
         try {
             gameMode(context).stopDestroyBlock();
             pending.finish(PendingInteraction.Status.CANCELLED,
@@ -170,7 +169,7 @@ public final class DefaultInteractionSender implements InteractionSender {
         String reason = boundaryReason == null || boundaryReason.isBlank()
                 ? "the owning task ended before native mining confirmation"
                 : boundaryReason;
-        if (opportunity.tryClaim(context)) {
+        if (context.tryClaimInteraction()) {
             try {
                 gameMode(context).stopDestroyBlock();
                 pending.finish(PendingInteraction.Status.CANCELLED, reason);
@@ -188,10 +187,11 @@ public final class DefaultInteractionSender implements InteractionSender {
     @Override
     public PendingInteraction continueBreaking(PlayerContext context, PendingInteraction pending) {
         // 同一挖掘每刻最多推进一次，且先读取当前结果，已经完成就不再继续挥手。
-        requireSubmission(context);
+        requireCurrent(context);
         requireActive(pending, PendingInteraction.Kind.BREAK_BLOCK);
         poll(context, pending);
         if (pending.terminal() || pending.lastNativeTick() == context.clientTick()) return pending;
+        claimSubmission(context);
         try {
             gameMode(context).continueDestroyBlock(pending.breakTarget(), pending.breakFace());
             context.localPlayer().swing(InteractionHand.MAIN_HAND);
@@ -207,7 +207,7 @@ public final class DefaultInteractionSender implements InteractionSender {
     public PendingInteraction useBlock(PlayerContext context, InteractionHand hand, BlockHitResult hit,
                                        InteractionConfirmation confirmation, int timeoutTicks) {
         // 发一次普通方块右键，再用调用者给的条件查结果；游戏本身可能先在客户端预测放置效果。
-        requireSubmission(context);
+        claimSubmission(context);
         requireIdle(context);
         BlockUseConfirmation acknowledged = null;
         if (confirmation.requiresBlockAcknowledgement()) {
@@ -248,7 +248,7 @@ public final class DefaultInteractionSender implements InteractionSender {
     @Override
     public PendingInteraction useItem(PlayerContext context, InteractionHand hand,
                                       InteractionConfirmation confirmation, int timeoutTicks) {
-        requireSubmission(context);
+        claimSubmission(context);
         requireIdle(context);
         PendingInteraction pending = oneShot(
                 PendingInteraction.Kind.USE_ITEM, context, confirmation, timeoutTicks);
@@ -266,7 +266,7 @@ public final class DefaultInteractionSender implements InteractionSender {
     @Override
     public PendingInteraction releaseUsingItem(PlayerContext context, PendingInteraction pending) {
         // 持续吃东西、拉弓等需要实际松开使用；新的“已停止使用”确认接替原来的使用确认。
-        requireSubmission(context);
+        claimSubmission(context);
         requireActive(pending, PendingInteraction.Kind.USE_ITEM);
         PendingInteraction release = oneShot(
                 PendingInteraction.Kind.RELEASE_ITEM,
@@ -285,7 +285,7 @@ public final class DefaultInteractionSender implements InteractionSender {
     @Override
     public PendingInteraction selectHotbar(PlayerContext context, int slot, int timeoutTicks) {
         // 本地切换选中槽并发包通知服务器；随后比较的 selected 字段就是这个本地值。
-        requireSubmission(context);
+        claimSubmission(context);
         // 选中上限问原版自己：服务端 handleSetCarriedItem 也按 Inventory.getSelectionSize() 校验；
         // 扩展快捷栏模组（如 HotBaaaar）会把它抬到 9 以上，未装时恒为 9，与原校验一致。
         int selectionLimit = Inventory.getSelectionSize();
@@ -313,7 +313,7 @@ public final class DefaultInteractionSender implements InteractionSender {
     public PendingInteraction creativeSetSlot(
             PlayerContext context, int inventorySlot, ItemStack expected, int timeoutTicks) {
         // 只有创造模式且物品栏界面已显示才允许设置槽位；发包后等物品栏实际出现期望物品，不直接在这里改本地数量。
-        requireSubmission(context);
+        claimSubmission(context);
         if (inventorySlot < 0 || inventorySlot >= Math.min(
                 36, context.localPlayer().getInventory().getContainerSize())) {
             throw new IllegalArgumentException("creative inventory slot must be between 0 and 35");
@@ -371,7 +371,7 @@ public final class DefaultInteractionSender implements InteractionSender {
             int timeoutTicks,
             boolean usesMenu) {
         // 模组菜单协议必须有可见菜单，世界控制协议则要求合适的世界界面；两者仍共用同一交互机会和等待位置。
-        requireSubmission(context);
+        claimSubmission(context);
         if (submission == null) throw new IllegalArgumentException("submission is required");
         if (confirmation == null) throw new IllegalArgumentException("confirmation is required");
         String name = operation == null || operation.isBlank() ? "mod protocol action" : operation;
@@ -398,7 +398,7 @@ public final class DefaultInteractionSender implements InteractionSender {
 
     public boolean deferMainHandUseCancellation(Object owner, PlayerContext context, PendingInteraction pending) {
         // 只能接收当前任务确实持有的主手动作；租借继续绑定原角色、确认、槽位、物品和递减的持用计时。
-        requireSubmission(context);
+        requireCurrent(context);
         if (!ownsItemUse(pending)
                 || context.localPlayer().getUsedItemHand() != InteractionHand.MAIN_HAND) return false;
         ItemStack item = context.localPlayer().getUseItem().copy();
@@ -414,7 +414,8 @@ public final class DefaultInteractionSender implements InteractionSender {
             clearMainHandCancellation();
             return false;
         }
-        if (opportunity.tryClaim(context)) cancelMainHandUse(context, held.pending());
+        // 只读看一眼本刻还有没有机会；真正发出取消时由取消入口自己占用。
+        if (context.canInteractThisTick()) cancelMainHandUse(context, held.pending());
         return true;
     }
 
@@ -424,7 +425,7 @@ public final class DefaultInteractionSender implements InteractionSender {
 
     @Override
     public PendingInteraction cancelMainHandUse(PlayerContext context, PendingInteraction pending) {
-        requireSubmission(context);
+        claimSubmission(context);
         requireActive(pending, PendingInteraction.Kind.USE_ITEM);
         if (context.localPlayer().isUsingItem()
                 && context.localPlayer().getUsedItemHand() != InteractionHand.MAIN_HAND)
@@ -453,12 +454,13 @@ public final class DefaultInteractionSender implements InteractionSender {
     @Override
     public PendingInteraction attack(PlayerContext context, Entity target,
                                      InteractionConfirmation confirmation, int timeoutTicks) {
-        requireSubmission(context);
-        // 同一目标的挥击还在等确认时，重提交按幂等等待：不重复挥手、不抛异常，
+        requireCurrent(context);
+        // 同一目标的挥击还在等确认时，重提交按幂等等待：不重复挥手、不抛异常，也不占本刻的交互机会，
         // 把仍在进行的等待原样交回，调用方逐刻读它自己的结算结果。
         if (sameTargetAttackAwaiting(active, context, target.getId())) {
             return active;
         }
+        claimSubmission(context);
         requireIdle(context);
         PendingInteraction pending = oneShot(
                 PendingInteraction.Kind.ATTACK_ENTITY, context, confirmation, timeoutTicks);
@@ -476,7 +478,7 @@ public final class DefaultInteractionSender implements InteractionSender {
     @Override
     public PendingInteraction interact(PlayerContext context, Entity target, InteractionHand hand,
                                        InteractionConfirmation confirmation, int timeoutTicks) {
-        requireSubmission(context);
+        claimSubmission(context);
         requireIdle(context);
         PendingInteraction pending = oneShot(
                 PendingInteraction.Kind.INTERACT_ENTITY, context, confirmation, timeoutTicks);
@@ -583,7 +585,7 @@ public final class DefaultInteractionSender implements InteractionSender {
      * 只登记边界原因，下一刻 advance 先停挖再结算。没有这一步，等待中的挖掘会一直占着
      * 动作队列直到自身超期——挖掘窗口长达数千刻，期间所有原生提交都被拒绝。
      */
-    public void deferBreakCancellationForTaskBoundary(PendingInteraction pending, String boundaryReason) {
+    @Override public void deferBreakCancellationForTaskBoundary(PendingInteraction pending, String boundaryReason) {
         if (pending == null || pending.terminal() || pending != active
                 || pending.kind() != PendingInteraction.Kind.BREAK_BLOCK) return;
         pendingBreakCancellationReason = boundaryReason == null || boundaryReason.isBlank()
@@ -594,7 +596,7 @@ public final class DefaultInteractionSender implements InteractionSender {
      * 刻外任务收尾的一次性动作版：不需要世界操作就能如实终结，标记效果未知
      * （提交可能已经生效），不留等待占位。持续动作（挖掘、持用）须走各自的物理停手。
      */
-    public void abandonOneShotForTaskBoundary(PendingInteraction pending, String boundaryReason) {
+    @Override public void abandonOneShotForTaskBoundary(PendingInteraction pending, String boundaryReason) {
         if (pending == null || pending.terminal()) return;
         if (pending != active && pending != auxiliary) return;
         if (pending.kind() == PendingInteraction.Kind.BREAK_BLOCK
@@ -636,10 +638,15 @@ public final class DefaultInteractionSender implements InteractionSender {
         pendingBreakCancellationReason = null;
     }
 
-    private static void requireSubmission(PlayerContext context) {
-        if (context == null || !context.isCurrent()) {
-            throw new IllegalArgumentException("the player context must belong to the current tick");
-        }
+    // 上下文必须属于本刻：旧刻的上下文可能指着已经换掉的玩家或连接。
+    private static void requireCurrent(PlayerContext context) {
+        if (context == null || !context.isCurrent()) throw new IllegalArgumentException("the player context must belong to the current tick");
+    }
+
+    // 发包前：角色仍归自动化控制（F8 交还后不能再发），并占用本刻唯一的交互机会；用过就拒绝，不悄悄再点一下。
+    private static void claimSubmission(PlayerContext context) {
+        requireCurrent(context);
+        if (!context.tryClaimInteraction()) throw new IllegalStateException("no interaction opportunity this tick");
     }
 
     /**
@@ -717,7 +724,7 @@ public final class DefaultInteractionSender implements InteractionSender {
             pendingBreakCancellationReason = null;
             return;
         }
-        if (!opportunity.tryClaim(context)) return;
+        if (!context.tryClaimInteraction()) return;
         try {
             gameMode(context).stopDestroyBlock();
             pending.finish(PendingInteraction.Status.CANCELLED,

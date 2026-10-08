@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.survival;
 
+import org.maiwithu.maicraft.game.menu.MenuActions;
+import org.maiwithu.maicraft.game.interaction.InteractionSender;
+import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.player.LocalPlayer;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -70,15 +75,16 @@ final class SurvivalFakes {
 
         TestPlayer nextTick() { tick++; return this; }
 
-        @Override public net.minecraft.client.player.LocalPlayer localPlayer() { return null; }
-        @Override public net.minecraft.client.multiplayer.ClientLevel level() { return null; }
-        @Override public net.minecraft.client.multiplayer.ClientPacketListener connection() { return null; }
-        @Override public org.maiwithu.maicraft.game.interaction.InteractionSender interactionSender() { return null; }
-        @Override public org.maiwithu.maicraft.game.menu.MenuActions menuActions() { return null; }
+        @Override public LocalPlayer localPlayer() { return null; }
+        @Override public ClientLevel level() { return null; }
+        @Override public ClientPacketListener connection() { return null; }
+        @Override public InteractionSender interactionSender() { return null; }
+        @Override public MenuActions menuActions() { return null; }
         @Override public PlayerInput input() { return input; }
         @Override public long clientTick() { return tick; }
         @Override public boolean isCurrent() { return true; }
         @Override public boolean canInteractThisTick() { return true; }
+        @Override public boolean tryClaimInteraction() { return true; }
 
         /** 输入替身：只记录，不写进任何玩家。 */
         final class FakeInput implements PlayerInput {
@@ -92,8 +98,8 @@ final class SurvivalFakes {
             }
             @Override public void clearLook() {}
             @Override public void releaseAll() {}
-            @Override public void halt(net.minecraft.client.player.LocalPlayer player) {}
-            @Override public void lookAt(net.minecraft.client.player.LocalPlayer player, Vec3 point) {}
+            @Override public void halt(LocalPlayer player) {}
+            @Override public void lookAt(LocalPlayer player, Vec3 point) {}
         }
     }
 

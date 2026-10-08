@@ -181,8 +181,9 @@ public final class SustainedUse implements Action {
         if (projection != null) {
             projection.release(this);
         }
+        // 本刻已经没有交互机会时发不了松开：投影已经交还，原版两刻内就看到松键，不硬发第二下。
         if (stage == Stage.HOLDING && lastContext != null && lastContext.interactionSender() != null
-                && pending != null) {
+                && pending != null && lastContext.canInteractThisTick()) {
             pending = lastContext.interactionSender().releaseUsingItem(lastContext, pending);
             result = InteractionResult.unconfirmed(
                     "任务结束时松开了手持" + describeHeld() + "的持续使用，没能等到做成它的确认");

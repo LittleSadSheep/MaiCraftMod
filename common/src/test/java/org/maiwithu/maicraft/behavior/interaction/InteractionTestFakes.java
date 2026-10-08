@@ -60,6 +60,7 @@ final class InteractionTestFakes {
         @Override public long clientTick() { return tick; }
         @Override public boolean isCurrent() { return current; }
         @Override public boolean canInteractThisTick() { return canInteract; }
+        @Override public boolean tryClaimInteraction() { return canInteractThisTick(); }
 
         TickContext asTickContext() {
             return new TickContext() {

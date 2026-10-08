@@ -11,6 +11,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.BaseFireBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
@@ -29,7 +30,8 @@ import org.maiwithu.maicraft.game.world.InteractionRange;
 /**
  * 把挖一个方块拆成选工具、关背包、瞄准、持续挖、等结果几步。
  * 每一刻调用一次，不会在一个循环里瞬间挖完；目标和未完成动作保存在本对象中。
- * 它有“可先拆遮挡物”和“只挖目标”两种入口，是否允许碰别的方块由调用方选择。
+ * 它有“可先拆遮挡物”和“只挖目标”两种入口；哪些遮挡格能顺手挖掉由调用方按许可给出，
+ * 这里不替它判断（默认一格都不挖，只挖目标）。
  * 交互与界面入口从构造函数传入，每刻推进时传入当刻的角色上下文。
  */
 public final class BlockDigger {
@@ -52,6 +54,12 @@ public final class BlockDigger {
     private int minimumToolDurability;
     public void minimumToolDurability(int remaining) { minimumToolDurability = Math.max(0, remaining); }
     private Predicate<BlockHitResult> preparation = hit -> true;
+    /** 哪些遮挡格可以顺手挖掉；判断归玩家行为层的许可检查点，没给时一格都不挖。 */
+    private Predicate<BlockPos> mayBreakOccluder = occluder -> false;
+    /** 允许拆遮挡物的入口用它问"这一格能不能挖"：受保护的、玩家的方块由许可检查点拒绝。 */
+    public void occluderRule(Predicate<BlockPos> mayBreak) {
+        mayBreakOccluder = Objects.requireNonNull(mayBreak);
+    }
     /** 工具真正拿好、界面关闭且准星对准后，才检查调用方的附加准备；未通过前不提交第一下破坏。 */
     public void beforeBreak(Predicate<BlockHitResult> gate) {
         preparation = Objects.requireNonNull(gate);
@@ -158,13 +166,13 @@ public final class BlockDigger {
             return DigResult.PROGRESSING;
         }
         // 决定本刻实际挥向哪里：先尝试射线确认可见的目标表面；若目标被树叶或狭窄顶棚遮挡，则瞄准目标中心并破坏准星实际命中的遮挡物来开路。
-        // 这样角色不必永远等待理想角度；但带方块实体的格子（箱子、机器等）绝不能作为遮挡物破坏。
+        // 这样角色不必永远等待理想角度；遮挡格能不能挖由调用方按许可回答，这里不替它判断。
         BlockHitResult hit = reachableHit(target);
         BlockPos effective = target;
         if (hit == null) {
             BlockHitResult center = centerRaycast(target);
             if (center != null && !center.getBlockPos().equals(target)
-                    && !level.getBlockState(center.getBlockPos()).hasBlockEntity()) {
+                    && mayBreakOccluder.test(center.getBlockPos().immutable())) {
                 hit = center;
                 effective = center.getBlockPos();
             }
@@ -235,6 +243,10 @@ public final class BlockDigger {
             return DigResult.PROGRESSING;
         }
         playerInput.lookAt(player, hit.getLocation());
+        // 本刻的交互机会已经被别的动作用掉（或角色不归自动化控制）：照样瞄准，下一刻再挥。
+        if (!context.canInteractThisTick()) {
+            return DigResult.PROGRESSING;
+        }
         // 第一次出手先等视角靠近目标；开始以后继续推进同一份挖掘记录，不每刻重新开挖。
         if (pending == null) {
             if (!aimReady(hit.getLocation())) {
@@ -330,6 +342,8 @@ public final class BlockDigger {
     // 工具在快捷栏就切换选中格；在背包第 9～35 格则先显示背包，再与当前快捷栏格交换。
     private void submitToolSelection(PlayerContext context) {
         int bestSlot = pendingToolSlot;
+        // 切快捷栏也是一次交互：本刻没有机会就留到下一刻，选好的格子不丢。
+        if (bestSlot >= 0 && bestSlot < 9 && !context.canInteractThisTick()) return;
         if (bestSlot >= 9 && bestSlot < 36 && !menuActions.ensureVisible(context)) return;
         pendingToolSlot = -1;
         int selected = player.getInventory().selected;
@@ -345,7 +359,7 @@ public final class BlockDigger {
     }
 
     /**
-     * 结束此挖掘器拥有的所有角色操作交易。
+     * 结束此挖掘器所有还没结清的操作：挖掘、切工具、为换工具打开的背包。
      *
      * <p>挖掘器可能在第一次挥动之前、仍处于选择或准备工具阶段时被取消。这些确认占用与破坏动作相同的
      * 交互串行槽位；只清空本地字段会遗留占用，使下一任务因“仍在等待确认”而失败。因此要实际停止破坏，
@@ -355,6 +369,20 @@ public final class BlockDigger {
     public void cancel(PlayerContext context) {
         boolean pendingBreak = pending != null && !pending.terminal();
         boolean pendingSelection = toolSelectPending != null && !toolSelectPending.terminal();
+        if (context == null || !context.isCurrent()) {
+            // 收尾时已经拿不到本刻的上下文（例如任务在两刻之间被换掉）：停挖留到下一刻在新任务之前做，
+            // 还在等确认的切工具按不确定交还；不能因为拿不到上下文就让挖掘一直按着。
+            if (pendingBreak) {
+                sender.deferBreakCancellationForTaskBoundary(pending,
+                        "the block-digging task ended before its native break was confirmed");
+            }
+            if (pendingSelection) {
+                sender.abandonOneShotForTaskBoundary(toolSelectPending,
+                        "the block-digging task ended while tool selection was awaiting confirmation");
+            }
+            reset();
+            return;
+        }
         boolean pendingMenu = (toolClosePending != null && !toolClosePending.terminal())
                 || (toolStagePending != null && !toolStagePending.terminal())
                 || MenuVisibility.inventoryVisible(
@@ -420,9 +448,9 @@ public final class BlockDigger {
         if (shape.isEmpty()) {
             shape = Shapes.block();
         }
-        // 先检查碰撞形状中心（形状为空时改用整个方块中心），再检查选择形状的六个面中心。
+        // 先检查碰撞形状中心（没有碰撞形状时用整格中心，火取底面），再检查选择形状的六个面中心。
         Vec3[] aims = {
-                shapeCenter(pos, shape),
+                collisionCenter(level, pos, state),
                 offsetOn(pos, shape, 0.5, 0.0, 0.5),
                 offsetOn(pos, shape, 0.5, 1.0, 0.5),
                 offsetOn(pos, shape, 0.5, 0.5, 0.0),
@@ -448,12 +476,18 @@ public final class BlockDigger {
         return null;
     }
 
-    /** 选择形状的中心；形状为空时退回整格中心。 */
-    private static Vec3 shapeCenter(BlockPos pos, VoxelShape shape) {
-        if (shape.isEmpty()) return Vec3.atCenterOf(pos);
+    /** 碰撞形状的中心；没有碰撞形状时退回整格中心。火没有碰撞，取它的底面高度：灭火要看火的根部。 */
+    private static Vec3 collisionCenter(Level level, BlockPos pos, BlockState state) {
+        VoxelShape shape = state.getCollisionShape(level, pos);
+        if (shape.isEmpty()) {
+            double y = state.getBlock() instanceof BaseFireBlock ? 0.0 : 0.5;
+            return new Vec3(pos.getX() + 0.5, pos.getY() + y, pos.getZ() + 0.5);
+        }
+        double y = state.getBlock() instanceof BaseFireBlock ? 0.0
+                : (shape.min(Direction.Axis.Y) + shape.max(Direction.Axis.Y)) / 2.0;
         return new Vec3(
                 pos.getX() + (shape.min(Direction.Axis.X) + shape.max(Direction.Axis.X)) / 2.0,
-                pos.getY() + (shape.min(Direction.Axis.Y) + shape.max(Direction.Axis.Y)) / 2.0,
+                pos.getY() + y,
                 pos.getZ() + (shape.min(Direction.Axis.Z) + shape.max(Direction.Axis.Z)) / 2.0);
     }
 

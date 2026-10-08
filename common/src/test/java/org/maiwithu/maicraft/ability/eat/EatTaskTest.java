@@ -127,6 +127,7 @@ class EatTaskTest {
         @Override public long clientTick() { return tick; }
         @Override public boolean isCurrent() { return true; }
         @Override public boolean canInteractThisTick() { return true; }
+        @Override public boolean tryClaimInteraction() { return true; }
     }
 
     /** 按住投影替身：记次数，续期永远成功。 */

@@ -73,6 +73,14 @@ public final class ScriptedInteractionSender implements InteractionSender {
         return ownsUse;
     }
 
+    @Override public void deferBreakCancellationForTaskBoundary(PendingInteraction pending, String boundaryReason) {}
+
+    @Override public void abandonOneShotForTaskBoundary(PendingInteraction pending, String boundaryReason) {
+        if (!pending.terminal()) {
+            pending.finish(PendingInteraction.Status.UNCERTAIN, boundaryReason);
+        }
+    }
+
     @Override public PendingInteraction retireOneShotForTaskBoundary(
             PlayerContext context, PendingInteraction pending, String boundaryReason) {
         retireCalled = true;

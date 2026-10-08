@@ -110,9 +110,9 @@ public final class Interaction {
      * 精确 useBlock 默认关闭；forHit 的调用方自行决定是否开启。
      */
     private boolean itemFallthrough;
-    private PendingMenuAction closeReceipt;
-    private PendingInteraction receipt;
-    private PendingInteraction lastUseReceipt;
+    private PendingMenuAction closePending;
+    private PendingInteraction pending;
+    private PendingInteraction lastUsePending;
     private boolean fallingThrough;
     private boolean releasing;
     private int fires;
@@ -252,7 +252,7 @@ public final class Interaction {
     }
 
     /** 原生点击已发出时先结算，不能为恢复空手而移动刚取回的工件，破坏库存确认依据。 */
-    public boolean awaitingReceipt() { return receipt != null; }
+    public boolean awaitingConfirmation() { return pending != null; }
 
     /** 固定语义目标身份，避免把预计放置后的方块误当成新的输入目标。 */
     public Interaction requireBlock(BlockPos position, Block required) {
@@ -273,27 +273,27 @@ public final class Interaction {
 
     /** 走位更新后续订同一近战目标的可见瞄准；不发攻击、不改移动，真正出手仍由下一次 tick 核对射线。 */
     public void renewEntityAttackAim() {
-        if (button != Button.ATTACK || receipt != null || entity == null || !entity.isAlive()
+        if (button != Button.ATTACK || pending != null || entity == null || !entity.isAlive()
                 || player.level().getEntity(entity.getId()) != entity || hardFail) return;
         playerInput.lookAt(player, stableEntityAimPoint(entity));
     }
 
     /** 挥击已经提交时必须继续等它的确认结果；尚未提交的瞄准才允许因对手退出射程而撤销。 */
-    public boolean entityAttackSubmitted() { return button == Button.ATTACK && receipt != null; }
+    public boolean entityAttackSubmitted() { return button == Button.ATTACK && pending != null; }
 
     /** 只结算已提交的这一刀；死亡、丢失和任务收尾期间均不重新瞄准、点击或发包。 */
     public Status pollSubmittedEntityAttack(PlayerContext context) {
-        if (button != Button.ATTACK || entity == null || receipt == null)
+        if (button != Button.ATTACK || entity == null || pending == null)
             return hardFail ? Status.FAILED : fires > 0 ? Status.DONE : Status.RUNNING;
-        if (settleAttackReceipt(context)) { fires++; return Status.DONE; }
+        if (settleAttack(context)) { fires++; return Status.DONE; }
         return hardFail ? Status.FAILED : Status.RUNNING;
     }
 
     // 先处理还没关好的界面，再分别推进挖方块、对空气使用物品或离散点击。
     // 已经发出的动作优先等结果，不因这次动作刚打开了箱子就立刻把箱子关上。
     public Status tick(PlayerContext context) {
-        if (receipt == null
-                && (closeReceipt != null || player.containerMenu != player.inventoryMenu
+        if (pending == null
+                && (closePending != null || player.containerMenu != player.inventoryMenu
                 || Minecraft.getInstance().screen != null)) {
             Status menuStatus = awaitWorldInputReady(context);
             if (menuStatus != null) {
@@ -312,21 +312,22 @@ public final class Interaction {
     /** 容器界面打开时不向世界发送攻击或使用按键，避免点击穿过菜单。 */
     // 发一次关闭菜单请求，然后逐刻等它完成；关闭失败就不能继续向世界点击。
     private Status awaitWorldInputReady(PlayerContext context) {
-        if (closeReceipt == null) {
-            closeReceipt = menuActions.close(context, CONFIRM_TIMEOUT_TICKS);
+        if (closePending == null) {
+            closePending = menuActions.close(context, CONFIRM_TIMEOUT_TICKS);
             return Status.RUNNING;
         }
-        if (!closeReceipt.terminal()) {
-            closeReceipt = menuActions.poll(context, closeReceipt);
+        if (!closePending.terminal()) {
+            closePending = menuActions.poll(context, closePending);
         }
-        if (!closeReceipt.terminal()) {
+        if (!closePending.terminal()) {
             return Status.RUNNING;
         }
-        PendingMenuAction.Status status = closeReceipt.status();
-        String detail = closeReceipt.detail();
-        closeReceipt = null;
+        PendingMenuAction.Status status = closePending.status();
+        String detail = closePending.detail();
+        closePending = null;
         if (status == PendingMenuAction.Status.CONFIRMED_APPLIED) {
-            return null;
+            // 关界面本身占用了这一刻的交互机会；世界动作留到下一刻，不在同一刻再出手。
+            return context.canInteractThisTick() ? null : Status.RUNNING;
         }
         failReason = "could not close the active menu before the world action: " + detail;
         return Status.FAILED;
@@ -363,12 +364,13 @@ public final class Interaction {
     // 点一下只要求这次使用得到确认；持续使用才会等到吃完或到达按住时限。
     private Status useAir(PlayerContext context) {
         playerInput.halt(player);
-        if (receipt == null) {
+        if (pending == null) {
             if (!requiredBlockPresent()) return Status.FAILED;
             if (player.isUsingItem()) {
                 failReason = "another item use was already active; it was left untouched";
                 return Status.FAILED;
             }
+            if (!context.canInteractThisTick()) return Status.RUNNING;
             ItemStack before = player.getItemInHand(hand).copy();
             int beforeMenu = player.containerMenu.containerId;
             InteractionConfirmation confirmation = InteractionConfirmation.anyOf(
@@ -377,42 +379,45 @@ public final class Interaction {
                     c -> c.localPlayer().isUsingItem()
                             ? InteractionConfirmation.Verdict.APPLIED
                             : InteractionConfirmation.Verdict.PENDING);
-            receipt = sender.useItem(
+            pending = sender.useItem(
                     context, hand, confirmation, timing.hold
                             ? Math.max(CONFIRM_TIMEOUT_TICKS, (int) Math.min(1200L,
                                     (long) before.getUseDuration(player) + CONFIRM_TIMEOUT_TICKS))
                             : CONFIRM_TIMEOUT_TICKS);
             return Status.RUNNING;
         }
-        receipt = sender.poll(context, receipt);
-        if (!receipt.terminal()) {
+        pending = sender.poll(context, pending);
+        if (!pending.terminal()) {
             return Status.RUNNING;
         }
         // 已经发出松开请求时，只等待松开结果，不重新开始使用。
         if (releasing) {
-            if (receipt.status() == PendingInteraction.Status.CONFIRMED_APPLIED) {
+            if (pending.status() == PendingInteraction.Status.CONFIRMED_APPLIED) {
                 return Status.DONE;
             }
-            failReason = "native item release was not confirmed: " + receipt.detail();
+            failReason = "native item release was not confirmed: " + pending.detail();
             return Status.FAILED;
         }
-        if (receipt.status() != PendingInteraction.Status.CONFIRMED_APPLIED) {
-            failReason = "native item use was not confirmed: " + receipt.detail();
+        if (pending.status() != PendingInteraction.Status.CONFIRMED_APPLIED) {
+            failReason = "native item use was not confirmed: " + pending.detail();
             return Status.FAILED;
         }
         if (!timing.hold) {
             return Status.DONE;
         }
         // 持续使用是否还归本交互管，以交互提交方认不认这笔使用为准。
-        if (player.isUsingItem() && !sender.ownsItemUse(receipt)) {
+        if (player.isUsingItem() && !sender.ownsItemUse(pending)) {
             failReason = "the held item use no longer belongs to this interaction";
             return Status.FAILED;
         }
         if (!player.isUsingItem()) {
             return Status.DONE;
         }
+        if (timing.maxHold > 0 && held + 1 >= timing.maxHold && !context.canInteractThisTick()) {
+            return Status.RUNNING;
+        }
         if (timing.maxHold > 0 && ++held >= timing.maxHold) {
-            receipt = sender.releaseUsingItem(context, receipt);
+            pending = sender.releaseUsingItem(context, pending);
             releasing = true;
             return Status.RUNNING;
         }
@@ -424,7 +429,7 @@ public final class Interaction {
     // 一次点击没确认完就不计次；确认一次后先等间隔，再开始下一次。
     private Status discrete(PlayerContext context) {
         // 有限持续操作到期后只结算已经发出的这一次，不能在最后一个确认尚未完成时宣布整段成功。
-        if (finishRequested && receipt == null) {
+        if (finishRequested && pending == null) {
             if (fires > 0 && !hardFail) return Status.DONE;
             failReason = "finite interaction ended without a confirmed native use"; return Status.FAILED;
         }
@@ -446,7 +451,7 @@ public final class Interaction {
     // 上次攻击尚未确认就继续等；准备新攻击时先停止移动、瞄准活着的目标，
     // 还要等攻击冷却和目标的短暂无敌时间结束，才发出攻击。
     private boolean fireAttackEntity(PlayerContext context) {
-        if (receipt != null) return settleAttackReceipt(context);
+        if (pending != null) return settleAttack(context);
         if (entity == null || !entity.isAlive()) {
             failReason = "the attack target is gone";
             hardFail = true;
@@ -467,10 +472,10 @@ public final class Interaction {
         boolean recovering = entity instanceof LivingEntity living
                 && living.hurtTime > 0;
         // 刚换武器、目标还在短暂无敌期，或攻击条没恢复到位，都先等；否则伤害会被吞掉或打折。
-        if (recovering || player.getAttackStrengthScale(0.0f) < ATTACK_READY) {
+        if (recovering || player.getAttackStrengthScale(0.0f) < ATTACK_READY || !context.canInteractThisTick()) {
             return false;
         }
-        receipt = sender.attack(
+        pending = sender.attack(
                 context,
                 entity,
                 InteractionConfirmation.entityStruck(player, entity),
@@ -478,14 +483,14 @@ public final class Interaction {
         return false;
     }
 
-    private boolean settleAttackReceipt(PlayerContext context) {
+    private boolean settleAttack(PlayerContext context) {
         // 沿原确认条件等待，不使用耐久、死亡记账或实体消失自行补造命中；已终结的确认可直接读历史结果。
-        if (!receipt.terminal()) {
-            receipt = sender.poll(context, receipt);
+        if (!pending.terminal()) {
+            pending = sender.poll(context, pending);
         }
-        if (!receipt.terminal()) return false;
-        PendingInteraction.Status status = receipt.status();
-        String detail = receipt.detail(); receipt = null;
+        if (!pending.terminal()) return false;
+        PendingInteraction.Status status = pending.status();
+        String detail = pending.detail(); pending = null;
         if (status == PendingInteraction.Status.CONFIRMED_APPLIED) return true;
         failReason = "native attack was not confirmed: " + detail;
         hardFail = true;
@@ -494,8 +499,8 @@ public final class Interaction {
 
     // 每次新点击都重新瞄准目标。指定面的操作还必须让当前准星真正落在那个面上。
     private boolean fireUseBlock(PlayerContext context) {
-        if (receipt != null) {
-            return settleUseReceipt(context, "block use");
+        if (pending != null) {
+            return settleUse(context, "block use");
         }
         if (!requiredBlockPresent()) return false;
         if (!player.level().isLoaded(block)) {
@@ -521,16 +526,16 @@ public final class Interaction {
                 return false;
             }
         }
-        if (!aimReady(hit.getLocation())) {
+        if (!aimReady(hit.getLocation()) || !context.canInteractThisTick()) {
             return false;
         }
         if (fallingThrough) {
             ItemStack before = player.getItemInHand(hand).copy();
-            receipt = sender.useItem(
+            pending = sender.useItem(
                     context, hand, itemUseConfirmation(hand, before),
                     CONFIRM_TIMEOUT_TICKS);
         } else {
-            receipt = sender.useBlock(
+            pending = sender.useBlock(
                     context, hand, hit, blockUseConfirmation(hit, hand),
                     CONFIRM_TIMEOUT_TICKS);
             // 仅记录真正交给原生右键入口的面，选站位时的预想朝向不能当作已点击方向。
@@ -540,15 +545,15 @@ public final class Interaction {
     }
 
     // 确认成功才计次；只有明确未生效才允许物品兜底，超时后必须保留原确认并交回现场检查。
-    private boolean settleUseReceipt(PlayerContext context, String action) {
-        receipt = sender.poll(context, receipt);
-        if (!receipt.terminal()) {
+    private boolean settleUse(PlayerContext context, String action) {
+        pending = sender.poll(context, pending);
+        if (!pending.terminal()) {
             return false;
         }
-        PendingInteraction.Status status = receipt.status();
-        String detail = receipt.detail();
-        lastUseReceipt = receipt;
-        receipt = null;
+        PendingInteraction.Status status = pending.status();
+        String detail = pending.detail();
+        lastUsePending = pending;
+        pending = null;
         if (status == PendingInteraction.Status.CONFIRMED_APPLIED) {
             lastUseOutcome = "confirmed (" + action + ")";
             fallingThrough = false;
@@ -560,7 +565,7 @@ public final class Interaction {
             return false;
         }
         // 失败的提交必须携带提交现场的插桩事实，否则“点击被谁拒了”只能靠猜。
-        String trace = lastUseReceipt.useOnTrace();
+        String trace = lastUsePending.useOnTrace();
         failReason = action + " was not confirmed: " + detail + (trace.isEmpty() ? "" : "; " + trace);
         hardFail = true;
         return false;
@@ -619,7 +624,7 @@ public final class Interaction {
     /** 没观察到变化不等于没发生；让任务和完成通知保留原生点击的确认边界，避免再次互换已装好的材料。 */
     public Map<String, Object> useEvidence() {
         if (button != Button.USE) return Map.of();
-        var last = receipt == null ? lastUseReceipt : receipt;
+        var last = pending == null ? lastUsePending : pending;
         if (last == null) return Map.of();
         boolean uncertain = last.status() != PendingInteraction.Status.CONFIRMED_APPLIED
                 && last.status() != PendingInteraction.Status.CONFIRMED_NOT_APPLIED;
@@ -644,8 +649,8 @@ public final class Interaction {
 
     // 目标仍活着、准星也确实点到它，才提交交互；需要物品兜底时仍沿用相同目标检查。
     private boolean fireUseEntity(PlayerContext context) {
-        if (receipt != null) {
-            return settleUseReceipt(context, "entity interaction");
+        if (pending != null) {
+            return settleUse(context, "entity interaction");
         }
         if (entity == null || !entity.isAlive()) {
             failReason = "the entity is gone";
@@ -657,18 +662,19 @@ public final class Interaction {
         if (!aimReady(entity.getEyePosition())) {
             return false;
         }
-        HitResult aimed = nativeRaytrace(player, InteractionRange.blockReach(player));
+        // 右键实体与左键实体一样按实体触及距离算：原版准星够不到的实体，人也点不到。
+        HitResult aimed = nativeRaytrace(player, InteractionRange.entityReach(player));
         if (!(aimed instanceof EntityHitResult entityHit)
-                || entityHit.getEntity() != entity) {
+                || entityHit.getEntity() != entity || !context.canInteractThisTick()) {
             return false;
         }
         if (fallingThrough) {
             ItemStack before = player.getItemInHand(hand).copy();
-            receipt = sender.useItem(
+            pending = sender.useItem(
                     context, hand, itemUseConfirmation(hand, before),
                     CONFIRM_TIMEOUT_TICKS);
         } else {
-            receipt = sender.interact(
+            pending = sender.interact(
                     context, entity, hand, entityUseConfirmation(entity, hand),
                     CONFIRM_TIMEOUT_TICKS);
         }
@@ -756,10 +762,12 @@ public final class Interaction {
     // 普通方块／实体点击的未确认记录没有在此退役，外层结束时仍需处理它。
     public void stop(PlayerContext context) {
         if (digger != null) digger.cancel(context);
-        if (receipt != null && receipt.kind() == PendingInteraction.Kind.USE_ITEM
+        if (pending != null && pending.kind() == PendingInteraction.Kind.USE_ITEM
                 && player.isUsingItem() && !releasing) {
-            if (sender.ownsItemUse(receipt) || block != null || entity != null || !timing.hold) {
-                receipt = sender.releaseUsingItem(context, receipt);
+            // 本刻没有交互机会时不发松开：按住使用键的投影两刻内自然过期，原版就看到松键。
+            if (context.canInteractThisTick()
+                    && (sender.ownsItemUse(pending) || block != null || entity != null || !timing.hold)) {
+                pending = sender.releaseUsingItem(context, pending);
                 releasing = true;
             }
         }
@@ -768,7 +776,7 @@ public final class Interaction {
     public void finishRepeating() { finishRequested = true; }
     /** 羊被本次剪毛或染色后只结算在途点击，不能把动作造成的属性变化当成选错目标。 */
     public boolean entityActionSubmitted() {
-        return entity != null && (receipt != null || lastUseReceipt != null || fires > 0);
+        return entity != null && (pending != null || lastUsePending != null || fires > 0);
     }
     public int confirmedUses() { return fires; }
 }

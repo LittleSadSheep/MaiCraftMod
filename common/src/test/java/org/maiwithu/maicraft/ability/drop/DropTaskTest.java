@@ -121,6 +121,8 @@ class DropTaskTest {
                 InteractionConfirmation cf, int t) { throw new UnsupportedOperationException(); }
         @Override public PendingInteraction submitControlProtocol(PlayerContext c, String op, Runnable run,
                 InteractionConfirmation cf, int t) { throw new UnsupportedOperationException(); }
+        @Override public void deferBreakCancellationForTaskBoundary(PendingInteraction pending, String reason) {}
+        @Override public void abandonOneShotForTaskBoundary(PendingInteraction pending, String reason) {}
         @Override public PendingInteraction retireOneShotForTaskBoundary(
                 PlayerContext c, PendingInteraction p, String reason) {
             throw new UnsupportedOperationException(); }
@@ -151,6 +153,7 @@ class DropTaskTest {
         @Override public long clientTick() { return tick; }
         @Override public boolean isCurrent() { return true; }
         @Override public boolean canInteractThisTick() { return true; }
+        @Override public boolean tryClaimInteraction() { return true; }
     }
 
     /** 现场替身：主手握着给定数量的圆石；注册表先经引导才能造真实物品。 */

@@ -90,6 +90,10 @@ public final class ThrowsItems implements Action {
             return ActionStatus.failed(new Problem(Problem.Kind.NEED_ITEM,
                     "主手上没有" + itemId + "，丢东西要先把要丢的换到主手", null));
         }
+        // 丢一下也是一次交互：本刻机会已经用掉（或角色不归自动化控制）就等下一刻。
+        if (!player.canInteractThisTick()) {
+            return ActionStatus.running();
+        }
         plannedThisThrow = held.getCount() <= remaining ? held.getCount() : 1;
         ItemStack before = held.copy();
         pending = player.interactionSender().dropSelected(player, before, plannedThisThrow > 1,

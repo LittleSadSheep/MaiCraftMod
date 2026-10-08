@@ -39,7 +39,6 @@ import org.maiwithu.maicraft.game.ModIdentity;
 import org.maiwithu.maicraft.game.interaction.DefaultInteractionSender;
 import org.maiwithu.maicraft.game.interaction.InteractionSender;
 import org.maiwithu.maicraft.game.menu.MenuActions;
-import org.maiwithu.maicraft.game.interaction.InteractionOpportunity;
 import org.maiwithu.maicraft.game.loader.LoaderEnvironment;
 import org.maiwithu.maicraft.game.ChatLog;
 import org.maiwithu.maicraft.game.ClientHooks;
@@ -238,11 +237,10 @@ public final class Bootstrap {
             if (instanceConfig.allowGameCommands()) {
                 LOG.info("{} 本实例允许角色执行游戏命令（配置文件放开）", ModIdentity.NAME);
             }
-            // 交互提交与容器界面操作共用同一份每刻一次的交互机会；两边都建好后互相接上，再挂进角色上下文。
+            // 交互提交与容器界面操作共用角色上下文里同一份每刻一次的交互机会；两边建好后互相接上，再挂进角色上下文。
             // 行为层的生存需求要靠这条轨道挖掘与放水，所以在这里创建并互相接好。
-            InteractionOpportunity opportunity = new InteractionOpportunity();
-            menuActions = new DefaultMenuActions(opportunity, playerControl.input());
-            interactionSender = new DefaultInteractionSender(menuActions, opportunity);
+            menuActions = new DefaultMenuActions(playerControl.input());
+            interactionSender = new DefaultInteractionSender(menuActions);
             menuActions.attachSender(interactionSender);
             playerControl.attachInteractionEntries(interactionSender, menuActions);
             // 按住使用键的投影：持续使用的提交方接入前没有任务占用，投影读到的始终是真实键值。
