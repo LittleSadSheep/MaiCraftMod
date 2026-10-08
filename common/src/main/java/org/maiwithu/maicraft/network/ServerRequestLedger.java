@@ -9,8 +9,8 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** 同一会话内不会淘汰记录；丢失回执绝不能导致再次执行修改操作。 */
-final class RequestLedger {
+/** 同一会话内不会淘汰记录；丢失请求记录绝不能导致再次执行修改操作。 */
+final class ServerRequestLedger {
     static final int MAX_REQUESTS = 512;
     static final int RECENT_READ_RESULTS = 8;
     private static final int MAX_MUTATION_CHARS = 524288;

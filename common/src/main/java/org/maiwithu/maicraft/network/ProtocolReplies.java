@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.network;
 
 import com.google.gson.JsonObject;
 
+/** 服务端应答信封的组装：把请求身份带回，标明状态、效果与服务端刻号。 */
 final class ProtocolReplies {
     private ProtocolReplies() {}
 

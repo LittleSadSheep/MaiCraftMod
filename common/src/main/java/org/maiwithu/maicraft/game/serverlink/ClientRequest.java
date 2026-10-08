@@ -8,13 +8,12 @@ import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.Objects;
 
-/** 每次提交保留唯一身份，取消或超时后仍凭它核对实际效果。 */
-public final class ClientRequestReceipt {
+/** 单次向服务端提交的请求记录：保留唯一身份，取消或超时后仍凭它核对实际效果。 */
+public final class ClientRequest {
     public enum Status { QUEUED, PENDING, SUCCEEDED, REJECTED, FAILED, CANCELLED, UNKNOWN }
     public enum Effect { NOT_APPLIED, APPLIED, UNKNOWN }
-    public enum Backend { UNSELECTED, SERVER, CLIENT }
 
-    /** SUCCEEDED 表示分发成功，任务是否完成仍由具体操作的结果字段决定。 */
+    /** SUCCEEDED 表示分发成功，业务是否完成仍由具体操作的结果字段决定。 */
     public record Result(Status status, Effect effect, JsonObject result, String code, String message) {
         public Result {
             if (status == null || effect == null) throw new IllegalArgumentException("status/effect required");
@@ -26,7 +25,7 @@ public final class ClientRequestReceipt {
     }
 
     public record Snapshot(UUID requestId, String operationId, int version, boolean mutating,
-                           Backend backend, Status status, Effect effect, boolean retired,
+                           Status status, Effect effect, boolean retired,
                            String code, String message, long serverTick, JsonObject result) {
         public Snapshot { result = result.deepCopy(); }
         @Override public JsonObject result() { return result.deepCopy(); }
@@ -42,12 +41,10 @@ public final class ClientRequestReceipt {
     final Runnable requireThread;
     final Consumer<Runnable> dispatch;
     final List<Consumer<Snapshot>> observers = new ArrayList<>();
-    Backend backend = Backend.UNSELECTED;
     Status status = Status.QUEUED;
     Effect effect = Effect.NOT_APPLIED;
     boolean retired;
     boolean submitted;
-    boolean fallbackAfterRejection;
     boolean readRefreshEligible;
     String code = "queued";
     String message = "waiting for a client tick";
@@ -58,8 +55,8 @@ public final class ClientRequestReceipt {
     long stopQueryTick;
     ServerCapabilityState.Scope scope;
 
-    ClientRequestReceipt(ClientOperation operation, JsonObject arguments, long binding,
-                         long generation, Runnable requireThread, Consumer<Runnable> dispatch) {
+    ClientRequest(ClientOperation operation, JsonObject arguments, long binding,
+                  long generation, Runnable requireThread, Consumer<Runnable> dispatch) {
         this.operation = operation;
         this.arguments = arguments.deepCopy();
         this.binding = binding;
@@ -71,16 +68,16 @@ public final class ClientRequestReceipt {
     public UUID id() { return id; }
     public Snapshot snapshot() {
         requireThread.run();
-        return new Snapshot(id, operation.id(), operation.version(), operation.mutating(), backend,
+        return new Snapshot(id, operation.id(), operation.version(), operation.mutating(),
                 status, effect, retired, code, message, serverTick, result);
     }
 
-    /** 回执观察者始终在客户端执行器上运行，结算完成后新登记的观察者也遵守此规则。 */
+    /** 记录的观察者始终在客户端线程运行；结算完成后新登记的观察者也遵守此规则。 */
     public void onUpdate(Consumer<Snapshot> observer) {
         Objects.requireNonNull(observer, "observer");
         dispatch.accept(() -> {
             requireThread.run();
-            if (observers.size() >= 32) throw new IllegalStateException("receipt observer limit reached");
+            if (observers.size() >= 32) throw new IllegalStateException("request observer limit reached");
             observers.add(observer);
             observer.accept(snapshot());
         });

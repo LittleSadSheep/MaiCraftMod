@@ -8,7 +8,7 @@ import java.util.Locale;
 
 /** 协商出的服务端支持、客户端已登记能力和每次执行条件分别判断。 */
 public final class ServerCapabilityState {
-    public enum State { DISCONNECTED, NEGOTIATING, READY, CLIENT_ONLY, DENIED, LOST }
+    public enum State { DISCONNECTED, NEGOTIATING, READY, UNCONFIRMED, DENIED, LOST }
     public record Scope(long connection, String sessionId, String dimension) {}
     public record Feature(int version, boolean mutating, boolean enabled, JsonObject limits) {
         public Feature { limits = limits.deepCopy(); }

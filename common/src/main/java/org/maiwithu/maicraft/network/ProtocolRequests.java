@@ -9,7 +9,7 @@ final class ProtocolRequests {
 
     static JsonObject execute(ProtocolSession session, JsonObject request, ServerProtocolDispatcher.Peer peer, boolean limited) {
         String requestId = ProtocolJson.string(request, "requestId");
-        String fingerprint = RequestLedger.fingerprint(request);
+        String fingerprint = ServerRequestLedger.fingerprint(request);
         JsonObject previous = session.ledger.lookup(requestId);
         if (previous != null) {
             if (session.ledger.matches(requestId, fingerprint)) return previous;

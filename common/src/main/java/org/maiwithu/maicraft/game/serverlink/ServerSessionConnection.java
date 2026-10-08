@@ -7,7 +7,7 @@ import java.util.UUID;
 import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
 
-/** 在客户端线程完成能力协商和控制授权续订，不重放任何业务操作。 */
+/** 在客户端线程完成能力协商和控制许可续订，不重放任何业务操作。 */
 final class ServerSessionConnection {
     final ServerCapabilityState capabilities = new ServerCapabilityState();
     final BooleanSupplier available;
@@ -49,7 +49,7 @@ final class ServerSessionConnection {
         wireGeneration = 0;
         acknowledged = false;
         nonce = UUID.randomUUID().toString();
-        capabilities.reset(ServerCapabilityState.State.CLIENT_ONLY, "channel_unavailable");
+        capabilities.reset(ServerCapabilityState.State.UNCONFIRMED, "channel_unavailable");
         if (available.getAsBoolean()) hello(tick, operations);
     }
 
@@ -64,7 +64,7 @@ final class ServerSessionConnection {
         envelope.add("features", versions);
         capabilities.reset(ServerCapabilityState.State.NEGOTIATING, "awaiting_welcome");
         helloDeadline = tick + 100;
-        if (!send(envelope)) capabilities.reset(ServerCapabilityState.State.CLIENT_ONLY, "hello_not_sent");
+        if (!send(envelope)) capabilities.reset(ServerCapabilityState.State.UNCONFIRMED, "hello_not_sent");
     }
 
     void tick(long tick, Collection<ClientOperation> operations) {
@@ -78,10 +78,10 @@ final class ServerSessionConnection {
             }
             return;
         }
-        if (capabilities.state == ServerCapabilityState.State.CLIENT_ONLY
+        if (capabilities.state == ServerCapabilityState.State.UNCONFIRMED
                 && capabilities.reason.equals("channel_unavailable")) hello(tick, operations);
         if (capabilities.state == ServerCapabilityState.State.NEGOTIATING && tick >= helloDeadline)
-            capabilities.reset(ServerCapabilityState.State.CLIENT_ONLY, "negotiation_timeout");
+            capabilities.reset(ServerCapabilityState.State.UNCONFIRMED, "negotiation_timeout");
         if (capabilities.state == ServerCapabilityState.State.READY && !acknowledged && tick >= controlRetryTick) {
             if (controlAttempts < 5) transmitControl(tick);
             else {
@@ -151,7 +151,7 @@ final class ServerSessionConnection {
         JsonObject envelope = scoped("control");
         envelope.addProperty("controlGeneration", wireGeneration);
         envelope.addProperty("allowed", allowed);
-        try { send(envelope); } catch (RuntimeException ignored) { /* 同一代控制授权可安全重试，不会新增游戏操作 */ }
+        try { send(envelope); } catch (RuntimeException ignored) { /* 同一代控制许可可安全重试，不会新增游戏操作 */ }
     }
 
     boolean mutationPermitted() {
@@ -193,7 +193,7 @@ final class ServerSessionConnection {
 
     void close() {
         if (capabilities.scope != null && available.getAsBoolean()) {
-            try { send(scoped("close")); } catch (RuntimeException ignored) { /* 保留未决回执，等待后续核对实际效果 */ }
+            try { send(scoped("close")); } catch (RuntimeException ignored) { /* 保留未决请求，等待后续核对实际效果 */ }
         }
     }
 
