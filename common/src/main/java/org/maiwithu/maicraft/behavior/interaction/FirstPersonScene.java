@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.interaction;
 
+import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
@@ -25,6 +26,21 @@ public interface FirstPersonScene {
 
     /** 沿当前视线发出原版射线：更近的方块或实体，谁都没射到就是未命中。 */
     HitResult sightRay();
+
+    /**
+     * 从现在的眼睛位置看这一格，能点到的第一个可见部位（命中点与面）；一面都看不到或够不着时为 null。
+     * 判断哪一面看得见是游戏接口层的同一条事实，这里只转述，不另写一套。
+     */
+    BlockHitResult visibleHit(BlockPos target);
+
+    /**
+     * 手里的物品按它自己的射线规则使用时（水桶沿视线找支撑面，满桶的水落到命中面外侧那一格），
+     * 现在看得见、能作用到 target 这一格的部位；看不到或够不着时为 null。
+     */
+    BlockHitResult visibleItemHit(BlockPos target, InteractionHand hand);
+
+    /** 按手里物品自己的射线规则，现在的准星使用下去会不会正好作用到 target 这一格。 */
+    boolean heldItemPointsAt(BlockPos target, InteractionHand hand);
 
     /** 目标格当前状态；格子未加载时返回 null，不能把没加载当成没有。 */
     BlockState blockAt(BlockPos pos);

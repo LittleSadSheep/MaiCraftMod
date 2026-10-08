@@ -155,4 +155,19 @@ class AimAndInteractTest {
     private static String failedKind(ActionStatus status) {
         return ((ActionStatus.Failed) status).problem().kind().name();
     }
+    @Test
+    void aBlockWithNoVisibleFaceAsksForAnotherStandWithoutTurning() {
+        ScriptedInteractionSender sender = new ScriptedInteractionSender();
+        InteractionTestFakes.FakeContext context = new InteractionTestFakes.FakeContext().withSender(sender);
+        InteractionTestFakes.FakeScene scene = new InteractionTestFakes.FakeScene(context);
+        scene.hidden.add(TARGET);
+        AimAndInteract action = blockAction(scene, c -> InteractionConfirmation.Verdict.APPLIED);
+
+        ActionStatus status = action.tick(context.asTickContext());
+
+        assertTrue(status instanceof ActionStatus.Failed, "一面都看不到就是站位问题");
+        assertEquals("UNREACHABLE", failedKind(status));
+        assertTrue(context.input.lookRequests.isEmpty(), "看不到就不白转头");
+        assertTrue(sender.submissions.isEmpty());
+    }
 }

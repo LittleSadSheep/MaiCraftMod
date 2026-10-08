@@ -24,31 +24,42 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 瞄准 → 交互 → 确认的完整动作，像真人一样"看准、点下去、看有没有反应"：
- * 先转向目标点并等真实镜头转到位（发出转头不算转到位），再用准星射线核对命中的
- * 确实是目标（命中了别的就换一个瞄准点，最多再试一次，还不行就是站位问题）；
- * 提交前冻结现场（目标格状态、射线命中者），经角色的交互提交入口交出本刻的
+ * 先从现在的位置找出目标看得见的部位（哪一面看得见是游戏接口层的同一条事实），转过去并等真实镜头
+ * 转到位（发出转头不算转到位），再用准星射线核对命中的确实是目标（命中了别的就重新瞄一次，
+ * 还不行就是站位问题）；提交前冻结现场（目标格状态、射线命中者），经角色的交互提交入口交出本刻的
  * 一次交互，然后逐刻确认：连续几刻稳定才算数，客户端预测的回滚排除在外。
- * 结论分生效、没生效、出乎预料、没能确认四种；任务结束收尾时，没等到确认的
- * 提交按不确定交还，任何退出路径都不会漏。站位与靠近不归这里管：需要换位时
- * 用"到不了"的问题表达，由调用方换站位后重新做这个动作。
+ * 结论分生效、没生效、出乎预料、没能确认四种；任务结束收尾时，没等到确认的提交按不确定交还，
+ * 任何退出路径都不会漏。站位与靠近不归这里管：需要换位时用"到不了"的问题表达，
+ * 由调用方换站位后重新做这个动作。
  */
 public final class AimAndInteract implements Action {
+
+    /** 这一下怎么点：右键目标本身（方块、实体），或者朝目标格使用手里的物品（水桶倒水这类沿物品自己射线作用的）。 */
+    public enum Gesture {
+        /** 右键方块或实体：开门、放方块、剪毛、骑乘。 */
+        USE,
+        /** 朝一格使用手里的物品：物品按自己的射线规则作用到那一格，例如把水倒进脚下那格。 */
+        USE_HELD_ITEM
+    }
 
     /** 等游戏确认的期限；超过就按没能确认收尾，不无限等。 */
     private static final int CONFIRM_TIMEOUT_TICKS = 20;
     /** 镜头转向目标的耐心上限；原地转不过去说明视角被什么占住，按到不了收尾。 */
     private static final int TURN_PATIENCE_TICKS = 40;
-    /** 瞄准点从方块中心往回收的距离，让准星落在面的内侧而不是边上。 */
-    private static final double AIM_INSET = 0.45;
+    /** 转到位后准星点到了别的东西时，最多重新瞄几次；真人换个角度再试一次就够了。 */
+    private static final int MAX_AIM_ATTEMPTS = 2;
 
     /** 动作内部的进度：转头与核对命中 → 等游戏确认。 */
     private enum Stage { AIMING, CONFIRMING }
 
     private final InteractionTarget target;
+    private final Gesture gesture;
+    private final InteractionHand hand;
     private final InteractionConfirmation confirmation;
     private final Function<PlayerContext, FirstPersonScene> scenes;
-    private final List<Vec3> aimCandidates = new ArrayList<>();
-    private int candidateIndex;
+    /** 这一次瞄准的点；重新瞄准时清空，按当时的位置重新找。 */
+    private Vec3 aimPoint;
+    private int aimAttempts;
     private int aimTicks;
     private Stage stage = Stage.AIMING;
     private PendingInteraction pending;
@@ -60,6 +71,22 @@ public final class AimAndInteract implements Action {
 
     public AimAndInteract(InteractionTarget target, InteractionConfirmation confirmation,
                           Function<PlayerContext, FirstPersonScene> scenes) {
+        this(target, Gesture.USE, InteractionHand.MAIN_HAND, confirmation, scenes);
+    }
+
+    /**
+     * @param target       要处理的目标；USE_HELD_ITEM 时是物品要作用到的那一格（倒水时是水该落进的那一格）
+     * @param gesture      怎么点
+     * @param hand         用哪只手
+     * @param confirmation 什么时候算生效，由调用方按手势给
+     */
+    public AimAndInteract(InteractionTarget target, Gesture gesture, InteractionHand hand,
+                          InteractionConfirmation confirmation, Function<PlayerContext, FirstPersonScene> scenes) {
+        if (gesture == Gesture.USE_HELD_ITEM && !(target instanceof InteractionTarget.BlockTarget)) {
+            throw new IllegalArgumentException("朝目标使用手里的物品只能对着一格方块");
+        }
+        this.gesture = Objects.requireNonNull(gesture, "gesture");
+        this.hand = Objects.requireNonNull(hand, "hand");
         this.target = Objects.requireNonNull(target, "target");
         this.confirmation = Objects.requireNonNull(confirmation, "confirmation");
         this.scenes = Objects.requireNonNull(scenes, "scenes");
@@ -90,7 +117,13 @@ public final class AimAndInteract implements Action {
             return ActionStatus.failed(new Problem(Problem.Kind.TARGET_GONE,
                     target.describe() + "已经不在了，还没出手", null));
         }
-        Vec3 aimPoint = nextAimCandidate();
+        if (aimPoint == null) {
+            aimPoint = planAim(scene);
+            if (aimPoint == null) {
+                return ActionStatus.failed(new Problem(Problem.Kind.UNREACHABLE,
+                        "从当前位置看不到" + target.describe() + "的任何一面，或者够不着，需要换站位", null));
+            }
+        }
         player.input().halt(player.localPlayer());
         player.input().lookAt(player.localPlayer(), aimPoint);
         // 发出转头不算转到位：实际视线没对准前不发射线核对，避免点到目标旁边。
@@ -102,16 +135,30 @@ public final class AimAndInteract implements Action {
             return ActionStatus.running();
         }
         HitResult hit = scene.sightRay();
-        if (!hitsTarget(hit)) {
-            return retryOrGiveUp(hit);
+        boolean onTarget = gesture == Gesture.USE_HELD_ITEM
+                ? scene.heldItemPointsAt(((InteractionTarget.BlockTarget) target).pos(), hand)
+                : hitsTarget(hit);
+        if (!onTarget) {
+            return reaimOrGiveUp(hit);
         }
         return submit(player, scene, hit);
     }
 
-    // 命中了别的：换个瞄准点再试一次（真人"换个角度最多再试一次"）；用尽仍不行就是站位问题。
-    private ActionStatus retryOrGiveUp(HitResult hit) {
-        candidateIndex++;
-        if (candidateIndex < aimCandidates.size()) {
+    // 瞄准点：方块取现在看得见的那个部位，实体取碰撞箱中心；方块一面都看不到时为 null。
+    private Vec3 planAim(FirstPersonScene scene) {
+        if (target instanceof InteractionTarget.BlockTarget block) {
+            BlockHitResult visible = gesture == Gesture.USE_HELD_ITEM
+                    ? scene.visibleItemHit(block.pos(), hand) : scene.visibleHit(block.pos());
+            return visible == null ? null : visible.getLocation();
+        }
+        return ((InteractionTarget.EntityTarget) target).entity().getBoundingBox().getCenter();
+    }
+
+    // 转到位后准星点到了别的：按现在的位置重新找瞄准点再试；次数用完就是站位问题。
+    private ActionStatus reaimOrGiveUp(HitResult hit) {
+        if (++aimAttempts < MAX_AIM_ATTEMPTS) {
+            aimPoint = null;
+            aimTicks = 0;
             return ActionStatus.running();
         }
         return ActionStatus.failed(new Problem(Problem.Kind.UNREACHABLE,
@@ -121,13 +168,21 @@ public final class AimAndInteract implements Action {
 
     // 冻结提交现场（目标格状态、射线命中者）再交出本刻的交互；之后进入逐刻确认。
     private ActionStatus submit(PlayerContext player, FirstPersonScene scene, HitResult hit) {
-        if (target instanceof InteractionTarget.BlockTarget block) {
-            targetStateAtSubmission = scene.blockAt(block.pos());
-        }
         submittedHitDescription = AimCheck.describeHit(hit);
-        pending = player.interactionSender().useBlock(
-                player, InteractionHand.MAIN_HAND, (BlockHitResult) hit, confirmation,
-                CONFIRM_TIMEOUT_TICKS);
+        if (gesture == Gesture.USE_HELD_ITEM) {
+            // 物品按自己的射线作用：发的是"使用手里的物品"，不是右键准星指着的方块。
+            targetStateAtSubmission = scene.blockAt(((InteractionTarget.BlockTarget) target).pos());
+            pending = player.interactionSender().useItem(player, hand, confirmation, CONFIRM_TIMEOUT_TICKS);
+        } else if (target instanceof InteractionTarget.BlockTarget block) {
+            targetStateAtSubmission = scene.blockAt(block.pos());
+            pending = player.interactionSender().useBlock(
+                    player, hand, (BlockHitResult) hit, confirmation, CONFIRM_TIMEOUT_TICKS);
+        } else {
+            // 实体目标走右键实体的原生入口：剪毛、挤奶、骑乘、交易都是这一下。
+            pending = player.interactionSender().interact(
+                    player, ((InteractionTarget.EntityTarget) target).entity(), hand,
+                    confirmation, CONFIRM_TIMEOUT_TICKS);
+        }
         stage = Stage.CONFIRMING;
         return ActionStatus.progressed();
     }
@@ -169,13 +224,17 @@ public final class AimAndInteract implements Action {
         return facts.toString();
     }
 
-    // 目标还没加载不能当成没有；方块目标已经变成空气就是没了。实体目标是否还在由确认与上层判断。
+    // 目标还没加载不能当成没有；方块目标已经变成空气就是没了，实体目标已经死亡或离开世界也是没了。
     private boolean targetVanished(FirstPersonScene scene) {
+        if (gesture == Gesture.USE_HELD_ITEM) {
+            // 物品要作用的那一格本来就常是空气（水要倒进去），空不代表目标没了。
+            return false;
+        }
         if (target instanceof InteractionTarget.BlockTarget block) {
             BlockState state = scene.blockAt(block.pos());
             return state != null && state.isAir();
         }
-        return false;
+        return target instanceof InteractionTarget.EntityTarget entity && entity.entity().isRemoved();
     }
 
     private boolean hitsTarget(HitResult hit) {
@@ -184,29 +243,6 @@ public final class AimAndInteract implements Action {
         }
         return target instanceof InteractionTarget.EntityTarget entity
                 && AimCheck.hitsEntity(hit, entity.entity());
-    }
-
-    // 瞄准点候选：方块从中心到六个面内侧，实体固定瞄碰撞箱中心。
-    private Vec3 nextAimCandidate() {
-        if (aimCandidates.isEmpty()) {
-            if (target instanceof InteractionTarget.BlockTarget block) {
-                fillBlockCandidates(block.pos());
-            } else if (target instanceof InteractionTarget.EntityTarget entity) {
-                aimCandidates.add(entity.entity().getBoundingBox().getCenter());
-            }
-        }
-        return aimCandidates.get(Math.min(candidateIndex, aimCandidates.size() - 1));
-    }
-
-    private void fillBlockCandidates(BlockPos pos) {
-        aimCandidates.add(Vec3.atCenterOf(pos));
-        // 六个面各一个内侧点：中心被挡住时换个面常就能点到；顺序固定，重试可复现。
-        aimCandidates.add(new Vec3(pos.getX() + 0.5, pos.getY() + AIM_INSET, pos.getZ() + 0.5));
-        aimCandidates.add(new Vec3(pos.getX() + 0.5, pos.getY() + 1 - AIM_INSET, pos.getZ() + 0.5));
-        aimCandidates.add(new Vec3(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + AIM_INSET));
-        aimCandidates.add(new Vec3(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 1 - AIM_INSET));
-        aimCandidates.add(new Vec3(pos.getX() + AIM_INSET, pos.getY() + 0.5, pos.getZ() + 0.5));
-        aimCandidates.add(new Vec3(pos.getX() + 1 - AIM_INSET, pos.getY() + 0.5, pos.getZ() + 0.5));
     }
 
     @Override public void pause() {

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.interaction;
 
+import net.minecraft.world.item.Item;
+import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.InteractionHand;
@@ -9,7 +11,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
-import org.maiwithu.maicraft.game.interaction.Interaction;
+import org.maiwithu.maicraft.game.interaction.FirstPersonInteractionTargeting;
 import org.maiwithu.maicraft.game.world.InteractionRange;
 
 /**
@@ -32,8 +34,36 @@ public final class LiveFirstPersonScene implements FirstPersonScene {
     }
 
     @Override public HitResult sightRay() {
-        // 原版准星规则：先找挡路方块，再看有没有更近的可点实体；距离用玩家自己的交互属性。
-        return Interaction.nativeRaytrace(player, InteractionRange.blockReach(player));
+        // 原版准星规则：先找挡路方块，再看有没有更近的可点实体；方块与实体各用玩家自己的触及距离。
+        return FirstPersonInteractionTargeting.crosshairTarget(player);
+    }
+
+    @Override public BlockHitResult visibleHit(BlockPos target) {
+        // 先试形状中心，再试六个面内侧，射线命中的第一格必须就是目标、且在方块触及距离内。
+        return FirstPersonInteractionTargeting.visibleBlockHit(player.level(), player, player.getEyePosition(),
+                target, InteractionRange.blockReach(player));
+    }
+
+    @Override public BlockHitResult visibleItemHit(BlockPos target, InteractionHand hand) {
+        Item item = player.getItemInHand(hand).getItem();
+        double reach = InteractionRange.blockReach(player);
+        if (FirstPersonInteractionTargeting.usesBucketRay(item)) {
+            return FirstPersonInteractionTargeting.visibleBucketHit(
+                    player.level(), player, player.getEyePosition(), target, reach, item);
+        }
+        return visibleHit(target);
+    }
+
+    @Override public boolean heldItemPointsAt(BlockPos target, InteractionHand hand) {
+        Item item = player.getItemInHand(hand).getItem();
+        if (!FirstPersonInteractionTargeting.usesBucketRay(item)) {
+            return AimCheck.hitsBlock(sightRay(), target);
+        }
+        // 水桶不走准星的方块射线：沿当前视线按桶自己的流体规则射出去，再核对水会不会落进 target。
+        Vec3 eye = player.getEyePosition();
+        Vec3 end = eye.add(player.getViewVector(1.0f).scale(InteractionRange.blockReach(player)));
+        BlockHitResult hit = FirstPersonInteractionTargeting.bucketRay(player.level(), player, eye, end, item);
+        return FirstPersonInteractionTargeting.acceptsBucketHit(player.level(), target, item, hit);
     }
 
     @Override public BlockState blockAt(BlockPos pos) {

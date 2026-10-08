@@ -25,8 +25,14 @@ public final class StandSpots {
     /** 围着目标扫候选站位的水平半径（格）：盖住交互距离属性被装备撑大后的范围。 */
     private static final int SCAN_RADIUS = 5;
 
-    /** 候选落差的扫描：目标上下各几格内找落脚点，床在高台上、实体在坑里都够得到。 */
-    private static final int SCAN_VERTICAL = 2;
+    /**
+     * 候选脚位比目标低多少格还要扫：眼睛比脚高一格半，低于目标五格的脚位仍可能够到天花板上的矿。
+     * 类别：游戏事实（眼高与方块触及距离）。
+     */
+    private static final int SCAN_BELOW = 5;
+
+    /** 候选脚位比目标高多少格还要扫：站在高处往下够坑里的东西。 */
+    private static final int SCAN_ABOVE = 3;
 
     /** 床距离的高度差上限：服务端对床横向卡三格、高度只允许差两格。类别：游戏事实。 */
     private static final int BED_VERTICAL_LIMIT = 2;
@@ -48,7 +54,7 @@ public final class StandSpots {
         BlockPos anchor = target.anchorBlock();
         BlockPos current = world.currentFeet();
         for (int dx = -SCAN_RADIUS; dx <= SCAN_RADIUS; dx++) {
-            for (int dy = -SCAN_VERTICAL; dy <= SCAN_VERTICAL; dy++) {
+            for (int dy = -SCAN_BELOW; dy <= SCAN_ABOVE; dy++) {
                 for (int dz = -SCAN_RADIUS; dz <= SCAN_RADIUS; dz++) {
                     review(new BlockPos(anchor.getX() + dx, anchor.getY() + dy, anchor.getZ() + dz),
                             target, reach, world, walking, guarded, current, spots, rejected);
