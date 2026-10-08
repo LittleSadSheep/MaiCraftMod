@@ -26,6 +26,7 @@ public final class ParamNames {
             Map.entry("operation", "一个能力内部的几种操作选哪一种，例如 enable、disable、status"),
             Map.entry("via", "指定途径，例如拿东西时指定合成、烧炼或采掘"),
             Map.entry("text", "要发送或书写的文字"),
+            Map.entry("message", "要发到游戏聊天的一句话，对全体玩家可见"),
             Map.entry("name", "名字，例如要记住的地点名"));
 
     private ParamNames() {}
