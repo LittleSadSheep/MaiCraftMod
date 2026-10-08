@@ -12,6 +12,9 @@ dependencies {
     }
     modImplementation "net.fabricmc:fabric-loader:${fabric_loader_version}"
     modImplementation "net.fabricmc.fabric-api:fabric-api:${fabric_version}"
+
+    // SQLite 驱动打进 Mod 的 Jar 里（include = 嵌入依赖）。
+    include(implementation("org.xerial:sqlite-jdbc:${sqlite_jdbc_version}"))
 }
 
 // 配置可选访问扩展、Mixin 映射文件，以及开发时的客户端与服务器启动方式。

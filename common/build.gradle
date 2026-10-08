@@ -19,6 +19,9 @@ neoForge {
 // Mixin 与 MixinExtras 由两个加载器在运行时提供，公共源码只需编译期依赖。
 // 测试使用 JUnit 5；ArchUnit 把 docs/design/02 第 7 节的分层与编码规则变成构建会失败的检查。
 dependencies {
+    // 世界进度存在 SQLite 里；驱动随 Mod 打包内置。
+    implementation "org.xerial:sqlite-jdbc:${sqlite_jdbc_version}"
+
     compileOnly group: 'org.spongepowered', name: 'mixin', version: '0.8.5'
     compileOnly group: 'io.github.llamalad7', name: 'mixinextras-common', version: '0.5.3'
     annotationProcessor group: 'io.github.llamalad7', name: 'mixinextras-common', version: '0.5.3'

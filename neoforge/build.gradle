@@ -42,3 +42,11 @@ neoForge {
 }
 
 sourceSets.main.resources { srcDir 'src/generated/resources' }
+
+// SQLite 驱动用 JarJar 打进 Mod 的 Jar 里，并加进开发运行的类路径。
+dependencies {
+    jarJar(implementation('org.xerial:sqlite-jdbc')) {
+        version { strictly "[${sqlite_jdbc_version},4.0)"; prefer sqlite_jdbc_version }
+    }
+    additionalRuntimeClasspath "org.xerial:sqlite-jdbc:${sqlite_jdbc_version}"
+}

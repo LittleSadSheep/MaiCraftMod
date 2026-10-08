@@ -14,50 +14,48 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.level.storage.LevelResource;
 
 /**
- * 决定任务进度属于哪个存档或服务器，避免连到另一处时直接使用上一次的任务和地标。
+ * 世界身份：判定当前进度属于哪个存档或服务器，连到另一个世界时不把上一个世界的数据当自己的用。
  *
- * @param key 从存档路径或服务器地址计算出的哈希；文件名中不直接写出地址或路径。
- * @param directory 旧 JSON 所在目录及原生提交日志目录。
- * @param databaseFile 同一游戏实例共用的 SQLite 文件。
- * @param scope 区分任务记忆与各玩家施工归属，避免共库后互相覆盖。
+ * @param key 从存档路径或服务器地址算出的哈希；文件名里不直接写出地址或路径。
+ * @param directory 本世界数据所在目录。
+ * @param databaseFile 同一游戏实例共用的 SQLite 库文件。
+ * @param scope 库内的范围名，区分不同用途的数据，避免共库后互相覆盖。
  */
 public record StateIdentity(String key, Path directory, Path databaseFile, String scope) {
-    /** 独立存储及回归夹具默认在各自目录建库，不探查其他游戏目录。 */
+    /** 独立使用或测试夹具：直接在给定目录建库。 */
     public StateIdentity(String key, Path directory) {
-        this(key, directory, directory.resolve(MemoryDatabase.FILE_NAME), "state");
+        this(key, directory, directory.resolveSibling(DocumentStore.FILE_NAME), "state");
     }
 
     public StateIdentity {
         if (key == null || !key.matches("[0-9a-f]{64}")) {
-            throw new IllegalArgumentException("state identity key must be SHA-256 hex");
+            throw new IllegalArgumentException("world identity key must be SHA-256 hex");
         }
         directory = directory.toAbsolutePath().normalize();
         databaseFile = databaseFile.toAbsolutePath().normalize();
-        if (scope == null || scope.isBlank()) throw new IllegalArgumentException("empty memory scope");
+        if (scope == null || scope.isBlank()) throw new IllegalArgumentException("empty storage scope");
     }
 
-    /** 同一世界的施工归属按玩家分区，沿用旧目录读入记录，同时共享游戏实例的数据库。 */
-    public StateIdentity child(String name) {
-        if (name == null || !name.matches("[a-zA-Z0-9_-]+")) throw new IllegalArgumentException("invalid memory scope");
-        return new StateIdentity(key, directory.resolve(name), databaseFile, scope + "/" + name);
-    }
-
+    /**
+     * 从当前游戏状态识别世界身份：优先认单人存档的存档目录，认不到再看多人服务器的地址；
+     * 还没进世界时不凭外部传来的文字猜身份，返回空。
+     */
     public static Optional<StateIdentity> resolve(Minecraft minecraft) {
-        // 优先识别单人存档，识别不到再看多人服务器；没进世界时不凭 MCP 传来的文字猜身份。
         if (minecraft == null || minecraft.player == null || minecraft.level == null) {
             return Optional.empty();
         }
         String raw = singleplayerIdentity(minecraft);
         if (raw == null) raw = multiplayerIdentity(minecraft);
         if (raw == null) return Optional.empty();
+        // 数据放在自己的版本目录下，不与旧版本的数据文件混用，互不读到对方的数据。
         Path directory = minecraft.gameDirectory.toPath()
-                .resolve("config").resolve("maicraft").resolve("state");
+                .resolve("config").resolve("maicraft").resolve("v1").resolve("state");
         return Optional.of(new StateIdentity(sha256(raw), directory,
-                directory.getParent().resolve(MemoryDatabase.FILE_NAME), "state"));
+                directory.resolveSibling(DocumentStore.FILE_NAME), "state"));
     }
 
+    /** 单人世界按存档目录区分；Windows 路径不区分大小写，先统一成小写再算，同一存档才算同一个世界。 */
     private static String singleplayerIdentity(Minecraft minecraft) {
-        // 用存档目录区分单人世界；Windows 路径不区分大小写，因此先统一成小写再计算。
         MinecraftServer server = minecraft.getSingleplayerServer();
         if (server == null) return null;
         try {
@@ -71,15 +69,15 @@ public record StateIdentity(String key, Path directory, Path databaseFile, Strin
         }
     }
 
+    /** 多人世界按服务器地址区分；同一地址上换地图时仍算同一个身份，地址里也不含玩家账号。 */
     private static String multiplayerIdentity(Minecraft minecraft) {
-        // 多人世界目前只按服务器地址区分，未包含玩家账号，也无法区分同一地址更换前后的世界。
         ServerData server = minecraft.getCurrentServer();
         if (server == null || server.ip == null || server.ip.isBlank()) return null;
         return "multiplayer\n" + server.ip.strip().toLowerCase(Locale.ROOT);
     }
 
+    /** 把路径或地址变成固定长度编号；这只用于区分文件，不代表服务器内容没有变化。 */
     private static String sha256(String value) {
-        // 将路径或地址变成固定长度编号；这只用于区分文件，不证明服务器内容没有变化。
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256")
                     .digest(value.getBytes(StandardCharsets.UTF_8));
