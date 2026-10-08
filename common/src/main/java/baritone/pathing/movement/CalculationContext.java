@@ -49,7 +49,7 @@ import net.minecraft.world.level.block.Blocks;
 import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
 
 import static baritone.api.pathing.movement.ActionCosts.COST_INF;
-import org.maiwithu.maicraft.behavior.navigation.baritone.FallDamageBudget;
+import org.maiwithu.maicraft.game.player.FallDamage;
 import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationProtection;
 import org.maiwithu.maicraft.behavior.navigation.baritone.PhysicalObstacleSnapshot;
 import org.maiwithu.maicraft.behavior.navigation.baritone.MaiCraftGoals;
@@ -84,7 +84,7 @@ public class CalculationContext {
     public final boolean allowDiagonalAscend;
     public final boolean allowDownward;
     public int minFallHeight;
-    public final FallDamageBudget fallDamageBudget;
+    public final FallDamage fallDamageBudget;
     private final BlockPos fallOrigin;
     private final double fallOriginY;
     public final double waterWalkSpeed;
@@ -164,7 +164,7 @@ public class CalculationContext {
                 player.position(), baritone.getPlayerContext().playerFeet(),
                 () -> PhysicalObstacleSnapshot.EMPTY,
                 player.getBbWidth(), player.getBbHeight());
-        this.fallDamageBudget = FallDamageBudget.capture(player);
+        this.fallDamageBudget = FallDamage.capture(player);
         this.fallOrigin = baritone.getPlayerContext().playerFeet().immutable();
         this.fallOriginY = player.getY();
         this.toolSet = new ToolSet(player);
@@ -254,14 +254,14 @@ public class CalculationContext {
     public boolean canLandWithoutDamage(int x, int y, int z, int effectiveStartHeight,
                                        int destX, int supportY, int destZ, BlockState support) {
         return fallDamageBudget.damage(fallDistance(x, y, z, effectiveStartHeight, destX, supportY, destZ),
-                FallDamageBudget.Landing.of(support), initialFall(x, y, z, effectiveStartHeight)) == 0;
+                FallDamage.Landing.of(support), initialFall(x, y, z, effectiveStartHeight)) == 0;
     }
 
     /** Survival estimate; route admission separately requires protecting any predicted injury. */
     public boolean canSurviveFall(int x, int y, int z, int effectiveStartHeight,
                                  int destX, int supportY, int destZ, BlockState support) {
         return fallDamageBudget.survives(fallDistance(x, y, z, effectiveStartHeight, destX, supportY, destZ),
-                FallDamageBudget.Landing.of(support), initialFall(x, y, z, effectiveStartHeight));
+                FallDamage.Landing.of(support), initialFall(x, y, z, effectiveStartHeight));
     }
 
     private double fallDistance(int x, int y, int z, int effectiveStartHeight, int destX, int supportY, int destZ) {

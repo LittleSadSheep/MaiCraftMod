@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.behavior.navigation.baritone;
+package org.maiwithu.maicraft.game.player;
 
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.tags.DamageTypeTags;
@@ -22,7 +22,7 @@ import net.minecraft.world.level.storage.loot.predicates.DamageSourceCondition;
  * 按当前生命、黄心、摔落相关属性和能理解的附魔，估算某个落差能否活下来。计算前取样，实际离地前仍要复查。
  * 抗性与缓降效果要能持续到估计的落地时刻才计入；模组自定义伤害和不能理解的附魔效果不在完整模拟范围内。
  */
-public record FallDamageBudget(float health, float absorption, float safeFallDistance,
+public record FallDamage(float health, float absorption, float safeFallDistance,
         double damageMultiplier, float protection, int resistanceLevel, int resistanceTicks,
         int slowFallingTicks, double gravity, float accumulatedFallDistance, boolean immune) {
 
@@ -41,7 +41,7 @@ public record FallDamageBudget(float health, float absorption, float safeFallDis
         }
     }
 
-    public static FallDamageBudget capture(LocalPlayer player) {
+    public static FallDamage capture(LocalPlayer player) {
         // 只在客户端线程读取游戏状态；线程由调用方保证。
         DamageSource fall = player.damageSources().fall();
         var resistance = player.getEffect(MobEffects.DAMAGE_RESISTANCE);
@@ -51,7 +51,7 @@ public record FallDamageBudget(float health, float absorption, float safeFallDis
         if (slow != null) gravity = Math.min(gravity, 0.01);
         // 漂浮效果会使着陆时间无法确定；不能依赖有限时长的增益效果之后自行结束。
         if (player.hasEffect(MobEffects.LEVITATION)) gravity = 0;
-        return new FallDamageBudget(player.getHealth(), player.getAbsorptionAmount(),
+        return new FallDamage(player.getHealth(), player.getAbsorptionAmount(),
                 (float) player.getAttributeValue(Attributes.SAFE_FALL_DISTANCE),
                 player.getAttributeValue(Attributes.FALL_DAMAGE_MULTIPLIER),
                 effects && !fall.is(DamageTypeTags.BYPASSES_ENCHANTMENTS) ? protection(player, fall) : 0,
