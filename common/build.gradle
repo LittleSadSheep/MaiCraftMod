@@ -17,11 +17,21 @@ neoForge {
 }
 
 // Mixin 与 MixinExtras 由两个加载器在运行时提供，公共源码只需编译期依赖。
+// 测试使用 JUnit 5；ArchUnit 把 docs/design/02 第 7 节的分层与编码规则变成构建会失败的检查。
 dependencies {
     compileOnly group: 'org.spongepowered', name: 'mixin', version: '0.8.5'
     compileOnly group: 'io.github.llamalad7', name: 'mixinextras-common', version: '0.5.3'
     annotationProcessor group: 'io.github.llamalad7', name: 'mixinextras-common', version: '0.5.3'
+
+    testImplementation platform("org.junit:junit-bom:${junit_version}")
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    testImplementation "com.tngtech.archunit:archunit-junit5:${archunit_version}"
 }
+
+// 决策类与内核的测试会用到 Minecraft 的值类型，测试类路径沿用主源码的编译类路径；测试本身不启动游戏。
+sourceSets.test.compileClasspath += sourceSets.main.compileClasspath
+sourceSets.test.runtimeClasspath += sourceSets.main.compileClasspath
 
 // 把公共 Java 源码与资源目录作为可供两个加载器模块取用的产物。公共模块不反过来解析这两份配置。
 configurations {
