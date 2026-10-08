@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.kernel.goal;
 
+import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
 
@@ -29,6 +30,23 @@ public record Permissions(
     /** 默认值：像正常玩家一样。 */
     public static final Permissions DEFAULT = new Permissions(
             BlockChanges.NATURAL, Fight.HOSTILE_MOBS, false, AnimalKilling.WILD, SurvivalNeeds.ON, Set.of());
+
+    /**
+     * 许可 = 默认值 + 这次任务给的覆盖：只写要改的字段，没写的（null；布尔用 null 表示没给）保持默认值，
+     * 额外保护的地标取并集。能力层解析 permissions 参数时用它把没出现的字段落回默认。
+     */
+    public Permissions mergedWith(BlockChanges changeBlocks, Fight fight, Boolean useRareItems,
+            AnimalKilling killAnimals, SurvivalNeeds survivalNeeds, Set<String> protectedLandmarks) {
+        var landmarks = new HashSet<>(this.protectedLandmarks);
+        if (protectedLandmarks != null) landmarks.addAll(protectedLandmarks);
+        return new Permissions(
+                changeBlocks != null ? changeBlocks : this.changeBlocks,
+                fight != null ? fight : this.fight,
+                useRareItems != null ? useRareItems : this.useRareItems,
+                killAnimals != null ? killAnimals : this.killAnimals,
+                survivalNeeds != null ? survivalNeeds : this.survivalNeeds,
+                landmarks);
+    }
 
     public Permissions {
         Objects.requireNonNull(changeBlocks, "changeBlocks");
