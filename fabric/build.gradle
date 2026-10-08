@@ -13,6 +13,11 @@ dependencies {
     modImplementation "net.fabricmc:fabric-loader:${fabric_loader_version}"
     modImplementation "net.fabricmc.fabric-api:fabric-api:${fabric_version}"
 
+    // 内嵌 Baritone 的源码引用 javax.annotation 注解与 ASM；加载器重编译 common 源码时也要在类路径上。
+    compileOnly group: 'com.google.code.findbugs', name: 'jsr305', version: '3.0.2'
+    compileOnly group: 'org.ow2.asm', name: 'asm', version: '9.7.1'
+    compileOnly group: 'org.ow2.asm', name: 'asm-tree', version: '9.7.1'
+
     // SQLite 驱动打进 Mod 的 Jar 里（include = 嵌入依赖）。
     include(implementation("org.xerial:sqlite-jdbc:${sqlite_jdbc_version}"))
 }
