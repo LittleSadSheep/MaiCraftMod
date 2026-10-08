@@ -51,7 +51,8 @@ public final class RequestRouter {
     ServerSessionConnection session() { return session; }
 
     public void register(ClientOperation operation) {
-        requireThread.run();
+        // 注册发生在 mod 构造期（不在客户端线程），只写并发前的清单，不碰游戏对象；
+        // 线程守卫只属于发请求/收确认那些真正触碰连接的路径。
         ClientOperation old = operations.get(operation.id());
         if (old != null && (old.version() != operation.version() || old.mutating() != operation.mutating()))
             throw new IllegalArgumentException("operation contract cannot change in place");
