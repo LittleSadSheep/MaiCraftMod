@@ -4,12 +4,14 @@ package org.maiwithu.maicraft.behavior.acquire;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquisitionCost;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
+import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
@@ -37,6 +39,7 @@ public final class RecipeSource implements ItemSource {
     private static final int PLANNED_COAL_BURN_TICKS = 1600;
     private static final String COAL = "minecraft:coal";
 
+    private final Set<RecipeView.Kind> kinds;
     private final ReadsRecipes recipes;
     private final WorldMemory memory;
     private final ReadsFuels fuels;
@@ -45,9 +48,16 @@ public final class RecipeSource implements ItemSource {
     private final OffhandContents offhand;
     private final ReadsItemTags tags;
     private final ItemNeeds needs;
+    /** 就地摆工作站的接缝；没接上时附近没有设施就如实说没有，不放。 */
+    private final SetsUpWorkstation placer;
+    private final PermissionCheck permission;
 
-    public RecipeSource(ReadsRecipes recipes, WorldMemory memory, ReadsFuels fuels, RecipeRuns runs,
-            BackpackView backpack, OffhandContents offhand, ReadsItemTags tags, ItemNeeds needs) {
+    /** 只做给定几种配方的来源：合成一条路（含石切台），烧炼一条路，分开登记才分得开 via。 */
+    public RecipeSource(Set<RecipeView.Kind> kinds, ReadsRecipes recipes, WorldMemory memory, ReadsFuels fuels,
+            RecipeRuns runs, BackpackView backpack, OffhandContents offhand, ReadsItemTags tags, ItemNeeds needs,
+            SetsUpWorkstation placer, PermissionCheck permission) {
+        if (kinds.isEmpty()) throw new IllegalArgumentException("来源至少要认一种配方");
+        this.kinds = Set.copyOf(kinds);
         this.recipes = recipes;
         this.memory = memory;
         this.fuels = fuels;
@@ -56,14 +66,30 @@ public final class RecipeSource implements ItemSource {
         this.offhand = offhand;
         this.tags = tags;
         this.needs = needs;
+        this.placer = placer;
+        this.permission = permission;
+    }
+
+    /** 认所有种类配方、不就地摆设施的来源：就地摆放与种类分路接入前的老写法。 */
+    public RecipeSource(ReadsRecipes recipes, WorldMemory memory, ReadsFuels fuels, RecipeRuns runs,
+            BackpackView backpack, OffhandContents offhand, ReadsItemTags tags, ItemNeeds needs) {
+        this(Set.of(RecipeView.Kind.CRAFTING, RecipeView.Kind.SMELTING, RecipeView.Kind.STONECUTTING),
+                recipes, memory, fuels, runs, backpack, offhand, tags, needs, null, null);
     }
 
     @Override public String describe() {
-        return "自己做";
+        return kinds.contains(RecipeView.Kind.SMELTING) && !kinds.contains(RecipeView.Kind.CRAFTING)
+                ? "烧炼" : "自己做";
+    }
+
+    @Override public String route() {
+        return kinds.contains(RecipeView.Kind.CRAFTING) ? AcquireRoutes.CRAFT : AcquireRoutes.SMELT;
     }
 
     @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
-        List<RecipeView> candidates = recipes.recipesProducing(request.wanted());
+        List<RecipeView> candidates = recipes.recipesProducing(request.wanted()).stream()
+                .filter(recipe -> kinds.contains(recipe.kind()))
+                .toList();
         if (candidates.isEmpty()) {
             return new SourceQuote.Unavailable(describe(),
                     "游戏里没有做出" + request.wanted().describe() + "的配方");
@@ -74,9 +100,7 @@ public final class RecipeSource implements ItemSource {
                 .toList().getFirst();
         Optional<MemoryRecord> station = findStation(recipe.kind(), context);
         if (station.isEmpty()) {
-            return new SourceQuote.Unavailable(describe(),
-                    "有配方（" + recipe.id() + "），但没记得附近有" + workstationName(recipe.kind())
-                            + "；用过一次才会记得它在哪");
+            return placementQuote(recipe, request.count(), context);
         }
         int times = timesNeeded(recipe, request.count());
         return new SourceQuote.Offer(describe(), request.count(),
@@ -94,14 +118,12 @@ public final class RecipeSource implements ItemSource {
             return Optional.empty();
         }
         Optional<MemoryRecord> station = findStation(recipe.kind(), context);
-        if (station.isEmpty()) {
-            return Optional.empty();
-        }
-        return Optional.of(assemble(recipe, station.get().position(),
+        return Optional.of(assemble(recipe,
+                station.map(MemoryRecord::position).orElse(null),
                 timesNeeded(recipe, request.count()), context));
     }
 
-    // 备料的一整串：缺的原料逐项去弄，烧炼再备燃料，最后到设施上做。
+    // 备料的一整串：缺的原料逐项去弄，烧炼再备燃料，没有设施就先摆一个，最后到设施上做。
     private Action assemble(RecipeView recipe, WorldPosition station, int times, SourceContext context) {
         Permissions permissions = context.permissions();
         List<Action> steps = new ArrayList<>();
@@ -116,6 +138,20 @@ public final class RecipeSource implements ItemSource {
         if (recipe.kind() == RecipeView.Kind.SMELTING) {
             steps.addAll(fuelSteps(recipe, times, permissions));
         }
+        if (station == null) {
+            // 附近没有记住的设施：先去弄一个设施方块、在身边放下，再到新设施上做。
+            steps.addAll(placeSteps(recipe, permissions));
+            Optional<Action> run = runs.runAtRememberedStation(recipe, times);
+            if (run.isEmpty()) {
+                return steps.isEmpty()
+                        ? nothingToDo(recipe)
+                        : new StepwiseActions("为「做" + recipe.result().describe() + "」备料",
+                                steps.toArray(Action[]::new));
+            }
+            steps.add(run.get());
+            return new StepwiseActions("就地摆下" + workstationName(recipe.kind()) + "再做"
+                    + recipe.result().describe(), steps.toArray(Action[]::new));
+        }
         Optional<Action> run = runs.run(recipe, station, times);
         if (run.isEmpty()) {
             // 备齐了也动不了手（设施没了、界面进不去）：整串放弃，由引擎换别的路。
@@ -127,6 +163,57 @@ public final class RecipeSource implements ItemSource {
         steps.add(run.get());
         return new StepwiseActions("备齐原料后去" + workstationName(recipe.kind()) + "做"
                 + recipe.result().describe(), steps.toArray(Action[]::new));
+    }
+
+    // 摆一个设施要的几步：身上没有设施方块就先去弄一个，然后在身边放下。摆不了（没接上）时给一个当场说明问题的动作。
+    private List<Action> placeSteps(RecipeView recipe, Permissions permissions) {
+        String blockType = workstationBlockType(recipe.kind());
+        List<Action> steps = new ArrayList<>();
+        int carried = CarriedItems.matching(backpack, offhand, WantedItem.ofItem(blockType), tags);
+        if (carried < 1) {
+            steps.add(needs.actionFor(new ItemRequest(WantedItem.ofItem(blockType), 1,
+                    "就地摆放的工作站"), permissions));
+        }
+        // 接缝没接上、或现场放不下时，这一步以问题收场，整串停在摆台之前，不冒充做成了。
+        Optional<Action> placing = placer == null ? Optional.empty() : placer.placeNearby(blockType);
+        if (placing.isEmpty()) {
+            steps.add(cannotPlace(recipe));
+        } else {
+            placing.ifPresent(steps::add);
+        }
+        return steps;
+    }
+
+    // 摆不了设施的动作：一推进一步就带着问题失败，免得"备料成功"冒充摆好了台子。
+    private Action cannotPlace(RecipeView recipe) {
+        String name = workstationName(recipe.kind());
+        return new Action() {
+            @Override public ActionStatus tick(TickContext context) {
+                return ActionStatus.failed(Problem.of(Problem.Kind.UNSUPPORTED,
+                        "在身边放下" + name + "的现场动作还没接上，做不了"));
+            }
+            @Override public String describe() {
+                return "放" + name + "的现场动作还没接上";
+            }
+        };
+    }
+
+    // 报价时没找到记住的设施：能就地摆就报"摆一个再做"，摆不了就如实说没有设施。
+    private SourceQuote placementQuote(RecipeView recipe, int count, SourceContext context) {
+        if (placer == null) {
+            return new SourceQuote.Unavailable(describe(),
+                    "有配方（" + recipe.id() + "），但没记得附近有" + workstationName(recipe.kind())
+                            + "；用过一次才会记得它在哪");
+        }
+        if (context.permissions().changeBlocks() == Permissions.BlockChanges.NONE) {
+            return new SourceQuote.Unavailable(describe(),
+                    "有配方（" + recipe.id() + "），附近没有" + workstationName(recipe.kind())
+                            + "，就地放一个需要改方块的许可，这次的许可不给");
+        }
+        return new SourceQuote.Offer(describe(), count,
+                new AcquisitionCost(0, 8 + recipe.ingredients().size()),
+                "附近没有" + workstationName(recipe.kind()) + "，会在身边放一个（消耗一个）并记下位置",
+                recipe.id());
     }
 
     // 烧炼要的燃料：身上有烧得着的就用身上的（挑烧得最久的），一件都没有才去弄煤。

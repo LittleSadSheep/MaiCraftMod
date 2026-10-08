@@ -32,6 +32,8 @@ final class ScriptedSource implements ItemSource {
     }
 
     final String name;
+    /** 这条来源自报的途径；核对 via 只走指定路时用它。 */
+    private final String route;
     private final FakeBackpack backpack;
     private final Deque<SourceQuote> quotes = new ArrayDeque<>();
     private SourceQuote lastAnswer;
@@ -40,7 +42,12 @@ final class ScriptedSource implements ItemSource {
     private int begun;
 
     ScriptedSource(String name, FakeBackpack backpack) {
+        this(name, AcquireRoutes.CARRIED, backpack);
+    }
+
+    ScriptedSource(String name, String route, FakeBackpack backpack) {
         this.name = name;
+        this.route = route;
         this.backpack = backpack;
     }
 
@@ -65,6 +72,10 @@ final class ScriptedSource implements ItemSource {
 
     @Override public String describe() {
         return name;
+    }
+
+    @Override public String route() {
+        return route;
     }
 
     @Override public SourceQuote quote(ItemRequest request, SourceContext context) {

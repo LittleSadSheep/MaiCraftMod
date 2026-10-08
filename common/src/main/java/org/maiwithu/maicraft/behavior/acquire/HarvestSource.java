@@ -26,15 +26,27 @@ public final class HarvestSource implements ItemSource {
     private final ScansMatureCrops crops;
     private final DigsBlocks digs;
     private final PermissionCheck permission;
+    /** 收完顺手补种的接缝；没接上时只收不补。 */
+    private final ReplantsCrops replants;
 
     public HarvestSource(ScansMatureCrops crops, DigsBlocks digs, PermissionCheck permission) {
+        this(crops, digs, permission, null);
+    }
+
+    public HarvestSource(ScansMatureCrops crops, DigsBlocks digs, PermissionCheck permission,
+            ReplantsCrops replants) {
         this.crops = crops;
         this.digs = digs;
         this.permission = permission;
+        this.replants = replants;
     }
 
     @Override public String describe() {
         return "收熟作物";
+    }
+
+    @Override public String route() {
+        return AcquireRoutes.HARVEST;
     }
 
     @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
@@ -69,6 +81,10 @@ public final class HarvestSource implements ItemSource {
                 return Optional.empty();
             }
             steps.add(dig.get());
+            if (replants != null) {
+                // 收完顺手把种子种回去；没有种子时补种动作自己会照常收场，不冒充补上了，也不白收。
+                replants.replant(spot.pos()).ifPresent(steps::add);
+            }
         }
         return Optional.of(new StepwiseActions("把熟了的" + request.wanted().describe()
                 + "收进背包", steps.toArray(Action[]::new)));

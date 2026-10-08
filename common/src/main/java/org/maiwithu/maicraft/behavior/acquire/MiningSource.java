@@ -51,13 +51,17 @@ public final class MiningSource implements ItemSource {
         return "采掘";
     }
 
+    @Override public String route() {
+        return AcquireRoutes.MINE;
+    }
+
     @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
         if (!minables.anyBlockDrops(request.wanted())) {
             return new SourceQuote.Unavailable(describe(),
                     "没有方块直接掉出" + request.wanted().describe()
                             + "——它是做出来的，去合成或烧炼");
         }
-        List<MinableSpot> spots = minables.minable(request.wanted(), context.characterAt(), SEARCH_RADIUS_BLOCKS);
+        List<MinableSpot> spots = minables.minable(request.wanted(), context.characterAt(), searchRadius(context));
         if (spots.isEmpty()) {
             return new SourceQuote.Unavailable(describe(),
                     "附近没有会掉出" + request.wanted().describe() + "的方块");
@@ -74,7 +78,7 @@ public final class MiningSource implements ItemSource {
 
     @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
         // 动手前重新扫一遍：问价到动手之间矿可能被挖走了，以现场为准。
-        List<MinableSpot> spots = minables.minable(request.wanted(), context.characterAt(), SEARCH_RADIUS_BLOCKS);
+        List<MinableSpot> spots = minables.minable(request.wanted(), context.characterAt(), searchRadius(context));
         PermittedSpots.Screen<MinableSpot> screened = PermittedSpots.screen(spots, MinableSpot::pos,
                 MinableSpot::blockType, context.permissions(), permission);
         if (screened.allowed().isEmpty()) {
@@ -114,6 +118,11 @@ public final class MiningSource implements ItemSource {
         WantedItem tool = new WantedItem(required.get());
         return Optional.of(needs.actionFor(new ItemRequest(tool, 1,
                 "采掘" + request.wanted().describe() + "要用的工具"), permissions));
+    }
+
+    /** 这次挖多大范围：任务给了半径就在这个范围里找（给了就不越界），没给用来源自己的默认。 */
+    private static int searchRadius(SourceContext context) {
+        return context.radiusBlocks() == null ? SEARCH_RADIUS_BLOCKS : context.radiusBlocks();
     }
 
     // 一格不一定掉一件，要挖的格子按"每格掉一件"估；真掉几件以重新清点为准。

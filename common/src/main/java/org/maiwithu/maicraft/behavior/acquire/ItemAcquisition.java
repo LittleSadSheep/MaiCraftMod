@@ -6,6 +6,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
 
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
@@ -65,13 +66,51 @@ public final class ItemAcquisition implements ItemNeeds {
         this.maxDepth = maxDepth;
     }
 
-    /** 这次要拿东西的动作：逐刻推进，把东西弄进背包算做完，弄不到以问题失败。 */
+    /** 这次要拿东西的动作：逐刻推进，把东西弄进背包算做完，弄不到以问题失败。途径、距离、半径都不限。 */
     public Action need(ItemRequest request, Permissions permissions) {
+        return need(request, permissions, Scope.ALL, null);
+    }
+
+    /**
+     * 带限定的一次拿东西：只走指定途径、只考虑愿意走的距离、只在给定的半径里找，
+     * 实际拿到东西时把途径报告给回调（结果细节 obtained_via 用它）。
+     * 限定只管最外层这一次；来源备料（原料、工具、燃料）仍然问遍所有来源——
+     * 指定了"烧炼"不等于烧之前连挖煤都不许。
+     */
+    public Action need(ItemRequest request, Permissions permissions, Scope scope, Consumer<String> onDelivered) {
         if (activeRequests.contains(request.wanted().specifier())) {
             throw new IllegalArgumentException("同一个需求已经在外层办着，不能再发一次："
                     + request.wanted().specifier());
         }
-        return new Run(request, permissions, request.wanted().specifier());
+        return new Run(request, permissions, request.wanted().specifier(), scope, onDelivered);
+    }
+
+    /**
+     * 一次拿东西的限定：只走哪些途径、愿意走多远、在多大半径里找。
+     * 空的途径集合与 null 的距离、半径都表示不限。
+     *
+     * @param routes            允许的途径（来源自报的门户）；空集合表示全部参与
+     * @param maxDistanceBlocks 愿意为此走多远（格）；来源报的距离超过它的不参与
+     * @param radiusBlocks      容器与采掘的搜索半径（格）；传给来源，给了就不越界
+     */
+    public record Scope(Set<String> routes, Double maxDistanceBlocks, Integer radiusBlocks) {
+
+        /** 什么都不限：问遍所有来源，按代价挑。 */
+        public static final Scope ALL = new Scope(Set.of(), null, null);
+
+        public Scope {
+            routes = Set.copyOf(routes);
+        }
+
+        /** 这条途径这次能不能参与。 */
+        public boolean allows(String route) {
+            return routes.isEmpty() || routes.contains(route);
+        }
+    }
+
+    /** 距离给人看的写法：整数不带小数点，例如 50 而不是 50.0。 */
+    private static String blocks(Double distance) {
+        return distance == Math.floor(distance) ? String.valueOf(distance.longValue()) : distance.toString();
     }
 
     /** 来源备料时的内部需求：深度与防环在这里把守，转圈与过深的请求当场拒绝。 */
@@ -88,7 +127,7 @@ public final class ItemAcquisition implements ItemNeeds {
                             + request.purpose() + "再去弄" + request.wanted().describe()
                             + "，层数太深不再往下试"));
         }
-        return new Run(request, permissions, key);
+        return new Run(request, permissions, key, Scope.ALL, null);
     }
 
     /** 一场获取的执行：清点 → 问价挑路 → 腾格子 → 用一个来源 → 再清点，直到够数或路都走完。 */
@@ -99,6 +138,8 @@ public final class ItemAcquisition implements ItemNeeds {
         private final ItemRequest request;
         private final Permissions permissions;
         private final String chainKey;
+        private final Scope scope;
+        private final Consumer<String> onDelivered;
         /** 这次办砸过或白跑过、不再回头的来源；报价再好也不选，免得在同一个地方撞两次。 */
         private final Set<String> excluded = new HashSet<>();
         private final List<String> deadEnds = new ArrayList<>();
@@ -106,13 +147,17 @@ public final class ItemAcquisition implements ItemNeeds {
         private List<Planned> plan = List.of();
         private Action step;
         private String stepSource;
+        private String stepSourceRoute;
         private int carriedAtStepStart;
         private boolean leftChain;
 
-        private Run(ItemRequest request, Permissions permissions, String chainKey) {
+        private Run(ItemRequest request, Permissions permissions, String chainKey,
+                Scope scope, Consumer<String> onDelivered) {
             this.request = request;
             this.permissions = permissions;
             this.chainKey = chainKey;
+            this.scope = scope;
+            this.onDelivered = onDelivered;
             activeRequests.add(chainKey);
         }
 
@@ -137,13 +182,27 @@ public final class ItemAcquisition implements ItemNeeds {
         // 问遍所有来源：给得了的按代价排队，给不了的记下原因，超出许可的原样带问题。
         private ActionStatus consult(int carried) {
             int stillNeeded = request.count() - carried;
-            SourceContext context = new SourceContext(position.currentPosition(), permissions);
+            SourceContext context = scope.radiusBlocks() == null
+                    ? new SourceContext(position.currentPosition(), permissions)
+                    : new SourceContext(position.currentPosition(), permissions, scope.radiusBlocks());
             List<Planned> offers = new ArrayList<>();
             List<SourceQuote> refusals = new ArrayList<>();
             for (ItemSource source : sources) {
                 if (excluded.contains(source.describe())) continue;
+                if (!scope.allows(source.route())) {
+                    // via 指定了别条路：这条不参与，也不算"问过没货"，不必写进结果。
+                    continue;
+                }
                 switch (source.quote(request.just(stillNeeded), context)) {
-                    case SourceQuote.Offer offer -> offers.add(new Planned(source, offer));
+                    case SourceQuote.Offer offer -> {
+                        if (scope.maxDistanceBlocks() != null
+                                && offer.cost().distanceBlocks() > scope.maxDistanceBlocks()) {
+                            refusals.add(new SourceQuote.Unavailable(offer.source(),
+                                    "在愿意走的 " + blocks(scope.maxDistanceBlocks()) + " 格之外"));
+                        } else {
+                            offers.add(new Planned(source, offer));
+                        }
+                    }
                     case SourceQuote.Unavailable unavailable -> refusals.add(unavailable);
                     case SourceQuote.NeedsApproval approval -> refusals.add(approval);
                     case SourceQuote.Unsupported unsupported -> refusals.add(unsupported);
@@ -189,6 +248,9 @@ public final class ItemAcquisition implements ItemNeeds {
                     if (carried <= carriedAtStepStart) {
                         excluded.add(stepSource);
                         deadEnds.add(stepSource + "（做完了，但一件都没拿到）");
+                    } else if (onDelivered != null) {
+                        // 真有东西进了背包：这条途径记进 obtained_via。
+                        onDelivered.accept(stepSourceRoute);
                     }
                     stage = Stage.CONSULT;
                     yield ActionStatus.progressed();
@@ -203,7 +265,9 @@ public final class ItemAcquisition implements ItemNeeds {
         }
 
         private ActionStatus startStep() {
-            SourceContext context = new SourceContext(position.currentPosition(), permissions);
+            SourceContext context = scope.radiusBlocks() == null
+                    ? new SourceContext(position.currentPosition(), permissions)
+                    : new SourceContext(position.currentPosition(), permissions, scope.radiusBlocks());
             Planned planned = plan.getFirst();
             int stillNeeded = request.count() - CarriedItems.matching(backpack, offhand, request, tags);
             Optional<Action> begun = planned.source()
@@ -216,6 +280,7 @@ public final class ItemAcquisition implements ItemNeeds {
             }
             step = begun.get();
             stepSource = planned.offer().source();
+            stepSourceRoute = planned.source().route();
             carriedAtStepStart = CarriedItems.matching(backpack, offhand, request, tags);
             stage = Stage.RUN;
             return ActionStatus.progressed();

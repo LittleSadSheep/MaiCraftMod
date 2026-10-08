@@ -40,8 +40,12 @@ public final class ContainerSource implements ItemSource {
         return "记得的箱子";
     }
 
+    @Override public String route() {
+        return AcquireRoutes.CONTAINER;
+    }
+
     @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
-        List<MemoryRecord> records = memory.recordsNear(context.characterAt(), SEARCH_RADIUS_BLOCKS);
+        List<MemoryRecord> records = memory.recordsNear(context.characterAt(), searchRadius(context));
         MemoryRecord known = null;
         MemoryRecord maybe = null;
         for (MemoryRecord record : records) {
@@ -73,6 +77,7 @@ public final class ContainerSource implements ItemSource {
     @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
         // 到了跟前再核对该报价认的那只箱子；箱子没了（被拆、记忆过时）就交回空，由引擎换路。
         Optional<MemoryRecord> record = memory.recordAt(MemoryKind.CONTAINER, parsePosition(offer.hint()));
+
         if (record.isEmpty()) {
             return Optional.empty();
         }
@@ -81,6 +86,11 @@ public final class ContainerSource implements ItemSource {
                 container.blockType() + " " + offer.hint(),
                 container.position().x(), container.position().y(), container.position().z());
         return takes.take(known, request);
+    }
+
+    /** 这次搜多大范围：任务给了半径就在这个范围里找（给了就不越界），没给用来源自己的默认。 */
+    private static int searchRadius(SourceContext context) {
+        return context.radiusBlocks() == null ? SEARCH_RADIUS_BLOCKS : context.radiusBlocks();
     }
 
     /** 开过、且记下的内容里有想要的东西的容器。 */

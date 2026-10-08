@@ -32,6 +32,10 @@ public final class CarriedItemsSource implements ItemSource {
         return "身上的背包";
     }
 
+    @Override public String route() {
+        return AcquireRoutes.CARRIED;
+    }
+
     @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
         int carried = CarriedItems.matching(backpack, offhand, request, tags);
         if (carried <= 0) {

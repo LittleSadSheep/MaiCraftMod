@@ -21,4 +21,13 @@ public interface RecipeRuns {
      * @param times   要做几次
      */
     Optional<Action> run(RecipeView recipe, WorldPosition station, int times);
+
+    /**
+     * 在"刚记进世界记忆的那台设施"上做：附近本来没有设施、就地放了一个新的时，
+     * 动手前才从世界记忆里读它的位置。实现从记忆里按方块类型找最近一台；
+     * 还没接上就地摆放的执行时返回 empty，来源如实报告做不了。
+     */
+    default Optional<Action> runAtRememberedStation(RecipeView recipe, int times) {
+        return Optional.empty();
+    }
 }
