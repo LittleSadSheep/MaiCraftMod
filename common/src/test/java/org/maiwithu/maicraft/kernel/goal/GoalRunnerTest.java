@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.goal.GoalTestAbility.ScriptedGoalTask;
 import org.maiwithu.maicraft.kernel.goal.GoalTestAbility.TestInput;
+import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
@@ -26,7 +27,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 目标推进器：下达后逐步推进到完成、失败传播、提问挂起与应答后继续、记住地点、等条件、
- * 按顺序运行几个任务、存盘与重启后恢复为暂停、提前收尾。
+ * 按顺序运行几个任务、存盘与重启后恢复为暂停、提前收尾；每个任务已经发生的事都并进目标的结果，
+ * 失败后能回来换办法，钩子在每个任务开始前都被问到，出错与启动失败都如实收场，暂停与恢复。
  */
 class GoalRunnerTest {
 
@@ -172,7 +174,7 @@ class GoalRunnerTest {
     }
 
     @Test
-    void recheckAfterSuccessLooksAtTheStepAgain() {
+    void decideAgainAfterSuccessLooksAtTheStepAgain() {
         GoalTestAbility ability = new GoalTestAbility("maicraft:test");
         ability.next(new StepDecision.Run(new TestInput("补一块板"), true));
         ability.next(new StepDecision.Finish(TaskResult.done("墙补好了")));
@@ -273,12 +275,12 @@ class GoalRunnerTest {
         TaskFactories factories = new TaskFactories();
         AbilityRegistry registry = new AbilityRegistry(factories);
         registry.register(ability);
-        GoalRunner revived = GoalRunner.resume(restored, registry, store, new TestMemory());
+        GoalRunner revived = GoalRunner.restore(restored, registry, store, new TestMemory());
         assertEquals(GoalRunState.PAUSED, revived.run().state(), "重启后恢复为暂停");
         assertEquals(TickResult.RUNNING, revived.tick(TICK0), "暂停中的目标不推进");
         assertEquals(List.of("y"), revived.run().answers(), "回答跟着记录一起回来了");
 
-        revived.unpause();
+        revived.resumeGoal();
         revived.answer("a");
         TaskResult result = resultOfDrive(revived);
         assertEquals(TaskResult.Status.DONE, result.status());
@@ -294,7 +296,7 @@ class GoalRunnerTest {
         drive(runner, 10);
 
         IllegalStateException error = assertThrows(IllegalStateException.class,
-                () -> GoalRunner.resume(runner.run(), new AbilityRegistry(new TaskFactories()), store, new TestMemory()));
+                () -> GoalRunner.restore(runner.run(), new AbilityRegistry(new TaskFactories()), store, new TestMemory()));
         assertTrue(error.getMessage().contains("已经结束"));
     }
 
@@ -351,12 +353,12 @@ class GoalRunnerTest {
         run.ask(question);
         run.pause();
         assertEquals(question, run.question(), "等回答时暂停，问题还挂着");
-        run.unpause();
+        run.resume();
         run.answer("a");
         assertThrows(IllegalStateException.class, () -> run.answer("b"), "不在等回答时不能回答");
         run.pause();
         assertThrows(IllegalStateException.class, () -> run.ask(question), "暂停中不能提问");
-        run.unpause();
+        run.resume();
         run.finish(TaskResult.done("好了"), 20);
         assertThrows(IllegalStateException.class, () -> run.finish(TaskResult.done("又好了"), 21),
                 "结束只发生一次");
@@ -364,5 +366,229 @@ class GoalRunnerTest {
         assertEquals(TaskResult.Status.DONE, run.result().status());
         assertEquals(20, run.finishedTick());
         assertNull(run.question());
+    }
+    private static TaskResult doneWith(String summary, String item) {
+        return TaskResult.builder(TaskResult.Status.DONE, summary)
+                .change(Change.of(Change.Kind.ITEM_GAINED, item, 1)).build();
+    }
+
+    private static AbilityRegistry registryOf(GoalTestAbility ability) {
+        AbilityRegistry registry = new AbilityRegistry(new TaskFactories());
+        registry.register(ability);
+        return registry;
+    }
+
+    @Test
+    void factsOfEveryTaskEndUpInTheGoalResult() {
+        // 先拿木头再做木板：最后由做木板给出结论，拿到木头这件事也要留在目标的结果里。
+        GoalTestAbility ability = new GoalTestAbility("maicraft:test");
+        ability.ending("拿木头", doneWith("拿了木头", "minecraft:oak_log"));
+        ability.ending("做木板", doneWith("做了木板", "minecraft:oak_planks"));
+        ability.next(new StepDecision.RunInOrder(List.of(
+                () -> new TestInput("拿木头"), () -> new TestInput("做木板"))));
+        GoalRunner runner = launch(Goal.of("maicraft:test", null, null), ability,
+                new InMemoryGoalRunStore(), new TestMemory());
+
+        TaskResult result = drive(runner, 10);
+
+        assertEquals(List.of("minecraft:oak_log", "minecraft:oak_planks"),
+                result.changes().stream().map(Change::what).toList());
+    }
+
+    @Test
+    void finishAfterTasksKeepsWhatTheTasksDid() {
+        // 白天叫它睡觉：先备好床，能力看了结果再以部分完成收场，备床的变化要在结果里。
+        GoalTestAbility ability = new GoalTestAbility("maicraft:test");
+        ability.ending("备床", doneWith("放好了床", "minecraft:red_bed"));
+        ability.next(new StepDecision.Run(new TestInput("备床"), true));
+        ability.next(new StepDecision.Finish(TaskResult.builder(TaskResult.Status.PARTIAL, "现在睡不了")
+                .remaining("入睡").problem(Problem.of(Problem.Kind.WRONG_TIME, "白天睡不了")).build()));
+        GoalRunner runner = launch(Goal.of("maicraft:test", null, null), ability,
+                new InMemoryGoalRunStore(), new TestMemory());
+
+        TaskResult result = drive(runner, 10);
+
+        assertEquals(TaskResult.Status.PARTIAL, result.status());
+        assertEquals("minecraft:red_bed", result.changes().get(0).what());
+        assertEquals(1, ability.taskResultsSeen.size(), "做决定时看得到刚结束的任务");
+    }
+
+    @Test
+    void failedTaskWithDecideAgainLetsTheAbilityTryAnotherWay() {
+        // 路被挡住：回来再决定，能力看到失败后换一条路，第二条路走通了，第一条路的经过也留着。
+        GoalTestAbility ability = new GoalTestAbility("maicraft:test");
+        ability.ending("走大路", TaskResult.builder(TaskResult.Status.FAILED, "大路被挡")
+                .problem(Problem.of(Problem.Kind.UNREACHABLE, "大路被墙挡住"))
+                .change(Change.of(Change.Kind.MOVED, "大路口", 1)).build());
+        ability.next(new StepDecision.Run(new TestInput("走大路"), true));
+        ability.next(new StepDecision.Run(new TestInput("走小路")));
+        GoalRunner runner = launch(Goal.of("maicraft:test", null, null), ability,
+                new InMemoryGoalRunStore(), new TestMemory());
+
+        TaskResult result = drive(runner, 10);
+
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertEquals(TaskResult.Status.FAILED, ability.taskResultsSeen.get(0).status(), "换办法前看到了失败");
+        assertEquals("大路口", result.changes().get(0).what());
+    }
+
+    @Test
+    void closeKeepsFactsOfTasksThatAlreadyFinished() {
+        GoalTestAbility ability = new GoalTestAbility("maicraft:test");
+        ability.ending("拿木头", doneWith("拿了木头", "minecraft:oak_log"));
+        ability.shared().keepRunning("做木板");
+        ability.next(new StepDecision.RunInOrder(List.of(
+                () -> new TestInput("拿木头"), () -> new TestInput("做木板"))));
+        GoalRunner runner = launch(Goal.of("maicraft:test", null, null), ability,
+                new InMemoryGoalRunStore(), new TestMemory());
+        runner.start(TICK0);
+        runner.tick(new GoalTestTick(101));
+        runner.tick(new GoalTestTick(102));
+
+        TaskResult result = runner.close(CloseReason.CANCELLED);
+
+        assertEquals(TaskResult.Status.CANCELLED, result.status());
+        assertEquals(List.of("minecraft:oak_log"), result.changes().stream().map(Change::what).toList());
+        assertEquals(1, ability.shared().created.get("做木板").closes, "还在做的任务按取消收尾");
+    }
+
+    @Test
+    void beforeTaskHookRunsBeforeEveryTaskStarts() {
+        GoalTestAbility ability = new GoalTestAbility("maicraft:test");
+        List<String> timeline = new ArrayList<>();
+        ability.hooks = new AbilityHooks() {
+            @Override public void beforeTask(StepContext step, TaskInput input) {
+                timeline.add("看:" + input.describe() + "（已启动 " + ability.startedInputs().size() + " 个）");
+            }
+        };
+        ability.next(new StepDecision.RunInOrder(List.of(
+                () -> new TestInput("一"), () -> new TestInput("二"), () -> new TestInput("三"))));
+        GoalRunner runner = launch(Goal.of("maicraft:test", null, null), ability,
+                new InMemoryGoalRunStore(), new TestMemory());
+
+        drive(runner, 10);
+
+        assertEquals(List.of("看:一（已启动 0 个）", "看:二（已启动 1 个）", "看:三（已启动 2 个）"), timeline,
+                "排在后面的任务也在启动前被问到");
+    }
+
+    @Test
+    void hookErrorClosesTheRunningTaskBeforeEnding() {
+        GoalTestAbility ability = new GoalTestAbility("maicraft:test");
+        ability.shared().keepRunning("一直挖");
+        ability.hooks = new AbilityHooks() {
+            @Override public Question duringTask(StepContext step, TaskInput input) {
+                throw new IllegalStateException("钩子出错");
+            }
+        };
+        ability.next(new StepDecision.Run(new TestInput("一直挖")));
+        GoalRunner runner = launch(Goal.of("maicraft:test", null, null), ability,
+                new InMemoryGoalRunStore(), new TestMemory());
+
+        TaskResult result = drive(runner, 5);
+
+        assertEquals(Problem.Kind.INTERNAL_ERROR, result.problem().kind());
+        assertEquals(1, ability.shared().created.get("一直挖").closes, "出错前先收尾正在跑的任务，不留按住的键");
+    }
+
+    @Test
+    void taskThatFailsToStartEndsTheGoalInsteadOfRetryingForever() {
+        GoalTestAbility ability = new GoalTestAbility("maicraft:test");
+        ability.shared().failOnStart("坏任务", new IllegalStateException("启动出错"));
+        for (int i = 0; i < 5; i++) {
+            ability.next(new StepDecision.Run(new TestInput("坏任务")));
+        }
+        GoalRunner runner = launch(Goal.of("maicraft:test", null, null), ability,
+                new InMemoryGoalRunStore(), new TestMemory());
+
+        TaskResult result = drive(runner, 5);
+
+        assertEquals(Problem.Kind.INTERNAL_ERROR, result.problem().kind());
+        assertEquals(1, ability.startedInputs().size(), "启动失败当场结束，不每刻重来");
+    }
+
+    @Test
+    void pausedGoalStopsTheTaskAndResumesWhereItWas() {
+        GoalTestAbility ability = new GoalTestAbility("maicraft:test");
+        ability.shared().keepRunning("砍树");
+        ability.next(new StepDecision.Run(new TestInput("砍树")));
+        InMemoryGoalRunStore store = new InMemoryGoalRunStore();
+        GoalRunner runner = launch(Goal.of("maicraft:test", null, null), ability, store, new TestMemory());
+        runner.start(TICK0);
+        runner.tick(new GoalTestTick(101));
+
+        runner.pauseGoal();
+
+        assertEquals(GoalRunState.PAUSED, store.unfinished().get(0).state(), "暂停后立即存盘");
+        assertEquals(1, ability.shared().created.get("砍树").pauses, "暂停时任务松手");
+        assertEquals(TickResult.RUNNING, runner.tick(new GoalTestTick(102)));
+        assertEquals(Interruptibility.BETWEEN_ACTIONS, runner.interruptibility(TICK0), "暂停中谁都可以插进来");
+        runner.resumeGoal();
+        assertEquals(GoalRunState.RUNNING, runner.run().state());
+        assertEquals(1, ability.startedInputs().size(), "恢复后接着原来的任务，不重新开始");
+    }
+
+    @Test
+    void pausedGoalCanBeAnsweredBeforeResuming() {
+        GoalTestAbility ability = new GoalTestAbility("maicraft:test");
+        ability.next(new StepDecision.Ask(new Question(Question.Reason.CHOOSE_ONE, "走哪条路？",
+                List.of(new Question.Option("a", "北边")))));
+        ability.next(new StepDecision.Finish(TaskResult.done("过去了")));
+        InMemoryGoalRunStore store = new InMemoryGoalRunStore();
+        GoalRunner runner = launch(Goal.of("maicraft:test", null, null), ability, store, new TestMemory());
+        runner.start(TICK0);
+        runner.tick(new GoalTestTick(101));
+        GoalRunner revived = GoalRunner.restore(store.unfinished().get(0), registryOf(ability), store, new TestMemory());
+        assertEquals("走哪条路？", revived.pendingQuestion().text());
+
+        revived.answer("a");
+
+        assertEquals(GoalRunState.PAUSED, revived.run().state(), "先收下回答，仍保持暂停");
+        assertNull(revived.pendingQuestion());
+        revived.resumeGoal();
+        assertEquals(TaskResult.Status.DONE, resultOfDrive(revived).status());
+        assertEquals(List.of("a"), ability.answersSeen);
+    }
+
+    @Test
+    void waitingForAnAnswerLeavesRoomForUnhurriedNeeds() {
+        GoalTestAbility ability = new GoalTestAbility("maicraft:test");
+        ability.shared().keepRunning("挖矿");
+        ability.hooks = new AbilityHooks() {
+            @Override public Question duringTask(StepContext step, TaskInput input) {
+                return step.answers().isEmpty() ? new Question(Question.Reason.NEED_APPROVAL, "要拆墙吗？",
+                        List.of(new Question.Option("y", "拆"))) : null;
+            }
+        };
+        ability.next(new StepDecision.Run(new TestInput("挖矿")));
+        GoalRunner runner = launch(Goal.of("maicraft:test", null, null), ability,
+                new InMemoryGoalRunStore(), new TestMemory());
+        runner.start(TICK0);
+        runner.tick(new GoalTestTick(101));
+        runner.tick(new GoalTestTick(102));
+
+        assertEquals(GoalRunState.AWAITING_ANSWER, runner.run().state());
+        assertEquals(Interruptibility.BETWEEN_ACTIONS, runner.interruptibility(TICK0),
+                "任务停手等回答时，吃口东西这类不急的事可以插进来");
+    }
+
+    @Test
+    void stepRecordsAreNotRestoredOnTheirOwn() {
+        GoalRun step = new GoalRun(7, Goal.of("maicraft:test", null, null), 3, 0);
+        assertThrows(IllegalArgumentException.class, () -> GoalRunner.restore(step,
+                new AbilityRegistry(new TaskFactories()), new InMemoryGoalRunStore(), new TestMemory()));
+    }
+
+    @Test
+    void cancelledBeforeFirstTickStaysCancelledWhenStarted() {
+        GoalTestAbility ability = new GoalTestAbility("maicraft:test");
+        GoalRunner runner = launch(Goal.of("maicraft:test", null, null), ability,
+                new InMemoryGoalRunStore(), new TestMemory());
+        runner.close(CloseReason.CANCELLED);
+
+        runner.start(TICK0);
+
+        assertEquals(TaskResult.Status.CANCELLED,
+                assertInstanceOf(TickResult.Finished.class, runner.tick(TICK0)).result().status());
     }
 }

@@ -12,21 +12,26 @@ import java.util.Objects;
  * 一次目标推进的记录：编号、目标、处境、进行到第几步、问过的问题、得到过的回答与最终结果。
  * 存盘的是它，重启后从它恢复；LLM 查询目标进展时看到的也是它。
  *
- * <p>状态只能前进：RUNNING → AWAITING_ANSWER → RUNNING 来回，PAUSED → RUNNING 解除，
- * 任何状态 → FINISHED 结束；结束后不可再改。违反顺序直接抛异常：那说明调用方的代码写错了，
- * 不是游戏里发生了什么。
+ * <p>处境的走法：RUNNING 与 AWAITING_ANSWER 之间来回（提问、回答）；RUNNING 或 AWAITING_ANSWER
+ * 可以被暂停（LLM 要求暂停，或重启后恢复出来），恢复后回到暂停前的处境；任何处境都可以结束，
+ * 结束后不可再改。违反走法直接抛异常：那说明调用方的代码写错了，不是游戏里发生了什么。
  *
  * <p>只在客户端主线程读写，本类不加锁。
  */
 public final class GoalRun {
+    /** LLM 直接下达的目标没有所属的目标运行。 */
+    public static final long NO_PARENT = -1;
+
     private final long id;
     private final Goal goal;
-    /** 所属的目标运行编号；LLM 直接下达的目标没有所属，为 -1。重启后恢复时要靠它分辨哪些是步骤自己的记录。 */
+    /** 所属的目标运行编号；LLM 直接下达的目标为 {@link #NO_PARENT}。重启后恢复时靠它分辨哪些是步骤自己的记录。 */
     private final long parentRunId;
+    /** 是所属 sequence 的第几步（从 0 开始）；LLM 直接下达的目标为 -1。重启后按它找回同一步的记录。 */
+    private final int stepOfParent;
     private GoalRunState state = GoalRunState.RUNNING;
     /** 进行到第几步（从 0 开始）；普通目标固定 0，sequence 是它包含的第几个子目标。 */
     private int stepIndex;
-    /** 等回答时的问题；不在等回答时为 null。 */
+    /** 在等回答的问题；没有问题挂着时为 null。暂停时问题照样挂着。 */
     private Question question;
     /** 这次推进里 LLM 已经给过的回答，按先后顺序。 */
     private final List<String> answers = new ArrayList<>();
@@ -37,22 +42,28 @@ public final class GoalRun {
 
     /** 编号由目标运行存储分配，这里不持有全局计数器；LLM 直接下达的目标没有所属运行。 */
     public GoalRun(long id, Goal goal) {
-        this(id, goal, -1);
+        this(id, goal, NO_PARENT, -1);
     }
 
-    /** sequence 的某一步：记录它所属的目标运行。 */
-    public GoalRun(long id, Goal goal, long parentRunId) {
+    /** sequence 的某一步：记录它所属的目标运行和它是第几步。 */
+    public GoalRun(long id, Goal goal, long parentRunId, int stepOfParent) {
         this.id = id;
         this.goal = Objects.requireNonNull(goal, "goal");
         this.parentRunId = parentRunId;
+        this.stepOfParent = stepOfParent;
     }
 
-    /** 第一次被推进时调用：记下开始时刻。 */
+    /**
+     * 开始被推进时调用：只记第一次的开始时刻。重启后恢复的记录照样会被再 start 一次
+     * （可能还挂着问题或处于暂停），这不改变它的处境，也不改写原来的开始时刻。
+     */
     public void start(long gameTick) {
-        if (state != GoalRunState.RUNNING) {
-            throw new IllegalStateException("目标运行 " + id + " 只能从 RUNNING 开始推进，当前是 " + state);
+        if (state == GoalRunState.FINISHED) {
+            throw new IllegalStateException("目标运行 " + id + " 已经结束，不能再开始推进");
         }
-        startedTick = gameTick;
+        if (startedTick < 0) {
+            startedTick = gameTick;
+        }
     }
 
     /** 停下来向 LLM 提问：从 RUNNING 进入等回答。 */
@@ -62,19 +73,23 @@ public final class GoalRun {
         state = GoalRunState.AWAITING_ANSWER;
     }
 
-    /** LLM 回答了：记下回答，回到推进。 */
+    /**
+     * LLM 回答了：记下回答，问题撤下。在等回答时回到推进；暂停中的目标也能先收下回答，
+     * 处境保持暂停，恢复后直接接着推进，不再等这个回答。
+     */
     public void answer(String text) {
-        requireState(GoalRunState.AWAITING_ANSWER, "回答");
+        if (question == null || (state != GoalRunState.AWAITING_ANSWER && state != GoalRunState.PAUSED)) {
+            throw new IllegalStateException("目标运行 " + id + " 没有在等回答，当前是 " + state);
+        }
         if (text == null || text.isBlank()) throw new IllegalArgumentException("回答不能为空");
         answers.add(text);
         question = null;
-        state = GoalRunState.RUNNING;
+        if (state == GoalRunState.AWAITING_ANSWER) {
+            state = GoalRunState.RUNNING;
+        }
     }
 
-    /**
-     * 暂停推进：重启恢复后的目标运行处于这个状态。等回答的目标也能暂停——问题还挂着，
-     * 解除暂停后照样等回答；已结束的不能改。
-     */
+    /** 暂停推进：LLM 要求暂停，或重启后恢复出来。等回答的目标也能暂停，问题照样挂着；已结束的不能改。 */
     public void pause() {
         if (state != GoalRunState.RUNNING && state != GoalRunState.AWAITING_ANSWER) {
             throw new IllegalStateException("目标运行 " + id + " 只能在推进中或等回答时暂停，当前是 " + state);
@@ -82,9 +97,9 @@ public final class GoalRun {
         state = GoalRunState.PAUSED;
     }
 
-    /** 解除暂停：暂停前在等回答的回到等回答，其余回到推进。 */
-    public void unpause() {
-        requireState(GoalRunState.PAUSED, "解除暂停");
+    /** 恢复推进：还挂着问题的回到等回答，其余回到推进。 */
+    public void resume() {
+        requireState(GoalRunState.PAUSED, "恢复");
         state = question != null ? GoalRunState.AWAITING_ANSWER : GoalRunState.RUNNING;
     }
 
@@ -94,6 +109,7 @@ public final class GoalRun {
             throw new IllegalStateException("目标运行 " + id + " 已经结束，不能再改结果");
         }
         result = Objects.requireNonNull(value, "value");
+        question = null;
         state = GoalRunState.FINISHED;
         finishedTick = gameTick;
     }
@@ -114,9 +130,14 @@ public final class GoalRun {
         return goal;
     }
 
-    /** 所属的目标运行编号；LLM 直接下达的目标为 -1。 */
+    /** 所属的目标运行编号；LLM 直接下达的目标为 {@link #NO_PARENT}。 */
     public long parentRunId() {
         return parentRunId;
+    }
+
+    /** 是所属 sequence 的第几步；LLM 直接下达的目标为 -1。 */
+    public int stepOfParent() {
+        return stepOfParent;
     }
 
     public GoalRunState state() {
@@ -127,7 +148,7 @@ public final class GoalRun {
         return stepIndex;
     }
 
-    /** 等回答时的问题；不在等回答时为 null。 */
+    /** 挂着的问题；没有问题挂着时为 null。 */
     public Question question() {
         return question;
     }
@@ -142,7 +163,7 @@ public final class GoalRun {
         return result;
     }
 
-    /** 开始时的游戏刻；还没开始时为 -1。 */
+    /** 第一次开始时的游戏刻；还没开始时为 -1。 */
     public long startedTick() {
         return startedTick;
     }
