@@ -1,44 +1,144 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.navigation.baritone;
 
+import baritone.api.BaritoneAPI;
+import baritone.api.IBaritone;
+import baritone.api.Settings;
+import baritone.api.event.events.PathEvent;
+import baritone.api.event.events.WorldEvent;
+import baritone.api.event.events.type.EventState;
+import baritone.api.event.listener.AbstractGameEventListener;
+import baritone.behavior.PathingBehavior;
+import java.util.List;
+import it.unimi.dsi.fastutil.longs.LongSets;
 import java.util.concurrent.atomic.AtomicReference;
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
+import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
+import org.maiwithu.maicraft.behavior.navigation.WalkRun;
+import org.maiwithu.maicraft.behavior.navigation.WalkTo;
+import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /**
- * 内嵌 Baritone 的接缝：Baritone 的搜索与移动对象都由它自己创建，拿不到外部传入的服务，
- * 所以这里登记唯一实例，供它的分叉代码把视角请求、快捷栏选择这类回调交回来。
- * 走到的实现方每刻先用本刻的角色上下文接上，再推进 Baritone；没有接上时回调一律不生效。
+ * 走到的内嵌 Baritone 实现方，也是全仓唯一接触 Baritone 非 api 包的位置。
+ * 编译好的目标包成 Baritone 的搜索目标交给它算路；引擎不靠自己的事件钩子运行，
+ * 由走到运行每刻手动推进它的计算、读回路线与进度，并把引擎请求的按键合成
+ * 角色的移动输入。地形许可按 {@link TerrainSwitches} 写进引擎的挖／放开关；
+ * 保护格经 {@link NavigationProtection} 交给引擎的搜索与执行。
+ *
+ * <p>同一时刻角色只走一条路：上一次运行还没停稳时，新请求排队等待交出身体，
+ * 等待期间如实报告正在算路。所有方法只能在客户端线程调用；逐刻推进由任务
+ * 在阶段里调用 {@link WalkRun#tick}。
  */
-public final class BaritoneInternals {
+public final class BaritoneInternals implements WalkTo {
 
     private static final AtomicReference<BaritoneInternals> ATTACHED = new AtomicReference<>();
 
-    /** 登记唯一实例；走到结束或换角色时解除。 */
-    public static void attach(BaritoneInternals internals) {
-        ATTACHED.set(internals);
+    private IBaritone engine;
+    /** 引擎上次同步的世界；换世界后要重新通知引擎，避免它拿着旧世界的缓存算路。 */
+    private ClientLevel engineWorld;
+    private BaritoneWalkRun active;
+    private BaritoneWalkRun queued;
+
+    @Override
+    public WalkRun start(GoalCompiler.Compiled target, TerrainPermit permit) {
+        var run = new BaritoneWalkRun(this, target, permit);
+        // 上一次运行还在路上：新请求排队，等旧运行交出身体才上路；排队者被更新的请求顶掉时如实结算。
+        if (queued != null) queued.abandon();
+        queued = run;
+        return run;
     }
 
-    public static void detach(BaritoneInternals internals) {
-        ATTACHED.compareAndSet(internals, null);
+    /** 走到实现方每刻推进一个运行；同时只推进拥有身体的那一个。 */
+    void drive(BaritoneWalkRun run, PlayerContext context) {
+        if (active == null && queued == run) {
+            activate(run, context);
+        }
+        if (active != run) {
+            run.observeQueued();
+            return;
+        }
+        engineWorld(engine, context.level());
+        beginTick(context);
+        try {
+            run.driveBody(context);
+        } finally {
+            endTick();
+        }
     }
 
-    private static BaritoneInternals current() {
-        return ATTACHED.get();
+    /** 当前运行结束后让下一个排队运行上路。 */
+    void release(BaritoneWalkRun run) {
+        if (active != run) return;
+        active = null;
     }
 
-    private PlayerContext tickContext;
-
-    /** 走到的实现方每刻推进前调用：本刻的视角与快捷栏回调都写进这份上下文的输入入口。 */
-    public void beginTick(PlayerContext context) {
-        this.tickContext = context;
+    /** 排队请求被更新的请求顶掉或所属任务已放弃时结算，不能永远占着队位。 */
+    void dropQueued(BaritoneWalkRun run) {
+        if (queued == run) queued = null;
     }
 
-    /** 本刻推进结束；之后的回调不再对应任何有效的每刻输入。 */
-    public void endTick() {
-        this.tickContext = null;
+    IBaritone engine() {
+        return engine;
+    }
+
+    PathingBehavior pathing() {
+        return engine == null ? null : (PathingBehavior) engine.getPathingBehavior();
+    }
+
+    private void activate(BaritoneWalkRun run, PlayerContext context) {
+        if (engine == null) {
+            engine = BaritoneAPI.getProvider().getPrimaryBaritone();
+            engine.getGameEventHandler().registerEventListener(new AbstractGameEventListener() {
+                @Override
+                public void onPathEvent(PathEvent event) {
+                    BaritoneWalkRun current = active;
+                    if (current != null) current.onPathEvent(event);
+                }
+            });
+        }
+        ATTACHED.set(this);
+        NavigationProtection.install(run.sacredCells(), LongSets.EMPTY_SET, Integer.MIN_VALUE);
+        configureTerrain(BaritoneAPI.getSettings(), run.permit());
+        queued = null;
+        active = run;
+        run.activate(context);
+    }
+
+    // 把本次许可明确写到引擎：能否挖、能否垫、能否跑酷垫、能否向下挖都从这份许可决定，
+    // 不沿用上一次走到留下的状态；视角与聊天控制保持关闭，镜头与消息归本仓管。
+    private static void configureTerrain(Settings settings, TerrainPermit permit) {
+        TerrainSwitches switches = TerrainSwitches.of(permit);
+        settings.allowBreak.value = switches.allowBreak();
+        settings.allowBreakAnyway.value = List.of();
+        settings.allowPlace.value = switches.allowPlace();
+        settings.allowParkourPlace.value = switches.allowParkourPlace();
+        settings.allowDownward.value = switches.allowDownward();
+        settings.allowWaterBucketFall.value = switches.allowWaterBucketFall();
+        // 背包换槽由原生交换流程负责，这里不开放引擎的直接背包操作。
+        settings.allowInventory.value = false;
+        settings.allowSprint.value = true;
+        settings.allowParkour.value = true;
+        settings.sprintAscends.value = true;
+        settings.sprintInWater.value = true;
+        settings.renderPath.value = false;
+        settings.renderGoal.value = false;
+        settings.chatControl.value = false;
+        settings.chatControlAnyway.value = false;
+        settings.notificationOnPathComplete.value = false;
+        settings.disconnectOnArrival.value = false;
+        settings.freeLook.value = false;
+        settings.randomLooking.value = 0D;
+        settings.randomLooking113.value = 0D;
+    }
+
+    private void engineWorld(IBaritone baritone, ClientLevel current) {
+        if (engineWorld == current) return;
+        baritone.getGameEventHandler().onWorldEvent(new WorldEvent(current, EventState.POST));
+        engineWorld = current;
     }
 
     /**
@@ -46,7 +146,7 @@ public final class BaritoneInternals {
      * 挖掘与放置的精确方块瞄准走立即瞄准通道。没有本刻上下文时不转。
      */
     public static void requestLook(float yaw, float pitch, boolean precisionAim) {
-        BaritoneInternals internals = current();
+        BaritoneInternals internals = ATTACHED.get();
         PlayerContext context = internals == null ? null : internals.tickContext;
         if (context == null) return;
         if (precisionAim) {
@@ -54,6 +154,17 @@ public final class BaritoneInternals {
         } else {
             context.input().requestNavigationLook(yaw, pitch, context.clientTick());
         }
+    }
+
+    private PlayerContext tickContext;
+
+    /** 每刻推进前由运行调用：本刻引擎发出的视角请求都写进这份上下文的输入入口。 */
+    void beginTick(PlayerContext context) {
+        this.tickContext = context;
+    }
+
+    void endTick() {
+        this.tickContext = null;
     }
 
     /**
@@ -77,17 +188,4 @@ public final class BaritoneInternals {
 
     /** 请求停止正在进行的挖掘；逐刻的原生交互提交接入前无事可做。 */
     public static void requestStopBreaking() {}
-
-    /**
-     * 角色背包里选得出的垫块；垫块选料还没有接入，返回 null 表示按
-     * Baritone 自己的易拆物品清单找，不额外登记垫块策略。
-     */
-    public static Object scaffoldChoice(LocalPlayer player) {
-        return null;
-    }
-
-    /** 是否登记了垫块选料策略；没有接入时固定为 false。 */
-    public static boolean hasScaffoldMaterialPolicy() {
-        return false;
-    }
 }
