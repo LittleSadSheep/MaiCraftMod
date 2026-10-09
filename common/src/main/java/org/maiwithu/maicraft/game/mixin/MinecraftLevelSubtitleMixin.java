@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.game.mixin;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.ReceivingLevelScreen;
 import net.minecraft.client.multiplayer.ClientLevel;
 
 import org.maiwithu.maicraft.game.ClientHooks;
@@ -16,7 +17,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class MinecraftLevelSubtitleMixin {
 
     @Inject(method = "setLevel", at = @At("TAIL"))
-    private void maicraft$attachSubtitleFeed(ClientLevel level, CallbackInfo ci) {
+    private void maicraft$attachSubtitleFeed(ClientLevel level, ReceivingLevelScreen.Reason reason, CallbackInfo ci) {
         SubtitleFeed feed = ClientHooks.subtitleFeed();
         if (feed == null) {
             return;
