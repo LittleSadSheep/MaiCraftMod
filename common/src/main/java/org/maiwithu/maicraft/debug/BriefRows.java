@@ -146,7 +146,7 @@ final class BriefRows {
         return rows;
     }
 
-    // 刚失败：最近下达的那个目标没做成，一分钟内提醒；下一个目标一开始就收起。
+    // 刚失败：最近下达的那个目标失败了，一分钟内提醒；下一个目标一开始就收起。
     private static void recentFailure(Moment moment, List<Row> rows) {
         List<StatusSnapshot.GoalLine> recent = moment.status().goals().recent().stream()
                 .filter(goal -> goal.id() >= 0).toList();

@@ -159,7 +159,7 @@ final class FullRows {
         return String.join(" → ", shown) + "（现在）";
     }
 
-    // 进展：上一次真实进展是什么、多久前；多久没进展算卡住；快到最多能做的时长时再提一句。
+    // 进展：上一次真实进展是什么、多久前；无进展时限多长（到了就判卡住）；快到最多能做的时长时再提一句。
     private static String progressSentence(TaskProgress progress) {
         StringBuilder text = new StringBuilder();
         boolean noneYet = progress.ticksSinceProgress() == progress.activeTicks() && "开始".equals(progress.lastProgress());
@@ -169,7 +169,7 @@ final class FullRows {
             text.append(PanelWords.ticks(progress.ticksSinceProgress())).append(" 前：").append(progress.lastProgress());
         }
         if (progress.stuckAfterTicks() < Long.MAX_VALUE) {
-            text.append(" · ").append(PanelWords.ticks(progress.stuckAfterTicks())).append(" 没有新进展算卡住");
+            text.append(" · ").append(PanelWords.ticks(progress.stuckAfterTicks())).append(" 无进展时限");
         }
         if (progress.maxTicks() < Long.MAX_VALUE && progress.activeTicks() * 2 >= progress.maxTicks()) {
             text.append(" · 最多做 ").append(PanelWords.ticks(progress.maxTicks()))
@@ -178,7 +178,7 @@ final class FullRows {
         return text.toString();
     }
 
-    // 生存需求段：只在有需求想插没插、或上次没做成正等着再试时出现，每个需求一句整话。
+    // 生存需求段：只在有需求想插没插、或上次失败正等着再试时出现，每个需求一句整话。
     private static List<Row> survivalNeeds(Moment moment) {
         List<String> sentences = new ArrayList<>();
         StatusSnapshot.HeldBack held = moment.loop().heldBack();

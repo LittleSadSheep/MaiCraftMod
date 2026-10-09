@@ -151,7 +151,7 @@ public record StatusSnapshot(long gameTick, Connection connection, Goals goals, 
      * @param layers      运行栈，从下往上（最底是主任务，最上是此刻在推进的）
      * @param progress    此刻在推进的那个任务的进展；没有可说的进展时为 null
      * @param heldBack    本刻想插进来、却被打断规则按住的生存需求；没有时为 null
-     * @param retryWaits  临时任务没做成、正在等着再试的生存需求
+     * @param retryWaits  临时任务失败、正在等着再试的生存需求
      * @param parkedWhere 主任务停在半路时停在了哪里；没停时为 null
      */
     public record Loop(LoopState state, List<Layer> layers, TaskProgress progress, HeldBack heldBack,
@@ -187,12 +187,12 @@ public record StatusSnapshot(long gameTick, Connection connection, Goals goals, 
     public record HeldBack(String needName, Urgency urgency, Interruptibility current) {}
 
     /**
-     * 临时任务没做成、正在等着再试的生存需求。
+     * 临时任务失败、正在等着再试的生存需求。
      *
      * @param needName    需求的名字
      * @param secondsLeft 还要等几秒
-     * @param failures    已接连没做成几次
-     * @param why         上次为什么没做成
+     * @param failures    已连续失败几次
+     * @param why         上次为什么失败
      */
     public record RetryWait(String needName, long secondsLeft, int failures, String why) {}
 

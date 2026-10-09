@@ -148,8 +148,8 @@ class PanelLayoutTest {
         PanelScene slow = new PanelScene().working("maicraft:sleep", "天黑了", "睡觉：走到床边");
         slow.progress = new TaskProgress("睡觉：走到床边", "走到床边", List.of(), "走到床边", 500, 600, 900, 12_000);
 
-        assertFalse(text(lay(calm, PanelLevel.BRIEF)).contains("没有新进展"));
-        assertTrue(flat(lay(slow, PanelLevel.BRIEF)).contains("自「走到床边」之后 25s 没有新进展，30s 算卡住"));
+        assertFalse(text(lay(calm, PanelLevel.BRIEF)).contains("无进展展"));
+        assertTrue(flat(lay(slow, PanelLevel.BRIEF)).contains("自「走到床边」之后 25s 无进展（30s 无进展时限）"));
     }
 
     @Test
@@ -235,7 +235,7 @@ class PanelLayoutTest {
         List<PanelLine> lines = lay(scene, PanelLevel.FULL, PanelPage.RECENT_GOALS, 300);
 
         assertEquals("最近的目标 · 共 1 个 · F9+H 返回", lines.get(0).text());
-        assertEquals("#11 没做成 · travel · 用时 10s · 5m00s 前 · 到不了，试过的路线都不通", lines.get(1).text());
+        assertEquals("#11 失败 · travel · 用时 10s · 5m00s 前 · 到不了，试过的路线都不通", lines.get(1).text());
         assertEquals(PanelColor.PROBLEM, lines.get(1).pieces().getFirst().color());
     }
 }

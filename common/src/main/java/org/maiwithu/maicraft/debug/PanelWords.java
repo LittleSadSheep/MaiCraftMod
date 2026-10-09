@@ -47,8 +47,8 @@ final class PanelWords {
     static String resultStatus(TaskResult.Status status) {
         return switch (status) {
             case DONE -> "完成";
-            case PARTIAL -> "做了一部分";
-            case FAILED -> "没做成";
+            case PARTIAL -> "部分失败";
+            case FAILED -> "失败";
             case CANCELLED -> "取消了";
         };
     }

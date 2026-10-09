@@ -57,7 +57,7 @@ final class GoalListRows {
         return text.toString();
     }
 
-    // 颜色：进行中青，在等回答与暂停黄，没做成红，完成绿，取消灰。
+    // 颜色：进行中青，在等回答、暂停与部分失败黄，失败红，完成绿，取消灰。
     private static PanelColor color(StatusSnapshot.GoalLine goal) {
         return switch (goal.state()) {
             case RUNNING -> PanelColor.DOING;

@@ -114,10 +114,10 @@ final class StatusSentences {
         return held.needName() + "想插进来（" + PanelWords.urgency(held.urgency()) + "），" + why;
     }
 
-    /** 上次没做成、正等着再试的生存需求：为什么没做成、还要等多久、接连几次了。 */
+    /** 上次失败、正等着再试的生存需求：为什么失败、还要等多久、连续失败几次了。 */
     static String retryWait(StatusSnapshot.RetryWait wait) {
-        return wait.needName() + "上次没做成：" + wait.why() + "。" + wait.secondsLeft() + "s 后再试"
-                + (wait.failures() > 1 ? "（已接连没做成 " + wait.failures() + " 次）" : "");
+        return wait.needName() + "上次失败：" + wait.why() + "。" + wait.secondsLeft() + "s 后再试"
+                + (wait.failures() > 1 ? "（已连续失败 " + wait.failures() + " 次）" : "");
     }
 
     /** 被按住的需求如果其实是在等着再试，就只按"等着再试"说一次，不说两遍。 */
@@ -125,24 +125,24 @@ final class StatusSentences {
         return moment.loop().retryWaits().stream().anyMatch(wait -> wait.needName().equals(held.needName()));
     }
 
-    /** 快卡住了：没有新进展的时长过了判卡住的一半。不设判卡住时限的任务（等待、跟随）不算。 */
+    /** 快卡住了：无进展的时长过了无进展时限的一半。不设判卡住时限的任务（等待、跟随）不算。 */
     static boolean nearlyStuck(TaskProgress progress) {
         return progress != null && progress.stuckAfterTicks() < Long.MAX_VALUE
                 && progress.ticksSinceProgress() * 2 >= progress.stuckAfterTicks();
     }
 
-    /** 快卡住的提醒：自哪次进展之后多久没动，多久算卡住。 */
+    /** 快卡住的提醒：自哪次进展之后多久没动，无进展时限是多少（到了就判卡住）。 */
     static String stalled(TaskProgress progress) {
         return "自「" + progress.lastProgress() + "」之后 " + PanelWords.ticks(progress.ticksSinceProgress())
-                + " 没有新进展，" + PanelWords.ticks(progress.stuckAfterTicks()) + " 算卡住";
+                + " 无进展（" + PanelWords.ticks(progress.stuckAfterTicks()) + " 无进展时限）";
     }
 
-    /** 一个没做成的目标：能力、问题种类、游戏里的说法。 */
+    /** 一个失败的目标：能力、问题种类、游戏里的说法。 */
     static String failure(StatusSnapshot.GoalLine goal) {
-        return "没做成 " + PanelWords.ability(goal.ability()) + "：" + why(goal.result());
+        return PanelWords.ability(goal.ability()) + " 失败：" + why(goal.result());
     }
 
-    /** 为什么没做成：问题种类加上用游戏里的话说的原因；没写问题时用结果的一句话结论。 */
+    /** 为什么失败：问题种类加上用游戏里的话说的原因；没写问题时用结果的一句话结论。 */
     static String why(TaskResult result) {
         Problem problem = result.problem();
         return problem == null ? result.summary() : PanelWords.problemKind(problem.kind()) + "，" + problem.message();
