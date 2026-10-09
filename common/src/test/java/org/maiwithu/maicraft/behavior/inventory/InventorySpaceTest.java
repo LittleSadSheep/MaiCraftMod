@@ -62,9 +62,9 @@ class InventorySpaceTest {
         final List<String> dropped = new ArrayList<>();
 
         @Override
-        public Optional<Change> drop(String itemId, int count) {
+        public SpaceStepResult drop(String itemId, int count) {
             dropped.add(itemId);
-            return Optional.of(new Change(Change.Kind.ITEM_DROPPED, itemId, count, null));
+            return SpaceStepResult.done(new Change(Change.Kind.ITEM_DROPPED, itemId, count, null));
         }
     }
 

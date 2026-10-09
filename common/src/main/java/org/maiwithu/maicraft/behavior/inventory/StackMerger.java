@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.inventory;
 
-import org.maiwithu.maicraft.kernel.result.Change;
 
-import java.util.Optional;
 
 /**
  * 合并接缝：把主背包里同一种物品的散堆并成整堆。合并不丢东西，只是把格子腾出来。
@@ -13,8 +11,8 @@ import java.util.Optional;
 public interface StackMerger {
 
     /**
-     * 做一步合并（一次点击搬运一堆）。合并完成并确认了才返回变化；
-     * 没有可合并的散堆或还没确认就返回空，调用方下一刻重看背包视图再决定。
+     * 做一步合并（一次点击搬运一堆）：合并完成并确认了是做成，点击还在等确认是还在做，
+     * 没有可合并的散堆是做不了。
      */
-    Optional<Change> mergeOne();
+    SpaceStepResult mergeOne();
 }

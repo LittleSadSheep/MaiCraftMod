@@ -112,47 +112,55 @@ public final class InventorySpace {
                 slotsNeeded,
                 Set.of(),
                 stackMerger.isPresent(),
-                carriedBackpack.isPresent(),
+                carriedBackpack.map(CarriedBackpack::freeSlots).orElse(0),
                 knownContainers.map(containers -> containers.within(NEARBY_CONTAINER_RANGE)).orElse(List.of())));
 
-        List<Change> done = new ArrayList<>();
-        // 执行计划里能执行的第一步：接缝没接上或现场变了就跳过，跳过的下一步重算。
+        // 按计划顺序做第一步能做的：做成了记账，还在做就等它（不转头做下一步），做不了才换下一步。
         for (SpaceMove move : plan.moves()) {
-            Optional<Change> change = execute(move, purpose);
-            if (change.isPresent()) {
-                done.add(change.get());
-                return Result.of(State.PROGRESS, done);
+            SpaceStepResult step = execute(move, purpose);
+            if (step instanceof SpaceStepResult.Done made) {
+                return Result.of(State.PROGRESS, List.of(made.change()));
+            }
+            if (step instanceof SpaceStepResult.Working) {
+                return Result.of(State.PROGRESS, List.of());
             }
         }
-        if (!plan.moves().isEmpty()) {
-            // 计划里的动作一步都没确认：可能正点击到一半，下一刻重看现场，任务自己的进度跟踪兜底卡住。
-            return Result.of(State.PROGRESS, done);
-        }
-
         if (plan.question() != null) {
-            return new Result(State.NEED_ASK, done, null, plan.question());
+            return new Result(State.NEED_ASK, List.of(), null, plan.question());
         }
-        return new Result(State.IMPOSSIBLE, done, plan.problem(), null);
+        if (plan.moves().isEmpty()) {
+            return new Result(State.IMPOSSIBLE, List.of(), plan.problem(), null);
+        }
+        // 计划里每一步都做不了（接缝没接上、容器不在了……）：如实说腾不出，不悄悄空转。
+        return new Result(State.IMPOSSIBLE, List.of(),
+                plan.problem() != null ? plan.problem()
+                        : Problem.of(Problem.Kind.INVENTORY_FULL, "腾地方的办法都用不上，背包腾不出 " + slotsNeeded + " 格"),
+                null);
     }
 
-    // 执行一步腾挪；接缝没接上、东西已经不在或还没得到确认都返回空，下一刻重看现场。
-    private Optional<Change> execute(SpaceMove move, String purpose) {
+    // 执行一步腾挪；接缝没接上就是做不了。
+    private SpaceStepResult execute(SpaceMove move, String purpose) {
         if (move instanceof SpaceMove.MergeStacks ignored) {
-            // 散堆合并一步只并一堆；合并本身不丢东西，记一笔普通变化让账对得上。
-            return stackMerger.flatMap(merger -> merger.mergeOne());
+            // 散堆合并不丢东西，记一笔普通变化让账对得上。
+            return stackMerger.map(StackMerger::mergeOne).orElse(SpaceStepResult.cannotDo("合并散堆的接缝没接上"));
         }
         if (move instanceof SpaceMove.ToCarriedBackpack(var stack)) {
-            return carriedBackpack.flatMap(pack -> pack.store(stack));
+            return carriedBackpack.map(pack -> pack.store(stack)).orElse(SpaceStepResult.cannotDo("没有随身背包"));
         }
         if (move instanceof SpaceMove.ToKnownContainer(var container, var stack)) {
-            return containerDeposits.flatMap(deposits -> deposits.deposit(container, stack));
+            return containerDeposits.map(deposits -> deposits.deposit(container, stack))
+                    .orElse(SpaceStepResult.cannotDo("存箱子的接缝没接上"));
         }
         if (move instanceof SpaceMove.DropStack(var stack)) {
-            return itemDropper.flatMap(dropper -> dropper.drop(stack.itemId(), stack.count()))
-                    .map(change -> new Change(Change.Kind.ITEM_DROPPED, change.what(), change.count(),
-                            "腾地方（" + purpose + "）：" + noteOf(stack)));
+            SpaceStepResult dropped = itemDropper.map(dropper -> dropper.drop(stack.itemId(), stack.count()))
+                    .orElse(SpaceStepResult.cannotDo("丢东西的接缝没接上"));
+            if (dropped instanceof SpaceStepResult.Done made) {
+                return SpaceStepResult.done(new Change(Change.Kind.ITEM_DROPPED, made.change().what(),
+                        made.change().count(), "腾地方（" + purpose + "）：" + noteOf(stack)));
+            }
+            return dropped;
         }
-        return Optional.empty();
+        return SpaceStepResult.cannotDo("不认识的腾挪：" + move);
     }
 
     private static String noteOf(BackpackStack stack) {
