@@ -284,9 +284,10 @@ public final class AbilityCatalog {
     private static AbilityModule obtainModule(Deps deps, LiveApproaches bringsClose,
             ClientMovesToMainhand toMainhand, PermissionCheck permission) {
         ClientQuickMoves obtainQuickMoves = new ClientQuickMoves();
-        RecipeRuns recipeRuns = new MenuRecipeRuns(bringsClose, deps.interactions(),
-                obtainQuickMoves, deps.memory(), deps.context());
         RegistryRecipeReads recipeReads = new RegistryRecipeReads(deps.context(), deps.itemTags());
+        // 在工作站上动手：熔炉添燃料时按同一份燃料表挑身上烧得最久的。
+        RecipeRuns recipeRuns = new MenuRecipeRuns(bringsClose, deps.interactions(),
+                recipeReads, deps.memory(), deps.context());
         ClientYieldScans yieldScans = new ClientYieldScans(deps.blockScans(), deps.context());
         ClientDigsBlocks digs = new ClientDigsBlocks();
         ClientWorkstationPlacer placer = new ClientWorkstationPlacer(
