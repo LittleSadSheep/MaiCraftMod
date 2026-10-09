@@ -76,6 +76,8 @@ public final class GoalRunner implements Task {
         this.registry = registry;
         this.store = store;
         this.remembers = remembers;
+        // 重启后恢复的 sequence：前面已经结束的步骤的结论从记录里接上，收尾时照样算进成败、并进事实。
+        finishedResults.addAll(run.stepResults());
     }
 
     /** 下达一个新目标：分配编号、记一条进行中的目标运行并立即存盘。 */
@@ -131,6 +133,31 @@ public final class GoalRunner implements Task {
         run.resume();
         save();
         LOG.info("目标 {} 恢复推进", run.id());
+    }
+
+    /**
+     * 角色离开世界（退出到标题、断线、换世界）：手上的任务按"角色不在了"收尾、松开按键，目标本身不结束，
+     * 存成暂停。下次进这个世界时它随存盘恢复为暂停，等 LLM 决定接不接着做——和重启游戏是同一回事。
+     * sequence 正在跑的那一步同样停手存成暂停，恢复后从这一步接着做。
+     */
+    public void leaveWorld() {
+        if (result != null) {
+            return;
+        }
+        if (stepRunner != null) {
+            // 步骤自己停手存盘；包着它的子任务运行器不收尾，收尾会把这一步当成结束。
+            stepRunner.leaveWorld();
+            forgetChild();
+            stepRunner = null;
+        } else {
+            closeRunningChild(CloseReason.PLAYER_GONE);
+        }
+        queuedInputs = null;
+        if (run.state() != GoalRunState.PAUSED) {
+            run.pause();
+        }
+        save();
+        LOG.info("目标 {} 随角色离开世界停在暂停，下次进这个世界时恢复", run.id());
     }
 
     /**
@@ -437,6 +464,7 @@ public final class GoalRunner implements Task {
         stepRunner = null;
         int index = run.stepIndex();
         finishedResults.add(stepResult);
+        run.recordStepResult(stepResult);
         Goal step = goal.steps().get(index);
         if (stepResult.status() != TaskResult.Status.DONE && step.onFailure() == Goal.OnFailure.STOP) {
             return settle(sequenceResult(index + 1), context);

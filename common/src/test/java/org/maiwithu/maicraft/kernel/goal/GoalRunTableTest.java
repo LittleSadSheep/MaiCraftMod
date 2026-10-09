@@ -6,6 +6,7 @@ import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.interrupt.ControlLoop;
 import org.maiwithu.maicraft.kernel.param.Params;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
+import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 
 import java.util.List;
@@ -196,21 +197,47 @@ class GoalRunTableTest {
     }
 
     @Test
-    void rememberingFollowsTheAttachedWorldMemoryAndStopsWhenDetached() {
-        // 挂上的记忆收下决定；摘掉之后同一种决定按程序错误收场，不悄悄丢掉。
+    void rememberingFollowsTheWorldItIsInAndStopsAfterLeaving() {
+        // 进了世界，记地点落到这个世界的记忆；离开之后同一种决定按程序错误收场，不悄悄丢掉。
         GoalRunnerTest.TestMemory attached = new GoalRunnerTest.TestMemory();
-        table.attachPlaces(attached);
+        table.enterWorld(attached, store);
         ability.next(new StepDecision.Remember("家门口", WorldPosition.here(12, 64, -8)));
         ability.next(new StepDecision.Finish(TaskResult.done("记好了")));
         table.runAside(GOAL, new GoalTestTick(tick++));
         assertEquals(List.of("家门口@12,64,-8"), attached.remembered);
 
-        table.detachPlaces();
+        table.leaveWorld();
         ability.next(new StepDecision.Remember("家门口", WorldPosition.here(12, 64, -8)));
         ability.next(new StepDecision.Finish(TaskResult.done("记好了")));
         // 推进器把程序出错按如实失败收场：这次没记上，也不连累控制循环。
         GoalRun run = table.runAside(GOAL, new GoalTestTick(tick++));
         assertEquals(GoalRunState.FINISHED, run.state());
         assertEquals(TaskResult.Status.FAILED, run.result().status());
+    }
+
+    @Test
+    void leavingTheWorldParksTheMainGoalAndComingBackRestoresItPaused() {
+        // 角色正在干活时退出到标题：任务停手，目标不结束、存成暂停，控制循环空下来，不跟进下一个世界。
+        table.enterWorld(new GoalRunnerTest.TestMemory(), store);
+        ability.shared().keepRunning("挖矿");
+        ability.next(new StepDecision.Run(new GoalTestAbility.TestInput("挖矿")));
+        long id = table.launch(GOAL, null).runner().run().id();
+        runTicks(2);
+
+        table.leaveWorld();
+
+        assertEquals(CloseReason.PLAYER_GONE, ability.shared().created.get("挖矿").closedWith, "手上的任务停手松键");
+        assertNull(loop.currentTask());
+        assertTrue(table.recent().isEmpty());
+        GoalRun parked = store.unfinished().get(0);
+        assertEquals(id, parked.id());
+        assertEquals(GoalRunState.PAUSED, parked.state());
+
+        // 再进同一个世界：目标恢复为暂停，等 LLM 解除暂停才重新成为主任务。
+        table.enterWorld(new GoalRunnerTest.TestMemory(), store);
+        assertEquals(GoalRunState.PAUSED, table.find(id).orElseThrow().state());
+        assertNull(loop.currentTask());
+        table.resume(id);
+        assertEquals(id, ((GoalRunner) loop.currentTask()).run().id());
     }
 }

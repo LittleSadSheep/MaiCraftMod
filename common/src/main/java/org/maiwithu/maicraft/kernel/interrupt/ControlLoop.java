@@ -85,6 +85,22 @@ public final class ControlLoop {
         return endMain(reason);
     }
 
+    /**
+     * 角色离开世界：插着的临时任务按"角色不在了"收尾弹出；主任务只从循环里撤下、不替它收尾——
+     * 目标运行表已经让它停手并存成暂停，下次进这个世界时恢复。之前缓着的需求与停在半路的说明一并清掉。
+     */
+    public void leaveWorld() {
+        for (int i = stack.size() - 1; i >= 0; i--) {
+            Frame frame = stack.remove(i);
+            if (frame.from != null) {
+                frame.close(CloseReason.PLAYER_GONE);
+            }
+        }
+        backoffs.clear();
+        brokenNeeds.clear();
+        parkedWhere = null;
+    }
+
     /** 本刻正在被推进（或被压着等待恢复）的任务里最上面的那个；没有任务时为 null。 */
     public Task currentTask() {
         return stack.isEmpty() ? null : top().task;

@@ -6,6 +6,8 @@ import org.maiwithu.maicraft.kernel.interrupt.ControlLoop;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -29,13 +31,15 @@ import java.util.Optional;
  * <p>结束了的目标只保留最近 {@value #KEPT_FINISHED} 条供查询；还没结束的一条都不丢。只在客户端线程使用。
  */
 public final class GoalRunTable {
+    private static final Logger LOG = LoggerFactory.getLogger(GoalRunTable.class);
     static final int KEPT_FINISHED = 64;
     static final int KEPT_REQUEST_KEYS = 256;
     /** 不控制角色的目标最多当场推进几刻：记地点、出报告都是一两刻的事。 */
     static final int ASIDE_TICK_LIMIT = 20;
 
     private final AbilityRegistry registry;
-    private final GoalRunStore store;
+    /** 当期的目标运行存储：进世界时换成那个世界的存盘，下达、推进、恢复都落在它上面。 */
+    private GoalRunStore store;
     private final ControlLoop loop;
     /** 控制权交接：目标成为主任务时经它请求控制权，查询端经它看此刻谁拥有控制权。 */
     private final PlayerControlHandover handover;
@@ -66,16 +70,34 @@ public final class GoalRunTable {
     }
 
     /**
-     * 接上当期的记地点入口：进世界时由现场调用，指到这个世界的世界记忆。
-     * 已经接上时换到新的入口（换世界是整份现场丢弃重建，不会连续接两次同一份）。
+     * 进一个世界：记地点指到这个世界的世界记忆，存储换成这个世界的存盘，再把上次没结束的目标读回来，
+     * 全部恢复为暂停，等 LLM 明确解除暂停才接着做。换世界是整份现场丢弃重建，进之前先离开上一个世界。
      */
-    public void attachPlaces(RemembersPlaces places) {
-        this.places = Objects.requireNonNull(places, "places");
+    public void enterWorld(RemembersPlaces worldPlaces, GoalRunStore worldStore) {
+        this.places = Objects.requireNonNull(worldPlaces, "worldPlaces");
+        this.store = Objects.requireNonNull(worldStore, "worldStore");
+        restore();
     }
 
-    /** 摘掉当期的记地点入口：退世界时调用，之后记地点按占位如实报程序错误。 */
-    public void detachPlaces() {
-        this.places = detachedPlaceholder;
+    /**
+     * 离开世界（退出到标题、断线、换世界）：每个没结束的目标停手并存成暂停，控制循环撤下主任务、
+     * 临时任务按"角色不在了"收尾；表清空，记地点摘回占位。下次进同一个世界时从存盘恢复，和重启游戏是同一回事。
+     */
+    public void leaveWorld() {
+        for (GoalRunner runner : runners.values()) {
+            if (!runner.run().unfinished()) continue;
+            try {
+                runner.leaveWorld();
+            } catch (RuntimeException failure) {
+                // 一个目标停手时出错不能拦住其余目标存盘：记下来，接着处理下一个。
+                LOG.warn("目标 {} 随角色离开世界停手时出错", runner.run().id(), failure);
+            }
+        }
+        loop.leaveWorld();
+        runners.clear();
+        requestKeys.clear();
+        mainRunId = -1;
+        places = detachedPlaceholder;
     }
 
     /**
