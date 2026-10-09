@@ -32,17 +32,17 @@ public final class KnowledgeLibrary {
      * 精确与近似搜索都按条目元数据匹配。
      */
     static final String[][] GAME_MECHANICS = {
-            {"gravity-blocks", "重力方块与塌落", "gravel sand 落沙 gravity 塌方 塌落 掩埋掉落物 瞬时 no_path 落方块伤害"},
-            {"fluid-flow", "流体流动与灌满", "water lava 水 岩浆 流动 灌满 倒水 自救 淹 黑曜石 生成 隧道进水"},
-            {"item-drops", "掉落物物理", "item entity 掉落物 拾取半径 漂移 消失 despawn remaining_live_drops 没进背包 确认"},
-            {"drop-rates", "关键掉率与方差", "flint 燧石 10% 掉率 方差 fortune 时运 loot 战利品表 掉落概率 苹果 树苗"},
-            {"tool-tiers", "工具等级与挖掘资格", "tool tier 工具等级 wrong_tool 黑曜石 obsidian diamond_pickaxe 镐 挖不动 不掉落 挖掘资格"},
-            {"ore-heights", "mine 源查询的范围语义", "mine 源查询 半径 深度 query_complete known_sources 保留意见 暴露源 埋藏矿 扫描范围"},
-            {"food", "食物与饥饿", "food eat 食物 饥饿 进食 consume 饱食度 saturation 营养 打猎 狩猎 耕种 种植 农田 补种 小麦 胡萝卜 土豆 甜菜 面包 cook 烹饪 熔炉"},
-            {"sleep-night", "睡眠与夜晚", "sleep bed 睡觉 床 幻翼 phantom 夜晚 night 刷怪 spawn 羊毛 wool sheep_color 染料 dye 同色 重生点 respawn insomnia 跳夜"},
-            {"tunneling", "下降掘进与寻路死角", "descent digging staircase tunnel 斜向阶梯 竖井 planning_stall no_path 寻路死角 树冠 下掘 水平掘进 矿带 travel"},
-            {"lighting", "挖掘工作面照明", "lighting torch 火把 照明 光照 刷怪 spawn 黑暗 洞穴 深掘 营地 auto_light light_area 布光 煤 木棍 合成"},
-            {"tick-rate", "世界刻速与失焦限流", "tps tick 刻速 刻率 失焦 focus 限流 throttle 慢放 停滞 冻结 game_time recent_tps tick_rate 任务变慢 卡死"},
+            {"gravity-blocks", "重力方块与塌落", "gravel sand 砾石 沙子 落沙 gravity 塌方 塌落 掩埋掉落物 砸伤 窒息"},
+            {"fluid-flow", "流体流动与灌满", "water lava 水 岩浆 流动 灌满 倒水 舀水 桶 bucket 自救 黑曜石 圆石 隧道进水"},
+            {"item-drops", "掉落物", "item entity 掉落物 拾取半径 漂走 消失 despawn 没进背包 背包满 拾取冷却 捡东西"},
+            {"drop-rates", "关键掉率与方差", "flint 燧石 10% 掉率 方差 fortune 时运 精准采集 战利品表 掉落概率 苹果 树苗 种子"},
+            {"tool-tiers", "工具等级与挖掘资格", "tool tier 工具等级 镐 pickaxe 黑曜石 obsidian 远古残骸 挖不动 不掉落 挖掘资格 深板岩"},
+            {"ore-heights", "矿物生成高度", "ore 矿 矿石 找矿 高度 生成 分布 层 钻石 diamond 铁 iron 煤 coal 铜 copper 金 gold 红石 redstone 青金石 lapis 绿宝石 emerald 深板岩 deepslate 粗铁 raw_iron 远古残骸"},
+            {"food", "食物与饥饿", "food eat 食物 饥饿 饱和度 saturation 回血 饿死 打猎 狩猎 生肉 熟食 烧熟 耕种 耕地 锄头 种植 小麦 胡萝卜 马铃薯 甜菜 面包 骨粉"},
+            {"sleep-night", "睡眠与夜晚", "sleep bed 睡觉 床 幻翼 phantom 夜晚 night 刷怪 spawn 羊毛 wool 剪羊毛 shears 染料 dye 同色 重生点 respawn 跳夜 封顶"},
+            {"tunneling", "往下挖与地下通行", "dig down staircase tunnel 往下挖 竖井 阶梯 下矿 通道 两格高 矿洞 迷路 入口"},
+            {"tick-rate", "世界刻速与失焦", "tps tick 刻速 刻率 失焦 focus 暂停 pause 限速 throttle 变慢 慢放 卡死 任务变慢"},
+            {"lighting", "照明与刷怪", "lighting torch 火把 照明 光照 刷怪 spawn 黑暗 洞穴 地下 煤 木炭 木棍 灯笼 萤石"},
     };
 
     private final KnowledgeSource source;
