@@ -11,6 +11,9 @@ import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
 import net.neoforged.neoforge.client.event.ClientChatReceivedEvent;
 import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.neoforge.client.event.RenderGuiEvent;
+import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
+import net.neoforged.neoforge.client.event.ScreenEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import net.minecraft.client.Minecraft;
 import net.neoforged.neoforge.event.GameShuttingDownEvent;
@@ -46,6 +49,25 @@ public final class MaiCraftNeoForgeClient {
         NeoForge.EVENT_BUS.addListener(this::onLoggingOut);
         NeoForge.EVENT_BUS.addListener(this::onGameShuttingDown);
         NeoForge.EVENT_BUS.addListener(this::onChatReceived);
+        NeoForge.EVENT_BUS.addListener(this::onHudRendered);
+        NeoForge.EVENT_BUS.addListener(this::onScreenRendered);
+        NeoForge.EVENT_BUS.addListener(this::onLevelRendered);
+    }
+
+    // 调试面板画在原版 HUD 层之上；容器界面打开时界面每帧画完后再补画一次，调试界面流程时也看得到。
+    private void onHudRendered(RenderGuiEvent.Post event) {
+        client.renderDebugPanel(event.getGuiGraphics());
+    }
+
+    private void onScreenRendered(ScreenEvent.Render.Post event) {
+        client.renderDebugPanel(event.getGuiGraphics());
+    }
+
+    // 世界整个画完（AFTER_LEVEL）后画导航路线（路线开关开着时）。
+    private void onLevelRendered(RenderLevelStageEvent event) {
+        if (event.getStage() == RenderLevelStageEvent.Stage.AFTER_LEVEL) {
+            client.renderWorldOverlay(event.getCamera(), event.getModelViewMatrix(), event.getProjectionMatrix());
+        }
     }
 
     // 创建工作排到客户端主线程的工作队列，保证访问游戏对象时在正确的线程上。

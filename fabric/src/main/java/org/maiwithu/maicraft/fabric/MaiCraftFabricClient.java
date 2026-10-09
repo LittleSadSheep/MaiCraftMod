@@ -8,6 +8,9 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
+import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
+import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.minecraft.client.Minecraft;
 import org.maiwithu.maicraft.bootstrap.Bootstrap;
 import org.maiwithu.maicraft.bootstrap.ClientLifecycle;
@@ -40,5 +43,13 @@ public final class MaiCraftFabricClient implements ClientModInitializer {
                         sender == null ? null : sender.getName(), chatType));
         ClientReceiveMessageEvents.GAME.register((message, actionBar) ->
                 client.systemMessageReceived(Minecraft.getInstance(), message, actionBar));
+        // 调试面板画在原版 HUD 层之上；容器界面打开时界面每帧画完后再补画一次，调试界面流程时也看得到。
+        HudRenderCallback.EVENT.register((graphics, tickCounter) -> client.renderDebugPanel(graphics));
+        ScreenEvents.AFTER_INIT.register((minecraft, screen, width, height) ->
+                ScreenEvents.afterRender(screen).register((rendered, graphics, mouseX, mouseY, delta) ->
+                        client.renderDebugPanel(graphics)));
+        // 世界画完后画导航路线（路线开关开着时）。
+        WorldRenderEvents.END.register(context ->
+                client.renderWorldOverlay(context.camera(), context.positionMatrix(), context.projectionMatrix()));
     }
 }
