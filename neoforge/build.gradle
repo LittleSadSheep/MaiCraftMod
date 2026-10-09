@@ -65,6 +65,8 @@ dependencies {
     // 联动模组只在编译时可见：读写端直接调用它们的类；游戏里没装时读写端类不会被加载，所以不进包、不进运行类路径。
     compileOnly "maven.modrinth:sophisticated-backpacks:${sophisticatedbackpacks_version}"
     compileOnly "maven.modrinth:sophisticated-core:${sophisticatedcore_version}"
+    // AE2 只要它自己的类，不带它的运行依赖（GuideME 等）：读写端用不到，开发客户端里自己放 jar。
+    compileOnly("org.appliedenergistics:appliedenergistics2:${ae2_version}") { transitive = false }
     jarJar(implementation('org.xerial:sqlite-jdbc')) {
         version { strictly "[${sqlite_jdbc_version},4.0)"; prefer sqlite_jdbc_version }
     }
