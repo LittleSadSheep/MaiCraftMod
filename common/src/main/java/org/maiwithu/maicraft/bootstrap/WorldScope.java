@@ -33,6 +33,7 @@ import org.maiwithu.maicraft.game.ChatChannel;
 import org.maiwithu.maicraft.game.SubtitleFeed;
 import org.maiwithu.maicraft.game.interaction.InteractionSender;
 import org.maiwithu.maicraft.game.menu.MenuActions;
+import org.maiwithu.maicraft.game.player.InputDriver;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerControlBoundary;
 import org.maiwithu.maicraft.game.serverlink.ServerLinkSession;
@@ -104,7 +105,8 @@ public final class WorldScope {
                 travelProgress,
                 new ChatChannel(now),
                 // 客户端刻号跟着所在世界走；没进世界读不到，按 0 兜底（只在读端内部量时长用）。
-                () -> minecraft.level == null ? 0 : minecraft.level.getGameTime()));
+                () -> minecraft.level == null ? 0 : minecraft.level.getGameTime(),
+                new InputDriver(playerControl)));
         this.goals = new MainGoalSlot(controlLoop, registry, new InMemoryGoalRunStore(), memory);
     }
 

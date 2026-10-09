@@ -25,7 +25,9 @@ import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.ChatChannel;
 import org.maiwithu.maicraft.game.ChatLog;
 import org.maiwithu.maicraft.game.ClientHooks;
+import org.maiwithu.maicraft.game.player.InputDriver;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.player.PlayerControlBoundary;
 import org.maiwithu.maicraft.game.serverlink.LinkTransport;
 import org.maiwithu.maicraft.game.serverlink.ServerLinkSession;
 import org.maiwithu.maicraft.game.world.BlockScanService;
@@ -150,7 +152,8 @@ class AssemblyTest {
                 new ClientTravelWorldView(nobody),
                 progress -> { },
                 chat,
-                () -> 0);
+                () -> 0,
+                new InputDriver(new PlayerControlBoundary()));
     }
 
     /** 测试专用的世界身份编号：任意一个合法的 SHA-256 形状。 */

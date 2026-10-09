@@ -43,6 +43,9 @@ import org.maiwithu.maicraft.behavior.interaction.ClientGameRefusals;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuContent;
+import org.maiwithu.maicraft.behavior.inventory.ClientGearChanges;
+import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
+import org.maiwithu.maicraft.behavior.inventory.ClientStepsAside;
 import org.maiwithu.maicraft.behavior.inventory.DropAvoidance;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
@@ -62,6 +65,7 @@ import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.ChatChannel;
 import org.maiwithu.maicraft.game.interaction.OverlayMessages;
 import org.maiwithu.maicraft.game.player.BackpackView;
+import org.maiwithu.maicraft.game.player.InputDriver;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.ReadsEffects;
 import org.maiwithu.maicraft.game.player.ReadsEquipment;
@@ -114,7 +118,8 @@ public final class AbilityCatalog {
             TravelWorldView travelWorld,
             TravelProgressListener travelProgress,
             ChatChannel chat,
-            LongSupplier clientTicks) {
+            LongSupplier clientTicks,
+            InputDriver inputs) {
 
         public Deps {
             Objects.requireNonNull(context, "context");
@@ -148,18 +153,22 @@ public final class AbilityCatalog {
                 new ClientMenuContent(deps.context()),
                 deps.memory()));
 
-        // 进食：换到主手的接缝还没有实现方，先留空——手上不是食物时如实说换不了手。
+        // 换手与穿卸的读端一份：吃东西要换手，装备要穿卸，它们共享同一套界面搬运。
+        ClientMovesToMainhand toMainhand = new ClientMovesToMainhand(deps.context());
+
+        // 进食：把食物换到主手走背包界面的原生搬运；手上不是食物时能换手了。
         registry.register(new EatModule(deps.backpack(), deps.offhand(), deps.hunger(), deps.foods(),
                 deps.equipment(), deps.effects(), deps.itemTags(), deps.useKeyProjection(),
-                Optional.empty()));
+                Optional.of(toMainhand)));
 
-        // 装备：腾背包与穿卸执行两个接缝还没有实现方，先留空——只能看、能挑，动不了装备栏。
+        // 装备：穿卸走背包界面的原生操作；腾背包的接缝还没有实现方，背包满了先按装不上说。
         registry.register(new EquipModule(deps.backpack(), deps.offhand(), deps.equipment(),
-                deps.gearFit(), Optional.empty(), Optional.empty()));
+                deps.gearFit(), Optional.empty(), Optional.of(new ClientGearChanges(deps.context(), toMainhand))));
 
-        // 丢弃：换手与走开两步还没有实现方，丢出的东西落在角色脚边。
+        // 丢弃：换手接上了；丢完朝旁边走两步，别让丢出的东西落回自己头上。
         registry.register(new DropModule(deps.backpack(), deps.offhand(), deps.itemTags(),
-                deps.characterPosition(), new DropAvoidance(), Optional.empty(), Optional.empty()));
+                deps.characterPosition(), new DropAvoidance(), Optional.of(toMainhand),
+                Optional.of(new ClientStepsAside(deps.inputs()))));
 
         // 拿到物品：合成、烧炼、找容器、挖矿、收获、交易各来源还没有实现方，
         // 先用一份没有来源的引擎登记——拿到物品的目标会如实以"没有途径"失败。
