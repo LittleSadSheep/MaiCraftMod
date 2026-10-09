@@ -3,6 +3,11 @@ package org.maiwithu.maicraft.behavior.survival;
 
 import org.junit.jupiter.api.Test;
 
+import org.maiwithu.maicraft.kernel.result.TaskResult;
+import org.maiwithu.maicraft.kernel.task.CloseReason;
+import org.maiwithu.maicraft.kernel.task.Task;
+import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.maiwithu.maicraft.kernel.task.TickResult;
 import org.maiwithu.maicraft.kernel.task.Urgency;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -46,10 +51,28 @@ class SurvivalBranchTest {
 
     @Test
     void edgeOnlyWhenCloseToDeepDrop() {
-        assertTrue(EdgeProximityNeed.atRisk(new EdgeProximityNeed.Facts(0.2, 5, true, new double[] {0, 0, 0})));
+        assertTrue(EdgeProximityNeed.atRisk(new EdgeProximityNeed.Facts(0.2, 5, new double[] {0, 0, 0})));
         // 离边远：不算。
-        assertFalse(EdgeProximityNeed.atRisk(new EdgeProximityNeed.Facts(1.5, 5, true, new double[] {0, 0, 0})));
+        assertFalse(EdgeProximityNeed.atRisk(new EdgeProximityNeed.Facts(1.5, 5, new double[] {0, 0, 0})));
         // 边外只是个台阶：不算。
-        assertFalse(EdgeProximityNeed.atRisk(new EdgeProximityNeed.Facts(0.2, 2, true, new double[] {0, 0, 0})));
+        assertFalse(EdgeProximityNeed.atRisk(new EdgeProximityNeed.Facts(0.2, 2, new double[] {0, 0, 0})));
+        // 四面都是崖、附近没有站得住的地方：退无可退，不插。
+        assertFalse(EdgeProximityNeed.atRisk(new EdgeProximityNeed.Facts(0.2, 5, null)));
+    }
+
+    @Test
+    void edgeRetreatOnlyWhenNoTaskHoldsTheBody() {
+        // 手上有任务时贴着边是那件事要的姿态，不往回退；闲着才退，免得退一步、走回去、再退一步来回抖。
+        EdgeProximityNeed need = new EdgeProximityNeed(
+                context -> new EdgeProximityNeed.Facts(0.2, 5, new double[] {1, 64, 1}), spot -> null);
+        Task bridging = new Task() {
+            @Override public TickResult tick(TickContext context) { return TickResult.RUNNING; }
+            @Override public TaskResult close(CloseReason reason) { return null; }
+            @Override public void pause() {}
+            @Override public String describe() { return "搭桥"; }
+        };
+
+        assertNull(need.urgency(null, bridging));
+        assertEquals(Urgency.LATER, need.urgency(null, null));
     }
 }
