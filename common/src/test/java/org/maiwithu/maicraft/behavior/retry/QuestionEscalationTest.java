@@ -61,7 +61,7 @@ class QuestionEscalationTest {
     }
 
     @Test
-    void approvalWithoutASuggestionAsksPlainly() {
+    void 说不清要开哪项许可时照样提问_不出现null() {
         // 被拒时说不清要开哪一项许可：只问同不同意，问句里不出现 null。
         var question = QuestionEscalation.escalate(Problem.of(Problem.Kind.NEED_APPROVAL, "要拆的墙是玩家盖的")).orElseThrow();
         assertFalse(question.text().contains("null"));

@@ -1,14 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.survival;
 
+import java.util.Optional;
+
+import net.minecraft.core.BlockPos;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.game.player.PlayerInput;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
+import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.maiwithu.maicraft.behavior.survival.SurvivalFakes.FakeBreaking;
 import static org.maiwithu.maicraft.behavior.survival.SurvivalFakes.TestPlayer;
 import static org.maiwithu.maicraft.behavior.survival.SurvivalFakes.TestTick;
 import static org.maiwithu.maicraft.behavior.survival.SurvivalFakes.inAir;
@@ -70,5 +75,42 @@ class BreathTaskTest {
         assertTrue(result != null, "一直上不去时应当收场");
         assertEquals(TaskResult.Status.FAILED, result.status());
         assertEquals(Problem.Kind.STUCK, result.problem().kind());
+    }
+
+    @Test
+    void iceOverTheWaterIsDugOpenBeforeSwimmingUp() {
+        // 水面结了冰：往上顶出不去，先挖开头顶那一格，挖开后接着往上游。
+        BlockPos ice = new BlockPos(0, 44, 0);
+        SurvivalSituation underIce = SurvivalFakes.calm().feet(40.0).underwater(30).underCeiling(ice).build();
+        FakeBreaking digging = new FakeBreaking(ActionStatus.running(), ActionStatus.done());
+        BreathTask task = new BreathTask(scripted(underIce, underIce, underIce, underwater(40.0)),
+                (context, cell) -> {
+                    digging.aimAt(cell);
+                    return Optional.of(digging);
+                });
+        task.start(tick);
+        for (int i = 0; i < 4; i++) {
+            assertTrue(task.tick(tick) instanceof TickResult.Running);
+            player.nextTick();
+        }
+
+        assertTrue(digging.dug.contains(ice), "挖的是压在水面上的那一格");
+        assertTrue(digging.closed, "挖完收尾");
+    }
+
+    @Test
+    void iceThatMayNotBeDugEndsTheTaskWithTheReason() {
+        // 头顶那一格挖不动（基岩这类）：如实失败，交给上层。
+        SurvivalSituation underIce = SurvivalFakes.calm().feet(40.0).underwater(30)
+                .underCeiling(new BlockPos(0, 44, 0)).build();
+        BreathTask task = new BreathTask(scripted(underIce), BreathTask.DigsCeiling.NONE);
+        task.start(tick);
+
+        TickResult result = task.tick(tick);
+
+        assertTrue(result instanceof TickResult.Finished);
+        TaskResult finished = ((TickResult.Finished) result).result();
+        assertEquals(TaskResult.Status.FAILED, finished.status());
+        assertTrue(finished.problem().message().contains("挖不动"), finished.problem().message());
     }
 }

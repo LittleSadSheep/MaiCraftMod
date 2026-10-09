@@ -32,6 +32,10 @@ import org.maiwithu.maicraft.behavior.survival.LiveCombatSenses;
 import org.maiwithu.maicraft.behavior.survival.LiveEdgeView;
 import org.maiwithu.maicraft.behavior.survival.LiveHungerView;
 import org.maiwithu.maicraft.behavior.survival.LiveNightAndEdgeMoves;
+import org.maiwithu.maicraft.behavior.survival.LiveBurrow;
+import org.maiwithu.maicraft.behavior.permission.Protection;
+import org.maiwithu.maicraft.behavior.survival.BlockBreaking;
+import org.maiwithu.maicraft.behavior.survival.LiveCeilingDigs;
 import org.maiwithu.maicraft.behavior.survival.LiveNightView;
 import org.maiwithu.maicraft.behavior.survival.NightfallNeed;
 import org.maiwithu.maicraft.behavior.survival.SelfDefenseNeed;
@@ -45,6 +49,7 @@ import org.maiwithu.maicraft.game.ChatLog;
 import org.maiwithu.maicraft.game.ClientHooks;
 import org.maiwithu.maicraft.game.SubtitleFeed;
 import org.maiwithu.maicraft.game.menu.DefaultMenuActions;
+import org.maiwithu.maicraft.game.menu.RenderedScreens;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerControlBoundary;
 import org.maiwithu.maicraft.game.player.ReadsFoodValues;
@@ -85,6 +90,7 @@ import org.maiwithu.maicraft.server.ServerLinkServices;
 import org.maiwithu.maicraft.server.ServerOperationRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.maiwithu.maicraft.game.world.FurnaceFuels;
 
 /**
  * 公共启动入口。两个加载器的入口类只调用这里，再把加载器事件转给返回的接收端。
@@ -173,18 +179,18 @@ public final class Bootstrap {
             TaskEventSink events,
             InteractionSender interactionSender, MenuActions menuActions, Interactions interactions,
             CombatSenses combatSenses, WalkTo walks,
-            EatSoonTask.FoodMoves foodMoves, ReadsFoodValues foods) {
+            EatSoonTask.FoodMoves foodMoves, ReadsFoodValues foods, LiveBurrow burrow, LiveCeilingDigs ceilings) {
         // 角色死亡这类循环自身的处境变化也从同一条事件流出去。
         return new ControlLoop(List.of(
                 new DigOutNeed(new SurvivalSituation.FromPlayer(),
                         () -> new NativeBlockBreaking(interactionSender, menuActions)),
-                new BreathNeed(new SurvivalSituation.FromPlayer()),
+                new BreathNeed(new SurvivalSituation.FromPlayer(), ceilings),
                 new FallNeed(new SurvivalSituation.FromPlayer(), interactions, FirstPersonScene::of,
                         PlayerContext::backpack),
                 new SelfDefenseNeed(combatSenses, new LiveCombatMoves(walks), events),
                 new HungerNeed(new LiveHungerView(foods), foodMoves, events),
                 new NightfallNeed(new LiveNightView(combatSenses),
-                        LiveNightAndEdgeMoves.burrow(events)),
+                        LiveNightAndEdgeMoves.burrow(burrow, events)),
                 new EdgeProximityNeed(new LiveEdgeView(),
                         LiveNightAndEdgeMoves.retreat(walks, events))), events);
     }
@@ -221,6 +227,8 @@ public final class Bootstrap {
         private ServerLinkSession session;
         /** 所有者的实例配置：启动时读一次，之后只读；不经任何工具参数暴露。 */
         private InstanceConfig instanceConfig;
+        /** 熔炉燃料由加载器回答：进世界建能力清单时交给配方与燃料的读端。 */
+        private FurnaceFuels furnaceFuels;
         private ControlLoop controlLoop;
         private DefaultMenuActions menuActions;
         private DefaultInteractionSender interactionSender;
@@ -240,34 +248,23 @@ public final class Bootstrap {
         void createSharedServices(LoaderEnvironment loader) {
             // 实例配置启动时读一次：所有者在 config/maicraft.json 里放的开关，全进程只认这份文件。
             instanceConfig = InstanceConfig.read(loader.configDirectory());
+            furnaceFuels = loader.furnaceFuels();
             if (instanceConfig.allowGameCommands()) {
                 LOG.info("{} 本实例允许角色执行游戏命令（配置文件放开）", ModIdentity.NAME);
             }
             // 交互提交与容器界面操作共用角色上下文里同一份每刻一次的交互机会；两边建好后互相接上，再挂进角色上下文。
             // 行为层的生存需求要靠这条轨道挖掘与放水，所以在这里创建并互相接好。
-            menuActions = new DefaultMenuActions(playerControl.input());
+            // 界面真正画出来的记录：渲染从 Mixin 进来记帧，容器界面点击前要等改变后的界面画过一帧。
+            RenderedScreens renderedScreens = new RenderedScreens();
+            ClientHooks.registerRenderedScreens(renderedScreens);
+            menuActions = new DefaultMenuActions(playerControl.input(), renderedScreens);
             interactionSender = new DefaultInteractionSender(menuActions);
             menuActions.attachSender(interactionSender);
             playerControl.attachInteractionEntries(interactionSender, menuActions);
             // 按住使用键的投影：持续使用的提交方接入前没有任务占用，投影读到的始终是真实键值。
             UseKeyProjection useKeyProjection = new UseKeyHoldProjection(useKeyHold);
-            // 吃随身食物：挑一件能直接吃的，换到主手后原生按住吃完一口。
-            // 食物数值一份：饿了挑吃的、数口粮都按游戏的食物组件认。
-            ReadsFoodValues foods = PlayerViews.foods(() -> playerControl.activeContext().orElse(null));
-            EatsCarriedFood foodMoves = new EatsCarriedFood(
-                    PlayerViews.backpack(() -> playerControl.activeContext().orElse(null)),
-                    foods,
-                    new ClientMovesToMainhand(() -> playerControl.activeContext().orElse(null)),
-                    useKeyProjection);
-            // 战斗感观一份：生存需求的自卫与战斗能力看的是同一份伤害证据。
-            combatSenses = new LiveCombatSenses(new CombatMemory(), foods);
-            // 控制循环按急迫程度登记生存需求：必须立刻处理的先登记，同样急时它先插进来；
-            // 生存需求的事件从同一条任务事件流出去。主任务由目标运行表挂上：LLM 用 execute 派了活，
-            // 目标就成为主任务。
-            // 交互动作入口与按住使用键投影：生存需求的落地放水、能力清单在进世界时都用它们。
-            interactions = new Interactions(useKeyProjection);
-            controlLoop = withSurvivalNeeds(taskEvents, interactionSender, menuActions, interactions,
-                    combatSenses, walks, foodMoves, foods);
+            // 生存需求与战斗感观：控制循环在这里建好，目标运行表把主任务挂上去。
+            buildSurvival(useKeyProjection);
             // Mixin 钩子拿不到构造注入，只能在这里登记；服务本体仍以实例传递。
             ClientHooks.registerPlayerControl(playerControl);
             ClientHooks.registerBlockScans(blockScans);
@@ -294,6 +291,10 @@ public final class Bootstrap {
                     return playerControl.input().automationOwnsControls();
                 }
 
+                @Override public boolean humanTookOver() {
+                    return playerControl.input().humanTookOver();
+                }
+
                 @Override public void requestControl() {
                     // 本刻的角色上下文只在 beginTick 与 endTick 之间有效；下达与恢复都发生在客户端刻里，
                     // 这里取的是当刻的玩家本体，不在世界里时边界会如实拒绝。
@@ -303,6 +304,34 @@ public final class Bootstrap {
                 }
             });
             tools = goalTools(abilities, goals, clientWork, taskEvents, () -> worldScope[0]);
+        }
+
+        // 生存需求一套：吃随身食物、战斗感观、交互入口、挖三填一与换气挖顶，按急迫程度登记进控制循环。
+        private void buildSurvival(UseKeyProjection useKeyProjection) {
+            // 吃随身食物：挑一件能直接吃的，换到主手后原生按住吃完一口。
+            // 食物数值一份：饿了挑吃的、数口粮都按游戏的食物组件认。
+            ReadsFoodValues foods = PlayerViews.foods(() -> playerControl.activeContext().orElse(null));
+            EatsCarriedFood foodMoves = new EatsCarriedFood(
+                    PlayerViews.backpack(() -> playerControl.activeContext().orElse(null)),
+                    foods,
+                    new ClientMovesToMainhand(() -> playerControl.activeContext().orElse(null)),
+                    useKeyProjection);
+            // 战斗感观一份：生存需求的自卫与战斗能力看的是同一份伤害证据。
+            combatSenses = new LiveCombatSenses(new CombatMemory(), foods);
+            // 控制循环按急迫程度登记生存需求：必须立刻处理的先登记，同样急时它先插进来；
+            // 生存需求的事件从同一条任务事件流出去。主任务由目标运行表挂上：LLM 用 execute 派了活，
+            // 目标就成为主任务。
+            // 交互动作入口与按住使用键投影：生存需求的落地放水、能力清单在进世界时都用它们。
+            interactions = new Interactions(useKeyProjection);
+            // 挖三填一：挖用原生挖掘、封口换方块原生放下、出坑用走到；脚下是不是别人的东西问当前世界的保护判断。
+            Supplier<PlayerContext> now = () -> playerControl.activeContext().orElse(null);
+            // 换气时水面被盖住，挖开头顶那一格也问同一份保护判断。
+            Supplier<Protection> protection = () -> worldScope[0] == null ? null : worldScope[0].protection();
+            Supplier<BlockBreaking> diggings = () -> new NativeBlockBreaking(interactionSender, menuActions);
+            LiveBurrow burrow = new LiveBurrow(now, diggings, interactions, new ClientMovesToMainhand(now), walks,
+                    protection);
+            controlLoop = withSurvivalNeeds(taskEvents, interactionSender, menuActions, interactions,
+                    combatSenses, walks, foodMoves, foods, burrow, new LiveCeilingDigs(diggings, protection));
         }
 
         /** 建与服务端的会话，并在入服前登记客户端知道的操作清单。 */
@@ -342,7 +371,7 @@ public final class Bootstrap {
                 UseKeyProjection useKeyProjection = new UseKeyHoldProjection(useKeyHold);
                 WorldScope scope = new WorldScope(minecraft, playerControl, blockScans, session,
                         subtitles, interactions, useKeyProjection, walks, combatSenses,
-                        abilities, interactionSender, menuActions, instanceConfig.allowGameCommands());
+                        abilities, interactionSender, menuActions, instanceConfig.allowGameCommands(), furnaceFuels);
                 worldScope[0] = scope;
                 // 换了世界，任务事件流换一条新的，宿主手里的旧游标如实作废；再把这个世界上次没做完的目标
                 // 读回来，全部恢复为暂停，等 LLM 决定接不接着做。读回时的暂停事件进的是新的这条流。
@@ -374,7 +403,10 @@ public final class Bootstrap {
          * 但不推进控制循环，生存需求不能去抢人类手上的角色。
          */
         private void tickInWorld(Minecraft minecraft, PlayerContext current) {
-            // 启动接管开关还欠着控制权时每刻请求一次；请求是幂等的，拿到为止。
+            // 启动接管开关还欠着控制权时每刻请求一次；请求是幂等的，拿到为止。人按了 F8 就不再追着要。
+            if (startupAutomationPending && playerControl.input().humanTookOver()) {
+                startupAutomationPending = false;
+            }
             if (startupAutomationPending) {
                 playerControl.requestAutomationControl(current.localPlayer());
                 if (playerControl.input().automationOwnsControls()) {

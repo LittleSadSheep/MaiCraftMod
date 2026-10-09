@@ -8,7 +8,6 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.ArrowItem;
-import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.CrossbowItem;
 import net.minecraft.world.item.ItemStack;
 
@@ -43,11 +42,6 @@ public final class WeaponCarriedReader {
             }
         }
         return isArrow(player.getOffhandItem());
-    }
-
-    /** 手上或背包里是不是能垫能封的方块：极端自保（挖三填一）用它。 */
-    static boolean isPlaceableBlock(ItemStack stack) {
-        return stack.getItem() instanceof BlockItem;
     }
 
     private static WeaponChoice.Carried asCarried(ItemStack stack) {

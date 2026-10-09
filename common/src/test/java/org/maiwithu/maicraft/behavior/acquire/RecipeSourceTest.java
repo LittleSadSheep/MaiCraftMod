@@ -65,7 +65,8 @@ class RecipeSourceTest {
     private static final class FakeRuns implements RecipeRuns {
         static final FakeRuns READY = new FakeRuns();
 
-        @Override public Optional<Action> run(RecipeView recipe, WorldPosition station, int times) {
+        @Override public Optional<Action> run(RecipeView recipe, WorldPosition station, int times,
+                Permissions permissions) {
             return Optional.of(new Action() {
                 @Override public ActionStatus tick(TickContext context) {
                     return ActionStatus.done();

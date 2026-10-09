@@ -73,7 +73,7 @@ class BlockOwnershipRecordTest {
     }
 
     @Test
-    void savedRecordComesBackAfterARestart(@TempDir Path temp) {
+    void 存盘后重启还能读回记录(@TempDir Path temp) {
         // 存进存档、重启后读回：玩家盖的房子不会因为服务器重启就变成"不知道是谁的"。
         var record = new BlockOwnershipRecord();
         var alice = UUID.randomUUID();
@@ -91,7 +91,7 @@ class BlockOwnershipRecordTest {
     }
 
     @Test
-    void brokenBlockForgetsItsOwner() {
+    void 方块被拆掉就忘掉它的归属() {
         var record = new BlockOwnershipRecord();
         var position = new BlockPos(2, 64, 2);
         record.recordPlacement(OVERWORLD, position, UUID.randomUUID(), 1);

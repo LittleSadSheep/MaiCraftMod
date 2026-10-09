@@ -21,9 +21,9 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeInput;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.item.crafting.RecipeType;
-import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
 
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.world.FurnaceFuels;
 
 /**
  * 配方与燃料读端的注册表实现：能做出一种东西的有哪些做法、一件东西能烧多久，
@@ -37,8 +37,11 @@ public final class RegistryRecipeReads implements ReadsRecipes, ReadsFuels {
 
     private final Supplier<PlayerContext> context;
     private final ReadsItemTags tags;
+    private final FurnaceFuels fuels;
 
-    public RegistryRecipeReads(Supplier<PlayerContext> context, ReadsItemTags tags) {
+    /** @param fuels 一件东西能烧多久，由加载器回答（含模组燃料） */
+    public RegistryRecipeReads(Supplier<PlayerContext> context, ReadsItemTags tags, FurnaceFuels fuels) {
+        this.fuels = Objects.requireNonNull(fuels, "fuels");
         this.context = Objects.requireNonNull(context, "context");
         this.tags = Objects.requireNonNull(tags, "tags");
     }
@@ -59,8 +62,8 @@ public final class RegistryRecipeReads implements ReadsRecipes, ReadsFuels {
     @Override
     public int burnTicks(String itemId) {
         var item = BuiltInRegistries.ITEM.getOptional(ResourceLocation.tryParse(itemId.toLowerCase(Locale.ROOT)));
-        // 燃料表按原版与数据包注册的燃料回答；烧不起来的东西就是 0 刻。
-        return item.map(value -> AbstractFurnaceBlockEntity.getFuel().getOrDefault(value, 0)).orElse(0);
+        // 燃料按加载器自己的登记回答（原版燃料与模组燃料都在内）；烧不起来的东西就是 0 刻。
+        return item.map(value -> fuels.burnTicks(new ItemStack(value))).orElse(0);
     }
 
     // 按设施种类收配方：产出对上想要的（具体物品按 ID，标签按物品挂的标签）才算一条做法。

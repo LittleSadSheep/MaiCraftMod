@@ -96,7 +96,7 @@ class GatherTaskTest {
             this.dropCount = dropCount;
         }
 
-        @Override public Action toward(BlockPos target) {
+        @Override public Action toward(BlockPos target, Permissions permissions) {
             return simple("走近 " + target, "走近");
         }
 
@@ -303,7 +303,7 @@ class GatherTaskTest {
         FakeBackpack backpack = new FakeBackpack();
         // 掉落物在走近时由原版收进包：替身按同样的时机把东西放进背包。
         FakeActions actions = new FakeActions(backpack, "minecraft:rotten_flesh", 2) {
-            @Override public Action toward(BlockPos target) {
+            @Override public Action toward(BlockPos target, Permissions permissions) {
                 return new Action() {
                     @Override public ActionStatus tick(TickContext context) {
                         backpack.add("minecraft:rotten_flesh", 2);

@@ -3,7 +3,8 @@ package org.maiwithu.maicraft.game.mixin;
 
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
-import org.maiwithu.maicraft.game.menu.MenuVisibility;
+import org.maiwithu.maicraft.game.ClientHooks;
+import org.maiwithu.maicraft.game.menu.RenderedScreens;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -15,6 +16,9 @@ public abstract class ScreenVisibilityMixin {
     @Inject(method = "renderWithTooltip", at = @At("RETURN"))
     private void maicraft$observeMenuFrame(GuiGraphics graphics, int mouseX, int mouseY,
                                           float partialTick, CallbackInfo callback) {
-        MenuVisibility.rendered((Screen) (Object) this);
+        RenderedScreens screens = ClientHooks.renderedScreens();
+        if (screens != null) {
+            screens.rendered((Screen) (Object) this);
+        }
     }
 }

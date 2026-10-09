@@ -83,7 +83,7 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
         BlockPos target = new BlockPos(spot.at().x(), spot.at().y(), spot.at().z());
         return switch (phase) {
             // 掉落物目标没有"动手"这步，走近后直接等入包；两种靠近都交给站位与靠近的模型。
-            case WALK, RECOLLECT -> approaches.toward(target);
+            case WALK, RECOLLECT -> approaches.toward(target, spot.permissions());
             case DIG -> digs.dig(target).orElse(null);
             // 看现场不是现场动作，在 tick 里读现场；补种的入口再问一次，没接上时这一步跳过。
             case JUDGE -> null;

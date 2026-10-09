@@ -113,7 +113,7 @@ class SpacePlannerTest {
     }
 
     @Test
-    void fullCarriedBackpackFallsBackToChestsThenTheGround() {
+    void 随身背包满了接着存箱子_再不行才丢() {
         // 随身背包只剩一格：第一堆放进去，第二堆存进记得的箱子，第三堆才丢。
         List<BackpackStack> stacks = List.of(junk("minecraft:dirt", 64), junk("minecraft:gravel", 64),
                 junk("minecraft:sand", 64));

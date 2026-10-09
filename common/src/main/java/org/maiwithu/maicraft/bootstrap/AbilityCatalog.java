@@ -75,8 +75,6 @@ import org.maiwithu.maicraft.behavior.inventory.ClientStepsAside;
 import org.maiwithu.maicraft.behavior.inventory.DropAvoidance;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
-import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
-import org.maiwithu.maicraft.behavior.permission.OwnershipQueries;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
@@ -104,6 +102,7 @@ import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
+import org.maiwithu.maicraft.game.world.FurnaceFuels;
 
 /**
  * 能力清单：启动时按这份明确的清单创建并登记能力，新增能力在清单里加一行，不做类路径扫描。
@@ -146,7 +145,9 @@ public final class AbilityCatalog {
             ChatChannel chat,
             LongSupplier clientTicks,
             InputDriver inputs,
-            boolean allowGameCommands) {
+            boolean allowGameCommands,
+            Protection protection,
+            FurnaceFuels furnaceFuels) {
 
         public Deps {
             Objects.requireNonNull(context, "context");
@@ -200,12 +201,8 @@ public final class AbilityCatalog {
                 deps.characterPosition(), dropAvoidance, Optional.of(toMainhand),
                 Optional.of(new ClientStepsAside(deps.inputs(), dropAvoidance))));
 
-        // 许可检查点：归属记录问服务端，区域与地标问世界记忆；玩家放置推断没有接，先按不受保护处理。
-        // 拿到物品的来源与采集都用这一份，先建。
-        PermissionCheck permission = new PermissionCheck(
-                new Protection(new OwnershipQueries(deps.session()), deps.memory(), deps.memory(),
-                        GuessesPlayerMade.NOTHING, deps.selfPlayerId()),
-                deps.creatures());
+        // 许可检查点：保护判断是这个世界的那一份（生存需求挖三填一也用它），拿到物品的来源与采集都用这一份，先建。
+        PermissionCheck permission = new PermissionCheck(deps.protection(), deps.creatures());
 
         // 拿到物品：身上的不算来源（引擎开场就清点），已实现的途径都登记，见 obtainModule。
         registry.register(obtainModule(deps, bringsClose, toMainhand, permission));
@@ -286,7 +283,7 @@ public final class AbilityCatalog {
     private static AbilityModule obtainModule(Deps deps, LiveApproaches bringsClose,
             ClientMovesToMainhand toMainhand, PermissionCheck permission) {
         ClientQuickMoves obtainQuickMoves = new ClientQuickMoves();
-        RegistryRecipeReads recipeReads = new RegistryRecipeReads(deps.context(), deps.itemTags());
+        RegistryRecipeReads recipeReads = new RegistryRecipeReads(deps.context(), deps.itemTags(), deps.furnaceFuels());
         // 在工作站上动手：熔炉添燃料时按同一份燃料表挑身上烧得最久的。
         RecipeRuns recipeRuns = new MenuRecipeRuns(bringsClose, deps.interactions(),
                 recipeReads, deps.memory(), deps.context());
@@ -351,8 +348,8 @@ public final class AbilityCatalog {
         }
     }
 
-    /** 采集的靠近：目标落实成一格方块后交给靠近模型，许可用默认档。 */
+    /** 采集的靠近：目标落实成一格方块后交给靠近模型，走过去能动多少地形按这次任务的许可来。 */
     private static ApproachesTargets approaches(LiveApproaches bringsClose) {
-        return target -> bringsClose.toward(InteractionTarget.ofBlock(target), Permissions.DEFAULT);
+        return (target, permissions) -> bringsClose.toward(InteractionTarget.ofBlock(target), permissions);
     }
 }

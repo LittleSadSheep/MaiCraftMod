@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.kernel.goal;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.child.ChildTaskRunner;
+import org.maiwithu.maicraft.kernel.interrupt.SurvivalNeedsOff;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
@@ -42,7 +43,7 @@ import java.util.function.Supplier;
  * <p>推进的记录 {@link GoalRun} 每次处境变化都存进目标运行存储；重启后从存储读回还没结束的
  * 记录，恢复为暂停，明确恢复后从当前步骤重新决定（进行中的任务不能跨重启恢复，能力会重新看现场）。
  */
-public final class GoalRunner implements Task {
+public final class GoalRunner implements Task, SurvivalNeedsOff {
     private static final Logger LOG = LoggerFactory.getLogger(GoalRunner.class);
 
     private final Goal goal;
@@ -69,6 +70,16 @@ public final class GoalRunner implements Task {
     private final List<TaskResult> finishedResults = new ArrayList<>();
     /** 结束后的结果；没结束时为 null。 */
     private TaskResult result;
+
+    /**
+     * 这件事的许可关掉了生存需求（survival_needs=off，寻死这类）：控制循环据此不插任何生存需求。
+     * sequence 正在跑某一步时按那一步的许可。
+     */
+    @Override
+    public boolean survivalNeedsOff() {
+        if (stepRunner != null) return stepRunner.survivalNeedsOff();
+        return goal.permissions().survivalNeeds() == Permissions.SurvivalNeeds.OFF;
+    }
 
     private GoalRunner(GoalRun run, AbilityRegistry registry, GoalRunStore store, RemembersPlaces remembers) {
         this.run = run;

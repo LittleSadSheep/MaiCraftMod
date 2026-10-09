@@ -15,9 +15,16 @@ import org.maiwithu.maicraft.kernel.task.Urgency;
 public final class BreathNeed implements SurvivalNeed {
 
     private final SurvivalSituation.SituationReader reader;
+    private final BreathTask.DigsCeiling ceilings;
 
     public BreathNeed(SurvivalSituation.SituationReader reader) {
+        this(reader, BreathTask.DigsCeiling.NONE);
+    }
+
+    /** @param ceilings 水面被盖住时怎么挖开头顶那一格 */
+    public BreathNeed(SurvivalSituation.SituationReader reader, BreathTask.DigsCeiling ceilings) {
         this.reader = reader;
+        this.ceilings = ceilings;
     }
 
     @Override public String name() { return "换气"; }
@@ -30,6 +37,6 @@ public final class BreathNeed implements SurvivalNeed {
 
     @Override
     public Task createTask(TickContext context) {
-        return new BreathTask(reader);
+        return new BreathTask(reader, ceilings);
     }
 }

@@ -19,8 +19,9 @@ import net.minecraft.client.Minecraft;
  * 归还时只恢复自己换掉的那个对象，其他模组已经换走就不覆盖。任务每一刻都要重新说
  * “继续前进”或“继续看向这里”；漏发时自动松键，不让旧输入一直生效。
  *
- * <p>F8 是人类随时可用的急停：按下后控制权回到人类手上，自动化不会立刻抢回。
- * 自动化这边只在目标下达（或暂停的目标恢复）成为主任务的那一刻重新请求一次控制权，
+ * <p>F8 是人类随时可用的急停：按下后控制权回到人类手上，直到人再按 F8 交回之前，
+ * 自动化的任何请求（目标下达、恢复、进世界自动接管）都不理会；离开世界后这个记号清掉。
+ * 没按过 F8 时，自动化在目标下达（或暂停的目标恢复）成为主任务的那一刻请求一次控制权，
  * 请求在下一个玩家更新时才安装自动输入。
  */
 public final class LocalPlayerInput implements PlayerInput {
@@ -31,6 +32,8 @@ public final class LocalPlayerInput implements PlayerInput {
     private Input humanInput;
     private BotInput botInput;
     private boolean automationRequested;
+    /** 人按 F8 收回了角色、还没交回：这期间不理会自动化的请求。 */
+    private boolean humanTookOver;
     private boolean toggleWasDown;
     private long requestRevision;
     private long activeTick;
@@ -79,6 +82,16 @@ public final class LocalPlayerInput implements PlayerInput {
 
     boolean automationControlRequested() {
         return automationRequested;
+    }
+
+    @Override
+    public boolean humanTookOver() {
+        return humanTookOver;
+    }
+
+    /** 离开世界：人收回角色的记号只管这一趟，下次进世界重新算。 */
+    void forgetHumanTakeover() {
+        humanTookOver = false;
     }
 
     boolean effectiveAutomationRequested() { return automationRequested; }
@@ -349,8 +362,14 @@ public final class LocalPlayerInput implements PlayerInput {
 
     /** 将 F8 撤销控制权的处理与 GLFW 按键轮询分开，便于独立验证交还身体的流程。 */
     boolean toggleHumanRequest(LocalPlayer player) {
-        if (automationRequested) cancelAutomationRequest();
-        else requestAutomation(player);
+        // 人按 F8：自动化在手上就收回并记下"人接管了"；不在手上就是人把角色交给自动化，记号清掉。
+        if (automationRequested) {
+            cancelAutomationRequest();
+            humanTookOver = true;
+        } else {
+            humanTookOver = false;
+            requestAutomation(player);
+        }
         return automationRequested;
     }
 
@@ -409,6 +428,7 @@ public final class LocalPlayerInput implements PlayerInput {
     void shutdown() {
         cancelAutomationRequest();
         toggleWasDown = false;
+        humanTookOver = false;
     }
 
     private void cancelAutomationRequest() {

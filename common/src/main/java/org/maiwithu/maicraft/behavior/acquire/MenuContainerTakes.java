@@ -63,8 +63,8 @@ public final class MenuContainerTakes implements ContainerTakes {
     }
 
     @Override
-    public Optional<Action> take(KnownContainer container, ItemRequest request) {
-        return Optional.of(new TakeAction(container, request));
+    public Optional<Action> take(KnownContainer container, ItemRequest request, Permissions permissions) {
+        return Optional.of(new TakeAction(container, request, permissions));
     }
 
     /** 开箱取货的动作：靠近 → 点开 → 等同步 → 逐格搬 → 关上，跨刻推进。 */
@@ -72,6 +72,8 @@ public final class MenuContainerTakes implements ContainerTakes {
 
         private final KnownContainer container;
         private final ItemRequest request;
+        /** 这次任务的许可：走到箱子跟前时能动多少地形按它来。 */
+        private final Permissions permissions;
         private Stage stage = Stage.APPROACH;
         private Action approaching;
         private AimAndInteract opening;
@@ -81,7 +83,8 @@ public final class MenuContainerTakes implements ContainerTakes {
         private int startTotal = -1;
         private Problem failure;
 
-        TakeAction(KnownContainer container, ItemRequest request) {
+        TakeAction(KnownContainer container, ItemRequest request, Permissions permissions) {
+            this.permissions = permissions;
             this.container = container;
             this.request = request;
         }
@@ -106,7 +109,8 @@ public final class MenuContainerTakes implements ContainerTakes {
         private ActionStatus approach(TickContext tick) {
             if (approaching == null) {
                 BlockPos at = new BlockPos((int) container.x(), (int) container.y(), (int) container.z());
-                approaching = close.toward(InteractionTarget.ofBlock(at), Permissions.DEFAULT);
+                // 走过去能动多少地形按这次任务的许可来，不另开一套默认档。
+                approaching = close.toward(InteractionTarget.ofBlock(at), permissions);
             }
             ActionStatus status = approaching.tick(tick);
             if (status instanceof ActionStatus.Running) return status;

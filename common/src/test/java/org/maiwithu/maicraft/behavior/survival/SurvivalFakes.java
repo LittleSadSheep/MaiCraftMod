@@ -55,6 +55,7 @@ final class SurvivalFakes {
         int airToSurface = 69;
         boolean stuck;
         BlockPos buried;
+        BlockPos ceiling;
 
         Situation feet(double y) { feetY = y; return this; }
         Situation fallingOnto(BlockPos cell, boolean survives) {
@@ -70,10 +71,11 @@ final class SurvivalFakes {
         Situation surfaceNeeds(int airTicks) { airToSurface = airTicks; return this; }
         Situation air(int airTicks) { air = airTicks; return this; }
         Situation buriedAt(BlockPos cell) { stuck = true; buried = cell; return this; }
+        Situation underCeiling(BlockPos cell) { ceiling = cell; return this; }
 
         SurvivalSituation build() {
             return new SurvivalSituation(health, feetY, yaw, falling, overVoid, landsInWater, survivesLanding,
-                    waterCell, headInWater, canBreatheUnderwater, air, maxAir, airToSurface, stuck, buried);
+                    waterCell, headInWater, canBreatheUnderwater, air, maxAir, airToSurface, stuck, buried, ceiling);
         }
     }
 

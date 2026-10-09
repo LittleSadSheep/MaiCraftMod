@@ -89,6 +89,8 @@ public final class PlayerControlBoundary {
                 || minecraft.getConnection() == null) {
             // 没有身体上下文就不会经过 endTick，因此在这里停止输入，避免角色继续沿用上一刻的动作。
             input.releaseAll();
+            // 离开了世界：人按 F8 收回角色的记号只管那一趟，下次进世界重新算。
+            if (minecraft.level == null) input.forgetHumanTakeover();
             if (playerChanged) {
                 controlRevision = nextRevision(controlRevision, "control revision");
                 mutationClaimedTick = tickRevision;
@@ -169,10 +171,16 @@ public final class PlayerControlBoundary {
         return input;
     }
 
-    /** 按 F8 从人类手里请求控制角色；不在处理外部请求的中途立即替换玩家输入，下一刻生效。 */
+    /**
+     * 自动化请求控制角色（目标下达、恢复、进世界自动接管）；不在处理外部请求的中途立即替换玩家输入，下一刻生效。
+     * 人按 F8 收回了角色、还没交回时不请求：F8 是人的急停，只有人再按 F8 才交回。
+     */
     public AutomationRequest requestAutomationControl(LocalPlayer player) {
         // 必须仍是当前世界里的同一个玩家；正在重生或换世界时先等下一次身体绑定完成。
         requireClientThread();
+        if (input.humanTookOver()) {
+            return new AutomationRequest(0, false);
+        }
         if (player == null || minecraft.player != player || minecraft.level == null
                 || minecraft.gameMode == null || minecraft.getConnection() == null) {
             throw new IllegalStateException("automatic control has no stable local-player world");

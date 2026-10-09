@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.game.loader;
 
 import java.nio.file.Path;
 import java.util.Optional;
+import org.maiwithu.maicraft.game.world.FurnaceFuels;
 
 /**
  * 加载器提供给公共代码的环境事实：是哪个加载器、装了哪些模组、游戏与配置目录在哪。
@@ -28,4 +29,7 @@ public interface LoaderEnvironment {
 
     /** 是否运行在开发环境（IDE 或 Gradle 启动项），用于打开只在开发时需要的诊断。 */
     boolean isDevelopment();
+
+    /** 一件东西放进熔炉能烧多久：按这个加载器自己的燃料登记回答，含模组燃料。 */
+    FurnaceFuels furnaceFuels();
 }

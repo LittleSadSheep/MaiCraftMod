@@ -307,6 +307,33 @@ class ControlLoopTest {
     }
 
     @Test
+    void mainTaskThatTurnedSurvivalNeedsOffIsNeverInterrupted() {
+        // 寻死这类任务把 survival_needs 关掉：快淹死也不插换气，手上的事照常推进。
+        FakeTask main = new SurvivalOffTask();
+        FakeNeed breath = FakeNeed.always("换气", Urgency.NOW);
+        ControlLoop loop = new ControlLoop(List.of(breath));
+        loop.setMainTask(main);
+
+        for (long tick = 0; tick < 5; tick++) {
+            loop.tick(new TestContext(tick));
+        }
+
+        assertEquals(0, breath.created, "生存需求关掉时不建临时任务");
+        assertTrue(main.ticks > 0, "主任务照常推进");
+    }
+
+    /** 许可里关掉了生存需求的主任务替身。 */
+    static final class SurvivalOffTask extends FakeTask implements SurvivalNeedsOff {
+        SurvivalOffTask() {
+            super("寻死", Interruptibility.WORKING);
+        }
+
+        @Override public boolean survivalNeedsOff() {
+            return true;
+        }
+    }
+
+    @Test
     void needThatKeepsFailingWaitsLongerEachTime() {
         // 饿了却弄不到吃的：接连没做成，等待逐次加倍，不每隔五秒就打断一次手上的活。
         FakeTask main = new FakeTask("挖矿", Interruptibility.WORKING);
