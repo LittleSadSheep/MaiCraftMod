@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.ability.deposit;
 
 import org.maiwithu.maicraft.behavior.inventory.SpotsContainers;
+import org.maiwithu.maicraft.behavior.acquire.ReadsItemTags;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 
 /**
@@ -14,7 +15,7 @@ import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
  * @param opens  打开一只容器
  * @param places 目标对象落在哪
  * @param digs   挖开压住盖子的方块
- * @param tags   物品标签判断
+ * @param tags   物品挂着哪些标签（玩家行为层的读法）；没接上时为 null，按什么标签都不挂算
  * @param memory 世界记忆；存完把容器里有什么记下来
  */
 record DepositServices(
@@ -22,7 +23,7 @@ record DepositServices(
         DepositSeams.OpensMenus opens,
         DepositSeams.FindsPlaces places,
         DepositSeams.DigsLid digs,
-        DepositSeams.ReadsItemTags tags,
+        ReadsItemTags tags,
         WorldMemory memory) {
 
     DepositServices {

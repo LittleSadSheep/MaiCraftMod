@@ -25,7 +25,7 @@ final class StubWorld implements ApproachWorldView {
     final Set<BlockPos> lavas = new HashSet<>();
     final Set<BlockPos> unloaded = new HashSet<>();
     /** 看不见的默认反面：只对声明为挡住的眼睛位置回答看不见。 */
-    BiPredicate<Vec3, InteractionTarget> hidden = (eye, target) -> false;
+    BiPredicate<Vec3, ApproachTarget> hidden = (eye, target) -> false;
 
     @Override public BlockPos currentFeet() {
         return feet;
@@ -63,7 +63,7 @@ final class StubWorld implements ApproachWorldView {
         return lavas.contains(at);
     }
 
-    @Override public boolean visibleFrom(Vec3 eye, InteractionTarget target) {
+    @Override public boolean visibleFrom(Vec3 eye, ApproachTarget target) {
         return !hidden.test(eye, target);
     }
 }

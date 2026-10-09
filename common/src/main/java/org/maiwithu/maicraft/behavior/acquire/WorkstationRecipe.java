@@ -4,7 +4,7 @@ package org.maiwithu.maicraft.behavior.acquire;
 import java.util.List;
 
 /**
- * 一条配方：从游戏真实配方管理器里读出来的只读快照。含模组配方；
+ * 一条工作站配方：角色能自己在合成台、熔炉、石切台上动手做的，从游戏真实配方管理器里读出来的只读快照。含模组配方；
  * 原料写的是游戏要的东西（具体物品或标签），产出写一次能做出几件。
  *
  * @param id           配方的注册 ID，例如 minecraft:iron_ingot_from_blasting_iron_ore
@@ -13,10 +13,10 @@ import java.util.List;
  * @param resultCount  做一次出几件
  * @param ingredients  做一次要的原料；烧炼与石切台只有一条
  */
-public record RecipeView(String id, Kind kind, WantedItem result, int resultCount,
+public record WorkstationRecipe(String id, Kind kind, WantedItem result, int resultCount,
         List<IngredientStack> ingredients) {
 
-    public RecipeView {
+    public WorkstationRecipe {
         if (id == null || id.isBlank()) throw new IllegalArgumentException("配方必须有注册 ID");
         if (kind == null) throw new IllegalArgumentException("配方必须有设施种类");
         if (result == null) throw new IllegalArgumentException("配方必须有产出");

@@ -16,7 +16,7 @@ public interface WalksToSpot {
     void begin(BlockPos feet);
 
     /** 推进一刻：站进目标格并落地是做完，还在走是进行中，这条路走不了是失败。 */
-    ActionStatus step(TickContext context);
+    ActionStatus tick(TickContext context);
 
     /** 被打断：松开按键、撤掉路线，但记着要去哪；恢复后接着推进时重新算路走过去。 */
     void pause();

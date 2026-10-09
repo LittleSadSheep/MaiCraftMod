@@ -51,10 +51,10 @@ import org.maiwithu.maicraft.behavior.acquire.MenuRecipeRuns;
 import org.maiwithu.maicraft.behavior.acquire.ReadsToolRequirements;
 import org.maiwithu.maicraft.behavior.acquire.RecipeRuns;
 import org.maiwithu.maicraft.behavior.acquire.RecipeSource;
-import org.maiwithu.maicraft.behavior.acquire.RecipeView;
+import org.maiwithu.maicraft.behavior.acquire.WorkstationRecipe;
 import org.maiwithu.maicraft.behavior.acquire.RegistryRecipeReads;
 import org.maiwithu.maicraft.behavior.acquire.TradeSource;
-import org.maiwithu.maicraft.behavior.approach.InteractionTarget;
+import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.approach.LiveApproachWorld;
 import org.maiwithu.maicraft.behavior.approach.LiveApproaches;
 import org.maiwithu.maicraft.behavior.interaction.ClientGameRefusals;
@@ -301,11 +301,11 @@ public final class AbilityCatalog {
         ClientWorkstationPlacer placer = new ClientWorkstationPlacer(
                 deps.interactions(), toMainhand, deps.memory(), deps.context());
         RecipeSource craftSource = new RecipeSource(
-                Set.of(RecipeView.Kind.CRAFTING, RecipeView.Kind.STONECUTTING),
+                Set.of(WorkstationRecipe.Kind.CRAFTING, WorkstationRecipe.Kind.STONECUTTING),
                 recipeReads, deps.memory(), recipeReads, recipeRuns,
                 deps.backpack(), deps.offhand(), deps.itemTags(), innerNeeds, placer, permission);
         RecipeSource smeltSource = new RecipeSource(
-                Set.of(RecipeView.Kind.SMELTING),
+                Set.of(WorkstationRecipe.Kind.SMELTING),
                 recipeReads, deps.memory(), recipeReads, recipeRuns,
                 deps.backpack(), deps.offhand(), deps.itemTags(), innerNeeds, placer, permission);
         MiningSource miningSource = new MiningSource(yieldScans, collects, deps.toolRequirements(),
@@ -365,6 +365,6 @@ public final class AbilityCatalog {
 
     /** 采集的靠近：目标落实成一格方块后交给靠近模型，走过去能动多少地形按这次任务的许可来。 */
     private static ApproachesTargets approaches(LiveApproaches bringsClose) {
-        return (target, permissions) -> bringsClose.toward(InteractionTarget.ofBlock(target), permissions);
+        return (target, permissions) -> bringsClose.toward(ApproachTarget.ofBlock(target), permissions);
     }
 }

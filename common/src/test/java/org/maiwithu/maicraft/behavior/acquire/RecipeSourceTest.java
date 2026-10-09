@@ -65,7 +65,7 @@ class RecipeSourceTest {
     private static final class FakeRuns implements RecipeRuns {
         static final FakeRuns READY = new FakeRuns();
 
-        @Override public Optional<Action> run(RecipeView recipe, WorldPosition station, int times,
+        @Override public Optional<Action> run(WorkstationRecipe recipe, WorldPosition station, int times,
                 Permissions permissions) {
             return Optional.of(new Action() {
                 @Override public ActionStatus tick(TickContext context) {
@@ -82,10 +82,10 @@ class RecipeSourceTest {
         return new WorldMemory(new DocumentStore(temp.resolve("state.sqlite")), "world-1");
     }
 
-    private RecipeView plankRecipe() {
-        return new RecipeView("minecraft:oak_planks", RecipeView.Kind.CRAFTING,
+    private WorkstationRecipe plankRecipe() {
+        return new WorkstationRecipe("minecraft:oak_planks", WorkstationRecipe.Kind.CRAFTING,
                 WantedItem.ofItem("minecraft:oak_planks"), 4,
-                List.of(new RecipeView.IngredientStack(WantedItem.ofItem("minecraft:oak_log"), 1)));
+                List.of(new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:oak_log"), 1)));
     }
 
     private RecipeSource source(WorldMemory memory, ReadsRecipes recipes, CapturingNeeds needs) {
@@ -145,9 +145,9 @@ class RecipeSourceTest {
     void 烧炼身上没燃料_先去弄煤_用途写明是燃料() {
         WorldMemory memory = memory();
         memory.rememberWorkstationUsed(TABLE_AT, "minecraft:furnace", NOW);
-        RecipeView smelting = new RecipeView("minecraft:iron_ingot", RecipeView.Kind.SMELTING,
+        WorkstationRecipe smelting = new WorkstationRecipe("minecraft:iron_ingot", WorkstationRecipe.Kind.SMELTING,
                 WantedItem.ofItem("minecraft:iron_ingot"), 1,
-                List.of(new RecipeView.IngredientStack(WantedItem.ofItem("minecraft:raw_iron"), 1)));
+                List.of(new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:raw_iron"), 1)));
         CapturingNeeds needs = new CapturingNeeds();
         RecipeSource recipeSource = source(memory, wanted -> List.of(smelting), needs);
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class,
@@ -170,9 +170,9 @@ class RecipeSourceTest {
         WorldMemory memory = memory();
         memory.rememberWorkstationUsed(TABLE_AT, "minecraft:furnace", NOW);
         backpack.add("minecraft:coal_block", 2);
-        RecipeView smelting = new RecipeView("minecraft:iron_ingot", RecipeView.Kind.SMELTING,
+        WorkstationRecipe smelting = new WorkstationRecipe("minecraft:iron_ingot", WorkstationRecipe.Kind.SMELTING,
                 WantedItem.ofItem("minecraft:iron_ingot"), 1,
-                List.of(new RecipeView.IngredientStack(WantedItem.ofItem("minecraft:raw_iron"), 1)));
+                List.of(new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:raw_iron"), 1)));
         CapturingNeeds needs = new CapturingNeeds();
         RecipeSource recipeSource = source(memory, wanted -> List.of(smelting), needs);
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class,

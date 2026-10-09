@@ -40,7 +40,7 @@ public final class RecipeSource implements ItemSource {
     private static final int PLANNED_COAL_BURN_TICKS = 1600;
     private static final String COAL = "minecraft:coal";
 
-    private final Set<RecipeView.Kind> kinds;
+    private final Set<WorkstationRecipe.Kind> kinds;
     private final ReadsRecipes recipes;
     private final WorldMemory memory;
     private final ReadsFuels fuels;
@@ -54,7 +54,7 @@ public final class RecipeSource implements ItemSource {
     private final PermissionCheck permission;
 
     /** 只做给定几种配方的来源：合成一条路（含石切台），烧炼一条路，分开登记才分得开 via。 */
-    public RecipeSource(Set<RecipeView.Kind> kinds, ReadsRecipes recipes, WorldMemory memory, ReadsFuels fuels,
+    public RecipeSource(Set<WorkstationRecipe.Kind> kinds, ReadsRecipes recipes, WorldMemory memory, ReadsFuels fuels,
             RecipeRuns runs, BackpackView backpack, OffhandContents offhand, ReadsItemTags tags, ItemNeeds needs,
             SetsUpWorkstation placer, PermissionCheck permission) {
         if (kinds.isEmpty()) throw new IllegalArgumentException("来源至少要认一种配方");
@@ -74,21 +74,21 @@ public final class RecipeSource implements ItemSource {
     /** 认所有种类配方、不就地摆设施的来源：就地摆放与种类分路接入前的老写法。 */
     public RecipeSource(ReadsRecipes recipes, WorldMemory memory, ReadsFuels fuels, RecipeRuns runs,
             BackpackView backpack, OffhandContents offhand, ReadsItemTags tags, ItemNeeds needs) {
-        this(Set.of(RecipeView.Kind.CRAFTING, RecipeView.Kind.SMELTING, RecipeView.Kind.STONECUTTING),
+        this(Set.of(WorkstationRecipe.Kind.CRAFTING, WorkstationRecipe.Kind.SMELTING, WorkstationRecipe.Kind.STONECUTTING),
                 recipes, memory, fuels, runs, backpack, offhand, tags, needs, null, null);
     }
 
     @Override public String describe() {
-        return kinds.contains(RecipeView.Kind.SMELTING) && !kinds.contains(RecipeView.Kind.CRAFTING)
+        return kinds.contains(WorkstationRecipe.Kind.SMELTING) && !kinds.contains(WorkstationRecipe.Kind.CRAFTING)
                 ? "烧炼" : "自己做";
     }
 
     @Override public AcquireVia via() {
-        return kinds.contains(RecipeView.Kind.CRAFTING) ? AcquireVia.CRAFT : AcquireVia.SMELT;
+        return kinds.contains(WorkstationRecipe.Kind.CRAFTING) ? AcquireVia.CRAFT : AcquireVia.SMELT;
     }
 
     @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
-        List<RecipeView> candidates = recipes.recipesProducing(request.wanted()).stream()
+        List<WorkstationRecipe> candidates = recipes.recipesProducing(request.wanted()).stream()
                 .filter(recipe -> kinds.contains(recipe.kind()))
                 .toList();
         if (candidates.isEmpty()) {
@@ -96,7 +96,7 @@ public final class RecipeSource implements ItemSource {
                     "游戏里没有做出" + request.wanted().describe() + "的配方");
         }
         // 多种做法时挑原料种类最少的一种：备料越简单，路上出的岔子越少。
-        RecipeView recipe = candidates.stream()
+        WorkstationRecipe recipe = candidates.stream()
                 .sorted((a, b) -> Integer.compare(a.ingredients().size(), b.ingredients().size()))
                 .toList().getFirst();
         Optional<MemoryRecord> station = findStation(recipe.kind(), context);
@@ -110,7 +110,7 @@ public final class RecipeSource implements ItemSource {
     }
 
     @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
-        RecipeView recipe = recipes.recipesProducing(request.wanted()).stream()
+        WorkstationRecipe recipe = recipes.recipesProducing(request.wanted()).stream()
                 .filter(candidate -> candidate.id().equals(offer.hint()))
                 .findFirst()
                 .orElse(null);
@@ -125,10 +125,10 @@ public final class RecipeSource implements ItemSource {
     }
 
     // 备料的一整串：缺的原料逐项去弄，烧炼再备燃料，没有设施就先摆一个，最后到设施上做。
-    private Action assemble(RecipeView recipe, WorldPosition station, int times, SourceContext context) {
+    private Action assemble(WorkstationRecipe recipe, WorldPosition station, int times, SourceContext context) {
         Permissions permissions = context.permissions();
         List<Action> steps = new ArrayList<>();
-        for (RecipeView.IngredientStack ingredient : recipe.ingredients()) {
+        for (WorkstationRecipe.IngredientStack ingredient : recipe.ingredients()) {
             int needed = ingredient.count() * times;
             int carried = CarriedItems.matching(backpack, offhand, ingredient.item(), tags);
             if (carried < needed) {
@@ -136,7 +136,7 @@ public final class RecipeSource implements ItemSource {
                         "为「做" + recipe.result().describe() + "」备原料"), permissions));
             }
         }
-        if (recipe.kind() == RecipeView.Kind.SMELTING) {
+        if (recipe.kind() == WorkstationRecipe.Kind.SMELTING) {
             steps.addAll(fuelSteps(recipe, times, permissions));
         }
         if (station == null) {
@@ -167,7 +167,7 @@ public final class RecipeSource implements ItemSource {
     }
 
     // 摆一个设施要的几步：身上没有设施方块就先去弄一个，然后在身边放下。摆不了（没接上）时给一个当场说明问题的动作。
-    private List<Action> placeSteps(RecipeView recipe, Permissions permissions) {
+    private List<Action> placeSteps(WorkstationRecipe recipe, Permissions permissions) {
         String blockType = workstationBlockType(recipe.kind());
         List<Action> steps = new ArrayList<>();
         int carried = CarriedItems.matching(backpack, offhand, WantedItem.ofItem(blockType), tags);
@@ -186,7 +186,7 @@ public final class RecipeSource implements ItemSource {
     }
 
     // 摆不了设施的动作：一推进一步就带着问题失败，免得"备料成功"冒充摆好了台子。
-    private Action cannotPlace(RecipeView recipe) {
+    private Action cannotPlace(WorkstationRecipe recipe) {
         String name = workstationName(recipe.kind());
         return new Action() {
             @Override public ActionStatus tick(TickContext context) {
@@ -200,7 +200,7 @@ public final class RecipeSource implements ItemSource {
     }
 
     // 报价时没找到记住的设施：能就地摆就报"摆一个再做"，摆不了就如实说没有设施。
-    private SourceQuote placementQuote(RecipeView recipe, int count, SourceContext context) {
+    private SourceQuote placementQuote(WorkstationRecipe recipe, int count, SourceContext context) {
         if (placer == null) {
             return new SourceQuote.Unavailable(describe(),
                     "有配方（" + recipe.id() + "），但没记得附近有" + workstationName(recipe.kind())
@@ -218,7 +218,7 @@ public final class RecipeSource implements ItemSource {
     }
 
     // 烧炼要的燃料：身上有烧得着的就用身上的（挑烧得最久的），一件都没有才去弄煤。
-    private List<Action> fuelSteps(RecipeView recipe, int times, Permissions permissions) {
+    private List<Action> fuelSteps(WorkstationRecipe recipe, int times, Permissions permissions) {
         int smeltTicks = times * SMELT_TICKS_PER_ITEM;
         int bestBurn = 0;
         for (var stack : backpack.stacks()) {
@@ -233,7 +233,7 @@ public final class RecipeSource implements ItemSource {
     }
 
     // 没有备料要做、动手也接不上：一个当场说明问题的动作，免得"备料成功"冒充做成了。
-    private Action nothingToDo(RecipeView recipe) {
+    private Action nothingToDo(WorkstationRecipe recipe) {
         return new Action() {
             @Override public ActionStatus tick(TickContext context) {
                 return ActionStatus.failed(Problem.of(Problem.Kind.UNSUPPORTED,
@@ -246,11 +246,11 @@ public final class RecipeSource implements ItemSource {
         };
     }
 
-    private int timesNeeded(RecipeView recipe, int count) {
+    private int timesNeeded(WorkstationRecipe recipe, int count) {
         return (int) Math.ceil((double) count / recipe.resultCount());
     }
 
-    private Optional<MemoryRecord> findStation(RecipeView.Kind kind, SourceContext context) {
+    private Optional<MemoryRecord> findStation(WorkstationRecipe.Kind kind, SourceContext context) {
         String blockType = workstationBlockType(kind);
         return memory.recordsNear(context.characterAt(), SEARCH_RADIUS_BLOCKS).stream()
                 .filter(record -> record.kind() == MemoryKind.WORKSTATION)
@@ -258,19 +258,19 @@ public final class RecipeSource implements ItemSource {
                 .findFirst();
     }
 
-    private String riskNote(RecipeView recipe, int times, SourceContext context) {
+    private String riskNote(WorkstationRecipe recipe, int times, SourceContext context) {
         StringBuilder note = new StringBuilder("还要备齐原料：");
-        for (RecipeView.IngredientStack ingredient : recipe.ingredients()) {
+        for (WorkstationRecipe.IngredientStack ingredient : recipe.ingredients()) {
             note.append(ingredient.item().describe()).append("×").append(ingredient.count() * times).append(" ");
         }
-        if (recipe.kind() == RecipeView.Kind.SMELTING) {
+        if (recipe.kind() == WorkstationRecipe.Kind.SMELTING) {
             note.append("；烧").append(times).append("次还要燃料");
         }
         return note.toString().trim();
     }
 
     /** 设施的方块类型：配方在哪种设施上做，就在记忆里找哪种。 */
-    private static String workstationBlockType(RecipeView.Kind kind) {
+    private static String workstationBlockType(WorkstationRecipe.Kind kind) {
         return switch (kind) {
             case CRAFTING -> "minecraft:crafting_table";
             case SMELTING -> "minecraft:furnace";
@@ -278,7 +278,7 @@ public final class RecipeSource implements ItemSource {
         };
     }
 
-    private static String workstationName(RecipeView.Kind kind) {
+    private static String workstationName(WorkstationRecipe.Kind kind) {
         return switch (kind) {
             case CRAFTING -> "工作台";
             case SMELTING -> "熔炉";

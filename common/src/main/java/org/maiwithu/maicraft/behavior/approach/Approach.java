@@ -32,7 +32,7 @@ public final class Approach implements Action {
     /** 动作内部的推进位置：先确认原地，再逐个候选走过去，最后才补救。 */
     private enum Stage { CHECK_HERE, NEXT_SPOT, WALKING, OPENING }
 
-    private final InteractionTarget target;
+    private final ApproachTarget target;
     private final ReachRules reach;
     private final ApproachWorldView world;
     private final WalkCost walking;
@@ -59,7 +59,7 @@ public final class Approach implements Action {
      * @param opener      站位补救；交互轨没接上之前传 null，等于不挖不垫
      * @param permissions 这次的许可，决定最后手段能不能用
      */
-    public Approach(InteractionTarget target, ReachRules reach, ApproachWorldView world,
+    public Approach(ApproachTarget target, ReachRules reach, ApproachWorldView world,
                     WalkCost walking, ProtectedCells guarded, WalksToSpot moves,
                     StandOpener opener, Permissions permissions) {
         this.target = target;
@@ -137,7 +137,7 @@ public final class Approach implements Action {
     }
 
     private ActionStatus walkStep(TickContext context) {
-        return switch (moves.step(context)) {
+        return switch (moves.tick(context)) {
             case ActionStatus.Running running -> running;
             // 到了再核对一次：路走完了不等于位置还能用，世界可能在这几刻里变了。
             case ActionStatus.Done done -> verifyArrival();

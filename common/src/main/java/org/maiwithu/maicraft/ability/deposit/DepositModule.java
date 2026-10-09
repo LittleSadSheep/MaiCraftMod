@@ -81,7 +81,7 @@ public final class DepositModule implements AbilityModule {
                 (at, permissions) -> new ClientMenuOpening(at, permissions, layouts, close, interactions, contexts),
                 new LiveDepositPlaces(scene, memory, contexts),
                 new NativeLidDigging(digs),
-                (itemId, tagId) -> tags.tagsOf(itemId).contains(tagId),
+                tags,
                 memory), backpack);
     }
 

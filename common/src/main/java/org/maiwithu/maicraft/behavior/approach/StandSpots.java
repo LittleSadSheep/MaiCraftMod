@@ -47,7 +47,7 @@ public final class StandSpots {
      * 找目标周围的候选站位。顺序按走过去的代价从小到大，没有代价信息（寻路没接上）时按远近排。
      * 没加载的格子直接跳过：既不能站，也不算"附近没有站位"的理由。
      */
-    public static Ranking find(InteractionTarget target, ReachRules reach,
+    public static Ranking find(ApproachTarget target, ReachRules reach,
                                ApproachWorldView world, WalkCost walking, ProtectedCells guarded) {
         List<StandSpot> spots = new ArrayList<>();
         List<RejectedSpot> rejected = new ArrayList<>();
@@ -69,7 +69,7 @@ public final class StandSpots {
      * 到了之后的核对：角色站在给定的位置上，够得着吗、看得见吗、落地了吗。
      * 通过返回 empty；不过时返回最先不过的那一项，用玩家能懂的话说。
      */
-    public static Optional<String> checkArrival(InteractionTarget target, ReachRules reach,
+    public static Optional<String> checkArrival(ApproachTarget target, ReachRules reach,
                                                 ApproachWorldView world, ProtectedCells guarded) {
         BlockPos feet = world.currentFeet();
         if (!world.onGround()) return Optional.of("还没落地");
@@ -80,7 +80,7 @@ public final class StandSpots {
     }
 
     /** 一个候选位置过一遍四项检查；过得去就带着代价进候选表，过不去就带着失败项进被拒表。 */
-    private static void review(BlockPos feet, InteractionTarget target, ReachRules reach,
+    private static void review(BlockPos feet, ApproachTarget target, ReachRules reach,
                                ApproachWorldView world, WalkCost walking, ProtectedCells guarded,
                                BlockPos current, List<StandSpot> spots, List<RejectedSpot> rejected) {
         if (!world.isLoaded(feet)) return;
@@ -120,7 +120,7 @@ public final class StandSpots {
     }
 
     /** 够得着检查：按交互种类取距离规则，返回失败项，够得着返回 null。 */
-    private static String reachFailure(InteractionTarget target, ReachRules reach, BlockPos feet, Vec3 eye) {
+    private static String reachFailure(ApproachTarget target, ReachRules reach, BlockPos feet, Vec3 eye) {
         return switch (target.kind()) {
             // 方块与实体：从眼睛到目标边缘的直线距离不超属性值，和角色自己伸手判定同源。
             case BLOCK -> eye.distanceTo(nearestPoint(target.bounds(), eye)) > reach.blockRange() ? "够不着" : null;

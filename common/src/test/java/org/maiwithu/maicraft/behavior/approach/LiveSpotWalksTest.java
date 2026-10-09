@@ -51,9 +51,9 @@ class LiveSpotWalksTest {
         };
         LiveSpotWalks spot = new LiveSpotWalks(walks, TerrainPermit.WALK_ONLY);
         spot.begin(new BlockPos(3, 64, 3));
-        assertTrue(spot.step(null) instanceof ActionStatus.Running);
+        assertTrue(spot.tick(null) instanceof ActionStatus.Running);
         spot.pause();
-        assertTrue(spot.step(null) instanceof ActionStatus.Running, "停下不是到了");
+        assertTrue(spot.tick(null) instanceof ActionStatus.Running, "停下不是到了");
         assertEquals(2, runs.size());
         assertTrue(runs.getFirst().closed);
         assertEquals(List.of(TerrainPermit.WALK_ONLY, TerrainPermit.WALK_ONLY), permits);

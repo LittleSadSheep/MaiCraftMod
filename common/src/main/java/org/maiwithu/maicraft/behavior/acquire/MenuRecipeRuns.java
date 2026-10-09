@@ -19,7 +19,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.RecipeHolder;
 
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
-import org.maiwithu.maicraft.behavior.approach.InteractionTarget;
+import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.interaction.AimAndInteract;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuContent;
@@ -92,7 +92,7 @@ public final class MenuRecipeRuns implements RecipeRuns {
     }
 
     @Override
-    public Optional<Action> run(RecipeView recipe, WorldPosition station, int times, Permissions permissions) {
+    public Optional<Action> run(WorkstationRecipe recipe, WorldPosition station, int times, Permissions permissions) {
         PlayerContext current = context.get();
         ClientLevel level = current == null ? null : current.level();
         if (level == null) {
@@ -108,7 +108,7 @@ public final class MenuRecipeRuns implements RecipeRuns {
     }
 
     @Override
-    public Optional<Action> runAtRememberedStation(RecipeView recipe, int times, Permissions permissions) {
+    public Optional<Action> runAtRememberedStation(WorkstationRecipe recipe, int times, Permissions permissions) {
         // 刚就地摆下的那台就是最新记下的：按方块类型从记忆里找记录时刻最新的工作站。
         String blockType = workstationBlockType(recipe.kind());
         return memory.allRecords().stream()
@@ -134,7 +134,7 @@ public final class MenuRecipeRuns implements RecipeRuns {
         private final RecipeHolder<?> holder;
         /** 这次任务的许可：走到设施跟前时能动多少地形按它来。 */
         private final Permissions permissions;
-        private final RecipeView recipe;
+        private final WorkstationRecipe recipe;
         private final WorldPosition station;
         private final int batches;
         /** 想做出的总件数：按配方的单次产出与次数估。 */
@@ -159,7 +159,7 @@ public final class MenuRecipeRuns implements RecipeRuns {
         private int feedFrom = -1;
         private int feedLeft;
 
-        WorkAction(RecipeHolder<?> holder, RecipeView recipe, WorldPosition station, int batches,
+        WorkAction(RecipeHolder<?> holder, WorkstationRecipe recipe, WorldPosition station, int batches,
                 Permissions permissions) {
             this.permissions = permissions;
             this.holder = holder;
@@ -192,7 +192,7 @@ public final class MenuRecipeRuns implements RecipeRuns {
 
         // 总期限：烧炼按每件的烧制刻数估，合成石切按一次一两刻估，另留动手与收尾的余量。
         private long giveUpTicks() {
-            long smelting = recipe.kind() == RecipeView.Kind.SMELTING
+            long smelting = recipe.kind() == WorkstationRecipe.Kind.SMELTING
                     ? (long) batches * SMELT_TICKS_PER_ITEM : 0;
             return smelting + 20L * 60;
         }
@@ -202,7 +202,7 @@ public final class MenuRecipeRuns implements RecipeRuns {
             if (approaching == null) {
                 BlockPos at = new BlockPos(station.x(), station.y(), station.z());
                 // 走过去能动多少地形按这次任务的许可来，不另开一套默认档。
-                approaching = close.toward(InteractionTarget.ofBlock(at), permissions);
+                approaching = close.toward(ApproachTarget.ofBlock(at), permissions);
             }
             ActionStatus status = approaching.tick(tick);
             if (status instanceof ActionStatus.Running) {
@@ -437,7 +437,7 @@ public final class MenuRecipeRuns implements RecipeRuns {
         // 收拾：熔炉不会把东西还回来，燃料槽和投入口剩下的收回背包；工作台、石切台关界面时原版自己还。
         private ActionStatus tidy(TickContext tick) {
             Optional<MenuContent.Reading> reading = menus.current();
-            if (reading.isEmpty() || recipe.kind() != RecipeView.Kind.SMELTING) {
+            if (reading.isEmpty() || recipe.kind() != WorkstationRecipe.Kind.SMELTING) {
                 stage = Stage.CLOSE;
                 return ActionStatus.progressed();
             }
@@ -538,7 +538,7 @@ public final class MenuRecipeRuns implements RecipeRuns {
                 Optional<MenuContent.Reading> reading = menus.current();
                 if (reading.isEmpty()) return MenuConfirmation.Verdict.PENDING;
                 List<SlotSnapshot> container = reading.get().containerSnapshots();
-                boolean placed = recipe.kind() == RecipeView.Kind.SMELTING
+                boolean placed = recipe.kind() == WorkstationRecipe.Kind.SMELTING
                         ? !container.get(FURNACE_INPUT).isEmpty()
                         : container.subList(1, container.size()).stream().anyMatch(stack -> !stack.isEmpty());
                 return placed ? MenuConfirmation.Verdict.APPLIED : MenuConfirmation.Verdict.PENDING;
@@ -633,7 +633,7 @@ public final class MenuRecipeRuns implements RecipeRuns {
     }
 
     /** 配方的设施种类对应的方块类型；摆台与记设施都用它。 */
-    static String workstationBlockType(RecipeView.Kind kind) {
+    static String workstationBlockType(WorkstationRecipe.Kind kind) {
         return switch (kind) {
             case CRAFTING -> "minecraft:crafting_table";
             case SMELTING -> "minecraft:furnace";

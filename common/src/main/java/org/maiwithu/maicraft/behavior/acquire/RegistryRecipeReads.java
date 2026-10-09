@@ -47,15 +47,15 @@ public final class RegistryRecipeReads implements ReadsRecipes, ReadsFuels {
     }
 
     @Override
-    public List<RecipeView> recipesProducing(WantedItem wanted) {
+    public List<WorkstationRecipe> recipesProducing(WantedItem wanted) {
         PlayerContext current = context.get();
         if (current == null || current.level() == null) {
             return List.of();
         }
-        List<RecipeView> views = new ArrayList<>();
-        collect(current, RecipeType.CRAFTING, RecipeView.Kind.CRAFTING, wanted, views);
-        collect(current, RecipeType.SMELTING, RecipeView.Kind.SMELTING, wanted, views);
-        collect(current, RecipeType.STONECUTTING, RecipeView.Kind.STONECUTTING, wanted, views);
+        List<WorkstationRecipe> views = new ArrayList<>();
+        collect(current, RecipeType.CRAFTING, WorkstationRecipe.Kind.CRAFTING, wanted, views);
+        collect(current, RecipeType.SMELTING, WorkstationRecipe.Kind.SMELTING, wanted, views);
+        collect(current, RecipeType.STONECUTTING, WorkstationRecipe.Kind.STONECUTTING, wanted, views);
         return List.copyOf(views);
     }
 
@@ -67,8 +67,8 @@ public final class RegistryRecipeReads implements ReadsRecipes, ReadsFuels {
     }
 
     // 按设施种类收配方：产出对上想要的（具体物品按 ID，标签按物品挂的标签）才算一条做法。
-    private <I extends RecipeInput, T extends Recipe<I>> void collect(PlayerContext current, RecipeType<T> type, RecipeView.Kind kind,
-            WantedItem wanted, List<RecipeView> views) {
+    private <I extends RecipeInput, T extends Recipe<I>> void collect(PlayerContext current, RecipeType<T> type, WorkstationRecipe.Kind kind,
+            WantedItem wanted, List<WorkstationRecipe> views) {
         for (RecipeHolder<?> holder : current.level().getRecipeManager().getAllRecipesFor(type)) {
             var result = holder.value().getResultItem(current.level().registryAccess());
             if (result == null || result.isEmpty()) {
@@ -78,21 +78,21 @@ public final class RegistryRecipeReads implements ReadsRecipes, ReadsFuels {
             if (!wanted.matches(resultId, tags.tagsOf(resultId))) {
                 continue;
             }
-            views.add(new RecipeView(holder.id().toString(), kind,
+            views.add(new WorkstationRecipe(holder.id().toString(), kind,
                     WantedItem.ofItem(resultId), result.getCount(), ingredients(holder.value().getIngredients())));
         }
     }
 
     // 一条配方的原料清单：每格一份，同一种写法合并计数。
-    private List<RecipeView.IngredientStack> ingredients(List<Ingredient> ingredients) {
+    private List<WorkstationRecipe.IngredientStack> ingredients(List<Ingredient> ingredients) {
         Map<String, Integer> merged = new LinkedHashMap<>();
         for (Ingredient ingredient : ingredients) {
             specifierOf(ingredient).ifPresent(specifier -> merged.merge(specifier, 1, Integer::sum));
         }
-        List<RecipeView.IngredientStack> stacks = new ArrayList<>();
+        List<WorkstationRecipe.IngredientStack> stacks = new ArrayList<>();
         for (var entry : merged.entrySet()) {
             String specifier = entry.getKey();
-            stacks.add(new RecipeView.IngredientStack(
+            stacks.add(new WorkstationRecipe.IngredientStack(
                     specifier.startsWith("#")
                             ? WantedItem.ofTag(specifier.substring(1))
                             : WantedItem.ofItem(specifier),

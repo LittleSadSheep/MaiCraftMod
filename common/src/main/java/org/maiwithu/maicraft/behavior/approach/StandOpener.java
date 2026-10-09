@@ -15,5 +15,5 @@ public interface StandOpener {
      * 为一个被拒的站位生成补救动作，做完之后角色应站在（或能重新核对）这个位置附近；
      * 这个位置不值得救（要动的方块太多、会砸坏东西）时返回 empty。
      */
-    Optional<Action> rescue(RejectedSpot blocked, InteractionTarget target);
+    Optional<Action> rescue(RejectedSpot blocked, ApproachTarget target);
 }
