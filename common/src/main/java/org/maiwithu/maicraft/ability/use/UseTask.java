@@ -81,6 +81,8 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     private String openedMenu;
     private String riding;
     private List<String> signLines = List.of();
+    /** 备手的当前动作；跨刻推进，做完或换阶段时清掉。 */
+    private Action handAction;
 
     UseTask(UseInput input, UseServices services) {
         super("用东西", Phase.RESOLVE, new ProgressTracker(200, 20L * 60 * 10));
@@ -103,7 +105,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
         return switch (phase) {
             case RESOLVE -> resolve(context);
             case TRAVEL -> travel(context);
-            case HAND -> prepareHand();
+            case HAND -> prepareHand(context);
             case APPROACH -> runActionThen(context, () -> Next.go(Phase.INTERACT, "到能动手的位置了"));
             case INTERACT -> interact(context);
             case WRITE -> writeDone();
@@ -246,10 +248,26 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
         };
     }
 
-    // 备手：选到主手或腾出空手；身上没有时由手上准备去拿一件，拿不到按缺物品失败。
-    private Next<Phase> prepareHand() {
-        Optional<Problem> problem = services.hand().hold(input.item());
-        if (problem.isPresent()) return Next.fail(problem.get());
+    // 备手：准备动作分刻推进，做到东西在主手上或空手为止；身上没有时按缺物品失败。
+    private Next<Phase> prepareHand(TickContext context) {
+        if (handAction == null) {
+            Optional<Action> prepared = services.hand().hold(input.item());
+            if (prepared.isEmpty()) {
+                return handReady();
+            }
+            handAction = prepared.get();
+        }
+        return switch (handAction.tick(context)) {
+            case ActionStatus.Running running -> Next.stay();
+            case ActionStatus.Done done -> {
+                handAction = null;
+                yield handReady();
+            }
+            case ActionStatus.Failed failed -> Next.fail(failed.problem());
+        };
+    }
+
+    private Next<Phase> handReady() {
         recordProgress(input.item() == null ? "空手准备好了" : "把 " + input.item() + " 拿到了手上");
         return target == null ? Next.go(Phase.INTERACT, "手准备好了")
                 : Next.go(Phase.APPROACH, "手准备好了");

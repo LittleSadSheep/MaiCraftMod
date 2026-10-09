@@ -5,7 +5,6 @@ import java.util.Optional;
 
 import org.maiwithu.maicraft.behavior.interaction.SignEditor;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
-import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 
 /**
@@ -16,10 +15,10 @@ final class UseSeams {
 
     private UseSeams() {}
 
-    /** 手上拿什么：选到主手，或腾出空手；身上没有要拿的东西时按缺物品失败。缺的自己去拿是拿到物品模型的事。 */
+    /** 手上拿什么：给出一份分刻推进的准备动作，逐刻做到东西在主手上；item 为 null 表示要空手。
+     * 已经拿好时给空；身上没有要拿的东西时给一个按缺物品失败的动作——缺的自己去拿是拿到物品模型的事。 */
     interface PreparesHand {
-        /** 把给定物品选到主手；item 为 null 表示要空手。做不成时给问题（NEED_ITEM 或腾不出手）。 */
-        Optional<Problem> hold(String item);
+        Optional<Action> hold(String item);
     }
 
     /** 告示牌编辑界面：右键提交后界面的读取入口；界面没开着给空。 */

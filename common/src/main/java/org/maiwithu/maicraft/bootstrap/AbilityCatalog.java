@@ -145,20 +145,20 @@ public final class AbilityCatalog {
         LiveApproaches bringsClose = new LiveApproaches(deps.context(),
                 new LiveApproachWorld(deps.context()), new LiveSpotWalks(deps.walks()));
 
+        // 换手读端提前建好：用东西的备手、进食的换手、装备的穿卸共用同一套界面搬运。
+        ClientMovesToMainhand toMainhand = new ClientMovesToMainhand(deps.context());
+
         // 用东西：交互、靠近、手上准备、观察编号解析、附近搜索、游戏拒绝读端与界面读数都接上了；
         // 告示牌界面、顺手捡起、跨未加载坐标还没有实现方，先留空。
         // 游戏拒绝读端看动作栏与服务端确认流：确认流从会话里读，刻号从所在世界取。
         registry.register(UseModule.assemble(deps.interactions(), bringsClose,
-                new LiveHandPreparation(deps.context()),
+                new LiveHandPreparation(toMainhand, deps.context()),
                 new LiveSeenResolver(deps::scene),
                 new LiveNearbySearcher(deps.blockScans(), deps.context()),
                 new RefusalReads(new ClientGameRefusals(new OverlayMessages(),
                         () -> deps.session().confirmations().recent(), deps.clientTicks())),
                 new ClientMenuContent(deps.context()),
                 deps.memory()));
-
-        // 换手与穿卸的读端一份：吃东西要换手，装备要穿卸，它们共享同一套界面搬运。
-        ClientMovesToMainhand toMainhand = new ClientMovesToMainhand(deps.context());
 
         // 进食：把食物换到主手走背包界面的原生搬运；手上不是食物时能换手了。
         registry.register(new EatModule(deps.backpack(), deps.offhand(), deps.hunger(), deps.foods(),
