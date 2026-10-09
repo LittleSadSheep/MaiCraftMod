@@ -16,7 +16,9 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * 死亡恢复决策：角色死后给 LLM 的一个选择——请求原版重生、请求切观战，或取消任务把死亡屏幕留给人。
+ * 死亡恢复决策：角色死后给 LLM 的一个选择——回到世界里（普通世界是重生，极限模式是旁观世界），
+ * 或取消任务把死亡屏幕留给人。两种"回去"在原版是死亡界面上同一个按钮发的同一个请求，
+ * 服务器按世界规则结算：普通世界复活，极限模式切成旁观；所以只按世界规则给其中一种，不让 LLM 选了旁观却被复活。
  *
  * <p>死亡停摆时挂一次问题（经内核的问题通道，MCP 的 answer 沿目标运行表的回答管道回来）。
  * 同一个死亡过程只挂一次；挂着的决策记在一条内存里的目标运行上，让 LLM 能按编号查到它、回答它。
@@ -50,14 +52,15 @@ public final class DeathRecovery {
     /**
      * 角色死了：挂一次死亡恢复决策。已经挂着或本轮已经了结（等 LLM 换人来重生）时不再挂。
      *
-     * @param facts           死亡现场的可见事实；这一刻拿不到时为 null，问题文本里就少写一条
-     * @param connectionAlive 到服务器的连接还在不在；不在时不提供切观战
+     * @param facts           死亡现场的可见事实；这一刻拿不到时为 null，问题文本里就少写一条，按普通世界给选项
+     * @param connectionAlive 到服务器的连接还在不在；不在时回不去，只能取消任务
      */
     public void onDeath(DeathFacts facts, boolean connectionAlive) {
         if (decision != null) {
             return;
         }
-        Question question = new Question(Question.Reason.CHOOSE_ONE, questionText(facts), options(connectionAlive));
+        Question question = new Question(Question.Reason.CHOOSE_ONE, questionText(facts),
+                options(facts != null && facts.hardcore(), connectionAlive));
         decision = new GoalRun(nextDecisionId--, goal(), GoalRun.NO_PARENT, -1);
         issuedDecisionIds.add(decision.id());
         while (issuedDecisionIds.size() > KEPT_DECISION_IDS) {
@@ -178,12 +181,14 @@ public final class DeathRecovery {
         return text.append("接下来怎么办？").toString();
     }
 
-    // 选项：重生永远提供；切观战只在连接还在时提供；取消任务永远提供。
-    private static List<Question.Option> options(boolean connectionAlive) {
+    // 选项：连接还在才回得去——普通世界给重生，极限模式给旁观世界（死亡界面上就是这样）；取消任务永远提供。
+    private static List<Question.Option> options(boolean hardcore, boolean connectionAlive) {
         List<Question.Option> options = new ArrayList<>();
-        options.add(new Question.Option("respawn", "发原版重生请求，回出生点或床，任务原地接着做"));
-        if (connectionAlive) {
-            options.add(new Question.Option("spectate", "请求切到旁观模式，成不成由服务器决定"));
+        if (connectionAlive && !hardcore) {
+            options.add(new Question.Option("respawn", "发原版重生请求，回出生点或床，任务原地接着做"));
+        }
+        if (connectionAlive && hardcore) {
+            options.add(new Question.Option("spectate", "极限模式不能重生：请求旁观这个世界，成不成由服务器决定"));
         }
         options.add(new Question.Option("cancel_task", "取消当前任务，死亡屏幕留给人处理"));
         return List.copyOf(options);

@@ -21,7 +21,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class DeathRecoveryTest {
 
-    private static final DeathFacts FACTS = new DeathFacts(12, "minecraft:overworld", 10.5, -3.0, 20.25);
+    private static final DeathFacts FACTS = new DeathFacts(12, "minecraft:overworld", 10.5, -3.0, 20.25, false);
+    private static final DeathFacts HARDCORE = new DeathFacts(12, "minecraft:overworld", 10.5, -3.0, 20.25, true);
 
     private final TaskEventLog events = new TaskEventLog();
     private final DeathRecovery recovery = new DeathRecovery(events);
@@ -35,7 +36,7 @@ class DeathRecoveryTest {
         assertEquals(Question.Reason.CHOOSE_ONE, question.reason());
         assertTrue(question.text().contains("分数 12"), "问题带死亡事实：" + question.text());
         assertTrue(question.text().contains("minecraft:overworld"), "问题带维度：" + question.text());
-        assertEquals(List.of("respawn", "spectate", "cancel_task"), optionIds(question));
+        assertEquals(List.of("respawn", "cancel_task"), optionIds(question));
 
         // 继续死着：同一个死亡过程不重复挂。
         recovery.onDeath(FACTS, true);
@@ -43,11 +44,19 @@ class DeathRecoveryTest {
     }
 
     @Test
-    void spectateIsOnlyOfferedWhileConnected() {
+    void comingBackIsOnlyOfferedWhileConnected() {
         recovery.onDeath(FACTS, false);
 
-        assertEquals(List.of("respawn", "cancel_task"), optionIds(recovery.pendingQuestion()),
-                "连接不在时不提供切观战");
+        assertEquals(List.of("cancel_task"), optionIds(recovery.pendingQuestion()),
+                "连接不在时回不去，只能取消任务");
+    }
+
+    @Test
+    void hardcoreOffersSpectateInsteadOfRespawn() {
+        // 极限模式死了不能重生：死亡界面上的按钮是旁观世界，发的是同一个请求，服务器切成旁观。
+        recovery.onDeath(HARDCORE, true);
+
+        assertEquals(List.of("spectate", "cancel_task"), optionIds(recovery.pendingQuestion()));
     }
 
     @Test
@@ -80,8 +89,8 @@ class DeathRecoveryTest {
         assertEquals(id, recovery.decisionRun().orElseThrow().id(), "还是同一条决策记录");
 
         // 重挂之后再答一次，这次成了，本轮了结。
-        assertEquals(DeathRecovery.Choice.SPECTATE, recovery.answer(id, "spectate"));
-        recovery.applied(DeathRecovery.Choice.SPECTATE, true);
+        assertEquals(DeathRecovery.Choice.RESPAWN, recovery.answer(id, "respawn"));
+        recovery.applied(DeathRecovery.Choice.RESPAWN, true);
         assertNull(recovery.pendingQuestion());
     }
 

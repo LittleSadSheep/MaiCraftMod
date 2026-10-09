@@ -144,7 +144,7 @@ class ControlLoopDeathTest {
     /** 只回答"死没死"的角色上下文替身；其他入口这些测试用不到，如实报缺。 */
     private static final class DyingPlayer implements PlayerContext {
         boolean dead;
-        DeathFacts facts = new DeathFacts(12, "minecraft:overworld", 1, 64, 2);
+        DeathFacts facts = new DeathFacts(12, "minecraft:overworld", 1, 64, 2, false);
 
         @Override public LocalPlayer localPlayer() { return null; }
         @Override public ClientLevel level() { return null; }
