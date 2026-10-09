@@ -54,6 +54,12 @@ class LayerRulesTest {
             .whereLayer("Server").mayOnlyBeAccessedByLayers("Bootstrap")
             .whereLayer("Network").mayOnlyBeAccessedByLayers("Game", "Server", "Bootstrap");
 
+    /** 内核不直接碰 Minecraft 的类：存档、玩家、世界都经游戏接口层转成内核自己的说法。 */
+    @ArchTest
+    static final ArchRule kernelDoesNotTouchMinecraft = noClasses()
+            .that().resideInAPackage(ROOT + "kernel..")
+            .should().dependOnClassesThat().resideInAPackage("net.minecraft..");
+
     /** 能力之间只能通过对方的 api、spi 子包互相依赖，不能伸进对方的内部包。 */
     @ArchTest
     static final ArchRule abilitiesOnlyMeetThroughApiOrSpi = classes()
