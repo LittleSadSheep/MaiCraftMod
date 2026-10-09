@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.mcp.tool;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import org.maiwithu.maicraft.game.ModIdentity;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.ability.AbilitySpec;
@@ -124,9 +125,15 @@ public final class LookupTool implements McpTool {
     private JsonObject ability(String rawId, RequestCheck check) {
         String id = rawId.contains(":") ? rawId.toLowerCase(Locale.ROOT)
                 : registry.all().stream().map(module -> module.spec().id())
-                .filter(candidate -> candidate.endsWith(":" + rawId.toLowerCase(Locale.ROOT))).findFirst().orElse(rawId);
+                .filter(candidate -> candidate.endsWith(":" + rawId.toLowerCase(Locale.ROOT))).findFirst()
+                .orElse(ModIdentity.MOD_ID + ":" + rawId.toLowerCase(Locale.ROOT));
         AbilityModule module = registry.find(id).orElse(null);
         if (module == null) {
+            List<String> missing = registry.missingModsFor(id);
+            if (!missing.isEmpty()) {
+                return ToolReply.error(ErrorCode.UNKNOWN_ABILITY, "能力 " + rawId + " 需要模组 "
+                        + String.join("、", missing) + "，这个实例没装");
+            }
             return ToolReply.error(ErrorCode.UNKNOWN_ABILITY, "没有能力 " + rawId + "；" + SimilarAbilities.hint(registry, id));
         }
         AbilitySpec spec = module.spec();

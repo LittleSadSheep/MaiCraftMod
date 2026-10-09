@@ -56,6 +56,17 @@ class GoalReaderTest {
     }
 
     @Test
+    void namesTheMissingModWhenTheAbilityNeedsOne() {
+        AbilityRegistry registry = new AbilityRegistry(new TaskFactories(), modId -> false);
+        registry.register(ToolTestAbility.needsMods("maicraft:machine_probe", "create"));
+        GoalReader.Reading reading = new GoalReader(registry).read(JsonParser.parseString("""
+                {"ability": "machine_probe"}"""));
+
+        assertEquals(ErrorCode.UNKNOWN_ABILITY, reading.code());
+        assertTrue(reading.errors().getFirst().message().contains("需要模组 create"), reading.errors()::toString);
+    }
+
+    @Test
     void reportsEveryMistakeInOneGo() {
         GoalReader.Reading reading = read("""
                 {"ability": "maicraft:use", "target": {"kind": "landmark", "name": "家"},

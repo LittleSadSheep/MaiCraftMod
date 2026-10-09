@@ -18,10 +18,11 @@ import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** 能力注册：登记能力时同时登记它的任务；同一个能力不能登记两次；能力 ID 形如 maicraft:小写名。 */
+/** 能力注册：登记能力时同时登记它的任务；同一个能力不能登记两次；需要的模组没装就不登记；能力 ID 形如 maicraft:小写名。 */
 class AbilityRegistryTest {
 
     private record Remember(String name) implements TaskInput {
@@ -32,8 +33,18 @@ class AbilityRegistryTest {
 
     // 最小的能力：记住一个地点；登记时顺带登记它的任务。
     private static final class RememberModule implements AbilityModule {
+        private final Set<RequiredMod> requiredMods;
+
+        RememberModule() {
+            this(Set.of());
+        }
+
+        RememberModule(Set<RequiredMod> requiredMods) {
+            this.requiredMods = requiredMods;
+        }
+
         @Override public AbilitySpec spec() {
-            return rememberSpec("maicraft:remember");
+            return rememberSpec("maicraft:remember", requiredMods);
         }
 
         @Override public StepDecision decide(StepContext step) {
@@ -60,8 +71,12 @@ class AbilityRegistryTest {
     }
 
     private static AbilitySpec rememberSpec(String id) {
+        return rememberSpec(id, Set.of());
+    }
+
+    private static AbilitySpec rememberSpec(String id, Set<RequiredMod> requiredMods) {
         return new AbilitySpec(id, "记住一个地点", AbilityDoc.forAbility("remember"), ParamSpec.EMPTY,
-                Set.of(TargetKind.HERE), ExecutionMode.MEMORY_ONLY, Set.of(), List.of(), Listing.LISTED);
+                Set.of(TargetKind.HERE), ExecutionMode.MEMORY_ONLY, requiredMods, List.of(), Listing.LISTED);
     }
 
     @Test
@@ -80,6 +95,27 @@ class AbilityRegistryTest {
         registry.register(new RememberModule());
 
         assertThrows(IllegalStateException.class, () -> registry.register(new RememberModule()));
+    }
+
+    @Test
+    void skipsAbilitiesWhoseRequiredModsAreMissing() {
+        AbilityRegistry registry = new AbilityRegistry(new TaskFactories(), modId -> modId.equals("create"));
+        registry.register(new RememberModule(Set.of(RequiredMod.of("ae2"), RequiredMod.of("create"))));
+
+        assertTrue(registry.find("maicraft:remember").isEmpty());
+        assertTrue(registry.all().isEmpty(), "缺模组的能力不出现在能力列表里");
+        assertFalse(registry.taskFactories().supports(Remember.class), "没登记的能力不该留下它的任务");
+        assertEquals(List.of("ae2"), registry.missingModsFor("maicraft:remember"));
+        assertTrue(registry.missingModsFor("maicraft:nothing").isEmpty());
+    }
+
+    @Test
+    void registersAbilitiesWhenEveryRequiredModIsInstalled() {
+        AbilityRegistry registry = new AbilityRegistry(new TaskFactories(), modId -> true);
+        registry.register(new RememberModule(Set.of(RequiredMod.of("create"))));
+
+        assertTrue(registry.find("maicraft:remember").isPresent());
+        assertTrue(registry.missingModsFor("maicraft:remember").isEmpty());
     }
 
     @Test
