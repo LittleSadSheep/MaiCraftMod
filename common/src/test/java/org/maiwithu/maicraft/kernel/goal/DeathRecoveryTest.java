@@ -38,7 +38,7 @@ class DeathRecoveryTest {
         assertEquals(Question.Reason.CHOOSE_ONE, question.reason());
         assertTrue(question.text().contains("分数 12"), "问题带死亡事实：" + question.text());
         assertTrue(question.text().contains("minecraft:overworld"), "问题带维度：" + question.text());
-        assertEquals(List.of("respawn", "cancel_task"), optionIds(question));
+        assertEquals(List.of("respawn", "cancel_goal"), optionIds(question));
 
         // 继续死着：同一个死亡过程不重复挂。
         recovery.onDeath(FACTS, true);
@@ -49,8 +49,8 @@ class DeathRecoveryTest {
     void comingBackIsOnlyOfferedWhileConnected() {
         recovery.onDeath(FACTS, false);
 
-        assertEquals(List.of("cancel_task"), optionIds(recovery.pendingQuestion()),
-                "连接不在时回不去，只能取消任务");
+        assertEquals(List.of("cancel_goal"), optionIds(recovery.pendingQuestion()),
+                "连接不在时回不去，只能取消目标");
     }
 
     @Test
@@ -58,7 +58,7 @@ class DeathRecoveryTest {
         // 极限模式死了不能重生：死亡界面上的按钮是旁观世界，发的是同一个请求，服务器切成旁观。
         recovery.onDeath(HARDCORE, true);
 
-        assertEquals(List.of("spectate", "cancel_task"), optionIds(recovery.pendingQuestion()));
+        assertEquals(List.of("spectate", "cancel_goal"), optionIds(recovery.pendingQuestion()));
     }
 
     @Test
@@ -100,8 +100,8 @@ class DeathRecoveryTest {
     void lateDuplicateAnswerDoesNotLandOnTheConsumedQuestion() {
         recovery.onDeath(FACTS, true);
         long id = recovery.decisionRun().orElseThrow().id();
-        recovery.answer(id, "cancel_task");
-        recovery.applied(DeathRecovery.Choice.CANCEL_TASK, true);
+        recovery.answer(id, "cancel_goal");
+        recovery.applied(DeathRecovery.Choice.CANCEL_GOAL, true);
 
         // 本轮还没回到活体（死亡屏幕留给人），决策记录还在，但问题已经消费掉：
         // 迟到的重复答复如实报错，不悄悄当没听见，也不落到别的问题上。
@@ -131,8 +131,8 @@ class DeathRecoveryTest {
         recovery.onDeath(FACTS, true);
         long id = recovery.decisionRun().orElseThrow().id();
 
-        assertEquals(DeathRecovery.Choice.CANCEL_TASK, recovery.answer(id, "cancel_task"));
-        recovery.applied(DeathRecovery.Choice.CANCEL_TASK, true);
+        assertEquals(DeathRecovery.Choice.CANCEL_GOAL, recovery.answer(id, "cancel_goal"));
+        recovery.applied(DeathRecovery.Choice.CANCEL_GOAL, true);
         assertTrue(recovery.decisionRun().orElseThrow().result().summary().contains("取消"),
                 "结果说清取消了任务");
     }

@@ -16,7 +16,8 @@ import org.maiwithu.maicraft.kernel.result.Problem;
  * <p>两条规矩：
  * <ul>
  * <li>LLM 明确点名的目标（观察编号）视为对这个目标的许可——"拆掉这面墙"点名了那面墙，
- *     即使它是玩家放的也放行；但角色自己挑的目标必须过保护和许可档位两道关。</li>
+ *     即使它是玩家放的也放行；但角色自己挑的目标必须过保护和许可档位两道关。
+ *     例外是有主的生物（有名字、驯服、拴绳、圈养）和玩家：伤害它们点了名也要再确认一次，见 {@link #namedCreatureAllowed}。</li>
  * <li>被拒时给 {@code NEED_APPROVAL} 问题，写清需要哪一项许可、涉及哪些格子或生物，
  *     不让 LLM 猜该开哪个开关；要不要升级成向 LLM 提问，走提问升级的判断。</li>
  * </ul>
@@ -49,21 +50,29 @@ public final class PermissionCheck {
     }
 
     /**
-     * LLM 这次任务点名的目标能不能按这个动作处理：观察编号视为对那个目标的许可；
+     * LLM 这次任务点名的目标能不能按这个动作处理：方块的观察编号视为对那个目标的许可；
      * 位置与地标目标走完整的保护与档位检查。
      *
-     * @throws IllegalArgumentException 动作与目标对象配不上（例如对着"往前 100 格"挖方块）——
-     *         能力应先把目标对象落实成位置或观察编号再来检查
+     * @throws IllegalArgumentException 动作与目标对象配不上（例如对着"往前 100 格"挖方块）、坐标没给高度，
+     *         或对点名的生物动手——能力应先把目标对象落实成具体的一格，生物先找回是哪一只再走
+     *         {@link #namedCreatureAllowed}
      */
     public Optional<Problem> allows(Permissions permissions, WorldAction action, Target target) {
         if (action == WorldAction.USE_RARE_ITEM) return rareItemAllowed(permissions);
         switch (target) {
             case Target.Seen seen -> {
-                // 点名即许可：LLM 说拆哪面墙、打哪只，就按它说的做。
+                // 点名即许可：LLM 说拆哪面墙就拆哪面。点名的生物还要看有没有主，得先找回是哪一只。
+                if (action == WorldAction.FIGHT || action == WorldAction.KILL_ANIMAL) {
+                    throw new IllegalArgumentException("点名的生物要先找回是哪一只，再用 namedCreatureAllowed 看它有没有主");
+                }
                 return Optional.empty();
             }
             case Target.Position position -> {
                 requireBlockAction(action);
+                // 没给高度的坐标是一整列，不是一格：先落实到具体哪一格再来问。
+                if (position.y() == null) {
+                    throw new IllegalArgumentException("坐标没给高度，先落实到具体哪一格再检查许可");
+                }
                 return blockAllowed(permissions, action,
                         new WorldPosition(position.x(), position.y(), position.z(), position.dimension()), null);
             }
@@ -130,6 +139,37 @@ public final class PermissionCheck {
                     "想动它，就用观察编号明确点名这只生物"));
         }
         return creatureAllowed(permissions, action, situation.get(), describe);
+    }
+
+    /**
+     * LLM 用观察编号点名要打（或为需要击杀）的一只生物：点名本身就是许可，但有主的（有名字、驯服、拴绳、圈养）
+     * 和玩家点了名也要再确认一次——这次任务把 fight（击杀动物时是 kill_animals）开到 any 才动手；
+     * 击杀玩家永远不行。处境读不到时按有主算。
+     */
+    public Optional<Problem> namedCreatureAllowed(Permissions permissions, WorldAction action,
+            UUID entityId, String describe) {
+        requireCreatureAction(action);
+        var situation = creatures.situationOf(entityId);
+        boolean player = situation.map(ReadsCreatureSituation.CreatureSituation::player).orElse(false);
+        if (player) {
+            if (action == WorldAction.KILL_ANIMAL) {
+                return Optional.of(Problem.of(Problem.Kind.NEED_APPROVAL,
+                        "没有任何一项许可允许伤害玩家：" + describe, null));
+            }
+            return fightPlayerAllowed(permissions, describe);
+        }
+        boolean bonded = situation.map(ReadsCreatureSituation.CreatureSituation::bondedToSomeone).orElse(true);
+        if (!bonded) return Optional.empty();
+        boolean confirmed = action == WorldAction.FIGHT
+                ? permissions.fight() == Permissions.Fight.ANY
+                : permissions.killAnimals() == Permissions.AnimalKilling.ANY;
+        if (confirmed) return Optional.empty();
+        String tier = action == WorldAction.FIGHT ? "fight" : "kill_animals";
+        return Optional.of(Problem.of(Problem.Kind.NEED_APPROVAL,
+                describe + (situation.isEmpty() ? "看不真切，可能是别人的（有名字、驯服、拴着或圈着）"
+                        : "是有主的（有名字、驯服、拴着绳或圈养着）")
+                        + "，点了名也要再确认一次才动手",
+                "确实要动它，就把这次任务的 " + tier + " 设为 any 再下一次"));
     }
 
     /** 已知处境的许可判断：受保护的生物一律拒；对玩家的动作只有 fight=any 放行，击杀玩家永远不行。 */

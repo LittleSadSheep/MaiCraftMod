@@ -18,8 +18,8 @@ import java.util.stream.Stream;
 /**
  * execute：开始做一件事。不是 Minecraft 的 /execute 命令。
  *
- * <p>控制角色的目标交给目标运行表，成为角色的主任务，原来的主任务被替换；马上返回任务编号，
- * 进展用 events 等、用 task 查。只读分析、只改记忆的目标当场做完，结果直接返回，不打断手上的活。
+ * <p>控制角色的目标交给目标运行表，成为角色的主任务，原来的主任务被替换；马上返回目标编号，
+ * 进展用 events 等、用 goal 查。只读分析、只改记忆的目标当场做完，结果直接返回，不打断手上的活。
  *
  * <p>{@code dry_run=true} 只检查目标、不动手，返回一个计划编号；之后用 {@code plan_id} 执行同一个目标。
  */
@@ -95,14 +95,14 @@ public final class ExecuteTool implements McpTool {
         GoalRunTable.Launch launch = clientThread.call(context -> table.launch(goal, key));
         GoalRun run = launch.runner().run();
         JsonObject data = new JsonObject();
-        data.addProperty("task_id", run.id());
+        data.addProperty("goal_id", run.id());
         data.addProperty("ability", goal.ability());
         data.addProperty("state", ResultJson.lower(run.state()));
         if (launch.repeated()) {
             data.addProperty("repeated", true);
         }
         JsonObject wait = new JsonObject();
-        wait.addProperty("task_id", run.id());
+        wait.addProperty("goal_id", run.id());
         wait.addProperty("wait_ms", EventsTool.DEFAULT_WAIT_MS);
         return ToolReply.ok(data, notes, ToolReply.next(ToolCatalog.EVENTS, wait));
     }

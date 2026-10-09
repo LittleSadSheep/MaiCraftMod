@@ -22,7 +22,7 @@ import java.util.function.Function;
 /**
  * 等待能力：在游戏里等一个条件——等一段时间、等天黑或天亮、等生命回满、等不再饥饿。
  *
- * <p>只观察，不会为了达成条件去做任何事，也没有超时；要停下由 LLM 取消任务。
+ * <p>只观察，不会为了达成条件去做任何事，也没有超时；要停下由 LLM 取消这个目标。
  * 本包对外的唯一入口：规格、参数与任务都从这里进入内核。
  */
 public final class WaitModule implements AbilityModule {

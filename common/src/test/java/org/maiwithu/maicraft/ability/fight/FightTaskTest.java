@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import net.minecraft.world.entity.Entity;
 import org.junit.jupiter.api.Test;
@@ -51,7 +52,7 @@ class FightTaskTest {
         SeenTargets.Observed now;
 
         @Override public Locked lock(TickContext context, String observedId) {
-            return "e1".equals(observedId) ? new Locked(7, "minecraft:zombie") : null;
+            return "e1".equals(observedId) ? new Locked(7, new UUID(0, 7), "minecraft:zombie") : null;
         }
 
         @Override public Observed observe(TickContext context, int entityId) { return now; }
@@ -92,9 +93,11 @@ class FightTaskTest {
 
     private final Targets targets = new Targets();
     private final Moves moves = new Moves();
+    /** 点名的二次确认：refusal 为空就是能打。 */
+    private Optional<Problem> refusal = Optional.empty();
     private final FightTask task = new FightTask(
             new FightInput(List.of("e1"), null, FightInput.DEFAULT_RADIUS, null, Permissions.DEFAULT),
-            new Senses(), targets, moves);
+            new Senses(), targets, moves, (target, permissions) -> refusal);
 
     // 推进若干刻；结束了返回结果，没结束返回 null。
     private TaskResult run(int ticks) {
@@ -133,6 +136,19 @@ class FightTaskTest {
         FightTask.FightDetails details = (FightTask.FightDetails) result.details();
         assertEquals(1, details.defeated().size());
         assertTrue(details.lostTrack().isEmpty());
+    }
+
+    @Test
+    void namedTargetOwnedBySomeoneNeedsAnotherConfirmationBeforeAnyMove() {
+        // 点名的是别人的狗：点了名也要再确认一次，许可没开到 any 就不走过去、不出手。
+        refusal = Optional.of(Problem.of(Problem.Kind.NEED_APPROVAL, "是有主的", "把 fight 设为 any"));
+        targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, false);
+        TaskResult result = run(5);
+
+        assertNotNull(result);
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertEquals(Problem.Kind.NEED_APPROVAL, result.problem().kind());
+        assertTrue(moves.started.isEmpty(), moves.started.toString());
     }
 
     @Test

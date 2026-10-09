@@ -66,14 +66,14 @@ public final class ResultJson {
     }
 
     /**
-     * 目标运行：LLM 用 task 查到的样子。
+     * 目标运行：LLM 用 goal 查到的样子。
      *
      * @param pending 此刻在等的问题（sequence 时是正在跑的那一步的问题）；没有时为 null
      * @param doing   此刻在做什么的一句话；已经结束时为 null
      */
     public static JsonObject goalRun(GoalRun run, Question pending, String doing) {
         JsonObject json = new JsonObject();
-        json.addProperty("task_id", run.id());
+        json.addProperty("goal_id", run.id());
         json.addProperty("ability", run.goal().ability());
         if (run.goal().purpose() != null) {
             json.addProperty("purpose", run.goal().purpose());
@@ -118,9 +118,9 @@ public final class ResultJson {
         JsonObject json = new JsonObject();
         json.addProperty("cursor", event.cursor());
         json.addProperty("kind", lower(event.kind()));
-        // 与目标无关的事件不带 task_id；死亡恢复决策的编号是负数（-2 起），也是一条能按编号回答的记录，照样带上。
+        // 与目标无关的事件不带 goal_id；死亡恢复决策的编号是负数（-2 起），也是一条能按编号回答的记录，照样带上。
         if (event.goalRunId() != TaskEventLog.NO_GOAL) {
-            json.addProperty("task_id", event.goalRunId());
+            json.addProperty("goal_id", event.goalRunId());
         }
         json.addProperty("message", event.message());
         if (event.status() != null) {

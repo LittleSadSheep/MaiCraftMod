@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.ability.fight;
 import java.util.List;
 import java.util.Set;
 
+import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.survival.CombatSenses;
 import org.maiwithu.maicraft.behavior.survival.WeaponChoice;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;
@@ -35,12 +36,14 @@ public final class FightModule implements AbilityModule {
     private final CombatSenses senses;
     private final SeenTargets seenTargets;
     private final FightMoves moves;
+    private final PermissionCheck permission;
 
-    /** 生产用：战斗感观、目标解析与动手实现由启动一侧创建并登记。 */
-    public FightModule(CombatSenses senses, SeenTargets seenTargets, FightMoves moves) {
+    /** 生产用：战斗感观、目标解析、动手实现与许可检查点由启动一侧创建并登记。 */
+    public FightModule(CombatSenses senses, SeenTargets seenTargets, FightMoves moves, PermissionCheck permission) {
         this.senses = senses;
         this.seenTargets = seenTargets;
         this.moves = moves;
+        this.permission = permission;
     }
 
     private final AbilitySpec spec = new AbilitySpec(
@@ -90,6 +93,9 @@ public final class FightModule implements AbilityModule {
 
     @Override
     public void registerTasks(TaskFactories factories) {
-        factories.register(FightInput.class, input -> new FightTask(input, senses, seenTargets, moves));
+        // 点名的目标交许可检查点再看一眼有没有主：有主的生物和玩家点了名也要 fight=any 才打。
+        NamedTargetConsent consent = (target, permissions) -> permission.namedCreatureAllowed(permissions,
+                PermissionCheck.WorldAction.FIGHT, target.uuid(), target.type() + "（实体 " + target.entityId() + "）");
+        factories.register(FightInput.class, input -> new FightTask(input, senses, seenTargets, moves, consent));
     }
 }

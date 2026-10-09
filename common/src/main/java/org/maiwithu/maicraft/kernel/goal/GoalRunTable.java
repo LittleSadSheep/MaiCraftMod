@@ -305,13 +305,13 @@ public final class GoalRunTable {
 
     /**
      * 执行死亡恢复的回答：重生与观战经原生动作发请求，发不出去就把同一个问题重新挂上，不吞答复；
-     * 取消任务就地收尾主任务，死亡屏幕留给人。发出去或取消了，本轮决策就地了结。
+     * 取消目标就地收尾主任务（当前目标），死亡屏幕留给人。发出去或取消了，本轮决策就地了结。
      */
     private void applyDeathChoice(DeathRecovery.Choice choice) {
         switch (choice) {
             case RESPAWN -> deathRecovery.applied(choice, deathActions.requestRespawn());
             case SPECTATE -> deathRecovery.applied(choice, deathActions.requestSpectate());
-            case CANCEL_TASK -> {
+            case CANCEL_GOAL -> {
                 if (mainRunId != -1) {
                     // 是主任务：经控制循环收尾，它会连同压在上面等它的位置一起清掉。
                     loop.endMainTask(CloseReason.CANCELLED);

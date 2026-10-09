@@ -86,7 +86,7 @@ class McpTransportHttpTest {
         JsonArray tools = result(list).getAsJsonArray("tools");
         Set<String> names = new HashSet<>();
         tools.forEach(tool -> names.add(tool.getAsJsonObject().get("name").getAsString()));
-        assertEquals(Set.of("observe", "lookup", "execute", "task", "events"), names,
+        assertEquals(Set.of("observe", "lookup", "execute", "goal", "events"), names,
                 "五个工具都能被发现，不多不少");
         for (JsonElement element : tools) {
             JsonObject tool = element.getAsJsonObject();

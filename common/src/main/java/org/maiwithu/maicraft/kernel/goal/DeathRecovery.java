@@ -15,7 +15,7 @@ import java.util.Optional;
 
 /**
  * 死亡恢复决策：角色死后给 LLM 的一个选择——回到世界里（普通世界是重生，极限模式是旁观世界），
- * 或取消任务把死亡屏幕留给人。两种"回去"在原版是死亡界面上同一个按钮发的同一个请求，
+ * 或取消当前目标把死亡屏幕留给人。两种"回去"在原版是死亡界面上同一个按钮发的同一个请求，
  * 服务器按世界规则结算：普通世界复活，极限模式切成旁观；所以只按世界规则给其中一种，不让 LLM 选了旁观却被复活。
  *
  * <p>死亡停摆时挂一次问题（经内核的问题通道，MCP 的 answer 沿目标运行表的回答管道回来）。
@@ -47,7 +47,7 @@ public final class DeathRecovery {
      * 角色死了：挂一次死亡恢复决策。已经挂着或本轮已经了结（等 LLM 换人来重生）时不再挂。
      *
      * @param facts           死亡现场的可见事实；这一刻拿不到时为 null，问题文本里就少写一条，按普通世界给选项
-     * @param connectionAlive 到服务器的连接还在不在；不在时回不去，只能取消任务
+     * @param connectionAlive 到服务器的连接还在不在；不在时回不去，只能取消目标
      */
     public void onDeath(DeathFacts facts, boolean connectionAlive) {
         if (decision != null) {
@@ -108,8 +108,8 @@ public final class DeathRecovery {
         RESPAWN,
         /** 请求切观战。 */
         SPECTATE,
-        /** 取消当前任务，死亡屏幕留给人。 */
-        CANCEL_TASK
+        /** 取消当前目标，死亡屏幕留给人。 */
+        CANCEL_GOAL
     }
 
     /**
@@ -136,7 +136,7 @@ public final class DeathRecovery {
         return switch (optionId) {
             case "respawn" -> Choice.RESPAWN;
             case "spectate" -> Choice.SPECTATE;
-            case "cancel_task" -> Choice.CANCEL_TASK;
+            case "cancel_goal" -> Choice.CANCEL_GOAL;
             default -> throw new IllegalStateException("选项已经核对过，不该走到别的故事里");
         };
     }
@@ -158,7 +158,7 @@ public final class DeathRecovery {
         String summary = switch (choice) {
             case RESPAWN -> "已发出原版重生请求，等服务器结算，复活后循环接着做";
             case SPECTATE -> "已发出切观战的请求，成不成由服务器决定";
-            case CANCEL_TASK -> "已取消当前任务，死亡屏幕留给人处理";
+            case CANCEL_GOAL -> "已取消当前目标，死亡屏幕留给人处理";
         };
         decision.finish(TaskResult.done(summary), -1);
         events.append(TaskEvent.Kind.DEATH_RECOVERY_APPLIED, decision.id(), summary, TaskResult.Status.DONE);
@@ -176,16 +176,16 @@ public final class DeathRecovery {
         return text.append("接下来怎么办？").toString();
     }
 
-    // 选项：连接还在才回得去——普通世界给重生，极限模式给旁观世界（死亡界面上就是这样）；取消任务永远提供。
+    // 选项：连接还在才回得去——普通世界给重生，极限模式给旁观世界（死亡界面上就是这样）；取消目标永远提供。
     private static List<Question.Option> options(boolean hardcore, boolean connectionAlive) {
         List<Question.Option> options = new ArrayList<>();
         if (connectionAlive && !hardcore) {
-            options.add(new Question.Option("respawn", "发原版重生请求，回出生点或床，任务原地接着做"));
+            options.add(new Question.Option("respawn", "发原版重生请求，回出生点或床，目标原地接着做"));
         }
         if (connectionAlive && hardcore) {
             options.add(new Question.Option("spectate", "极限模式不能重生：请求旁观这个世界，成不成由服务器决定"));
         }
-        options.add(new Question.Option("cancel_task", "取消当前任务，死亡屏幕留给人处理"));
+        options.add(new Question.Option("cancel_goal", "取消当前目标，死亡屏幕留给人处理"));
         return List.copyOf(options);
     }
 
@@ -195,7 +195,7 @@ public final class DeathRecovery {
 
     // 决策记录要挂一个目标：这里只借它的名字与说明给查询端看，不会有人推进它。
     private static Goal goal() {
-        return new Goal(DECISION_NAME, "死亡恢复：重生、观战或取消任务", null,
+        return new Goal(DECISION_NAME, "死亡恢复：重生、观战或取消目标", null,
                 Params.EMPTY, null, List.of(), null);
     }
 }

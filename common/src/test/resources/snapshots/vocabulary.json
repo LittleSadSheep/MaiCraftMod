@@ -195,7 +195,7 @@
       ]
     },
     "goal_run": {
-      "task_id": 12,
+      "goal_id": 12,
       "ability": "maicraft:obtain",
       "state": "awaiting_answer",
       "question": {
@@ -217,7 +217,7 @@
     "event": {
       "cursor": 7,
       "kind": "asked",
-      "task_id": 12,
+      "goal_id": 12,
       "message": "动哪个箱子？"
     }
   }

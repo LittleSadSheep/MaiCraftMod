@@ -102,7 +102,7 @@ class FightAreaClearTest {
     private final Field field = new Field();
     private final FightTask task = new FightTask(
             new FightInput(List.of(), null, FightInput.DEFAULT_RADIUS, null, Permissions.DEFAULT),
-            field, field, field);
+            field, field, field, (target, permissions) -> Optional.empty());
 
     private long tick;
 

@@ -19,7 +19,7 @@ import java.util.function.Function;
  * 等待任务：站在原地盯着条件，等到了说一声；只观察，不替角色达成条件。
  *
  * <p>计时从任务第一次被推进那刻起，按世界时刻算：被生存需求打断的这段时间也算已经过去，
- * 不重置也不倒扣。条件不成立就继续等，没有超时——要停下由 LLM 取消任务。
+ * 不重置也不倒扣。条件不成立就继续等，没有超时——要停下由 LLM 取消这个目标。
  */
 final class WaitTask extends PhasedTask<WaitTask.Phase> implements Standing {
 

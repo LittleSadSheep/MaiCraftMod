@@ -78,8 +78,8 @@
       }
     },
     {
-      "name": "task",
-      "description": "查看、暂停、恢复、取消任务，回答任务提出的问题，分页读证据。",
+      "name": "goal",
+      "description": "查看、暂停、恢复、取消下达过的目标，回答目标提出的问题，分页读证据。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -87,9 +87,9 @@
             "type": "string",
             "description": "操作：get、list、pause、resume、cancel、answer"
           },
-          "task_id": {
+          "goal_id": {
             "type": "integer",
-            "description": "除 list 外都要给：execute 返回的任务编号"
+            "description": "除 list 外都要给：execute 返回的目标编号"
           },
           "answer": {
             "type": "string",
@@ -109,12 +109,12 @@
         "properties": {
           "topic": {
             "type": "string",
-            "description": "读哪条流：tasks（默认，任务事件）、chat（聊天栏收到的消息）",
-            "default": "tasks"
+            "description": "读哪条流：self（默认，角色身上发生的事：目标的进展、生存需求插进来的临时任务、角色死了）、chat（聊天栏收到的消息）",
+            "default": "self"
           },
-          "task_id": {
+          "goal_id": {
             "type": "integer",
-            "description": "只读这个任务的事件；只在 topic=tasks 时用"
+            "description": "只读这个目标的事件；只在 topic=self 时用"
           },
           "stream_id": {
             "type": "string",

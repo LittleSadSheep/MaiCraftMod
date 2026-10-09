@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.fight;
 
+import java.util.UUID;
+
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -14,8 +16,8 @@ interface SeenTargets {
     /** 实体此刻的观察；走远、死亡或编号被重用给别的东西时返回 null。 */
     Observed observe(TickContext context, int entityId);
 
-    /** 刚锁定时的目标：游戏实体编号与类型。 */
-    record Locked(int entityId, String type) {}
+    /** 刚锁定时的目标：游戏实体编号、身份（查它有没有主用）与类型。 */
+    record Locked(int entityId, UUID uuid, String type) {}
 
     /** 实体此刻的观察：在哪、离多远、是否已经死亡（死亡证据由游戏侧确认）。 */
     record Observed(double x, double y, double z, double distance, boolean dead) {}

@@ -95,8 +95,8 @@ class GoalRunTableTest {
         assertSame(main.run(), deaths.mainGoal().orElseThrow(), "主任务还在，死亡决策不顶替它");
 
         // 选了取消：主任务被取消收尾，死亡屏幕留给人。
-        deaths.answer(decision.id(), "cancel_task");
-        assertFalse(main.run().unfinished(), "取消任务把主任务收尾");
+        deaths.answer(decision.id(), "cancel_goal");
+        assertFalse(main.run().unfinished(), "取消目标把主任务收尾");
         assertTrue(decision.result().summary().contains("取消"));
 
         // 决策记录只能回答，暂停、恢复、取消对它都不适用。

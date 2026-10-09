@@ -58,6 +58,7 @@ term 心跳 改说"每刻推进"
 term 装配 改说"启动时创建、登记"
 term 对账 改说"确认"
 term 授权 任务的许可改说"许可"；MCP 连接的身份校验写"鉴权"
+term task_id 对外编号叫 goal_id；内核的任务 Task 不对外
 term 清册 改说"旧逻辑清单"
 term 换芯 改说"重写"
 word Navigator 已改名：对外的寻路入口叫 WalkTo（走到），一次运行叫 WalkRun（走到运行）
