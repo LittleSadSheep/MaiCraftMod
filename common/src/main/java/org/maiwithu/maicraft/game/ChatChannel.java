@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.game;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.function.Supplier;
 
@@ -38,15 +39,22 @@ public final class ChatChannel {
         }
     }
 
+    /** 聊天栏到此刻为止一共出现过几条：发游戏命令前记下。聊天栏还没接上时为 0。 */
+    public long mark() {
+        ChatLog log = ClientHooks.chatLog();
+        return log == null ? 0 : log.mark();
+    }
+
+    /** 记号之后聊天栏新出现的话，按先后：发完游戏命令后读服务器回了什么。 */
+    public List<String> shownSince(long mark) {
+        ChatLog log = ClientHooks.chatLog();
+        return log == null ? List.of() : log.shownSince(mark);
+    }
+
     /** 这句话是否已经出现在本地聊天栏里（回显）。 */
     public boolean appearsInChat(String message) {
         ChatLog log = ClientHooks.chatLog();
         return log != null && log.showedUp(message);
     }
 
-    /** 提交时刻之后本地聊天栏有没有冒出新的一行；命令的完成依据是命令反馈行。 */
-    public boolean anyLineAfter(long sinceMillis) {
-        ChatLog log = ClientHooks.chatLog();
-        return log != null && log.anyShownAfter(sinceMillis);
-    }
 }

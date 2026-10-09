@@ -254,7 +254,9 @@ public final class AbilityCatalog {
         ChatChannel chat = deps.chat();
         ReadsChatEcho echo = new ReadsChatEcho() {
             @Override public boolean appearsInChat(String message) { return chat.appearsInChat(message); }
-            @Override public boolean anyLineAfter(long sinceMillis) { return chat.anyLineAfter(sinceMillis); }
+            // 游戏命令不回显成聊天：发前记下聊天栏的记号，发后读这之后服务器回了什么。
+            @Override public long mark() { return chat.mark(); }
+            @Override public List<String> shownSince(long mark) { return chat.shownSince(mark); }
         };
         return new ChatAbility(chat::send, echo, deps.allowGameCommands());
     }

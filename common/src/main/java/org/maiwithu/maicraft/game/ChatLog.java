@@ -13,14 +13,16 @@ import java.util.List;
  */
 public final class ChatLog {
 
-    /** 一条刚出现的聊天消息：文字与出现时刻（毫秒时钟）。 */
-    public record Shown(String text, long shownMillis) {}
+    /** 一条刚出现的聊天消息：文字、出现时刻（毫秒时钟）与这是记下的第几条（从 1 数）。 */
+    public record Shown(String text, long shownMillis, long sequence) {}
 
     // 聊天确认只看最近一小会儿：窗口外的旧消息对"刚发的话出现了没有"没有意义。
     private static final int MAX_LINES = 128;
     private static final long RETENTION_MILLIS = 10_000L;
 
     private List<Shown> lines = List.of();
+    /** 一共记过几条：只增不减，旧消息丢了也不回退，发命令前记下它做记号。 */
+    private long shownTotal;
 
     /** 聊天栏加了一条消息：记下文字与时刻。 */
     public void shown(String text) {
@@ -29,8 +31,24 @@ public final class ChatLog {
         }
         long now = System.currentTimeMillis();
         List<Shown> kept = new ArrayList<>(lines);
-        kept.add(new Shown(text, now));
+        kept.add(new Shown(text, now, ++shownTotal));
         lines = prune(kept, now);
+    }
+
+    /** 到此刻为止一共记过几条：发游戏命令前记下，之后按它取服务器回的话。 */
+    public long mark() {
+        return shownTotal;
+    }
+
+    /** 记号之后出现、还在保留窗口里的消息文字，按出现先后。 */
+    public List<String> shownSince(long mark) {
+        List<String> texts = new ArrayList<>();
+        for (Shown line : retainRecent(lines, System.currentTimeMillis())) {
+            if (line.sequence() > mark) {
+                texts.add(line.text());
+            }
+        }
+        return List.copyOf(texts);
     }
 
     /** 给定的话最近有没有在聊天栏里出现过（整句包含即可，服务端可能加了 <名字> 前缀）。 */
@@ -44,16 +62,6 @@ public final class ChatLog {
         return false;
     }
 
-    /** 给定时刻之后聊天栏有没有出现过新的一行；命令反馈行没有"自己那条"可对，只看提交后有没有新行。 */
-    public boolean anyShownAfter(long millis) {
-        long now = System.currentTimeMillis();
-        for (Shown line : retainRecent(lines, now)) {
-            if (line.shownMillis() >= millis) {
-                return true;
-            }
-        }
-        return false;
-    }
 
     // 窗口外与超量的旧消息丢弃：纯函数，离线测试直接喂列表。
     static List<Shown> prune(List<Shown> lines, long nowMillis) {

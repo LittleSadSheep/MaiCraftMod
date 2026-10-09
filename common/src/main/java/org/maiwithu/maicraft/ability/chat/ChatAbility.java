@@ -56,7 +56,8 @@ public final class ChatAbility implements AbilityModule {
             doc = doc.withExtraNote("本实例允许执行游戏命令：`message` 以 `/` 开头时不拒绝，"
                     + "作为游戏命令以角色自己的权限交给服务器执行；上面「角色不执行游戏命令」"
                     + "的边界在本实例不适用。命令的完成依据是聊天栏出现命令反馈行"
-                    + "（原版命令没有自己那条回显），等不到反馈行按没能确认如实收场。");
+                    + "（原版命令没有自己那条回显），反馈行原样写在结果的 `feedback` 里，成没成看它判断；"
+                    + "等不到反馈行按没能确认如实收场。");
         }
         return new AbilitySpec(
                 "maicraft:chat",
