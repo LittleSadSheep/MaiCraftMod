@@ -28,12 +28,6 @@ import org.maiwithu.maicraft.ability.obtain.ObtainAbility;
 import org.maiwithu.maicraft.ability.remember.RememberAbility;
 import org.maiwithu.maicraft.ability.sequence.SequenceModule;
 import org.maiwithu.maicraft.ability.travel.TravelAbility;
-import org.maiwithu.maicraft.ability.use.LiveDropGathering;
-import org.maiwithu.maicraft.ability.use.LiveHandPreparation;
-import org.maiwithu.maicraft.ability.use.LiveNearbySearcher;
-import org.maiwithu.maicraft.ability.use.MenuSignEditors;
-import org.maiwithu.maicraft.ability.use.LiveSeenResolver;
-import org.maiwithu.maicraft.ability.use.RefusalReads;
 import org.maiwithu.maicraft.ability.use.UseModule;
 import org.maiwithu.maicraft.ability.wait.WaitModule;
 import org.maiwithu.maicraft.behavior.acquire.ClientCropReplanting;
@@ -181,9 +175,13 @@ public final class AbilityCatalog {
         // 换手读端提前建好：用东西的备手、进食的换手、装备的穿卸共用同一套界面搬运。
         ClientMovesToMainhand toMainhand = new ClientMovesToMainhand(deps.context());
 
-        // 用东西：交互、靠近、手上准备、观察编号解析、附近搜索、游戏拒绝读端与界面读数都接上了；
-        // 跨未加载坐标还没有实现方，先留空。
-        registry.register(useModule(deps, bringsClose, toMainhand));
+        // 拿到物品引擎的内需入口先建好：用东西缺了要用的东西去拿一件、来源备料缺原料缺工具，都回到同一个引擎，
+        // 引擎在登记拿到物品时建好再接上。
+        DeferredInnerNeeds innerNeeds = new DeferredInnerNeeds();
+
+        // 用东西：读世界、组装交互、靠近、备手、去拿缺的东西、观察编号、附近搜索、动作栏提示语、
+        // 走到没加载的坐标、捡掉出的东西、看点开的界面都接上了。
+        registry.register(useModule(deps, bringsClose, toMainhand, innerNeeds));
 
         // 进食：把食物换到主手走背包界面的原生搬运；手上不是食物时能换手了。
         registry.register(new EatModule(deps.backpack(), deps.offhand(), deps.hunger(), deps.foods(),
@@ -205,7 +203,7 @@ public final class AbilityCatalog {
         PermissionCheck permission = new PermissionCheck(deps.protection(), deps.creatures());
 
         // 拿到物品：身上的不算来源（引擎开场就清点），已实现的途径都登记，见 obtainModule。
-        registry.register(obtainModule(deps, bringsClose, toMainhand, permission));
+        registry.register(obtainModule(deps, bringsClose, toMainhand, permission, innerNeeds));
 
         // 存东西：找容器把现场扫描与世界记忆并起来，界面读数、整堆搬运与挖盖子都接上了。
         registry.register(depositModule(deps, bringsClose));
@@ -259,19 +257,12 @@ public final class AbilityCatalog {
     }
 
     /** 用东西能力的一份：游戏拒绝读端看动作栏与服务端确认流，刻号从所在世界取。 */
-    private static UseModule useModule(Deps deps, LiveApproaches bringsClose, ClientMovesToMainhand toMainhand) {
+    private static UseModule useModule(Deps deps, LiveApproaches bringsClose, ClientMovesToMainhand toMainhand,
+            ItemNeeds needs) {
         ClientGameRefusals refusals = new ClientGameRefusals(new OverlayMessages(),
                 () -> deps.session().confirmations().recent(), deps.clientTicks());
-        return UseModule.assemble(deps.interactions(), bringsClose,
-                new LiveHandPreparation(toMainhand, deps.context()),
-                new LiveSeenResolver(deps::scene),
-                new LiveNearbySearcher(deps.blockScans(), deps.context()),
-                new RefusalReads(refusals),
-                new MenuSignEditors(),
-                new LiveDropGathering(deps.context(), deps.inputs()),
-                null,
-                new ClientMenuContent(deps.context()),
-                deps.memory());
+        return UseModule.live(deps.context(), deps.interactions(), bringsClose, toMainhand, needs,
+                deps::scene, deps.blockScans(), refusals, deps.walks(), deps.memory());
     }
 
     /**
@@ -281,7 +272,7 @@ public final class AbilityCatalog {
      * 引擎要等来源清单建好才建得出来，所以内需入口先接住、引擎建好后接上。
      */
     private static AbilityModule obtainModule(Deps deps, LiveApproaches bringsClose,
-            ClientMovesToMainhand toMainhand, PermissionCheck permission) {
+            ClientMovesToMainhand toMainhand, PermissionCheck permission, DeferredInnerNeeds innerNeeds) {
         ClientQuickMoves obtainQuickMoves = new ClientQuickMoves();
         RegistryRecipeReads recipeReads = new RegistryRecipeReads(deps.context(), deps.itemTags(), deps.furnaceFuels());
         // 在工作站上动手：熔炉添燃料时按同一份燃料表挑身上烧得最久的。
@@ -291,7 +282,6 @@ public final class AbilityCatalog {
         ClientDigsBlocks digs = new ClientDigsBlocks();
         ClientWorkstationPlacer placer = new ClientWorkstationPlacer(
                 deps.interactions(), toMainhand, deps.memory(), deps.context());
-        DeferredInnerNeeds innerNeeds = new DeferredInnerNeeds();
         RecipeSource craftSource = new RecipeSource(
                 Set.of(RecipeView.Kind.CRAFTING, RecipeView.Kind.STONECUTTING),
                 recipeReads, deps.memory(), recipeReads, recipeRuns,

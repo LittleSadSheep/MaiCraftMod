@@ -1,16 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.use;
 
+import java.util.HashSet;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Supplier;
 
-import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
 
-import org.maiwithu.maicraft.game.player.InputDriver;
+import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
+import org.maiwithu.maicraft.behavior.navigation.WalkRun;
+import org.maiwithu.maicraft.behavior.navigation.WalkTo;
+import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -18,88 +23,144 @@ import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
- * 顺手捡起的生产实现：附近几格有掉落物时朝它走过去，让原版的拾取自己吸附。
+ * 顺手捡起的生产实现：出手后脚边新冒出来的掉落物（剪下来的羊毛），一件件走过去让原版拾取吸进包。
  *
- * <p>走过去就行，不伸手改背包：东西进没进包以地上的那件消失为准；时限内没捡到
- * 如实失败，不把"走过去了"当成"捡到了"。附近没有掉落物时给空，调用方跳过捡拾。
+ * <p>只捡这一下带出来的：出手前就躺在地上的东西不是这次的，不去碰。走路交给走到（不挖不垫，
+ * 不会为捡一团羊毛走下悬崖）；东西进没进包以地上那件消失为准，限时没捡到如实失败，
+ * 不把"走过去了"当成"捡到了"。
  */
-public final class LiveDropGathering implements UseSeams.GathersDrops {
+final class LiveDropGathering implements UseSeams.GathersDrops {
 
-    /** 只捡近处的：交互掉出来的东西就在脚下，走远了的不算"顺手"。 */
-    private static final double NEARBY_BLOCKS = 5.0;
-    /** 捡拾的时限；到点没捡到就收手，不在一件东西上耗着。 */
-    private static final int GIVE_UP_TICKS = 60;
+    /** 只认近处的：交互掉出来的东西就在脚边，走远了的不算"顺手"。 */
+    private static final double NEARBY_BLOCKS = 6.0;
+    /** 每件东西的耐心；到点没捡到就放弃这一件，不在一件东西上耗着。 */
+    private static final int GIVE_UP_TICKS = 100;
 
     private final Supplier<PlayerContext> context;
-    private final InputDriver input;
+    private final WalkTo walks;
 
-    public LiveDropGathering(Supplier<PlayerContext> context, InputDriver input) {
+    LiveDropGathering(Supplier<PlayerContext> context, WalkTo walks) {
         this.context = Objects.requireNonNull(context, "context");
-        this.input = Objects.requireNonNull(input, "input");
+        this.walks = Objects.requireNonNull(walks, "walks");
     }
 
     @Override
-    public Optional<Action> nearby() {
-        PlayerContext current = context.get();
-        if (current == null || current.localPlayer() == null) {
-            return Optional.empty();
-        }
-        ItemEntity nearest = nearestDrop(current.level(), current.localPlayer());
-        if (nearest == null) {
-            return Optional.empty();
-        }
-        return Optional.of(new WalkOver(nearest.getId()));
-    }
-
-    // 渲染范围内离角色最近的掉落物；五格开外的不算顺手捡。
-    private ItemEntity nearestDrop(ClientLevel level, LocalPlayer player) {
-        ItemEntity best = null;
-        double bestDistance = NEARBY_BLOCKS * NEARBY_BLOCKS;
-        for (Entity entity : level.entitiesForRendering()) {
-            if (!(entity instanceof ItemEntity drop)) continue;
-            double distance = entity.distanceToSqr(player);
-            if (distance < bestDistance) {
-                best = drop;
-                bestDistance = distance;
+    public Set<Integer> nearby() {
+        LocalPlayer player = player();
+        Set<Integer> ids = new HashSet<>();
+        if (player == null) return ids;
+        for (Entity entity : player.clientLevel.entitiesForRendering()) {
+            if (entity instanceof ItemEntity && entity.distanceToSqr(player) <= NEARBY_BLOCKS * NEARBY_BLOCKS) {
+                ids.add(entity.getId());
             }
         }
-        return best;
+        return ids;
     }
 
-    /** 走向掉落物的动作：东西消失即捡到了；时限到了还在地上，如实失败。 */
-    private final class WalkOver implements Action {
+    @Override
+    public Optional<Action> collectNewSince(Set<Integer> before) {
+        Set<Integer> fresh = new HashSet<>(nearby());
+        fresh.removeAll(before);
+        return fresh.isEmpty() ? Optional.empty() : Optional.of(new PickUp(before));
+    }
 
-        private final int entityId;
+    private LocalPlayer player() {
+        PlayerContext current = context.get();
+        return current == null ? null : current.localPlayer();
+    }
+
+    /** 一件件捡起新掉出来的东西：走到它脚下那一格，它从地上消失就是捡到了，下一件接着来。 */
+    private final class PickUp implements Action {
+
+        /** 出手前就在地上的，以及捡不到放弃了的：都不再去碰。 */
+        private final Set<Integer> skip;
+        private Integer current;
+        private BlockPos walkingTo;
+        private WalkRun walk;
         private int waited;
+        private int missed;
 
-        WalkOver(int entityId) {
-            this.entityId = entityId;
+        PickUp(Set<Integer> before) {
+            this.skip = new HashSet<>(before);
         }
 
         @Override
         public ActionStatus tick(TickContext tick) {
-            PlayerContext current = context.get();
-            if (current == null || current.localPlayer() == null) {
-                return ActionStatus.failed(Problem.of(Problem.Kind.WRONG_TIME,
-                        "这一刻掌握不到角色，捡不了", null));
+            LocalPlayer player = player();
+            if (player == null) {
+                return ActionStatus.failed(Problem.of(Problem.Kind.WRONG_TIME, "这一刻掌握不到角色，捡不了", null));
             }
-            LocalPlayer player = current.localPlayer();
-            Entity drop = player.level().getEntity(entityId);
-            // 掉落物不在了：被原版吸进了包（也可能被别人拿走），这一步就此结束，捡到多少以清点为准。
-            if (drop == null || !drop.isAlive()) {
-                return ActionStatus.done();
+            Entity drop = current == null ? null : player.clientLevel.getEntity(current);
+            if (current != null && (drop == null || !drop.isAlive())) {
+                // 地上那件不在了：被原版吸进了包（也可能被别人拿走），接着捡下一件。
+                current = null;
+            } else if (current != null && ++waited > GIVE_UP_TICKS) {
+                skip.add(current);
+                missed++;
+                current = null;
             }
-            if (++waited > GIVE_UP_TICKS) {
-                return ActionStatus.failed(Problem.of(Problem.Kind.STUCK,
-                        describe() + "：走过去了东西还在地上，先不捡了", null));
+            if (current == null && !pickNext(player)) {
+                stopWalking();
+                return missed == 0 ? ActionStatus.done() : ActionStatus.failed(Problem.of(Problem.Kind.STUCK,
+                        "有 " + missed + " 件掉出的东西走过去了还在地上，先不捡了", null));
             }
-            input.stepToward(player, drop.position(), false);
+            return walkToward(player.clientLevel.getEntity(current), tick);
+        }
+
+        // 挑下一件这次新掉出来的、离得最近的东西；没有了返回假。
+        private boolean pickNext(LocalPlayer player) {
+            Set<Integer> fresh = nearby();
+            fresh.removeAll(skip);
+            Entity best = null;
+            for (int id : fresh) {
+                Entity entity = player.clientLevel.getEntity(id);
+                if (entity != null && (best == null || entity.distanceToSqr(player) < best.distanceToSqr(player))) {
+                    best = entity;
+                }
+            }
+            if (best == null) return false;
+            current = best.getId();
+            waited = 0;
+            return true;
+        }
+
+        // 东西还在滚动：它换了格子就重新起步走向新的那一格。
+        private ActionStatus walkToward(Entity drop, TickContext tick) {
+            BlockPos cell = drop.blockPosition();
+            if (walk == null || !cell.equals(walkingTo)) {
+                stopWalking();
+                walkingTo = cell;
+                walk = walks.start(GoalCompiler.standOn(cell), TerrainPermit.WALK_ONLY);
+            }
+            if (walk.tick(tick) instanceof ActionStatus.Failed) {
+                // 走不过去就别指望它自己吸过来了：放弃这一件，挑下一件。
+                skip.add(current);
+                missed++;
+                current = null;
+                stopWalking();
+            }
             return ActionStatus.progressed();
+        }
+
+        private void stopWalking() {
+            if (walk != null) {
+                walk.close();
+                walk = null;
+                walkingTo = null;
+            }
+        }
+
+        @Override public void pause() {
+            if (walk != null) walk.pause();
+        }
+
+        @Override public void close() {
+            stopWalking();
         }
 
         @Override
         public String describe() {
-            return "捡起脚边掉出的东西";
+            return "捡起脚边新掉出的东西";
         }
     }
 }

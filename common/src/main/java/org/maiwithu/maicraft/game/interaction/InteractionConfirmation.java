@@ -107,6 +107,18 @@ public interface InteractionConfirmation {
                 || state.getBlock() instanceof NetherPortalBlock;
     }
 
+    /**
+     * 右键马、船、矿车的原生效果是骑上去：不换手、不开界面也不改方块，角色的坐骑变成这只实体
+     * 本身就是这次点击已生效的客户端权威事实（服务端同意骑乘后才把乘客关系同步下来）。
+     */
+    public static InteractionConfirmation ridingOn(Entity vehicle) {
+        int id = vehicle.getId();
+        return context -> {
+            Entity riding = context.localPlayer().getVehicle();
+            return riding != null && riding.getId() == id ? Verdict.APPLIED : Verdict.PENDING;
+        };
+    }
+
     public static InteractionConfirmation heldItemChanged(InteractionHand hand, ItemStack before) {
         ItemStack frozen = before.copy();
         return context -> sameStack(context.localPlayer().getItemInHand(hand), frozen)

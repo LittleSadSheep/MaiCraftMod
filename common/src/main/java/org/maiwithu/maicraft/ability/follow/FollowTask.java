@@ -8,7 +8,6 @@ import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
-import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -65,8 +64,7 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing 
         this.view = Objects.requireNonNull(view, "view");
         this.walks = Objects.requireNonNull(walks, "walks");
         // 跟随的走到许可直接沿用任务许可的档位：只垫不挖时跟人开路也只垫不拆；落地水随动土一起放开。
-        this.permit = new TerrainPermit(input.permissions().changeBlocks(),
-                input.permissions().changeBlocks() != Permissions.BlockChanges.NONE);
+        this.permit = TerrainPermit.of(input.permissions());
     }
 
     /** 把走在路上的动作接进基类的暂停与收尾：基类持有的是这个外壳。 */

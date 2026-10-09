@@ -9,7 +9,6 @@
           "here",
           "landmark",
           "position",
-          "previous",
           "seen"
         ],
         "mode": "controls_player"
@@ -184,7 +183,6 @@
         "here",
         "landmark",
         "position",
-        "previous",
         "seen"
       ],
       "mode": "controls_player",
