@@ -172,6 +172,10 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing 
             return;
         }
         walkAnchor = anchor;
+        // 目标走远了要换目标点：先收尾上一趟走到交出身体，新的一趟才上得了路。
+        if (walk != null) {
+            walk.close();
+        }
         // 走到离目标半格距离的范围内就算跟上，剩下的距离差交给迟滞判断。
         walk = walks.start(GoalCompiler.near(anchor, Math.max(1.0, input.distance() * 0.5)), permit);
     }

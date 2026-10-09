@@ -154,4 +154,18 @@ class WalkRunProgressTest {
         assertEquals(WalkReport.State.ON_THE_WAY, ready.report().state());
         assertFalse(ready.done());
     }
+
+    @Test
+    void yieldingTheBodySettlesAsStoppedButKeepsAnEarlierConclusion() {
+        // 被暂停的走到交出身体：按"已停下"结算，恢复时任务会从原地重新上路；已经有结论的不改。
+        var stopped = progressExact();
+        stopped.observe(seen(ELSEWHERE, true, false, true, false));
+        stopped.stopWhereLastSeen();
+        assertEquals(WalkReport.State.STOPPED, stopped.report().state());
+
+        var failed = progressExact();
+        failed.fail(Problem.of(Problem.Kind.STUCK, "走不动"), null);
+        failed.stopWhereLastSeen();
+        assertEquals(WalkReport.State.FAILED, failed.report().state());
+    }
 }

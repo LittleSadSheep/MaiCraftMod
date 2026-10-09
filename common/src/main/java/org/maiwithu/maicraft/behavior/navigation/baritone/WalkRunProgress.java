@@ -48,6 +48,12 @@ final class WalkRunProgress {
         stopRequested = true;
     }
 
+    /** 交出身体时就地按"已停下"结算：停在最近一次看到的位置；已经有结论的不改。 */
+    void stopWhereLastSeen() {
+        if (done()) return;
+        report = WalkReport.stopped(report.feet(), crossedWater);
+    }
+
     boolean stopRequested() {
         return stopRequested;
     }

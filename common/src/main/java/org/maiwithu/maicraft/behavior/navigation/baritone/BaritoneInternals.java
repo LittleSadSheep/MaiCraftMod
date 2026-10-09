@@ -62,6 +62,13 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
 
     /** 走到实现方每刻推进一个运行；同时只推进拥有身体的那一个。 */
     void drive(BaritoneWalkRun run, PlayerContext context) {
+        long now = context.clientTick();
+        run.markDriven(now);
+        // 拥有身体的运行已经没人推进（主任务被生存需求暂停、或调用方丢下没收尾）：它交不出身体，
+        // 排队的新运行就永远上不了路。按"已停下"结算它并交出身体，再让排队的这个上路。
+        if (active != null && active != run && queued == run && active.idleAt(now)) {
+            active.yieldBody();
+        }
         if (active == null && queued == run) {
             activate(run, context);
         }
@@ -76,6 +83,11 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
         } finally {
             endTick();
         }
+    }
+
+    /** 这个运行此刻是否拥有身体（引擎正按它的目标走）。 */
+    boolean owns(BaritoneWalkRun run) {
+        return active == run;
     }
 
     /** 当前运行结束后让下一个排队运行上路。 */
