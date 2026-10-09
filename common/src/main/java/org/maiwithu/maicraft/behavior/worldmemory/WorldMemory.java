@@ -145,7 +145,7 @@ public final class WorldMemory implements RemembersPlaces, RemembersRegions, Rem
     public boolean forgetPlace(String name) {
         // 先查再删：名字没记过时不进文档库的事务，也如实回答没忘掉什么。
         if (readBook().places().containsKey(name)) {
-            modify(book -> book.withoutPlace(name));
+            modifyAndSave(book -> book.withoutPlace(name));
             return true;
         }
         return false;
