@@ -17,11 +17,13 @@ import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
 import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.survival.BreathNeed;
+import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
 import org.maiwithu.maicraft.behavior.survival.DigOutNeed;
 import org.maiwithu.maicraft.behavior.survival.FallNeed;
 import org.maiwithu.maicraft.behavior.survival.NativeBlockBreaking;
 import org.maiwithu.maicraft.behavior.survival.EdgeProximityNeed;
 import org.maiwithu.maicraft.behavior.survival.EatSoonTask;
+import org.maiwithu.maicraft.behavior.survival.EatsCarriedFood;
 import org.maiwithu.maicraft.behavior.survival.HungerNeed;
 import org.maiwithu.maicraft.behavior.survival.LiveCombatMoves;
 import org.maiwithu.maicraft.behavior.survival.LiveCombatSenses;
@@ -146,13 +148,13 @@ public final class Bootstrap {
     /**
      * 控制循环的生存需求清单：按急迫程度登记，必须立刻处理的先登记，同样急时先插进来。
      * 战斗感观由外面递进来，与战斗能力共用一份；走到已接上，撤离与绕行用真的走路完成；
-     * 进食流程还没有接，饿了的临时任务先如实报告做不了。
+     * 饿了的临时任务吃随身食物：先换到主手，再原生按住吃完一口；有预算地弄吃的还没接。
      */
     private static ControlLoop withSurvivalNeeds(
             InteractionSender interactionSender, MenuActions menuActions,
-            CombatSenses combatSenses, WalkTo walks) {
+            CombatSenses combatSenses, WalkTo walks,
+            EatSoonTask.FoodMoves foodMoves) {
         TaskEventSink events = TaskEventSink.NONE;
-        EatSoonTask.FoodMoves foodMoves = null;
         return new ControlLoop(List.of(
                 new DigOutNeed(new SurvivalSituation.FromPlayer(),
                         () -> new NativeBlockBreaking(interactionSender, menuActions)),
@@ -205,11 +207,19 @@ public final class Bootstrap {
             interactionSender = new DefaultInteractionSender(menuActions, opportunity);
             menuActions.attachSender(interactionSender);
             playerControl.attachInteractionEntries(interactionSender, menuActions);
+            // 按住使用键投影提前建好：吃饭动作与交互动作入口用同一个使用通道。
+            UseKeyProjection useKeyProjection = new UseKeyHoldProjection(useKeyHold);
+            // 吃随身食物：挑一件能直接吃的，换到主手后原生按住吃完一口。
+            EatsCarriedFood foodMoves = new EatsCarriedFood(
+                    PlayerViews.backpack(() -> playerControl.activeContext().orElse(null)),
+                    PlayerViews.foods(() -> playerControl.activeContext().orElse(null)),
+                    new ClientMovesToMainhand(() -> playerControl.activeContext().orElse(null)),
+                    useKeyProjection);
             // 战斗感观一份：生存需求的自卫与战斗能力看的是同一份伤害证据。
             combatSenses = new LiveCombatSenses(new CombatMemory());
             // 控制循环按急迫程度登记生存需求：必须立刻处理的先登记，同样急时它先插进来；
             // 主任务由目标主任务槽下达，进世界时建好。
-            controlLoop = withSurvivalNeeds(interactionSender, menuActions, combatSenses, walks);
+            controlLoop = withSurvivalNeeds(interactionSender, menuActions, combatSenses, walks, foodMoves);
             // Mixin 钩子拿不到构造注入，只能在这里登记；服务本体仍以实例传递。
             ClientHooks.registerPlayerControl(playerControl);
             ClientHooks.registerBlockScans(blockScans);
@@ -217,7 +227,7 @@ public final class Bootstrap {
             ClientHooks.registerSubtitleFeed(subtitles);
             ClientHooks.registerChatLog(new ChatLog());
             // 交互动作入口与按住使用键投影：能力清单在进世界时用它们拼装各能力。
-            interactions = new Interactions(new UseKeyHoldProjection(useKeyHold));
+            interactions = new Interactions(useKeyProjection);
         }
 
         /** 建与服务端的会话，并在入服前登记客户端知道的操作清单。 */

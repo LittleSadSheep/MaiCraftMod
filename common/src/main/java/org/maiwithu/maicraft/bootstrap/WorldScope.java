@@ -28,6 +28,7 @@ import org.maiwithu.maicraft.behavior.travel.ClientTravelWorldView;
 import org.maiwithu.maicraft.behavior.travel.TravelProgress;
 import org.maiwithu.maicraft.behavior.travel.TravelProgressListener;
 import org.maiwithu.maicraft.behavior.acquire.LiveCarryReads;
+import org.maiwithu.maicraft.behavior.acquire.RegistryToolRequirements;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.ChatChannel;
 import org.maiwithu.maicraft.game.SubtitleFeed;
@@ -93,7 +94,7 @@ public final class WorldScope {
                 LiveCarryReads.itemTags(),
                 LiveCarryReads.characterPosition(now),
                 LiveCarryReads.itemRegistry(),
-                LiveCarryReads.toolRequirements(now),
+                new RegistryToolRequirements(),
                 PlayerViews.hunger(now),
                 PlayerViews.foods(now),
                 PlayerViews.equipment(now),
