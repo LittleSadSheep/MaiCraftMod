@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat.ae2;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -18,8 +19,9 @@ import org.maiwithu.maicraft.compat.CompatRegistry;
  * 找终端、核对点开的界面、读网络存货、发取货操作，每一下都经联动入口包一层，
  * 装的 AE2 和编译时用的对不上时整个联动停用，不让 LinkageError 漏出去。
  *
- * <p>物品来源还没有交给登记表：来源要用的保护判断、靠近与交互都是进世界后才建的，
- * 登记表还没有把它们交给联动来源的路；接上之前这里只把编译、联动清单、版本检查与停用包装走通。
+ * <p>交给登记表两样东西：ME 终端界面的布局证明（终端能像原版界面一样打开、读角色那一侧），
+ * 以及 ME 终端来源的建法——来源要用的保护判断、靠近与交互是进世界后才有的，进世界时登记表带着它们建来源。
+ * 每次进世界建一份新的"上次看到的网络存货"，换世界、重开游戏都从没看过开始。
  */
 public final class Ae2Compat extends CompatModule {
 
@@ -35,7 +37,12 @@ public final class Ae2Compat extends CompatModule {
     }
 
     @Override public void contribute(CompatRegistry registry) {
-        // 还没有能交的来源：联动来源拿到玩家行为的服务之后再交 ME 终端来源。
+        registry.menuLayout(this, new Ae2TerminalLayout());
+        registry.itemSource(this, services -> {
+            SeenNetworkStock seen = new SeenNetworkStock();
+            return new Ae2TerminalSource(this, services, new MenuTerminalTakes(this, services, seen, Instant::now),
+                    seen, Instant::now);
+        });
     }
 
     /** 角色周围已加载区块里装着 ME 终端的面；见 {@link Ae2Terminals#near}。 */
