@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.worldmemory;
 
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.time.Instant;
@@ -33,16 +35,38 @@ public final class WorldMemory implements RemembersPlaces, RemembersRegions, Rem
     public static final String SCOPE = "world-memory";
 
     private static final String DOCUMENT_KEY = "memory";
-    // 整册记忆的存盘预算。一个角色记得的箱子、设施、产地到几百条就到头了，超出按坏了处理，不做截断。
-    private static final int DOCUMENT_LIMIT = 262144;
+    // 整册记忆的存盘预算：一个角色长期记得的箱子、设施、产地几千条也用不到这么多；超出时整册不写，不做截断。
+    private static final int DOCUMENT_LIMIT = 8 * 1024 * 1024;
+    /** 改过的记忆最多隔多久存一次盘：感知每隔几刻就会写一笔，逐笔落盘会让游戏卡顿。 */
+    private static final long FLUSH_INTERVAL_NANOS = 5_000_000_000L;
+    private static final Logger LOG = LoggerFactory.getLogger(WorldMemory.class);
 
     private final DocumentStore documents;
     private final String worldKey;
     private final MemoryCodec codec = new MemoryCodec();
+    /** 读进来的整册记忆；第一次用到时从文档库读，之后读写都在这里，改过就隔一阵存一次盘。 */
+    private MemoryBook book;
+    private boolean dirty;
+    private long lastFlushNanos = System.nanoTime();
 
     public WorldMemory(DocumentStore documents, String worldKey) {
         this.documents = documents;
         this.worldKey = worldKey;
+    }
+
+    /**
+     * 把改过的记忆存盘：离开世界、客户端退出前必须调用一次，平时修改后也会隔一阵自动存。
+     * 存盘失败只记日志、保留在内存里下次再试，不让一次写盘失败打断游戏刻。
+     */
+    public void flush() {
+        if (!dirty) return;
+        try {
+            documents.write(SCOPE, worldKey, DOCUMENT_KEY, codec.encode(book), false);
+            dirty = false;
+        } catch (IOException failure) {
+            LOG.warn("世界记忆存盘失败，留在内存里下次再试", failure);
+        }
+        lastFlushNanos = System.nanoTime();
     }
 
     /**
@@ -95,13 +119,13 @@ public final class WorldMemory implements RemembersPlaces, RemembersRegions, Rem
 
     /** 忘掉一条记忆：到现场发现东西没了、搬走了，留着旧记录只会再骗一次。 */
     public void forget(MemoryKind kind, WorldPosition position) {
-        modify(book -> book.without(kind, position));
+        modifyAndSave(book -> book.without(kind, position));
     }
 
     /** 记住一个按名字叫的地点（家、床这类）；同名地点用新位置覆盖。 */
     @Override
     public void remember(String name, WorldPosition position) {
-        modify(book -> book.withPlace(name, position));
+        modifyAndSave(book -> book.withPlace(name, position));
     }
 
     /**
@@ -109,12 +133,12 @@ public final class WorldMemory implements RemembersPlaces, RemembersRegions, Rem
      * 半径必须为正；同名区域用新范围覆盖。记区域的入口在世界记忆上，读的接缝是 RemembersRegions。
      */
     public void rememberRegion(String name, WorldPosition center, int radiusBlocks) {
-        modify(book -> book.withRegion(new RememberedRegion(name, center, radiusBlocks)));
+        modifyAndSave(book -> book.withRegion(new RememberedRegion(name, center, radiusBlocks)));
     }
 
     /** 忘掉一块区域：地界变了或记错了；名字没记过就不动。 */
     public void forgetRegion(String name) {
-        modify(book -> book.withoutRegion(name));
+        modifyAndSave(book -> book.withoutRegion(name));
     }
 
     /** 忘掉一个按名字记的地点；名字没记过就不动，返回有没有真的忘掉。 */
@@ -183,22 +207,30 @@ public final class WorldMemory implements RemembersPlaces, RemembersRegions, Rem
         modify(book -> book.withRecord(incoming));
     }
 
-    // 每次修改都整册读出、改好、在文档库的一个事务里写回：两次并发修改不会互相覆盖。
+    // 修改只改内存里的这一册并记下"改过了"；距上次存盘够久才写回文档库，逐笔落盘会拖慢游戏刻。
     private void modify(UnaryOperator<MemoryBook> change) {
-        try {
-            documents.update(SCOPE, worldKey, DOCUMENT_KEY, DOCUMENT_LIMIT,
-                    json -> codec.encode(change.apply(codec.decode(json))));
-        } catch (IOException failure) {
-            throw new UncheckedIOException("world_memory_write_failed", failure);
+        book = change.apply(readBook());
+        dirty = true;
+        if (System.nanoTime() - lastFlushNanos >= FLUSH_INTERVAL_NANOS) {
+            flush();
         }
     }
 
+    // 明确交代的事（记地点、圈地盘、忘掉一条）改了立刻存盘：保护判断靠它们，不能因为没赶上存盘就丢了。
+    private void modifyAndSave(UnaryOperator<MemoryBook> change) {
+        modify(change);
+        flush();
+    }
+
     private MemoryBook readBook() {
-        try {
-            return codec.decode(documents.read(SCOPE, worldKey, DOCUMENT_KEY, DOCUMENT_LIMIT));
-        } catch (IOException failure) {
-            throw new UncheckedIOException("world_memory_read_failed", failure);
+        if (book == null) {
+            try {
+                book = codec.decode(documents.read(SCOPE, worldKey, DOCUMENT_KEY, DOCUMENT_LIMIT));
+            } catch (IOException failure) {
+                throw new UncheckedIOException("world_memory_read_failed", failure);
+            }
         }
+        return book;
     }
 
     private static boolean sameDimension(WorldPosition first, WorldPosition second) {

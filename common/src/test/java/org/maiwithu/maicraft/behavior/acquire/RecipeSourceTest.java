@@ -112,7 +112,7 @@ class RecipeSourceTest {
     void 记得工作台_报价带备料清单() {
         WorldMemory memory = memory();
         memory.rememberWorkstationUsed(TABLE_AT, "minecraft:crafting_table", NOW);
-        SourceQuote quote = source(memory(), wanted -> List.of(plankRecipe()), new CapturingNeeds())
+        SourceQuote quote = source(memory, wanted -> List.of(plankRecipe()), new CapturingNeeds())
                 .quote(new ItemRequest(WantedItem.ofItem("minecraft:oak_planks"), 4, "施工备料"), CONTEXT);
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, quote);
         assertEquals("minecraft:oak_planks", offer.hint());
@@ -125,7 +125,7 @@ class RecipeSourceTest {
         WorldMemory memory = memory();
         memory.rememberWorkstationUsed(TABLE_AT, "minecraft:crafting_table", NOW);
         CapturingNeeds needs = new CapturingNeeds();
-        RecipeSource recipeSource = source(memory(), wanted -> List.of(plankRecipe()), needs);
+        RecipeSource recipeSource = source(memory, wanted -> List.of(plankRecipe()), needs);
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class,
                 recipeSource.quote(new ItemRequest(WantedItem.ofItem("minecraft:oak_planks"), 8, "施工备料"),
                         CONTEXT));
@@ -148,7 +148,7 @@ class RecipeSourceTest {
                 WantedItem.ofItem("minecraft:iron_ingot"), 1,
                 List.of(new RecipeView.IngredientStack(WantedItem.ofItem("minecraft:raw_iron"), 1)));
         CapturingNeeds needs = new CapturingNeeds();
-        RecipeSource recipeSource = source(memory(), wanted -> List.of(smelting), needs);
+        RecipeSource recipeSource = source(memory, wanted -> List.of(smelting), needs);
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class,
                 recipeSource.quote(new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), 1, "工具准备"),
                         CONTEXT));
@@ -173,7 +173,7 @@ class RecipeSourceTest {
                 WantedItem.ofItem("minecraft:iron_ingot"), 1,
                 List.of(new RecipeView.IngredientStack(WantedItem.ofItem("minecraft:raw_iron"), 1)));
         CapturingNeeds needs = new CapturingNeeds();
-        RecipeSource recipeSource = source(memory(), wanted -> List.of(smelting), needs);
+        RecipeSource recipeSource = source(memory, wanted -> List.of(smelting), needs);
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class,
                 recipeSource.quote(new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), 1, "工具准备"),
                         CONTEXT));

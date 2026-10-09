@@ -345,10 +345,18 @@ public final class Bootstrap {
                 // 开关开启时，这次进世界要逐刻请求控制权直到拿到；直播待机没有目标也守得住角色。
                 startupAutomationPending = automationOnJoin;
             } else if (minecraft.level == null) {
-                // 离开世界：没做完的目标停手存成暂停，下次进这个世界时恢复；不让它跟进下一个世界接着跑。
-                if (worldScope[0] != null) goals.leaveWorld();
-                worldScope[0] = null;
+                leaveWorld();
             }
+        }
+
+        // 离开世界：没做完的目标停手存成暂停（下次进这个世界时恢复），再把世界记忆里还没存盘的改动写下去，
+        // 最后丢掉现场；不让目标跟进下一个世界接着跑。
+        private void leaveWorld() {
+            if (worldScope[0] != null) {
+                goals.leaveWorld();
+                worldScope[0].memory().flush();
+            }
+            worldScope[0] = null;
         }
 
         /**
@@ -387,7 +395,7 @@ public final class Bootstrap {
         @Override public void stopping() {
             playerControl.shutdown();
             blockScans.dropAll();
-            worldScope[0] = null;
+            leaveWorld();
             if (mcp != null) mcp.stop();
             LOG.info("{} 客户端即将退出", ModIdentity.NAME);
         }

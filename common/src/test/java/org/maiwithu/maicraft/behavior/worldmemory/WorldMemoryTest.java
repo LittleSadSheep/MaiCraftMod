@@ -154,8 +154,10 @@ class WorldMemoryTest {
     @Test
     void 关掉再开_记忆还在(@TempDir Path temp) {
         DocumentStore store = store(temp);
-        new WorldMemory(store, "a".repeat(64))
-                .rememberContainerOpened(CHEST, "minecraft:chest", List.of("minecraft:coal"), NOW);
+        var memory = new WorldMemory(store, "a".repeat(64));
+        memory.rememberContainerOpened(CHEST, "minecraft:chest", List.of("minecraft:coal"), NOW);
+        // 修改先记在内存里，离开世界前存盘；存过盘再开就还在。
+        memory.flush();
         var reopened = new WorldMemory(store, "a".repeat(64));
         assertEquals(List.of("minecraft:coal"),
                 reopened.recordAt(MemoryKind.CONTAINER, CHEST).orElseThrow().contents());
