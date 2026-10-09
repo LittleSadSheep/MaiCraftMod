@@ -60,8 +60,29 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
         if (source == NOT_CARRIED) return Optional.empty();
         // 穿在身上的（盔甲格）不是这里换的：那是穿卸装备的事，如实给空不冒充换得了。
         if (source >= 36 && source <= 39) return Optional.empty();
-        return Optional.of(new MoveAction(itemId, source));
+        return Optional.of(new MoveAction("把 " + itemId + " 换到主手", source));
     }
+
+    /**
+     * 把主手（选中的快捷栏格）上的东西收进主背包的一个空格，腾出空手：开背包界面，用原生交换把它换进那个空格，
+     * 再关上界面。主背包也没有空格时给空，腾地方是另一件事。
+     */
+    public Optional<Action> stowMainhand() {
+        PlayerContext context = contexts.get();
+        if (context == null || context.localPlayer() == null) return Optional.empty();
+        var inventory = context.localPlayer().getInventory();
+        for (int slot = FIRST_MAIN_SLOT; slot <= LAST_MAIN_SLOT; slot++) {
+            if (inventory.getItem(slot).isEmpty()) {
+                // 和空格交换：主手那件进背包，选中的那一格变空，选中不用改。
+                return Optional.of(new MoveAction("把主手的东西收进背包", slot));
+            }
+        }
+        return Optional.empty();
+    }
+
+    /** 主背包的格号范围（快捷栏之外、盔甲格之前）。 */
+    private static final int FIRST_MAIN_SLOT = 9;
+    private static final int LAST_MAIN_SLOT = 35;
 
     /** 找东西在身上的哪个格：主背包 9..35、副手、或已经在选中的快捷栏格。 */
     static final int NOT_CARRIED = -1;
@@ -83,9 +104,10 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
         return !stack.isEmpty() && BuiltInRegistries.ITEM.getKey(stack.getItem()).equals(wanted);
     }
 
-    /** 换手动作：界面搬运 → 关界面 → 副手交换 → 选中，逐刻推进。 */
+    /** 换手动作：界面搬运 → 关界面 → 副手交换 → 选中，逐刻推进；收进背包也走前两步加一次选中核对。 */
     private final class MoveAction implements Action {
-        private final String itemId;
+        /** 这次搬的是什么，给日志与描述的一句话。 */
+        private final String what;
         /** 身上那件东西现在的格号；副手是 40，随搬运推进更新。 */
         private int slot;
         private Stage stage;
@@ -93,8 +115,8 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
         private PendingInteraction selectPending;
         private Problem failure;
 
-        MoveAction(String itemId, int sourceSlot) {
-            this.itemId = itemId;
+        MoveAction(String what, int sourceSlot) {
+            this.what = what;
             this.slot = sourceSlot;
             // 已经在快捷栏的选中那一格就行；副手的先做原生交换（要关着界面），主背包的先开界面搬运。
             this.stage = sourceSlot == 40 ? Stage.OFFHAND_SWAP
@@ -202,7 +224,7 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
 
         @Override
         public String describe() {
-            return "把 " + itemId + " 换到主手";
+            return what;
         }
     }
 

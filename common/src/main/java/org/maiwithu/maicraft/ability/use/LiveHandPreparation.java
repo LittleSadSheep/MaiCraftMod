@@ -49,7 +49,7 @@ final class LiveHandPreparation implements UseSeams.PreparesHand {
         }
         LocalPlayer player = current.localPlayer();
         if (item == null) {
-            return emptyHand(player);
+            return emptyHand(player, toMainhand);
         }
         if (matches(player.getMainHandItem(), item)) {
             return new UseSeams.HandPlan.Ready();
@@ -67,8 +67,9 @@ final class LiveHandPreparation implements UseSeams.PreparesHand {
                         carried.get() + " 在身上却换不到主手", null)));
     }
 
-    // 要空手：主手已空就成了；不然选一个空快捷栏格切过去，一格都没有按腾不出交代。
-    private static UseSeams.HandPlan emptyHand(LocalPlayer player) {
+    // 要空手：主手已空就成了；不然选一个空快捷栏格切过去；快捷栏没有空格就把主手的东西收进背包，
+    // 背包也满了才按腾不出交代。
+    private static UseSeams.HandPlan emptyHand(LocalPlayer player, ClientMovesToMainhand toMainhand) {
         if (player.getMainHandItem().isEmpty()) {
             return new UseSeams.HandPlan.Ready();
         }
@@ -78,8 +79,10 @@ final class LiveHandPreparation implements UseSeams.PreparesHand {
                 return new UseSeams.HandPlan.Move(new HotbarSelection(slot));
             }
         }
-        return new UseSeams.HandPlan.Cannot(Problem.of(Problem.Kind.NEED_ITEM,
-                "腾不出空手：快捷栏没有空格", "先丢掉或收起一件东西再试"));
+        return toMainhand.stowMainhand()
+                .<UseSeams.HandPlan>map(UseSeams.HandPlan.Move::new)
+                .orElseGet(() -> new UseSeams.HandPlan.Cannot(Problem.of(Problem.Kind.INVENTORY_FULL,
+                        "腾不出空手：快捷栏和背包都没有空格", "先存起或丢掉一件东西再试")));
     }
 
     // 身上（主背包、快捷栏、副手）第一件对得上的东西的物品 ID；盔甲格不算。
