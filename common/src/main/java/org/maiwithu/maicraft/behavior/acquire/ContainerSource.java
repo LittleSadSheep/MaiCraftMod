@@ -9,6 +9,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.inventory.KnownContainer;
+import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
@@ -20,6 +21,9 @@ import org.maiwithu.maicraft.kernel.task.Action;
  * 记忆只是线索：开过且记了内容的箱子报明确的数；没开过的报"不知道有多少"，
  * 排在明确够数的后面——有确定的货就不赌运气。到了跟前以现场为准，开了才算数。
  * 用哪只箱子、里面实际有多少，由开箱取物的执行接缝到现场核对并如实回报。
+ *
+ * <p>受保护的箱子不碰：玩家放的、在玩家地盘里的、这次任务额外保护的地标旁的，归属还没问清的也算，
+ * 记得里面有货也不去翻——默认绝不碰玩家的箱子。
  */
 public final class ContainerSource implements ItemSource {
 
@@ -28,11 +32,13 @@ public final class ContainerSource implements ItemSource {
 
     private final WorldMemory memory;
     private final ReadsItemTags tags;
+    private final Protection protection;
     private final ContainerTakes takes;
 
-    public ContainerSource(WorldMemory memory, ReadsItemTags tags, ContainerTakes takes) {
+    public ContainerSource(WorldMemory memory, ReadsItemTags tags, Protection protection, ContainerTakes takes) {
         this.memory = memory;
         this.tags = tags;
+        this.protection = protection;
         this.takes = takes;
     }
 
@@ -48,8 +54,14 @@ public final class ContainerSource implements ItemSource {
         List<MemoryRecord> records = memory.recordsNear(context.characterAt(), searchRadius(context));
         MemoryRecord known = null;
         MemoryRecord maybe = null;
+        boolean skippedProtected = false;
         for (MemoryRecord record : records) {
             if (record.kind() != MemoryKind.CONTAINER) continue;
+            // 玩家的箱子不翻：记得里面有货也跳过，只在说明里交代一句。
+            if (protectedContainer(record, context)) {
+                skippedProtected = true;
+                continue;
+            }
             if (known == null && record.openedBefore() && holdsWanted(record, request)) {
                 known = record;
             }
@@ -71,7 +83,8 @@ public final class ContainerSource implements ItemSource {
                     "这只箱子只是看见过，没开过，不确定里面有什么", positionHint(maybe));
         }
         return new SourceQuote.Unavailable(describe(),
-                "记得的容器里没有装着" + request.wanted().describe() + "的");
+                "记得的容器里没有装着" + request.wanted().describe() + "的"
+                        + (skippedProtected ? "（玩家的箱子不翻）" : ""));
     }
 
     @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
@@ -82,10 +95,20 @@ public final class ContainerSource implements ItemSource {
             return Optional.empty();
         }
         MemoryRecord container = record.get();
+        // 报价之后才知道它是玩家的（归属刚问到）：同样不翻，交回空让引擎换路。
+        if (protectedContainer(container, context)) {
+            return Optional.empty();
+        }
         KnownContainer known = new KnownContainer(
                 container.blockType() + " " + offer.hint(),
                 container.position().x(), container.position().y(), container.position().z());
         return takes.take(known, request, context.permissions());
+    }
+
+    /** 这只箱子受不受保护：按方块归属、记住的区域、这次额外保护的地标与玩家放置推断判断，拿不准算受保护。 */
+    private boolean protectedContainer(MemoryRecord record, SourceContext context) {
+        return protection.blockProtected(record.position(), record.blockType(),
+                context.permissions().protectedLandmarks());
     }
 
     /** 这次搜多大范围：任务给了半径就在这个范围里找（给了就不越界），没给用来源自己的默认。 */

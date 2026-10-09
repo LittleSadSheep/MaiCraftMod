@@ -302,7 +302,7 @@ public final class AbilityCatalog {
         HarvestSource harvestSource = new HarvestSource(yieldScans, collects, permission,
                 new ClientCropReplanting(toMainhand, deps.interactions(), deps.context()));
         ItemAcquisition acquisition = new ItemAcquisition(
-                List.of(new ContainerSource(deps.memory(), deps.itemTags(),
+                List.of(new ContainerSource(deps.memory(), deps.itemTags(), deps.protection(),
                                 new MenuContainerTakes(bringsClose, deps.interactions(), deps.itemTags(),
                                         deps.memory(), deps.context())),
                         craftSource, smeltSource, miningSource, harvestSource, new TradeSource()),
