@@ -54,7 +54,7 @@ public final class SelfView {
             json.add("inventory", inventory(backpack));
             json.addProperty("free_slots", backpack.freeSlots());
         }
-        // 谁在操作角色：玩家手上时目标只会挂着不动，要玩家在游戏里按 F8 交给自动控制。
+        // 谁在操作角色：在玩家手上时主任务不推进；重新下达或恢复目标会再请求控制权，玩家按 F8 也能交给自动化。
         if (automationControls != null) {
             json.addProperty("control", automationControls ? "automation" : "player");
         }
