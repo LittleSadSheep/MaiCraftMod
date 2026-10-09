@@ -6,10 +6,12 @@ import com.google.gson.JsonParser;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.maiwithu.maicraft.ability.remember.RememberAbility;
 import org.maiwithu.maicraft.behavior.perception.EntitySight;
 import org.maiwithu.maicraft.behavior.perception.NearbyBlocksSight;
 import org.maiwithu.maicraft.behavior.perception.Scene;
 import org.maiwithu.maicraft.behavior.perception.SelfSight;
+import org.maiwithu.maicraft.behavior.travel.SceneSeenTargets;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
@@ -61,7 +63,11 @@ class ObserveToolTest {
         scene.updateFacilities(10, Instant.ofEpochMilli(1000),
                 List.of(new NearbyBlocksSight.BlockSighting(WorldPosition.here(4, 64, 0), "minecraft:chest")));
         // 控制权交接给空实现：observe 测试不接输入层。
-        GoalRunTable table = new GoalRunTable(new AbilityRegistry(new TaskFactories()), new InMemoryGoalRunStore(),
+        // 记地点用真实的能力：脚下那一格固定在原点，观察编号从场景查。
+        AbilityRegistry registry = new AbilityRegistry(new TaskFactories());
+        registry.register(new RememberAbility(memory, () -> new WorldPosition(0, 64, 0, "minecraft:overworld"),
+                new SceneSeenTargets(() -> scene)));
+        GoalRunTable table = new GoalRunTable(registry, new InMemoryGoalRunStore(),
                 memory, new ControlLoop(List.of()), new PlayerControlHandover() {
                     @Override public boolean automationOwnsControls() {
                         return true;
@@ -76,11 +82,15 @@ class ObserveToolTest {
             }
         };
         tools = new ToolDispatcher(List.of(new ObserveTool(() -> inWorld ? scene : null,
-                () -> inWorld ? memory : null, table, direct)));
+                () -> inWorld ? memory : null, table, direct), new ExecuteTool(registry, table, direct)));
     }
 
     private JsonObject observe(String arguments) {
         return tools.call("observe", JsonParser.parseString(arguments).getAsJsonObject());
+    }
+
+    private JsonObject execute(String goal) {
+        return tools.call("execute", JsonParser.parseString("{\"goal\": " + goal + "}").getAsJsonObject());
     }
 
     private static JsonObject data(JsonObject reply) {
@@ -138,6 +148,23 @@ class ObserveToolTest {
 
         assertEquals("矿洞口", view.getAsJsonArray("places").get(0).getAsJsonObject().get("name").getAsString());
         assertEquals("container", view.getAsJsonArray("records").get(0).getAsJsonObject().get("kind").getAsString());
+    }
+
+    @Test
+    void rememberedPlacesShowUpInObserveAndGoAwayWhenForgotten() {
+        // 记地点当场完成：execute 直接带回结果，不成为主任务。
+        JsonObject remembered = data(execute("{\"ability\": \"remember\", \"parameters\": {\"name\": \"家\"}}"));
+        JsonObject chest = data(execute("{\"ability\": \"remember\", \"target\": {\"kind\": \"seen\", \"id\": \"b1\"},"
+                + " \"parameters\": {\"name\": \"箱子\"}}"));
+
+        assertEquals("done", remembered.getAsJsonObject("result").get("status").getAsString(), remembered::toString);
+        assertEquals("箱子", data(observe("{\"what\": \"world_memory\"}")).getAsJsonArray("places").get(1)
+                .getAsJsonObject().get("name").getAsString(), chest::toString);
+        assertEquals("空闲，没有主任务", data(observe("{\"what\": \"self\"}")).getAsJsonObject("task")
+                .get("doing").getAsString());
+
+        data(execute("{\"ability\": \"remember\", \"parameters\": {\"name\": \"家\", \"operation\": \"forget\"}}"));
+        assertEquals("unknown_id", errorCode(observe("{\"what\": \"detail\", \"id\": \"家\"}")));
     }
 
     @Test
