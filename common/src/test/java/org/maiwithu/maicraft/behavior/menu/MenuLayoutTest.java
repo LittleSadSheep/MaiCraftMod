@@ -79,4 +79,18 @@ class MenuLayoutTest {
         Unsupported unsupported = assertInstanceOf(Unsupported.class, layout);
         assertTrue(unsupported.reason().contains("somemod:chest_like"), "原因里写明认不出的界面类型");
     }
+
+    @Test
+    void 合成台与石切台的两格产出投入都认得出() {
+        // 合成台容器侧 10 格（产出格加合成格），石切台 2 格（投入口加产出格），点击都按普通槽核对。
+        Layout crafting = MenuLayout.classify(slots("minecraft:crafting", 46, 36));
+        Supported supported = assertInstanceOf(Supported.class, crafting);
+        assertEquals(List.of(0, 1, 2, 3, 4, 5, 6, 7, 8, 9), supported.containerSlots());
+        assertTrue(supported.machineSlots().isEmpty());
+
+        Layout stonecutter = MenuLayout.classify(slots("minecraft:stonecutter", 38, 36));
+        Supported stoneSupported = assertInstanceOf(Supported.class, stonecutter);
+        assertEquals(List.of(0, 1), stoneSupported.containerSlots());
+        assertTrue(stoneSupported.machineSlots().isEmpty());
+    }
 }

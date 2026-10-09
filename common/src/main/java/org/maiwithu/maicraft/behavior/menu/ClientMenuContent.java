@@ -23,16 +23,26 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
 public final class ClientMenuContent implements MenuContent {
 
     private final Supplier<PlayerContext> contexts;
+    /** 绑定过的标记：绑定推迟到第一次读的时候，读端可以先建、等界面打开后再绑。 */
+    private boolean bound;
     /** 界面内容读取绑定的通道；绑定时的界面就是它核对的那一份。 */
-    private final ClientMenuChannel channel;
-    private final MenuSlots slots;
-    private final IntFunction<SlotSnapshot> snapshotAt;
+    private ClientMenuChannel channel;
+    private MenuSlots slots;
+    private IntFunction<SlotSnapshot> snapshotAt;
     /** 绑定时的菜单版本与绑定时刻：判断同步是否已经到了。 */
-    private final int boundStateId;
+    private int boundStateId;
     private long boundTick;
 
     public ClientMenuContent(Supplier<PlayerContext> contexts) {
         this.contexts = Objects.requireNonNull(contexts);
+    }
+
+    // 绑定推迟到第一次读：动手动作可以先建读端再点开界面，绑上的就是点开的那份。
+    private void bindOnce() {
+        if (bound) {
+            return;
+        }
+        bound = true;
         PlayerContext context = contexts.get();
         // 上下文不在或没有打开的容器界面时，读端空转：current 一直给空，等界面打开后重新建读端。
         this.channel = ClientMenuChannel.claimCurrent(contexts);
@@ -49,6 +59,7 @@ public final class ClientMenuContent implements MenuContent {
 
     @Override
     public Optional<Reading> current() {
+        bindOnce();
         PlayerContext context = contexts.get();
         if (context == null || channel == null) return Optional.empty();
         if (!synced(context)) return Optional.empty();

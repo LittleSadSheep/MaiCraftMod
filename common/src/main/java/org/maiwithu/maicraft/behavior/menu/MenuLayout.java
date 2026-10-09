@@ -27,6 +27,12 @@ public final class MenuLayout {
     private static final Set<String> FURNACE_LIKE = Set.of(
             "minecraft:furnace", "minecraft:blast_furnace", "minecraft:smoker");
 
+    /** 合成台：容器侧第 0 格是产出格，其余九格是合成格。 */
+    private static final Set<String> CRAFTING = Set.of("minecraft:crafting");
+
+    /** 石切台：第 0 格是投入口，第 1 格是产出格。 */
+    private static final Set<String> STONECUTTER = Set.of("minecraft:stonecutter");
+
     /** 角色侧固定 36 格：27 格主背包 + 9 格快捷栏。 */
     private static final int PLAYER_SLOTS = 36;
 
@@ -71,6 +77,10 @@ public final class MenuLayout {
             }
             Set<Integer> machine = Set.of(1, 2);
             return new Supported(List.copyOf(playerSlots), List.copyOf(containerSlots), machine);
+        }
+        if (CRAFTING.contains(typeId) || STONECUTTER.contains(typeId)) {
+            // 合成台与石切台的产出格只会被拿走不会被塞进，点击都按普通槽核对。
+            return new Supported(List.copyOf(playerSlots), List.copyOf(containerSlots), Set.of());
         }
         // 没证明过的模组界面：不是"当作普通箱子试试"，而是承认两侧的行为证明不了。
         return new Unsupported("认不出界面类型 " + typeId + " 的布局，证明不了两侧怎么分，不点击");
