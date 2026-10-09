@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.util.Optional;
 import java.util.List;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
@@ -67,6 +68,7 @@ import org.maiwithu.maicraft.kernel.task.TaskFactories;
 import org.maiwithu.maicraft.mcp.tool.EventsTool;
 import org.maiwithu.maicraft.mcp.tool.ExecuteTool;
 import org.maiwithu.maicraft.mcp.tool.LookupTool;
+import org.maiwithu.maicraft.mcp.tool.ObserveTool;
 import org.maiwithu.maicraft.mcp.tool.TaskTool;
 import org.maiwithu.maicraft.mcp.tool.ToolDispatcher;
 import org.maiwithu.maicraft.mcp.transport.EmbeddedMcpService;
@@ -247,7 +249,7 @@ public final class Bootstrap {
             // 交互动作入口与按住使用键投影：能力清单在进世界时用它们拼装各能力。
             interactions = new Interactions(useKeyProjection);
             // 目标执行与 MCP 工具：LLM 用 execute 下达的目标经目标运行表成为控制循环的主任务。
-            tools = goalTools(abilities, controlLoop, clientWork);
+            tools = goalTools(abilities, controlLoop, clientWork, () -> worldScope[0]);
         }
 
         /** 建与服务端的会话，并在入服前登记客户端知道的操作清单。 */
@@ -260,7 +262,7 @@ public final class Bootstrap {
         @Override public void started() {
             try {
                 mcp = EmbeddedMcpService.startWithFallback(mcpConfig, 2, tools);
-                LOG.info("{} MCP 服务已启动（端口 {}；lookup、execute、task、events 已接上，observe 还是空壳）",
+                LOG.info("{} MCP 服务已启动（端口 {}；五个工具都已接上）",
                         ModIdentity.NAME, mcp.port());
             } catch (IOException exception) {
                 LOG.error("{} MCP 服务启动失败", ModIdentity.NAME, exception);
@@ -335,15 +337,21 @@ public final class Bootstrap {
      * 能力按清单在进世界时登记进这份注册表。
      */
     private static ToolDispatcher goalTools(AbilityRegistry abilities, ControlLoop controlLoop,
-                                            ClientTickWork clientWork) {
+                                            ClientTickWork clientWork, Supplier<WorldScope> worldScope) {
         TaskEventLog taskEvents = new TaskEventLog();
         GoalRunStore goalRuns = new EventPublishingGoalRunStore(new InMemoryGoalRunStore(), taskEvents);
-        // 世界记忆按世界创建，还没有接进启动流程：要记地点的目标如实以程序错误收场，不悄悄丢掉。
+        // 记地点交给当前世界的世界记忆；不在世界里时如实以程序错误收场，不悄悄丢掉。
         RemembersPlaces places = (name, position) -> {
-            throw new IllegalStateException("世界记忆还没有接进启动流程，记不住地点 " + name);
+            WorldScope scope = worldScope.get();
+            if (scope == null) {
+                throw new IllegalStateException("角色不在世界里，记不住地点 " + name);
+            }
+            scope.memory().remember(name, position);
         };
         GoalRunTable goals = new GoalRunTable(abilities, goalRuns, places, controlLoop);
         return new ToolDispatcher(List.of(
+                new ObserveTool(() -> worldScope.get() == null ? null : worldScope.get().scene(),
+                        () -> worldScope.get() == null ? null : worldScope.get().memory(), goals, clientWork),
                 new LookupTool(abilities),
                 new ExecuteTool(abilities, goals, clientWork),
                 new TaskTool(goals, clientWork),

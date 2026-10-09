@@ -6,6 +6,7 @@ import java.io.UncheckedIOException;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.UnaryOperator;
 import org.maiwithu.maicraft.behavior.perception.RemembersSightings;
@@ -155,6 +156,11 @@ public final class WorldMemory implements RemembersPlaces, RemembersRegions, Rem
         return readBook().records().stream()
                 .sorted(Comparator.comparing(MemoryRecord::recordedAt).reversed())
                 .toList();
+    }
+
+    /** 记过的全部地点，名字到位置；observe 的世界记忆视图按它列出，不截断。 */
+    public Map<String, WorldPosition> places() {
+        return Map.copyOf(readBook().places());
     }
 
     /** 按名字查记过的地点。 */

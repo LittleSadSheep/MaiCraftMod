@@ -113,6 +113,12 @@ public final class GoalRunTable {
         }
     }
 
+    /** 现在作为主任务的目标；没有主任务，或者它已经结束时为空。observe(self) 用它说"手上在做什么"。 */
+    public Optional<GoalRun> mainGoal() {
+        GoalRunner runner = runners.get(mainRunId);
+        return runner == null || !runner.run().unfinished() ? Optional.empty() : Optional.of(runner.run());
+    }
+
     /** 按编号查目标运行；不在表里（编号不存在，或结束太久已经不保留）时为空。 */
     public Optional<GoalRun> find(long id) {
         GoalRunner runner = runners.get(id);
