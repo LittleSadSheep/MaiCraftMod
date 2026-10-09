@@ -6,9 +6,14 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.ArmorItem;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.DiggerItem;
+import net.minecraft.world.item.ElytraItem;
+import net.minecraft.world.item.FishingRodItem;
+import net.minecraft.world.item.FlintAndSteelItem;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.MaceItem;
 import net.minecraft.world.item.ProjectileWeaponItem;
 import net.minecraft.world.item.Rarity;
+import net.minecraft.world.item.ShearsItem;
 import net.minecraft.world.item.ShieldItem;
 import net.minecraft.world.item.SwordItem;
 import net.minecraft.world.item.TridentItem;
@@ -88,8 +93,11 @@ public final class ClientBackpackView implements BackpackView {
     // 装备栏视图读副手与护甲时用同一张快照，分类判断不写第二份。
     public static BackpackStack snapshot(ItemStack stack) {
         var item = stack.getItem();
+        // 工具、武器与穿戴：挖掘工具与剑、弓弩三叉戟重锤、剪刀打火石钓竿，护甲、鞘翅与盾牌。
         boolean gear = item instanceof SwordItem || item instanceof DiggerItem || item instanceof ProjectileWeaponItem
-                || item instanceof TridentItem || item instanceof ArmorItem || item instanceof ShieldItem;
+                || item instanceof TridentItem || item instanceof MaceItem || item instanceof ArmorItem
+                || item instanceof ElytraItem || item instanceof ShieldItem || item instanceof ShearsItem
+                || item instanceof FlintAndSteelItem || item instanceof FishingRodItem;
         boolean food = stack.has(DataComponents.FOOD);
         // 贵重：游戏标了 uncommon 以上稀有度，或者带附魔——丢了心疼、难补的东西。
         boolean precious = stack.getRarity() != Rarity.COMMON || stack.isEnchanted();
