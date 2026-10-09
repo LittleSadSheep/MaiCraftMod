@@ -40,6 +40,21 @@ class OwnershipMapTest {
     }
 
     @Test
+    void 没写维度的位置按角色此刻所在的维度查() {
+        // 挖矿、收庄稼报来的格子只写坐标、不写维度：按角色所在维度查到的归属同样算数。
+        OwnershipMap map = new OwnershipMap(new ServerLinkSession(NO_TRANSPORT));
+        assertFalse(map.known(null, 5, 64, 5), "连维度都还不知道时说不知道，也不出错");
+        map.standingIn("minecraft:overworld");
+        map.remember(new OwnershipMap.ChunkKey("minecraft:overworld", 0, 0),
+                Map.of(BlockPos.asLong(5, 64, 5), "alice"), System.currentTimeMillis());
+
+        assertTrue(map.known(null, 5, 64, 5));
+        assertEquals("alice", map.whoPlaced(null, 5, 64, 5).orElseThrow().playerId());
+        assertTrue(map.whoPlaced(null, 6, 64, 5).isEmpty(), "问过的区块里没记录的格子就是没人放的");
+        assertFalse(map.known("minecraft:the_nether", 5, 64, 5), "别的维度的同一坐标是另一块");
+    }
+
+    @Test
     void 回答按放置人表读回每一格() {
         JsonObject result = new JsonObject();
         JsonArray owners = new JsonArray();

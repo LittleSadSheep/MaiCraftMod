@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.ability.use;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
@@ -155,6 +156,18 @@ final class UseSeams {
          * @param permissions 这次任务的许可：路上能动多少地形按它来
          */
         Optional<Action> toward(WorldPosition where, boolean heightKnown, Permissions permissions);
+    }
+
+    /**
+     * 别人的东西：会改动世界的用法（倒流体、点火、耕地、剪毛、挤奶这类）碰到角色自己挑的目标时，
+     * 别人的不碰；开门、开箱看看、按按钮、骑乘不改动世界，别人的也可以。LLM 用观察编号点名的不问这里。
+     */
+    interface OthersThings {
+        /** 拿着这件东西（空手为 null）对这个目标用一下，算不算改动世界；拿不准算。 */
+        boolean changesWorld(String heldItem, ResolvedTarget target);
+
+        /** 这个目标是不是别人的：方块按保护判断，生物按有主（有名字、驯服、拴绳、圈养、玩家）判断；拿不准算别人的。 */
+        boolean someoneElses(ResolvedTarget target, Set<String> protectedLandmarks);
     }
 
     /** 看看点开的界面：等内容同步完、列出里面有什么、再关上；打开者负责关闭。 */

@@ -13,7 +13,7 @@ import org.maiwithu.maicraft.behavior.acquire.ReadsItemTags;
 import org.maiwithu.maicraft.game.player.ReadsFoodValues.FoodEffect;
 import org.maiwithu.maicraft.game.player.ReadsFoodValues.FoodValue;
 
-/** 挑哪种吃的：无效果优先、按补的多少排；带害的垫底；点名的只认点名的那种。 */
+/** 挑哪种吃的：没点名只吃普通食物、再是垃圾食物，珍贵的、会传送的、会中毒的要点名；点名的只认点名的那种。 */
 class FoodPickerTest {
 
     private static FoodValue food(String id, int nutrition, float saturation, FoodEffect... effects) {
@@ -36,13 +36,27 @@ class FoodPickerTest {
     }
 
     @Test
-    void 只剩带效果的食物时有益的排在带害的前面_腐肉垫底() {
+    void 没点名时没有普通食物就吃腐肉_金苹果留着() {
         List<FoodPicker.Carried> carried = List.of(
                 carried("minecraft:rotten_flesh", 5, food("minecraft:rotten_flesh", 4, 0.8f,
                         new FoodEffect("minecraft:hunger", false))),
                 carried("minecraft:golden_apple", 1, food("minecraft:golden_apple", 4, 9.6f,
                         new FoodEffect("minecraft:absorption", true))));
-        assertEquals(Optional.of("minecraft:golden_apple"), FoodPicker.autoPick(carried));
+        assertEquals(Optional.of("minecraft:rotten_flesh"), FoodPicker.autoPick(carried));
+    }
+
+    @Test
+    void 没点名时金苹果_紫颂果_河豚都不吃() {
+        // 随便吃点不包括这些：金苹果珍贵，紫颂果吃了会随机传送（没有状态效果但饱腹也能吃），河豚会中毒。
+        FoodValue chorus = new FoodValue("minecraft:chorus_fruit", 4, 2.4f, 1.6f, true, List.of());
+        List<FoodPicker.Carried> carried = List.of(
+                carried("minecraft:golden_apple", 1, new FoodValue("minecraft:golden_apple", 4, 9.6f, 1.6f, true,
+                        List.of(new FoodEffect("minecraft:regeneration", true)))),
+                carried("minecraft:chorus_fruit", 3, chorus),
+                carried("minecraft:pufferfish", 2, food("minecraft:pufferfish", 1, 0.2f,
+                        new FoodEffect("minecraft:poison", false), new FoodEffect("minecraft:hunger", false))));
+        assertEquals(Optional.empty(), FoodPicker.autoPick(carried));
+        assertTrue(!FoodPicker.plain(chorus) && !FoodPicker.junk(chorus));
     }
 
     @Test
@@ -57,7 +71,7 @@ class FoodPickerTest {
     }
 
     @Test
-    void 饿了顺手吃不动金苹果和腐肉_见底掉血时才什么都吃() {
+    void 饿了顺手吃不动金苹果和腐肉_见底掉血时才什么都吃_腐肉先于金苹果() {
         FoodValue goldenApple = new FoodValue("minecraft:golden_apple", 4, 9.6f, 1.6f, true,
                 List.of(new FoodEffect("minecraft:regeneration", true)));
         List<FoodPicker.Carried> carried = List.of(
@@ -65,7 +79,9 @@ class FoodPickerTest {
                 carried("minecraft:rotten_flesh", 5, food("minecraft:rotten_flesh", 4, 0.8f,
                         new FoodEffect("minecraft:hunger", false))));
         assertEquals(Optional.empty(), FoodPicker.forHunger(carried, 5, false));
-        assertEquals(Optional.of("minecraft:golden_apple"), FoodPicker.forHunger(carried, 0, true));
+        // 见底掉血：先吃腐肉保命，只剩金苹果时才动它。
+        assertEquals(Optional.of("minecraft:rotten_flesh"), FoodPicker.forHunger(carried, 0, true));
+        assertEquals(Optional.of("minecraft:golden_apple"), FoodPicker.forHunger(carried.subList(0, 1), 0, true));
         assertTrue(FoodPicker.harmless(goldenApple));
         assertTrue(!FoodPicker.plain(goldenApple));
     }

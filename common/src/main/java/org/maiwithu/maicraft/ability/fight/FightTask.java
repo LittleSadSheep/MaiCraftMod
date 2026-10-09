@@ -3,9 +3,12 @@ package org.maiwithu.maicraft.ability.fight;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
 import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.behavior.survival.CombatSenses;
@@ -26,6 +29,9 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 战斗任务：打点名目标，或清一片区域的敌对生物。
+ *
+ * <p>不点名时清的是开打那一刻 radius 内看得见的这一批，途中冲着角色来的一并处理；
+ * 之后新刷出来的、墙后与地下看不见的不追，这一批打完、身边也没有在打我的就收手。
  *
  * <p>先评估再动手：打不过不开打，说清差在血、武器还是数量；血量跌破拒战线就撤，
  * 甩开所有追击的才算撤成，撤离了不冒充打赢。一场战斗内盯住同一个目标，不每刻重选。
@@ -52,6 +58,8 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
 
     /** 点名目标：观察编号、实体编号、类型；区域清扫时为空。 */
     private final List<SeenTargets.Locked> named = new ArrayList<>();
+    /** 区域清扫要清的这一批：开打那一刻半径内看得见的敌对生物的实体编号；点名时为空。 */
+    private final Set<Integer> batch = new HashSet<>();
     /** 已确认击败的目标。 */
     private final List<String> defeated = new ArrayList<>();
     /** 点名目标在确认击败前就不见了（走远、被别的东西打死）：不算击败，单独交代。 */
@@ -118,6 +126,14 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     }
 
     private Next<Phase> assess(TickContext context) {
+        if (named.isEmpty()) {
+            // 区域清扫先认下这一批：此刻半径内看得见的；墙后、地下看不见的不算，之后新刷的也不算。
+            for (CombatSenses.Threat threat : senses.threats(context, input.radius())) {
+                if (threat.visible() && wantedType(threat)) {
+                    batch.add(threat.entityId());
+                }
+            }
+        }
         ThreatAssessment.MySide mine = mySide(context);
         List<ThreatAssessment.Foe> foes = foesOf(context, mine);
         ThreatAssessment.Assessment assessment = ThreatAssessment.assess(mine, foes);
@@ -146,8 +162,8 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         Tracked target = pickTarget(context);
         if (target == null) {
             if (named.isEmpty()) {
-                // 区域清扫：没有可打的了。
-                return Next.go(Phase.LOOT, lastKillSpot == null ? "附近没有敌对生物" : "清扫完毕，就地捡一下");
+                // 区域清扫：这一批打完了，身边也没有在打我的。
+                return Next.go(Phase.LOOT, lastKillSpot == null ? "附近没有看得见的敌对生物" : "这一批清完了，就地捡一下");
             }
             // 点名目标全部确认死亡：完成。
             return Next.done(settled(context));
@@ -322,10 +338,16 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
                 engaged = null;
             }
         }
+        // 只在这一批里挑，外加途中冲着角色来的（刚打过角色的、点着引信的苦力怕）；
         // 每只敌人连同它的评估输入一起排序：同种同距离的两只不会被认成同一只。
+        Set<UUID> attackers = new HashSet<>();
+        for (CombatSenses.Attacker attacker : senses.recentAttackers(currentContext)) {
+            attackers.add(attacker.uuid());
+        }
         List<CombatSenses.Threat> ordered = new ArrayList<>();
         for (CombatSenses.Threat threat : senses.threats(currentContext, input.radius())) {
-            if (input.entityType() == null || threat.type().equals(input.entityType())) {
+            boolean comingAtMe = attackers.contains(threat.uuid()) || threat.armed();
+            if (batch.contains(threat.entityId()) && wantedType(threat) || comingAtMe) {
                 ordered.add(threat);
             }
         }
@@ -337,6 +359,11 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         }
         CombatSenses.Threat first = ordered.getFirst();
         return new Tracked(first.entityId(), first.type(), first.x(), first.y(), first.z(), first.distance());
+    }
+
+    // 给了生物类型就只清这一种；冲着角色来的不管什么类型都处理。
+    private boolean wantedType(CombatSenses.Threat threat) {
+        return input.entityType() == null || threat.type().equals(input.entityType());
     }
 
     private ThreatAssessment.MySide mySide(TickContext context) {
@@ -354,6 +381,8 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         List<ThreatAssessment.Foe> foes = new ArrayList<>();
         double radius = named.isEmpty() ? input.radius() : ThreatAssessment.VIGILANCE_RADIUS;
         for (CombatSenses.Threat threat : senses.threats(context, radius)) {
+            // 区域清扫只评估要清的这一批：看不见的、不是这一种的不算进对面的人数。
+            if (named.isEmpty() && !batch.contains(threat.entityId())) continue;
             foes.add(new ThreatAssessment.Foe(threat.distance(), threat.kind(), threat.armed(), threat.armed()));
         }
         return ThreatAssessment.sortedByThreat(foes);

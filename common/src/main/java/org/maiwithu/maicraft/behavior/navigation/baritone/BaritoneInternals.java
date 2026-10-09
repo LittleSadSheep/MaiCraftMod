@@ -11,7 +11,6 @@ import baritone.api.event.listener.AbstractGameEventListener;
 import baritone.behavior.PathingBehavior;
 import java.util.ArrayList;
 import java.util.List;
-import it.unimi.dsi.fastutil.longs.LongSets;
 import java.util.concurrent.atomic.AtomicReference;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
@@ -129,7 +128,7 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
             });
         }
         ATTACHED.set(this);
-        NavigationProtection.install(run.sacredCells(), LongSets.EMPTY_SET, Integer.MIN_VALUE);
+        NavigationProtection.install(run.sacredCells(), run.forbiddenBodyCells(), Integer.MIN_VALUE);
         configureTerrain(BaritoneAPI.getSettings(), run.permit());
         queued = null;
         active = run;
@@ -208,10 +207,12 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
 
     /**
      * 当前走到任务对这扇门登记的目标开关状态；没有登记时返回 null，按门板朝向判断。
-     * 逐刻的门卡记忆还没有接到这个接缝上，先如实地交给寻路自己判断。
+     * 同一面前格卡住一次后，走到运行会为途经的门登记要切到的状态（门的上下两半按下半格登记）。
      */
     public static Boolean passageOpenOverride(BlockPos pos, BlockState state) {
-        return null;
+        BaritoneInternals internals = ATTACHED.get();
+        BaritoneWalkRun current = internals == null ? null : internals.active;
+        return current == null ? null : current.passageOpen(MovementStall.passageKey(pos, state));
     }
 
     /** 引擎请求停挖：它同时会松开左键，走到运行下一刻看到左键松开就停手，这里不用另做。 */

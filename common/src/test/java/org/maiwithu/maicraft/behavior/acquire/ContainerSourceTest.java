@@ -17,6 +17,9 @@ import org.maiwithu.maicraft.behavior.acquire.spi.AcquisitionCost;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.inventory.KnownContainer;
+import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
+import org.maiwithu.maicraft.behavior.permission.Protection;
+import org.maiwithu.maicraft.behavior.permission.ReadsBlockOwnership;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -36,6 +39,10 @@ class ContainerSourceTest {
     private static final SourceContext CONTEXT = new SourceContext(
             WorldPosition.here(0, 64, 0), Permissions.DEFAULT);
 
+    /** 谁的箱子都不是：归属问过了、没人放过、也不在谁的地盘里。 */
+    private static final Protection NOBODY_OWNS = new Protection((dimension, x, y, z) -> Optional.empty(),
+            List::of, name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self");
+
     @TempDir Path temp;
 
     private final FakeTags tags = new FakeTags();
@@ -53,7 +60,7 @@ class ContainerSourceTest {
         WorldMemory memory = memory();
         memory.rememberContainerOpened(CHEST_AT, "minecraft:chest",
                 List.of("minecraft:iron_ingot", "minecraft:iron_ingot", "minecraft:bread"), NOW);
-        ContainerSource source = new ContainerSource(memory, tags, (container, request, permissions) -> Optional.empty());
+        ContainerSource source = new ContainerSource(memory, tags, NOBODY_OWNS, (container, request, permissions) -> Optional.empty());
 
         SourceQuote quote = source.quote(request(2), CONTEXT);
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, quote);
@@ -66,7 +73,7 @@ class ContainerSourceTest {
     void 只看见过的箱子报不知道有多少_排在后面由选择器决定() {
         WorldMemory memory = memory();
         memory.rememberContainerSeen(CHEST_AT, "minecraft:chest", NOW);
-        ContainerSource source = new ContainerSource(memory, tags, (container, request, permissions) -> Optional.empty());
+        ContainerSource source = new ContainerSource(memory, tags, NOBODY_OWNS, (container, request, permissions) -> Optional.empty());
 
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class,
                 source.quote(request(1), CONTEXT));
@@ -78,7 +85,7 @@ class ContainerSourceTest {
     void 记忆里没有装着它的箱子_如实回答给不了() {
         WorldMemory memory = memory();
         memory.rememberContainerOpened(CHEST_AT, "minecraft:chest", List.of("minecraft:bread"), NOW);
-        ContainerSource source = new ContainerSource(memory, tags, (container, request, permissions) -> Optional.empty());
+        ContainerSource source = new ContainerSource(memory, tags, NOBODY_OWNS, (container, request, permissions) -> Optional.empty());
 
         SourceQuote quote = source.quote(request(1), CONTEXT);
         SourceQuote.Unavailable unavailable = assertInstanceOf(SourceQuote.Unavailable.class, quote);
@@ -86,11 +93,27 @@ class ContainerSourceTest {
     }
 
     @Test
+    void 玩家的箱子记得有货也不翻() {
+        // 默认绝不碰玩家的箱子：服务端记着这只箱子是 bob 放的，里面有铁也跳过，说明里交代一句。
+        WorldMemory memory = memory();
+        memory.rememberContainerOpened(CHEST_AT, "minecraft:chest", List.of("minecraft:iron_ingot"), NOW);
+        Protection bobsChest = new Protection((dimension, x, y, z) -> x == 10 && y == 64 && z == 5
+                ? Optional.of(new ReadsBlockOwnership.PlacedBy("bob")) : Optional.empty(),
+                List::of, name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self");
+        ContainerSource source = new ContainerSource(memory, tags, bobsChest,
+                (container, request, permissions) -> Optional.empty());
+
+        SourceQuote.Unavailable unavailable = assertInstanceOf(SourceQuote.Unavailable.class,
+                source.quote(request(1), CONTEXT));
+        assertTrue(unavailable.reason().contains("玩家的箱子不翻"), unavailable.reason());
+    }
+
+    @Test
     void 动手时按报价认的箱子交开箱接缝() {
         WorldMemory memory = memory();
         memory.rememberContainerOpened(CHEST_AT, "minecraft:chest", List.of("minecraft:iron_ingot"), NOW);
         AtomicReference<KnownContainer> taken = new AtomicReference<>();
-        ContainerSource source = new ContainerSource(memory, tags, (container, request, permissions) -> {
+        ContainerSource source = new ContainerSource(memory, tags, NOBODY_OWNS, (container, request, permissions) -> {
             taken.set(container);
             return Optional.of(new Action() {
                 @Override public ActionStatus tick(TickContext context) {
@@ -112,7 +135,7 @@ class ContainerSourceTest {
     @Test
     void 报价认的箱子从记忆里没了_交回空由引擎换路() {
         WorldMemory memory = memory();
-        ContainerSource source = new ContainerSource(memory, tags, (container, request, permissions) -> Optional.empty());
+        ContainerSource source = new ContainerSource(memory, tags, NOBODY_OWNS, (container, request, permissions) -> Optional.empty());
         SourceQuote.Offer stale = new SourceQuote.Offer("记得的箱子", 3,
                 new AcquisitionCost(5, 4), null, "99,64,99");
         assertTrue(source.begin(request(1), stale, CONTEXT).isEmpty());

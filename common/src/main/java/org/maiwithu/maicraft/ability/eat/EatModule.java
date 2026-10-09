@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
 import org.maiwithu.maicraft.behavior.acquire.ReadsItemTags;
@@ -84,7 +85,7 @@ public final class EatModule implements AbilityModule {
                 AbilityDoc.forAbility("eat"),
                 ParamSpec.of(
                         Param.of("item", ParamType.ITEM_OR_TAG)
-                                .doc("要吃的物品 ID；不给时在身上能吃的里自动挑一种").build(),
+                                .doc("要吃的物品 ID；不给时只在普通食物里挑，没有再吃腐肉这类垃圾食物，金苹果、紫颂果、河豚要点名").build(),
                         Param.of("count", ParamType.INTEGER).range(1, 64).defaultValue(1)
                                 .doc("吃几件").build()),
                 Set.of(), ExecutionMode.CONTROLS_PLAYER, Set.of(), List.of(), Listing.LISTED);
@@ -111,8 +112,16 @@ public final class EatModule implements AbilityModule {
                     "开始时已经饱了（饱食度 " + hunger.foodLevel() + "/20），没有点名要吃的东西"));
         }
         Optional<String> picked = FoodPicker.autoPick(carried);
-        if (picked.isEmpty()) {
+        if (picked.isEmpty() && carried.isEmpty()) {
             return asFailure(Problem.Kind.NEED_ITEM, "身上没有能吃的东西");
+        }
+        if (picked.isEmpty()) {
+            // "随便吃点"不包括金苹果、紫颂果、河豚这类：身上只剩它们时写清有哪些，点名了才吃。
+            String onHand = carried.stream().map(food -> food.itemId() + " ×" + food.count())
+                    .collect(Collectors.joining("、"));
+            return new StepDecision.Finish(TaskResult.failed("没有吃东西：身上只有要点名才吃的食物（" + onHand + "）",
+                    Problem.of(Problem.Kind.NEED_ITEM, "身上没有普通食物，只有珍贵的、会传送的或会中毒的：" + onHand,
+                            "确实要吃就点名 item")));
         }
         return new StepDecision.Run(new EatInput(picked.get(), count));
     }

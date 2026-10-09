@@ -3,6 +3,8 @@ package org.maiwithu.maicraft.ability.use;
 
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.function.IntPredicate;
+import java.util.function.Predicate;
 
 import net.minecraft.core.BlockPos;
 
@@ -14,11 +16,11 @@ import net.minecraft.core.BlockPos;
  */
 public interface SearchesNearby {
 
-    /** 范围内最近的一格给定方块（# 开头是标签）；还没扫完时 scannedComplete 为假。 */
-    BlockResult nearestBlock(String blockOrTag, BlockPos center, int radius);
+    /** 范围内最近的一格给定方块（# 开头是标签），skip 认下的跳过；还没扫完时 scannedComplete 为假。 */
+    BlockResult nearestBlock(String blockOrTag, BlockPos center, int radius, Predicate<BlockPos> skip);
 
-    /** 范围内最近的一只给定类型的实体，给游戏实体编号；不含角色自己。 */
-    EntityResult nearestEntity(String entityTypeId, BlockPos center, int radius);
+    /** 范围内最近的一只给定类型的实体，给游戏实体编号，skip 认下的跳过；不含角色自己。 */
+    EntityResult nearestEntity(String entityTypeId, BlockPos center, int radius, IntPredicate skip);
 
     /**
      * 一次方块搜索的结果。

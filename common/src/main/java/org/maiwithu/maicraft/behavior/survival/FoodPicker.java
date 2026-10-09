@@ -12,10 +12,10 @@ import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.ReadsFoodValues;
 
 /**
- * 挑哪种吃的判断：点名的只认点名的那种；没点名时像真人翻背包——
- * 无效果的食物优先，按补的多少（营养加饱和度）从高到低排；
- * 身上只剩带效果的食物时，挑对身体最有益的（全是有益效果的优先，
- * 腐肉这类带害的留到真没别的时），吃下去的效果由任务如实写进结果。
+ * 挑哪种吃的判断：点名的只认点名的那种；没点名就是"随便吃点"——
+ * 只在普通食物里挑，按补的多少（营养加饱和度）从高到低排；没有普通的，再吃只会让人更饿的
+ * 垃圾食物（腐肉、生鸡肉这类，效果只有饥饿）。金苹果这类珍贵的、紫颂果（吃了会随机传送）、
+ * 吃了会中毒掉血的（河豚、蜘蛛眼、毒马铃薯）都要点名才吃，"随便吃点"本来就不包括它们。
  *
  * <p>自己饿了顺手吃（{@link #forHunger}）和 LLM 让吃（{@link #autoPick}、{@link #named}）用同一套事实，
  * 只是顺手吃挑得更省：只吃普通食物，按还差多少挑补得刚好的。
@@ -23,6 +23,9 @@ import org.maiwithu.maicraft.game.player.ReadsFoodValues;
  * <p>纯函数：只看随身带着哪些食物、各自的游戏数值，给结论，不动手也不问游戏。
  */
 public final class FoodPicker {
+
+    /** 饥饿这个状态效果的注册 ID：垃圾食物只带它。 */
+    private static final String HUNGER_EFFECT = "minecraft:hunger";
 
     private FoodPicker() {}
 
@@ -54,6 +57,14 @@ public final class FoodPicker {
         return value.nutrition() > 0 && value.effects().isEmpty() && !value.canAlwaysEat();
     }
 
+    /**
+     * 垃圾食物：吃了只会让人更饿（效果只有饥饿），腐肉、生鸡肉这类。没点名时普通食物吃完了才轮到它们。
+     */
+    public static boolean junk(ReadsFoodValues.FoodValue value) {
+        return value.nutrition() > 0 && !value.effects().isEmpty()
+                && value.effects().stream().allMatch(effect -> HUNGER_EFFECT.equals(effect.name()));
+    }
+
     /** 吃了不伤身：不带有害效果。打架前数"带了几份口粮"按这个数，金苹果算，腐肉不算。 */
     public static boolean harmless(ReadsFoodValues.FoodValue value) {
         return value.nutrition() > 0 && value.effects().stream().allMatch(ReadsFoodValues.FoodEffect::beneficial);
@@ -62,7 +73,8 @@ public final class FoodPicker {
     /**
      * 自己饿了顺手吃一口：只在普通食物里挑，按饱食度还差多少挑补得刚好的——补得进去的里面挑最多的，
      * 都会溢出就挑溢出最少的，不拿一块牛排去补一格饱食度。没有普通食物时，只有饱食度见底、
-     * 已经在掉血（starving）才按 {@link #autoPick} 的顺序什么都吃；否则不吃，交给弄吃的或 LLM。
+     * 已经在掉血（starving）才什么都吃：先按 {@link #autoPick} 吃垃圾食物，再没有才动珍贵的、
+     * 会传送的，会中毒的留到最后；否则不吃，交给弄吃的或 LLM。
      */
     public static Optional<String> forHunger(List<Carried> carried, int foodLevel, boolean starving) {
         int missing = Math.max(1, 20 - foodLevel);
@@ -71,7 +83,21 @@ public final class FoodPicker {
                 .min(Comparator.comparingInt(candidate -> waste(candidate.value().nutrition(), missing)))
                 .map(Carried::itemId);
         if (plainPick.isPresent() || !starving) return plainPick;
-        return autoPick(carried);
+        Optional<String> casual = autoPick(carried);
+        if (casual.isPresent()) return casual;
+        // 饿到掉血又只剩要点名的：保命要紧，先吃有益的（金苹果），再吃会传送的，会中毒的垫底。
+        return carried.stream()
+                .filter(candidate -> candidate.value().nutrition() > 0)
+                .sorted(Comparator.comparingInt(FoodPicker::lastResortRank).thenComparing(FoodPicker::byGain))
+                .map(Carried::itemId)
+                .findFirst();
+    }
+
+    // 饿到掉血时最后才动的那些怎么排：全是有益效果的最先，没效果但饱腹也能吃的（紫颂果）其次，带害的最后。
+    private static int lastResortRank(Carried candidate) {
+        List<ReadsFoodValues.FoodEffect> effects = candidate.value().effects();
+        if (effects.isEmpty()) return 1;
+        return effects.stream().allMatch(ReadsFoodValues.FoodEffect::beneficial) ? 0 : 2;
     }
 
     // 补得进去的按还空着多少算（越小越好）；会溢出的一律排在后面，溢出越少越好。
@@ -91,30 +117,28 @@ public final class FoodPicker {
     }
 
     /**
-     * 没点名：在身上的食物里挑一种。顺序是"无效果优先，然后有益效果，最后带害的"，
-     * 同档里按营养加饱和度从高到低——真没别的了，腐肉也吃，但效果会如实写进结果。
+     * 没点名（"随便吃点"）：普通食物里补得最多的；没有普通的，垃圾食物里补得最多的；
+     * 身上只剩要点名才吃的（珍贵的、会传送的、会中毒的）时为 empty，由调用方写清身上有哪些。
      */
     public static Optional<String> autoPick(List<Carried> carried) {
+        Optional<String> plainPick = carried.stream()
+                .filter(candidate -> plain(candidate.value()))
+                .sorted(FoodPicker::byGain)
+                .map(Carried::itemId)
+                .findFirst();
+        if (plainPick.isPresent()) return plainPick;
         return carried.stream()
-                .sorted(FoodPicker::byWholesomeness)
+                .filter(candidate -> junk(candidate.value()))
+                .sorted(FoodPicker::byGain)
                 .map(Carried::itemId)
                 .findFirst();
     }
 
-    // 档次：无效果的最先；带效果的全有益的次之；带害的垫底。同档里补得多的在前。
-    private static int byWholesomeness(Carried left, Carried right) {
-        int byEffect = effectRank(left) - effectRank(right);
-        if (byEffect != 0) return byEffect;
+    // 同一档里补得多的在前：营养加饱和度。
+    private static int byGain(Carried left, Carried right) {
         float gainLeft = left.value().nutrition() + left.value().saturation();
         float gainRight = right.value().nutrition() + right.value().saturation();
         return Float.compare(gainRight, gainLeft);
-    }
-
-    private static int effectRank(Carried candidate) {
-        List<ReadsFoodValues.FoodEffect> effects = candidate.value().effects();
-        if (effects.isEmpty()) return 0;
-        boolean anyHarmful = effects.stream().anyMatch(effect -> !effect.beneficial());
-        return anyHarmful ? 2 : 1;
     }
 
     // 点名匹配：具体物品按 ID 相等，# 开头的按这个物品挂着的标签。
