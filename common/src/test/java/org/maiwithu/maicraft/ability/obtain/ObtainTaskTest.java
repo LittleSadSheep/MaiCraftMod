@@ -10,6 +10,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.function.Consumer;
 
+import com.google.gson.JsonArray;
+
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.acquire.ItemAcquisition;
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
@@ -29,6 +31,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
+import org.maiwithu.maicraft.mcp.tool.ResultJson;
 
 /**
  * 拿东西的任务：count 是再多拿几件，身上原有的不算；引擎做完按实际入包结算，拿到一部分是 partial 加还差几件；
@@ -64,7 +67,7 @@ class ObtainTaskTest {
         Consumer<String> lastDelivered;
         /** 每推进一步做的事：往背包放几件货、报哪条途径；null 表示以问题失败。 */
         Integer deliverPerTick;
-        String deliveredRoute;
+        String deliveredVia;
         Problem failure;
 
         @Override public Action need(ItemRequest request, Permissions permissions,
@@ -77,9 +80,9 @@ class ObtainTaskTest {
                     // 先把这次动作能拿到的东西放进背包（真实引擎里来源做完才重新清点），
                     // 剧本设了失败就接着以问题收场——对应"做了一个来源之后还是不够"。
                     if (deliverPerTick != null) {
-                        ((FakeBackpack) backpack).add(deliveredRouteItem(), deliverPerTick);
+                        ((FakeBackpack) backpack).add(deliveredItem(), deliverPerTick);
                         if (lastDelivered != null) {
-                            lastDelivered.accept(deliveredRoute);
+                            lastDelivered.accept(deliveredVia);
                         }
                     }
                     return failure != null ? ActionStatus.failed(failure) : ActionStatus.done();
@@ -92,9 +95,9 @@ class ObtainTaskTest {
         }
 
         BackpackView backpack;
-        String deliveredRouteItem = "minecraft:torch";
-        String deliveredRouteItem() {
-            return deliveredRouteItem;
+        String deliveredItem = "minecraft:torch";
+        String deliveredItem() {
+            return deliveredItem;
         }
     }
 
@@ -123,7 +126,7 @@ class ObtainTaskTest {
         ScriptedAcquisition acquisition = new ScriptedAcquisition();
         acquisition.backpack = backpack;
         acquisition.deliverPerTick = 8;
-        acquisition.deliveredRoute = "craft";
+        acquisition.deliveredVia = "craft";
         ObtainTask task = new ObtainTask(input(8, ItemAcquisition.Scope.ALL),
                 acquisition, backpack, null, itemId -> Set.of());
         task.start(tick(0));
@@ -139,7 +142,7 @@ class ObtainTaskTest {
         ScriptedAcquisition acquisition = new ScriptedAcquisition();
         acquisition.backpack = backpack;
         acquisition.deliverPerTick = 8;
-        acquisition.deliveredRoute = "craft";
+        acquisition.deliveredVia = "craft";
         ObtainTask task = new ObtainTask(input(8, ItemAcquisition.Scope.ALL),
                 acquisition, backpack, null, itemId -> Set.of());
         task.start(tick(0));
@@ -151,7 +154,10 @@ class ObtainTaskTest {
         assertEquals("minecraft:torch", gained.what());
         assertEquals(8, gained.count());
         ObtainedVia via = (ObtainedVia) finished.details();
-        assertEquals(List.of("craft"), via.routes());
+        assertEquals(List.of("craft"), via.obtainedVia());
+        // LLM 看到的键要和能力说明里写的 details.obtained_via 对得上。
+        JsonArray obtainedVia = ResultJson.result(finished).getAsJsonObject("details").getAsJsonArray("obtained_via");
+        assertEquals("craft", obtainedVia.get(0).getAsString());
     }
 
     @Test
@@ -161,7 +167,7 @@ class ObtainTaskTest {
         ScriptedAcquisition acquisition = new ScriptedAcquisition();
         acquisition.backpack = backpack;
         acquisition.deliverPerTick = 2;
-        acquisition.deliveredRoute = "container";
+        acquisition.deliveredVia = "container";
         acquisition.failure = Problem.of(Problem.Kind.NEED_ITEM, "附近没有会掉出火把的方块了");
         ObtainTask task = new ObtainTask(input(8, ItemAcquisition.Scope.ALL),
                 acquisition, backpack, null, itemId -> Set.of());
@@ -194,7 +200,7 @@ class ObtainTaskTest {
         ScriptedAcquisition acquisition = new ScriptedAcquisition();
         acquisition.backpack = backpack;
         acquisition.deliverPerTick = 1;
-        acquisition.deliveredRoute = "mine";
+        acquisition.deliveredVia = "mine";
         ItemAcquisition.Scope scope = new ItemAcquisition.Scope(Set.of("mine"), 30.0, 12);
         ObtainTask task = new ObtainTask(input(1, scope), acquisition, backpack, null, itemId -> Set.of());
         task.start(tick(0));

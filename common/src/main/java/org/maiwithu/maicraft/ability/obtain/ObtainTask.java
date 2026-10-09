@@ -46,7 +46,7 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
     /** 任务开始时身上有几件；结算"这次拿到几件"的基准。 */
     private int carriedAtStart;
     /** 实际拿到东西的途径，按拿到先后排，一条不重复。 */
-    private final Set<String> obtainedRoutes = new LinkedHashSet<>();
+    private final Set<String> obtainedVia = new LinkedHashSet<>();
 
     ObtainTask(ObtainItems input, StartsAcquisition acquisition, BackpackView backpack,
             OffhandContents offhand, ReadsItemTags tags) {
@@ -62,7 +62,7 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
         // 清点是只读判断，不需要动作；引擎的动作在进入 ACQUIRE 时才发起，许可随输入一起带过来。
         return phase == Phase.ACQUIRE
                 ? acquisition.need(new ItemRequest(input.wanted(), input.count(), input.purpose()),
-                        input.permissions(), input.scope(), obtainedRoutes::add)
+                        input.permissions(), input.scope(), obtainedVia::add)
                 : null;
     }
 
@@ -99,14 +99,14 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
         String item = input.wanted().describe();
         if (failure == null) {
             return Next.done(TaskResult.builder(TaskResult.Status.DONE,
-                    "拿到了：这次经 " + routesText() + " 拿到 " + gained + " 个" + item
+                    "拿到了：这次经 " + viaText() + " 拿到 " + gained + " 个" + item
                             + "，身上现在有 " + carried + " 个")
                     .details(details()).build());
         }
         if (gained > 0) {
             int stillNeeded = input.count() - gained;
             return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL,
-                    "部分拿到：经 " + routesText() + " 拿到 " + gained + " 个" + item
+                    "部分拿到：经 " + viaText() + " 拿到 " + gained + " 个" + item
                             + "，还差 " + stillNeeded + " 个")
                     .problem(failure)
                     .remaining(List.of("还差 " + stillNeeded + " 个" + item))
@@ -116,11 +116,11 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
     }
 
     @Override protected ResultDetails details() {
-        return new ObtainedVia(List.copyOf(obtainedRoutes));
+        return new ObtainedVia(List.copyOf(obtainedVia));
     }
 
     // 一条都没拿到时结果里不编途径：summary 说清是失败，细节给空列表。
-    private String routesText() {
-        return obtainedRoutes.isEmpty() ? "身上已有的" : String.join("、", obtainedRoutes);
+    private String viaText() {
+        return obtainedVia.isEmpty() ? "身上已有的" : String.join("、", obtainedVia);
     }
 }

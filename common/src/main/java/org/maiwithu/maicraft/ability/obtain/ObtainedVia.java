@@ -10,11 +10,11 @@ import org.maiwithu.maicraft.kernel.result.ResultDetails;
  * 写法与参数 via 的取值一致（craft、smelt、container、mine、harvest、trade）；
  * 一条都没拿到时为空列表——结果里靠 changes 与问题交代，不编一条途径出来。
  *
- * @param routes 实际拿到东西的途径
+ * @param obtainedVia 实际拿到东西的途径；写进结果时就是 details.obtained_via，和能力说明里写的一致
  */
-record ObtainedVia(List<String> routes) implements ResultDetails {
+record ObtainedVia(List<String> obtainedVia) implements ResultDetails {
 
     ObtainedVia {
-        routes = List.copyOf(routes);
+        obtainedVia = List.copyOf(obtainedVia);
     }
 }
