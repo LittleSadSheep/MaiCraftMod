@@ -29,6 +29,13 @@ class VerifiedVersionsTest {
     }
 
     @Test
+    void 比的是模组自身的版本带游戏版本前缀的写法对不上() {
+        // 加载器报的是 3.25.69；Modrinth 文件名那种 1.21.1-3.25.69.1979 会拿 1 去和 3 比，不能写进范围也不会被认成在范围内。
+        assertFalse(range.contains("1.21.1-3.25.69.1979"));
+        assertTrue(range.contains("3.25.69-beta"));
+    }
+
+    @Test
     void 版本不明算不在范围内() {
         assertFalse(range.contains(null));
         assertFalse(range.contains(" "));

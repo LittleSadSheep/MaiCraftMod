@@ -23,7 +23,8 @@ public abstract class CompatModule {
 
     private final String modId;
     private final String name;
-    private String disabledReason;
+    /** 停用发生在客户端线程，知识来源却在 MCP 的线程上读 active()：volatile 让另一边立刻看到。 */
+    private volatile String disabledReason;
 
     /**
      * @param modId 模组 ID，例如 sophisticatedbackpacks
