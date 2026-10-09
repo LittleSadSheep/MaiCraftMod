@@ -47,11 +47,11 @@ class InteractionConfirmationTest {
     @Test
     void strikeVerdictConfirmsOnAnyHitEvidence() {
         var verdict = InteractionConfirmation.Verdict.APPLIED;
-        assertEquals(verdict, InteractionConfirmation.strikeVerdict(false, 20.0f, 20.0f, 0, 1.0f),
+        assertEquals(verdict, InteractionConfirmation.strikeVerdict(false, 20.0f, 20.0f, 0, 0, 1.0f),
                 "目标死了算命中");
-        assertEquals(verdict, InteractionConfirmation.strikeVerdict(true, 12.0f, 20.0f, 0, 1.0f),
+        assertEquals(verdict, InteractionConfirmation.strikeVerdict(true, 12.0f, 20.0f, 0, 0, 1.0f),
                 "血量比出手前低算命中");
-        assertEquals(verdict, InteractionConfirmation.strikeVerdict(true, 20.0f, 20.0f, 5, 1.0f),
+        assertEquals(verdict, InteractionConfirmation.strikeVerdict(true, 20.0f, 20.0f, 5, 0, 1.0f),
                 "受击红闪算命中");
     }
 
@@ -60,8 +60,18 @@ class InteractionConfirmationTest {
         // 挥击已发生（攻击充能被这次出手清零，出手门槛是 0.95，恢复又远慢于确认窗）也算出手成立；
         // 充能还在出手线以上说明这一刀还没挥出去，继续等。
         assertEquals(InteractionConfirmation.Verdict.APPLIED,
-                InteractionConfirmation.strikeVerdict(true, 20.0f, 20.0f, 0, 0.8f));
+                InteractionConfirmation.strikeVerdict(true, 20.0f, 20.0f, 0, 0, 0.8f));
         assertEquals(InteractionConfirmation.Verdict.PENDING,
-                InteractionConfirmation.strikeVerdict(true, 20.0f, 20.0f, 0, 1.0f));
+                InteractionConfirmation.strikeVerdict(true, 20.0f, 20.0f, 0, 0, 1.0f));
+    }
+
+    @Test
+    void strikeVerdictIgnoresAFlashThatWasAlreadyFading() {
+        // 出手前目标就在红闪（刚被别人打过），之后还在倒数：不是这一刀的证据，充能也还满着，继续等。
+        assertEquals(InteractionConfirmation.Verdict.PENDING,
+                InteractionConfirmation.strikeVerdict(true, 20.0f, 20.0f, 5, 8, 1.0f));
+        // 重新闪起来（比出手前长）才算这一刀打中。
+        assertEquals(InteractionConfirmation.Verdict.APPLIED,
+                InteractionConfirmation.strikeVerdict(true, 20.0f, 20.0f, 10, 8, 1.0f));
     }
 }
