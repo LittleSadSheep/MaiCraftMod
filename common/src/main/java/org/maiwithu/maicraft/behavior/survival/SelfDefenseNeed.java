@@ -25,6 +25,8 @@ public final class SelfDefenseNeed implements SurvivalNeed {
     private final CombatSenses senses;
     private final SelfDefenseTask.CombatMoves moves;
     private final TaskEventSink events;
+    /** 打击推进连续空转的笔数：任务每次空转满 600 刻记一笔，满两笔就该撤离了。 */
+    private int attackStalls;
 
     /** @param moves 出手与走位怎么落地；生产用原生攻击与走到，测试换替身。 */
     public SelfDefenseNeed(CombatSenses senses, SelfDefenseTask.CombatMoves moves, TaskEventSink events) {
@@ -58,7 +60,19 @@ public final class SelfDefenseNeed implements SurvivalNeed {
 
     @Override
     public Task createTask(TickContext context) {
-        return new SelfDefenseTask(senses, moves, events);
+        // 空转的账记在需求自己这里：临时任务每次运行都是新的，但"已经空转过几次"要跨运行算总账，
+        // 这样第二次空转一满 600 刻就转撤离，不会无限地"打不出去→重来→再打不出去"。
+        return new SelfDefenseTask(senses, moves, events, this);
+    }
+
+    /** 打击推进又空转满 600 刻：记一笔；这是第二笔就该撤了。 */
+    boolean noteAttackStalled() {
+        return ++attackStalls >= 2;
+    }
+
+    /** 打击有了真实进展（出手、追上、走位在动）：空转的账清零。 */
+    void noteAttackProgress() {
+        attackStalls = 0;
     }
 
     /** 供事件与日志用：当前证据里的仇家（按类型与数量）。 */

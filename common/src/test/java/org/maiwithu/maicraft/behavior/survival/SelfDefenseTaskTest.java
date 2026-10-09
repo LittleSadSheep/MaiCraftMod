@@ -75,7 +75,8 @@ class SelfDefenseTaskTest {
         Senses senses = new Senses();
         senses.threats = List.of(foe(ThreatAssessment.Kind.MELEE, 8, 8, false));
         Moves moves = new Moves();
-        SelfDefenseTask task = new SelfDefenseTask(senses, moves, TaskEventSink.NONE);
+        SelfDefenseNeed need = new SelfDefenseNeed(senses, moves, TaskEventSink.NONE);
+        SelfDefenseTask task = new SelfDefenseTask(senses, moves, TaskEventSink.NONE, need);
         task.start(new Tick(0));
         for (long t = 0; t < 10; t++) task.tick(new Tick(t));
 
@@ -88,7 +89,8 @@ class SelfDefenseTaskTest {
         Senses senses = new Senses();
         senses.threats = List.of(foe(ThreatAssessment.Kind.MELEE, 8, 8, false));
         Moves moves = new Moves();
-        SelfDefenseTask task = new SelfDefenseTask(senses, moves, TaskEventSink.NONE);
+        SelfDefenseNeed need = new SelfDefenseNeed(senses, moves, TaskEventSink.NONE);
+        SelfDefenseTask task = new SelfDefenseTask(senses, moves, TaskEventSink.NONE, need);
         task.start(new Tick(0));
         task.tick(new Tick(0));
         senses.threats = List.of(foe(ThreatAssessment.Kind.MELEE, 2, 2, false));
@@ -104,7 +106,8 @@ class SelfDefenseTaskTest {
         Senses senses = new Senses();
         senses.threats = List.of(foe(ThreatAssessment.Kind.EXPLOSIVE, 2, 2, false));
         Moves moves = new Moves();
-        SelfDefenseTask task = new SelfDefenseTask(senses, moves, TaskEventSink.NONE);
+        SelfDefenseNeed need = new SelfDefenseNeed(senses, moves, TaskEventSink.NONE);
+        SelfDefenseTask task = new SelfDefenseTask(senses, moves, TaskEventSink.NONE, need);
         task.start(new Tick(0));
         for (long t = 0; t < 5; t++) task.tick(new Tick(t));
 
