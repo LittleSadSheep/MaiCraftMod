@@ -14,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.security.NoSuchAlgorithmException;
 
 /**
@@ -28,34 +29,55 @@ public final class KnowledgeLibrary {
     private static final int PAGE_SIZE = 16;
 
     /**
-     * 游戏机制常识条目：slug、标题、检索描述；描述带中英关键词与注册 ID，
-     * 精确与近似搜索都按条目元数据匹配。
+     * 游戏机制常识条目：slug、标题、一句话说明、检索词。一句话说明给目录看；检索词带中英说法与注册 ID，
+     * 搜索按标题、说明和检索词匹配，不读正文。
      */
     static final String[][] GAME_MECHANICS = {
-            {"gravity-blocks", "重力方块与塌落", "gravel sand 砾石 沙子 落沙 gravity 塌方 塌落 掩埋掉落物 砸伤 窒息"},
-            {"fluid-flow", "流体流动与灌满", "water lava 水 岩浆 流动 灌满 倒水 舀水 桶 bucket 自救 黑曜石 圆石 隧道进水"},
-            {"item-drops", "掉落物", "item entity 掉落物 拾取半径 漂走 消失 despawn 没进背包 背包满 拾取冷却 捡东西"},
-            {"drop-rates", "关键掉率与方差", "flint 燧石 10% 掉率 方差 fortune 时运 精准采集 战利品表 掉落概率 苹果 树苗 种子"},
-            {"tool-tiers", "工具等级与挖掘资格", "tool tier 工具等级 镐 pickaxe 黑曜石 obsidian 远古残骸 挖不动 不掉落 挖掘资格 深板岩"},
-            {"ore-heights", "矿物生成高度", "ore 矿 矿石 找矿 高度 生成 分布 层 钻石 diamond 铁 iron 煤 coal 铜 copper 金 gold 红石 redstone 青金石 lapis 绿宝石 emerald 深板岩 deepslate 粗铁 raw_iron 远古残骸"},
-            {"food", "食物与饥饿", "food eat 食物 饥饿 饱和度 saturation 回血 饿死 打猎 狩猎 生肉 熟食 烧熟 耕种 耕地 锄头 种植 小麦 胡萝卜 马铃薯 甜菜 面包 骨粉"},
-            {"sleep-night", "睡眠与夜晚", "sleep bed 睡觉 床 幻翼 phantom 夜晚 night 刷怪 spawn 羊毛 wool 剪羊毛 shears 染料 dye 同色 重生点 respawn 跳夜 封顶"},
-            {"tunneling", "往下挖与地下通行", "dig down staircase tunnel 往下挖 竖井 阶梯 下矿 通道 两格高 矿洞 迷路 入口"},
-            {"tick-rate", "世界刻速与失焦", "tps tick 刻速 刻率 失焦 focus 暂停 pause 限速 throttle 变慢 慢放 卡死 任务变慢"},
-            {"lighting", "照明与刷怪", "lighting torch 火把 照明 光照 刷怪 spawn 黑暗 洞穴 地下 煤 木炭 木棍 灯笼 萤石"},
+            {"gravity-blocks", "重力方块与塌落", "挖掉砾石、沙子的下方会整列塌落，地形和掉落物的位置随之改变",
+                    "gravel sand 砾石 沙子 落沙 gravity 塌方 塌落 掩埋掉落物 砸伤 窒息"},
+            {"fluid-flow", "流体流动与灌满", "挖开的空间会被水或岩浆灌满；倒水自救前先看流向",
+                    "water lava 水 岩浆 流动 灌满 倒水 舀水 桶 bucket 自救 黑曜石 圆石 隧道进水"},
+            {"item-drops", "掉落物", "拾取半径约 1 格、会漂走、5 分钟后消失；“方块碎了没进包”的排查顺序",
+                    "item entity 掉落物 拾取 拾取半径 漂走 消失 despawn 没进背包 背包满 拾取冷却 捡东西"},
+            {"drop-rates", "关键掉率与方差", "燧石 10% 掉率是常态，连挖几块不掉不是故障",
+                    "flint 燧石 10% 掉率 方差 fortune 时运 精准采集 战利品表 掉落概率 苹果 树苗 种子"},
+            {"tool-tiers", "工具等级与挖掘资格", "等级不够挖不动或不掉落；黑曜石要钻石镐",
+                    "tool tier 工具等级 镐 pickaxe 黑曜石 obsidian 远古残骸 挖不动 不掉落 挖掘资格 深板岩"},
+            {"ore-heights", "矿物生成高度", "各种矿在哪一层最多；采掘只在角色附近找，先到对应高度再要",
+                    "ore 矿 矿石 找矿 高度 生成 分布 层 钻石 diamond 铁 iron 煤 coal 铜 copper 金 gold 红石 redstone 青金石 lapis 绿宝石 emerald 深板岩 deepslate 粗铁 raw_iron 远古残骸"},
+            {"food", "食物与饥饿", "饥饿与回血规则、食物从哪来、耕地保湿",
+                    "food eat 食物 吃 饿 饥饿 饱和度 saturation 回血 饿死 打猎 狩猎 生肉 熟食 烧熟 耕种 耕地 锄头 种植 小麦 胡萝卜 马铃薯 甜菜 面包 骨粉"},
+            {"sleep-night", "睡眠与夜晚", "黑暗处刷怪、床跳夜与重设重生点、同色羊毛、3 天不睡刷幻翼",
+                    "sleep bed 睡觉 床 幻翼 phantom 夜晚 晚上 night 刷怪 spawn 羊毛 wool 剪羊毛 shears 染料 dye 同色 重生点 respawn 跳夜 封顶"},
+            {"tunneling", "往下挖与地下通行", "不要垂直往下挖；阶梯式下降和两格高的通道更安全",
+                    "dig down staircase tunnel 往下挖 竖井 阶梯 下矿 通道 两格高 矿洞 迷路 入口"},
+            {"tick-rate", "世界刻速与失焦", "游戏窗口失焦时世界可能停住或变慢；任务变慢先想到它",
+                    "tps tick 刻速 刻率 失焦 focus 暂停 pause 限速 throttle 变慢 慢放 卡死 任务变慢"},
+            {"lighting", "照明与刷怪", "方块光照为 0 才刷敌对生物；火把 = 煤或木炭 + 木棍",
+                    "lighting torch 火把 照明 光照 亮 刷怪 spawn 黑暗 洞穴 地下 煤 木炭 木棍 灯笼 萤石"},
     };
 
     private final KnowledgeSource source;
     private final Map<String, KnowledgeDocument> builtins;
+    // 内置资料的目录条目：比正文多一份检索词，目录与搜索都用它。
+    private final Map<String, KnowledgeDocument.Entry> builtinEntries;
 
     public KnowledgeLibrary(KnowledgeSource source) {
         this.source = source;
         // 内置资料随包发布；缺一篇就在启动时失败，不把空正文当知识交给模型。
         Map<String, KnowledgeDocument> docs = new LinkedHashMap<>();
-        docs.put(INDEX, load("index", "知识索引", "按需发现游戏机制常识、已登记的资料来源和检索方式。"));
-        for (String[] entry : GAME_MECHANICS)
-            docs.put(GAME_MECHANICS_PREFIX + entry[0], load("game_mechanics/" + entry[0], entry[1], entry[2]));
+        Map<String, KnowledgeDocument.Entry> entries = new LinkedHashMap<>();
+        KnowledgeDocument index = load("index", "知识索引", "按需发现游戏机制常识、已登记的资料来源和检索方式。");
+        docs.put(INDEX, index);
+        entries.put(INDEX, index.entry());
+        for (String[] row : GAME_MECHANICS) {
+            KnowledgeDocument document = load("game_mechanics/" + row[0], row[1], row[2]);
+            docs.put(document.uri(), document);
+            entries.put(document.uri(), new KnowledgeDocument.Entry(
+                    document.uri(), document.name(), document.title(), document.description(), row[3]));
+        }
         builtins = Map.copyOf(docs);
+        builtinEntries = Map.copyOf(entries);
     }
 
     /** 没有任何登记来源时的空知识库：只剩内置资料，来源状态如实标为不可用。 */
@@ -99,9 +121,61 @@ public final class KnowledgeLibrary {
         return document;
     }
 
+    /** 给 lookup 的资料目录：内置常识与登记来源的全部条目，按地址排序；索引那一篇不列，目录本身就是索引。 */
+    public List<KnowledgeDocument.Entry> listing() {
+        return catalog().stream().filter(entry -> !entry.uri().equals(INDEX)).toList();
+    }
+
+    /**
+     * 按 lookup 的 id 找一篇：给完整地址就按地址读；只给末段名（例如 food）时找末段对得上的那一篇，
+     * 和查能力时可以省掉 maicraft: 前缀一样。找不到、或末段名对上不止一篇时返回空，不拿相近的顶替。
+     */
+    public Optional<KnowledgeDocument> find(String id) {
+        String wanted = id.strip();
+        if (!wanted.contains("://")) {
+            String suffix = "/" + wanted.toLowerCase(Locale.ROOT);
+            List<String> uris = catalog().stream().map(KnowledgeDocument.Entry::uri)
+                    .filter(uri -> uri.toLowerCase(Locale.ROOT).endsWith(suffix)).toList();
+            if (uris.size() != 1) return Optional.empty();
+            wanted = uris.getFirst();
+        }
+        try {
+            return Optional.of(read(wanted));
+        } catch (IllegalArgumentException missing) {
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * 给 lookup 的关键词搜索，只比较目录元数据（标题、一句话说明、检索词），不读正文。
+     * LLM 常把关键词写成一句不带空格的话（"钻石在哪一层"），所以两头都比：问句里的词出现在条目里，
+     * 或条目的标题、检索词出现在问句里，都算命中；命中越多排得越前，同分按地址排。
+     */
+    public List<KnowledgeDocument.Entry> matching(String query) {
+        String asked = query.strip().toLowerCase(Locale.ROOT);
+        List<String> terms = Arrays.stream(asked.split("[\\s,，、;；。?？!！]+")).filter(term -> !term.isEmpty()).toList();
+        Map<KnowledgeDocument.Entry, Integer> scores = new LinkedHashMap<>();
+        for (KnowledgeDocument.Entry entry : listing()) {
+            String searchable = entry.searchable();
+            int score = 0;
+            for (String term : terms) {
+                if (searchable.contains(term)) score += 2;
+            }
+            for (String word : (entry.title() + " " + entry.keywords()).toLowerCase(Locale.ROOT).split("\\s+")) {
+                if (!word.isEmpty() && asked.contains(word)) score++;
+            }
+            if (score > 0) scores.put(entry, score);
+        }
+        return scores.entrySet().stream()
+                .sorted(Comparator.comparing((Map.Entry<KnowledgeDocument.Entry, Integer> hit) -> -hit.getValue())
+                        .thenComparing(hit -> hit.getKey().uri()))
+                .map(Map.Entry::getKey)
+                .toList();
+    }
+
     private List<KnowledgeDocument.Entry> catalog() {
         Map<String, KnowledgeDocument.Entry> entries = new LinkedHashMap<>();
-        builtins.values().forEach(doc -> entries.put(doc.uri(), doc.entry()));
+        entries.putAll(builtinEntries);
         source.entries().forEach(entry -> entries.putIfAbsent(entry.uri(), entry));
         return entries.values().stream()
                 .sorted(Comparator.comparing(KnowledgeDocument.Entry::uri)).toList();
@@ -137,7 +211,7 @@ public final class KnowledgeLibrary {
         String cleaned = query == null ? "" : query.strip().toLowerCase(Locale.ROOT);
         if (cleaned.length() > 256) throw new IllegalArgumentException("Knowledge query is too long");
         Map<String, KnowledgeDocument.Entry> candidates = new LinkedHashMap<>();
-        builtins.values().forEach(doc -> candidates.put(doc.uri(), doc.entry()));
+        candidates.putAll(builtinEntries);
         source.searchCandidates(cleaned).forEach(entry -> candidates.putIfAbsent(entry.uri(), entry));
         String[] terms = cleaned.isEmpty() ? new String[0] : cleaned.split("\\s+");
         List<KnowledgeDocument.Entry> matches = candidates.values().stream()
@@ -165,7 +239,7 @@ public final class KnowledgeLibrary {
         if (limit < 1 || limit > 20) throw new IllegalArgumentException("Knowledge limit must be 1..20");
         var matcher = new MetadataSearch.Query(query);
         Map<String, KnowledgeDocument.Entry> candidates = new LinkedHashMap<>();
-        builtins.values().forEach(doc -> candidates.put(doc.uri(), doc.entry()));
+        candidates.putAll(builtinEntries);
         // 候选召回也必须允许错字；否则目标在精确过滤阶段已经消失，后续排序无法补救。
         source.searchCandidates(query, true).forEach(entry -> candidates.putIfAbsent(entry.uri(), entry));
         var matches = new ArrayList<JsonObject>();
