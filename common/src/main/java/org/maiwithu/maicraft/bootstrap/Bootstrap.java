@@ -254,7 +254,18 @@ public final class Bootstrap {
             interactions = new Interactions(useKeyProjection);
             // 目标执行与 MCP 工具：LLM 用 execute 下达的目标经目标运行表成为控制循环的主任务；
             // 目标处境与生存需求的事件都进同一条任务事件流，宿主用 events 读。
-            tools = goalTools(abilities, controlLoop, clientWork, taskEvents, () -> worldScope[0]);
+            GoalRunStore goalRuns = new EventPublishingGoalRunStore(new InMemoryGoalRunStore(), taskEvents);
+            // 记地点交给当前世界的世界记忆；不在世界里时如实以程序错误收场，不悄悄丢掉。
+            RemembersPlaces places = (name, position) -> {
+                WorldScope scope = worldScope[0];
+                if (scope == null) {
+                    throw new IllegalStateException("角色不在世界里，记不住地点 " + name);
+                }
+                scope.memory().remember(name, position);
+            };
+            // 赋给字段：进世界时现场要经它把当期的世界记忆接上（attachPlaces）。
+            goals = new GoalRunTable(abilities, goalRuns, places, controlLoop);
+            tools = goalTools(abilities, goals, clientWork, taskEvents, () -> worldScope[0]);
         }
 
         /** 建与服务端的会话，并在入服前登记客户端知道的操作清单。 */
@@ -346,20 +357,9 @@ public final class Bootstrap {
      * 成为控制循环的主任务；目标处境每次变化都发成任务事件，宿主用 events 等。
      * 能力按清单在进世界时登记进这份注册表。事件流用 ClientEntry 的那一份：目标处境与生存需求共一条流。
      */
-    private ToolDispatcher goalTools(AbilityRegistry abilities, ControlLoop controlLoop,
+    private static ToolDispatcher goalTools(AbilityRegistry abilities, GoalRunTable goals,
                                             ClientTickWork clientWork, TaskEventLog taskEvents,
                                             Supplier<WorldScope> worldScope) {
-        GoalRunStore goalRuns = new EventPublishingGoalRunStore(new InMemoryGoalRunStore(), taskEvents);
-        // 记地点交给当前世界的世界记忆；不在世界里时如实以程序错误收场，不悄悄丢掉。
-        RemembersPlaces places = (name, position) -> {
-            WorldScope scope = worldScope.get();
-            if (scope == null) {
-                throw new IllegalStateException("角色不在世界里，记不住地点 " + name);
-            }
-            scope.memory().remember(name, position);
-        };
-        // 赋给字段：进世界时现场要经它把当期的世界记忆接上（attachPlaces）。
-        goals = new GoalRunTable(abilities, goalRuns, places, controlLoop);
         return new ToolDispatcher(List.of(
                 new ObserveTool(() -> worldScope.get() == null ? null : worldScope.get().scene(),
                         () -> worldScope.get() == null ? null : worldScope.get().memory(), goals, clientWork),
