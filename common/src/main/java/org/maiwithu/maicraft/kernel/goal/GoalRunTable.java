@@ -32,8 +32,13 @@ public final class GoalRunTable {
 
     private final AbilityRegistry registry;
     private final GoalRunStore store;
-    private final RemembersPlaces remembers;
     private final ControlLoop loop;
+    /** 当期的记地点入口：进世界时接上，退世界恢复占位。推进器都经 relay 读它，换世界不用换推进器。 */
+    private RemembersPlaces places;
+    /** 记地点的固定转发：目标推进器拿着它，每次记地点都落到当期的入口上。 */
+    private final RemembersPlaces relay = (name, position) -> places.remember(name, position);
+    /** 退世界后恢复的占位：没有当期记忆时记地点是程序错误，不悄悄丢掉。 */
+    private final RemembersPlaces detachedPlaceholder;
     /** 按下达顺序；结束了的超出保留条数时从最早的开始丢。 */
     private final Map<Long, GoalRunner> runners = new LinkedHashMap<>();
     private final Map<String, Long> requestKeys = new LinkedHashMap<>() {
@@ -47,8 +52,22 @@ public final class GoalRunTable {
     public GoalRunTable(AbilityRegistry registry, GoalRunStore store, RemembersPlaces remembers, ControlLoop loop) {
         this.registry = Objects.requireNonNull(registry, "registry");
         this.store = Objects.requireNonNull(store, "store");
-        this.remembers = Objects.requireNonNull(remembers, "remembers");
+        this.detachedPlaceholder = Objects.requireNonNull(remembers, "remembers");
+        this.places = remembers;
         this.loop = Objects.requireNonNull(loop, "loop");
+    }
+
+    /**
+     * 接上当期的记地点入口：进世界时由现场调用，指到这个世界的世界记忆。
+     * 已经接上时换到新的入口（换世界是整份现场丢弃重建，不会连续接两次同一份）。
+     */
+    public void attachPlaces(RemembersPlaces places) {
+        this.places = Objects.requireNonNull(places, "places");
+    }
+
+    /** 摘掉当期的记地点入口：退世界时调用，之后记地点按占位如实报程序错误。 */
+    public void detachPlaces() {
+        this.places = detachedPlaceholder;
     }
 
     /**
@@ -63,7 +82,7 @@ public final class GoalRunTable {
                 return new Launch(runners.get(existing), true);
             }
         }
-        GoalRunner runner = GoalRunner.launch(goal, registry, store, remembers);
+        GoalRunner runner = GoalRunner.launch(goal, registry, store, relay);
         long id = runner.run().id();
         runners.put(id, runner);
         if (requestKey != null) {
@@ -80,7 +99,7 @@ public final class GoalRunTable {
      * 几刻之内还没有结果（例如提了问题），按取消收尾，不让它挂着没人推进。
      */
     public GoalRun runAside(Goal goal, TickContext context) {
-        GoalRunner runner = GoalRunner.launch(goal, registry, store, remembers);
+        GoalRunner runner = GoalRunner.launch(goal, registry, store, relay);
         runners.put(runner.run().id(), runner);
         runner.start(context);
         for (int i = 0; i < ASIDE_TICK_LIMIT && runner.run().state() == GoalRunState.RUNNING; i++) {
@@ -108,7 +127,7 @@ public final class GoalRunTable {
     public void restore() {
         for (GoalRun run : store.unfinished()) {
             if (run.parentRunId() == GoalRun.NO_PARENT && !runners.containsKey(run.id())) {
-                runners.put(run.id(), GoalRunner.restore(run, registry, store, remembers));
+                runners.put(run.id(), GoalRunner.restore(run, registry, store, relay));
             }
         }
     }

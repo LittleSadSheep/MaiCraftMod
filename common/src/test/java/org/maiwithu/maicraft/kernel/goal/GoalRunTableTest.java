@@ -34,7 +34,10 @@ class GoalRunTableTest {
 
     GoalRunTableTest() {
         registry.register(ability);
-        table = new GoalRunTable(registry, store, new GoalRunnerTest.TestMemory(), loop);
+        // 与启动一侧同样的占位：没接上世界记忆时记地点如实报程序错误。
+        table = new GoalRunTable(registry, store, (name, position) -> {
+            throw new IllegalStateException("没有当期的世界记忆，记不住地点 " + name);
+        }, loop);
     }
 
     private void runTicks(int count) {
@@ -134,5 +137,24 @@ class GoalRunTableTest {
 
         assertTrue(table.find(firstId).isEmpty());
         assertEquals(GoalRunTable.KEPT_FINISHED + 1, table.recent().size());
+    }
+
+    @Test
+    void rememberingFollowsTheAttachedWorldMemoryAndStopsWhenDetached() {
+        // 挂上的记忆收下决定；摘掉之后同一种决定按程序错误收场，不悄悄丢掉。
+        GoalRunnerTest.TestMemory attached = new GoalRunnerTest.TestMemory();
+        table.attachPlaces(attached);
+        ability.next(new StepDecision.Remember("家门口", WorldPosition.here(12, 64, -8)));
+        ability.next(new StepDecision.Finish(TaskResult.done("记好了")));
+        table.runAside(GOAL, new GoalTestTick(tick++));
+        assertEquals(List.of("家门口@12,64,-8"), attached.remembered);
+
+        table.detachPlaces();
+        ability.next(new StepDecision.Remember("家门口", WorldPosition.here(12, 64, -8)));
+        ability.next(new StepDecision.Finish(TaskResult.done("记好了")));
+        // 推进器把程序出错按如实失败收场：这次没记上，也不连累控制循环。
+        GoalRun run = table.runAside(GOAL, new GoalTestTick(tick++));
+        assertEquals(GoalRunState.FINISHED, run.state());
+        assertEquals(TaskResult.Status.FAILED, run.result().status());
     }
 }

@@ -287,14 +287,18 @@ public final class Bootstrap {
             session.tick(minecraft);
         }
 
-        /** 进世界建现场、退世界丢现场：世界记忆按世界身份分开，感知场景不跨世界残留。 */
+        /** 进世界建现场、退世界丢现场：世界记忆按世界身份分开，感知场景不跨世界残留。
+         *  目标运行表的记地点入口跟着换：进世界指到当期的记忆，退世界摘掉。 */
         private void keepWorldScopeFresh(Minecraft minecraft, Optional<PlayerContext> context) {
             if (minecraft.level != null && worldScope[0] == null && context.isPresent()) {
                 UseKeyProjection useKeyProjection = new UseKeyHoldProjection(useKeyHold);
-                worldScope[0] = new WorldScope(minecraft, playerControl, blockScans, session,
+                WorldScope scope = new WorldScope(minecraft, playerControl, blockScans, session,
                         subtitles, interactions, useKeyProjection, walks, combatSenses,
                         abilities, interactionSender, menuActions);
+                worldScope[0] = scope;
+                goals.attachPlaces(scope.memory());
             } else if (minecraft.level == null) {
+                if (worldScope[0] != null) goals.detachPlaces();
                 worldScope[0] = null;
             }
         }
