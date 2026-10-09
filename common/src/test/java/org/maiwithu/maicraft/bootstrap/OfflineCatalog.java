@@ -106,6 +106,7 @@ final class OfflineCatalog {
                 () -> 0,
                 new InputDriver(new PlayerControlBoundary()),
                 false,
-                new Protection(new OwnershipQueries(session), memory, memory, GuessesPlayerMade.NOTHING, SELF_ID));
+                new Protection(new OwnershipQueries(session), memory, memory, GuessesPlayerMade.NOTHING, SELF_ID),
+                stack -> 0);
     }
 }

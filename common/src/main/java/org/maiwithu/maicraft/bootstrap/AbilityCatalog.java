@@ -102,6 +102,7 @@ import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
+import org.maiwithu.maicraft.game.world.FurnaceFuels;
 
 /**
  * 能力清单：启动时按这份明确的清单创建并登记能力，新增能力在清单里加一行，不做类路径扫描。
@@ -145,7 +146,8 @@ public final class AbilityCatalog {
             LongSupplier clientTicks,
             InputDriver inputs,
             boolean allowGameCommands,
-            Protection protection) {
+            Protection protection,
+            FurnaceFuels furnaceFuels) {
 
         public Deps {
             Objects.requireNonNull(context, "context");
@@ -281,7 +283,7 @@ public final class AbilityCatalog {
     private static AbilityModule obtainModule(Deps deps, LiveApproaches bringsClose,
             ClientMovesToMainhand toMainhand, PermissionCheck permission) {
         ClientQuickMoves obtainQuickMoves = new ClientQuickMoves();
-        RegistryRecipeReads recipeReads = new RegistryRecipeReads(deps.context(), deps.itemTags());
+        RegistryRecipeReads recipeReads = new RegistryRecipeReads(deps.context(), deps.itemTags(), deps.furnaceFuels());
         // 在工作站上动手：熔炉添燃料时按同一份燃料表挑身上烧得最久的。
         RecipeRuns recipeRuns = new MenuRecipeRuns(bringsClose, deps.interactions(),
                 recipeReads, deps.memory(), deps.context());

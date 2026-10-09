@@ -89,6 +89,7 @@ import org.maiwithu.maicraft.server.ServerLinkServices;
 import org.maiwithu.maicraft.server.ServerOperationRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.maiwithu.maicraft.game.world.FurnaceFuels;
 
 /**
  * 公共启动入口。两个加载器的入口类只调用这里，再把加载器事件转给返回的接收端。
@@ -225,6 +226,8 @@ public final class Bootstrap {
         private ServerLinkSession session;
         /** 所有者的实例配置：启动时读一次，之后只读；不经任何工具参数暴露。 */
         private InstanceConfig instanceConfig;
+        /** 熔炉燃料由加载器回答：进世界建能力清单时交给配方与燃料的读端。 */
+        private FurnaceFuels furnaceFuels;
         private ControlLoop controlLoop;
         private DefaultMenuActions menuActions;
         private DefaultInteractionSender interactionSender;
@@ -244,6 +247,7 @@ public final class Bootstrap {
         void createSharedServices(LoaderEnvironment loader) {
             // 实例配置启动时读一次：所有者在 config/maicraft.json 里放的开关，全进程只认这份文件。
             instanceConfig = InstanceConfig.read(loader.configDirectory());
+            furnaceFuels = loader.furnaceFuels();
             if (instanceConfig.allowGameCommands()) {
                 LOG.info("{} 本实例允许角色执行游戏命令（配置文件放开）", ModIdentity.NAME);
             }
@@ -357,7 +361,7 @@ public final class Bootstrap {
                 UseKeyProjection useKeyProjection = new UseKeyHoldProjection(useKeyHold);
                 WorldScope scope = new WorldScope(minecraft, playerControl, blockScans, session,
                         subtitles, interactions, useKeyProjection, walks, combatSenses,
-                        abilities, interactionSender, menuActions, instanceConfig.allowGameCommands());
+                        abilities, interactionSender, menuActions, instanceConfig.allowGameCommands(), furnaceFuels);
                 worldScope[0] = scope;
                 // 换了世界，任务事件流换一条新的，宿主手里的旧游标如实作废；再把这个世界上次没做完的目标
                 // 读回来，全部恢复为暂停，等 LLM 决定接不接着做。读回时的暂停事件进的是新的这条流。
