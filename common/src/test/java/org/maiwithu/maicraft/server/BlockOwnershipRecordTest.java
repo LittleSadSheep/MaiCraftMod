@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.server;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import org.junit.jupiter.api.io.TempDir;
+import java.nio.file.Path;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -67,5 +70,32 @@ class BlockOwnershipRecordTest {
         }
         assertTrue(record.ownerOf(OVERWORLD, oldest).isEmpty());
         assertTrue(record.ownerOf(OVERWORLD, kept).isPresent());
+    }
+
+    @Test
+    void savedRecordComesBackAfterARestart(@TempDir Path temp) {
+        // 存进存档、重启后读回：玩家盖的房子不会因为服务器重启就变成"不知道是谁的"。
+        var record = new BlockOwnershipRecord();
+        var alice = UUID.randomUUID();
+        var bob = UUID.randomUUID();
+        record.recordPlacement(OVERWORLD, new BlockPos(1, 64, 1), alice, 10);
+        record.recordPlacement(NETHER, new BlockPos(-5, 70, 3), bob, 20);
+        var file = new OwnershipFile(temp.resolve("data").resolve("owners.dat"));
+
+        file.saveIfDirty(record);
+        var restored = file.load();
+
+        assertEquals(alice, restored.ownerOf(OVERWORLD, new BlockPos(1, 64, 1)).orElseThrow().playerId());
+        assertEquals(20, restored.ownerOf(NETHER, new BlockPos(-5, 70, 3)).orElseThrow().tick());
+        assertFalse(record.dirty(), "存过盘就没有待存的改动");
+    }
+
+    @Test
+    void brokenBlockForgetsItsOwner() {
+        var record = new BlockOwnershipRecord();
+        var position = new BlockPos(2, 64, 2);
+        record.recordPlacement(OVERWORLD, position, UUID.randomUUID(), 1);
+        record.forget(OVERWORLD, position);
+        assertTrue(record.ownerOf(OVERWORLD, position).isEmpty(), "方块拆了，这一格不再算谁的");
     }
 }
