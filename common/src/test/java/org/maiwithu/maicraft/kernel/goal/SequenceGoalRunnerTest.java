@@ -8,6 +8,7 @@ import org.maiwithu.maicraft.kernel.goal.GoalTestAbility.TestInput;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
+import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 import org.maiwithu.maicraft.kernel.task.TaskInput;
 import org.maiwithu.maicraft.kernel.task.TickResult;
@@ -284,5 +285,42 @@ class SequenceGoalRunnerTest {
             tickResult = runner.tick(new GoalTestTick(tick));
         }
         return assertInstanceOf(TickResult.Finished.class, tickResult).result();
+    }
+
+    @Test
+    void leavingTheWorldMidSequenceParksTheStepAndPicksItUpAfterRestore() {
+        // 先挖坑再搭房，搭房搭到一半退出游戏：搭房的任务停手，整件事和这一步都存成暂停；
+        // 回来解除暂停后从搭房接着做，挖好的坑不再挖一遍。
+        SharedTasks tasks = new SharedTasks();
+        GoalTestAbility dig = new GoalTestAbility("maicraft:dig", tasks);
+        dig.next(new StepDecision.Run(new TestInput("挖坑")));
+        GoalTestAbility build = new GoalTestAbility("maicraft:build", tasks);
+        build.next(new StepDecision.Run(new TestInput("搭房")));
+        build.next(new StepDecision.Run(new TestInput("搭房")));
+        tasks.keepRunning("搭房");
+        AbilityRegistry registry = new AbilityRegistry(new TaskFactories());
+        registry.register(dig);
+        registry.register(build);
+        InMemoryGoalRunStore store = new InMemoryGoalRunStore();
+        GoalRunner runner = GoalRunner.launch(sequenceOf(stepOf("maicraft:dig"), stepOf("maicraft:build")),
+                registry, store, new GoalRunnerTest.TestMemory());
+        runner.start(TICK0);
+        for (long tick = 101; tick < 106; tick++) runner.tick(new GoalTestTick(tick));
+        assertEquals(List.of("挖坑", "搭房"), labels(tasks.started));
+
+        runner.leaveWorld();
+
+        assertEquals(CloseReason.PLAYER_GONE, tasks.created.get("搭房").closedWith);
+        List<GoalRun> parked = store.unfinished();
+        assertEquals(2, parked.size(), "整件事和正在跑的那一步都留在存盘里");
+        assertTrue(parked.stream().allMatch(run -> run.state() == GoalRunState.PAUSED));
+
+        GoalRunner restored = GoalRunner.restore(runner.run(), registry, store, new GoalRunnerTest.TestMemory());
+        restored.resumeGoal();
+        restored.start(new GoalTestTick(200));
+        for (long tick = 201; tick < 204; tick++) restored.tick(new GoalTestTick(tick));
+
+        assertEquals(List.of("挖坑", "搭房", "搭房"), labels(tasks.started));
+        assertEquals(1, restored.run().stepIndex());
     }
 }

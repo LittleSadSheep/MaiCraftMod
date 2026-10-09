@@ -269,6 +269,7 @@ public final class Bootstrap {
             interactions = new Interactions(useKeyProjection);
             // 目标执行与 MCP 工具：LLM 用 execute 下达的目标经目标运行表成为控制循环的主任务；
             // 目标处境与生存需求的事件都进同一条任务事件流，宿主用 events 读。
+            // 没进世界时的占位存储：进世界时换成那个世界的存盘（见 enterWorld），不在世界里也下达不了目标。
             GoalRunStore goalRuns = new EventPublishingGoalRunStore(new InMemoryGoalRunStore(), taskEvents);
             // 记地点交给当前世界的世界记忆；不在世界里时如实以程序错误收场，不悄悄丢掉。
             RemembersPlaces places = (name, position) -> {
@@ -278,7 +279,7 @@ public final class Bootstrap {
                 }
                 scope.memory().remember(name, position);
             };
-            // 赋给字段：进世界时现场要经它把当期的世界记忆接上（attachPlaces）。
+            // 赋给字段：进世界时现场要经它把当期的世界记忆与目标存盘接上（enterWorld）。
             // 控制权交接接在玩家控制权边界上：目标成为主任务时向输入层请求控制权（下一刻生效），
             // 查询端读此刻自动化是否真的拥有控制权。启动与查询都发生在客户端刻里，线程要求满足。
             goals = new GoalRunTable(abilities, goalRuns, places, controlLoop, new PlayerControlHandover() {
@@ -336,11 +337,15 @@ public final class Bootstrap {
                         subtitles, interactions, useKeyProjection, walks, combatSenses,
                         abilities, interactionSender, menuActions, instanceConfig.allowGameCommands());
                 worldScope[0] = scope;
-                goals.attachPlaces(scope.memory());
+                // 换了世界，任务事件流换一条新的，宿主手里的旧游标如实作废；再把这个世界上次没做完的目标
+                // 读回来，全部恢复为暂停，等 LLM 决定接不接着做。读回时的暂停事件进的是新的这条流。
+                taskEvents.restart();
+                goals.enterWorld(scope.memory(), new EventPublishingGoalRunStore(scope.goalRuns(), taskEvents));
                 // 开关开启时，这次进世界要逐刻请求控制权直到拿到；直播待机没有目标也守得住角色。
                 startupAutomationPending = automationOnJoin;
             } else if (minecraft.level == null) {
-                if (worldScope[0] != null) goals.detachPlaces();
+                // 离开世界：没做完的目标停手存成暂停，下次进这个世界时恢复；不让它跟进下一个世界接着跑。
+                if (worldScope[0] != null) goals.leaveWorld();
                 worldScope[0] = null;
             }
         }

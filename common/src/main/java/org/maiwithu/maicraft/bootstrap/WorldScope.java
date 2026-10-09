@@ -40,6 +40,8 @@ import org.maiwithu.maicraft.game.player.PlayerControlBoundary;
 import org.maiwithu.maicraft.game.serverlink.ServerLinkSession;
 import org.maiwithu.maicraft.game.world.BlockScanService;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
+import org.maiwithu.maicraft.kernel.goal.DocumentGoalRunStore;
+import org.maiwithu.maicraft.kernel.goal.GoalRunStore;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 import org.maiwithu.maicraft.kernel.storage.StateIdentity;
 
@@ -55,6 +57,8 @@ public final class WorldScope {
     private final BlockScanService blockScans;
     private final SubtitleFeed subtitles;
     private final WorldMemory memory;
+    /** 这个世界的目标运行存盘：退出游戏、换世界之后，没做完的目标从这里读回来。 */
+    private final GoalRunStore goalRuns;
     private final Scene scene;
     private final TravelProgressListener travelProgress = new LatestTravelProgress();
 
@@ -76,7 +80,10 @@ public final class WorldScope {
                 .orElseThrow(() -> new IllegalStateException("进了世界却识别不出世界身份，记忆无处安放"));
         this.blockScans = Objects.requireNonNull(blockScans, "blockScans");
         this.subtitles = Objects.requireNonNull(subtitles, "subtitles");
-        this.memory = new WorldMemory(new DocumentStore(identity.databaseFile()), identity.key());
+        // 世界记忆与目标运行存在同一个文档库里，按世界身份分开；目标读回时按能力清单的参数规格整理参数。
+        DocumentStore documents = new DocumentStore(identity.databaseFile());
+        this.memory = new WorldMemory(documents, identity.key());
+        this.goalRuns = new DocumentGoalRunStore(documents, identity.key(), abilities);
         this.scene = new Scene(memory);
 
         // 当刻角色的供给者：感知、背包、聊天都从它拿这一刻的角色，不留到下一刻。
@@ -142,6 +149,11 @@ public final class WorldScope {
     /** 世界记忆：宿主查询与能力共用的那份。 */
     public WorldMemory memory() {
         return memory;
+    }
+
+    /** 这个世界的目标运行存盘：进世界时交给目标运行表，读回上次没做完的目标。 */
+    public GoalRunStore goalRuns() {
+        return goalRuns;
     }
 
     /** 感知场景：观察视图与速写都从这里整理。 */

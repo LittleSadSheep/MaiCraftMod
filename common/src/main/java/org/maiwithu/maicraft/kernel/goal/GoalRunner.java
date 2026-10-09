@@ -134,6 +134,31 @@ public final class GoalRunner implements Task {
     }
 
     /**
+     * 角色离开世界（退出到标题、断线、换世界）：手上的任务按"角色不在了"收尾、松开按键，目标本身不结束，
+     * 存成暂停。下次进这个世界时它随存盘恢复为暂停，等 LLM 决定接不接着做——和重启游戏是同一回事。
+     * sequence 正在跑的那一步同样停手存成暂停，恢复后从这一步接着做。
+     */
+    public void leaveWorld() {
+        if (result != null) {
+            return;
+        }
+        if (stepRunner != null) {
+            // 步骤自己停手存盘；包着它的子任务运行器不收尾，收尾会把这一步当成结束。
+            stepRunner.leaveWorld();
+            forgetChild();
+            stepRunner = null;
+        } else {
+            closeRunningChild(CloseReason.PLAYER_GONE);
+        }
+        queuedInputs = null;
+        if (run.state() != GoalRunState.PAUSED) {
+            run.pause();
+        }
+        save();
+        LOG.info("目标 {} 随角色离开世界停在暂停，下次进这个世界时恢复", run.id());
+    }
+
+    /**
      * 现在挂着、等 LLM 回答的问题；没有时为 null。sequence 返回正在跑的那一步的问题，
      * 重启后那一步还没被重新拉起时，到存储里找它的记录。
      */
