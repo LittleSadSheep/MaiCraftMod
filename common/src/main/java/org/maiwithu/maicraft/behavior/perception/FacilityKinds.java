@@ -9,9 +9,13 @@ import java.util.Set;
  */
 public final class FacilityKinds {
 
-    /** 能装东西的方块：看见只记"这里有只"，里面有没有货要开过才知道。 */
+    /**
+     * 能装东西的方块：看见只记"这里有只"，里面有没有货要开过才知道。
+     * 潜影盒有十七种颜色（不染色的叫 shulker_box，染色的叫"颜色_shulker_box"），按后缀认。
+     */
     public static final Set<String> CONTAINERS = Set.of(
-            "minecraft:chest", "minecraft:trapped_chest", "minecraft:barrel", "minecraft:shulker_box");
+            "minecraft:chest", "minecraft:trapped_chest", "minecraft:barrel", "minecraft:shulker_box",
+            "minecraft:ender_chest");
 
     /** 用一次就知道能用的设施：工作台、熔炉这类。 */
     public static final Set<String> WORKSTATIONS = Set.of(
@@ -24,7 +28,8 @@ public final class FacilityKinds {
 
     /** 是能装东西的容器。 */
     public static boolean isContainer(String blockType) {
-        return CONTAINERS.contains(blockType);
+        return CONTAINERS.contains(blockType)
+                || blockType.startsWith("minecraft:") && blockType.endsWith("_shulker_box");
     }
 
     /** 是工作设施。 */
