@@ -18,6 +18,7 @@ import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.inventory.KnownContainer;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuOpening;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
+import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
 import org.maiwithu.maicraft.behavior.menu.MenuOpening;
 import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
@@ -50,14 +51,17 @@ public final class MenuContainerTakes implements ContainerTakes {
     private final ReadsItemTags tags;
     private final WorldMemory memory;
     private final Supplier<PlayerContext> contexts;
+    /** 认得出哪些界面：原版加上联动模组证明过的（例如模组的箱子）。 */
+    private final MenuLayouts layouts;
 
     public MenuContainerTakes(BringsPlayerClose close, Interactions interactions, ReadsItemTags tags,
-            WorldMemory memory, Supplier<PlayerContext> contexts) {
+            WorldMemory memory, Supplier<PlayerContext> contexts, MenuLayouts layouts) {
         this.close = Objects.requireNonNull(close, "close");
         this.interactions = Objects.requireNonNull(interactions, "interactions");
         this.tags = Objects.requireNonNull(tags, "tags");
         this.memory = Objects.requireNonNull(memory, "memory");
         this.contexts = Objects.requireNonNull(contexts, "contexts");
+        this.layouts = Objects.requireNonNull(layouts, "layouts");
     }
 
     @Override
@@ -87,7 +91,7 @@ public final class MenuContainerTakes implements ContainerTakes {
             this.request = request;
             this.at = BlockPos.containing(container.x(), container.y(), container.z());
             // 走过去能动多少地形按这次任务的许可来，不另开一套默认档。
-            this.opening = new ClientMenuOpening(at, permissions, close, interactions, contexts);
+            this.opening = new ClientMenuOpening(at, permissions, layouts, close, interactions, contexts);
         }
 
         @Override

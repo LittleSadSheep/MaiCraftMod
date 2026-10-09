@@ -7,7 +7,9 @@ import java.util.function.Supplier;
 
 import net.minecraft.world.inventory.ClickType;
 
+import org.maiwithu.maicraft.game.menu.MenuActions;
 import org.maiwithu.maicraft.game.menu.MenuConfirmation;
+import org.maiwithu.maicraft.game.menu.PendingMenuAction;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -54,6 +56,17 @@ final class ClientOpenedMenu implements OpenedMenu {
         if (context == null || !channel.stillOpen() || context.menuActions().hasPendingTransaction()) return;
         context.menuActions().click(context, slotId, 0, ClickType.QUICK_MOVE,
                 MenuConfirmation.stateChanged(), QUICK_MOVE_TIMEOUT_TICKS);
+    }
+
+    // 模组协议的一下：界面还是这一份、上一下结清、界面画过且本刻有交互机会才发；否则本刻不动，下一刻再试。
+    @Override public Optional<PendingMenuAction> submitModAction(String what, Runnable send,
+            MenuConfirmation confirmation, int timeoutTicks) {
+        PlayerContext context = contexts.get();
+        // 本刻的交互机会已被移动或世界动作用掉时不发：菜单入口占不到机会会当错误抛出，这里按"下一刻再试"返回空。
+        if (context == null || !channel.stillOpen() || !context.canInteractThisTick()) return Optional.empty();
+        MenuActions actions = context.menuActions();
+        if (actions.hasPendingTransaction() || !actions.ensureVisible(context)) return Optional.empty();
+        return Optional.of(actions.submitModAction(context, what, send, confirmation, timeoutTicks));
     }
 
     @Override public void click(int slotId, int button) {

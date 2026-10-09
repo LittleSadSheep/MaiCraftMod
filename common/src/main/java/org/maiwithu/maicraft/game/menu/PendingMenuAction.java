@@ -12,7 +12,7 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /** 一次菜单操作的等待记录：保存原菜单编号和版本、期望结果，以及何时算等待超时。 */
 public final class PendingMenuAction {
-    public enum Kind { CLICK, SWAP_TO_HOTBAR, PLACE_RECIPE, CLOSE, BUTTON }
+    public enum Kind { CLICK, SWAP_TO_HOTBAR, PLACE_RECIPE, CLOSE, BUTTON, MOD_ACTION }
     public enum Status { PENDING, CONFIRMED_APPLIED, CONFIRMED_NOT_APPLIED, DIVERGED, UNCERTAIN }
 
     private static final Logger LOG = LoggerFactory.getLogger(PendingMenuAction.class);

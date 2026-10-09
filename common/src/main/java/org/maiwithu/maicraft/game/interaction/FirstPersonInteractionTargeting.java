@@ -213,14 +213,51 @@ public final class FirstPersonInteractionTargeting {
         var state = level.getBlockState(target);
         if (state.isAir() || state.getBlock() instanceof LiquidBlock) return null;
 
+        return hitWithin(level, observer, eye, target, reach, shapeBounds(level, target, state),
+                hit -> (requiredFace == null || hit.getDirection() == requiredFace) && acceptsHit.test(hit));
+    }
+
+    /**
+     * 方块上的一个部件（例如挂在线缆上的终端面板）里看得见的部位：瞄准点只在部件框里找，命中点也必须落在框里。
+     * 线缆这类方块的形状中心落在线缆芯上，照整格瞄会点到线缆而不是面板；所以靠近与瞄准都对准同一个框。
+     *
+     * @param part 部件框，世界坐标；和方块形状的边界不重叠时看不到这个部件，返回 null
+     */
+    public static BlockHitResult visiblePartHit(
+            Level level, Entity observer, Vec3 eye, BlockPos target, double reach, AABB part) {
+        if (!Double.isFinite(reach) || reach <= 0.0D
+                || !level.isLoaded(BlockPos.containing(eye))
+                || !level.isLoaded(target)) {
+            return null;
+        }
+        var state = level.getBlockState(target);
+        if (state.isAir() || state.getBlock() instanceof LiquidBlock) return null;
+        AABB shape = shapeBounds(level, target, state);
+        AABB local = part.move(-target.getX(), -target.getY(), -target.getZ());
+        // 先确认部件框和方块形状真有重叠：没有重叠时求交会得到一个颠倒后又被摆正的框，瞄到别处去。
+        if (!shape.intersects(local)) return null;
+        AABB accepted = part.inflate(FACE_INSET);
+        return hitWithin(level, observer, eye, target, reach, shape.intersect(local),
+                hit -> accepted.contains(hit.getLocation()));
+    }
+
+    // 方块选择形状的边界（方块内的局部坐标）；形状为空时按整格算。
+    private static AABB shapeBounds(Level level, BlockPos target, BlockState state) {
         VoxelShape shape = state.getShape(level, target);
         if (shape.isEmpty()) shape = Shapes.block();
-        double minX = shape.min(Direction.Axis.X);
-        double minY = shape.min(Direction.Axis.Y);
-        double minZ = shape.min(Direction.Axis.Z);
-        double maxX = shape.max(Direction.Axis.X);
-        double maxY = shape.max(Direction.Axis.Y);
-        double maxZ = shape.max(Direction.Axis.Z);
+        return new AABB(shape.min(Direction.Axis.X), shape.min(Direction.Axis.Y), shape.min(Direction.Axis.Z),
+                shape.max(Direction.Axis.X), shape.max(Direction.Axis.Y), shape.max(Direction.Axis.Z));
+    }
+
+    // 在局部框里试中心和靠近六个面的点：命中必须属于指定格、在触及距离内、并通过调用方的筛选。
+    private static BlockHitResult hitWithin(Level level, Entity observer, Vec3 eye, BlockPos target, double reach,
+            AABB bounds, Predicate<BlockHitResult> acceptsHit) {
+        double minX = bounds.minX;
+        double minY = bounds.minY;
+        double minZ = bounds.minZ;
+        double maxX = bounds.maxX;
+        double maxY = bounds.maxY;
+        double maxZ = bounds.maxZ;
         double midX = (minX + maxX) * 0.5D;
         double midY = (minY + maxY) * 0.5D;
         double midZ = (minZ + maxZ) * 0.5D;
@@ -247,7 +284,6 @@ public final class FirstPersonInteractionTargeting {
                     eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, observer));
             if (hit.getType() == HitResult.Type.BLOCK
                     && hit.getBlockPos().equals(target)
-                    && (requiredFace == null || hit.getDirection() == requiredFace)
                     && acceptsHit.test(hit)
                     && eye.distanceToSqr(hit.getLocation()) <= reach * reach + EPSILON) {
                 return hit;

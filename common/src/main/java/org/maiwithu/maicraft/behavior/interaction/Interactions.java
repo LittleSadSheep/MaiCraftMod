@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.interaction;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 
@@ -29,6 +30,17 @@ public final class Interactions {
     /** 右键一格方块（放置、开门、点火这类），生效与否按给定的确认条件核对。 */
     public AimAndInteract useBlock(BlockPos target, InteractionConfirmation confirmation) {
         return new AimAndInteract(new InteractionTarget.BlockTarget(target), confirmation,
+                FirstPersonScene::of);
+    }
+
+    /**
+     * 右键方块上的一个部件（例如挂在线缆上的终端面板）：瞄准点只在部件框里找，准星必须落在框里才提交；
+     * 同一格上的线缆或别的面板挡在前面时按"点到了别的"重新找瞄准点，找不到就是站位问题。
+     *
+     * @param part 部件框，世界坐标；读写端按模组的模型给出
+     */
+    public AimAndInteract useBlockPart(BlockPos target, AABB part, InteractionConfirmation confirmation) {
+        return new AimAndInteract(new InteractionTarget.BlockTarget(target, part), confirmation,
                 FirstPersonScene::of);
     }
 

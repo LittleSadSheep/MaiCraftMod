@@ -97,6 +97,7 @@ import org.maiwithu.maicraft.kernel.task.TaskFactories;
 import org.maiwithu.maicraft.game.world.FurnaceFuels;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
+import org.maiwithu.maicraft.behavior.acquire.spi.SourceServices;
 import org.maiwithu.maicraft.compat.CompatRegistry;
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 
@@ -315,9 +316,11 @@ public final class AbilityCatalog {
         List<ItemSource> sources = new ArrayList<>(List.of(
                 new ContainerSource(deps.memory(), deps.itemTags(), deps.protection(),
                         new MenuContainerTakes(bringsClose, deps.interactions(), deps.itemTags(),
-                                deps.memory(), deps.context())),
+                                deps.memory(), deps.context(), deps.compat().menuLayouts())),
                 craftSource, smeltSource, miningSource, harvestSource, new TradeSource()));
-        sources.addAll(deps.compat().itemSources());
+        sources.addAll(deps.compat().itemSources(new SourceServices(deps.context(), bringsClose,
+                deps.interactions(), deps.protection(), deps.itemTags(), deps.compat().menuLayouts(),
+                deps.blockScans())));
         ItemAcquisition acquisition = new ItemAcquisition(sources,
                 deps.backpack(), deps.offhand(), deps.itemTags(),
                 deps.characterPosition(), Optional.empty(), ItemAcquisition.DEFAULT_MAX_DEPTH);
@@ -336,7 +339,7 @@ public final class AbilityCatalog {
     private static DepositModule depositModule(Deps deps, LiveApproaches bringsClose, ClientCollectsBlocks collects) {
         return DepositModule.live(deps.context(), bringsClose, deps.interactions(), collects,
                 deps.itemTags(), deps.memory(), deps.backpack(), deps.blockScans(), deps.protection(), deps::scene,
-                deps.facilities());
+                deps.facilities(), deps.compat().menuLayouts());
     }
 
     /**

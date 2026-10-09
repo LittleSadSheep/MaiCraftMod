@@ -5,13 +5,16 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.function.Function;
+
+import org.maiwithu.maicraft.behavior.menu.spi.MenuLayoutProof;
 
 /**
  * 界面布局：判断一个容器界面两侧各是哪些槽、能否安全点击的纯函数。
  *
  * <p>只认界面类型注册 ID 证明得了的布局：角色侧必须是 36 格（27 主背包 + 9 快捷栏），
  * 容器侧是剩下的槽。认不出的模组界面给"证明不了"的结论，调用方以不支持结束，不照着普通箱子的样子乱点；
- * 模组界面的证明随各自的联动适配补进来。
+ * 模组界面的证明由联动模组登记（MenuLayoutProof），和原版的样子一起经 MenuLayouts 判。
  *
  * <p>机器槽（熔炉的燃料与产出格）放进去的物品可能在放置回显到达前就被吃掉，
  * 搬运确认对这些槽换用"源格确切减少 + 光标空"的核对（见 {@link MoveConfirmation}）。
@@ -61,6 +64,15 @@ public final class MenuLayout {
      * 角色侧不是恰好 36 格、或界面类型不在已证明的清单里，都按证明不了处理。
      */
     public static Layout classify(MenuSlots slots) {
+        return classify(slots, type -> null);
+    }
+
+    /**
+     * 分侧判定，带上联动模组证明过的界面：角色侧先核对 36 格，再按界面类型找原版的样子或模组的证明。
+     *
+     * @param modProofs 按界面类型（小写注册 ID）查模组的证明；没有时给 null
+     */
+    static Layout classify(MenuSlots slots, Function<String, MenuLayoutProof> modProofs) {
         String typeId = slots.menuTypeId() == null ? "" : slots.menuTypeId().toLowerCase(Locale.ROOT);
         List<Integer> playerSlots = new ArrayList<>();
         List<Integer> containerSlots = new ArrayList<>();
@@ -86,6 +98,11 @@ public final class MenuLayout {
         if (CRAFTING.contains(typeId) || STONECUTTER.contains(typeId)) {
             // 合成台与石切台的产出格只会被拿走不会被塞进，点击都按普通槽核对。
             return new Supported(List.copyOf(playerSlots), List.copyOf(containerSlots), Set.of());
+        }
+        // 联动模组证明过的界面：按它的证明分侧；证明的是模组自己的界面，原版类型走不到这里。
+        MenuLayoutProof proof = modProofs.apply(typeId);
+        if (proof != null) {
+            return proof.classify(slots, List.copyOf(playerSlots), List.copyOf(containerSlots));
         }
         // 没证明过的模组界面：不是"当作普通箱子试试"，而是承认两侧的行为证明不了。
         return new Unsupported("认不出界面类型 " + typeId + " 的布局，证明不了两侧怎么分，不点击");

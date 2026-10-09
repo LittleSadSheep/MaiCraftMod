@@ -251,6 +251,31 @@ public final class DefaultMenuActions implements MenuActions {
         return pending;
     }
 
+    @Override
+    public PendingMenuAction submitModAction(PlayerContext context, String what, Runnable send,
+                                             MenuConfirmation confirmation, int timeoutTicks) {
+        // 模组协议的一下和点格子一样排队：旧事务结清、界面画过，再占本刻的交互机会发包，按确认条件等结果。
+        requireSubmission(context);
+        requireIdle();
+        requireVisible(context);
+        Objects.requireNonNull(send, "send");
+        Objects.requireNonNull(confirmation, "mod menu action requires an exact postcondition");
+        if (!context.tryClaimInteraction()) throw new IllegalStateException("no interaction opportunity this tick");
+        AbstractContainerMenu menu = context.localPlayer().containerMenu;
+        PendingMenuAction pending = create(
+                PendingMenuAction.Kind.MOD_ACTION, context, menu, -1, timeoutTicks, false, confirmation);
+        LOG.debug("mod menu action submitted: {}", what);
+        try {
+            send.run();
+            interactionSubmitted(context);
+        } catch (RuntimeException failure) {
+            // 发包途中出错时证明不了服务器收没收到，按不确定收场交给调用方核对现场，不自动重发。
+            pending.finish(PendingMenuAction.Status.UNCERTAIN,
+                    "mod menu action threw after entering the client transaction path: " + failure);
+        }
+        return pending;
+    }
+
     private void advanceClose(PlayerContext context, PendingMenuAction pending) {
         // 只关当时那一个菜单；等最后操作被显示过并且本刻还有交互机会，再调用原版关闭流程。
         if (context.localPlayer().containerMenu != closingMenu) {

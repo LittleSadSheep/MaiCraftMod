@@ -121,9 +121,11 @@ final class InteractionTestFakes {
         @Override public boolean heldItemPointsAt(BlockPos target, InteractionHand hand) {
             return itemPointsAt.contains(target);
         }
+        /** 看得见的部位落在哪一点；没写的格子从正上方看到中心。测方块上的部件时把面板中心写进来。 */
+        final Map<BlockPos, Vec3> visibleAt = new HashMap<>();
         @Override public BlockHitResult visibleHit(BlockPos target) {
             return hidden.contains(target) ? null
-                    : new BlockHitResult(Vec3.atCenterOf(target), Direction.UP, target, false);
+                    : new BlockHitResult(visibleAt.getOrDefault(target, Vec3.atCenterOf(target)), Direction.UP, target, false);
         }
         @Override public BlockState blockAt(BlockPos pos) { return blocks.get(pos); }
         @Override public boolean isLoaded(BlockPos pos) { return blocks.containsKey(pos); }

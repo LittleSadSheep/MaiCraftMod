@@ -26,6 +26,19 @@ public interface MenuActions {
     /** 登记经模组原生协议提交的菜单操作，让后续任务等待对应确认。 */
     void interactionSubmitted(PlayerContext context);
 
+    /**
+     * 经模组自己的协议对当前界面做一次操作（例如 AE2 终端里取一件，发的是模组的包，不是原版点格子）。
+     * 和点格子同一套规矩：上一项操作结清、当前界面画过一帧、占本刻唯一的一次交互机会，再调 send 发包；
+     * 之后按调用方给的确认条件等到期限。send 抛异常时按不确定收场，不自动再发一次。
+     *
+     * @param what 这一下在做什么，写进日志，例如"AE2 终端取一件"
+     * @param send 真正发模组的包的那一下；联动包里经模组读写端调用
+     */
+    default PendingMenuAction submitModAction(PlayerContext context, String what, Runnable send,
+                                              MenuConfirmation confirmation, int timeoutTicks) {
+        throw new UnsupportedOperationException("mod menu actions are not supported");
+    }
+
     PendingMenuAction click(PlayerContext context, int slot, int button, ClickType clickType,
                             MenuConfirmation confirmation, int timeoutTicks);
 
