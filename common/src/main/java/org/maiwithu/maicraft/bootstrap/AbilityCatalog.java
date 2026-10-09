@@ -2,12 +2,14 @@
 package org.maiwithu.maicraft.bootstrap;
 
 import java.util.List;
+import java.util.Set;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.ability.chat.ChatAbility;
+import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.ability.deposit.DepositModule;
 import org.maiwithu.maicraft.ability.drop.DropModule;
 import org.maiwithu.maicraft.ability.eat.EatModule;
@@ -33,15 +35,27 @@ import org.maiwithu.maicraft.ability.use.UseModule;
 import org.maiwithu.maicraft.ability.wait.WaitModule;
 import org.maiwithu.maicraft.behavior.acquire.ClientCropReplanting;
 import org.maiwithu.maicraft.behavior.acquire.ClientDigsBlocks;
+import org.maiwithu.maicraft.behavior.acquire.ClientWorkstationPlacer;
+import org.maiwithu.maicraft.behavior.acquire.ClientYieldScans;
 import org.maiwithu.maicraft.behavior.acquire.ContainerSource;
+import org.maiwithu.maicraft.behavior.acquire.HarvestSource;
 import org.maiwithu.maicraft.behavior.acquire.ItemAcquisition;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
+import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.MenuContainerTakes;
 import org.maiwithu.maicraft.behavior.acquire.LiveBlockDigging;
 import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
 import org.maiwithu.maicraft.behavior.acquire.ReadsCharacterPosition;
 import org.maiwithu.maicraft.behavior.acquire.ReadsItemRegistry;
 import org.maiwithu.maicraft.behavior.acquire.ReadsItemTags;
+import org.maiwithu.maicraft.behavior.acquire.MiningSource;
+import org.maiwithu.maicraft.behavior.acquire.MenuRecipeRuns;
 import org.maiwithu.maicraft.behavior.acquire.ReadsToolRequirements;
+import org.maiwithu.maicraft.behavior.acquire.RecipeRuns;
+import org.maiwithu.maicraft.behavior.acquire.RecipeSource;
+import org.maiwithu.maicraft.behavior.acquire.RecipeView;
+import org.maiwithu.maicraft.behavior.acquire.RegistryRecipeReads;
+import org.maiwithu.maicraft.behavior.acquire.TradeSource;
 import org.maiwithu.maicraft.behavior.approach.InteractionTarget;
 import org.maiwithu.maicraft.behavior.approach.LiveApproachWorld;
 import org.maiwithu.maicraft.behavior.approach.LiveApproaches;
@@ -85,14 +99,14 @@ import org.maiwithu.maicraft.game.serverlink.ServerLinkSession;
 import org.maiwithu.maicraft.game.world.BlockScanService;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 
 /**
  * 能力清单：启动时按这份明确的清单创建并登记能力，新增能力在清单里加一行，不做类路径扫描。
  *
  * <p>各模块的构造依赖都从这份清单的入参里来；还没有实现方的接缝先留空
- * （传 null 或 Optional.empty()），能力自己按接缝缺失如实失败。存东西能力还没有接：
- * 它要的容器界面读数与整堆搬运接缝还没有实现方，接上后在清单里补一行。
+ * （传 null 或 Optional.empty()），能力自己按接缝缺失如实失败，接上后在清单里补一行。
  */
 public final class AbilityCatalog {
 
@@ -180,26 +194,18 @@ public final class AbilityCatalog {
                 deps.characterPosition(), new DropAvoidance(), Optional.of(toMainhand),
                 Optional.of(new ClientStepsAside(deps.inputs()))));
 
-        // 拿到物品：记得的箱子这一路接上了——走到、点开、整堆搬进背包、关上都在生产实现里；
-        // 合成、烧炼、挖矿、收获、交易还没有实现方，拿到物品只在这些路上如实说没有途径。
-        registry.register(new ObtainAbility(
-                new ItemAcquisition(
-                        List.of(new ContainerSource(deps.memory(), deps.itemTags(),
-                                new MenuContainerTakes(bringsClose, deps.interactions(),
-                                        new ClientMenuContent(deps.context()), new ClientQuickMoves(),
-                                        deps.itemTags(), deps.memory()))),
-                        deps.backpack(), deps.offhand(), deps.itemTags(),
-                        deps.characterPosition(), Optional.empty(), ItemAcquisition.DEFAULT_MAX_DEPTH),
-                deps.itemRegistry(), deps.backpack(), deps.offhand(), deps.itemTags()));
-
-        // 存东西：找容器把现场扫描与世界记忆并起来，界面读数、整堆搬运与挖盖子都接上了。
-        registry.register(depositModule(deps, bringsClose));
-
         // 许可检查点：归属记录问服务端，区域与地标问世界记忆；玩家放置推断没有接，先按不受保护处理。
+        // 拿到物品的来源与采集都用这一份，先建。
         PermissionCheck permission = new PermissionCheck(
                 new Protection(new OwnershipQueries(deps.session()), deps.memory(), deps.memory(),
                         GuessesPlayerMade.NOTHING, deps.selfPlayerId()),
                 deps.creatures());
+
+        // 拿到物品：身上的不算来源（引擎开场就清点），已实现的途径都登记，见 obtainModule。
+        registry.register(obtainModule(deps, bringsClose, toMainhand, permission));
+
+        // 存东西：找容器把现场扫描与世界记忆并起来，界面读数、整堆搬运与挖盖子都接上了。
+        registry.register(depositModule(deps, bringsClose));
 
         // 采集：观察编号从场景查，现场从世界读，靠近用站位与走到，挖用原生挖掘；
         // 收完把身上的种子补种回原格，没有种子就不补，不额外去找。
@@ -246,6 +252,49 @@ public final class AbilityCatalog {
                 deps.memory());
     }
 
+    /**
+     * 拿到物品能力的一份：身上的不算来源（引擎开场就清点），登记的是身外的途径——
+     * 记得的箱子与现场容器、合成（含石切台）、烧炼、挖矿、收熟作物；交易还没实现，
+     * 问价如实回答不支持。来源备料缺原料缺工具时回到引擎自己再问一遍，
+     * 引擎要等来源清单建好才建得出来，所以内需入口先接住、引擎建好后接上。
+     */
+    private static AbilityModule obtainModule(Deps deps, LiveApproaches bringsClose,
+            ClientMovesToMainhand toMainhand, PermissionCheck permission) {
+        ClientQuickMoves obtainQuickMoves = new ClientQuickMoves();
+        RecipeRuns recipeRuns = new MenuRecipeRuns(bringsClose, deps.interactions(),
+                obtainQuickMoves, deps.memory(), deps.context());
+        RegistryRecipeReads recipeReads = new RegistryRecipeReads(deps.context(), deps.itemTags());
+        ClientYieldScans yieldScans = new ClientYieldScans(deps.blockScans(), deps.context());
+        ClientDigsBlocks digs = new ClientDigsBlocks();
+        ClientWorkstationPlacer placer = new ClientWorkstationPlacer(
+                deps.interactions(), toMainhand, deps.memory(), deps.context());
+        DeferredInnerNeeds innerNeeds = new DeferredInnerNeeds();
+        RecipeSource craftSource = new RecipeSource(
+                Set.of(RecipeView.Kind.CRAFTING, RecipeView.Kind.STONECUTTING),
+                recipeReads, deps.memory(), recipeReads, recipeRuns,
+                deps.backpack(), deps.offhand(), deps.itemTags(), innerNeeds, placer, permission);
+        RecipeSource smeltSource = new RecipeSource(
+                Set.of(RecipeView.Kind.SMELTING),
+                recipeReads, deps.memory(), recipeReads, recipeRuns,
+                deps.backpack(), deps.offhand(), deps.itemTags(), innerNeeds, placer, permission);
+        MiningSource miningSource = new MiningSource(yieldScans, digs, deps.toolRequirements(),
+                permission, deps.backpack(), deps.offhand(), innerNeeds);
+        HarvestSource harvestSource = new HarvestSource(yieldScans, digs, permission,
+                new ClientCropReplanting(toMainhand, deps.interactions(), deps.context()));
+        ItemAcquisition acquisition = new ItemAcquisition(
+                List.of(new ContainerSource(deps.memory(), deps.itemTags(),
+                                new MenuContainerTakes(bringsClose, deps.interactions(),
+                                        new ClientMenuContent(deps.context()), obtainQuickMoves,
+                                        deps.itemTags(), deps.memory())),
+                        craftSource, smeltSource, miningSource, harvestSource, new TradeSource()),
+                deps.backpack(), deps.offhand(), deps.itemTags(),
+                deps.characterPosition(), Optional.empty(), ItemAcquisition.DEFAULT_MAX_DEPTH);
+        innerNeeds.attach(acquisition);
+        return new ObtainAbility(
+                acquisition,
+                deps.itemRegistry(), deps.backpack(), deps.offhand(), deps.itemTags());
+    }
+
     /** 存东西能力的一份：找容器把现场扫描与世界记忆并起来，界面读数、整堆搬运与挖盖子走生产实现。 */
     private static DepositModule depositModule(Deps deps, LiveApproaches bringsClose) {
         return DepositModule.assemble(
@@ -253,6 +302,27 @@ public final class AbilityCatalog {
                 bringsClose, deps.interactions(), new ClientMenuContent(deps.context()),
                 new ClientQuickMoves(), new ClientDigsBlocks(), deps.itemTags(),
                 deps.memory(), deps.context(), deps.backpack());
+    }
+
+    /**
+     * 拿到物品引擎的内需入口：来源备料缺原料缺工具时回到引擎，但引擎要等来源清单
+     * 建好才建得出来。这里先接住内需、引擎建好后接上，来源用它时不觉得有先后。
+     */
+    private static final class DeferredInnerNeeds implements ItemNeeds {
+
+        private ItemNeeds engine;
+
+        /** 引擎建好后接上；这之后内需才真的往下问。 */
+        void attach(ItemNeeds engine) {
+            this.engine = Objects.requireNonNull(engine, "engine");
+        }
+
+        @Override public Action actionFor(ItemRequest request, Permissions permissions) {
+            if (engine == null) {
+                throw new IllegalStateException("拿到物品的引擎还没建好，内需没有可以回的地方");
+            }
+            return engine.actionFor(request, permissions);
+        }
     }
 
     /** 采集的靠近：目标落实成一格方块后交给靠近模型，许可用默认档。 */
