@@ -42,7 +42,9 @@ public record TaskEvent(long cursor, Kind kind, long goalRunId, String message, 
         /** 角色自己处理不了的生存需求，例如饿了、身上没吃的、也弄不到。 */
         NEED_UNHANDLED,
         /** 角色死了：血量见底进了死亡流程，循环停摆只报这一条，等重生。 */
-        CHARACTER_DIED
+        CHARACTER_DIED,
+        /** 死亡恢复决策已经执行：重生或观战的请求发出去了，或任务已取消；做了什么在消息里。 */
+        DEATH_RECOVERY_APPLIED
     }
 
     public TaskEvent {

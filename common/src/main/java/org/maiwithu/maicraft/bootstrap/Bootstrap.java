@@ -54,6 +54,7 @@ import org.maiwithu.maicraft.game.ClientHooks;
 import org.maiwithu.maicraft.game.SubtitleFeed;
 import org.maiwithu.maicraft.game.menu.DefaultMenuActions;
 import org.maiwithu.maicraft.game.menu.RenderedScreens;
+import org.maiwithu.maicraft.game.player.DeathFacts;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerControlBoundary;
 import org.maiwithu.maicraft.game.player.ReadsFoodValues;
@@ -66,6 +67,9 @@ import org.maiwithu.maicraft.behavior.survival.CombatMemory;
 import org.maiwithu.maicraft.behavior.survival.CombatSenses;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.interrupt.ControlLoop;
+import org.maiwithu.maicraft.kernel.interrupt.DeathDecisionHost;
+import org.maiwithu.maicraft.kernel.goal.DeathRecovery;
+import org.maiwithu.maicraft.kernel.goal.DeathRecoveryActions;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.event.EventPublishingGoalRunStore;
@@ -182,11 +186,11 @@ public final class Bootstrap {
      * 饿了的临时任务吃随身食物：先换到主手，再原生按住吃完一口；有预算地弄吃的还没接。
      */
     private static ControlLoop withSurvivalNeeds(
-            TaskEventSink events,
+            TaskEventSink events, DeathDecisionHost deathDecisions,
             InteractionSender interactionSender, MenuActions menuActions, Interactions interactions,
             CombatSenses combatSenses, WalkTo walks,
             EatSoonTask.FoodMoves foodMoves, ReadsFoodValues foods, LiveBurrow burrow, LiveCeilingDigs ceilings) {
-        // 角色死亡这类循环自身的处境变化也从同一条事件流出去。
+        // 角色死亡这类循环自身的处境变化也从同一条事件流出去；死亡决策从挂载口交给目标运行表。
         return new ControlLoop(List.of(
                 new DigOutNeed(new SurvivalSituation.FromPlayer(),
                         () -> new NativeBlockBreaking(interactionSender, menuActions)),
@@ -198,7 +202,7 @@ public final class Bootstrap {
                 new NightfallNeed(new LiveNightView(combatSenses),
                         LiveNightAndEdgeMoves.burrow(burrow, events)),
                 new EdgeProximityNeed(new LiveEdgeView(),
-                        LiveNightAndEdgeMoves.retreat(walks, events))), events);
+                        LiveNightAndEdgeMoves.retreat(walks, events))), events, deathDecisions);
     }
 
     /**
@@ -272,7 +276,7 @@ public final class Bootstrap {
             // 按住使用键的投影：持续使用的提交方接入前没有任务占用，投影读到的始终是真实键值。
             UseKeyProjection useKeyProjection = new UseKeyHoldProjection(useKeyHold);
             // 生存需求与战斗感观：控制循环在这里建好，目标运行表把主任务挂上去。
-            buildSurvival(useKeyProjection);
+            buildSurvival(useKeyProjection, deathDecisions());
             // Mixin 钩子拿不到构造注入，只能在这里登记；服务本体仍以实例传递。
             ClientHooks.registerPlayerControl(playerControl);
             ClientHooks.registerBlockScans(blockScans);
@@ -294,7 +298,19 @@ public final class Bootstrap {
             // 赋给字段：进世界时现场要经它把当期的世界记忆与目标存盘接上（enterWorld）。
             // 控制权交接接在玩家控制权边界上：目标成为主任务时向输入层请求控制权（下一刻生效），
             // 查询端读此刻自动化是否真的拥有控制权。启动与查询都发生在客户端刻里，线程要求满足。
-            goals = new GoalRunTable(abilities, goalRuns, places, controlLoop, new PlayerControlHandover() {
+            goals = buildGoalRunTable(goalRuns, places);
+
+            tools = goalTools(abilities, goals, clientWork, taskEvents, chatEvents, () -> worldScope[0]);
+        }
+
+        /**
+         * 目标运行表：控制权交接接在玩家控制权边界上，死亡恢复的问题挂在它身上、
+         * 原生动作走角色本体自己的重生请求。表在控制循环之后建，死亡决策的挂载口
+         * 经一个转发接回来（见 deathDecisions）。
+         */
+        private GoalRunTable buildGoalRunTable(GoalRunStore goalRuns, RemembersPlaces places) {
+            // 控制权交接：目标成为主任务时向输入层请求控制权（下一刻生效），查询端读此刻谁拿着控制权。
+            PlayerControlHandover handover = new PlayerControlHandover() {
                 @Override public boolean automationOwnsControls() {
                     return playerControl.input().automationOwnsControls();
                 }
@@ -310,12 +326,37 @@ public final class Bootstrap {
                             playerControl.activeContext().orElseThrow(
                                     () -> new IllegalStateException("不在世界里，请求不了控制权")).localPlayer());
                 }
-            });
-            tools = goalTools(abilities, goals, clientWork, taskEvents, chatEvents, () -> worldScope[0]);
+            };
+            // 死亡恢复的原生动作：重生与观战都走角色本体自己的重生请求（死亡界面按钮发的那个包），
+            // 成不成由游戏结算；上下文不在或发包出错就如实说发不出去，目标运行表会把问题重新挂上。
+            DeathRecoveryActions deathActions = new DeathRecoveryActions() {
+                @Override public boolean requestRespawn() {
+                    return sendNativeRespawn();
+                }
+
+                @Override public boolean requestSpectate() {
+                    return sendNativeRespawn();
+                }
+            };
+            return new GoalRunTable(abilities, goalRuns, places, controlLoop, handover,
+                    new DeathRecovery(taskEvents), deathActions);
+        }
+
+        /** 死亡决策的挂载口转发到目标运行表：表在控制循环之后建，转发到那时才有着落。 */
+        private DeathDecisionHost deathDecisions() {
+            return new DeathDecisionHost() {
+                @Override public void characterDied(DeathFacts facts, boolean connectionAlive) {
+                    if (goals != null) goals.characterDied(facts, connectionAlive);
+                }
+
+                @Override public void characterAliveAgain() {
+                    if (goals != null) goals.characterAliveAgain();
+                }
+            };
         }
 
         // 生存需求一套：吃随身食物、战斗感观、交互入口、挖三填一与换气挖顶，按急迫程度登记进控制循环。
-        private void buildSurvival(UseKeyProjection useKeyProjection) {
+        private void buildSurvival(UseKeyProjection useKeyProjection, DeathDecisionHost deathDecisions) {
             // 吃随身食物：挑一件能直接吃的，换到主手后原生按住吃完一口。
             // 食物数值一份：饿了挑吃的、数口粮都按游戏的食物组件认。
             ReadsFoodValues foods = PlayerViews.foods(() -> playerControl.activeContext().orElse(null));
@@ -338,8 +379,25 @@ public final class Bootstrap {
             Supplier<BlockBreaking> diggings = () -> new NativeBlockBreaking(interactionSender, menuActions);
             LiveBurrow burrow = new LiveBurrow(now, diggings, interactions, new ClientMovesToMainhand(now), walks,
                     protection);
-            controlLoop = withSurvivalNeeds(taskEvents, interactionSender, menuActions, interactions,
+            controlLoop = withSurvivalNeeds(taskEvents, deathDecisions, interactionSender, menuActions, interactions,
                     combatSenses, walks, foodMoves, foods, burrow, new LiveCeilingDigs(diggings, protection));
+        }
+
+        /**
+         * 发原版重生请求：和人在死亡界面上点「重生」是同一个入口（角色本体自己发的那个包），
+         * 服务器按它的规则结算——普通重生或切到旁观都走这里。角色上下文不在（没进世界、
+         * 上下文过期）时发不出去，返回 false；发包出错同样如实返回 false，结果由下一刻的观察说话。
+         */
+        private boolean sendNativeRespawn() {
+            return playerControl.activeContext().map(context -> {
+                try {
+                    context.localPlayer().respawn();
+                    return true;
+                } catch (RuntimeException failure) {
+                    LOG.warn("原版重生请求发不出去", failure);
+                    return false;
+                }
+            }).orElse(false);
         }
 
         /** 建与服务端的会话，并在入服前登记客户端知道的操作清单。 */

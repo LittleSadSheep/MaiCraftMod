@@ -10,6 +10,7 @@ import net.minecraft.client.player.LocalPlayer;
 
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.game.interaction.InteractionSender;
+import org.maiwithu.maicraft.game.player.DeathFacts;
 import org.maiwithu.maicraft.game.menu.MenuActions;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
@@ -91,9 +92,59 @@ class ControlLoopDeathTest {
         assertNull(advanced.interrupting());
     }
 
+    @Test
+    void deathHandsFactsToTheDecisionHostOnce() {
+        // 停摆的第一刻把死亡事实与连接状态交给挂决策的一方，之后每刻停摆不再重复叫。
+        RecordingDeathDecisions decisions = new RecordingDeathDecisions();
+        DyingPlayer body = new DyingPlayer();
+        ControlLoop loop = new ControlLoop(List.of(), new RecordingEvents(), decisions);
+        loop.setMainTask(new FakeTask("挖矿", Interruptibility.WORKING));
+
+        body.dead = true;
+        assertInstanceOf(ControlLoop.Decision.WaitingRespawn.class, loop.tick(new Tick(body)));
+        loop.tick(new Tick(body));
+        assertEquals(1, decisions.deaths, "同一个死亡过程只叫一次");
+        assertEquals(12, decisions.facts.score(), "死亡事实原样交给挂决策的一方");
+        assertFalse(decisions.connectionAlive, "替身没有连接，如实交给挂决策的一方");
+        assertEquals(0, decisions.aliveAgain, "还没活过来不算了结");
+
+        // 重生：本轮死亡决策了结，下次死亡再挂新的。
+        body.dead = false;
+        loop.tick(new Tick(body));
+        assertEquals(1, decisions.aliveAgain);
+    }
+
+    @Test
+    void deathWithoutAHostStillHaltsTheLoop() {
+        // 没接挂决策的一方：死亡照常停摆，不挂问题也不出错。
+        DyingPlayer body = new DyingPlayer();
+        ControlLoop loop = new ControlLoop(List.of(), new RecordingEvents());
+        body.dead = true;
+        assertInstanceOf(ControlLoop.Decision.WaitingRespawn.class, loop.tick(new Tick(body)));
+    }
+
+    /** 记下死亡决策挂载口被叫了几次：断言一个死亡过程只挂一次、活过来才了结。 */
+    private static final class RecordingDeathDecisions implements DeathDecisionHost {
+        int deaths;
+        int aliveAgain;
+        DeathFacts facts;
+        boolean connectionAlive;
+
+        @Override public void characterDied(DeathFacts deathFacts, boolean aliveConnection) {
+            deaths++;
+            facts = deathFacts;
+            connectionAlive = aliveConnection;
+        }
+
+        @Override public void characterAliveAgain() {
+            aliveAgain++;
+        }
+    }
+
     /** 只回答"死没死"的角色上下文替身；其他入口这些测试用不到，如实报缺。 */
     private static final class DyingPlayer implements PlayerContext {
         boolean dead;
+        DeathFacts facts = new DeathFacts(12, "minecraft:overworld", 1, 64, 2);
 
         @Override public LocalPlayer localPlayer() { return null; }
         @Override public ClientLevel level() { return null; }
@@ -112,6 +163,7 @@ class ControlLoopDeathTest {
         @Override public boolean canInteractThisTick() { return false; }
         @Override public boolean tryClaimInteraction() { return false; }
         @Override public boolean isDeadOrDying() { return dead; }
+        @Override public DeathFacts deathFacts() { return facts; }
     }
 
     /** 本刻上下文替身：把身体递给循环。 */

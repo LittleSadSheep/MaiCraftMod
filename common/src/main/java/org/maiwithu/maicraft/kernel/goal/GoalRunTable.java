@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.kernel.goal;
 
+import org.maiwithu.maicraft.game.player.DeathFacts;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
+import org.maiwithu.maicraft.kernel.event.TaskEventLog;
 import org.maiwithu.maicraft.kernel.interrupt.ControlLoop;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -38,6 +40,8 @@ public final class GoalRunTable {
     static final int ASIDE_TICK_LIMIT = 20;
 
     private final AbilityRegistry registry;
+    /** 死亡恢复决策：角色死后给 LLM 的选择，挂在这里，回答也先到这里。 */
+    private final DeathRecovery deathRecovery;
     /** 当期的目标运行存储：进世界时换成那个世界的存盘，下达、推进、恢复都落在它上面。 */
     private GoalRunStore store;
     private final ControlLoop loop;
@@ -61,12 +65,31 @@ public final class GoalRunTable {
 
     public GoalRunTable(AbilityRegistry registry, GoalRunStore store, RemembersPlaces remembers, ControlLoop loop,
                         PlayerControlHandover handover) {
+        this(registry, store, remembers, loop, handover,
+                new DeathRecovery(new TaskEventLog()), DeathRecoveryActions.NONE);
+    }
+
+    public GoalRunTable(AbilityRegistry registry, GoalRunStore store, RemembersPlaces remembers, ControlLoop loop,
+                        PlayerControlHandover handover, DeathRecovery deathRecovery,
+                        DeathRecoveryActions deathActions) {
         this.registry = Objects.requireNonNull(registry, "registry");
         this.store = Objects.requireNonNull(store, "store");
         this.detachedPlaceholder = Objects.requireNonNull(remembers, "remembers");
         this.places = remembers;
         this.loop = Objects.requireNonNull(loop, "loop");
         this.handover = Objects.requireNonNull(handover, "handover");
+        this.deathRecovery = Objects.requireNonNull(deathRecovery, "deathRecovery");
+        this.deathActions = Objects.requireNonNull(deathActions, "deathActions");
+    }
+
+    /** 控制循环看到角色死亡的第一刻把现场事实交到这里：挂一次死亡恢复决策，同一个死亡过程只挂一次。 */
+    public void characterDied(DeathFacts facts, boolean connectionAlive) {
+        deathRecovery.onDeath(facts, connectionAlive);
+    }
+
+    /** 死亡过程结束（重生或以别的方式回到活体）：本轮死亡决策了结，下次死亡再挂新的。 */
+    public void characterAliveAgain() {
+        deathRecovery.backAlive();
     }
 
     /**
@@ -97,6 +120,7 @@ public final class GoalRunTable {
         runners.clear();
         requestKeys.clear();
         mainRunId = -1;
+        deathRecovery.forget();
         places = detachedPlaceholder;
     }
 
@@ -178,29 +202,38 @@ public final class GoalRunTable {
         return runner == null || !runner.run().unfinished() ? Optional.empty() : Optional.of(runner.run());
     }
 
-    /** 按编号查目标运行；不在表里（编号不存在，或结束太久已经不保留）时为空。 */
+    /** 按编号查目标运行；不在表里（编号不存在，或结束太久已经不保留）时为空。挂着的死亡恢复决策也按编号查得到。 */
     public Optional<GoalRun> find(long id) {
+        if (deathRecovery.owns(id)) {
+            return deathRecovery.decisionRun();
+        }
         GoalRunner runner = runners.get(id);
         return runner == null ? Optional.empty() : Optional.of(runner.run());
     }
 
-    /** 这个目标此刻在等的问题（sequence 时是正在跑的那一步的问题）；不在等回答时为空。 */
+    /** 这个目标此刻在等的问题（sequence 时是正在跑的那一步的问题）；不在等回答时为空。死亡恢复的问题也从这里看。 */
     public Optional<Question> pendingQuestion(long id) {
+        if (deathRecovery.owns(id)) {
+            return Optional.ofNullable(deathRecovery.pendingQuestion());
+        }
         return Optional.ofNullable(require(id).pendingQuestion());
     }
 
-    /** 表里的目标运行，最近下达的在前。 */
+    /** 表里的目标运行，最近下达的在前；挂着死亡恢复决策时它排在最前面。 */
     public List<GoalRun> recent() {
         List<GoalRun> runs = new ArrayList<>();
         for (GoalRunner runner : runners.values()) {
             runs.add(runner.run());
         }
         Collections.reverse(runs);
+        // 挂着的死亡恢复决策排在最前面：它是此刻最要紧、最该回答的一条。
+        deathRecovery.decisionRun().ifPresent(first -> runs.add(0, first));
         return runs;
     }
 
     /** 暂停：手上的动作停下、松开按键，目标原地不动；生存需求照常处理（被打了照样还手）。 */
     public void pause(long id) {
+        requireNotDeathDecision(id);
         GoalRunner runner = require(id);
         GoalRunState state = runner.run().state();
         if (state != GoalRunState.RUNNING && state != GoalRunState.AWAITING_ANSWER) {
@@ -211,6 +244,7 @@ public final class GoalRunTable {
 
     /** 解除暂停；它不是当前的主任务时（例如重启后恢复的），重新成为主任务，原来的主任务按"被替换"收尾。 */
     public void resume(long id) {
+        requireNotDeathDecision(id);
         GoalRunner runner = require(id);
         if (runner.run().state() != GoalRunState.PAUSED) {
             throw new WrongGoalRunState("目标 " + id + " 现在是 " + runner.run().state() + "，不在暂停");
@@ -226,6 +260,7 @@ public final class GoalRunTable {
 
     /** 取消：正在跑的任务按"被取消"收尾，已经发生的变化如实记进结果。 */
     public void cancel(long id) {
+        requireNotDeathDecision(id);
         GoalRunner runner = require(id);
         if (!runner.run().unfinished()) {
             throw new WrongGoalRunState("目标 " + id + " 已经结束");
@@ -245,6 +280,11 @@ public final class GoalRunTable {
      * @param optionId 所选回答的编号，必须是问题给出的选项之一
      */
     public void answer(long id, String optionId) {
+        if (deathRecovery.owns(id)) {
+            // 死亡恢复的回答不进目标的回答列表：它是一个 Mod 该动手的选择，在这里就地执行。
+            applyDeathChoice(deathRecovery.answer(id, optionId));
+            return;
+        }
         GoalRunner runner = require(id);
         Question question = runner.pendingQuestion();
         if (question == null) {
@@ -255,6 +295,32 @@ public final class GoalRunTable {
                     + String.join("、", question.options().stream().map(Question.Option::id).toList()));
         }
         runner.answer(optionId);
+    }
+
+    /**
+     * 执行死亡恢复的回答：重生与观战经原生动作发请求，发不出去就把同一个问题重新挂上，不吞答复；
+     * 取消任务就地收尾主任务，死亡屏幕留给人。发出去或取消了，本轮决策就地了结。
+     */
+    private void applyDeathChoice(DeathRecovery.Choice choice) {
+        switch (choice) {
+            case RESPAWN -> deathRecovery.applied(choice, deathActions.requestRespawn());
+            case SPECTATE -> deathRecovery.applied(choice, deathActions.requestSpectate());
+            case CANCEL_TASK -> {
+                if (mainRunId != -1) {
+                    // 是主任务：经控制循环收尾，它会连同压在上面等它的位置一起清掉。
+                    loop.endMainTask(CloseReason.CANCELLED);
+                    mainRunId = -1;
+                }
+                deathRecovery.applied(choice, true);
+            }
+        }
+    }
+
+    /** 死亡恢复的记录只能用 answer 回答：暂停、恢复、取消对它都不适用，如实说清。 */
+    private void requireNotDeathDecision(long id) {
+        if (deathRecovery.owns(id)) {
+            throw new WrongGoalRunState("死亡恢复决策只用 answer 回答");
+        }
     }
 
     private void makeMain(GoalRunner runner) {
@@ -289,6 +355,9 @@ public final class GoalRunTable {
      * @param repeated 同一个请求键之前已经下达过，这次没有新开，返回的是原来那个
      */
     public record Launch(GoalRunner runner, boolean repeated) {}
+
+    /** 死亡恢复的原生动作：重生与观战的请求从这里发出去；启动时接上，测试给替身。 */
+    private final DeathRecoveryActions deathActions;
 
     /** 编号不在表里：不存在，或者结束太久已经不保留。 */
     public static final class UnknownGoalRun extends RuntimeException {

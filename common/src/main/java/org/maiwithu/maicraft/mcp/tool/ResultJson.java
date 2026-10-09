@@ -117,7 +117,8 @@ public final class ResultJson {
         JsonObject json = new JsonObject();
         json.addProperty("cursor", event.cursor());
         json.addProperty("kind", lower(event.kind()));
-        if (event.goalRunId() >= 0) {
+        // 与目标无关的事件记在 -1 上；死亡恢复决策的编号是负数，也是一条能按编号回答的记录，照样带上。
+        if (event.goalRunId() != -1) {
             json.addProperty("task_id", event.goalRunId());
         }
         json.addProperty("message", event.message());

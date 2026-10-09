@@ -50,7 +50,8 @@ public final class TaskEventLog implements TaskEventSink {
      */
     public CursorLog.Page<TaskEvent> read(String expectedStream, long afterCursor, long goalRunId, int limit,
                                           long waitMillis) throws InterruptedException {
+        // 只看某个记录时按编号精确匹配；-1 才是"全部"，死亡恢复决策的负数编号也是能按编号筛的记录。
         return log.read(expectedStream, afterCursor,
-                event -> goalRunId < 0 || event.goalRunId() == goalRunId, limit, waitMillis);
+                event -> goalRunId == -1 || event.goalRunId() == goalRunId, limit, waitMillis);
     }
 }

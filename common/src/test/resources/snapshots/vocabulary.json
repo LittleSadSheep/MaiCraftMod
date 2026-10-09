@@ -120,7 +120,8 @@
     "temporary_task_started",
     "temporary_task_finished",
     "need_unhandled",
-    "character_died"
+    "character_died",
+    "death_recovery_applied"
   ],
   "chat_kinds": [
     "player",

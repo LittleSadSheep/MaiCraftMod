@@ -2,7 +2,9 @@
 package org.maiwithu.maicraft.kernel.goal;
 
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.game.player.DeathFacts;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
+import org.maiwithu.maicraft.kernel.event.TaskEventLog;
 import org.maiwithu.maicraft.kernel.interrupt.ControlLoop;
 import org.maiwithu.maicraft.kernel.param.Params;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
@@ -39,7 +41,24 @@ class GoalRunTableTest {
         // 与启动一侧同样的占位：没接上世界记忆时记地点如实报程序错误。
         table = new GoalRunTable(registry, store, (name, position) -> {
             throw new IllegalStateException("没有当期的世界记忆，记不住地点 " + name);
-        }, loop, handover);
+        }, loop, handover, new DeathRecovery(new TaskEventLog()), new RecordingDeathActions());
+    }
+
+    /** 死亡恢复的原生动作替身：记下请求了几次，发不发得出去可以拨。 */
+    static final class RecordingDeathActions implements DeathRecoveryActions {
+        int respawnRequests;
+        int spectateRequests;
+        boolean sends = true;
+
+        @Override public boolean requestRespawn() {
+            respawnRequests++;
+            return sends;
+        }
+
+        @Override public boolean requestSpectate() {
+            spectateRequests++;
+            return sends;
+        }
     }
 
     /** 控制权交接的替身：记下请求了几次，控制权此刻在谁手上可以拨。 */
@@ -59,6 +78,61 @@ class GoalRunTableTest {
         @Override public boolean humanTookOver() {
             return humanTookOver;
         }
+    }
+
+    @Test
+    void deathQuestionIsVisibleAndAnswerableThroughTheTable() {
+        RecordingDeathActions actions = new RecordingDeathActions();
+        GoalRunTable deaths = new GoalRunTable(registry, store, (name, position) -> {
+            throw new IllegalStateException("用不到");
+        }, loop, handover, new DeathRecovery(new TaskEventLog()), actions);
+        GoalRunner main = deaths.launch(GOAL, null).runner();
+
+        deaths.characterDied(new DeathFacts(3, "minecraft:overworld", 0, 64, 0), true);
+        GoalRun decision = deaths.recent().get(0);
+        assertEquals(DeathRecovery.DECISION_NAME, decision.goal().ability(), "任务列表里看得到死亡恢复");
+        assertTrue(deaths.pendingQuestion(decision.id()).isPresent());
+        assertSame(main.run(), deaths.mainGoal().orElseThrow(), "主任务还在，死亡决策不顶替它");
+
+        // 选了取消：主任务被取消收尾，死亡屏幕留给人。
+        deaths.answer(decision.id(), "cancel_task");
+        assertFalse(main.run().unfinished(), "取消任务把主任务收尾");
+        assertTrue(decision.result().summary().contains("取消"));
+
+        // 决策记录只能回答，暂停、恢复、取消对它都不适用。
+        assertThrows(GoalRunTable.WrongGoalRunState.class, () -> deaths.pause(decision.id()));
+        assertThrows(GoalRunTable.WrongGoalRunState.class, () -> deaths.cancel(decision.id()));
+    }
+
+    @Test
+    void respawnAnswerSendsTheNativeRequestAndFailureHangsTheQuestionAgain() {
+        RecordingDeathActions actions = new RecordingDeathActions();
+        GoalRunTable deaths = new GoalRunTable(registry, store, (name, position) -> {
+            throw new IllegalStateException("用不到");
+        }, loop, handover, new DeathRecovery(new TaskEventLog()), actions);
+        deaths.launch(GOAL, null).runner();
+
+        deaths.characterDied(null, true);
+        GoalRun decision = deaths.recent().get(0);
+
+        // 请求发不出去：问题重新挂上，答复不吞。
+        actions.sends = false;
+        deaths.answer(decision.id(), "respawn");
+        assertEquals(1, actions.respawnRequests);
+        assertTrue(deaths.pendingQuestion(decision.id()).isPresent(), "失败要重新挂问题");
+
+        // 这次发出去了：问题消费掉，迟到的重复答复不再被收。
+        actions.sends = true;
+        deaths.answer(decision.id(), "respawn");
+        assertEquals(2, actions.respawnRequests);
+        assertFalse(deaths.pendingQuestion(decision.id()).isPresent());
+        assertThrows(GoalRunTable.WrongGoalRunState.class, () -> deaths.answer(decision.id(), "respawn"));
+
+        // 回到活体：本轮决策丢掉，下次死亡再挂新的。
+        deaths.characterAliveAgain();
+        deaths.characterDied(null, false);
+        assertTrue(deaths.pendingQuestion(deaths.recent().get(0).id()).isPresent());
+        assertFalse(deaths.recent().get(0).id() == decision.id(), "下次死亡是一条新的决策记录");
     }
 
     private void runTicks(int count) {

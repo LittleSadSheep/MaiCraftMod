@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.kernel.interrupt;
 
+import org.maiwithu.maicraft.game.player.DeathFacts;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
@@ -59,6 +60,8 @@ public final class ControlLoop {
     private final List<SurvivalNeed> needs;
     /** 角色死亡这类循环自身的处境变化从这里告诉宿主。 */
     private final TaskEventSink events;
+    /** 死亡决策的挂载对象：停摆的第一刻把死亡事实交给它去挂「死亡恢复」问题。 */
+    private final DeathDecisionHost deathDecisions;
     /** 上一刻是否已在死亡停摆里；只在本刻刚看到死亡时收尾插着的任务、发一次事件。 */
     private boolean waitingRespawn;
     /** 主任务被停在半路时的一句话说明；没被停过为 null。 */
@@ -81,8 +84,17 @@ public final class ControlLoop {
      * @param events 角色死亡这类循环自身的处境变化从这里告诉宿主；测试没接事件流时用空实现。
      */
     public ControlLoop(List<SurvivalNeed> needs, TaskEventSink events) {
+        this(needs, events, DeathDecisionHost.NONE);
+    }
+
+    /**
+     * @param events         角色死亡这类循环自身的处境变化从这里告诉宿主；测试没接事件流时用空实现。
+     * @param deathDecisions 死亡决策的挂载对象；没接时死亡照常停摆，只是不挂「死亡恢复」问题。
+     */
+    public ControlLoop(List<SurvivalNeed> needs, TaskEventSink events, DeathDecisionHost deathDecisions) {
         this.needs = List.copyOf(needs);
         this.events = Objects.requireNonNull(events, "events");
+        this.deathDecisions = Objects.requireNonNull(deathDecisions, "deathDecisions");
     }
 
     /**
@@ -142,7 +154,11 @@ public final class ControlLoop {
         if (player != null && player.isDeadOrDying()) {
             return waitForRespawn(context);
         }
-        waitingRespawn = false;
+        if (waitingRespawn) {
+            // 从死亡停摆里走出来（重生或以别的方式回到活体）：本轮死亡决策了结，下次死亡再挂新的。
+            waitingRespawn = false;
+            deathDecisions.characterAliveAgain();
+        }
         if (stack.isEmpty()) {
             // 手上没有任务，没有东西要保护：任何生存需求此刻都能插进来，找空当的也不例外。
             Choice choice = choose(context, Interruptibility.BETWEEN_ACTIONS, null);
@@ -201,6 +217,10 @@ public final class ControlLoop {
             }
             events.publish(TaskEvent.Kind.CHARACTER_DIED,
                     "角色死了，等重生；插着的任务已结束，主任务停在原地，重生后接着做");
+            // 死亡是 LLM 该拿主意的事：把现场事实交给挂决策的一方，连接还在才提供切观战这个选项。
+            PlayerContext body = context.player();
+            DeathFacts facts = body == null ? null : body.deathFacts();
+            deathDecisions.characterDied(facts, body != null && body.connection() != null);
             LOG.info("角色死亡：控制循环停摆，等重生");
         }
         return new Decision.WaitingRespawn(stack.isEmpty() ? null : stack.getFirst().task);

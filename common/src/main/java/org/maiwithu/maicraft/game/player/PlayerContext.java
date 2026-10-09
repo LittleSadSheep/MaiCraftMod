@@ -71,4 +71,12 @@ public interface PlayerContext {
         LocalPlayer player = localPlayer();
         return player != null && player.isDeadOrDying();
     }
+
+    /**
+     * 死亡现场的可见事实：死亡那一刻的分数与所在位置。客户端拿不到死因，不在这里编。
+     * 没死、或测试替身没接时为 null。
+     */
+    default DeathFacts deathFacts() {
+        return null;
+    }
 }
