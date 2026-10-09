@@ -29,6 +29,11 @@ public final class TaskFactories {
         }
     }
 
+    /** 清空全部登记：登记方随它的现场整体换新时，旧的工厂一并作废，重新登记后不再生效。 */
+    public void clear() {
+        factories.clear();
+    }
+
     public boolean supports(Class<? extends TaskInput> type) {
         return factories.containsKey(type);
     }

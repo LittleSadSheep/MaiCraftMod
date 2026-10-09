@@ -5,12 +5,14 @@ import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.goal.GoalTestAbility.SharedTasks;
 import org.maiwithu.maicraft.kernel.goal.GoalTestAbility.TestInput;
+import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 import org.maiwithu.maicraft.kernel.task.TaskInput;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -19,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * sequence 多步目标：每一步当作一个完整的目标推进逐步跑；某步失败按 onFailure 决定停下还是继续；
- * 中断恢复时接着用它自己的步骤记录；LLM 的回答转交给正在跑的子目标。
+ * 中断恢复时接着用它自己的步骤记录；LLM 的回答转交给正在跑的子目标；各步骤发生的事并进整件事的结果。
  */
 class SequenceGoalRunnerTest {
 
@@ -27,6 +29,15 @@ class SequenceGoalRunnerTest {
 
     private static Goal stepOf(String ability) {
         return Goal.of(ability, null, null);
+    }
+
+    /** 带自己的 onFailure 的一步：这一步失败后整件事停下还是继续，由这一步自己说。 */
+    private static Goal stepOf(String ability, Goal.OnFailure onFailure) {
+        return new Goal(ability, null, null, null, null, List.of(), onFailure);
+    }
+
+    private static Goal sequenceOf(Goal... steps) {
+        return new Goal("maicraft:sequence", null, null, null, null, List.of(steps), null);
     }
 
     private static GoalRunner launch(Goal goal, GoalRunStore store, GoalTestAbility... abilities) {
@@ -102,13 +113,13 @@ class SequenceGoalRunnerTest {
         second.next(new StepDecision.Run(new TestInput("搭房")));
         InMemoryGoalRunStore store = new InMemoryGoalRunStore();
         Goal sequence = new Goal("maicraft:sequence", null, null, null, null,
-                List.of(stepOf("maicraft:dig"), stepOf("maicraft:build")), Goal.OnFailure.CONTINUE);
+                List.of(stepOf("maicraft:dig", Goal.OnFailure.CONTINUE), stepOf("maicraft:build")), null);
         GoalRunner runner = launch(sequence, store, first, second);
 
         TaskResult result = drive(runner, 20);
 
         assertEquals(TaskResult.Status.PARTIAL, result.status());
-        assertEquals(List.of("羊都跑光了"), result.remaining(), "没做成的步骤写进 remaining");
+        assertEquals(List.of("第 1 步（maicraft:dig）：羊都跑光了"), result.remaining(), "没做成的步骤写进 remaining");
         assertEquals(Problem.Kind.NEED_ITEM, result.problem().kind(), "第一个失败写进问题");
         assertEquals(List.of("剪羊毛", "搭房"), labels(first.startedInputs()), "继续做后面的步骤");
     }
@@ -138,8 +149,8 @@ class SequenceGoalRunnerTest {
         registry.register(second);
         GoalRun restoredSequence = store.unfinished().stream()
                 .filter(run -> run.parentRunId() == -1).findFirst().orElseThrow();
-        GoalRunner revived = GoalRunner.resume(restoredSequence, registry, store, new GoalRunnerTest.TestMemory());
-        revived.unpause();
+        GoalRunner revived = GoalRunner.restore(restoredSequence, registry, store, new GoalRunnerTest.TestMemory());
+        revived.resumeGoal();
         revived.answer("w");
         // 第一步的问题由子目标接着回答，第二步照常跑。
         TaskResult result = drive(revived, 20);
@@ -147,5 +158,131 @@ class SequenceGoalRunnerTest {
         assertEquals(List.of("w"), first.answersSeen, "回答转交给了正在跑的子目标");
         assertEquals(List.of("挖坑", "搭房"), labels(first.startedInputs()));
         assertTrue(store.unfinished().isEmpty());
+    }
+    @Test
+    void eachStepDecidesForItselfWhetherAFailureStopsTheSequence() {
+        // 第一步允许失败、第二步不允许：第一步没做成照样往下走，第二步做成，整件事部分完成。
+        SharedTasks tasks = new SharedTasks();
+        GoalTestAbility first = new GoalTestAbility("maicraft:dig", tasks);
+        first.ending("挖坑", TaskResult.failed("下面是基岩", Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "挖不动")));
+        first.next(new StepDecision.Run(new TestInput("挖坑")));
+        GoalTestAbility second = new GoalTestAbility("maicraft:build", tasks);
+        second.next(new StepDecision.Run(new TestInput("搭房")));
+        Goal sequence = sequenceOf(stepOf("maicraft:dig", Goal.OnFailure.CONTINUE),
+                stepOf("maicraft:build", Goal.OnFailure.STOP));
+        GoalRunner runner = launch(sequence, new InMemoryGoalRunStore(), first, second);
+
+        TaskResult result = drive(runner, 20);
+
+        assertEquals(TaskResult.Status.PARTIAL, result.status());
+        assertEquals(List.of("挖坑", "搭房"), labels(first.startedInputs()));
+    }
+
+    @Test
+    void whatEachStepDidEndsUpInTheSequenceResult() {
+        SharedTasks tasks = new SharedTasks();
+        GoalTestAbility first = new GoalTestAbility("maicraft:dig", tasks);
+        first.ending("挖坑", TaskResult.builder(TaskResult.Status.DONE, "挖好了")
+                .change(Change.of(Change.Kind.BLOCK_BROKEN, "minecraft:dirt", 4)).build());
+        first.next(new StepDecision.Run(new TestInput("挖坑")));
+        GoalTestAbility second = new GoalTestAbility("maicraft:build", tasks);
+        second.ending("搭房", TaskResult.failed("木板不够", Problem.of(Problem.Kind.NEED_ITEM, "还缺 6 块木板")));
+        second.next(new StepDecision.Run(new TestInput("搭房")));
+        GoalRunner runner = launch(sequenceOf(stepOf("maicraft:dig"), stepOf("maicraft:build")),
+                new InMemoryGoalRunStore(), first, second);
+
+        TaskResult result = drive(runner, 20);
+
+        assertEquals(TaskResult.Status.PARTIAL, result.status(), "第一步做成了，整件事算部分完成");
+        assertEquals(Problem.Kind.NEED_ITEM, result.problem().kind());
+        assertEquals("minecraft:dirt", result.changes().get(0).what(), "挖坑的变化留在整件事的结果里");
+    }
+
+    @Test
+    void restoredStepKeepsWaitingForItsAnswerEvenIfTickedFirst() {
+        // 重启后先恢复推进、过了几刻 LLM 才回答：那一步的问题照样挂着，回答到了接着走，不另起一条记录。
+        SharedTasks tasks = new SharedTasks();
+        GoalTestAbility first = new GoalTestAbility("maicraft:dig", tasks);
+        first.next(new StepDecision.Ask(new Question(Question.Reason.CHOOSE_ONE, "往哪边挖？",
+                List.of(new Question.Option("w", "西边")))));
+        first.next(new StepDecision.Run(new TestInput("挖坑")));
+        InMemoryGoalRunStore store = new InMemoryGoalRunStore();
+        GoalRunner runner = launch(sequenceOf(stepOf("maicraft:dig")), store, first);
+        runner.start(TICK0);
+        runner.tick(TICK0);
+        runner.tick(new GoalTestTick(101));
+        long stepRunId = store.unfinished().stream()
+                .filter(run -> run.parentRunId() != GoalRun.NO_PARENT).findFirst().orElseThrow().id();
+
+        GoalRunner revived = restoreSequence(store, first);
+        revived.resumeGoal();
+        revived.start(new GoalTestTick(200));
+        for (int tick = 201; tick < 205; tick++) {
+            assertEquals(TickResult.RUNNING, revived.tick(new GoalTestTick(tick)));
+        }
+        assertEquals("往哪边挖？", revived.pendingQuestion().text(), "问题还挂着");
+        revived.answer("w");
+        assertEquals(stepRunId, store.unfinished().stream()
+                .filter(run -> run.parentRunId() != GoalRun.NO_PARENT).findFirst().orElseThrow().id(),
+                "沿用重启前的那条步骤记录");
+
+        TaskResult result = resultOf(revived, 10);
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertEquals(List.of("w"), first.answersSeen);
+        assertTrue(store.unfinished().isEmpty());
+    }
+
+    @Test
+    void answerToAStepNotYetPulledUpIsSavedToThatStep() {
+        SharedTasks tasks = new SharedTasks();
+        GoalTestAbility first = new GoalTestAbility("maicraft:dig", tasks);
+        first.next(new StepDecision.Ask(new Question(Question.Reason.CHOOSE_ONE, "往哪边挖？",
+                List.of(new Question.Option("w", "西边")))));
+        List<Long> saved = new ArrayList<>();
+        InMemoryGoalRunStore inner = new InMemoryGoalRunStore();
+        GoalRunStore store = new GoalRunStore() {
+            @Override public long nextId() {
+                return inner.nextId();
+            }
+
+            @Override public void save(GoalRun run) {
+                saved.add(run.id());
+                inner.save(run);
+            }
+
+            @Override public List<GoalRun> unfinished() {
+                return inner.unfinished();
+            }
+        };
+        GoalRunner runner = launch(sequenceOf(stepOf("maicraft:dig")), store, first);
+        runner.start(TICK0);
+        runner.tick(TICK0);
+        runner.tick(new GoalTestTick(101));
+        GoalRun step = store.unfinished().stream()
+                .filter(run -> run.parentRunId() != GoalRun.NO_PARENT).findFirst().orElseThrow();
+        GoalRunner revived = restoreSequence(store, first);
+        saved.clear();
+
+        revived.answer("w");
+
+        assertEquals(List.of(step.id()), saved, "回答存进那一步自己的记录，不是存 sequence 的");
+    }
+
+    private static GoalRunner restoreSequence(GoalRunStore store, GoalTestAbility... abilities) {
+        AbilityRegistry registry = new AbilityRegistry(new TaskFactories());
+        for (GoalTestAbility ability : abilities) {
+            registry.register(ability);
+        }
+        GoalRun parent = store.unfinished().stream()
+                .filter(run -> run.parentRunId() == GoalRun.NO_PARENT).findFirst().orElseThrow();
+        return GoalRunner.restore(parent, registry, store, new GoalRunnerTest.TestMemory());
+    }
+
+    private static TaskResult resultOf(GoalRunner runner, int maxTicks) {
+        TickResult tickResult = TickResult.RUNNING;
+        for (int tick = 300; tick < 300 + maxTicks && tickResult instanceof TickResult.Running; tick++) {
+            tickResult = runner.tick(new GoalTestTick(tick));
+        }
+        return assertInstanceOf(TickResult.Finished.class, tickResult).result();
     }
 }

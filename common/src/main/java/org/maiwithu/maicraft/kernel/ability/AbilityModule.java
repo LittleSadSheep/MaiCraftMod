@@ -26,8 +26,17 @@ public interface AbilityModule {
     /** 登记本能力的任务输入类型和对应的任务。 */
     default void registerTasks(TaskFactories factories) {}
 
+    /**
+     * 这个能力的目标能不能带按顺序的步骤（steps）。只有按顺序做几件事的能力回答是；
+     * MCP 入口据此拒绝给其他能力带 steps，免得步骤被悄悄忽略。
+     */
+    default boolean acceptsSteps() {
+        return false;
+    }
+
     /** 本能力的特殊处理；绝大多数能力用不到。 */
     default AbilityHooks hooks() {
         return AbilityHooks.NONE;
     }
+
 }

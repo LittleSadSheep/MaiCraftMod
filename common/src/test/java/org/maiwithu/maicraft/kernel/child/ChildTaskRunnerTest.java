@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.kernel.child;
 
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
+import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -16,13 +17,15 @@ import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** 子任务运行器：正常结算、失败传播、暂停与恢复、卡住判定、继承时限、重复结算。 */
+/** 子任务运行器：正常结算、失败传播、暂停与恢复、卡住判定、继承时限、截停与出错时保留已发生的事、重复结算。 */
 class ChildTaskRunnerTest {
 
     private static final ChildTestTick TICK = new ChildTestTick(0);
@@ -72,7 +75,7 @@ class ChildTaskRunnerTest {
     void runsChildToCompletionAndSettles() {
         ScriptedChild child = new ScriptedChild(ScriptedChild.running(), ScriptedChild.running(),
                 ScriptedChild.finishedDone("箱子关上了"));
-        ChildTaskRunner runner = new ChildTaskRunner(new ProgressTracker(1, 100));
+        ChildTaskRunner runner = new ChildTaskRunner(100);
         runner.begin(child, TICK);
 
         TaskResult result = resultOf(runUntilFinished(runner, 10));
@@ -92,7 +95,7 @@ class ChildTaskRunnerTest {
     void childFailurePropagatesToParent() {
         ScriptedChild child = new ScriptedChild(TickResult.finished(
                 TaskResult.failed("附近没有羊毛", Problem.of(Problem.Kind.NEED_ITEM, "附近没有羊，身上也没有羊毛"))));
-        ChildTaskRunner runner = new ChildTaskRunner(new ProgressTracker(1, 100));
+        ChildTaskRunner runner = new ChildTaskRunner(100);
         runner.begin(child, TICK);
 
         TaskResult result = resultOf(runner.tick(TICK));
@@ -107,7 +110,7 @@ class ChildTaskRunnerTest {
         ScriptedChild child = new ScriptedChild(ScriptedChild.running(), ScriptedChild.running(),
                 ScriptedChild.finishedDone("躺下了"));
         child.interruptibility = Interruptibility.UNSAFE_TO_STOP;
-        ChildTaskRunner runner = new ChildTaskRunner(new ProgressTracker(1, 100));
+        ChildTaskRunner runner = new ChildTaskRunner(100);
         runner.begin(child, TICK);
 
         assertEquals(TickResult.RUNNING, runner.tick(TICK));
@@ -128,7 +131,7 @@ class ChildTaskRunnerTest {
     @Test
     void stuckChildIsJudgedByItsOwnProgressTracker() {
         // 磨蹭的子任务自己带进度跟踪：3 刻没有真实进展就算卡住，运行器只传播它的失败结果。
-        ChildTaskRunner runner = new ChildTaskRunner(new ProgressTracker(1, 1000));
+        ChildTaskRunner runner = new ChildTaskRunner(1000);
         runner.begin(new StallingChild(new ProgressTracker(3, 1000)), TICK);
 
         TaskResult result = resultOf(runUntilFinished(runner, 10));
@@ -143,7 +146,7 @@ class ChildTaskRunnerTest {
     void inheritedBudgetTimeoutStopsRunawayChild() {
         // 子任务自己的任务类型不做卡住判定（永远在做），父任务交给的时限到点就得截停。
         ScriptedChild child = new ScriptedChild(ScriptedChild.running());
-        ChildTaskRunner runner = new ChildTaskRunner(new ProgressTracker(1, 5));
+        ChildTaskRunner runner = new ChildTaskRunner(5);
         runner.begin(child, TICK);
 
         TaskResult result = null;
@@ -163,7 +166,7 @@ class ChildTaskRunnerTest {
     void standingChildIsNotStoppedByInheritedBudget() {
         // 常驻任务（等待、跟随）等的就是时间本身：兜底时限到点也不截停，由它自己的进度跟踪负责。
         StandingChild child = new StandingChild();
-        ChildTaskRunner runner = new ChildTaskRunner(new ProgressTracker(1, 5));
+        ChildTaskRunner runner = new ChildTaskRunner(5);
         runner.begin(child, TICK);
 
         for (int tick = 0; tick < 10; tick++) {
@@ -202,7 +205,7 @@ class ChildTaskRunnerTest {
     @Test
     void doubleSettleIsRejected() {
         ScriptedChild child = new ScriptedChild(ScriptedChild.finishedDone("做完了"));
-        ChildTaskRunner runner = new ChildTaskRunner(new ProgressTracker(1, 100));
+        ChildTaskRunner runner = new ChildTaskRunner(100);
         runner.begin(child, TICK);
         resultOf(runner.tick(TICK));
         assertTrue(runner.finished());
@@ -211,7 +214,7 @@ class ChildTaskRunnerTest {
         assertThrows(IllegalStateException.class, () -> runner.close(CloseReason.CANCELLED), "重复结算要被拒绝");
         assertThrows(IllegalStateException.class, () -> runner.begin(new ScriptedChild(), TICK), "结算后再开始要被拒绝");
         // 结算前提前收尾同样只允许一次。
-        ChildTaskRunner early = new ChildTaskRunner(new ProgressTracker(1, 100));
+        ChildTaskRunner early = new ChildTaskRunner(100);
         ScriptedChild abandoned = new ScriptedChild(ScriptedChild.running());
         abandoned.closeResult = TaskResult.cancelled("放下了手里的半成品");
         early.begin(abandoned, TICK);
@@ -226,7 +229,7 @@ class ChildTaskRunnerTest {
         // 启动就抛异常：运行器收场并给出程序错误的结果，不让异常顺着调用链炸到父任务。
         ScriptedChild brokenStart = new ScriptedChild();
         brokenStart.startError = new IllegalStateException("没有登记对应的任务");
-        ChildTaskRunner runner = new ChildTaskRunner(new ProgressTracker(1, 100));
+        ChildTaskRunner runner = new ChildTaskRunner(100);
         runner.begin(brokenStart, TICK);
 
         assertTrue(runner.finished());
@@ -237,12 +240,37 @@ class ChildTaskRunnerTest {
         // 推进到一半抛异常同样转成程序错误，父任务拿到的是明确的结算，不是异常。
         ScriptedChild brokenTick = new ScriptedChild(ScriptedChild.running());
         brokenTick.tickError = new ArithmeticException("除数不能为零");
-        ChildTaskRunner midRun = new ChildTaskRunner(new ProgressTracker(1, 100));
+        ChildTaskRunner midRun = new ChildTaskRunner(100);
         midRun.begin(brokenTick, TICK);
         TaskResult midResult = resultOf(midRun.tick(TICK));
         assertEquals(TaskResult.Status.FAILED, midResult.status());
         assertEquals(Problem.Kind.INTERNAL_ERROR, midResult.problem().kind());
         assertEquals(1, brokenTick.closes, "异常收场也要给子任务一次收尾机会");
         assertTrue(midRun.finished());
+    }
+    @Test
+    void timeoutAndExceptionKeepWhatTheChildAlreadyDid() {
+        // 挖了 40 个铁才被时限截停：收尾时交代的变化必须留在失败结果里，LLM 才知道已经拿到了什么。
+        Change mined = Change.of(Change.Kind.ITEM_GAINED, "minecraft:raw_iron", 40);
+        ScriptedChild slowMining = new ScriptedChild(ScriptedChild.running());
+        slowMining.closeResult = TaskResult.builder(TaskResult.Status.CANCELLED, "挖了一半").change(mined).build();
+        ChildTaskRunner limited = new ChildTaskRunner(3);
+        limited.begin(slowMining, TICK);
+        TaskResult timedOut = null;
+        for (int tick = 0; tick < 3 && timedOut == null; tick++) {
+            if (limited.tick(TICK) instanceof TickResult.Finished finished) timedOut = finished.result();
+        }
+        assertEquals(Problem.Kind.STUCK, timedOut.problem().kind());
+        assertEquals(List.of(mined), timedOut.changes(), "截停的结果里要有已经挖到的铁");
+
+        // 推进时出错同理：先让子任务交代，再把事实并进程序错误的结果。
+        ScriptedChild brokenMining = new ScriptedChild(ScriptedChild.running());
+        brokenMining.tickError = new IllegalStateException("推进出错");
+        brokenMining.closeResult = TaskResult.builder(TaskResult.Status.CANCELLED, "挖了一半").change(mined).build();
+        ChildTaskRunner runner = new ChildTaskRunner(ChildTaskRunner.NO_LIMIT);
+        runner.begin(brokenMining, TICK);
+        TaskResult crashed = resultOf(runner.tick(TICK));
+        assertEquals(Problem.Kind.INTERNAL_ERROR, crashed.problem().kind());
+        assertEquals(List.of(mined), crashed.changes(), "出错的结果里也要有已经挖到的铁");
     }
 }

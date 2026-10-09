@@ -33,6 +33,7 @@ import org.maiwithu.maicraft.game.serverlink.ServerLinkSession;
 import org.maiwithu.maicraft.game.world.BlockScanService;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.goal.Goal;
+import org.maiwithu.maicraft.kernel.goal.GoalRunTable;
 import org.maiwithu.maicraft.kernel.goal.InMemoryGoalRunStore;
 import org.maiwithu.maicraft.kernel.param.Params;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
@@ -86,12 +87,13 @@ class AssemblyTest {
         var registry = AbilityCatalog.create(deps());
         // 手上没有生存需求（替身清单为空），控制循环只推进主任务。
         ControlLoop controlLoop = new ControlLoop(List.of());
-        MainGoalSlot goals = new MainGoalSlot(controlLoop, registry,
-                new InMemoryGoalRunStore(), deps().memory());
+        // 下达经目标运行表：LLM 用 execute 派的活走同一条路，目标成为控制循环的主任务。
         // 等待目标：条件是"过了 0 秒"，开工即完成——推进路径走的是真实的任务与控制循环。
         // 目标写能力的完整 ID：目标推进器按 ID 查清单。
-        goals.assign(Goal.of("maicraft:wait", null, Params.EMPTY));
-        assertTrue(goals.running().isPresent(), "下达后目标推进器要在槽里");
+        GoalRunTable goals = new GoalRunTable(registry, new InMemoryGoalRunStore(),
+                deps().memory(), controlLoop);
+        GoalRunTable.Launch launch = goals.launch(Goal.of("maicraft:wait", null, Params.EMPTY), null);
+        assertTrue(!launch.repeated(), "第一次下达要新开一个目标运行");
 
         // 下达后的第一刻能力做决定、开出任务，随后一刻任务走完：两刻内给结果。
         TaskResult finished = null;

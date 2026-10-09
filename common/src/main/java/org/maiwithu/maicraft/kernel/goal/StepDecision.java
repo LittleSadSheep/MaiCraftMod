@@ -27,8 +27,15 @@ public sealed interface StepDecision {
         }
     }
 
-    /** 运行一个任务；recheckAfterSuccess 为 true 时，任务成功后回来重新看这一步是否满足，而不是直接算完成。 */
-    record Run(TaskInput input, boolean recheckAfterSuccess) implements StepDecision {
+    /**
+     * 运行一个任务。
+     *
+     * <p>decideAgain 为 false 时，任务的结果就是这一步的结果：成功算完成，失败带着事实结束。
+     * 为 true 时，任务结束后（无论成败）回来重新决定这一步：决定能从
+     * {@link StepContext#taskResults()} 看到刚结束的结果——成功了看这一步是否已经满足，
+     * 失败了按重试策略换办法，或者带着事实结束。
+     */
+    record Run(TaskInput input, boolean decideAgain) implements StepDecision {
         public Run {
             Objects.requireNonNull(input, "input");
         }

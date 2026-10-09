@@ -40,13 +40,11 @@ import org.maiwithu.maicraft.game.player.PlayerControlBoundary;
 import org.maiwithu.maicraft.game.serverlink.ServerLinkSession;
 import org.maiwithu.maicraft.game.world.BlockScanService;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
-import org.maiwithu.maicraft.kernel.goal.InMemoryGoalRunStore;
-import org.maiwithu.maicraft.kernel.interrupt.ControlLoop;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 import org.maiwithu.maicraft.kernel.storage.StateIdentity;
 
 /**
- * 进世界时创建、退世界时丢弃的这一份现场：世界记忆、感知场景、能力注册表与目标主任务槽。
+ * 进世界时创建、退世界时丢弃的这一份现场：世界记忆、感知场景，并把能力按清单登记进客户端共用的注册表。
  *
  * <p>世界身份从存档目录或服务器地址识别，记忆按身份分开存；连到另一个世界时这份现场整体丢弃，
  * 不把上一个世界的东西带过来。每刻由启动侧把当刻的角色上下文交给 {@link #observe}，
@@ -58,7 +56,6 @@ public final class WorldScope {
     private final SubtitleFeed subtitles;
     private final WorldMemory memory;
     private final Scene scene;
-    private final MainGoalSlot goals;
     private final TravelProgressListener travelProgress = new LatestTravelProgress();
 
     /** 保留最近一刻出行进展的收件口：宿主查任务面板时读它，不攒历史。 */
@@ -73,7 +70,7 @@ public final class WorldScope {
     public WorldScope(Minecraft minecraft, PlayerControlBoundary playerControl, BlockScanService blockScans,
             ServerLinkSession session, SubtitleFeed subtitles, Interactions interactions,
             UseKeyProjection useKeyProjection, BaritoneInternals walks, CombatSenses senses,
-            ControlLoop controlLoop, InteractionSender interactionSender, MenuActions menuActions) {
+            AbilityRegistry abilities, InteractionSender interactionSender, MenuActions menuActions) {
         StateIdentity identity = StateIdentity.resolve(minecraft)
                 .orElseThrow(() -> new IllegalStateException("进了世界却识别不出世界身份，记忆无处安放"));
         this.blockScans = Objects.requireNonNull(blockScans, "blockScans");
@@ -85,7 +82,8 @@ public final class WorldScope {
         Supplier<PlayerContext> now = () -> playerControl.activeContext().orElse(null);
         // 原生挖掘走生存需求共用的那套挖掘基础代码，每次要挖一格开一份。
         Supplier<NativeBlockBreaking> diggings = () -> new NativeBlockBreaking(interactionSender, menuActions);
-        AbilityRegistry registry = AbilityCatalog.create(new AbilityCatalog.Deps(
+        // 能力按清单登记进客户端全程共用的那一份注册表：MCP 的 lookup 与 execute 读的就是它。
+        AbilityCatalog.create(new AbilityCatalog.Deps(
                 now, interactions, walks, walks, blockScans, scene, memory,
                 session, minecraft.player.getUUID().toString(),
                 new ClientCreatureSituations(now), senses,
@@ -107,8 +105,7 @@ public final class WorldScope {
                 new ChatChannel(now),
                 // 客户端刻号跟着所在世界走；没进世界读不到，按 0 兜底（只在读端内部量时长用）。
                 () -> minecraft.level == null ? 0 : minecraft.level.getGameTime(),
-                new InputDriver(playerControl)));
-        this.goals = new MainGoalSlot(controlLoop, registry, new InMemoryGoalRunStore(), memory);
+                new InputDriver(playerControl)), abilities);
     }
 
     /**
@@ -138,11 +135,6 @@ public final class WorldScope {
         scene.updateFacilities(gameTick, when,
                 new ClientNearbyBlocksSight(blockScans, () -> current).nearby(facilities));
         scene.expire(gameTick);
-    }
-
-    /** 目标主任务槽：宿主下达目标从这里进控制循环。 */
-    public MainGoalSlot goals() {
-        return goals;
     }
 
     /** 世界记忆：宿主查询与能力共用的那份。 */

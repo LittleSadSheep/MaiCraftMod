@@ -63,17 +63,30 @@ public final class ToolCatalog {
         tools.add(tool(TASK, "查看、暂停、恢复、取消任务，回答任务提出的问题，分页读证据。",
                 properties(
                         field("operation", "string", "操作：get、list、pause、resume、cancel、answer", null),
-                        field("task_id", "string", "除 list 外都要给：任务编号", null),
+                        field("task_id", "integer", "除 list 外都要给：execute 返回的任务编号", null),
                         field("answer", "string", "只在 operation=answer 时用：所选回答的编号", null)),
                 new String[]{"operation"}));
         tools.add(tool(EVENTS, "按游标读任务事件，没有新事件时可以等一会儿。",
                 properties(
-                        field("task_id", "string", "只读这个任务的事件", null),
-                        field("stream_id", "string", "事件流的编号", null),
-                        field("after_cursor", "integer", "从这个游标之后开始读", null),
-                        field("wait_ms", "integer", "没有新事件时最多等多久（毫秒）", null)),
+                        field("task_id", "integer", "只读这个任务的事件", null),
+                        field("stream_id", "string", "事件流的编号，照抄上次返回的 stream_id", null),
+                        field("after_cursor", "integer", "从这个游标之后开始读，照抄上次返回的 cursor", null),
+                        field("wait_ms", "integer", "没有新事件时最多等多久（毫秒，0 到 60000）", null)),
                 new String[0]));
         return tools;
+    }
+
+    /** 把工具的统一格式结果装进 MCP 的调用结果：一段 JSON 文字，工具失败（ok=false）时标 isError。 */
+    public static JsonObject wrap(JsonObject reply) {
+        JsonArray content = new JsonArray();
+        JsonObject text = new JsonObject();
+        text.addProperty("type", "text");
+        text.addProperty("text", GSON.toJson(reply));
+        content.add(text);
+        JsonObject result = new JsonObject();
+        result.add("content", content);
+        result.addProperty("isError", !reply.get("ok").getAsBoolean());
+        return result;
     }
 
     /** 已声明但真实行为尚未接入时的调用应答：明确说还没有，不装作成功或失败。 */

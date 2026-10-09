@@ -39,21 +39,34 @@ final class GoalTestAbility implements AbilityModule {
         }
     }
 
-    /** 替身任务：逐刻返回约定结局；被提前收尾时如实交代被取消。 */
+    /** 替身任务：逐刻返回约定结局；被提前收尾时如实交代被取消；可以约定启动就出错。 */
     static final class ScriptedGoalTask implements Task {
         private final TickResult ending;
+        private final RuntimeException startError;
         int closes;
+        int pauses;
         CloseReason closedWith;
 
         ScriptedGoalTask(TickResult ending) {
+            this(ending, null);
+        }
+
+        ScriptedGoalTask(TickResult ending, RuntimeException startError) {
             this.ending = ending;
+            this.startError = startError;
+        }
+
+        @Override public void start(TickContext context) {
+            if (startError != null) throw startError;
         }
 
         @Override public TickResult tick(TickContext context) {
             return ending;
         }
 
-        @Override public void pause() {}
+        @Override public void pause() {
+            pauses++;
+        }
 
         @Override public TaskResult close(CloseReason reason) {
             closes++;
@@ -66,18 +79,36 @@ final class GoalTestAbility implements AbilityModule {
         }
     }
 
-    /** 几个替身能力共用的任务时间线：启动了哪些任务、每个任务的结局是什么。 */
+    /** 几个替身能力共用的任务时间线：启动了哪些任务、每个任务的结局是什么、建出来的任务对象。 */
     static final class SharedTasks {
         final List<TaskInput> started = new ArrayList<>();
+        final Map<String, ScriptedGoalTask> created = new HashMap<>();
         private final Map<String, TaskResult> endings = new HashMap<>();
+        private final Map<String, Boolean> stillRunning = new HashMap<>();
+        private final Map<String, RuntimeException> startErrors = new HashMap<>();
 
         /** 指定某个任务的结局；没指定的默认做成了。 */
         void ending(String label, TaskResult result) {
             endings.put(label, result);
         }
 
-        private TaskResult endingFor(TestInput input) {
-            return endings.getOrDefault(input.label(), TaskResult.done("做完了"));
+        /** 指定某个任务一直在做、不自己结束。 */
+        void keepRunning(String label) {
+            stillRunning.put(label, true);
+        }
+
+        /** 指定某个任务启动就出错。 */
+        void failOnStart(String label, RuntimeException error) {
+            startErrors.put(label, error);
+        }
+
+        private ScriptedGoalTask taskFor(TestInput input) {
+            TickResult ending = stillRunning.containsKey(input.label())
+                    ? TickResult.RUNNING
+                    : TickResult.finished(endings.getOrDefault(input.label(), TaskResult.done("做完了")));
+            ScriptedGoalTask task = new ScriptedGoalTask(ending, startErrors.get(input.label()));
+            created.put(input.label(), task);
+            return task;
         }
     }
 
@@ -87,6 +118,10 @@ final class GoalTestAbility implements AbilityModule {
     final Deque<StepDecision> decisions = new ArrayDeque<>();
     /** 能力每次做决定时看到的 LLM 回答，按看到顺序累积。 */
     final List<String> answersSeen = new ArrayList<>();
+    /** 能力最近一次做决定时看到的已结束任务的结果。 */
+    List<TaskResult> taskResultsSeen = List.of();
+    /** 这个替身能力的钩子；默认不做特殊处理。 */
+    AbilityHooks hooks = AbilityHooks.NONE;
 
     GoalTestAbility(String id) {
         this(id, new SharedTasks());
@@ -105,6 +140,7 @@ final class GoalTestAbility implements AbilityModule {
 
     @Override public StepDecision decide(StepContext step) {
         answersSeen.addAll(step.answers());
+        taskResultsSeen = step.taskResults();
         // 决定给过就弹掉；脚本用完后不再给（返回 NOT_READY），测试按刻数驱动。
         return decisions.isEmpty() ? StepDecision.NOT_READY : decisions.poll();
     }
@@ -121,8 +157,12 @@ final class GoalTestAbility implements AbilityModule {
         }
         factories.register(TestInput.class, input -> {
             shared.started.add(input);
-            return new ScriptedGoalTask(TickResult.finished(shared.endingFor((TestInput) input)));
+            return shared.taskFor((TestInput) input);
         });
+    }
+
+    @Override public AbilityHooks hooks() {
+        return hooks;
     }
 
     /** 已启动的任务输入，按顺序。 */
@@ -133,5 +173,10 @@ final class GoalTestAbility implements AbilityModule {
     /** 指定某个任务的结局；没指定的默认做成了。 */
     void ending(String label, TaskResult result) {
         shared.ending(label, result);
+    }
+
+    /** 共用的任务时间线。 */
+    SharedTasks shared() {
+        return shared;
     }
 }

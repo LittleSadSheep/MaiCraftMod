@@ -144,7 +144,16 @@ public final class AbilityCatalog {
 
     /** 按清单创建并登记全部能力；登记顺序即能力列表的展示顺序。 */
     public static AbilityRegistry create(Deps deps) {
-        AbilityRegistry registry = new AbilityRegistry(new TaskFactories());
+        return create(deps, new AbilityRegistry(new TaskFactories()));
+    }
+
+    /**
+     * 按清单把能力登记进给定的注册表，返回它。先清掉旧登记：能力模块带着某一个世界的现场，
+     * 退世界后现场整体丢弃，进下一个世界时按清单重新登记，不把上一个世界的模块带过来。
+     */
+    public static AbilityRegistry create(Deps deps, AbilityRegistry into) {
+        AbilityRegistry registry = into;
+        registry.clearRegistered();
 
         // 靠近与走向站位：站位判断问当刻的世界，走路交给走到（内嵌 Baritone）。
         LiveApproaches bringsClose = new LiveApproaches(deps.context(),

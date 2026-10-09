@@ -34,6 +34,12 @@ public final class AbilityRegistry {
         module.registerTasks(taskFactories);
     }
 
+    /** 清空全部能力与任务登记：能力模块带着创建它的那份现场，现场丢弃时登记一并作废，换现场后重新登记。 */
+    public void clearRegistered() {
+        modules.clear();
+        taskFactories.clear();
+    }
+
     public Optional<AbilityModule> find(String id) {
         return Optional.ofNullable(modules.get(id));
     }

@@ -56,6 +56,19 @@ import org.maiwithu.maicraft.behavior.survival.CombatSenses;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.interrupt.ControlLoop;
 import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
+import org.maiwithu.maicraft.kernel.event.EventPublishingGoalRunStore;
+import org.maiwithu.maicraft.kernel.event.TaskEventLog;
+import org.maiwithu.maicraft.kernel.goal.GoalRunStore;
+import org.maiwithu.maicraft.kernel.goal.GoalRunTable;
+import org.maiwithu.maicraft.kernel.goal.InMemoryGoalRunStore;
+import org.maiwithu.maicraft.kernel.goal.RemembersPlaces;
+import org.maiwithu.maicraft.kernel.task.TaskFactories;
+import org.maiwithu.maicraft.mcp.tool.EventsTool;
+import org.maiwithu.maicraft.mcp.tool.ExecuteTool;
+import org.maiwithu.maicraft.mcp.tool.LookupTool;
+import org.maiwithu.maicraft.mcp.tool.TaskTool;
+import org.maiwithu.maicraft.mcp.tool.ToolDispatcher;
 import org.maiwithu.maicraft.mcp.transport.EmbeddedMcpService;
 import org.maiwithu.maicraft.mcp.transport.McpConfig;
 import org.maiwithu.maicraft.network.MaiCraftPayload;
@@ -74,8 +87,8 @@ import org.slf4j.LoggerFactory;
  * 能力与联动模组在这里按一份明确的清单创建和登记，不做类路径扫描，新增时在清单里加一行。
  *
  * <p>服务端一侧已接好：方块归属记录、交互确认通道与只读的归属查询。
- * 客户端一侧已接好游戏接口层的每刻服务、和服务端 MaiCraft 的会话，
- * 以及每刻推进的控制循环与三项基本生存需求；目标执行与能力还没有接入。
+ * 客户端一侧已接好游戏接口层的每刻服务、和服务端 MaiCraft 的会话、七项生存需求与控制循环、
+ * 进世界时的世界记忆与感知场景，以及目标执行与四个 MCP 工具（lookup、execute、task、events）。
  */
 public final class Bootstrap {
     private static final Logger LOG = LoggerFactory.getLogger(Bootstrap.class);
@@ -169,8 +182,8 @@ public final class Bootstrap {
     }
 
     /**
-     * 客户端部分：只在客户端执行。创建游戏接口层的每刻服务、和服务端的会话、控制循环与生存需求，
-     * 以及走到与交互的玩家行为层入口；进世界时再创建世界记忆、感知场景与能力清单（见 WorldScope）。
+     * 客户端部分：只在客户端执行。创建游戏接口层的每刻服务、和服务端的会话、控制循环与生存需求、
+     * 目标执行与 MCP 工具；进世界时再创建世界记忆、感知场景与能力清单（见 WorldScope）。
      */
     public static ClientLifecycle startClient(LoaderEnvironment loader, LinkTransport transport) {
         LOG.info("{} 客户端部分启动（加载器：{}，开发环境：{}）",
@@ -189,6 +202,10 @@ public final class Bootstrap {
         private final UseKeyHold useKeyHold = new UseKeyHold();
         private final SubtitleFeed subtitles = new SubtitleFeed();
         private final McpConfig mcpConfig = McpConfig.localForProcess(8766);
+        // 能力注册表客户端全程一份：进世界时按清单把各能力登记进来，退世界清掉，不跨世界残留。
+        private final AbilityRegistry abilities = new AbilityRegistry(new TaskFactories());
+        // MCP 请求线程排工作、客户端刻里做：下达、暂停、回答与控制循环推进在同一个线程上。
+        private final ClientTickWork clientWork = new ClientTickWork();
         private final WorldScope[] worldScope = new WorldScope[1];
         private EmbeddedMcpService mcp;
         private ServerLinkSession session;
@@ -197,6 +214,7 @@ public final class Bootstrap {
         private DefaultInteractionSender interactionSender;
         private CombatSenses combatSenses;
         private Interactions interactions;
+        private ToolDispatcher tools;
 
         /** 创建客户端全程共用的服务，并把 Mixin 需要的实例登记到静态登记点。 */
         void createSharedServices() {
@@ -207,7 +225,7 @@ public final class Bootstrap {
             interactionSender = new DefaultInteractionSender(menuActions, opportunity);
             menuActions.attachSender(interactionSender);
             playerControl.attachInteractionEntries(interactionSender, menuActions);
-            // 按住使用键投影提前建好：吃饭动作与交互动作入口用同一个使用通道。
+            // 按住使用键的投影：持续使用的提交方接入前没有任务占用，投影读到的始终是真实键值。
             UseKeyProjection useKeyProjection = new UseKeyHoldProjection(useKeyHold);
             // 吃随身食物：挑一件能直接吃的，换到主手后原生按住吃完一口。
             EatsCarriedFood foodMoves = new EatsCarriedFood(
@@ -218,7 +236,7 @@ public final class Bootstrap {
             // 战斗感观一份：生存需求的自卫与战斗能力看的是同一份伤害证据。
             combatSenses = new LiveCombatSenses(new CombatMemory());
             // 控制循环按急迫程度登记生存需求：必须立刻处理的先登记，同样急时它先插进来；
-            // 主任务由目标主任务槽下达，进世界时建好。
+            // 主任务由目标运行表挂上：LLM 用 execute 派了活，目标就成为主任务。
             controlLoop = withSurvivalNeeds(interactionSender, menuActions, combatSenses, walks, foodMoves);
             // Mixin 钩子拿不到构造注入，只能在这里登记；服务本体仍以实例传递。
             ClientHooks.registerPlayerControl(playerControl);
@@ -228,6 +246,8 @@ public final class Bootstrap {
             ClientHooks.registerChatLog(new ChatLog());
             // 交互动作入口与按住使用键投影：能力清单在进世界时用它们拼装各能力。
             interactions = new Interactions(useKeyProjection);
+            // 目标执行与 MCP 工具：LLM 用 execute 下达的目标经目标运行表成为控制循环的主任务。
+            tools = goalTools(abilities, controlLoop, clientWork);
         }
 
         /** 建与服务端的会话，并在入服前登记客户端知道的操作清单。 */
@@ -239,14 +259,14 @@ public final class Bootstrap {
 
         @Override public void started() {
             try {
-                mcp = EmbeddedMcpService.startWithFallback(mcpConfig, 2);
-                LOG.info("{} MCP 服务已启动（端口 {}；五个工具为空壳）", ModIdentity.NAME, mcp.port());
+                mcp = EmbeddedMcpService.startWithFallback(mcpConfig, 2, tools);
+                LOG.info("{} MCP 服务已启动（端口 {}；lookup、execute、task、events 已接上，observe 还是空壳）",
+                        ModIdentity.NAME, mcp.port());
             } catch (IOException exception) {
                 LOG.error("{} MCP 服务启动失败", ModIdentity.NAME, exception);
                 return;
             }
-            LOG.info("{} 客户端启动完成；生存需求、控制循环、走到与交互已接入，"
-                    + "目标下达等 MCP 工具还没有接行为", ModIdentity.NAME);
+            LOG.info("{} 客户端启动完成；生存需求、控制循环、目标执行与能力清单已接入", ModIdentity.NAME);
         }
 
         @Override public void tickEnd(Minecraft minecraft) {
@@ -254,6 +274,7 @@ public final class Bootstrap {
             var context = playerControl.beginTick();
             if (minecraft.level != null) blockScans.tick(minecraft.level);
             keepWorldScopeFresh(minecraft, context);
+            if (context.isEmpty()) clientWork.drain(null);
             context.ifPresent(current -> tickInWorld(minecraft, current));
             // 与服务端的会话跟着每个客户端刻推进。
             session.tick(minecraft);
@@ -264,24 +285,29 @@ public final class Bootstrap {
             if (minecraft.level != null && worldScope[0] == null && context.isPresent()) {
                 UseKeyProjection useKeyProjection = new UseKeyHoldProjection(useKeyHold);
                 worldScope[0] = new WorldScope(minecraft, playerControl, blockScans, session,
-                        subtitles, interactions, useKeyProjection, walks, combatSenses, controlLoop,
-                        interactionSender, menuActions);
+                        subtitles, interactions, useKeyProjection, walks, combatSenses,
+                        abilities, interactionSender, menuActions);
             } else if (minecraft.level == null) {
                 worldScope[0] = null;
             }
         }
 
-        /** 控制循环必须在 beginTick 与 endTick 之间推进：任务此刻发出的移动与转头指令，
-         * 要等 endTick 统一写进角色。自动化没有实际拿到控制权（例如 F8 已归还）时不推进，
-         * 生存需求不能去抢人类手上的角色。 */
+        /**
+         * beginTick 与 endTick 之间要做的事：任务此刻发出的移动与转头指令，要等 endTick 统一写进角色。
+         * 世界扫描先整理感知场景；MCP 请求排进来的工作（下达、暂停、回答目标）在控制循环之前做完，
+         * 新下达的目标本刻就开始。自动化没有实际拿到控制权（例如 F8 已归还）时照样处理请求，
+         * 但不推进控制循环，生存需求不能去抢人类手上的角色。
+         */
         private void tickInWorld(Minecraft minecraft, PlayerContext current) {
             // 世界扫描：感知各读端读当刻的观察事实，整理进场景；顺序在控制循环之前。
             WorldScope scope = worldScope[0];
             if (scope != null) {
                 scope.observe(current, minecraft.level.getGameTime());
             }
+            long gameTick = minecraft.level.getGameTime();
+            clientWork.drain(new ClientTickContext(gameTick, current));
             if (playerControl.input().automationOwnsControls()) {
-                controlLoop.tick(new ClientTickContext(minecraft.level.getGameTime(), current));
+                controlLoop.tick(new ClientTickContext(gameTick, current));
             }
             playerControl.endTick(current);
         }
@@ -301,5 +327,26 @@ public final class Bootstrap {
         @Override public void serverLinkDisconnected(Minecraft minecraft) {
             session.disconnected(minecraft);
         }
+    }
+
+    /**
+     * 目标执行与 MCP 工具：能力注册表、目标运行表与任务事件流。LLM 用 execute 下达的目标经目标运行表
+     * 成为控制循环的主任务；目标处境每次变化都发成任务事件，宿主用 events 等。
+     * 能力按清单在进世界时登记进这份注册表。
+     */
+    private static ToolDispatcher goalTools(AbilityRegistry abilities, ControlLoop controlLoop,
+                                            ClientTickWork clientWork) {
+        TaskEventLog taskEvents = new TaskEventLog();
+        GoalRunStore goalRuns = new EventPublishingGoalRunStore(new InMemoryGoalRunStore(), taskEvents);
+        // 世界记忆按世界创建，还没有接进启动流程：要记地点的目标如实以程序错误收场，不悄悄丢掉。
+        RemembersPlaces places = (name, position) -> {
+            throw new IllegalStateException("世界记忆还没有接进启动流程，记不住地点 " + name);
+        };
+        GoalRunTable goals = new GoalRunTable(abilities, goalRuns, places, controlLoop);
+        return new ToolDispatcher(List.of(
+                new LookupTool(abilities),
+                new ExecuteTool(abilities, goals, clientWork),
+                new TaskTool(goals, clientWork),
+                new EventsTool(taskEvents, goals, clientWork)));
     }
 }
