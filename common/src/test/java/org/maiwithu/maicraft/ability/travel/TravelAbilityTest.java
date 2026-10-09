@@ -96,7 +96,7 @@ class TravelAbilityTest {
         assertEquals(2.0, input.radius());
         assertEquals(0, input.maxSeconds(), "没给时限就不设时限");
         // 默认许可 natural：可以挖开天然方块、垫临时方块开路。
-        assertEquals(TerrainPermit.TERRAFORM, input.permit());
+        assertEquals(TerrainPermit.NATURAL, input.permit());
     }
 
     @Test
@@ -132,7 +132,7 @@ class TravelAbilityTest {
     void factoryCreatesTravelTaskCarryingCollaborators() {
         TaskFactories factories = new TaskFactories();
         ability.registerTasks(factories);
-        TravelInput input = new TravelInput(new Target.Position(1, 2, 3, null), 2.0, 0, TerrainPermit.TERRAFORM);
+        TravelInput input = new TravelInput(new Target.Position(1, 2, 3, null), 2.0, 0, TerrainPermit.NATURAL);
 
         assertTrue(factories.supports(TravelInput.class));
         Task task = factories.create(input);

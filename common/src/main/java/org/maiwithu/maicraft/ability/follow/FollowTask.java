@@ -64,8 +64,9 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing 
         this.input = Objects.requireNonNull(input, "input");
         this.view = Objects.requireNonNull(view, "view");
         this.walks = Objects.requireNonNull(walks, "walks");
-        this.permit = input.permissions().changeBlocks() == Permissions.BlockChanges.NONE
-                ? TerrainPermit.WALK_ONLY : TerrainPermit.TERRAFORM;
+        // 跟随的走到许可直接沿用任务许可的档位：只垫不挖时跟人开路也只垫不拆；落地水随动土一起放开。
+        this.permit = new TerrainPermit(input.permissions().changeBlocks(),
+                input.permissions().changeBlocks() != Permissions.BlockChanges.NONE);
     }
 
     /** 把走在路上的动作接进基类的暂停与收尾：基类持有的是这个外壳。 */

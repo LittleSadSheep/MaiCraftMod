@@ -4,11 +4,13 @@ package org.maiwithu.maicraft.behavior.navigation.baritone;
 import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 import baritone.api.Settings;
+import baritone.api.event.events.BlockChangeEvent;
 import baritone.api.event.events.PathEvent;
 import baritone.api.event.events.WorldEvent;
 import baritone.api.event.events.type.EventState;
 import baritone.api.event.listener.AbstractGameEventListener;
 import baritone.behavior.PathingBehavior;
+import java.util.ArrayList;
 import java.util.List;
 import it.unimi.dsi.fastutil.longs.LongSets;
 import java.util.concurrent.atomic.AtomicReference;
@@ -20,6 +22,7 @@ import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
+import org.maiwithu.maicraft.behavior.travel.ReadsPlacedBlocks;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /**
@@ -32,8 +35,11 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
  * <p>同一时刻角色只走一条路：上一次运行还没停稳时，新请求排队等待交出身体，
  * 等待期间如实报告正在算路。所有方法只能在客户端线程调用；逐刻推进由任务
  * 在阶段里调用 {@link WalkRun#tick}。
+ *
+ * <p>路上垫的临时方块在这里记账：引擎报告的方块变化里，新出现实心方块的位置逐格记下，
+ * 结算时经 {@code ReadsPlacedBlocks} 交给出行的结果，收不收回由 LLM 决定。
  */
-public final class BaritoneInternals implements WalkTo {
+public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
 
     private static final AtomicReference<BaritoneInternals> ATTACHED = new AtomicReference<>();
 
@@ -42,6 +48,8 @@ public final class BaritoneInternals implements WalkTo {
     private ClientLevel engineWorld;
     private BaritoneWalkRun active;
     private BaritoneWalkRun queued;
+    /** 上一次运行垫上的方块；运行交出身体后，结算方还要读得到它。 */
+    private List<BlockPos> lastPlacements = List.of();
 
     @Override
     public WalkRun start(GoalCompiler.Compiled target, TerrainPermit permit) {
@@ -73,7 +81,25 @@ public final class BaritoneInternals implements WalkTo {
     /** 当前运行结束后让下一个排队运行上路。 */
     void release(BaritoneWalkRun run) {
         if (active != run) return;
+        // 垫块清单跟着运行走：运行结算后结算方读的是上一段路的清单。
+        lastPlacements = List.copyOf(run.placements());
         active = null;
+    }
+
+    /** 引擎报告的方块变化转给正在走的运行记账；不在这段路上的变化不记。 */
+    void onEngineBlockChange(BlockChangeEvent event) {
+        BaritoneWalkRun current = active;
+        if (current == null) return;
+        for (var pair : event.getBlocks()) {
+            current.recordPlacedIfSolid(pair.first(), pair.second());
+        }
+    }
+
+    /** 这段走到（或刚结束的一段）里垫上的方块格子；没垫过给空列表。 */
+    @Override
+    public List<BlockPos> placedDuringCurrentWalk() {
+        BaritoneWalkRun current = active;
+        return current != null ? List.copyOf(current.placements()) : lastPlacements;
     }
 
     /** 排队请求被更新的请求顶掉或所属任务已放弃时结算，不能永远占着队位。 */
@@ -97,6 +123,10 @@ public final class BaritoneInternals implements WalkTo {
                 public void onPathEvent(PathEvent event) {
                     BaritoneWalkRun current = active;
                     if (current != null) current.onPathEvent(event);
+                }
+
+                @Override public void onBlockChange(BlockChangeEvent event) {
+                    onEngineBlockChange(event);
                 }
             });
         }

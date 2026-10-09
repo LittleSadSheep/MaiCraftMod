@@ -40,7 +40,7 @@ class TravelTaskTest {
     private final FakeWalks walks = new FakeWalks();
     private final FakePlaced placed = new FakePlaced();
     private final ProgressRecorder progress = new ProgressRecorder();
-    private final TerrainPermit permit = TerrainPermit.TERRAFORM;
+    private final TerrainPermit permit = TerrainPermit.NATURAL;
     private final TestTick tick = new TestTick();
 
     private TravelTask task(Target target) {

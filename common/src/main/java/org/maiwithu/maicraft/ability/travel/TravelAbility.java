@@ -15,6 +15,7 @@ import org.maiwithu.maicraft.kernel.ability.Listing;
 import org.maiwithu.maicraft.kernel.goal.AbilityHooks;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.Question;
+import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.goal.TargetKind;
@@ -117,14 +118,9 @@ public final class TravelAbility implements AbilityModule {
 
     /** 把这次目标的方块许可折算成走到能动多少地形；能不能挖某一格由寻路的方块通行判断把关。 */
     private TerrainPermit terrainPermit(Goal goal) {
-        return switch (goal.permissions().changeBlocks()) {
-            // 只走不改：不挖、不垫。
-            case NONE -> TerrainPermit.WALK_ONLY;
-            // 天然方块与一切不受保护的方块：挖路垫路都允许。
-            case NATURAL, ANY -> TerrainPermit.TERRAFORM;
-            // 只搭临时方块：垫路正是搭临时方块，允许垫；走到内部不会去挖玩家盖的东西。
-            case TEMPORARY -> TerrainPermit.TERRAFORM;
-        };
+        // 四档直接对齐：只垫不挖的档走到实现方按"只垫不挖"开关寻路，垫上的临时方块逐格进结果。
+        return new TerrainPermit(goal.permissions().changeBlocks(),
+                goal.permissions().changeBlocks() != Permissions.BlockChanges.NONE);
     }
 
     /** 秒换内部用的整数时限；没给就不设时限。 */

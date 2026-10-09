@@ -12,13 +12,19 @@ import baritone.api.utils.input.Input;
 import baritone.behavior.PathingBehavior;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
+
+import java.util.ArrayList;
+import java.util.List;
+
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.game.player.PlayerInput;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
@@ -44,6 +50,8 @@ final class BaritoneWalkRun implements WalkRun {
     private final WalkRunProgress progress = new WalkRunProgress(goal());
     private final NavigationProgress displacement = new NavigationProgress();
     private final NavigationDispatchWatchdog dispatch = new NavigationDispatchWatchdog();
+    /** 这段路垫上的临时方块；逐格进结算结果，不自动收回。 */
+    private final List<BlockPos> placements = new ArrayList<>();
     /** 引擎本刻请求的按键是否读出来过；用于区分排队与真正在走。 */
     private boolean engineFailedPath;
     private boolean activated;
@@ -71,6 +79,22 @@ final class BaritoneWalkRun implements WalkRun {
 
     LongSet forbiddenBodyCells() {
         return LongSets.EMPTY_SET;
+    }
+
+    /**
+     * 引擎报告一格方块变了：变化后是实心方块（不是空气、不是水与岩浆）就记成这段路垫上的临时方块；
+     * 挖掉的变化（变成空气）不记。垫了什么如实进结算结果，收不收回由 LLM 决定。
+     */
+    void recordPlacedIfSolid(BlockPos position, BlockState after) {
+        if (permit.changes() == Permissions.BlockChanges.NONE) return;
+        if (!after.isAir() && !after.liquid() && !placements.contains(position)) {
+            placements.add(position.immutable());
+        }
+    }
+
+    /** 这段路垫上的方块格子。 */
+    List<BlockPos> placements() {
+        return placements;
     }
 
     /** 上路：把目标交给引擎并让它开始第一次算路。 */
