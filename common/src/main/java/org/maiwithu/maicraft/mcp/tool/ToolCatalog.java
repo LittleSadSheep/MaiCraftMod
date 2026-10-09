@@ -25,6 +25,11 @@ public final class ToolCatalog {
     public static final List<String> NAMES =
             List.of(OBSERVE, LOOKUP, EXECUTE, TASK, EVENTS);
 
+    /** 握手时交给客户端的一段说明：五个工具各管什么、先做什么。和工具描述一样进接口快照。 */
+    public static final String INSTRUCTIONS = "MaiCraft 操作 Minecraft 世界里的本地玩家（角色）。"
+            + "五个工具：observe 看世界和自己；lookup 查能力与资料，先调用 lookup() 列出能力；"
+            + "execute 下达一个目标；events 等目标的进展；task 查看、暂停、恢复、取消目标，或回答它提出的问题。";
+
     // 只用于把"尚未接入"的应答序列化成一条文本；与传输层同样关闭 HTML 转义，避免名称膨胀。
     private static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
 
