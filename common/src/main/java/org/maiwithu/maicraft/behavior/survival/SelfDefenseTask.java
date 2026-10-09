@@ -93,7 +93,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
     private int watchTicksLeft;
     /** 撤离寻路连续失败的次数：只有两格以上的真实位移才清零，不因重开一次路线就当作没失败过。 */
     private int fleeRouteFailures;
-    /** 连续失败的撤离尝试里已经转过几次方向：失败一次转 90 度，不反复撞同一堵墙。 */
+    /** 连续失败的撤离尝试里已经转过几次方向：每失败一次换一个没试过的方向，不反复撞同一堵墙。 */
     private int fleeTurns;
     /** 距上一次撤离起步还剩多少刻才能再起步。 */
     private int fleeRetryCooldown;
@@ -209,6 +209,18 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         currentTarget = -1;
     }
 
+    /**
+     * 第几次撤离往哪走：第一次正背对威胁，失败一次转向一侧 90 度，再失败转向另一侧 90 度，之后再轮回来。
+     * 返回水平方向的两个分量，长度与传进来的背对方向一样。
+     */
+    static double[] fleeDirection(double awayX, double awayZ, int turns) {
+        return switch (Math.floorMod(turns, 3)) {
+            case 1 -> new double[] {-awayZ, awayX};
+            case 2 -> new double[] {awayZ, -awayX};
+            default -> new double[] {awayX, awayZ};
+        };
+    }
+
     /** 从"再打"升级为"撤离"：丢掉手上的动作，换到撤离阶段；记一笔进展，免得基类的卡住判定抢在撤离前把任务判死。 */
     private Next<Phase> goRetreat(Problem why) {
         dropCurrent();
@@ -248,7 +260,8 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         double[] self = moves.selfPosition(context);
         if (current == null) {
             // 朝背对最近威胁的方向直线走：走位只走不改，绕路交给走到。
-            // 刚失败过的方向转 90 度再试：同一个点走不通，换个方向才可能走出去。
+            // 走不通过的方向不再回头试：正背对 → 转向一侧 90 度 → 转向另一侧 90 度，轮着换，
+            // 都不朝威胁那边去；三个方向都走不通时失败次数也到了上限，回去背水一战。
             var nearest = situation.foes().get(0);
             double awayX = self[0] - nearest.x();
             double awayZ = self[2] - nearest.z();
@@ -258,13 +271,9 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
                 awayZ = 0;
                 length = 1;
             }
-            if (fleeTurns % 2 == 1) {
-                double swap = awayX;
-                awayX = -awayZ;
-                awayZ = swap;
-            }
-            current = moves.walkTo(self[0] + awayX / length * FLEE_DISTANCE, self[1],
-                    self[2] + awayZ / length * FLEE_DISTANCE);
+            double[] direction = fleeDirection(awayX, awayZ, fleeTurns);
+            current = moves.walkTo(self[0] + direction[0] / length * FLEE_DISTANCE, self[1],
+                    self[2] + direction[1] / length * FLEE_DISTANCE);
         }
         ActionStatus status = current.tick(context);
         if (status instanceof ActionStatus.Failed failed) {
