@@ -135,4 +135,30 @@ class WalkRunProgressTest {
         progress.observe(seen(TARGET, true, false, true, false));
         assertEquals(Problem.Kind.STUCK, progress.report().problem().kind());
     }
+
+    @Test
+    void drivingWithoutAGoalFailsHonestlyInsteadOfCrashing() {
+        // 走到实现没拿到目标就开始驱动：如实失败并结束，不在到达判断上崩出空指针。
+        var progress = new WalkRunProgress(null);
+        var conclusion = progress.observe(seen(ELSEWHERE, true, false, false, false));
+        assertEquals(WalkReport.State.FAILED, conclusion.report().state());
+        assertEquals(Problem.Kind.INTERNAL_ERROR, conclusion.report().problem().kind());
+        assertEquals(WalkRunProgress.Action.CANCEL_ROUTE, conclusion.action());
+        assertTrue(conclusion.done());
+        // 之后的观察不再改变结果，也不会碰空目标。
+        var after = progress.observe(seen(TARGET, true, false, true, false));
+        assertEquals(WalkReport.State.FAILED, after.report().state());
+    }
+
+    @Test
+    void drivingBeforeTheRouteIsReadyReportsPlanningThenWalks() {
+        // 算路还没就绪的第一刻：如实报告正在算路，不冒充已在路上；路线出来后正常走到。
+        var progress = progressExact();
+        var notReady = progress.observe(seen(ELSEWHERE, true, false, false, false));
+        assertEquals(WalkReport.State.PLANNING, notReady.report().state());
+        assertFalse(notReady.done());
+        var ready = progress.observe(seen(ELSEWHERE.east(), true, false, true, false));
+        assertEquals(WalkReport.State.ON_THE_WAY, ready.report().state());
+        assertFalse(ready.done());
+    }
 }

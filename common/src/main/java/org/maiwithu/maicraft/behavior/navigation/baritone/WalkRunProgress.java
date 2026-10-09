@@ -65,6 +65,12 @@ final class WalkRunProgress {
         if (done()) {
             return new Conclusion(report, Action.NONE, true, false);
         }
+        // 手上没有目标就到不了任何地方：如实失败并结束这次走到，绝不在到达判断上崩出空指针。
+        if (goal == null) {
+            report = WalkReport.failed(
+                    Problem.of(Problem.Kind.INTERNAL_ERROR, "走到实现没有拿到目标，无法开始走", null), o.feet, crossedWater);
+            return new Conclusion(report, Action.CANCEL_ROUTE, true, false);
+        }
         // 泅渡发生在路上就如实记账；到达后不再把水里的漂动算进这段路。
         crossedWater |= o.inWater && o.routePresent;
 

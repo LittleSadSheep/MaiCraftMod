@@ -47,7 +47,9 @@ final class BaritoneWalkRun implements WalkRun {
     private final TerrainPermit permit;
     private final NavGoal goal;
     private final MaiCraftGoalAdapter engineGoal;
-    private final WalkRunProgress progress = new WalkRunProgress(goal());
+    // 逐刻判断必须拿到真实目标才能建：字段初始化会抢在构造赋值之前跑，拿到空目标，
+    // 所以上路运行挪进构造函数、在目标赋值之后再建。
+    private final WalkRunProgress progress;
     private final NavigationProgress displacement = new NavigationProgress();
     private final NavigationDispatchWatchdog dispatch = new NavigationDispatchWatchdog();
     /** 这段路垫上的临时方块；逐格进结算结果，不自动收回。 */
@@ -63,6 +65,7 @@ final class BaritoneWalkRun implements WalkRun {
         this.permit = permit;
         this.goal = target.goal();
         this.engineGoal = new MaiCraftGoalAdapter(goal);
+        this.progress = new WalkRunProgress(goal);
     }
 
     NavGoal goal() {
@@ -288,6 +291,12 @@ final class BaritoneWalkRun implements WalkRun {
 
     @Override
     public String describe() {
+        // 没有目标时只通报走到本身的状态，不去读目标内容，避免空目标崩了通报。
+        if (goal == null) {
+            return report().state() == WalkReport.State.FAILED
+                    ? "走不下去：" + report().problem().message()
+                    : "走到没有拿到目标";
+        }
         var report = progress.report();
         return switch (report.state()) {
             case PLANNING -> "正在算路（目标 " + goal.center().toShortString() + "）";
