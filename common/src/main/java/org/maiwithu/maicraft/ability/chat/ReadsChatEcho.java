@@ -10,4 +10,10 @@ public interface ReadsChatEcho {
 
     /** 这句话是否已经出现在聊天栏里（本地回显）。 */
     boolean appearsInChat(String message);
+
+    /**
+     * 给定时刻之后聊天栏有没有出现过新的一行。游戏命令没有"自己那条"的回显，
+     * 命令发没发成只能看提交后聊天栏里有没有冒出命令反馈行，这一条就是它的读端。
+     */
+    boolean anyLineAfter(long sinceMillis);
 }

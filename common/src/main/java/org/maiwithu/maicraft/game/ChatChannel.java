@@ -14,6 +14,7 @@ import org.maiwithu.maicraft.game.ClientHooks;
  * 这句话出现在本地聊天栏里才算说过，读不到回显不算失败也不算成功。
  * 只在控制循环的刻内调用。以 / 开头的是给游戏的命令：原版聊天界面按前缀分别走命令与聊天
  * 两个发送方法，这里按同样的前缀路由，命令以角色自己的权限交给服务器裁决。
+ * 命令没有自己那条回显，命令的完成依据（提交后聊天栏冒出的反馈行）也在这里读。
  */
 public final class ChatChannel {
 
@@ -38,8 +39,14 @@ public final class ChatChannel {
     }
 
     /** 这句话是否已经出现在本地聊天栏里（回显）。 */
-    public boolean echoed(String message) {
+    public boolean appearsInChat(String message) {
         ChatLog log = ClientHooks.chatLog();
         return log != null && log.showedUp(message);
+    }
+
+    /** 提交时刻之后本地聊天栏有没有冒出新的一行；命令的完成依据是命令反馈行。 */
+    public boolean anyLineAfter(long sinceMillis) {
+        ChatLog log = ClientHooks.chatLog();
+        return log != null && log.anyShownAfter(sinceMillis);
     }
 }

@@ -45,16 +45,25 @@ class ChatTaskTest {
         }
     }
 
-    /** 回显替身：出现哪些话由测试摆。 */
+    /** 回显替身：出现哪些话、哪些时刻出现过新行，由测试摆。 */
     private static final class StubEcho implements ReadsChatEcho {
         private final Set<String> echoed = new HashSet<>();
+        private boolean lineAfter;
 
         void echo(String message) {
             echoed.add(message);
         }
 
+        void feedbackLine() {
+            lineAfter = true;
+        }
+
         @Override public boolean appearsInChat(String message) {
             return echoed.contains(message);
+        }
+
+        @Override public boolean anyLineAfter(long sinceMillis) {
+            return lineAfter;
         }
     }
 
@@ -102,6 +111,38 @@ class ChatTaskTest {
         assertEquals(1, result.unconfirmed().size());
         Change unconfirmed = result.unconfirmed().get(0);
         assertEquals("在吗", unconfirmed.what());
+        assertTrue(result.summary().contains("没能确认"), result.summary());
+    }
+
+    @Test
+    void commandConfirmsOnFeedbackLineInsteadOfEcho() {
+        StubSender sender = new StubSender();
+        StubEcho echo = new StubEcho();
+        TestTick tick = new TestTick();
+        ChatTask task = new ChatTask("/time set day", sender, echo);
+        // 命令没有自己那条回显；提交后聊天栏冒出反馈行就算发成。
+        echo.feedbackLine();
+
+        TaskResult result = runToFinish(task, tick);
+
+        assertEquals(List.of("/time set day"), sender.sent);
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertTrue(result.summary().contains("命令反馈行"), result.summary());
+        assertTrue(result.unconfirmed().isEmpty(), "看到了反馈行就不留没能确认的交互");
+    }
+
+    @Test
+    void commandWithoutFeedbackLineEndsAsUnconfirmed() {
+        StubSender sender = new StubSender();
+        StubEcho echo = new StubEcho();
+        TestTick tick = new TestTick();
+        ChatTask task = new ChatTask("/give @s diamond", sender, echo);
+
+        TaskResult result = runToFinish(task, tick);
+
+        assertEquals(List.of("/give @s diamond"), sender.sent, "命令确实交出去了一次");
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertEquals(1, result.unconfirmed().size());
         assertTrue(result.summary().contains("没能确认"), result.summary());
     }
 

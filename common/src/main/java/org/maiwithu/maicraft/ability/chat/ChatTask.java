@@ -11,8 +11,10 @@ import org.maiwithu.maicraft.kernel.task.PhasedTask;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
- * 发话任务：把一句话交给聊天输入，再等聊天栏出现自己那条（本地回显）才算发成。
- * 回显等不到就按"已提交但没能确认"结束，记进结果的 unconfirmed，不盲目重发也不冒充成功。
+ * 发话任务：把一句话交给聊天输入，再等聊天栏出现证据才算发成。
+ * 普通聊天等自己那条（本地回显）；游戏命令没有"自己那条"的回显，等的是提交后
+ * 聊天栏冒出的命令反馈行（原版命令会打结果反馈，如 Set the time to…）。
+ * 证据等不到就按"已提交但没能确认"结束，记进结果的 unconfirmed，不盲目重发也不冒充成功。
  */
 public final class ChatTask extends PhasedTask<ChatTask.Phase> {
 
@@ -31,12 +33,17 @@ public final class ChatTask extends PhasedTask<ChatTask.Phase> {
 
     /** 提交那一刻的游戏刻；算等回显等了多久用。 */
     private long sentTick;
+    /** 提交那一刻的毫秒时钟；命令反馈行按提交后有没有新行判断，要用同一时钟比对。 */
+    private long sentMillis;
+    /** 以 / 开头的是游戏命令：没有自己的回显，完成依据换成命令反馈行。 */
+    private final boolean command;
 
     public ChatTask(String message, SendsChatMessage sender, ReadsChatEcho echo) {
         super("说话", Phase.SEND, new ProgressTracker(STUCK_AFTER_TICKS, Long.MAX_VALUE));
         this.message = message;
         this.sender = sender;
         this.echo = echo;
+        this.command = message.startsWith("/");
     }
 
     /** 发话的结果细节：发了哪句话，供 LLM 对照与直播解说。 */
@@ -56,16 +63,29 @@ public final class ChatTask extends PhasedTask<ChatTask.Phase> {
         };
     }
 
-    /** 把话交给聊天输入，随后进入等回显。 */
+    /** 把话交给聊天输入，随后进入等证据。 */
     private Next<Phase> tickSend(TickContext context) {
         sentTick = context.gameTick();
+        sentMillis = System.currentTimeMillis();
         sender.send(message);
         recordProgress("已把话交给聊天输入");
-        return Next.go(Phase.CONFIRM, "已提交，等聊天栏出现自己那条");
+        return Next.go(Phase.CONFIRM, command ? "已提交命令，等聊天栏出现命令反馈行" : "已提交，等聊天栏出现自己那条");
     }
 
-    /** 回显到了就算发成；等不到就按已提交但没能确认结束，不盲目重发。 */
+    /** 证据到了就算发成；等不到就按已提交但没能确认结束，不盲目重发。 */
     private Next<Phase> tickConfirm(TickContext context) {
+        // 命令与聊天分开确认：命令看提交后冒出的反馈行，聊天看自己那条回显。
+        if (command) {
+            if (echo.anyLineAfter(sentMillis)) {
+                return Next.done(TaskResult.done("命令已交给游戏执行，聊天栏出现了命令反馈行"));
+            }
+            if (context.gameTick() - sentTick >= CONFIRM_TICKS) {
+                recordUnconfirmed(new Change(Change.Kind.OTHER, message, 1,
+                        "已提交命令，但没在聊天栏看到命令反馈行，是否执行没能确认"));
+                return Next.done(TaskResult.done("命令已交出去，但没在聊天栏看到命令反馈行，是否执行没能确认"));
+            }
+            return Next.stay();
+        }
         if (echo.appearsInChat(message)) {
             return Next.done(TaskResult.done("已向全体玩家说话，聊天栏出现了自己那条"));
         }
@@ -84,6 +104,7 @@ public final class ChatTask extends PhasedTask<ChatTask.Phase> {
 
     @Override
     protected String describePhase(Phase value) {
-        return value == Phase.SEND ? "正在说话" : "等聊天栏回显";
+        if (value == Phase.SEND) return "正在说话";
+        return command ? "等命令反馈行" : "等聊天栏回显";
     }
 }

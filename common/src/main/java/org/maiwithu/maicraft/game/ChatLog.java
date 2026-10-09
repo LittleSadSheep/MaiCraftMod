@@ -44,6 +44,17 @@ public final class ChatLog {
         return false;
     }
 
+    /** 给定时刻之后聊天栏有没有出现过新的一行；命令反馈行没有"自己那条"可对，只看提交后有没有新行。 */
+    public boolean anyShownAfter(long millis) {
+        long now = System.currentTimeMillis();
+        for (Shown line : retainRecent(lines, now)) {
+            if (line.shownMillis() >= millis) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // 窗口外与超量的旧消息丢弃：纯函数，离线测试直接喂列表。
     static List<Shown> prune(List<Shown> lines, long nowMillis) {
         List<Shown> kept = new ArrayList<>();

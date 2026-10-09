@@ -9,6 +9,7 @@ import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.ability.chat.ChatAbility;
+import org.maiwithu.maicraft.ability.chat.ReadsChatEcho;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.ability.deposit.DepositModule;
 import org.maiwithu.maicraft.ability.drop.DropModule;
@@ -235,7 +236,8 @@ public final class AbilityCatalog {
                 deps.walkInternals(), deps.travelProgress()));
 
         // 聊天：发送与回显确认都走游戏聊天通道；是否放行游戏命令由所有者的实例配置决定。
-        registry.register(new ChatAbility(deps.chat()::send, deps.chat()::echoed, deps.allowGameCommands()));
+        // 聊天：发送与回显确认都走游戏聊天通道；是否放行游戏命令由所有者的实例配置决定。
+        registry.register(chatModule(deps));
 
         // 记地点：只改世界记忆，当场完成；位置从角色、场景里的观察编号与已记的地点解析。
         registry.register(new RememberAbility(deps.memory(), deps.characterPosition(),
@@ -244,6 +246,16 @@ public final class AbilityCatalog {
         // 按顺序做事：逐步推进在目标推进里，这里只登记"接受步骤"的能力。
         registry.register(new SequenceModule());
         return registry;
+    }
+
+    /** 聊天能力的一份：命令的完成依据（提交后聊天栏冒出的反馈行）与聊天回显同出一个聊天栏日志。 */
+    private static ChatAbility chatModule(Deps deps) {
+        ChatChannel chat = deps.chat();
+        ReadsChatEcho echo = new ReadsChatEcho() {
+            @Override public boolean appearsInChat(String message) { return chat.appearsInChat(message); }
+            @Override public boolean anyLineAfter(long sinceMillis) { return chat.anyLineAfter(sinceMillis); }
+        };
+        return new ChatAbility(chat::send, echo, deps.allowGameCommands());
     }
 
     /** 用东西能力的一份：游戏拒绝读端看动作栏与服务端确认流，刻号从所在世界取。 */
