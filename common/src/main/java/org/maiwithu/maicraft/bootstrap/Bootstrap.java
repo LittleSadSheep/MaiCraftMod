@@ -346,7 +346,7 @@ public final class Bootstrap {
      * 成为控制循环的主任务；目标处境每次变化都发成任务事件，宿主用 events 等。
      * 能力按清单在进世界时登记进这份注册表。事件流用 ClientEntry 的那一份：目标处境与生存需求共一条流。
      */
-    private static ToolDispatcher goalTools(AbilityRegistry abilities, ControlLoop controlLoop,
+    private ToolDispatcher goalTools(AbilityRegistry abilities, ControlLoop controlLoop,
                                             ClientTickWork clientWork, TaskEventLog taskEvents,
                                             Supplier<WorldScope> worldScope) {
         GoalRunStore goalRuns = new EventPublishingGoalRunStore(new InMemoryGoalRunStore(), taskEvents);
@@ -358,7 +358,8 @@ public final class Bootstrap {
             }
             scope.memory().remember(name, position);
         };
-        GoalRunTable goals = new GoalRunTable(abilities, goalRuns, places, controlLoop);
+        // 赋给字段：进世界时现场要经它把当期的世界记忆接上（attachPlaces）。
+        goals = new GoalRunTable(abilities, goalRuns, places, controlLoop);
         return new ToolDispatcher(List.of(
                 new ObserveTool(() -> worldScope.get() == null ? null : worldScope.get().scene(),
                         () -> worldScope.get() == null ? null : worldScope.get().memory(), goals, clientWork),
