@@ -50,6 +50,9 @@ public final class ControlLoop {
      */
     static final long RETRY_AFTER_FAILED_TICKS = 100;
 
+    /** 接连没做成时等待逐次加倍，最长五分钟：弄不到吃的这类一时解决不了的事，不每隔几秒就打断一次手上的活。 */
+    static final long MAX_RETRY_AFTER_FAILED_TICKS = 20L * 60 * 5;
+
     private final List<SurvivalNeed> needs;
     /** 主任务被停在半路时的一句话说明；没被停过为 null。 */
     private String parkedWhere;
@@ -57,6 +60,8 @@ public final class ControlLoop {
     private final List<Frame> stack = new ArrayList<>();
     /** 临时任务刚没做成的需求：在这一刻之前、且不比当时更急，就先不插。 */
     private final Map<SurvivalNeed, Backoff> backoffs = new HashMap<>();
+    /** 各需求接连没做成的次数；处境解除或做成一次就清零。 */
+    private final Map<SurvivalNeed, Integer> failureStreaks = new HashMap<>();
     /** 判断时抛过异常的需求；同一个需求的异常只记一次日志，免得每刻刷屏。 */
     private final Set<SurvivalNeed> brokenNeeds = new HashSet<>();
 
@@ -119,13 +124,14 @@ public final class ControlLoop {
             for (SurvivalNeed need : needs) {
                 if (hasLiveTask(need)) continue;
                 Urgency urgency = urgencyOf(need, context, null);
-                if (urgency == null) continue;
+                // 停着时也按没做成的等待来：救不成的需求不每刻重建一遍。
+                if (urgency == null || heldBack(need, urgency, context)) continue;
                 Task rescue;
                 try {
                     rescue = need.createTask(context);
                 } catch (RuntimeException exception) {
                     LOG.warn("生存需求「{}」创建临时任务时出错", need.name(), exception);
-                    backoffs.put(need, new Backoff(context.gameTick() + RETRY_AFTER_FAILED_TICKS, urgency));
+                    holdBack(need, urgency, context);
                     continue;
                 }
                 stack.add(new Frame(rescue, need, urgency));
@@ -154,6 +160,7 @@ public final class ControlLoop {
             if (urgency == null) {
                 // 处境已经不需要处理：之前没做成留下的等待一并作废，下次需要时马上能插。
                 backoffs.remove(need);
+                failureStreaks.remove(need);
                 continue;
             }
             boolean waiting = heldBack(need, urgency, context);
@@ -178,7 +185,7 @@ public final class ControlLoop {
             task = choice.chosen.createTask(context);
         } catch (RuntimeException exception) {
             LOG.warn("生存需求「{}」创建临时任务时出错", choice.chosen.name(), exception);
-            backoffs.put(choice.chosen, new Backoff(context.gameTick() + RETRY_AFTER_FAILED_TICKS, choice.urgency));
+            holdBack(choice.chosen, choice.urgency, context);
             return stack.isEmpty() ? Decision.IDLE : advance(top(), context, choice.chosen);
         }
         stack.add(new Frame(task, choice.chosen, choice.urgency));
@@ -203,7 +210,10 @@ public final class ControlLoop {
         stack.remove(frame);
         if (frame.from != null && finished.result().status() != TaskResult.Status.DONE) {
             // 自救没做成：处境不更急就先缓一阵再插，让主任务有机会动；做没做成都不影响主任务。
-            backoffs.put(frame.from, new Backoff(context.gameTick() + RETRY_AFTER_FAILED_TICKS, frame.urgency));
+            holdBack(frame.from, frame.urgency, context);
+        } else if (frame.from != null) {
+            // 做成了一次：之前接连没做成的次数清零，下次再出事从五秒等起。
+            failureStreaks.remove(frame.from);
         }
         // 临时任务回不到原来的岗位时不让主任务在新地点悄悄续上：停住等 LLM 决定。
         if (frame.task instanceof DisplacedTask displaced && displaced.cannotResumeInPlace()
@@ -237,6 +247,13 @@ public final class ControlLoop {
             }
             return null;
         }
+    }
+
+    // 记一次没做成：这个需求先缓一阵，接连没做成就缓得更久。
+    private void holdBack(SurvivalNeed need, Urgency urgency, TickContext context) {
+        int streak = failureStreaks.merge(need, 1, Integer::sum);
+        long delay = Math.min(RETRY_AFTER_FAILED_TICKS << Math.min(streak - 1, 12), MAX_RETRY_AFTER_FAILED_TICKS);
+        backoffs.put(need, new Backoff(context.gameTick() + delay, urgency));
     }
 
     // 临时任务刚没做成的需求：没到时间、处境也没更急，就先不插。

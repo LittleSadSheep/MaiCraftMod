@@ -182,7 +182,7 @@ public final class Bootstrap {
                 new SelfDefenseNeed(combatSenses, new LiveCombatMoves(walks), events),
                 new HungerNeed(new LiveHungerView(), foodMoves, events),
                 new NightfallNeed(new LiveNightView(combatSenses),
-                        LiveNightAndEdgeMoves.burrow(events), events),
+                        LiveNightAndEdgeMoves.burrow(events)),
                 new EdgeProximityNeed(new LiveEdgeView(),
                         LiveNightAndEdgeMoves.retreat(walks, events))));
     }

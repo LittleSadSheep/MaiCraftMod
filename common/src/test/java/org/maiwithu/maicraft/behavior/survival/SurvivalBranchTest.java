@@ -30,7 +30,8 @@ class SurvivalBranchTest {
         assertNull(NightfallNeed.branch(new NightfallNeed.Facts(false, false, true,
                 ThreatAssessment.Verdict.WINNABLE, 20, 15)));
         // 能弄到床：找空当去睡（入睡归睡觉规格）。
-        assertEquals(Urgency.LATER, NightfallNeed.branch(new NightfallNeed.Facts(true, false, true,
+        // 有床：夜间休息接上之前接着干活，不封坑熬夜。
+        assertNull(NightfallNeed.branch(new NightfallNeed.Facts(true, false, true,
                 ThreatAssessment.Verdict.WINNABLE, 20, 15)));
         // 安全处（矿道、屋里、照明充足）：接着干。
         assertNull(NightfallNeed.branch(new NightfallNeed.Facts(true, true, false,

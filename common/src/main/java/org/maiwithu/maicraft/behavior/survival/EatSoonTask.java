@@ -6,6 +6,7 @@ import java.util.Objects;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
+import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.ResultDetails;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -90,8 +91,8 @@ public final class EatSoonTask extends PhasedTask<EatSoonTask.Phase> {
             // 没有进食流程可组合：身上有吃的才轮到这一步，连吃都不能自动吃就如实说。
             events.publish(TaskEvent.Kind.NEED_UNHANDLED,
                     "饿了但进食还没接上流程，吃不了一口；主任务照常继续");
-            return Next.done(TaskResult.builder(TaskResult.Status.DONE,
-                    "饿了；身上有吃的但没法自动吃，等下一个空当或人工指派进食").build());
+            return Next.fail(Problem.of(Problem.Kind.UNSUPPORTED,
+                    "饿了；身上有吃的但没法自动吃，等下一个空当或人工指派进食"));
         }
         return runCurrent(context, () -> {
             // 吃完了再看饱食度；还没到线也算了结——下一次报急自然再插进来。
@@ -115,8 +116,9 @@ public final class EatSoonTask extends PhasedTask<EatSoonTask.Phase> {
         if (current == null) {
             events.publish(TaskEvent.Kind.NEED_UNHANDLED,
                     "饿了，身上没有吃的，弄吃的也没接上流程；先回去干活，缺食物这件事已上报");
-            return Next.done(TaskResult.builder(TaskResult.Status.DONE,
-                    "饿了且身上没吃的；弄不到（流程未接入），主任务不受影响").build());
+            return Next.fail(Problem.of(Problem.Kind.NEED_ITEM,
+                    "饿了且身上没吃的；弄吃的还没接上，主任务不受影响",
+                    "给角色一些能直接吃的东西"));
         }
         return runCurrent(context, () -> {
             // 一轮弄到就回去吃；弄不到按预算与卡住判定收场，事件交代事实。
@@ -126,8 +128,9 @@ public final class EatSoonTask extends PhasedTask<EatSoonTask.Phase> {
             }
             events.publish(TaskEvent.Kind.NEED_UNHANDLED,
                     "饿了，身上没吃的，弄吃的也弄不到（箱子空的、做不了、采不到都可能）；先回去继续干活");
-            return Next.done(TaskResult.builder(TaskResult.Status.DONE,
-                    "弄不到吃的：试过的路都没走通，主任务不受影响，继续干活").build());
+            return Next.fail(Problem.of(Problem.Kind.NEED_ITEM,
+                    "弄不到吃的：试过的路都没走通，主任务不受影响，继续干活",
+                    "给角色一些能直接吃的东西"));
         });
     }
 

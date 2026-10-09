@@ -307,6 +307,25 @@ class ControlLoopTest {
     }
 
     @Test
+    void needThatKeepsFailingWaitsLongerEachTime() {
+        // 饿了却弄不到吃的：接连没做成，等待逐次加倍，不每隔五秒就打断一次手上的活。
+        FakeTask main = new FakeTask("挖矿", Interruptibility.WORKING);
+        FakeNeed hunger = FakeNeed.always("饥饿", Urgency.SOON, () -> new FailingTask("进食临时"));
+        ControlLoop loop = new ControlLoop(List.of(hunger));
+        loop.setMainTask(main);
+
+        long secondTry = ControlLoop.RETRY_AFTER_FAILED_TICKS;
+        long thirdTry = secondTry + 2 * ControlLoop.RETRY_AFTER_FAILED_TICKS;
+        for (long tick = 0; tick < thirdTry; tick++) {
+            loop.tick(new TestContext(tick));
+        }
+
+        assertEquals(2, hunger.created, "第二次没做成后要等两倍的时间");
+        loop.tick(new TestContext(thirdTry));
+        assertEquals(3, hunger.created, "加倍后的等待过了再试一次");
+    }
+
+    @Test
     void needThatGotMoreUrgentDoesNotWaitOutItsBackoff() {
         FakeTask main = new FakeTask("挖矿", Interruptibility.WORKING);
         FakeNeed breath = FakeNeed.of("换气", () -> new FailingTask("换气临时"),
