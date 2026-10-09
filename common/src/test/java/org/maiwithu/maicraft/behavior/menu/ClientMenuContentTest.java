@@ -62,10 +62,10 @@ class ClientMenuContentTest {
 
     @Test
     void 普通容器界面给出分侧读数() {
-        // 27 格箱子 + 36 格角色侧：容器侧 0..26，角色侧 27..62。
+        // 27 格箱子（菜单类型 generic_9x3）+ 36 格角色侧：容器侧 0..26，角色侧 27..62。
         Map<Integer, SlotSnapshot> contents = new HashMap<>();
         contents.put(0, SlotSnapshot.of(new ItemStack(Items.OAK_LOG, 8)));
-        MenuSlots slots = new FakeSlots("minecraft:chest", 63,
+        MenuSlots slots = new FakeSlots("minecraft:generic_9x3", 63,
                 IntStream.rangeClosed(27, 62).boxed().collect(Collectors.toSet()));
         Optional<MenuContent.Reading> reading = ClientMenuContent.reading(
                 slots, emptyChannel(), slot -> contents.getOrDefault(slot, SlotSnapshot.empty()));
@@ -90,7 +90,7 @@ class ClientMenuContentTest {
     @Test
     void 角色侧格数对不上不给读数() {
         // 容器侧界面上角色侧只有 9 格：证明不了两侧怎么分，不报读数。
-        MenuSlots slots = new FakeSlots("minecraft:chest", 18,
+        MenuSlots slots = new FakeSlots("minecraft:generic_9x3", 18,
                 IntStream.range(9, 18).boxed().collect(Collectors.toSet()));
         assertTrue(ClientMenuContent.reading(slots, emptyChannel(), slot -> SlotSnapshot.empty()).isEmpty());
     }

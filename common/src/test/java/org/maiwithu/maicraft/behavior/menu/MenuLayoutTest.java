@@ -36,8 +36,9 @@ class MenuLayoutTest {
 
     @Test
     void 原版箱两侧各就各位() {
-        // 双 chest 界面共 90 格：54 容器格 + 36 角色格。
-        Layout layout = MenuLayout.classify(slots("minecraft:chest", 90, 36));
+        // 大箱子的菜单类型是 generic_9x6，共 90 格：54 容器格 + 36 角色格；菜单类型不是方块 ID，认 minecraft:chest 认不出。
+        Layout layout = MenuLayout.classify(slots("minecraft:generic_9x6", 90, 36));
+        assertInstanceOf(Unsupported.class, MenuLayout.classify(slots("minecraft:chest", 90, 36)));
         Supported supported = assertInstanceOf(Supported.class, layout);
         assertPlayerSideIsLast36(layout, 90);
         assertEquals(54, supported.containerSlots().size());

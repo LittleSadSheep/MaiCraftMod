@@ -28,7 +28,12 @@ public final class ClientMenuSlots implements MenuSlots {
     public String menuTypeId() {
         AbstractContainerMenu menu = currentMenu();
         if (menu == null) return "";
-        return BuiltInRegistries.MENU.getKey(menu.getType()).toString();
+        try {
+            return BuiltInRegistries.MENU.getKey(menu.getType()).toString();
+        } catch (UnsupportedOperationException noType) {
+            // 角色自己的物品栏界面没有菜单类型（原版直接抛异常）：不是容器界面，按认不出处理。
+            return "";
+        }
     }
 
     @Override
