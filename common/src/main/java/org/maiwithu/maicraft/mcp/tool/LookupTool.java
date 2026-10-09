@@ -9,6 +9,8 @@ import org.maiwithu.maicraft.kernel.ability.AbilitySpec;
 import org.maiwithu.maicraft.kernel.ability.Listing;
 import org.maiwithu.maicraft.kernel.ability.RequiredMod;
 import org.maiwithu.maicraft.kernel.param.Param;
+import org.maiwithu.maicraft.mcp.knowledge.KnowledgeDocument;
+import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -19,15 +21,18 @@ import java.util.Objects;
  * lookup：查资料。不带 id 和 query 时返回全部能力的一行签名，宿主开局可以直接放进上下文；
  * 带 id 时返回这个能力的完整说明与参数表；带 query 时按名字和用途搜索。
  *
- * <p>知识库、Wiki、配方三种 topic 随知识库接入，现在明确回答还没接上。
+ * <p>topic=knowledge 查随包的游戏机制常识：不带 id、query 列目录，query 按关键词找，id 读一篇正文。
+ * Wiki 与配方两种 topic 还没接上，明确回答还没接上。
  */
 public final class LookupTool implements McpTool {
     private static final List<String> TOPICS = List.of("abilities", "knowledge", "wiki", "recipe");
 
     private final AbilityRegistry registry;
+    private final KnowledgeLibrary knowledge;
 
-    public LookupTool(AbilityRegistry registry) {
+    public LookupTool(AbilityRegistry registry, KnowledgeLibrary knowledge) {
         this.registry = Objects.requireNonNull(registry, "registry");
+        this.knowledge = Objects.requireNonNull(knowledge, "knowledge");
     }
 
     @Override public String name() {
@@ -47,8 +52,12 @@ public final class LookupTool implements McpTool {
             return ToolReply.error(ErrorCode.INVALID_PARAMETER, "参数有 " + check.errors().size() + " 处问题",
                     check.errors(), null);
         }
+        if ("knowledge".equals(topic)) {
+            return knowledge(id, query, check);
+        }
         if (topic != null && !topic.equals("abilities")) {
-            return ToolReply.error(ErrorCode.INVALID_PARAMETER, "topic=" + topic + " 还没有接上，目前只能查 abilities");
+            return ToolReply.error(ErrorCode.INVALID_PARAMETER,
+                    "topic=" + topic + " 还没有接上，目前能查 abilities 和 knowledge");
         }
         if (id != null) {
             return ability(id, check);
@@ -66,6 +75,49 @@ public final class LookupTool implements McpTool {
         JsonObject data = new JsonObject();
         data.add("abilities", list);
         return ToolReply.ok(data, check.notes(), null);
+    }
+
+    /**
+     * 查游戏机制常识：给 id 读一篇正文（完整地址或末段名都行），给 query 按关键词找，都不给就列出目录。
+     * 常识只讲游戏规则，让角色去做时看对应能力的说明；这里不读游戏世界。
+     */
+    private JsonObject knowledge(String id, String query, RequestCheck check) {
+        List<String> notes = new ArrayList<>(check.notes());
+        if (id != null) {
+            KnowledgeDocument document = knowledge.find(id).orElse(null);
+            if (document == null) {
+                return ToolReply.error(ErrorCode.UNKNOWN_ID, "没有这篇资料：" + id
+                        + "；不带 id 调用 lookup(topic=knowledge) 看目录，或者用 query 按关键词找");
+            }
+            if (!document.uri().equals(id.strip())) {
+                notes.add("id \"" + id + "\" 按 " + document.uri() + " 读取");
+            }
+            JsonObject data = new JsonObject();
+            data.addProperty("id", document.uri());
+            data.addProperty("title", document.title());
+            data.addProperty("text", document.text());
+            return ToolReply.ok(data, notes, null);
+        }
+        List<KnowledgeDocument.Entry> entries = query == null ? knowledge.listing() : knowledge.matching(query);
+        JsonArray list = new JsonArray();
+        for (KnowledgeDocument.Entry entry : entries) {
+            JsonObject row = new JsonObject();
+            row.addProperty("id", entry.uri());
+            row.addProperty("title", entry.title());
+            row.addProperty("summary", entry.description());
+            list.add(row);
+        }
+        JsonObject data = new JsonObject();
+        data.add("knowledge", list);
+        JsonObject next = null;
+        if (query != null) {
+            // 找到了就建议读排在最前的那篇；没找到不等于没有这条规则，建议列出完整目录自己挑。
+            JsonObject arguments = new JsonObject();
+            arguments.addProperty("topic", "knowledge");
+            if (!entries.isEmpty()) arguments.addProperty("id", entries.getFirst().uri());
+            next = ToolReply.next(ToolCatalog.LOOKUP, arguments);
+        }
+        return ToolReply.ok(data, notes, next);
     }
 
     /** 一个能力的完整说明：用途、能力说明正文、参数表、接受的目标对象、执行方式、需要的模组。 */

@@ -72,6 +72,7 @@ import org.maiwithu.maicraft.kernel.goal.InMemoryGoalRunStore;
 import org.maiwithu.maicraft.kernel.goal.PlayerControlHandover;
 import org.maiwithu.maicraft.kernel.goal.RemembersPlaces;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
+import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
 import org.maiwithu.maicraft.mcp.tool.EventsTool;
 import org.maiwithu.maicraft.mcp.tool.ExecuteTool;
 import org.maiwithu.maicraft.mcp.tool.LookupTool;
@@ -461,7 +462,8 @@ public final class Bootstrap {
         return new ToolDispatcher(List.of(
                 new ObserveTool(() -> worldScope.get() == null ? null : worldScope.get().scene(),
                         () -> worldScope.get() == null ? null : worldScope.get().memory(), goals, clientWork),
-                new LookupTool(abilities),
+                // 查资料先接随包的游戏机制常识；联网的资料来源还没登记。
+                new LookupTool(abilities, KnowledgeLibrary.offline()),
                 new ExecuteTool(abilities, goals, clientWork),
                 new TaskTool(goals, clientWork),
                 new EventsTool(taskEvents, goals, clientWork)));

@@ -35,6 +35,7 @@ import org.maiwithu.maicraft.kernel.result.Attempt;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
+import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
 import org.maiwithu.maicraft.mcp.tool.ErrorCode;
 import org.maiwithu.maicraft.mcp.tool.FieldError;
 import org.maiwithu.maicraft.mcp.tool.LookupTool;
@@ -71,7 +72,7 @@ class InterfaceSnapshotTest {
     @Test
     void theAbilitiesMatchTheSnapshot() throws IOException {
         AbilityRegistry registry = AbilityCatalog.create(OfflineCatalog.deps(tempDir));
-        LookupTool lookup = new LookupTool(registry);
+        LookupTool lookup = new LookupTool(registry, KnowledgeLibrary.offline());
         JsonObject abilities = new JsonObject();
         // 开局 lookup() 给 LLM 的一行签名清单，按登记顺序。
         abilities.add("listing", data(lookup.call(new JsonObject())));
