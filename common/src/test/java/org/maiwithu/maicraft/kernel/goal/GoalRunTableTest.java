@@ -88,7 +88,7 @@ class GoalRunTableTest {
         }, loop, handover, new DeathRecovery(new TaskEventLog()), actions);
         GoalRunner main = deaths.launch(GOAL, null).runner();
 
-        deaths.characterDied(new DeathFacts(3, "minecraft:overworld", 0, 64, 0), true);
+        deaths.characterDied(new DeathFacts(3, "minecraft:overworld", 0, 64, 0, false), true);
         GoalRun decision = deaths.recent().get(0);
         assertEquals(DeathRecovery.DECISION_NAME, decision.goal().ability(), "任务列表里看得到死亡恢复");
         assertTrue(deaths.pendingQuestion(decision.id()).isPresent());
@@ -143,7 +143,7 @@ class GoalRunTableTest {
         GoalRunTable deaths = new GoalRunTable(registry, store, (name, position) -> {
             throw new IllegalStateException("用不到");
         }, loop, handover, new DeathRecovery(new TaskEventLog()), actions);
-        deaths.characterDied(new DeathFacts(3, "minecraft:overworld", 0, 64, 0), true);
+        deaths.characterDied(new DeathFacts(3, "minecraft:overworld", 0, 64, 0, false), true);
         GoalRun decision = deaths.recent().get(0);
 
         deaths.answer(decision.id(), "respawn");

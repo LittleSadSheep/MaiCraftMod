@@ -8,15 +8,15 @@ import org.maiwithu.maicraft.kernel.param.Params;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 
 /**
- * 死亡恢复决策：角色死后给 LLM 的一个选择——请求原版重生、请求切观战，或取消任务把死亡屏幕留给人。
+ * 死亡恢复决策：角色死后给 LLM 的一个选择——回到世界里（普通世界是重生，极限模式是旁观世界），
+ * 或取消任务把死亡屏幕留给人。两种"回去"在原版是死亡界面上同一个按钮发的同一个请求，
+ * 服务器按世界规则结算：普通世界复活，极限模式切成旁观；所以只按世界规则给其中一种，不让 LLM 选了旁观却被复活。
  *
  * <p>死亡停摆时挂一次问题（经内核的问题通道，MCP 的 answer 沿目标运行表的回答管道回来）。
  * 同一个死亡过程只挂一次；挂着的决策记在一条内存里的目标运行上，让 LLM 能按编号查到它、回答它。
@@ -24,24 +24,20 @@ import java.util.Set;
  * 执行成功或选了取消就了结本轮，迟到的重复答复不会再落在消费掉的问题上。
  * 回到活体（重生或人以别的方式救回来）或离开世界时，整份决策丢掉，下次死亡从头再来。
  *
- * <p>决策编号是负数（-1 起往回数），和下达的目标运行编号不在一个数域里，一眼分得清。
+ * <p>决策编号是负数（-2 起往回数），和下达的目标运行编号不在一个数域里，一眼分得清；
+ * -1 留给事件流里"与目标无关"的事件，不和它撞，按编号读事件时只读得到这条决策的。
  * 只在客户端线程使用。
  */
 public final class DeathRecovery {
     /** 决策在 MCP 里显示的名字：不是能力 ID，内核不认识任何能力，这里只是决策种类在任务列表里的叫法。 */
     public static final String DECISION_NAME = "death_recovery";
 
-    /** 留着最近多少轮的决策编号供迟到答复辨认；死亡不频繁，十六轮足够。 */
-    private static final int KEPT_DECISION_IDS = 16;
-
     private final TaskEventLog events;
     private GoalRun decision;
     /** 挂着的问题原文：答复会把问题从记录上消费掉，重新挂时要按原文挂回去。 */
     private Question lastQuestion;
-    /** 下一条决策的编号：负数往回数，与目标运行的正数编号永不相遇。 */
-    private long nextDecisionId = -1;
-    /** 最近挂过的决策编号：决策了结后迟到的答复据此得到"本轮已了结"的回话，而不是被当成编号不存在。 */
-    private final Set<Long> issuedDecisionIds = new LinkedHashSet<>();
+    /** 下一条决策的编号：从"与目标无关"的编号再往回一格起，负数往回数，与目标运行的正数编号永不相遇。 */
+    private long nextDecisionId = TaskEventLog.NO_GOAL - 1;
 
     public DeathRecovery(TaskEventLog events) {
         this.events = Objects.requireNonNull(events, "events");
@@ -50,20 +46,16 @@ public final class DeathRecovery {
     /**
      * 角色死了：挂一次死亡恢复决策。已经挂着或本轮已经了结（等 LLM 换人来重生）时不再挂。
      *
-     * @param facts           死亡现场的可见事实；这一刻拿不到时为 null，问题文本里就少写一条
-     * @param connectionAlive 到服务器的连接还在不在；不在时不提供切观战
+     * @param facts           死亡现场的可见事实；这一刻拿不到时为 null，问题文本里就少写一条，按普通世界给选项
+     * @param connectionAlive 到服务器的连接还在不在；不在时回不去，只能取消任务
      */
     public void onDeath(DeathFacts facts, boolean connectionAlive) {
         if (decision != null) {
             return;
         }
-        Question question = new Question(Question.Reason.CHOOSE_ONE, questionText(facts), options(connectionAlive));
+        Question question = new Question(Question.Reason.CHOOSE_ONE, questionText(facts),
+                options(facts != null && facts.hardcore(), connectionAlive));
         decision = new GoalRun(nextDecisionId--, goal(), GoalRun.NO_PARENT, -1);
-        issuedDecisionIds.add(decision.id());
-        while (issuedDecisionIds.size() > KEPT_DECISION_IDS) {
-            // 只留最近几轮的编号：死亡不频繁，更早的迟到答复当作编号不存在也说得通。
-            issuedDecisionIds.remove(issuedDecisionIds.iterator().next());
-        }
         decision.ask(question);
         lastQuestion = question;
         events.append(TaskEvent.Kind.ASKED, decision.id(), question.text(), null);
@@ -82,6 +74,12 @@ public final class DeathRecovery {
     /** 这个编号是不是本轮死亡决策的记录。 */
     public boolean owns(long runId) {
         return decision != null && decision.id() == runId;
+    }
+
+    // 这个编号是不是以前某轮死亡挂过的决策：编号从"与目标无关"的下一格起按顺序往回数，
+    // 挂过的正好是这一段连续的负数，用不着另记一份名单。
+    private boolean issuedEarlier(long runId) {
+        return runId < TaskEventLog.NO_GOAL && runId > nextDecisionId;
     }
 
     /** 本轮死亡决策的记录；死亡过程之外为空。 */
@@ -120,7 +118,7 @@ public final class DeathRecovery {
      */
     public Choice answer(long runId, String optionId) {
         if (!owns(runId)) {
-            if (issuedDecisionIds.contains(runId)) {
+            if (issuedEarlier(runId)) {
                 // 编号确实是某轮死亡决策的，但那轮已经了结：迟到的答复如实说不再收，不冒充编号不存在。
                 throw new GoalRunTable.WrongGoalRunState("本轮死亡恢复已了结，不再收回答");
             }
@@ -178,12 +176,14 @@ public final class DeathRecovery {
         return text.append("接下来怎么办？").toString();
     }
 
-    // 选项：重生永远提供；切观战只在连接还在时提供；取消任务永远提供。
-    private static List<Question.Option> options(boolean connectionAlive) {
+    // 选项：连接还在才回得去——普通世界给重生，极限模式给旁观世界（死亡界面上就是这样）；取消任务永远提供。
+    private static List<Question.Option> options(boolean hardcore, boolean connectionAlive) {
         List<Question.Option> options = new ArrayList<>();
-        options.add(new Question.Option("respawn", "发原版重生请求，回出生点或床，任务原地接着做"));
-        if (connectionAlive) {
-            options.add(new Question.Option("spectate", "请求切到旁观模式，成不成由服务器决定"));
+        if (connectionAlive && !hardcore) {
+            options.add(new Question.Option("respawn", "发原版重生请求，回出生点或床，任务原地接着做"));
+        }
+        if (connectionAlive && hardcore) {
+            options.add(new Question.Option("spectate", "极限模式不能重生：请求旁观这个世界，成不成由服务器决定"));
         }
         options.add(new Question.Option("cancel_task", "取消当前任务，死亡屏幕留给人处理"));
         return List.copyOf(options);

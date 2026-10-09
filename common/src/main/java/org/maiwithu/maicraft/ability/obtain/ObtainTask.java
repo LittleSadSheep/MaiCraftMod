@@ -24,8 +24,8 @@ import org.maiwithu.maicraft.kernel.task.PhasedTask;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
- * 拿东西的任务：先清点身上够不够（够了直接完成，一个动作都不用做），
- * 不够就把请求交给拿到物品的引擎——问遍来源、按代价挑路、做一个来源重新清点一次。
+ * 拿东西的任务：count 是"这次再多拿几件"，身上原有的不算——先记下身上原有几件，
+ * 再把请求交给拿到物品的引擎：问遍来源、按代价挑路、做一个来源重新清点一次，多出 count 件才算拿够。
  * 引擎做完算拿到；引擎认输（所有路都试完）时，这次已经拿到几件照实结算——
  * 部分拿到是 partial 加还差几件，一件没拿到才是失败，两条路不混淆。
  */
@@ -73,17 +73,11 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
         };
     }
 
-    // 开始时已够：一个动作都不用做，直接完成并写明"开始时已够"。
+    // 先记下身上原有几件：这次拿到几件按它算，原有的不算这次拿到的。
     private Next<Phase> countPhase() {
-        int carried = CarriedItems.matching(backpack, offhand, input.wanted(), tags);
-        if (carried >= input.count()) {
-            return Next.done(TaskResult.builder(TaskResult.Status.DONE,
-                    "开始时身上已够：要再拿 " + input.count() + " 个" + input.wanted().describe()
-                            + "，身上已有 " + carried + " 个").details(details()).build());
-        }
-        carriedAtStart = carried;
-        return Next.go(Phase.ACQUIRE, "身上只有 " + carried + " 个，还差 "
-                + (input.count() - carried) + " 个，去各来源弄");
+        carriedAtStart = CarriedItems.matching(backpack, offhand, input.wanted(), tags);
+        return Next.go(Phase.ACQUIRE, "身上原有 " + carriedAtStart + " 个，再去各来源弄 "
+                + input.count() + " 个");
     }
 
     // 引擎逐刻推进：做完重新清点结算；认输时按这次拿到几件分别落到 partial 或失败。
@@ -110,7 +104,7 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
                     .details(details()).build());
         }
         if (gained > 0) {
-            int stillNeeded = input.count() - carried;
+            int stillNeeded = input.count() - gained;
             return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL,
                     "部分拿到：经 " + routesText() + " 拿到 " + gained + " 个" + item
                             + "，还差 " + stillNeeded + " 个")

@@ -52,7 +52,7 @@ class ChatAbilityTest {
     }
 
     private static Params messageParam(String message) {
-        ChatAbility ability = new ChatAbility(message2 -> {}, SILENT_ECHO, false);
+        ChatAbility ability = new ChatAbility(message2 -> true, SILENT_ECHO, false);
         ParseResult result = ability.spec().params()
                 .parse(JsonParser.parseString("{\"message\":\"" + message + "\"}").getAsJsonObject());
         assertTrue(result.ok(), "参数应能解析：" + result.errors());
@@ -65,7 +65,7 @@ class ChatAbilityTest {
 
     @Test
     void specIsChatWithRequiredMessage() {
-        ChatAbility ability = new ChatAbility(message -> {}, SILENT_ECHO, false);
+        ChatAbility ability = new ChatAbility(message -> true, SILENT_ECHO, false);
         assertEquals("maicraft:chat", ability.spec().id());
         assertFalse(ability.spec().params().parse(new JsonObject()).ok(),
                 "缺 message 应报错");
@@ -74,14 +74,14 @@ class ChatAbilityTest {
     @Test
     void normalMessageRunsChatTask() {
         StepDecision.Run run = assertInstanceOf(StepDecision.Run.class,
-                new ChatAbility(message -> {}, SILENT_ECHO, false).decide(step(goal("大家好"))));
+                new ChatAbility(message -> true, SILENT_ECHO, false).decide(step(goal("大家好"))));
         assertEquals("大家好", assertInstanceOf(ChatInput.class, run.input()).message());
     }
 
     @Test
     void slashCommandIsRefusedWithoutRunningAnything() {
         StepDecision.Finish finish = assertInstanceOf(StepDecision.Finish.class,
-                new ChatAbility(message -> {}, SILENT_ECHO, false).decide(step(goal("/give @s diamond"))));
+                new ChatAbility(message -> true, SILENT_ECHO, false).decide(step(goal("/give @s diamond"))));
 
         assertEquals(TaskResult.Status.FAILED, finish.result().status());
         Problem problem = finish.result().problem();
@@ -94,18 +94,18 @@ class ChatAbilityTest {
     void slashCommandRunsWhenInstanceAllowsIt() {
         // 实例配置放开后，以 / 开头的消息不再拒绝，照常开出发话任务；命令能不能成由服务器裁决。
         StepDecision.Run run = assertInstanceOf(StepDecision.Run.class,
-                new ChatAbility(message -> {}, SILENT_ECHO, true).decide(step(goal("/give @s diamond"))));
+                new ChatAbility(message -> true, SILENT_ECHO, true).decide(step(goal("/give @s diamond"))));
         assertEquals("/give @s diamond", assertInstanceOf(ChatInput.class, run.input()).message());
     }
 
     @Test
     void docTellsCommandPolicyAccordingToInstance() {
         // 默认：说明写明角色不执行游戏命令；放开：说明与参数说明都如实写本实例允许执行游戏命令。
-        ChatAbility closed = new ChatAbility(message -> {}, SILENT_ECHO, false);
+        ChatAbility closed = new ChatAbility(message -> true, SILENT_ECHO, false);
         assertTrue(closed.spec().doc().load().contains("角色不执行游戏命令"));
         assertFalse(closed.spec().doc().load().contains("本实例允许执行游戏命令"));
 
-        ChatAbility open = new ChatAbility(message -> {}, SILENT_ECHO, true);
+        ChatAbility open = new ChatAbility(message -> true, SILENT_ECHO, true);
         assertTrue(open.spec().doc().load().contains("本实例允许执行游戏命令"),
                 open.spec().doc().load());
         // 放开说明要进全量列表：一句话用途里也带这一句，不能只藏在 lookup 详情里。
@@ -115,7 +115,7 @@ class ChatAbilityTest {
 
     @Test
     void factoryCreatesChatTask() {
-        ChatAbility ability = new ChatAbility(message -> {}, SILENT_ECHO, false);
+        ChatAbility ability = new ChatAbility(message -> true, SILENT_ECHO, false);
         TaskFactories factories = new TaskFactories();
         ability.registerTasks(factories);
         Task task = factories.create(new ChatInput("早上好"));

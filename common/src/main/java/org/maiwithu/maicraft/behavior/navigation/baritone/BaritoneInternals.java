@@ -4,7 +4,6 @@ package org.maiwithu.maicraft.behavior.navigation.baritone;
 import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 import baritone.api.Settings;
-import baritone.api.event.events.BlockChangeEvent;
 import baritone.api.event.events.PathEvent;
 import baritone.api.event.events.WorldEvent;
 import baritone.api.event.events.type.EventState;
@@ -36,7 +35,7 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
  * 等待期间如实报告正在算路。所有方法只能在客户端线程调用；逐刻推进由任务
  * 在阶段里调用 {@link WalkRun#tick}。
  *
- * <p>路上垫的临时方块在这里记账：引擎报告的方块变化里，新出现实心方块的位置逐格记下，
+ * <p>路上垫的临时方块由走到运行逐格记账（只记自己右键得到确认、确实长出方块的格子），
  * 结算时经 {@code ReadsPlacedBlocks} 交给出行的结果，收不收回由 LLM 决定。
  */
 public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
@@ -98,15 +97,6 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
         active = null;
     }
 
-    /** 引擎报告的方块变化转给正在走的运行记账；不在这段路上的变化不记。 */
-    void onEngineBlockChange(BlockChangeEvent event) {
-        BaritoneWalkRun current = active;
-        if (current == null) return;
-        for (var pair : event.getBlocks()) {
-            current.recordPlacedIfSolid(pair.first(), pair.second());
-        }
-    }
-
     /** 这段走到（或刚结束的一段）里垫上的方块格子；没垫过给空列表。 */
     @Override
     public List<BlockPos> placedDuringCurrentWalk() {
@@ -135,10 +125,6 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
                 public void onPathEvent(PathEvent event) {
                     BaritoneWalkRun current = active;
                     if (current != null) current.onPathEvent(event);
-                }
-
-                @Override public void onBlockChange(BlockChangeEvent event) {
-                    onEngineBlockChange(event);
                 }
             });
         }
@@ -228,6 +214,6 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
         return null;
     }
 
-    /** 请求停止正在进行的挖掘；逐刻的原生交互提交接入前无事可做。 */
+    /** 引擎请求停挖：它同时会松开左键，走到运行下一刻看到左键松开就停手，这里不用另做。 */
     public static void requestStopBreaking() {}
 }

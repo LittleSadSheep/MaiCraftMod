@@ -34,7 +34,10 @@ public final class ThrowsItems implements Action {
     private final String itemId;
     private final Function<PlayerContext, FirstPersonScene> scenes;
 
+    private final int planned;
     private int remaining;
+    /** 提交了却没等到确认的那一下计划丢几件：丢弃不可逆，调用方按没能确认记账。 */
+    private int unconfirmed;
     private PendingInteraction pending;
     /** 这次提交时计划丢出的件数：整份抛是一格的数量，零头抛是 1。 */
     private int plannedThisThrow;
@@ -49,6 +52,7 @@ public final class ThrowsItems implements Action {
     public ThrowsItems(String itemId, int count, Function<PlayerContext, FirstPersonScene> scenes) {
         this.itemId = Objects.requireNonNull(itemId, "itemId");
         if (count < 1) throw new IllegalArgumentException("要丢的数量至少为 1：" + count);
+        this.planned = count;
         this.remaining = count;
         this.scenes = Objects.requireNonNull(scenes, "scenes");
     }
@@ -56,6 +60,16 @@ public final class ThrowsItems implements Action {
     /** 还剩几件没丢出去。 */
     public int remaining() {
         return remaining;
+    }
+
+    /** 确认丢出去了几件。 */
+    public int thrown() {
+        return planned - remaining;
+    }
+
+    /** 提交了却没等到确认的件数：可能丢了也可能没丢，不能当成没发生，也不能当成丢了。 */
+    public int unconfirmed() {
+        return unconfirmed;
     }
 
     /** 收尾时的问题；动作以失败结束时非空。 */
@@ -109,6 +123,7 @@ public final class ThrowsItems implements Action {
             if (pending != null && !pending.terminal()) return ActionStatus.running();
         }
         if (pending == null) {
+            unconfirmed = plannedThisThrow;
             return ActionStatus.failed(stuck("投掷的确认记录没了，说不清丢没丢出去"));
         }
         PendingInteraction settled = pending;
@@ -120,7 +135,10 @@ public final class ThrowsItems implements Action {
             }
             case CONFIRMED_NOT_APPLIED -> ActionStatus.failed(new Problem(Problem.Kind.REFUSED_BY_GAME,
                     "游戏没有接受这次投掷：" + settled.detail(), null));
-            default -> ActionStatus.failed(stuck("投掷提交了但没等到确认，不能确定丢没丢出去，不盲目再丢"));
+            default -> {
+                unconfirmed = plannedThisThrow;
+                yield ActionStatus.failed(stuck("投掷提交了但没等到确认，不能确定丢没丢出去，不盲目再丢"));
+            }
         };
     }
 

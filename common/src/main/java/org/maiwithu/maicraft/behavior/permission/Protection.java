@@ -47,7 +47,8 @@ public final class Protection {
     /**
      * 一格方块受不受保护。
      *
-     * <p>判断顺序：先看服务端归属记录（以记录为准，角色自己放的不算），再看记住的区域，
+     * <p>判断顺序：归属还拿不准（这一格所在的区块还没问过服务端）就按受保护处理；
+     * 再看服务端归属记录（以记录为准，角色自己放的不算），再看记住的区域，
      * 再看额外保护的地标，最后靠玩家放置推断兜底。哪一路命中就不再往下问。
      *
      * @param position           方块位置
@@ -55,6 +56,8 @@ public final class Protection {
      * @param protectedLandmarks 这次任务额外保护的地标名
      */
     public boolean blockProtected(WorldPosition position, String blockType, Set<String> protectedLandmarks) {
+        // 拿不准就按受保护处理：归属还没问到，宁可少动一格。
+        if (!ownership.known(position.dimension(), position.x(), position.y(), position.z())) return true;
         Optional<ReadsBlockOwnership.PlacedBy> placedBy =
                 ownership.whoPlaced(position.dimension(), position.x(), position.y(), position.z());
         // 归属记录查得到就以它为准：别人放的受保护，自己放的临时方块不算。

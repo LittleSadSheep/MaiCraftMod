@@ -39,9 +39,13 @@ class ChatTaskTest {
     /** 记下交出去的话的发送替身。 */
     private static final class StubSender implements SendsChatMessage {
         final List<String> sent = new ArrayList<>();
+        /** 聊天通道接没接上：没接上时话交不出去。 */
+        boolean connected = true;
 
-        @Override public void send(String message) {
+        @Override public boolean send(String message) {
+            if (!connected) return false;
             sent.add(message);
+            return true;
         }
     }
 
@@ -177,6 +181,19 @@ class ChatTaskTest {
         assertTrue(result.summary().contains("没反馈不代表没执行"), result.summary());
         assertTrue(!result.summary().contains("失败"), result.summary());
         assertTrue(result.unconfirmed().get(0).note().contains("没反馈不代表没执行"), result.unconfirmed().toString());
+    }
+
+    @Test
+    void notHandedOverWhenTheChannelIsDownSaysSoInsteadOfWaiting() {
+        // 聊天通道没接上：话根本没交出去，当场如实收场，不等回显，也不说"已交给游戏执行"。
+        StubSender sender = new StubSender();
+        sender.connected = false;
+        TaskResult result = runToFinish(new ChatTask("/time set day", sender, new StubEcho()), new TestTick());
+
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertTrue(sender.sent.isEmpty());
+        assertTrue(result.summary().contains("没有交出去"), result.summary());
+        assertTrue(!result.summary().contains("已交给游戏执行"), result.summary());
     }
 
     @Test

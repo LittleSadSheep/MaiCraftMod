@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.kernel.event.CursorLog.CursorStatus;
 import org.maiwithu.maicraft.kernel.event.CursorLog.Page;
 
+import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -28,7 +29,7 @@ class TaskEventLogTest {
 
         log.publish(TaskEvent.Kind.TEMPORARY_TASK_STARTED, "被威胁，插入自卫");
 
-        Page<TaskEvent> page = log.read(null, 0, -1, 10, 0);
+        Page<TaskEvent> page = log.read(null, 0, OptionalLong.empty(), 10, 0);
         assertEquals(1, page.events().size());
         TaskEvent event = page.events().get(0);
         assertEquals(TaskEvent.Kind.TEMPORARY_TASK_STARTED, event.kind());
@@ -41,7 +42,7 @@ class TaskEventLogTest {
         TaskEventLog log = new TaskEventLog();
         append(log, 1, 5);
 
-        Page<TaskEvent> page = log.read(null, 0, -1, 3, 0);
+        Page<TaskEvent> page = log.read(null, 0, OptionalLong.empty(), 3, 0);
 
         assertEquals(3, page.events().size());
         assertEquals(3, page.events().get(0).cursor());
@@ -55,8 +56,8 @@ class TaskEventLogTest {
         TaskEventLog log = new TaskEventLog();
         append(log, 1, 5);
 
-        Page<TaskEvent> first = log.read(log.streamId(), 1, -1, 2, 0);
-        Page<TaskEvent> second = log.read(first.streamId(), first.cursor(), -1, 2, 0);
+        Page<TaskEvent> first = log.read(log.streamId(), 1, OptionalLong.empty(), 2, 0);
+        Page<TaskEvent> second = log.read(first.streamId(), first.cursor(), OptionalLong.empty(), 2, 0);
 
         assertEquals(2, first.events().get(0).cursor());
         assertTrue(first.hasMore());
@@ -73,11 +74,25 @@ class TaskEventLogTest {
         append(log, 2, 1);
         append(log, 1, 2);
 
-        Page<TaskEvent> page = log.read(log.streamId(), 0, 2, 10, 0);
+        Page<TaskEvent> page = log.read(log.streamId(), 0, OptionalLong.of(2), 10, 0);
 
         assertEquals(1, page.events().size());
         assertEquals(2, page.events().get(0).goalRunId());
         assertEquals(5, page.cursor());
+    }
+
+    @Test
+    void filteringByNegativeRecordIdSkipsEventsThatBelongToNoGoal() throws InterruptedException {
+        // 死亡恢复决策的编号是负数：按它筛时只要这条决策的事件，生存需求那些"与目标无关"的不能混进来。
+        TaskEventLog log = new TaskEventLog();
+        log.publish(TaskEvent.Kind.CHARACTER_DIED, "角色死了");
+        append(log, -2, 1);
+        log.publish(TaskEvent.Kind.TEMPORARY_TASK_STARTED, "被威胁，插入自卫");
+
+        Page<TaskEvent> page = log.read(log.streamId(), 0, OptionalLong.of(-2), 10, 0);
+
+        assertEquals(1, page.events().size());
+        assertEquals(-2, page.events().get(0).goalRunId());
     }
 
     @Test
@@ -88,7 +103,7 @@ class TaskEventLogTest {
         log.restart();
         append(log, 7, 1);
 
-        Page<TaskEvent> page = log.read(oldStream, 3, -1, 10, 0);
+        Page<TaskEvent> page = log.read(oldStream, 3, OptionalLong.empty(), 10, 0);
 
         assertEquals(CursorStatus.STREAM_CHANGED, page.cursorStatus());
         assertNotEquals(oldStream, page.streamId());
@@ -100,7 +115,7 @@ class TaskEventLogTest {
         TaskEventLog log = new TaskEventLog();
         append(log, 1, 2);
 
-        assertEquals(CursorStatus.STREAM_CHANGED, log.read(log.streamId(), 99, -1, 10, 0).cursorStatus());
+        assertEquals(CursorStatus.STREAM_CHANGED, log.read(log.streamId(), 99, OptionalLong.empty(), 10, 0).cursorStatus());
     }
 
     @Test
@@ -108,7 +123,7 @@ class TaskEventLogTest {
         TaskEventLog log = new TaskEventLog();
         append(log, 1, TaskEventLog.CAPACITY + 40);
 
-        Page<TaskEvent> page = log.read(log.streamId(), 10, -1, 5, 0);
+        Page<TaskEvent> page = log.read(log.streamId(), 10, OptionalLong.empty(), 5, 0);
 
         assertEquals(CursorStatus.HISTORY_LOST, page.cursorStatus());
         assertEquals(41, page.events().get(0).cursor());
@@ -120,7 +135,7 @@ class TaskEventLogTest {
         String stream = log.streamId();
         CompletableFuture<Page<TaskEvent>> reading = CompletableFuture.supplyAsync(() -> {
             try {
-                return log.read(stream, 0, -1, 10, 10_000);
+                return log.read(stream, 0, OptionalLong.empty(), 10, 10_000);
             } catch (InterruptedException exception) {
                 throw new IllegalStateException(exception);
             }
@@ -139,7 +154,7 @@ class TaskEventLogTest {
         TaskEventLog log = new TaskEventLog();
         append(log, 1, 2);
 
-        Page<TaskEvent> page = log.read(log.streamId(), 2, -1, 10, 30);
+        Page<TaskEvent> page = log.read(log.streamId(), 2, OptionalLong.empty(), 10, 30);
 
         assertTrue(page.events().isEmpty());
         assertEquals(CursorStatus.VALID, page.cursorStatus());

@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 
 import java.util.List;
+import java.util.OptionalLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -23,7 +24,7 @@ class EventPublishingGoalRunStoreTest {
             List.of(new Question.Option("yes", "拆"), new Question.Option("no", "不拆")));
 
     private static List<TaskEvent> events(TaskEventLog log) throws InterruptedException {
-        return log.read(log.streamId(), 0, -1, 100, 0).events();
+        return log.read(log.streamId(), 0, OptionalLong.empty(), 100, 0).events();
     }
 
     @Test

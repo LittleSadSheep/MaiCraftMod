@@ -153,7 +153,7 @@ public class MovementDescend extends Movement {
             // and potentially replace the water we're going to fall into
             return false;
         }
-        // 下落柱的通行检查只利用现场已有缓冲物，准备新放用品的完整证明留给真正的最终落点。
+        // 下落柱往下第二格得穿得过去才算一条下落路；落在哪、摔得疼不疼留给下面逐格往下找落点时判断。
         if (!MovementHelper.canWalkThrough(context, destX, y - 2, destZ, below)) {
             return false;
         }
@@ -218,6 +218,14 @@ public class MovementDescend extends Movement {
             }
             if (ontoBlock.getBlock() == Blocks.FARMLAND) {
                 return false; // 长距离坠落在农田上会把耕地踩回泥土,落点禁耕地
+            }
+            // 落地会掉血的一跳不收：落地救援（临时放水、垫史莱姆块、上船）还没有接回来，没有东西护着就别让角色白挨摔，
+            // 和一格下落的规矩一样；只是"摔不死"不够，路线要找别的下法，找不到就如实走不通。
+            if (reachedMinimum && !context.canLandWithoutDamage(x, y, z, effectiveStartHeight,
+                    destX, newY, destZ, ontoBlock)) {
+                DescentAdmissionLog.rejected(BlockPos.asLong(destX, newY, destZ), effectiveStartHeight - newY,
+                        "injurious_drop_without_protection");
+                return false;
             }
             if (reachedMinimum && context.canSurviveFall(x, y, z, effectiveStartHeight,
                     destX, newY, destZ, ontoBlock)) {

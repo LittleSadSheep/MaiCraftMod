@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.server;
 
+import java.util.Set;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
@@ -97,5 +98,29 @@ class BlockOwnershipRecordTest {
         record.recordPlacement(OVERWORLD, position, UUID.randomUUID(), 1);
         record.forget(OVERWORLD, position);
         assertTrue(record.ownerOf(OVERWORLD, position).isEmpty(), "方块拆了，这一格不再算谁的");
+    }
+
+    @Test
+    void 按区块问_只给这个区块里有主的格子() {
+        var record = new BlockOwnershipRecord();
+        var alice = UUID.randomUUID();
+        record.recordPlacement(OVERWORLD, new BlockPos(1, 64, 1), alice, 1);
+        record.recordPlacement(OVERWORLD, new BlockPos(15, 70, 15), alice, 2);
+        record.recordPlacement(OVERWORLD, new BlockPos(16, 64, 0), alice, 3);
+        record.recordPlacement(NETHER, new BlockPos(2, 64, 2), alice, 4);
+        assertEquals(Set.of(new BlockPos(1, 64, 1), new BlockPos(15, 70, 15)),
+                record.ownedInChunk(OVERWORLD, 0, 0).keySet());
+        // 拆掉的格子不再算有主。
+        record.forget(OVERWORLD, new BlockPos(1, 64, 1));
+        assertEquals(Set.of(new BlockPos(15, 70, 15)), record.ownedInChunk(OVERWORLD, 0, 0).keySet());
+    }
+
+    @Test
+    void 存档读回后按区块也问得到() {
+        var record = new BlockOwnershipRecord();
+        var alice = UUID.randomUUID();
+        record.recordPlacement(OVERWORLD, new BlockPos(-3, 64, -3), alice, 7);
+        var restored = BlockOwnershipRecord.fromTag(record.toTag());
+        assertEquals(alice, restored.ownedInChunk(OVERWORLD, -1, -1).get(new BlockPos(-3, 64, -3)).playerId());
     }
 }

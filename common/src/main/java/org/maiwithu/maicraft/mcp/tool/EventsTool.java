@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.OptionalLong;
 import java.util.function.Function;
 
 /**
@@ -78,7 +79,7 @@ public final class EventsTool implements McpTool {
                 CursorLog.Page<ChatEvent> page = chat.read(streamId, cursor, PAGE_SIZE, wait);
                 return ToolReply.ok(page(page, EventsTool::chatEvent), notes, next(page, CHAT, null));
             }
-            CursorLog.Page<TaskEvent> page = log.read(streamId, cursor, taskId == null ? -1 : taskId, PAGE_SIZE, wait);
+            CursorLog.Page<TaskEvent> page = log.read(streamId, cursor, taskId == null ? OptionalLong.empty() : OptionalLong.of(taskId), PAGE_SIZE, wait);
             JsonObject data = page(page, ResultJson::event);
             if (taskId != null) {
                 attachTask(data, taskId, notes);

@@ -5,7 +5,6 @@ import com.google.gson.JsonObject;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.behavior.permission.Protection;
-import org.maiwithu.maicraft.behavior.permission.OwnershipQueries;
 import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.acquire.LiveCarryReads;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
@@ -106,7 +105,8 @@ final class OfflineCatalog {
                 () -> 0,
                 new InputDriver(new PlayerControlBoundary()),
                 false,
-                new Protection(new OwnershipQueries(session), memory, memory, GuessesPlayerMade.NOTHING, SELF_ID),
+                new Protection((dimension, x, y, z) -> Optional.empty(), memory, memory, GuessesPlayerMade.NOTHING,
+                        SELF_ID),
                 stack -> 0);
     }
 }

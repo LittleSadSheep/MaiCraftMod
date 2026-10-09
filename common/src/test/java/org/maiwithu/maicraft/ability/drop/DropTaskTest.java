@@ -31,6 +31,7 @@ import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
 import org.maiwithu.maicraft.behavior.acquire.ReadsCharacterPosition;
 import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
 import org.maiwithu.maicraft.behavior.inventory.DropAvoidance;
+import org.maiwithu.maicraft.behavior.inventory.MovesToMainhand;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.interaction.InteractionSender;
 import org.maiwithu.maicraft.game.interaction.PendingInteraction;
@@ -43,6 +44,8 @@ import org.maiwithu.maicraft.game.player.PlayerInput;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
+import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
@@ -283,5 +286,33 @@ class DropTaskTest {
         assertTrue(partial.changes().isEmpty(), "没确认的不进 changes");
         // 没确认的抛掷不会再来一次。
         assertEquals(1, rig.sender.requestedCounts.size());
+    }
+
+    @Test
+    void 两堆分开放_丢完主手这堆再换下一堆接着丢() {
+        Rig rig = Rig.create(40, 30);
+        rig.sender.onConfirmed = () -> {
+            rig.backpack.cobble -= rig.scene.held;
+            rig.scene.held = 0;
+        };
+        // 换手替身：主手空了就把背包里剩下的一堆换上来。
+        MovesToMainhand moves = itemId -> rig.scene.held > 0 ? Optional.empty() : Optional.of(new Action() {
+            @Override public ActionStatus tick(TickContext context) {
+                rig.scene.held = Math.min(64, rig.backpack.cobble);
+                return ActionStatus.done();
+            }
+
+            @Override public String describe() { return "换下一堆到主手"; }
+        });
+        DropTask task = new DropTask(new DropInput(COBBLE, 40), rig.backpack, emptyOffhand(), atOrigin(),
+                ignored -> rig.scene, Optional.of(moves), Optional.empty(), rig.avoidance);
+        TickResult result = rig.run(task, 80);
+        TaskResult done = result instanceof TickResult.Finished finished ? finished.result() : null;
+        assertTrue(done != null && done.status() == TaskResult.Status.DONE,
+                () -> "结果：" + (done == null ? "没结束" : done.summary()));
+        assertEquals(40, done.changes().stream().filter(change -> change.kind() == Change.Kind.ITEM_DROPPED)
+                .mapToInt(Change::count).sum());
+        assertEquals(List.of(30, 10), rig.sender.requestedCounts);
+        assertTrue(done.unconfirmed().isEmpty(), "还没丢的不该算成没能确认");
     }
 }

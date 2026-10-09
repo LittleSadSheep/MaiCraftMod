@@ -48,14 +48,17 @@ class ItemAcquisitionTest {
     }
 
     @Test
-    void 身上够了直接算完成_一步都不用问() {
+    void 要的是再多几件_身上原有的不算() {
+        // 身上已有 3 根原木，再要 3 根：照样去问来源，拿完身上是 6 根。
         backpack.add("minecraft:oak_log", 3);
-        ScriptedSource chest = new ScriptedSource("记得的箱子", backpack);
+        ScriptedSource chest = new ScriptedSource("记得的箱子", backpack)
+                .answer(new SourceQuote.Offer("记得的箱子", 3, new AcquisitionCost(5, 4), null));
         ActionStatus status = runToSettlement(
                 engine(chest).need(new ItemRequest(WantedItem.ofItem("minecraft:oak_log"), 3, "施工备料"),
                         PERMISSIONS));
         assertEquals(ActionStatus.done(), status);
-        assertEquals(0, chest.askedTimes());
+        assertEquals(1, chest.begunTimes());
+        assertEquals(6, countOf("minecraft:oak_log"));
     }
 
     @Test

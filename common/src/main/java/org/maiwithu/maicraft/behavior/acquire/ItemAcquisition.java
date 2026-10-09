@@ -150,6 +150,8 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         private String stepSource;
         private String stepSourceRoute;
         private int carriedAtStepStart;
+        /** 拿够了是身上有几件：第一次推进时身上原有的加上这次要多拿的；还没推进过为 -1。 */
+        private int target = -1;
         private boolean leftChain;
 
         private Run(ItemRequest request, Permissions permissions, String chainKey,
@@ -169,7 +171,11 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                         "获取动作在脱离请求链之后还在被推进"));
             }
             int carried = CarriedItems.matching(backpack, offhand, request, tags);
-            if (carried >= request.count()) {
+            if (target < 0) {
+                // 请求的数量是"这次再多拿几件"：从第一次推进时身上原有的起算，原有的不算这次拿到的。
+                target = carried + request.count();
+            }
+            if (carried >= target) {
                 return leaveChain(ActionStatus.done());
             }
             return switch (stage) {
@@ -182,7 +188,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
 
         // 问遍所有来源：给得了的按代价排队，给不了的记下原因，超出许可的原样带问题。
         private ActionStatus consult(int carried) {
-            int stillNeeded = request.count() - carried;
+            int stillNeeded = target - carried;
             SourceContext context = scope.radiusBlocks() == null
                     ? new SourceContext(position.currentPosition(), permissions)
                     : new SourceContext(position.currentPosition(), permissions, scope.radiusBlocks());
@@ -270,7 +276,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                     ? new SourceContext(position.currentPosition(), permissions)
                     : new SourceContext(position.currentPosition(), permissions, scope.radiusBlocks());
             Planned planned = plan.getFirst();
-            int stillNeeded = request.count() - CarriedItems.matching(backpack, offhand, request, tags);
+            int stillNeeded = target - CarriedItems.matching(backpack, offhand, request, tags);
             Optional<Action> begun = planned.source()
                     .begin(request.just(Math.max(1, stillNeeded)), planned.offer(), context);
             if (begun.isEmpty()) {
@@ -297,7 +303,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                 return Problem.of(Problem.Kind.NEED_APPROVAL, approvalMessages.getFirst(),
                         "放宽对应的许可，或指一个可以用的来源");
             }
-            StringBuilder message = new StringBuilder("要").append(request.count() - carried).append("个")
+            StringBuilder message = new StringBuilder("还要").append(target - carried).append("个")
                     .append(request.wanted().describe()).append("（").append(request.purpose())
                     .append("），问过各来源都拿不到");
             for (SourceQuote refusal : refusals) {

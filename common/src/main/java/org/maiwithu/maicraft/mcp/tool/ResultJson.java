@@ -10,6 +10,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 import com.google.gson.JsonSerializer;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
+import org.maiwithu.maicraft.kernel.event.TaskEventLog;
 import org.maiwithu.maicraft.kernel.goal.GoalRun;
 import org.maiwithu.maicraft.kernel.goal.GoalRunState;
 import org.maiwithu.maicraft.kernel.goal.Question;
@@ -117,8 +118,8 @@ public final class ResultJson {
         JsonObject json = new JsonObject();
         json.addProperty("cursor", event.cursor());
         json.addProperty("kind", lower(event.kind()));
-        // 与目标无关的事件记在 -1 上；死亡恢复决策的编号是负数，也是一条能按编号回答的记录，照样带上。
-        if (event.goalRunId() != -1) {
+        // 与目标无关的事件不带 task_id；死亡恢复决策的编号是负数（-2 起），也是一条能按编号回答的记录，照样带上。
+        if (event.goalRunId() != TaskEventLog.NO_GOAL) {
             json.addProperty("task_id", event.goalRunId());
         }
         json.addProperty("message", event.message());

@@ -20,6 +20,7 @@ import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -102,6 +103,15 @@ class SelfDefenseRetreatTest {
         assertTrue(events.messages.stream().anyMatch(m -> m.contains("退无可退")),
                 "连续走不通才声明退无可退：" + events.messages);
         assertTrue(moves.strikeTicks > 0, "退无可退之后回到战斗，就地迎战");
+    }
+
+    @Test
+    void eachFailedRetreatTriesADirectionNotTriedBefore() {
+        // 威胁在西边（正背对是朝东 +X）：第一次朝东，失败后转向南（+Z），再失败转向北（-Z），
+        // 三个方向各试一次，不回头再撞走不通的那一边，也不朝威胁走。
+        assertArrayEquals(new double[] {1, 0}, SelfDefenseTask.fleeDirection(1, 0, 0), 1e-9);
+        assertArrayEquals(new double[] {0, 1}, SelfDefenseTask.fleeDirection(1, 0, 1), 1e-9);
+        assertArrayEquals(new double[] {0, -1}, SelfDefenseTask.fleeDirection(1, 0, 2), 1e-9);
     }
 
     @Test

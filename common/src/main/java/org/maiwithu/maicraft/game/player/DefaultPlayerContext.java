@@ -83,7 +83,7 @@ final class DefaultPlayerContext implements PlayerContext {
     // 死亡现场的可见事实：分数与位置此刻读得到就直接给；死因随死亡界面走，客户端身上没有。
     @Override public DeathFacts deathFacts() {
         return new DeathFacts(player.getScore(), level.dimension().location().toString(),
-                player.getX(), player.getY(), player.getZ());
+                player.getX(), player.getY(), player.getZ(), level.getLevelData().isHardcore());
     }
 
 }
