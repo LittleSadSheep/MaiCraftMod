@@ -10,7 +10,7 @@ import org.maiwithu.maicraft.kernel.result.TaskResult;
  * 详细档的"最近的目标"页：这段时间都干了什么，每个顶层目标一行，最近的在上。
  *
  * <p>这一页是用来扫一眼的：编号、处境、能力、步骤、时间这些短字段先排，purpose 或结论放在最后，
- * 放不下的部分截断，完整的结果用 task(get) 看。sequence 里的步骤不单列，只写第几步。
+ * 放不下的部分截断，完整的结果用 goal(get) 看。sequence 里的步骤不单列，只写第几步。
  */
 final class GoalListRows {
     /** 最多列几个目标。 */
