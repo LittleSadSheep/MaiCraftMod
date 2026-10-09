@@ -56,9 +56,12 @@ final class WaitTask extends PhasedTask<WaitTask.Phase> implements Standing {
         if (elapsedTicks < input.afterSeconds() * TICKS_PER_SECOND) {
             return Next.stay();
         }
-        WaitWorld facts = worlds.apply(context);
-        if (facts == null || !conditionMet(facts)) {
-            return Next.stay();
+        // 计时等待只看任务自己的时刻账，不问世界；其余条件才要世界事实，角色不在手就继续等。
+        if (input.condition() != WaitFor.ELAPSED) {
+            WaitWorld facts = worlds.apply(context);
+            if (facts == null || !conditionMet(facts)) {
+                return Next.stay();
+            }
         }
         long waitedSeconds = elapsedTicks / TICKS_PER_SECOND;
         return Next.done(TaskResult.builder(TaskResult.Status.DONE,
