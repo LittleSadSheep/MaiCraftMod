@@ -291,12 +291,6 @@ final class BaritoneWalkRun implements WalkRun {
 
     @Override
     public String describe() {
-        // 没有目标时只通报走到本身的状态，不去读目标内容，避免空目标崩了通报。
-        if (goal == null) {
-            return report().state() == WalkReport.State.FAILED
-                    ? "走不下去：" + report().problem().message()
-                    : "走到没有拿到目标";
-        }
         var report = progress.report();
         return switch (report.state()) {
             case PLANNING -> "正在算路（目标 " + goal.center().toShortString() + "）";
