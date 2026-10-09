@@ -41,11 +41,12 @@ public final class GoalReader {
     /** 读一个目标；路径前缀是 {@code goal}。 */
     public Reading read(JsonElement raw) {
         RequestCheck check = new RequestCheck();
-        Goal goal = readGoal(raw, "goal", 0, check);
+        Goal goal = readGoal(raw, "goal", 0, null, check);
         return new Reading(check.ok() ? goal : null, check.code(), check.errors(), check.notes());
     }
 
-    private Goal readGoal(JsonElement raw, String path, int depth, RequestCheck check) {
+    /** @param inherited sequence 里的一步时是整件事的许可，步骤没写的字段沿用它；最外层为 null */
+    private Goal readGoal(JsonElement raw, String path, int depth, Permissions inherited, RequestCheck check) {
         if (raw == null || !raw.isJsonObject()) {
             check.error(path, "目标应该是一个对象", "{\"ability\": \"…\", \"parameters\": {…}}");
             return null;
@@ -61,9 +62,9 @@ public final class GoalReader {
                 : null;
         Params params = parameters(object, path, module, check);
         Permissions permissions = present(object, "permissions")
-                ? PermissionsReader.read(object.get("permissions"), path + ".permissions", check)
-                : null;
-        List<Goal> steps = steps(object, path, depth, module, check);
+                ? PermissionsReader.read(object.get("permissions"), path + ".permissions", inherited, check)
+                : inherited;
+        List<Goal> steps = steps(object, path, depth, module, permissions, check);
         String onFailure = check.choice(object, "on_failure", path + ".on_failure", List.of("stop", "continue"));
         if (module == null) {
             return null;
@@ -125,8 +126,12 @@ public final class GoalReader {
         return parsed.params();
     }
 
-    /** steps 只交给按顺序做几件事的能力；每一步本身是一个完整的目标。 */
-    private List<Goal> steps(JsonObject object, String path, int depth, AbilityModule module, RequestCheck check) {
+    /**
+     * steps 只交给按顺序做几件事的能力；每一步本身是一个完整的目标。
+     * 整件事开始时说好的许可每一步都照样守：步骤没写的许可字段沿用整件事的。
+     */
+    private List<Goal> steps(JsonObject object, String path, int depth, AbilityModule module,
+                             Permissions permissions, RequestCheck check) {
         JsonElement raw = object.get("steps");
         boolean takesSteps = module != null && module.acceptsSteps();
         if (raw == null || raw.isJsonNull()) {
@@ -149,7 +154,7 @@ public final class GoalReader {
         List<Goal> steps = new ArrayList<>();
         JsonArray array = raw.getAsJsonArray();
         for (int i = 0; i < array.size(); i++) {
-            Goal step = readGoal(array.get(i), path + ".steps[" + i + "]", depth + 1, check);
+            Goal step = readGoal(array.get(i), path + ".steps[" + i + "]", depth + 1, permissions, check);
             if (step != null) steps.add(step);
         }
         return steps;

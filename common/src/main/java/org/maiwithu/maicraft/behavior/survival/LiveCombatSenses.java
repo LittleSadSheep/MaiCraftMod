@@ -17,6 +17,7 @@ import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.monster.Slime;
 import net.minecraft.world.phys.AABB;
 
+import org.maiwithu.maicraft.game.world.ObservationVisibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -48,9 +49,11 @@ public final class LiveCombatSenses implements CombatSenses {
             if (distance > radius) {
                 continue;
             }
+            // 看不看得见按视线判断，地下、墙后的怪不算看得见；攻击标记读原版同步的那一位。
             threats.add(new Threat(hostile.getId(), hostile.getUUID(), typeId(hostile),
                     hostile.getX(), hostile.getY(), hostile.getZ(), distance,
-                    kindOf(hostile), armed(hostile), true));
+                    kindOf(hostile), armed(hostile), ObservationVisibility.entity(self, hostile),
+                    hostile.isAggressive()));
         }
         return threats;
     }

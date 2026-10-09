@@ -10,6 +10,7 @@ import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -103,6 +104,25 @@ class GoalReaderTest {
         assertTrue(accepted.ok(), accepted.errors()::toString);
         assertEquals(2, accepted.goal().steps().size());
         assertEquals(Goal.OnFailure.CONTINUE, accepted.goal().steps().get(1).onFailure());
+    }
+
+    @Test
+    void stepsKeepTheWholeThingsPermissionsUnlessTheyOverrideAField() {
+        GoalReader.Reading reading = read("""
+                {"ability": "sequence", "permissions": {"fight": "self_defense", "protected_landmarks": ["家"]},
+                 "steps": [
+                   {"ability": "use"},
+                   {"ability": "use", "permissions": {"change_blocks": "none", "protected_landmarks": ["麦田"]}}]}""");
+
+        assertTrue(reading.ok(), reading.errors()::toString);
+        Permissions plain = reading.goal().steps().get(0).permissions();
+        Permissions own = reading.goal().steps().get(1).permissions();
+        // 没写许可的一步整份沿用；写了的一步只改自己写的字段，保护地标两边合在一起。
+        assertEquals(Permissions.Fight.SELF_DEFENSE, plain.fight());
+        assertEquals(Set.of("家"), plain.protectedLandmarks());
+        assertEquals(Permissions.Fight.SELF_DEFENSE, own.fight());
+        assertEquals(Permissions.BlockChanges.NONE, own.changeBlocks());
+        assertEquals(Set.of("家", "麦田"), own.protectedLandmarks());
     }
 
     @Test

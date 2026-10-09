@@ -30,9 +30,16 @@ public interface CombatSenses {
     /** 按游戏实体编号找回实体；还活着且在附近时才有。自卫出手要的是实体本身。 */
     Entity entityById(TickContext context, int entityId);
 
-    /** 一只构成威胁的敌对生物：位置供追击与出手。 */
+    /**
+     * 一只敌对生物：位置供追击与出手。
+     *
+     * @param armed      苦力怕已经膨胀或开始闪白（引信点着了）
+     * @param visible    角色看得见它：从眼睛到它之间没有方块挡着
+     * @param aggressive 原版同步给客户端的攻击标记：僵尸、骷髅这类锁定了攻击目标、正要动手时亮起
+     */
     record Threat(int entityId, UUID uuid, String type, double x, double y, double z,
-                  double distance, ThreatAssessment.Kind kind, boolean armed, boolean visible) {}
+                  double distance, ThreatAssessment.Kind kind, boolean armed, boolean visible,
+                  boolean aggressive) {}
 
     /** 一条伤害证据：谁、什么时候（游戏刻）、什么类型的伤害。 */
     record Attacker(UUID uuid, String type, long tick, String damageKind) {}

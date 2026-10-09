@@ -25,8 +25,10 @@ public final class SelfView {
      * @param backpack  背包视图；读不到时为 null
      * @param mainGoal  手上的主任务；没有时为 null
      * @param doing     主任务此刻在做什么的一句话；没有时为 null
+     * @param automationControls 自动化此刻是否拿着角色；读不到时为 null
      */
-    public static JsonObject of(SceneSelf self, String dimension, BackpackView backpack, GoalRun mainGoal, String doing) {
+    public static JsonObject of(SceneSelf self, String dimension, BackpackView backpack, GoalRun mainGoal, String doing,
+                                Boolean automationControls) {
         JsonObject json = new JsonObject();
         JsonObject position = new JsonObject();
         position.addProperty("x", Math.round(self.x() * 10) / 10.0);
@@ -51,6 +53,10 @@ public final class SelfView {
         if (backpack != null) {
             json.add("inventory", inventory(backpack));
             json.addProperty("free_slots", backpack.freeSlots());
+        }
+        // 谁在操作角色：在玩家手上时主任务不推进；重新下达或恢复目标会再请求控制权，玩家按 F8 也能交给自动化。
+        if (automationControls != null) {
+            json.addProperty("control", automationControls ? "automation" : "player");
         }
         json.add("task", task(mainGoal, doing));
         json.add("permissions", permissions(mainGoal == null ? Permissions.DEFAULT : mainGoal.goal().permissions()));

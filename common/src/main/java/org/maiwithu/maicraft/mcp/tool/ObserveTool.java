@@ -96,6 +96,8 @@ public final class ObserveTool implements McpTool {
                 ? null : player.level().dimension().location().toString();
         GoalRun main = table.mainGoal().orElse(null);
         String doing = main == null ? null : table.doing(main.id()).orElse(null);
-        return SelfView.of(currentScene.self(), dimension, player == null ? null : player.backpack(), main, doing);
+        Boolean automation = player == null || player.input() == null ? null : player.input().automationOwnsControls();
+        return SelfView.of(currentScene.self(), dimension, player == null ? null : player.backpack(), main, doing,
+                automation);
     }
 }

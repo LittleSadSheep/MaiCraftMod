@@ -228,6 +228,8 @@ public final class Bootstrap {
         // 人类按 F8 抢回不会被开关立刻夺回。重新进世界（现场重建）时重新生效。
         private final boolean automationOnJoin = Boolean.getBoolean("maicraft.automation.on_join");
         private boolean startupAutomationPending;
+        /** 上一刻自动化是否拿着角色；变了就记一行日志，排查"下了目标却不动"时先看这里。 */
+        private boolean automationOwned;
 
         /** 创建客户端全程共用的服务，并把 Mixin 需要的实例登记到静态登记点。 */
         void createSharedServices(LoaderEnvironment loader) {
@@ -364,7 +366,13 @@ public final class Bootstrap {
             }
             long gameTick = minecraft.level.getGameTime();
             clientWork.drain(new ClientTickContext(gameTick, current));
-            if (playerControl.input().automationOwnsControls()) {
+            boolean owned = playerControl.input().automationOwnsControls();
+            if (owned != automationOwned) {
+                // 控制权换手记一行：目标挂着不动时，先分清是没交给自动化，还是交了却没推进。
+                LOG.info(owned ? "自动化拿到角色控制权，控制循环开始推进" : "角色控制权回到玩家手上，控制循环停下");
+                automationOwned = owned;
+            }
+            if (owned) {
                 controlLoop.tick(new ClientTickContext(gameTick, current));
             }
             playerControl.endTick(current);
