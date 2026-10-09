@@ -64,7 +64,6 @@ import org.maiwithu.maicraft.behavior.menu.ClientMenuContent;
 import org.maiwithu.maicraft.behavior.menu.ClientQuickMoves;
 import org.maiwithu.maicraft.behavior.inventory.ClientGearChanges;
 import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
-import org.maiwithu.maicraft.behavior.inventory.ClientSpotsContainers;
 import org.maiwithu.maicraft.behavior.inventory.ClientStepsAside;
 import org.maiwithu.maicraft.behavior.inventory.DropAvoidance;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
@@ -205,7 +204,7 @@ public final class AbilityCatalog {
         // 拿到物品：身上的不算来源（引擎开场就清点），已实现的途径都登记，见 obtainModule。
         registry.register(obtainModule(deps, bringsClose, toMainhand, permission, innerNeeds));
 
-        // 存东西：找容器把现场扫描与世界记忆并起来，界面读数、整堆搬运与挖盖子都接上了。
+        // 存东西：找容器把现场扫描与世界记忆并起来，打开容器、逐笔搬运与挖盖子都接上了。
         registry.register(depositModule(deps, bringsClose));
 
         // 采集：观察编号从场景查，现场从世界读，靠近用站位与走到，挖用原生挖掘；
@@ -308,13 +307,10 @@ public final class AbilityCatalog {
                 deps.itemRegistry(), deps.backpack(), deps.offhand(), deps.itemTags());
     }
 
-    /** 存东西能力的一份：找容器把现场扫描与世界记忆并起来，界面读数、整堆搬运与挖盖子走生产实现。 */
+    /** 存东西能力的一份：找容器把现场扫描与世界记忆并起来，归属与压住盖子的方块问这个世界的保护判断。 */
     private static DepositModule depositModule(Deps deps, LiveApproaches bringsClose) {
-        return DepositModule.assemble(
-                new ClientSpotsContainers(deps.blockScans(), deps.context(), deps.memory()),
-                bringsClose, deps.interactions(), new ClientMenuContent(deps.context()),
-                new ClientQuickMoves(), new ClientDigsBlocks(), deps.itemTags(),
-                deps.memory(), deps.context(), deps.backpack());
+        return DepositModule.live(deps.context(), bringsClose, deps.interactions(), new ClientDigsBlocks(),
+                deps.itemTags(), deps.memory(), deps.backpack(), deps.blockScans(), deps.protection(), deps::scene);
     }
 
     /**
