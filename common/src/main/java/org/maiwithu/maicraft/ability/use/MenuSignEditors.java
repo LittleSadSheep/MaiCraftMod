@@ -11,7 +11,7 @@ import org.maiwithu.maicraft.game.interaction.SignScreenAccess;
  * 告示牌界面读端的接缝实现：编辑界面开着时把界面的一把手包成写字动作的观察口。
  * 界面没开着给空，由写字任务按"界面迟迟不开"如实上报。
  */
-public final class MenuSignEditors implements UseSeams.ReadsSignEditor {
+final class MenuSignEditors implements UseSeams.ReadsSignEditor {
 
     @Override
     public Optional<SignEditor> current() {

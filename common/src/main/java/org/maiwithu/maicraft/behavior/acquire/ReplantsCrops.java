@@ -18,7 +18,11 @@ public interface ReplantsCrops {
 
     /**
      * 为一株刚收掉的作物生成补种动作：做完时要么种回去了、要么写明没种子没补。
-     * 作物不是能补种的那类（例如甘蔗长在竹子上）时返回 empty，由调用方跳过补种。
+     * 要在掉落物捡进包之后再问——种子从这次收获里出，收割前格子还没空出来，也问不出补种。
+     * 作物不是能补种的那类（甘蔗、竹子这类不是种在耕地上的）时返回 empty，由调用方跳过补种。
+     *
+     * @param harvestedSpot 收掉的那一格
+     * @param cropType      收掉的作物方块 ID：种哪种种子按它认
      */
-    Optional<Action> replant(BlockPos harvestedSpot);
+    Optional<Action> replant(BlockPos harvestedSpot, String cropType);
 }

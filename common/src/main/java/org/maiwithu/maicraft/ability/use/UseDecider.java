@@ -8,15 +8,15 @@ import java.util.Optional;
 import java.util.Set;
 
 import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
-import org.maiwithu.maicraft.behavior.interaction.InteractionVerdict;
 import org.maiwithu.maicraft.kernel.result.Problem;
+import org.maiwithu.maicraft.kernel.result.TaskResult;
 
 /**
- * 用东西的手势判定：参数组合行不行、目标会不会炸、交互的结论怎么变成任务结果。
+ * 用东西的判定：参数组合行不行、目标会不会炸、交互的结论怎么变成任务结果。
  *
  * <p>纯判断，不碰游戏：参数组合在计划阶段一次报全；会爆炸的组合（下界与末地的床、
  * 主世界与末地的重生锚）直接按危险结束，一次都不点；交互结论按生效、没生效、
- * 出乎预料、没能确认四种走向结算，会用掉东西的交互没能确认时绝不再试。
+ * 出乎预料、没能确认四种走向结算，没能确认的交互绝不再赌第二次。
  */
 final class UseDecider {
 
@@ -44,31 +44,44 @@ final class UseDecider {
     /** 计划阶段的一次拒绝：参数怎么改能继续。 */
     record Rejection(String message, String suggestion) {}
 
-    /** 给了不接的物品时在计划阶段拒绝，指向对应的专门能力。 */
+    /**
+     * 给了不接的物品时在计划阶段拒绝：凭时机松手的指向对应的专门能力；
+     * 刷子要对着方块一直按住，这一路的按住还没接上，如实说做不了，不点一下就冒充刷过。
+     */
     static Optional<Rejection> rejectedItem(String item) {
-        if (item == null || !TIMED_RELEASE_ITEMS.contains(item.toLowerCase(Locale.ROOT))) {
+        if (item == null) {
             return Optional.empty();
         }
-        return Optional.of(new Rejection(
-                item + " 要凭时机松手（弓、弩、三叉戟、盾牌、望远镜、钓竿），use 不接受",
-                item.endsWith("fishing_rod") ? "钓鱼用 fish" : "打怪用 fight"));
+        String id = item.toLowerCase(Locale.ROOT);
+        if (TIMED_RELEASE_ITEMS.contains(id)) {
+            return Optional.of(new Rejection(
+                    item + " 要凭时机松手（弓、弩、三叉戟、盾牌、望远镜、钓竿），use 不接受",
+                    id.endsWith("fishing_rod") ? "钓鱼用 fish" : "打怪用 fight"));
+        }
+        if (id.equals("minecraft:brush")) {
+            return Optional.of(new Rejection("刷子要对着方块一直按住直到刷完，use 还接不了这种按法",
+                    "可疑的沙子、沙砾先别用 use 刷"));
+        }
+        return Optional.empty();
     }
 
     /**
      * 会爆炸的组合：下界、末地的床和主世界、末地的重生锚右键会炸。
-     * 维度传目标所在维度（null 表示角色当前维度）；不点，按危险结束。
+     * 维度传角色此刻所在的维度（目标就在身边才点得到）；读不到维度时不冒充知道，按不炸处理。
      */
     static Optional<Problem> explosionDanger(String dimension, String blockTypeId) {
-        String where = dimension == null ? "minecraft:overworld" : dimension;
+        if (dimension == null || blockTypeId == null) {
+            return Optional.empty();
+        }
         if ((blockTypeId.endsWith(":bed") || blockTypeId.endsWith("_bed"))
-                && (where.equals("minecraft:the_nether") || where.equals("minecraft:the_end"))) {
+                && (dimension.equals("minecraft:the_nether") || dimension.equals("minecraft:the_end"))) {
             return Optional.of(Problem.of(Problem.Kind.DANGER,
-                    "在" + dimensionName(where) + "右键床会爆炸，不点", null));
+                    "在" + dimensionName(dimension) + "右键床会爆炸，不点", null));
         }
         if (blockTypeId.endsWith(":respawn_anchor")
-                && (where.equals("minecraft:overworld") || where.equals("minecraft:the_end"))) {
+                && (dimension.equals("minecraft:overworld") || dimension.equals("minecraft:the_end"))) {
             return Optional.of(Problem.of(Problem.Kind.DANGER,
-                    "在" + dimensionName(where) + "右键重生锚会爆炸，不点", null));
+                    "在" + dimensionName(dimension) + "右键重生锚会爆炸，不点", null));
         }
         return Optional.empty();
     }
@@ -84,13 +97,13 @@ final class UseDecider {
 
     /** 交互结论结算后的走向。 */
     sealed interface Settlement {
-        /** 生效了：做满次数就完成。 */
+        /** 生效了：记进变化，做满次数就完成。 */
         record Applied() implements Settlement {}
 
-        /** 出乎预料：交互本身生效了，世界变成了预料之外的样子，结果照实写、照样算完成。 */
+        /** 出乎预料：交互本身生效了，世界变成了预料之外的样子；结果照实写，按完成收尾，设计对不对交给 LLM。 */
         record Unexpected(String scene) implements Settlement {}
 
-        /** 没能确认：部分完成，绝不再试会用掉东西的交互。 */
+        /** 没能确认：部分完成，进未确认清单，绝不再试。 */
         record Unconfirmed(String scene) implements Settlement {}
 
         /** 没生效，带该上报的问题。 */
@@ -100,29 +113,41 @@ final class UseDecider {
     /**
      * 把交互结论结算成走向。
      *
-     * @param result        交互动作给出的结论与现场
-     * @param gameExplained 游戏给了拒绝的提示语（动作栏消息、上锁、领地保护）
-     * @param consumesItem  这次交互会不会用掉手上的东西；没能确认时它决定绝不重试
+     * @param result      交互动作给出的结论与现场
+     * @param gameMessage 出手后动作栏新冒出的提示语（"箱子已上锁"、领地保护）；没有为空
      */
-    static Settlement settle(InteractionResult result, boolean gameExplained, boolean consumesItem) {
+    static Settlement settle(InteractionResult result, Optional<String> gameMessage) {
         return switch (result.verdict()) {
             case APPLIED -> new Settlement.Applied();
             case UNEXPECTED -> new Settlement.Unexpected(result.scene());
             case UNCONFIRMED -> new Settlement.Unconfirmed(result.scene());
-            case NOT_APPLIED -> new Settlement.NotApplied(gameExplained
-                    ? Problem.of(Problem.Kind.REFUSED_BY_GAME, result.scene(), null)
-                    : Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "这样用没有效果：" + result.scene(), null));
+            // 游戏说了为什么就附原话；什么都没说、目标也没变，就是这样用没有效果。
+            case NOT_APPLIED -> new Settlement.NotApplied(gameMessage
+                    .map(message -> Problem.of(Problem.Kind.REFUSED_BY_GAME, "游戏拒绝了：" + message, null))
+                    .orElseGet(() -> Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+                            "这样用没有效果：" + result.scene(), null)));
         };
     }
 
-    /** 没能确认的交互要不要就此停手：会用掉东西的绝不再试，其余按没做成一次处理。 */
-    static boolean mustStopAfterUnconfirmed(boolean consumesItem) {
-        return consumesItem;
+    /**
+     * 某一次没有效果就停下：一次都没做成按失败；做成过几次按部分完成，写明做成了几次，
+     * 不把没做成的次数也算进去。
+     */
+    static TaskResult stopped(long appliedTimes, long count, Problem problem) {
+        if (appliedTimes == 0) {
+            return TaskResult.failed("用东西没有生效：" + problem.message(), problem);
+        }
+        return TaskResult.builder(TaskResult.Status.PARTIAL,
+                        "确认生效了 " + appliedTimes + " 次，第 " + (appliedTimes + 1) + " 次没有效果，停下了（要做 "
+                                + count + " 次）")
+                .problem(problem).build();
     }
 
-    /** 交互结论是不是已经生效（含出乎预料：交互本身都生效了）。 */
-    static boolean applied(InteractionVerdict verdict) {
-        return verdict == InteractionVerdict.APPLIED || verdict == InteractionVerdict.UNEXPECTED;
+    /** 这一下没能确认生效没有：部分完成，写明前面确认过几次；不盲目重做，免得再花一次材料去赌。 */
+    static TaskResult unconfirmed(long appliedTimes, String scene) {
+        String before = appliedTimes == 0 ? "" : "前面确认生效了 " + appliedTimes + " 次；";
+        return TaskResult.builder(TaskResult.Status.PARTIAL,
+                before + "这一下没能确认有没有生效，不盲目重做：" + scene).build();
     }
 
     private UseDecider() {}

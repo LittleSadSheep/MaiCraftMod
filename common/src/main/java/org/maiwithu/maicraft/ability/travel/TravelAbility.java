@@ -15,7 +15,6 @@ import org.maiwithu.maicraft.kernel.ability.Listing;
 
 import org.maiwithu.maicraft.kernel.goal.Goal;
 
-import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.goal.TargetKind;
@@ -88,7 +87,7 @@ public final class TravelAbility implements AbilityModule {
         // 目的地现在就解析：坐标没给 y 走那一柱列，地标没记过就问，观察编号失效就如实结束。
         var resolution = resolver.resolve(goal.target(), goal.params().number("radius"));
         if (resolution instanceof DestinationResolver.Resolution.Ready ready) {
-            return new StepDecision.Run(new TravelInput(ready.destination(), maxSeconds(goal), terrainPermit(goal)));
+            return new StepDecision.Run(new TravelInput(ready.destination(), maxSeconds(goal), TerrainPermit.of(goal.permissions())));
         }
         if (resolution instanceof DestinationResolver.Resolution.AlreadyThere) {
             return new StepDecision.Finish(TaskResult.done("出行：开始时已经站在目的地"));
@@ -116,13 +115,6 @@ public final class TravelAbility implements AbilityModule {
             return new TravelTask(input.destination(), input.maxSeconds(), input.permit(),
                     walks, placedBlocks, progressListener);
         });
-    }
-
-    /** 把这次目标的方块许可折算成走到能动多少地形；能不能挖某一格由寻路的方块通行判断把关。 */
-    private TerrainPermit terrainPermit(Goal goal) {
-        // 四档直接对齐：只垫不挖的档走到实现方按"只垫不挖"开关寻路，垫上的临时方块逐格进结果。
-        return new TerrainPermit(goal.permissions().changeBlocks(),
-                goal.permissions().changeBlocks() != Permissions.BlockChanges.NONE);
     }
 
     /** 秒换内部用的整数时限；没给就不设时限。 */

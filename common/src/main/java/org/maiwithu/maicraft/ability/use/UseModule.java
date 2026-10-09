@@ -4,12 +4,20 @@ package org.maiwithu.maicraft.ability.use;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.function.Supplier;
 
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
+import org.maiwithu.maicraft.behavior.interaction.ClientGameRefusals;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
-import org.maiwithu.maicraft.behavior.menu.MenuContent;
+import org.maiwithu.maicraft.behavior.inventory.ClientDropPickup;
+import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
+import org.maiwithu.maicraft.behavior.navigation.WalkTo;
+import org.maiwithu.maicraft.behavior.perception.Scene;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.ModIdentity;
+import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.world.BlockScanService;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilitySpec;
@@ -51,27 +59,38 @@ public final class UseModule implements AbilityModule {
                             .doc("按 block、entity 找目标的范围（格）").build(),
                     Param.of("text", ParamType.TEXT)
                             .doc("写到告示牌上的文字，用换行分行，最多 4 行；给了 text 就必须空手").build()),
-            Set.of(TargetKind.HERE, TargetKind.SEEN, TargetKind.LANDMARK, TargetKind.POSITION, TargetKind.PREVIOUS),
+            // 前面某一步确认过的位置（previous）还没有地方记，解析不了：不列进接受的目标，免得说接受却用不了。
+            Set.of(TargetKind.HERE, TargetKind.SEEN, TargetKind.LANDMARK, TargetKind.POSITION),
             ExecutionMode.CONTROLS_PLAYER,
             Set.of(),
             List.of(),
             Listing.LISTED);
 
-    public UseModule(UseServices services) {
+    UseModule(UseServices services) {
         this.services = services;
     }
 
     /**
-     * 生产用：把各读端与接缝交给本包拼好协作服务再建模块，启动清单只认这个入口。
-     * 可选接缝（游戏拒绝、告示牌界面、顺手捡起、跨未加载坐标、界面读数、世界记忆）没接上就传 null，
-     * 相应环节按接缝缺失如实失败；交互、靠近与手上准备缺了能力做不了事，不许为 null。
+     * 生产用：把角色上下文与各读端交给本包，拼好读世界、组装交互、备手、搜索、出行、捡东西与看界面的
+     * 生产实现再建模块，启动清单只认这个入口。缺的东西去拿一件走拿到物品的引擎（needs）。
      */
-    public static UseModule assemble(Interactions interactions, BringsPlayerClose close,
-            UseSeams.PreparesHand hand, ResolvesSeen seen, SearchesNearby search,
-            UseSeams.ReadsGameRefusal refusal, UseSeams.ReadsSignEditor signEditors,
-            UseSeams.GathersDrops drops, UseSeams.TravelsTo travel, MenuContent menus, WorldMemory memory) {
-        return new UseModule(new UseServices(interactions, close, hand, seen, search,
-                refusal, signEditors, drops, travel, menus, memory));
+    public static UseModule live(Supplier<PlayerContext> context, Interactions interactions, BringsPlayerClose close,
+            ClientMovesToMainhand toMainhand, ItemNeeds needs, Supplier<Scene> scene, BlockScanService scans,
+            ClientGameRefusals refusals, WalkTo walks, WorldMemory memory) {
+        return new UseModule(new UseServices(
+                new LiveUseWorld(context),
+                new LiveUseInteractions(interactions, context),
+                close,
+                new LiveHandPreparation(toMainhand, context),
+                needs,
+                new LiveSeenResolver(scene),
+                new LiveNearbySearcher(scans, context),
+                refusals::latestMessage,
+                new MenuSignEditors(),
+                new ClientDropPickup(context, walks),
+                new LiveUseTravel(walks),
+                new LiveMenuLooks(context),
+                memory));
     }
 
     @Override public AbilitySpec spec() {

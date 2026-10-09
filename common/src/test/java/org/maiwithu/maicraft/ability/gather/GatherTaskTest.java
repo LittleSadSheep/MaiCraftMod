@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.OptionalInt;
 
 import net.minecraft.core.BlockPos;
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.acquire.DigsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.ReadsToolRequirements;
 import org.maiwithu.maicraft.behavior.acquire.ReplantsCrops;
+import org.maiwithu.maicraft.behavior.inventory.PicksUpDrops;
 import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.permission.Protection;
@@ -83,7 +85,7 @@ class GatherTaskTest {
     }
 
     /** 替身：靠近一步就算到；挖一格记一笔，做完时按设定往背包里放掉落；个别场景可覆盖挖的动作。 */
-    static class FakeActions implements ApproachesTargets, DigsBlocks {
+    static class FakeActions implements ApproachesTargets, DigsBlocks, PicksUpDrops {
         final FakeBackpack backpack;
         final String dropItem;
         final int dropCount;
@@ -98,6 +100,15 @@ class GatherTaskTest {
 
         @Override public Action toward(BlockPos target, Permissions permissions) {
             return simple("走近 " + target, "走近");
+        }
+
+        @Override public Set<Integer> nearby() {
+            return Set.of();
+        }
+
+        @Override public Action pickUpNewSince(Set<Integer> before) {
+            log.add("捡");
+            return simple("捡掉落物", "捡");
         }
 
         @Override public Optional<Action> dig(BlockPos target) {
@@ -149,7 +160,7 @@ class GatherTaskTest {
     final class FakeReplants implements ReplantsCrops {
         boolean fail;
 
-        @Override public Optional<Action> replant(BlockPos harvestedSpot) {
+        @Override public Optional<Action> replant(BlockPos harvestedSpot, String cropType) {
             return Optional.of(new Action() {
                 @Override public ActionStatus tick(TickContext context) {
                     log = fail ? "补种失败" : "补种了";
@@ -209,7 +220,7 @@ class GatherTaskTest {
         FakeActions actions = new FakeActions(backpack, "minecraft:wheat", 1);
         FakeReplants replants = new FakeReplants();
         GatherTask task = new GatherTask(blockSpot(null), actions, actions, new NoToolsNeeded(),
-                new FakeWorld("minecraft:wheat", true), replants, permission(), backpack, null, PERMS);
+                new FakeWorld("minecraft:wheat", true), replants, actions, permission(), backpack, null, PERMS);
         TaskResult result = run(task);
         assertEquals(TaskResult.Status.DONE, result.status());
         assertEquals("补种了", replants.log);
@@ -224,7 +235,7 @@ class GatherTaskTest {
         FakeBackpack backpack = new FakeBackpack();
         FakeActions actions = new FakeActions(backpack, "minecraft:wheat", 1);
         GatherTask task = new GatherTask(blockSpot(null), actions, actions, new NoToolsNeeded(),
-                new FakeWorld("minecraft:wheat", false), null, permission(), backpack, null, PERMS);
+                new FakeWorld("minecraft:wheat", false), null, actions, permission(), backpack, null, PERMS);
         TaskResult result = run(task);
         assertEquals(TaskResult.Status.FAILED, result.status());
         assertEquals(Problem.Kind.WRONG_TIME, result.problem().kind());
@@ -236,7 +247,7 @@ class GatherTaskTest {
         FakeBackpack backpack = new FakeBackpack();
         FakeActions actions = new FakeActions(backpack, "minecraft:cobblestone", 1);
         GatherTask task = new GatherTask(blockSpot(null), actions, actions, new IronPickRequired(),
-                new FakeWorld("minecraft:stone", false), null, permission(), backpack, null, PERMS);
+                new FakeWorld("minecraft:stone", false), null, actions, permission(), backpack, null, PERMS);
         TaskResult result = run(task);
         assertEquals(TaskResult.Status.FAILED, result.status());
         assertEquals(Problem.Kind.NEED_ITEM, result.problem().kind());
@@ -251,7 +262,7 @@ class GatherTaskTest {
         FakeReplants replants = new FakeReplants();
         replants.fail = true;
         GatherTask task = new GatherTask(blockSpot(null), actions, actions, new NoToolsNeeded(),
-                new FakeWorld("minecraft:wheat", true), replants, permission(), backpack, null, PERMS);
+                new FakeWorld("minecraft:wheat", true), replants, actions, permission(), backpack, null, PERMS);
         TaskResult result = run(task);
         assertEquals(TaskResult.Status.DONE, result.status(), "补种失败不该让已收的庄稼白收");
         assertEquals("补种失败", replants.log);
@@ -277,7 +288,7 @@ class GatherTaskTest {
             }
         };
         GatherTask task = new GatherTask(blockSpot("minecraft:coal"), actions, actions, new NoToolsNeeded(),
-                new FakeWorld("minecraft:stone", false), null, permission(), backpack, null, PERMS);
+                new FakeWorld("minecraft:stone", false), null, actions, permission(), backpack, null, PERMS);
         TaskResult result = run(task);
         assertEquals(TaskResult.Status.FAILED, result.status());
         assertEquals(Problem.Kind.NEED_ITEM, result.problem().kind());
@@ -291,7 +302,7 @@ class GatherTaskTest {
         FakeActions actions = new FakeActions(backpack, "minecraft:cobblestone", 1);
         GatherSpot spot = new GatherSpot(AT, false, "minecraft:diamond_ore", null, PERMS, "采集测试方块");
         GatherTask task = new GatherTask(spot, actions, actions, new IronPickRequired(),
-                new FakeWorld("minecraft:stone", false), null, permission(), backpack, null, PERMS);
+                new FakeWorld("minecraft:stone", false), null, actions, permission(), backpack, null, PERMS);
         TaskResult result = run(task);
         assertEquals(TaskResult.Status.FAILED, result.status());
         assertEquals(Problem.Kind.TARGET_GONE, result.problem().kind());
@@ -318,7 +329,7 @@ class GatherTaskTest {
         };
         GatherSpot spot = new GatherSpot(AT, true, null, "minecraft:rotten_flesh", PERMS, "捡起 e9");
         GatherTask task = new GatherTask(spot, actions, actions, new NoToolsNeeded(),
-                new FakeWorld(null, false), null, permission(), backpack, null, PERMS);
+                new FakeWorld(null, false), null, actions, permission(), backpack, null, PERMS);
         TaskResult result = run(task);
         assertEquals(TaskResult.Status.DONE, result.status());
         assertEquals(1, result.changes().size());
@@ -332,10 +343,27 @@ class GatherTaskTest {
         FakeActions actions = new FakeActions(backpack, "minecraft:wheat", 3);
         FakeReplants replants = new FakeReplants();
         GatherTask task = new GatherTask(blockSpot(null), actions, actions, new NoToolsNeeded(),
-                new FakeWorld("minecraft:wheat", true), replants, permission(), backpack, null, PERMS);
+                new FakeWorld("minecraft:wheat", true), replants, actions, permission(), backpack, null, PERMS);
         TaskResult result = run(task);
         assertEquals(TaskResult.Status.DONE, result.status());
         assertEquals(3, result.changes().get(1).count(), "只记这次多出来的");
     }
 
+    @Test
+    void 先捡掉落物再补种_补种按收掉的作物认种子() {
+        FakeBackpack backpack = new FakeBackpack();
+        FakeActions actions = new FakeActions(backpack, "minecraft:wheat", 1);
+        String[] crop = {null};
+        ReplantsCrops replants = (spot, cropType) -> {
+            crop[0] = cropType;
+            actions.log.add("补种");
+            return Optional.empty();
+        };
+        GatherTask task = new GatherTask(blockSpot(null), actions, actions, new NoToolsNeeded(),
+                new FakeWorld("minecraft:wheat", true), replants, actions, permission(), backpack, null, PERMS);
+        TaskResult result = run(task);
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertEquals("minecraft:wheat", crop[0]);
+        assertTrue(actions.log.indexOf("捡") < actions.log.indexOf("补种"), actions.log.toString());
+    }
 }

@@ -82,7 +82,7 @@ class GatherAbilityTest {
                 (target, permissions) -> {
                     throw new IllegalStateException("决定阶段不该靠近");
                 },
-                unusableDigs(), noTools, null, permission(), emptyBackpack(), null);
+                unusableDigs(), noTools, null, null, permission(), emptyBackpack(), null);
     }
 
     private StepDecision decide(Target target) {

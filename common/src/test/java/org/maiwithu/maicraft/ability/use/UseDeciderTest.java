@@ -7,6 +7,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
 import org.maiwithu.maicraft.kernel.result.Problem;
+import org.maiwithu.maicraft.kernel.result.TaskResult;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -40,6 +41,8 @@ class UseDeciderTest {
         assertTrue(UseDecider.explosionDanger("minecraft:the_end", "minecraft:white_bed").isPresent());
         assertTrue(UseDecider.explosionDanger("minecraft:overworld", "minecraft:respawn_anchor").isPresent());
         // 主世界的床、下界的重生锚不会炸。
+        assertTrue(UseDecider.explosionDanger("minecraft:overworld", "minecraft:red_bed").isEmpty());
+        // 读不到维度时不冒充知道。
         assertTrue(UseDecider.explosionDanger(null, "minecraft:red_bed").isEmpty());
         assertTrue(UseDecider.explosionDanger("minecraft:the_nether", "minecraft:respawn_anchor").isEmpty());
         assertTrue(UseDecider.explosionDanger("minecraft:overworld", "minecraft:chest").isEmpty());
@@ -48,26 +51,42 @@ class UseDeciderTest {
     @Test
     void verdictsSettleIntoResultDirections() {
         // 生效：做满次数就完成。
-        assertTrue(UseDecider.settle(InteractionResult.applied("生效"), false, true)
+        assertTrue(UseDecider.settle(InteractionResult.applied("生效"), Optional.empty())
                 instanceof UseDecider.Settlement.Applied);
-        // 有游戏给的提示语的没生效：按被游戏拒绝，附原话。
+        // 出手后动作栏冒出了提示语的没生效：按被游戏拒绝，附原话。
         UseDecider.Settlement refused = UseDecider.settle(
-                InteractionResult.notApplied("箱子已上锁"), true, false);
-        assertTrue(refused instanceof UseDecider.Settlement.NotApplied);
-        assertEquals(Problem.Kind.REFUSED_BY_GAME,
-                ((UseDecider.Settlement.NotApplied) refused).problem().kind());
-        // 服务端说没被任何东西处理且目标没变：这样用没有效果。
+                InteractionResult.notApplied("现场纹丝没动"), Optional.of("箱子已上锁"));
+        Problem refusal = ((UseDecider.Settlement.NotApplied) refused).problem();
+        assertEquals(Problem.Kind.REFUSED_BY_GAME, refusal.kind());
+        assertTrue(refusal.message().contains("箱子已上锁"));
+        // 游戏什么都没说、目标也没变：这样用没有效果。
         UseDecider.Settlement noEffect = UseDecider.settle(
-                InteractionResult.notApplied("现场纹丝没动"), false, false);
+                InteractionResult.notApplied("现场纹丝没动"), Optional.empty());
         assertEquals(Problem.Kind.NOT_POSSIBLE_HERE,
                 ((UseDecider.Settlement.NotApplied) noEffect).problem().kind());
         // 出乎预料（水倒进岩浆变成黑曜石）：照样算完成，changes 照实写。
-        assertTrue(UseDecider.settle(InteractionResult.unexpected("出现了黑曜石"), false, true)
+        assertTrue(UseDecider.settle(InteractionResult.unexpected("出现了黑曜石"), Optional.empty())
                 instanceof UseDecider.Settlement.Unexpected);
-        // 没能确认：部分完成，会用掉东西的绝不再试。
-        assertTrue(UseDecider.settle(InteractionResult.unconfirmed("确认没等到"), false, true)
+        // 没能确认：部分完成，不再试。
+        assertTrue(UseDecider.settle(InteractionResult.unconfirmed("确认没等到"), Optional.empty())
                 instanceof UseDecider.Settlement.Unconfirmed);
-        assertTrue(UseDecider.mustStopAfterUnconfirmed(true));
-        assertTrue(!UseDecider.mustStopAfterUnconfirmed(false));
+    }
+
+    @Test
+    void stoppingAfterSomeSuccessesIsPartialWithTheCount() {
+        Problem noEffect = Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "这样用没有效果", null);
+        // 一次都没做成：失败。
+        assertEquals(TaskResult.Status.FAILED, UseDecider.stopped(0, 3, noEffect).status());
+        // 做成过一次，第二次没效果：部分完成，写明做成了 1 次。
+        TaskResult partial = UseDecider.stopped(1, 3, noEffect);
+        assertEquals(TaskResult.Status.PARTIAL, partial.status());
+        assertTrue(partial.summary().contains("确认生效了 1 次"));
+        assertEquals(TaskResult.Status.PARTIAL, UseDecider.unconfirmed(0, "确认没等到").status());
+    }
+
+    @Test
+    void brushIsRejectedHonestly() {
+        // 刷子要一直按住刷完，这种按法还没接上：计划阶段如实拒绝，不点一下冒充刷过。
+        assertTrue(UseDecider.rejectedItem("minecraft:brush").isPresent());
     }
 }

@@ -6,6 +6,8 @@ import java.util.OptionalDouble;
 import java.util.function.Supplier;
 import net.minecraft.core.BlockPos;
 
+import org.maiwithu.maicraft.behavior.navigation.WalkTo;
+import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -24,19 +26,20 @@ public final class LiveApproaches implements BringsPlayerClose {
 
     private final Supplier<PlayerContext> context;
     private final ApproachWorldView world;
-    private final WalksToSpot moves;
+    private final WalkTo walks;
 
-    public LiveApproaches(Supplier<PlayerContext> context, ApproachWorldView world, WalksToSpot moves) {
+    public LiveApproaches(Supplier<PlayerContext> context, ApproachWorldView world, WalkTo walks) {
         this.context = Objects.requireNonNull(context, "context");
         this.world = Objects.requireNonNull(world, "world");
-        this.moves = Objects.requireNonNull(moves, "moves");
+        this.walks = Objects.requireNonNull(walks, "walks");
     }
 
     @Override
     public Action toward(InteractionTarget target, Permissions permissions) {
-        // 站位补救与保护格在此留空：受保护格不放行挖垫，许可档由走到实现方的方块通行判断把关。
+        // 每个靠近动作各走各的一份：路上能动多少地形按这次任务的许可来，暂停与收尾互不牵连。
+        // 站位补救与保护格在此留空：受保护格不放行挖垫，能不能挖某一格由走到实现方的方块通行判断把关。
         return new Approach(target, reachNow(), world, LiveApproaches::straightCost,
-                at -> false, moves, null, permissions);
+                at -> false, new LiveSpotWalks(walks, TerrainPermit.of(permissions)), null, permissions);
     }
 
     /** 当刻的距离数值：交互距离读角色属性，眼高按当时姿态取。 */

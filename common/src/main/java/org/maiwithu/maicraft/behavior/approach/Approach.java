@@ -87,8 +87,9 @@ public final class Approach implements Action {
         return List.copyOf(tried);
     }
 
+    // 被生存需求打断：走向站位先停住、记着去处，回来时接着走，不把这一趟丢了干等。
     @Override public void pause() {
-        moves.stop();
+        moves.pause();
     }
 
     @Override public void close() {

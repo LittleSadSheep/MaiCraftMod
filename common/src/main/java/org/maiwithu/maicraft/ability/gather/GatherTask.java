@@ -6,6 +6,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import net.minecraft.core.BlockPos;
 
@@ -14,6 +15,7 @@ import org.maiwithu.maicraft.behavior.acquire.DigsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
 import org.maiwithu.maicraft.behavior.acquire.ReadsToolRequirements;
 import org.maiwithu.maicraft.behavior.acquire.ReplantsCrops;
+import org.maiwithu.maicraft.behavior.inventory.PicksUpDrops;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -29,21 +31,19 @@ import org.maiwithu.maicraft.kernel.task.PhasedTask;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
- * 采集的任务：走到跟前，看清现场，只收熟了的作物、挖够得着的方块，然后走近让原版把掉落物收进包。
- * 收完庄稼顺手把种子种回去（种子从这次收获里出，没有就不补，补不上也不白收）；
+ * 采集的任务：走到跟前，看清现场，只收熟了的作物、挖够得着的方块，然后走过去捡起这一下掉出来的东西。
+ * 收完庄稼、种子进了包再顺手种回去（种子从这次收获里出，没有就不补，补不上也不白收）；
  * 工具不够格不自己去做一把，如实说缺什么等级的工具——备工具是拿东西的事，两件事分开才都看得清。
  * 拿没拿到按背包里数量的变化确认：冷却中的掉落物照常等，不误报"附近没有"。
  */
 final class GatherTask extends PhasedTask<GatherTask.Phase> {
 
-    /** 任务的阶段：走近 → 看现场 → 动手（挖/收）→ 补种 → 等掉落物入包。掉落物目标没有中间三步。 */
-    enum Phase { WALK, JUDGE, DIG, REPLANT, RECOLLECT }
+    /** 任务的阶段：走近 → 看现场 → 动手（挖/收）→ 捡掉落物 → 补种。掉落物目标走近后直接捡。 */
+    enum Phase { WALK, JUDGE, DIG, PICK_UP, REPLANT }
 
     /** 半分钟没有真实进展算卡住；整件事最多做五分钟。 */
     private static final long STUCK_AFTER_TICKS = 20L * 30;
     private static final long MAX_TICKS = 20L * 60 * 5;
-    /** 到了跟前等掉落物入包的耐心：拾取有冷却，等满这一阵再下结论。 */
-    private static final int PICKUP_WAIT_TICKS = 20 * 3;
 
     private final GatherSpot spot;
     private final ApproachesTargets approaches;
@@ -51,6 +51,7 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
     private final ReadsToolRequirements tools;
     private final ReadsSpot world;
     private final ReplantsCrops replants;
+    private final PicksUpDrops drops;
     private final PermissionCheck permission;
     private final BackpackView backpack;
     private final OffhandContents offhand;
@@ -60,12 +61,16 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
     private Map<String, Integer> baseline;
     /** 看现场时确认的方块种类；挖与结算用。 */
     private String liveType;
-    /** 等掉落物入包已经等了多少刻。 */
-    private int waitedForPickup;
+    /** 看现场时确认是熟了的作物：收完要不要补种按它，挖开后格子空了就再也看不出来。 */
+    private boolean matureCrop;
+    /** 动手前脚边已经躺着的掉落物：捡东西只捡这一下新冒出来的。 */
+    private Set<Integer> dropsBefore = Set.of();
+    /** 下一阶段的动作：上一刻按现场备好，进入阶段时交给基类持有。 */
+    private Action prepared;
 
     GatherTask(GatherSpot spot, ApproachesTargets approaches, DigsBlocks digs, ReadsToolRequirements tools,
-            ReadsSpot world, ReplantsCrops replants, PermissionCheck permission, BackpackView backpack,
-            OffhandContents offhand, Permissions permissions) {
+            ReadsSpot world, ReplantsCrops replants, PicksUpDrops drops, PermissionCheck permission,
+            BackpackView backpack, OffhandContents offhand, Permissions permissions) {
         super("采集", Phase.WALK, new ProgressTracker(STUCK_AFTER_TICKS, MAX_TICKS));
         this.spot = spot;
         this.approaches = approaches;
@@ -73,6 +78,7 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
         this.tools = tools;
         this.world = world;
         this.replants = replants;
+        this.drops = drops;
         this.permission = permission;
         this.backpack = backpack;
         this.offhand = offhand;
@@ -80,33 +86,34 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
     }
 
     @Override protected Action enter(Phase phase) {
-        BlockPos target = new BlockPos(spot.at().x(), spot.at().y(), spot.at().z());
-        return switch (phase) {
-            // 掉落物目标没有"动手"这步，走近后直接等入包；两种靠近都交给站位与靠近的模型。
-            case WALK, RECOLLECT -> approaches.toward(target, spot.permissions());
-            case DIG -> digs.dig(target).orElse(null);
-            // 看现场不是现场动作，在 tick 里读现场；补种的入口再问一次，没接上时这一步跳过。
-            case JUDGE -> null;
-            case REPLANT -> replants == null ? null : replants.replant(target).orElse(null);
-        };
+        if (phase == Phase.WALK) {
+            // 出发前记下背包里每样东西有几件：走过去时顺路吸进包的掉落物也算这次捡到的。
+            snapshotBaseline();
+            // 走近交给站位与靠近的模型。
+            return approaches.toward(asBlock(spot.at()), spot.permissions());
+        }
+        Action next = prepared;
+        prepared = null;
+        return next;
     }
 
     @Override protected Next<Phase> tick(Phase phase, TickContext context) {
         return switch (phase) {
             case WALK -> runActionThen(context, () -> {
-                snapshotBaseline();
-                return spot.drop() ? Next.go(Phase.RECOLLECT, "是掉落物，走近让游戏自己收")
+                // 掉落物目标：走到了就把附近地上的东西捡起来（出手前没有"原来就在"的那一批）。
+                return spot.drop() ? goWith(Phase.PICK_UP, drops.pickUpNewSince(Set.of()), "是掉落物，走过去捡")
                         : Next.go(Phase.JUDGE, "到跟前了，先看清是什么");
             });
             case JUDGE -> judge();
-            case DIG -> action() == null
-                    ? Next.fail(Problem.of(Problem.Kind.UNSUPPORTED, "挖方块的现场动作还没接上，采不了"))
-                    : digDone(context);
-            case REPLANT -> action() == null
-                    ? Next.go(Phase.RECOLLECT, "补种没接上，不补了")
-                    : replantDone(context);
-            case RECOLLECT -> waitForPickup(context);
+            case DIG -> digDone(context);
+            case PICK_UP -> pickedUp(context);
+            case REPLANT -> replantDone(context);
         };
+    }
+
+    private Next<Phase> goWith(Phase phase, Action action, String why) {
+        prepared = action;
+        return Next.go(phase, why);
     }
 
     // 看现场：目标还在不在、是熟作物还是普通方块、工具与许可过不过。哪一关不过都以问题如实结束。
@@ -127,7 +134,8 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
                 return Next.fail(Problem.of(Problem.Kind.WRONG_TIME,
                         liveType + "还没熟，现在收不上东西", "等它成熟了再来收"));
             }
-            return permissionOr(Next.go(Phase.DIG, "是熟了的作物，收"));
+            matureCrop = true;
+            return permissionOr("是熟了的作物，收");
         }
         Optional<String> required = tools.toolRequired(liveType);
         if (required.isPresent() && !CarriedItems.hasToolThatSuffices(backpack, offhand, liveType, tools)) {
@@ -138,62 +146,60 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
                             + "采集不会自己去备工具",
                     "先用拿东西备一件够格的工具，再来采集"));
         }
-        return permissionOr(Next.go(Phase.DIG, "是一格普通方块，挖"));
+        return permissionOr("是一格普通方块，挖");
     }
 
-    // 动手前过一次许可：别人搭的、玩家放的，一格都不动。
-    private Next<Phase> permissionOr(Next<Phase> allowed) {
+    // 动手前过一次许可：别人搭的、玩家放的，一格都不动。许可过了才记下脚边原有的掉落物、开挖。
+    private Next<Phase> permissionOr(String why) {
         Optional<Problem> refusal = permission.blockAllowed(permissions,
                 PermissionCheck.WorldAction.DIG_BLOCK, spot.at(), liveType);
-        return refusal.isEmpty() ? allowed : Next.fail(refusal.get());
+        if (refusal.isPresent()) return Next.fail(refusal.get());
+        Optional<Action> dig = digs.dig(asBlock(spot.at()));
+        if (dig.isEmpty()) {
+            return Next.fail(Problem.of(Problem.Kind.UNSUPPORTED, "挖方块的现场动作还没接上，采不了"));
+        }
+        dropsBefore = drops.nearby();
+        return goWith(Phase.DIG, dig.get(), why);
     }
 
+    // 挖开了：记下拆掉的方块，走过去捡这一下掉出来的东西。
     private Next<Phase> digDone(TickContext context) {
         return switch (runAction(context)) {
             case ActionStatus.Running running -> Next.stay();
             case ActionStatus.Done done -> {
                 recordChange(Change.of(Change.Kind.BLOCK_BROKEN, liveType, 1));
-                boolean crop = world.matureCrop(spot.at(), liveType);
-                // 补种在挖掘之后：作物被收掉、种子进了背包，才轮得到补种。
-                if (crop && replants != null && replants.replant(asBlock(spot.at())).isPresent()) {
-                    yield Next.go(Phase.REPLANT, "收完了，顺手把种子种回去");
-                }
-                yield Next.go(Phase.RECOLLECT, "挖开了，等掉落物入包");
+                yield goWith(Phase.PICK_UP, drops.pickUpNewSince(dropsBefore), "挖开了，走过去捡掉出来的东西");
             }
             case ActionStatus.Failed failed -> Next.fail(failed.problem());
         };
     }
 
-    // 补种成了、没种子、或游戏拒绝，都接着等掉落物；补种失败不冒充没收成，记下事实，保留已收的进度。
+    // 捡完了（捡不到的如实记一笔）：收的是熟作物就趁种子进了包顺手种回去，否则按背包变化结算。
+    private Next<Phase> pickedUp(TickContext context) {
+        ActionStatus status = runAction(context);
+        if (status instanceof ActionStatus.Running) return Next.stay();
+        if (status instanceof ActionStatus.Failed failed) {
+            recordAttempt("捡起掉出的东西", failed.problem().message());
+        }
+        if (matureCrop && replants != null) {
+            Optional<Action> replant = replants.replant(asBlock(spot.at()), liveType);
+            if (replant.isPresent()) {
+                return goWith(Phase.REPLANT, replant.get(), "收完了，顺手把种子种回去");
+            }
+        }
+        return settle();
+    }
+
+    // 补种成了、没种子、或游戏拒绝，都按已收的结算；补种失败不冒充没收成，记下事实。
     private Next<Phase> replantDone(TickContext context) {
         return switch (runAction(context)) {
             case ActionStatus.Running running -> Next.stay();
             case ActionStatus.Done done -> {
                 recordAttempt("补种", "补种这步做完了（种回去了，或者没有种子没补）");
-                yield Next.go(Phase.RECOLLECT, "补种收尾了，等掉落物入包");
+                yield settle();
             }
             case ActionStatus.Failed failed -> {
                 recordAttempt("补种", "没补上：" + failed.problem().message() + "；已收的照算");
-                yield Next.go(Phase.RECOLLECT, "补种没成，保留已收的继续");
-            }
-        };
-    }
-
-    // 走近让原版结算拾取，按背包同类数量的变化确认。冷却中的掉落物照常等，等满耐心才下结论。
-    private Next<Phase> waitForPickup(TickContext context) {
-        return switch (runAction(context)) {
-            case ActionStatus.Running running -> {
-                waitedForPickup++;
-                // 已经有东西进包就不用再等靠近：边走边捡是原版的规矩。
-                if (!gainedSinceBaseline().isEmpty() || waitedForPickup >= PICKUP_WAIT_TICKS) {
-                    yield settle();
-                }
-                yield Next.stay();
-            }
-            case ActionStatus.Done done -> settle();
-            case ActionStatus.Failed failed -> {
-                // 走不进掉落物那一格不算失败：站得够近原版也会收，先按等到的结算。
-                recordAttempt("走近掉落物", "没站进去：" + failed.problem().message());
                 yield settle();
             }
         };

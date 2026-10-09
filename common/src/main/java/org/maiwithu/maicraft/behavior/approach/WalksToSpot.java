@@ -18,6 +18,9 @@ public interface WalksToSpot {
     /** 推进一刻：站进目标格并落地是做完，还在走是进行中，这条路走不了是失败。 */
     ActionStatus step(TickContext context);
 
-    /** 不再走向当前目标，松开移动按键。 */
+    /** 被打断：松开按键、撤掉路线，但记着要去哪；恢复后接着推进时重新算路走过去。 */
+    void pause();
+
+    /** 不再走向当前目标：松开移动按键，交还占着的寻路。 */
     void stop();
 }

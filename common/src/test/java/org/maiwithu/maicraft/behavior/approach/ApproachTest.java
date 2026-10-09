@@ -140,4 +140,19 @@ class ApproachTest {
         approach.close();
         assertEquals(1, moves.stops);
     }
+
+    @Test
+    void 被打断时只暂停脚步_回来接着走同一个站位() {
+        // 出发时还在跳跃中：原地核对不过，挑了站位在路上时被打断。
+        world.grounded = false;
+        StubMoves moves = new StubMoves(world, ActionStatus.running(), ActionStatus.running());
+        Approach approach = approach(moves, null, Permissions.DEFAULT);
+        approach.tick(new StubTick(1));
+        approach.tick(new StubTick(2));
+        approach.pause();
+        assertEquals(1, moves.pauses);
+        assertEquals(0, moves.stops, "被打断不该把这一趟丢掉");
+        approach.tick(new StubTick(3));
+        assertEquals(1, moves.begun.size(), "回来接着走，不重新挑站位");
+    }
 }

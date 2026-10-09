@@ -107,6 +107,18 @@ public interface InteractionConfirmation {
                 || state.getBlock() instanceof NetherPortalBlock;
     }
 
+    /**
+     * 右键马、船、矿车的原生效果是骑上去：不换手、不开界面也不改方块，角色的坐骑变成这只实体
+     * 本身就是这次点击已生效的客户端权威事实（服务端同意骑乘后才把乘客关系同步下来）。
+     */
+    public static InteractionConfirmation ridingOn(Entity vehicle) {
+        int id = vehicle.getId();
+        return context -> {
+            Entity riding = context.localPlayer().getVehicle();
+            return riding != null && riding.getId() == id ? Verdict.APPLIED : Verdict.PENDING;
+        };
+    }
+
     public static InteractionConfirmation heldItemChanged(InteractionHand hand, ItemStack before) {
         ItemStack frozen = before.copy();
         return context -> sameStack(context.localPlayer().getItemInHand(hand), frozen)
@@ -134,11 +146,13 @@ public interface InteractionConfirmation {
     public static InteractionConfirmation entityStruck(LocalPlayer attacker, Entity target) {
         int id = target.getId();
         float health = target instanceof LivingEntity living ? living.getHealth() : Float.NaN;
+        // 出手前目标已经在红闪（刚被别人或上一刀打过）：那段红闪不是这一刀的证据，只认之后重新闪起来的。
+        int hurtBefore = target instanceof LivingEntity living ? living.hurtTime : 0;
         return context -> {
             // 目标实体不在了分不清是这次打死的还是别的原因，维持等待由超期如实收场。
             if (!(context.level().getEntity(id) instanceof LivingEntity living)) return Verdict.PENDING;
             return strikeVerdict(living.isAlive(), living.getHealth(), health,
-                    living.hurtTime, attacker.getAttackStrengthScale(0.0f));
+                    living.hurtTime, hurtBefore, attacker.getAttackStrengthScale(0.0f));
         };
     }
 
@@ -147,8 +161,9 @@ public interface InteractionConfirmation {
      * 都没成立而攻击充能低于出手线，说明挥击已发生（充能清零的恢复要十几刻，窗口内回不到出手线以上）。
      */
     static Verdict strikeVerdict(boolean targetAlive, float liveHealth, float healthBefore,
-                                 int hurtTime, float attackScale) {
-        if (!targetAlive || liveHealth < healthBefore || hurtTime > 0) return Verdict.APPLIED;
+                                 int hurtTime, int hurtTimeBefore, float attackScale) {
+        // 红闪按刻倒数：比出手前更长说明重新闪起来了，是这一刀打中的；还在倒数旧的那段不算。
+        if (!targetAlive || liveHealth < healthBefore || hurtTime > hurtTimeBefore) return Verdict.APPLIED;
         return attackScale < 0.9f ? Verdict.APPLIED : Verdict.PENDING;
     }
 

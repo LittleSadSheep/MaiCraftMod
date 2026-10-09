@@ -13,6 +13,8 @@ import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 采集的来源：收成熟作物。只收熟了的（没熟的被踩掉就白长了），收哪几格由许可说了算——
@@ -24,19 +26,19 @@ public final class HarvestSource implements ItemSource {
     public static final int SEARCH_RADIUS_BLOCKS = 48;
 
     private final ScansMatureCrops crops;
-    private final DigsBlocks digs;
+    private final CollectsBlocks collects;
     private final PermissionCheck permission;
     /** 收完顺手补种的接缝；没接上时只收不补。 */
     private final ReplantsCrops replants;
 
-    public HarvestSource(ScansMatureCrops crops, DigsBlocks digs, PermissionCheck permission) {
-        this(crops, digs, permission, null);
+    public HarvestSource(ScansMatureCrops crops, CollectsBlocks collects, PermissionCheck permission) {
+        this(crops, collects, permission, null);
     }
 
-    public HarvestSource(ScansMatureCrops crops, DigsBlocks digs, PermissionCheck permission,
+    public HarvestSource(ScansMatureCrops crops, CollectsBlocks collects, PermissionCheck permission,
             ReplantsCrops replants) {
         this.crops = crops;
-        this.digs = digs;
+        this.collects = collects;
         this.permission = permission;
         this.replants = replants;
     }
@@ -74,16 +76,17 @@ public final class HarvestSource implements ItemSource {
             return Optional.empty();
         }
         List<Action> steps = new ArrayList<>();
-        for (CropSpot spot : screened.allowed()) {
-            Optional<Action> dig = digs.dig(spot.pos());
-            if (dig.isEmpty()) {
-                // 挖的入口接不上，一步都还没动：整串放弃，由引擎换别的路。
+        // 一株至少收一件：要几件就收几株，不把附近的田一口气收光；收少了引擎清点后会再来。
+        for (CropSpot spot : screened.allowed().stream().limit(request.count()).toList()) {
+            Optional<Action> collect = collects.collect(spot.pos(), context.permissions());
+            if (collect.isEmpty()) {
+                // 收的入口接不上，一步都还没动：整串放弃，由引擎换别的路。
                 return Optional.empty();
             }
-            steps.add(dig.get());
+            steps.add(collect.get());
             if (replants != null) {
-                // 收完顺手把种子种回去；没有种子时补种动作自己会照常收场，不冒充补上了，也不白收。
-                replants.replant(spot.pos()).ifPresent(steps::add);
+                // 收完、掉落物进了包再顺手把种子种回去：种子从这次收获里出，收割前格子也还没空出来。
+                steps.add(new ReplantAfterwards(spot.pos(), spot.blockType()));
             }
         }
         return Optional.of(new StepwiseActions("把熟了的" + request.wanted().describe()
@@ -101,5 +104,40 @@ public final class HarvestSource implements ItemSource {
             nearest = Math.min(nearest, d);
         }
         return nearest;
+    }
+
+    /** 到这一步才问补种：前面的收割与捡掉落物做完了，种子在包里、格子也空出来了。 */
+    private final class ReplantAfterwards implements Action {
+
+        private final BlockPos spot;
+        private final String cropType;
+        private Action replant;
+        private boolean asked;
+
+        ReplantAfterwards(BlockPos spot, String cropType) {
+            this.spot = spot;
+            this.cropType = cropType;
+        }
+
+        @Override public ActionStatus tick(TickContext context) {
+            if (!asked) {
+                asked = true;
+                replant = replants.replant(spot, cropType).orElse(null);
+            }
+            // 这一株补不了（不是种在耕地上的那类、格子被占了）：跳过，不让已收的白收。
+            return replant == null ? ActionStatus.done() : replant.tick(context);
+        }
+
+        @Override public void pause() {
+            if (replant != null) replant.pause();
+        }
+
+        @Override public void close() {
+            if (replant != null) replant.close();
+        }
+
+        @Override public String describe() {
+            return replant == null ? "补种 " + spot.toShortString() : replant.describe();
+        }
     }
 }

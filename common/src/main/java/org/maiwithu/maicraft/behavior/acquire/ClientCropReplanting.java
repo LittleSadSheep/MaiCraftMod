@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.acquire;
 
-import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.CropBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.behavior.interaction.AimAndInteract;
@@ -27,15 +28,12 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 /**
  * 补种的生产实现：收掉的作物格上，把背包里对应的种子换到主手，对着空格点一下种回去。
  *
- * <p>种子从随身背包里出，不额外去找：没有这种作物的种子就不补，动作照常做成——
- * 补不成不能让已经收进背包的庄稼白收。只有种在耕地上的普通作物（小麦、胡萝卜、
- * 马铃薯、甜菜根）能这么补；格子还空着、下面不是耕地时按"这里补不了"跳过。
+ * <p>种哪种按收掉的那株作物认：作物自己知道用什么种回去（原版的"选取方块"给的就是它的种子，
+ * 模组作物也一样），小麦补小麦种子，不会拿胡萝卜去补小麦。种子从随身背包里出，不额外去找：
+ * 没有就不补，动作照常做成——补不成不能让已经收进背包的庄稼白收。
+ * 格子还空着、下面是耕地才补；种的时候点下面那块耕地的顶面，种子落在上面这一格。
  */
 public final class ClientCropReplanting implements ReplantsCrops {
-
-    /** 能补种的作物：种子到作物的对应，按原版玩家手里的常识写。 */
-    private static final List<String> FIELD_SEEDS = List.of(
-            "minecraft:wheat_seeds", "minecraft:carrot", "minecraft:potato", "minecraft:beetroot_seeds");
 
     private final ClientMovesToMainhand toMainhand;
     private final Interactions interactions;
@@ -49,7 +47,7 @@ public final class ClientCropReplanting implements ReplantsCrops {
     }
 
     @Override
-    public Optional<Action> replant(BlockPos harvestedSpot) {
+    public Optional<Action> replant(BlockPos harvestedSpot, String cropType) {
         PlayerContext current = context.get();
         ClientLevel level = current == null ? null : current.level();
         if (level == null) {
@@ -60,20 +58,16 @@ public final class ClientCropReplanting implements ReplantsCrops {
         if (!spot.isAir() || !level.getBlockState(harvestedSpot.below()).is(Blocks.FARMLAND)) {
             return Optional.empty();
         }
-        String seed = carriedSeed(current.localPlayer());
-        // 没带种子也返回动作：动作照常做完，结论是"没有种子，没补"，不让收获白收。
-        return Optional.of(new ReplantAction(harvestedSpot, seed));
-    }
-
-    // 身上第一件能种在耕地上的种子；没有给 null。
-    private String carriedSeed(LocalPlayer player) {
-        for (int slot = 0; slot < player.getInventory().getContainerSize(); slot++) {
-            ItemStack held = player.getInventory().getItem(slot);
-            if (held.isEmpty()) continue;
-            String itemId = BuiltInRegistries.ITEM.getKey(held.getItem()).toString();
-            if (FIELD_SEEDS.contains(itemId)) return itemId;
+        Optional<Block> crop = BuiltInRegistries.BLOCK.getOptional(ResourceLocation.tryParse(cropType));
+        if (crop.isEmpty() || !(crop.get() instanceof CropBlock)) {
+            return Optional.empty();
         }
-        return null;
+        // 这株作物的种子：问作物自己（选取方块给的就是种子）；身上没有就记"没种子没补"。
+        ItemStack seedStack = crop.get().getCloneItemStack(level, harvestedSpot, crop.get().defaultBlockState());
+        String seed = seedStack.isEmpty() ? null : BuiltInRegistries.ITEM.getKey(seedStack.getItem()).toString();
+        boolean carried = seed != null && toMainhand.carried(seed);
+        // 没带种子也返回动作：动作照常做完，结论是"没有种子，没补"，不让收获白收。
+        return Optional.of(new ReplantAction(harvestedSpot, carried ? seed : null));
     }
 
     /** 补种的动作：换到主手 → 对着空格点一下；没有种子就直接做完。 */
@@ -112,8 +106,9 @@ public final class ClientCropReplanting implements ReplantsCrops {
                     moving = move.get();
                     return ActionStatus.running();
                 }
+                // 种子点在下面那块耕地上，作物长在上面这一格：上面这一格变了样才算种上。
                 BlockState before = worldState(tick);
-                planting = interactions.useBlock(spot, InteractionConfirmation.blockChanged(spot, before));
+                planting = interactions.useBlock(spot.below(), InteractionConfirmation.blockChanged(spot, before));
             }
             ActionStatus status = planting.tick(tick);
             if (status instanceof ActionStatus.Failed failed) {
@@ -127,6 +122,18 @@ public final class ClientCropReplanting implements ReplantsCrops {
             PlayerContext player = tick.player();
             if (player == null || player.level() == null) return null;
             return player.level().getBlockState(spot);
+        }
+
+        @Override
+        public void pause() {
+            if (moving != null) moving.pause();
+            if (planting != null) planting.pause();
+        }
+
+        @Override
+        public void close() {
+            if (moving != null) moving.close();
+            if (planting != null) planting.close();
         }
 
         @Override

@@ -15,13 +15,14 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.tags.BlockTags;
 import net.minecraft.world.entity.animal.Cat;
+import net.minecraft.world.level.block.AbstractChestBlock;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
+import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
@@ -34,9 +35,9 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
  * 找容器的读端：现场扫描出这一片的容器方块，再把世界记忆里记过、现场还没扫到的并进来，
  * 按存东西挑选需要的事实（盖子上方、有没有猫坐着、开过没有）把每只候选读好。
  *
- * <p>方块索引第一次用到时登记容器方块，之后每刻只花小预算；没扫完如实标出，
- * "没扫完"不冒充"没有"。归属记录是异步查询，候选阶段问不了：谁的箱子先按能塞处理，
- * 点开前的许可与游戏自己的保护还会再挡一次，挡了就如实上报。
+ * <p>方块索引按维度补登记容器方块，之后每刻只花小预算；没扫完如实标出，"没扫完"不冒充"没有"。
+ * 是不是别人的箱子、压住盖子的方块是不是别人放的，都问这个世界的那一份保护判断；
+ * 盖子压不压得住按原版的规矩读：只有箱子类会被上方的实心方块压住，树叶、台阶压不住，木桶不看上方。
  */
 public final class ClientSpotsContainers implements SpotsContainers {
 
@@ -49,12 +50,16 @@ public final class ClientSpotsContainers implements SpotsContainers {
     private final WorldMemory memory;
     /** 容器方块按维度登记进扫描索引：去了下界、末地照样认得出那里的箱子。 */
     private final ScanTargets registered;
+    /** 这个世界的保护判断：容器与压住盖子的方块是不是别人的。 */
+    private final Protection protection;
     private boolean lastScanComplete;
 
-    public ClientSpotsContainers(BlockScanService scans, Supplier<PlayerContext> context, WorldMemory memory) {
+    public ClientSpotsContainers(BlockScanService scans, Supplier<PlayerContext> context, WorldMemory memory,
+            Protection protection) {
         this.scans = Objects.requireNonNull(scans, "scans");
         this.context = Objects.requireNonNull(context, "context");
         this.memory = Objects.requireNonNull(memory, "memory");
+        this.protection = Objects.requireNonNull(protection, "protection");
         this.registered = new ScanTargets(scans);
     }
 
@@ -122,14 +127,15 @@ public final class ClientSpotsContainers implements SpotsContainers {
         // 记忆里开过的内容跟位置走：现场还在，上次看到的清单仍可当"已经放着同种东西"的线索。
         Optional<MemoryRecord> known = memory.recordAt(MemoryKind.CONTAINER, WorldPosition.here(
                 at.getX(), at.getY(), at.getZ()));
+        WorldPosition position = positionOf(level, at);
         return Optional.of(new ContainerChooser.Candidate(
                 describe(blockTypeId, at),
                 blockTypeId,
-                WorldPosition.here(at.getX(), at.getY(), at.getZ()),
+                position,
                 known.filter(MemoryRecord::openedBefore).map(MemoryRecord::contents).orElse(null),
                 true,
                 Math.sqrt(at.distSqr(from)),
-                false,
+                protection.blockProtected(position, blockTypeId, Set.of()),
                 true,
                 lidOf(level, at),
                 catSitting(level, at)));
@@ -146,22 +152,29 @@ public final class ClientSpotsContainers implements SpotsContainers {
                 record.openedBefore() ? record.contents() : null,
                 true,
                 Math.sqrt(at.distSqr(from)),
-                false,
+                protection.blockProtected(record.position(), blockTypeId, Set.of()),
                 true,
                 ContainerChooser.Lid.CLEAR,
                 false);
     }
 
-    // 盖子上方的样子：空着没事，树叶与植物这类天然方块压着可以挖，其余按别人放的先问。
+    // 盖子压没压住按原版：箱子类上方是实心导电方块才打不开，其余容器不看上方。
+    // 压住的方块受保护（别人的）要先问；不受保护的可以挖开。
     private ContainerChooser.Lid lidOf(ClientLevel level, BlockPos at) {
-        BlockState above = level.getBlockState(at.above());
-        if (above.isAir()) {
+        if (!(level.getBlockState(at).getBlock() instanceof AbstractChestBlock<?>)) {
             return ContainerChooser.Lid.CLEAR;
         }
-        if (above.is(BlockTags.LEAVES) || above.canBeReplaced()) {
-            return ContainerChooser.Lid.BLOCKED_BY_NATURAL;
+        BlockPos lid = at.above();
+        BlockState above = level.getBlockState(lid);
+        if (!above.isRedstoneConductor(level, lid)) {
+            return ContainerChooser.Lid.CLEAR;
         }
-        return ContainerChooser.Lid.BLOCKED_BY_FOREIGN;
+        return protection.blockProtected(positionOf(level, lid), blockTypeIdOf(above), Set.of())
+                ? ContainerChooser.Lid.BLOCKED_BY_FOREIGN : ContainerChooser.Lid.BLOCKED_BY_NATURAL;
+    }
+
+    private static WorldPosition positionOf(ClientLevel level, BlockPos at) {
+        return new WorldPosition(at.getX(), at.getY(), at.getZ(), level.dimension().location().toString());
     }
 
     // 上面坐着猫的箱子开不了：按盖子那一格附近的猫找。

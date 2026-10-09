@@ -29,6 +29,15 @@ public record TerrainPermit(Permissions.BlockChanges changes, boolean mayUseWate
     /** 一切不受保护的方块都可以动。 */
     public static final TerrainPermit ANY = new TerrainPermit(Permissions.BlockChanges.ANY, true);
 
+    /**
+     * 把任务许可折算成走到能动多少地形：方块档位原样对齐；能动地形时摔落缓冲的落地水也允许，
+     * 一块都不许动时连水也不放。能不能挖某一格仍由寻路的方块通行判断按保护把关。
+     */
+    public static TerrainPermit of(Permissions permissions) {
+        Permissions.BlockChanges changes = permissions.changeBlocks();
+        return new TerrainPermit(changes, changes != Permissions.BlockChanges.NONE);
+    }
+
     /** 还能不能动土（挖或垫任一）；路线要不要绕开要动土的地方看它。 */
     public boolean mayChangeTerrain() {
         return changes != Permissions.BlockChanges.NONE;

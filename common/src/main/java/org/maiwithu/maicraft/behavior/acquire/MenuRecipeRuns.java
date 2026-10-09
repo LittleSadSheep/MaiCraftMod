@@ -145,6 +145,8 @@ public final class MenuRecipeRuns implements RecipeRuns {
         private AimAndInteract opening;
         /** 界面打开后才建的读端：绑的就是点开的那份界面。 */
         private MenuContent menus;
+        /** 收尾关界面用的那一份会话：认领一次，之后每刻只推进它。 */
+        private MenuSession closingSession;
         private int menuWaited;
         private int waited;
         /** 背包里实际多出来的产出件数：每次取货按取货前后背包里的数量差记。 */
@@ -455,18 +457,21 @@ public final class MenuRecipeRuns implements RecipeRuns {
             return ActionStatus.progressed();
         }
 
-        // 关界面：打开者负责关闭；关不上不冒充没开过，照常收场让引擎清点。
+        // 关界面：打开者负责关闭；一份界面会话从头用到尾，只请求游戏关一次、期限按这份会话算。
+        // 关不上不冒充没开过，照常收场让引擎清点。
         private ActionStatus close(TickContext tick) {
             Optional<MenuContent.Reading> reading = menus.current();
             if (reading.isEmpty()) {
                 return ActionStatus.done();
             }
-            MenuSession.Claim claim = MenuSession.claim(reading.get().channel());
-            if (claim instanceof MenuSession.Claim.Refused) {
-                return ActionStatus.done();
+            if (closingSession == null) {
+                MenuSession.Claim claim = MenuSession.claim(reading.get().channel());
+                if (claim instanceof MenuSession.Claim.Refused) {
+                    return ActionStatus.done();
+                }
+                closingSession = ((MenuSession.Claim.Owned) claim).session();
             }
-            var closing = ((MenuSession.Claim.Owned) claim).session()
-                    .closeNow(reading.get().channel(), tick.gameTick());
+            var closing = closingSession.closeNow(reading.get().channel(), tick.player().clientTick());
             if (closing instanceof MenuSession.Closing.Closed || closing instanceof MenuSession.Closing.Failed) {
                 return ActionStatus.done();
             }
@@ -573,13 +578,22 @@ public final class MenuRecipeRuns implements RecipeRuns {
         public void pause() {
             if (approaching != null) approaching.pause();
             if (opening != null) opening.pause();
+            // 界面开着就先关上（工作台格子里的料原版会还回背包），回来时引擎按身上的清点再决定。
+            abandonMenu();
         }
 
-        // 收尾：没走完的走到、没确认的点开一并收尾，不让它们悬着占着身体。
+        // 收尾：没走完的走到、没确认的点开一并收尾，开着的界面请游戏关上，不让它们悬着占着身体。
         @Override
         public void close() {
             if (approaching != null) approaching.close();
             if (opening != null) opening.close();
+            abandonMenu();
+        }
+
+        private void abandonMenu() {
+            if (menus != null) {
+                menus.current().ifPresent(reading -> reading.channel().requestClose());
+            }
         }
 
         @Override
