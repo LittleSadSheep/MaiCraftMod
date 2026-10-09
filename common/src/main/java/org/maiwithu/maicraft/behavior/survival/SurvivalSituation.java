@@ -35,6 +35,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * @param airNeededToSurface   直着游上去要用的氧气（刻），含三秒反应余量
  * @param stuckInSolidBlock    头卡在会窒息的实心方块里
  * @param buriedCell           被埋时最先要刨开的那一格（先眼睛所在格、再头顶格）；没被埋时为 null
+ * @param waterCeiling         头在水里时，往上那一柱水顶上压着的实心方块（冰面、石头）；水面上是空气或不在水里时为 null
  */
 public record SurvivalSituation(
         double health,
@@ -51,7 +52,8 @@ public record SurvivalSituation(
         int maxAirTicks,
         int airNeededToSurface,
         boolean stuckInSolidBlock,
-        BlockPos buriedCell) implements FallDanger.View, DrowningDanger.View, BuriedDanger.View {
+        BlockPos buriedCell,
+        BlockPos waterCeiling) implements FallDanger.View, DrowningDanger.View, BuriedDanger.View {
 
     /** 往上数水深最多数多少格；再深按这个深度估，照样会早早叫人上浮。类别：玩家常识。 */
     private static final int MAX_DEPTH_PROBE = 16;
@@ -100,7 +102,18 @@ public record SurvivalSituation(
                 player.getMaxAirSupply(),
                 needed,
                 buried != null,
-                buried);
+                buried,
+                headWet ? ceilingAbove(level, eyeCell) : null);
+    }
+
+    // 往上那一柱水的顶上：是空气就能浮出去；是实心方块（冰面、石头）就是压在头顶的盖子，给出那一格。
+    private static BlockPos ceilingAbove(Level level, BlockPos eyeCell) {
+        BlockPos cell = eyeCell;
+        for (int depth = 0; depth < MAX_DEPTH_PROBE && level.getFluidState(cell).is(FluidTags.WATER); depth++) {
+            cell = cell.above();
+        }
+        if (level.getFluidState(cell).is(FluidTags.WATER)) return null;
+        return level.getBlockState(cell).getCollisionShape(level, cell).isEmpty() ? null : cell;
     }
 
     // 这一格会让人窒息：实心、挡视线的方块（玻璃、树叶不算）。

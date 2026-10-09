@@ -6,7 +6,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import java.util.function.Supplier;
 
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -31,7 +30,6 @@ import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.WorldTime;
-import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
@@ -105,13 +103,8 @@ public final class LiveBurrow implements BurrowInTask.Moves {
         if (!state.getFluidState().isEmpty()) return BurrowPlan.Ground.FLUID;
         if (state.getCollisionShape(level, cell).isEmpty()) return BurrowPlan.Ground.OPEN;
         if (state.getDestroySpeed(level, cell) < 0) return BurrowPlan.Ground.UNBREAKABLE;
-        if (dimension != null) {
-            Protection rules = protection.get();
-            String type = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
-            if (rules == null || rules.blockProtected(
-                    new WorldPosition(cell.getX(), cell.getY(), cell.getZ(), dimension), type, Set.of())) {
-                return BurrowPlan.Ground.PROTECTED;
-            }
+        if (dimension != null && !LiveCeilingDigs.mayDig(level, cell, protection.get())) {
+            return BurrowPlan.Ground.PROTECTED;
         }
         return BurrowPlan.Ground.DIGGABLE;
     }

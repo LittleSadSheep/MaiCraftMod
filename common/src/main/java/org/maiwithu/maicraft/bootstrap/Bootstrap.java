@@ -33,6 +33,9 @@ import org.maiwithu.maicraft.behavior.survival.LiveEdgeView;
 import org.maiwithu.maicraft.behavior.survival.LiveHungerView;
 import org.maiwithu.maicraft.behavior.survival.LiveNightAndEdgeMoves;
 import org.maiwithu.maicraft.behavior.survival.LiveBurrow;
+import org.maiwithu.maicraft.behavior.permission.Protection;
+import org.maiwithu.maicraft.behavior.survival.BlockBreaking;
+import org.maiwithu.maicraft.behavior.survival.LiveCeilingDigs;
 import org.maiwithu.maicraft.behavior.survival.LiveNightView;
 import org.maiwithu.maicraft.behavior.survival.NightfallNeed;
 import org.maiwithu.maicraft.behavior.survival.SelfDefenseNeed;
@@ -174,12 +177,12 @@ public final class Bootstrap {
             TaskEventSink events,
             InteractionSender interactionSender, MenuActions menuActions, Interactions interactions,
             CombatSenses combatSenses, WalkTo walks,
-            EatSoonTask.FoodMoves foodMoves, ReadsFoodValues foods, LiveBurrow burrow) {
+            EatSoonTask.FoodMoves foodMoves, ReadsFoodValues foods, LiveBurrow burrow, LiveCeilingDigs ceilings) {
         // 角色死亡这类循环自身的处境变化也从同一条事件流出去。
         return new ControlLoop(List.of(
                 new DigOutNeed(new SurvivalSituation.FromPlayer(),
                         () -> new NativeBlockBreaking(interactionSender, menuActions)),
-                new BreathNeed(new SurvivalSituation.FromPlayer()),
+                new BreathNeed(new SurvivalSituation.FromPlayer(), ceilings),
                 new FallNeed(new SurvivalSituation.FromPlayer(), interactions, FirstPersonScene::of,
                         PlayerContext::backpack),
                 new SelfDefenseNeed(combatSenses, new LiveCombatMoves(walks), events),
@@ -269,11 +272,13 @@ public final class Bootstrap {
             interactions = new Interactions(useKeyProjection);
             // 挖三填一：挖用原生挖掘、封口换方块原生放下、出坑用走到；脚下是不是别人的东西问当前世界的保护判断。
             Supplier<PlayerContext> now = () -> playerControl.activeContext().orElse(null);
-            LiveBurrow burrow = new LiveBurrow(now, () -> new NativeBlockBreaking(interactionSender, menuActions),
-                    interactions, new ClientMovesToMainhand(now), walks,
-                    () -> worldScope[0] == null ? null : worldScope[0].protection());
+            // 换气时水面被盖住，挖开头顶那一格也问同一份保护判断。
+            Supplier<Protection> protection = () -> worldScope[0] == null ? null : worldScope[0].protection();
+            Supplier<BlockBreaking> diggings = () -> new NativeBlockBreaking(interactionSender, menuActions);
+            LiveBurrow burrow = new LiveBurrow(now, diggings, interactions, new ClientMovesToMainhand(now), walks,
+                    protection);
             controlLoop = withSurvivalNeeds(taskEvents, interactionSender, menuActions, interactions,
-                    combatSenses, walks, foodMoves, foods, burrow);
+                    combatSenses, walks, foodMoves, foods, burrow, new LiveCeilingDigs(diggings, protection));
             // Mixin 钩子拿不到构造注入，只能在这里登记；服务本体仍以实例传递。
             ClientHooks.registerPlayerControl(playerControl);
             ClientHooks.registerBlockScans(blockScans);
