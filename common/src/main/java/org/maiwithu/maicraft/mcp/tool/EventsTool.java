@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.mcp.tool;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import org.maiwithu.maicraft.kernel.event.CursorLog;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.kernel.event.TaskEventLog;
 import org.maiwithu.maicraft.kernel.goal.GoalRun;
@@ -56,7 +57,7 @@ public final class EventsTool implements McpTool {
             return ToolReply.error(ErrorCode.INVALID_PARAMETER, "参数有 " + check.errors().size() + " 处问题",
                     check.errors(), null);
         }
-        TaskEventLog.Page page;
+        CursorLog.Page<TaskEvent> page;
         try {
             page = log.read(streamId, after == null ? 0 : after, taskId == null ? -1 : taskId, PAGE_SIZE,
                     waitMs == null ? 0 : waitMs);
@@ -72,7 +73,7 @@ public final class EventsTool implements McpTool {
         return ToolReply.ok(data, notes, next(page, taskId));
     }
 
-    private static JsonObject page(TaskEventLog.Page page) {
+    private static JsonObject page(CursorLog.Page<TaskEvent> page) {
         JsonObject data = new JsonObject();
         data.addProperty("stream_id", page.streamId());
         data.addProperty("cursor", page.cursor());
@@ -104,7 +105,7 @@ public final class EventsTool implements McpTool {
         }
     }
 
-    private static JsonObject next(TaskEventLog.Page page, Integer taskId) {
+    private static JsonObject next(CursorLog.Page<TaskEvent> page, Integer taskId) {
         JsonObject arguments = new JsonObject();
         if (taskId != null) arguments.addProperty("task_id", taskId);
         arguments.addProperty("stream_id", page.streamId());
