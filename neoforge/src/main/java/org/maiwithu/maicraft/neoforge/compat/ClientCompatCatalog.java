@@ -4,6 +4,9 @@ package org.maiwithu.maicraft.neoforge.compat;
 import java.util.List;
 
 import org.maiwithu.maicraft.compat.SupportedMod;
+import org.maiwithu.maicraft.compat.VerifiedVersions;
+import org.maiwithu.maicraft.compat.backpack.BackpackCompat;
+import org.maiwithu.maicraft.neoforge.compat.backpack.SophisticatedBackpackItems;
 
 /**
  * 客户端一侧的联动清单：每个支持的模组一行（SupportedMod）——模组 ID、验证过的版本范围、怎么创建读写端与联动入口。
@@ -17,8 +20,11 @@ public final class ClientCompatCatalog {
 
     private ClientCompatCatalog() {}
 
-    /** 清单里支持的全部模组，按接入先后排。现在还没有接任何模组。 */
+    /** 清单里支持的全部模组，按接入先后排。 */
     public static List<SupportedMod> mods() {
-        return List.of();
+        return List.of(
+                // 精妙背包：实测过 3.25.69（精妙核心 1.4.72）；装了 3.26 及以上不登记，实测通过后再放宽。
+                new SupportedMod(BackpackCompat.MOD_ID, "精妙背包", new VerifiedVersions("3.25.69", "3.26"),
+                        () -> new BackpackCompat(new SophisticatedBackpackItems())));
     }
 }
