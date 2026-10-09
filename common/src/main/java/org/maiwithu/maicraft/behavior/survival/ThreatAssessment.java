@@ -57,6 +57,9 @@ public final class ThreatAssessment {
     /** 自卫警戒半径：被攻击、锁定、点引信的威胁在这个范围内就构成"正在被威胁"。 */
     public static final double VIGILANCE_RADIUS = 14.0;
 
+    /** 苦力怕的提前警戒：这个距离内看得见就先动手，等它开始膨胀再反应就来不及躲。 */
+    public static final double CREEPER_ALERT_RADIUS = 8.0;
+
     /** 有没有退路的判定：撤离寻路连续失败这么多次才算退无可退。 */
     public static final int ESCAPE_FAILURES_BEFORE_LAST_STAND = 3;
 

@@ -242,7 +242,9 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
             attackers.add(attacker.uuid());
         }
         List<ThreatAssessment.Foe> ordered = new ArrayList<>();
-        List<CombatSenses.Threat> threats = senses.threats(context, ThreatAssessment.VIGILANCE_RADIUS);
+        List<CombatSenses.Threat> threats = senses.threats(context, ThreatAssessment.VIGILANCE_RADIUS).stream()
+                .filter(threat -> threatening(threat, attackers))
+                .toList();
         for (CombatSenses.Threat threat : threats) {
             boolean chasing = attackers.contains(threat.uuid()) || threat.armed();
             ordered.add(new ThreatAssessment.Foe(threat.distance(), threat.kind(), chasing, threat.armed()));
@@ -263,6 +265,23 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
             }
         }
         return new ThreatSituation(mine, tracked);
+    }
+
+    /**
+     * 警戒半径里的这只敌对生物此刻是否正在威胁角色：十秒内真打过她的、引信点着的苦力怕、
+     * 看得见她又亮着攻击标记的，以及看得见的近处苦力怕。只在附近游荡、隔着地面或墙壁的怪
+     * 既看不见也没动手，不算——自卫去打它们只会走不过去、原地干耗，还白白打断手上的活。
+     */
+    static boolean threatening(CombatSenses.Threat threat, List<UUID> attackers) {
+        if (attackers.contains(threat.uuid()) || threat.armed()) {
+            return true;
+        }
+        if (!threat.visible()) {
+            return false;
+        }
+        boolean closeCreeper = threat.kind() == ThreatAssessment.Kind.EXPLOSIVE
+                && threat.distance() <= ThreatAssessment.CREEPER_ALERT_RADIUS;
+        return threat.aggressive() || closeCreeper;
     }
 
     /** 自卫的结果细节：位移与红心差。 */

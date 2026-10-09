@@ -68,9 +68,24 @@ class SelfDefenseNeedTest {
                 0);
     }
 
+    /** 看得见角色、亮着攻击标记的僵尸：正冲着她来。 */
     private static CombatSenses.Threat zombie(double distance) {
         return new CombatSenses.Threat(1, UUID.randomUUID(), "minecraft:zombie",
-                10, 64, 10, distance, ThreatAssessment.Kind.MELEE, false, true);
+                10, 64, 10, distance, ThreatAssessment.Kind.MELEE, false, true, true);
+    }
+
+    private static CombatSenses.Threat skeleton(UUID id, boolean visible, boolean aggressive) {
+        return new CombatSenses.Threat(2, id, "minecraft:skeleton",
+                10, 58, 10, 12, ThreatAssessment.Kind.RANGED, false, visible, aggressive);
+    }
+
+    private static CombatSenses.Threat creeper(double distance, boolean visible) {
+        return new CombatSenses.Threat(3, UUID.randomUUID(), "minecraft:creeper",
+                10, 64, 10, distance, ThreatAssessment.Kind.EXPLOSIVE, false, visible, false);
+    }
+
+    private static Urgency urgencyWith(List<CombatSenses.Threat> threats, List<CombatSenses.Attacker> attackers) {
+        return new SelfDefenseNeed(new FakeSenses(threats, attackers, profile(20)), null, null).urgency(TICK, null);
     }
 
     @Test
@@ -101,6 +116,27 @@ class SelfDefenseNeedTest {
         assertNull(need.urgency(TICK, CONFIDENT_FIGHT));
         // 主任务不是打仗的：照插。
         assertEquals(Urgency.SOON, need.urgency(TICK, IDLE_TASK));
+    }
+
+    @Test
+    void monstersThatAreNotAfterHerDoNotInterrupt() {
+        // 脚下矿洞里的骷髅：看不见、没亮攻击标记，也没打过她，干活不被打断。
+        UUID underground = UUID.randomUUID();
+        assertNull(urgencyWith(List.of(skeleton(underground, false, false)), List.of()));
+        // 看得见但在闲逛：同样不打断。
+        assertNull(urgencyWith(List.of(skeleton(underground, true, false)), List.of()));
+        // 看得见且拉弓瞄着：自卫。
+        assertEquals(Urgency.SOON, urgencyWith(List.of(skeleton(underground, true, true)), List.of()));
+        // 看不见但十秒内真射中过她：照样自卫。
+        assertEquals(Urgency.SOON, urgencyWith(List.of(skeleton(underground, false, false)),
+                List.of(new CombatSenses.Attacker(underground, "minecraft:skeleton", 0, "被射中"))));
+    }
+
+    @Test
+    void aCreeperCloseAndInSightIsDealtWithBeforeItSwells() {
+        assertEquals(Urgency.SOON, urgencyWith(List.of(creeper(6, true)), List.of()));
+        assertNull(urgencyWith(List.of(creeper(6, false)), List.of()), "墙后的苦力怕不提前动手");
+        assertNull(urgencyWith(List.of(creeper(12, true)), List.of()), "8 格外看得见的苦力怕先不管");
     }
 
     @Test
