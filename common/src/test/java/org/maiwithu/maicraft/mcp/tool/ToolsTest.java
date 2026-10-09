@@ -18,6 +18,7 @@ import org.maiwithu.maicraft.kernel.interrupt.ControlLoop;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -69,7 +70,7 @@ class ToolsTest {
                 return work.apply(new Tick(tick));
             }
         };
-        tools = new ToolDispatcher(List.of(new LookupTool(registry), new ExecuteTool(registry, table, direct),
+        tools = new ToolDispatcher(List.of(new LookupTool(registry, KnowledgeLibrary.offline()), new ExecuteTool(registry, table, direct),
                 new TaskTool(table, direct), new EventsTool(events, table, direct)));
     }
 
@@ -111,6 +112,37 @@ class ToolsTest {
         assertEquals("read_only", hidden.get("mode").getAsString());
         assertEquals("unknown_ability", errorCode(call("lookup", "{\"id\": \"sleeep\"}")));
         assertEquals("invalid_parameter", errorCode(call("lookup", "{\"topic\": \"wiki\"}")));
+    }
+
+    @Test
+    void lookupKnowledgeListsFindsAndReadsTheBundledMechanics() {
+        String oreHeights = "maicraft://knowledge/game_mechanics/ore-heights";
+        // 目录列出随包的常识，每篇有地址、标题和一句话说明；索引那一篇不列，目录本身就是索引。
+        List<String> listed = new ArrayList<>();
+        for (var row : data(call("lookup", "{\"topic\": \"knowledge\"}")).getAsJsonArray("knowledge")) {
+            JsonObject entry = row.getAsJsonObject();
+            assertFalse(entry.get("summary").getAsString().isBlank(), "每篇都有一句话说明");
+            listed.add(entry.get("id").getAsString());
+        }
+        assertTrue(listed.contains(oreHeights));
+        assertFalse(listed.contains("maicraft://knowledge/index"));
+
+        // 不带空格的一句问话也能找到：条目的检索词出现在问句里就算命中，并建议读排在最前的那篇。
+        JsonObject found = call("lookup", "{\"topic\": \"knowledge\", \"query\": \"钻石在哪一层\"}");
+        assertEquals(oreHeights, data(found).getAsJsonArray("knowledge").get(0).getAsJsonObject().get("id").getAsString());
+        assertEquals(oreHeights, found.getAsJsonObject("next").getAsJsonObject("arguments").get("id").getAsString());
+
+        // 末段名就能读，按哪篇读的写进 notes；没有这篇时如实说编号不存在，不拿相近的顶替。
+        JsonObject read = call("lookup", "{\"topic\": \"knowledge\", \"id\": \"food\"}");
+        assertEquals("maicraft://knowledge/game_mechanics/food", data(read).get("id").getAsString());
+        assertTrue(data(read).get("text").getAsString().contains("饥饿"));
+        assertTrue(read.has("notes"));
+        assertEquals("unknown_id", errorCode(call("lookup", "{\"topic\": \"knowledge\", \"id\": \"no-such-page\"}")));
+
+        // 没找到不等于没有这条规则：给空列表，并建议列出完整目录。
+        JsonObject none = call("lookup", "{\"topic\": \"knowledge\", \"query\": \"zzzz\"}");
+        assertEquals(0, data(none).getAsJsonArray("knowledge").size());
+        assertFalse(none.getAsJsonObject("next").getAsJsonObject("arguments").has("id"));
     }
 
     @Test
