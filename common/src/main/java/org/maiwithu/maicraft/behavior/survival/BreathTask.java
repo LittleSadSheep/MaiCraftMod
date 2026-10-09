@@ -23,7 +23,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 等氧气补满再结束。刚露头就结束会被手上的活立刻带回水下，氧气永远补不满，只能反复上来换气。
  *
  * <p>水面被实心方块压着（冰面、石头盖子）时，往上顶是顶不出去的：先把头顶那一格挖开再往上游。
- * 那一格挖不得（别人的东西、挖不动）就如实失败，交给上层带着事实收场。
+ * 淹水是马上要命的事，那一格是别人的东西也挖（命比方块要紧），结果里写明；挖不动就如实失败。
  * 上浮多久都没有真实进展（卡在什么东西下面）才判卡住。
  */
 public final class BreathTask extends PhasedTask<BreathTask.Phase> {
@@ -31,13 +31,18 @@ public final class BreathTask extends PhasedTask<BreathTask.Phase> {
     /** 触发条件：氧气告急或已经开始掉血。先上游到头露出水面（头顶被盖住就先挖开），再踩水等氧气补满。 */
     public enum Phase { SWIM_UP, DIG_CEILING, CATCH_BREATH }
 
-    /** 水面被盖住时怎么挖开头顶那一格：能挖给一份对准那格的挖掘，挖不得（受保护、挖不动）给空。 */
+    /** 水面被盖住时怎么挖开头顶那一格：挖得动给一份对准那格的挖掘，挖不动给空。 */
     @FunctionalInterface
     public interface DigsCeiling {
         /** 没有挖开盖子的办法：只会往上游。 */
         DigsCeiling NONE = (context, cell) -> Optional.empty();
 
         Optional<BlockBreaking> dig(TickContext context, BlockPos ceiling);
+
+        /** 这一格是不是别人的东西（受保护）：挖了要在结果里写明。 */
+        default boolean belongsToSomeone(TickContext context, BlockPos ceiling) {
+            return false;
+        }
     }
 
     /** 连续十秒既没往上游、氧气也没涨（被东西挡住、卡在泡泡柱外……）就算换不上气。 */
@@ -49,6 +54,8 @@ public final class BreathTask extends PhasedTask<BreathTask.Phase> {
     private int lastAir = Integer.MIN_VALUE;
     /** 下一次进"挖开头顶"时用的挖掘。 */
     private BlockBreaking ceilingDigging;
+    /** 要挖的那一格是不是别人的东西。 */
+    private boolean ceilingOwned;
 
     public BreathTask(SurvivalSituation.SituationReader reader) {
         this(reader, DigsCeiling.NONE);
@@ -83,9 +90,10 @@ public final class BreathTask extends PhasedTask<BreathTask.Phase> {
             Optional<BlockBreaking> digging = ceilings.dig(context, situation.waterCeiling());
             if (digging.isEmpty()) {
                 return Next.fail(Problem.of(Problem.Kind.STUCK,
-                        "水面被盖住，头顶那一格挖不得（受保护或挖不动），浮不上去换气"));
+                        "水面被盖住，头顶那一格挖不动，浮不上去换气"));
             }
             ceilingDigging = digging.get();
+            ceilingOwned = ceilings.belongsToSomeone(context, situation.waterCeiling());
             return Next.go(Phase.DIG_CEILING, "水面被盖住，先挖开头顶那一格");
         }
         PlayerContext player = context.player();
@@ -114,7 +122,8 @@ public final class BreathTask extends PhasedTask<BreathTask.Phase> {
         return switch (runAction(context)) {
             case ActionStatus.Running running -> Next.stay();
             case ActionStatus.Done done -> {
-                recordChange(Change.of(Change.Kind.BLOCK_BROKEN, "压在水面上的方块", 1));
+                recordChange(new Change(Change.Kind.BLOCK_BROKEN, "压在水面上的方块", 1,
+                        ceilingOwned ? "那一格是别人的东西，为了不淹死挖开的" : null));
                 yield Next.go(Phase.SWIM_UP, "头顶挖开了，接着往上游");
             }
             case ActionStatus.Failed failed -> Next.fail(Problem.of(Problem.Kind.STUCK,

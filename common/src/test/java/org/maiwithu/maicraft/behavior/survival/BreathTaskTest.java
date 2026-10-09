@@ -100,7 +100,7 @@ class BreathTaskTest {
 
     @Test
     void iceThatMayNotBeDugEndsTheTaskWithTheReason() {
-        // 头顶那一格挖不得（别人的东西、挖不动）：如实失败，交给上层。
+        // 头顶那一格挖不动（基岩这类）：如实失败，交给上层。
         SurvivalSituation underIce = SurvivalFakes.calm().feet(40.0).underwater(30)
                 .underCeiling(new BlockPos(0, 44, 0)).build();
         BreathTask task = new BreathTask(scripted(underIce), BreathTask.DigsCeiling.NONE);
@@ -111,6 +111,6 @@ class BreathTaskTest {
         assertTrue(result instanceof TickResult.Finished);
         TaskResult finished = ((TickResult.Finished) result).result();
         assertEquals(TaskResult.Status.FAILED, finished.status());
-        assertTrue(finished.problem().message().contains("挖不得"), finished.problem().message());
+        assertTrue(finished.problem().message().contains("挖不动"), finished.problem().message());
     }
 }
