@@ -89,9 +89,14 @@ public final class ChatTask extends PhasedTask<ChatTask.Phase> {
                 return Next.done(TaskResult.done("命令已交给游戏执行，聊天栏随后出现命令反馈行：" + String.join(" / ", said)));
             }
             if (context.gameTick() - sentTick >= CONFIRM_TICKS) {
+                // 无反馈不等于没执行：原版对执行了却没有产生任何变化的命令（如切到当前已是模式）本来就不发反馈行，
+                // 所以这里只说没等到证据，不说失败；目标达没达成留给 LLM 拿观察核对。
                 recordUnconfirmed(new Change(Change.Kind.OTHER, message, 1,
-                        "已提交命令，但没在聊天栏看到命令反馈行，是否执行没能确认"));
-                return Next.done(TaskResult.done("命令已交出去，但没在聊天栏看到命令反馈行，是否执行没能确认"));
+                        "已提交命令，但没在聊天栏看到命令反馈行，是否执行没能确认；"
+                                + "原版对没有产生变化的命令本来就静默，没反馈不代表没执行"));
+                return Next.done(TaskResult.done("命令已交给游戏执行，但没在聊天栏看到命令反馈行，是否生效没能确认；"
+                        + "原版对执行了却没有产生变化的命令（如切到角色已经在的模式）本来就不发反馈，"
+                        + "没反馈不代表没执行，是否生效由你观察核对"));
             }
             return Next.stay();
         }

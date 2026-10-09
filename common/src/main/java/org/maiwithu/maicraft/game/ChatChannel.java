@@ -7,6 +7,8 @@ import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.ClientHooks;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * 游戏聊天通道：把一句话交给游戏的聊天输入发送，并读本地聊天栏确认回显。
@@ -19,6 +21,8 @@ import org.maiwithu.maicraft.game.ClientHooks;
  */
 public final class ChatChannel {
 
+    private static final Logger LOG = LoggerFactory.getLogger(ChatChannel.class);
+
     private final Supplier<PlayerContext> context;
 
     public ChatChannel(Supplier<PlayerContext> context) {
@@ -29,12 +33,16 @@ public final class ChatChannel {
     public void send(String message) {
         PlayerContext current = context.get();
         if (current == null || current.localPlayer() == null) {
+            // 交出去之前就断掉：留一条日志，免得"交出去了"其实没交出去时无迹可查。
+            LOG.warn("[maicraft-chat] 聊天通道没接上，这句话没有交出去：{}", message);
             return;
         }
         if (message.startsWith("/")) {
             // 原版聊天界面的路由：命令去掉斜杠走命令发送件，服务器按角色自己的权限裁决。
+            LOG.info("[maicraft-chat] 提交命令：{}", message);
             current.localPlayer().connection.sendCommand(message.substring(1));
         } else {
+            LOG.info("[maicraft-chat] 提交聊天：{}", message);
             current.localPlayer().connection.sendChat(message);
         }
     }

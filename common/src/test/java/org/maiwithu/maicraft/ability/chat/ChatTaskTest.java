@@ -172,6 +172,11 @@ class ChatTaskTest {
         assertEquals(TaskResult.Status.DONE, result.status());
         assertEquals(1, result.unconfirmed().size());
         assertTrue(result.summary().contains("没能确认"), result.summary());
+        // 没等到反馈不等于没执行：原版对没有产生变化的命令本来就静默。收场的话要写明这一点，
+        // 不说"失败"，免得消费方把静默的命令（如切到当前已是模式）当成执行失败。
+        assertTrue(result.summary().contains("没反馈不代表没执行"), result.summary());
+        assertTrue(!result.summary().contains("失败"), result.summary());
+        assertTrue(result.unconfirmed().get(0).note().contains("没反馈不代表没执行"), result.unconfirmed().toString());
     }
 
     @Test
