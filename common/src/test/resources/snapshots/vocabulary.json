@@ -122,6 +122,10 @@
     "need_unhandled",
     "character_died"
   ],
+  "chat_kinds": [
+    "player",
+    "system"
+  ],
   "error_codes": [
     "invalid_parameter",
     "unknown_ability",

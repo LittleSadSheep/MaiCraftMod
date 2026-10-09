@@ -4,11 +4,14 @@ package org.maiwithu.maicraft.bootstrap;
 import com.google.gson.JsonObject;
 import java.io.IOException;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.ChatType;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.state.BlockState;
@@ -46,6 +49,7 @@ import org.maiwithu.maicraft.game.interaction.InteractionSender;
 import org.maiwithu.maicraft.game.menu.MenuActions;
 import org.maiwithu.maicraft.game.loader.LoaderEnvironment;
 import org.maiwithu.maicraft.game.ChatLog;
+import org.maiwithu.maicraft.game.ClientReceivedChat;
 import org.maiwithu.maicraft.game.ClientHooks;
 import org.maiwithu.maicraft.game.SubtitleFeed;
 import org.maiwithu.maicraft.game.menu.DefaultMenuActions;
@@ -66,6 +70,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.event.EventPublishingGoalRunStore;
 import org.maiwithu.maicraft.kernel.event.TaskEventLog;
+import org.maiwithu.maicraft.kernel.event.ChatEventLog;
 import org.maiwithu.maicraft.kernel.goal.GoalRunStore;
 import org.maiwithu.maicraft.kernel.goal.GoalRunTable;
 import org.maiwithu.maicraft.kernel.goal.InMemoryGoalRunStore;
@@ -223,6 +228,8 @@ public final class Bootstrap {
         private final ClientTickWork clientWork = new ClientTickWork();
         // 任务事件流一份：目标处境变化与生存需求的事件都进它，events 工具从这里读。
         private final TaskEventLog taskEvents = new TaskEventLog();
+        // 聊天事件流一份：聊天栏收到的消息进它，events(topic=chat) 从这里读；和任务事件分开，刷屏挤不掉目标的事件。
+        private final ChatEventLog chatEvents = new ChatEventLog();
         private final WorldScope[] worldScope = new WorldScope[1];
         private EmbeddedMcpService mcp;
         private ServerLinkSession session;
@@ -304,7 +311,7 @@ public final class Bootstrap {
                                     () -> new IllegalStateException("不在世界里，请求不了控制权")).localPlayer());
                 }
             });
-            tools = goalTools(abilities, goals, clientWork, taskEvents, () -> worldScope[0]);
+            tools = goalTools(abilities, goals, clientWork, taskEvents, chatEvents, () -> worldScope[0]);
         }
 
         // 生存需求一套：吃随身食物、战斗感观、交互入口、挖三填一与换气挖顶，按急迫程度登记进控制循环。
@@ -393,6 +400,8 @@ public final class Bootstrap {
                 goals.leaveWorld();
                 worldScope[0].memory().flush();
                 blockScans.dropAll();
+                // 聊天流在离开时换新：下一个世界登录后最早几条消息（谁进来了）可能比现场建好还早到，进世界时再换会把它们冲掉。
+                chatEvents.restart();
             }
             worldScope[0] = null;
         }
@@ -448,6 +457,19 @@ public final class Bootstrap {
         @Override public void serverLinkDisconnected(Minecraft minecraft) {
             session.disconnected(minecraft);
         }
+
+        // 聊天栏收到玩家说的话：认出发言人、私聊与自己的回显后记进聊天流；不在世界里时没有角色，不记。
+        @Override public void playerChatReceived(Minecraft minecraft, Component line, Component content, UUID senderId,
+                                                 String sender, ChatType.Bound chatType) {
+            if (minecraft.player == null) return;
+            ClientReceivedChat.player(minecraft, line, content, senderId, sender, chatType).ifPresent(chatEvents::append);
+        }
+
+        // 服务器的系统消息全收（进出、死亡播报、公告、命令反馈），动作栏提示不算聊天。
+        @Override public void systemMessageReceived(Minecraft minecraft, Component message, boolean actionBar) {
+            if (minecraft.player == null) return;
+            ClientReceivedChat.system(message, actionBar).ifPresent(chatEvents::append);
+        }
     }
 
 
@@ -458,7 +480,7 @@ public final class Bootstrap {
      */
     private static ToolDispatcher goalTools(AbilityRegistry abilities, GoalRunTable goals,
                                             ClientTickWork clientWork, TaskEventLog taskEvents,
-                                            Supplier<WorldScope> worldScope) {
+                                            ChatEventLog chatEvents, Supplier<WorldScope> worldScope) {
         return new ToolDispatcher(List.of(
                 new ObserveTool(() -> worldScope.get() == null ? null : worldScope.get().scene(),
                         () -> worldScope.get() == null ? null : worldScope.get().memory(), goals, clientWork),
@@ -466,6 +488,6 @@ public final class Bootstrap {
                 new LookupTool(abilities, KnowledgeLibrary.offline()),
                 new ExecuteTool(abilities, goals, clientWork),
                 new TaskTool(goals, clientWork),
-                new EventsTool(taskEvents, goals, clientWork)));
+                new EventsTool(taskEvents, chatEvents, goals, clientWork)));
     }
 }

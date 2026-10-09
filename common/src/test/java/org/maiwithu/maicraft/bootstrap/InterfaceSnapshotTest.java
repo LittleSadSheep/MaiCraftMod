@@ -19,6 +19,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.maiwithu.maicraft.game.ReceivedChat;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
@@ -108,6 +109,7 @@ class InterfaceSnapshotTest {
         vocabulary.add("problem_kinds", problemKinds);
         vocabulary.add("change_kinds", lowerNames(Change.Kind.values()));
         vocabulary.add("event_kinds", lowerNames(TaskEvent.Kind.values()));
+        vocabulary.add("chat_kinds", lowerNames(ReceivedChat.Kind.values()));
         JsonArray codes = new JsonArray();
         Arrays.stream(ErrorCode.values()).forEach(code -> codes.add(code.wireName()));
         vocabulary.add("error_codes", codes);

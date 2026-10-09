@@ -8,6 +8,7 @@ import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
+import net.neoforged.neoforge.client.event.ClientChatReceivedEvent;
 import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.common.NeoForge;
@@ -44,6 +45,7 @@ public final class MaiCraftNeoForgeClient {
         NeoForge.EVENT_BUS.addListener(this::onClientTick);
         NeoForge.EVENT_BUS.addListener(this::onLoggingOut);
         NeoForge.EVENT_BUS.addListener(this::onGameShuttingDown);
+        NeoForge.EVENT_BUS.addListener(this::onChatReceived);
     }
 
     // 创建工作排到客户端主线程的工作队列，保证访问游戏对象时在正确的线程上。
@@ -64,6 +66,19 @@ public final class MaiCraftNeoForgeClient {
 
     private void onGameShuttingDown(GameShuttingDownEvent event) {
         client.stopping();
+    }
+
+    // 聊天栏收到的消息分三种：系统消息、有签名的玩家消息（带原话与 UUID）、没签名的玩家消息（只有整行），有什么给什么。
+    private void onChatReceived(ClientChatReceivedEvent event) {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (event instanceof ClientChatReceivedEvent.System system) {
+            client.systemMessageReceived(minecraft, system.getMessage(), system.isOverlay());
+        } else if (event instanceof ClientChatReceivedEvent.Player player) {
+            client.playerChatReceived(minecraft, player.getMessage(), player.getPlayerChatMessage().decoratedContent(),
+                    player.getSender(), null, player.getBoundChatType());
+        } else {
+            client.playerChatReceived(minecraft, event.getMessage(), null, null, null, event.getBoundChatType());
+        }
     }
 }
 

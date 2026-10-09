@@ -8,6 +8,8 @@ import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.event.EventPublishingGoalRunStore;
+import org.maiwithu.maicraft.game.ReceivedChat;
+import org.maiwithu.maicraft.kernel.event.ChatEventLog;
 import org.maiwithu.maicraft.kernel.event.TaskEventLog;
 import org.maiwithu.maicraft.kernel.goal.GoalRunTable;
 import org.maiwithu.maicraft.kernel.goal.InMemoryGoalRunStore;
@@ -22,6 +24,7 @@ import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -42,6 +45,7 @@ class ToolsTest {
     private final ToolTestAbility remember = ToolTestAbility.remember();
     private final ControlLoop loop = new ControlLoop(List.of());
     private final TaskEventLog events = new TaskEventLog();
+    private final ChatEventLog chat = new ChatEventLog();
     private final List<String> remembered = new ArrayList<>();
     private long tick = 100;
     private boolean inWorld = true;
@@ -71,7 +75,7 @@ class ToolsTest {
             }
         };
         tools = new ToolDispatcher(List.of(new LookupTool(registry, KnowledgeLibrary.offline()), new ExecuteTool(registry, table, direct),
-                new TaskTool(table, direct), new EventsTool(events, table, direct)));
+                new TaskTool(table, direct), new EventsTool(events, chat, table, direct)));
     }
 
     private JsonObject call(String tool, String arguments) {
@@ -228,6 +232,33 @@ class ToolsTest {
         JsonObject next = reply.getAsJsonObject("next").getAsJsonObject("arguments");
         assertEquals(page.get("cursor"), next.get("after_cursor"));
         assertEquals(page.get("stream_id"), next.get("stream_id"));
+    }
+
+    @Test
+    void chatIsItsOwnStreamAndKeepsTheSenderAndPrivateMessages() {
+        UUID steve = UUID.fromString("8667ba71-b85a-4004-af54-457a9734eed7");
+        ReceivedChat.fromPlayer("麦麦过来", steve, "Steve", false, null).ifPresent(chat::append);
+        ReceivedChat.fromPlayer("悄悄跟你说", steve, "Steve", true, null).ifPresent(chat::append);
+        ReceivedChat.fromServer("Alex 加入了游戏", false).ifPresent(chat::append);
+
+        JsonObject reply = call("events", "{\"topic\": \"chat\"}");
+        JsonArray read = data(reply).getAsJsonArray("events");
+
+        // 玩家说的话带名字与 UUID；私聊才写 private；系统消息没有发言人。
+        assertEquals(3, read.size());
+        JsonObject said = read.get(0).getAsJsonObject();
+        assertEquals("player", said.get("kind").getAsString());
+        assertEquals("Steve", said.get("sender").getAsString());
+        assertEquals(steve.toString(), said.get("sender_id").getAsString());
+        assertEquals("麦麦过来", said.get("text").getAsString());
+        assertFalse(said.has("private"));
+        assertTrue(read.get(1).getAsJsonObject().get("private").getAsBoolean());
+        assertEquals("system", read.get(2).getAsJsonObject().get("kind").getAsString());
+        assertFalse(read.get(2).getAsJsonObject().has("sender"));
+        // 照抄 next 接着读的还是聊天；任务事件流里没有聊天；读聊天不带 task_id。
+        assertEquals("chat", reply.getAsJsonObject("next").getAsJsonObject("arguments").get("topic").getAsString());
+        assertEquals(0, data(call("events", "{}")).getAsJsonArray("events").size());
+        assertEquals("invalid_parameter", errorCode(call("events", "{\"topic\": \"chat\", \"task_id\": 1}")));
     }
 
     @Test
