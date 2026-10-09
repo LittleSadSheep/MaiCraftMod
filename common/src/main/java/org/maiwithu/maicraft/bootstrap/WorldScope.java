@@ -102,7 +102,9 @@ public final class WorldScope {
                 diggings::get,
                 new ClientTravelWorldView(now),
                 travelProgress,
-                new ChatChannel(now)));
+                new ChatChannel(now),
+                // 客户端刻号跟着所在世界走；没进世界读不到，按 0 兜底（只在读端内部量时长用）。
+                () -> minecraft.level == null ? 0 : minecraft.level.getGameTime()));
         this.goals = new MainGoalSlot(controlLoop, registry, new InMemoryGoalRunStore(), memory);
     }
 

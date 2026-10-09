@@ -7,6 +7,7 @@ import java.util.Set;
 
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
+import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.ModIdentity;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;
@@ -66,9 +67,10 @@ public final class UseModule implements AbilityModule {
      * 相应环节按接缝缺失如实失败；交互、靠近与手上准备缺了能力做不了事，不许为 null。
      */
     public static UseModule assemble(Interactions interactions, BringsPlayerClose close,
-            UseSeams.PreparesHand hand, ResolvesSeen seen, SearchesNearby search, WorldMemory memory) {
+            UseSeams.PreparesHand hand, ResolvesSeen seen, SearchesNearby search,
+            UseSeams.ReadsGameRefusal refusal, MenuContent menus, WorldMemory memory) {
         return new UseModule(new UseServices(interactions, close, hand, seen, search,
-                null, null, null, null, null, memory));
+                refusal, null, null, null, menus, memory));
     }
 
     @Override public AbilitySpec spec() {

@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.bootstrap;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.ability.chat.ChatAbility;
@@ -24,6 +25,7 @@ import org.maiwithu.maicraft.ability.travel.TravelAbility;
 import org.maiwithu.maicraft.ability.use.LiveHandPreparation;
 import org.maiwithu.maicraft.ability.use.LiveNearbySearcher;
 import org.maiwithu.maicraft.ability.use.LiveSeenResolver;
+import org.maiwithu.maicraft.ability.use.RefusalReads;
 import org.maiwithu.maicraft.ability.use.UseModule;
 import org.maiwithu.maicraft.ability.wait.WaitModule;
 import org.maiwithu.maicraft.behavior.acquire.ItemAcquisition;
@@ -37,8 +39,10 @@ import org.maiwithu.maicraft.behavior.approach.InteractionTarget;
 import org.maiwithu.maicraft.behavior.approach.LiveApproachWorld;
 import org.maiwithu.maicraft.behavior.approach.LiveApproaches;
 import org.maiwithu.maicraft.behavior.approach.LiveSpotWalks;
+import org.maiwithu.maicraft.behavior.interaction.ClientGameRefusals;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
+import org.maiwithu.maicraft.behavior.menu.ClientMenuContent;
 import org.maiwithu.maicraft.behavior.inventory.DropAvoidance;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
@@ -56,6 +60,7 @@ import org.maiwithu.maicraft.behavior.travel.TravelProgressListener;
 import org.maiwithu.maicraft.behavior.travel.TravelWorldView;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.ChatChannel;
+import org.maiwithu.maicraft.game.interaction.OverlayMessages;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.ReadsEffects;
@@ -108,7 +113,8 @@ public final class AbilityCatalog {
             Supplier<BlockBreaking> digging,
             TravelWorldView travelWorld,
             TravelProgressListener travelProgress,
-            ChatChannel chat) {
+            ChatChannel chat,
+            LongSupplier clientTicks) {
 
         public Deps {
             Objects.requireNonNull(context, "context");
@@ -130,12 +136,16 @@ public final class AbilityCatalog {
         LiveApproaches bringsClose = new LiveApproaches(deps.context(),
                 new LiveApproachWorld(deps.context()), new LiveSpotWalks(deps.walks()));
 
-        // 用东西：交互、靠近、手上准备、观察编号解析、附近搜索都已接上；
-        // 游戏拒绝、告示牌界面、顺手捡起、跨未加载坐标、界面读数还没有实现方，先留空。
+        // 用东西：交互、靠近、手上准备、观察编号解析、附近搜索、游戏拒绝读端与界面读数都接上了；
+        // 告示牌界面、顺手捡起、跨未加载坐标还没有实现方，先留空。
+        // 游戏拒绝读端看动作栏与服务端确认流：确认流从会话里读，刻号从所在世界取。
         registry.register(UseModule.assemble(deps.interactions(), bringsClose,
                 new LiveHandPreparation(deps.context()),
                 new LiveSeenResolver(deps::scene),
                 new LiveNearbySearcher(deps.blockScans(), deps.context()),
+                new RefusalReads(new ClientGameRefusals(new OverlayMessages(),
+                        () -> deps.session().confirmations().recent(), deps.clientTicks())),
+                new ClientMenuContent(deps.context()),
                 deps.memory()));
 
         // 进食：换到主手的接缝还没有实现方，先留空——手上不是食物时如实说换不了手。

@@ -149,7 +149,8 @@ class AssemblyTest {
                 () -> null,
                 new ClientTravelWorldView(nobody),
                 progress -> { },
-                chat);
+                chat,
+                () -> 0);
     }
 
     /** 测试专用的世界身份编号：任意一个合法的 SHA-256 形状。 */
