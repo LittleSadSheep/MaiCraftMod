@@ -164,7 +164,8 @@ class AssemblyTest {
                 progress -> { },
                 chat,
                 () -> 0,
-                new InputDriver(new PlayerControlBoundary()));
+                new InputDriver(new PlayerControlBoundary()),
+                false);
     }
 
     /** 测试专用的世界身份编号：任意一个合法的 SHA-256 形状。 */

@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** 说话能力：普通聊天照常发，游戏命令一律不执行；完成以本地回显为准。 */
+/** 说话能力：普通聊天照常发；游戏命令默认不执行、实例配置放开后放行；完成以本地回显为准。 */
 class ChatAbilityTest {
 
     /** 能决定阶段用的上下文：只有目标。 */
@@ -45,7 +45,7 @@ class ChatAbilityTest {
     }
 
     private static Params messageParam(String message) {
-        ChatAbility ability = new ChatAbility(message2 -> {}, message2 -> false);
+        ChatAbility ability = new ChatAbility(message2 -> {}, message2 -> false, false);
         ParseResult result = ability.spec().params()
                 .parse(JsonParser.parseString("{\"message\":\"" + message + "\"}").getAsJsonObject());
         assertTrue(result.ok(), "参数应能解析：" + result.errors());
@@ -58,7 +58,7 @@ class ChatAbilityTest {
 
     @Test
     void specIsChatWithRequiredMessage() {
-        ChatAbility ability = new ChatAbility(message -> {}, message -> false);
+        ChatAbility ability = new ChatAbility(message -> {}, message -> false, false);
         assertEquals("maicraft:chat", ability.spec().id());
         assertFalse(ability.spec().params().parse(new JsonObject()).ok(),
                 "缺 message 应报错");
@@ -67,14 +67,14 @@ class ChatAbilityTest {
     @Test
     void normalMessageRunsChatTask() {
         StepDecision.Run run = assertInstanceOf(StepDecision.Run.class,
-                new ChatAbility(message -> {}, message -> false).decide(step(goal("大家好"))));
+                new ChatAbility(message -> {}, message -> false, false).decide(step(goal("大家好"))));
         assertEquals("大家好", assertInstanceOf(ChatInput.class, run.input()).message());
     }
 
     @Test
     void slashCommandIsRefusedWithoutRunningAnything() {
         StepDecision.Finish finish = assertInstanceOf(StepDecision.Finish.class,
-                new ChatAbility(message -> {}, message -> false).decide(step(goal("/give @s diamond"))));
+                new ChatAbility(message -> {}, message -> false, false).decide(step(goal("/give @s diamond"))));
 
         assertEquals(TaskResult.Status.FAILED, finish.result().status());
         Problem problem = finish.result().problem();
@@ -84,8 +84,28 @@ class ChatAbilityTest {
     }
 
     @Test
+    void slashCommandRunsWhenInstanceAllowsIt() {
+        // 实例配置放开后，以 / 开头的消息不再拒绝，照常开出发话任务；命令能不能成由服务器裁决。
+        StepDecision.Run run = assertInstanceOf(StepDecision.Run.class,
+                new ChatAbility(message -> {}, message -> false, true).decide(step(goal("/give @s diamond"))));
+        assertEquals("/give @s diamond", assertInstanceOf(ChatInput.class, run.input()).message());
+    }
+
+    @Test
+    void docTellsCommandPolicyAccordingToInstance() {
+        // 默认：说明写明角色不执行游戏命令；放开：说明与参数说明都如实写本实例允许执行游戏命令。
+        ChatAbility closed = new ChatAbility(message -> {}, message -> false, false);
+        assertTrue(closed.spec().doc().load().contains("角色不执行游戏命令"));
+        assertFalse(closed.spec().doc().load().contains("本实例允许执行游戏命令"));
+
+        ChatAbility open = new ChatAbility(message -> {}, message -> false, true);
+        assertTrue(open.spec().doc().load().contains("本实例允许执行游戏命令"),
+                open.spec().doc().load());
+    }
+
+    @Test
     void factoryCreatesChatTask() {
-        ChatAbility ability = new ChatAbility(message -> {}, message -> false);
+        ChatAbility ability = new ChatAbility(message -> {}, message -> false, false);
         TaskFactories factories = new TaskFactories();
         ability.registerTasks(factories);
         Task task = factories.create(new ChatInput("早上好"));

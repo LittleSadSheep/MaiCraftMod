@@ -192,7 +192,7 @@ public final class Bootstrap {
         LOG.info("{} 客户端部分启动（加载器：{}，开发环境：{}）",
                 ModIdentity.NAME, loader.loaderName(), loader.isDevelopment());
         ClientEntry entry = new ClientEntry();
-        entry.createSharedServices();
+        entry.createSharedServices(loader);
         entry.connectSession(transport);
         return entry;
     }
@@ -214,6 +214,8 @@ public final class Bootstrap {
         private final WorldScope[] worldScope = new WorldScope[1];
         private EmbeddedMcpService mcp;
         private ServerLinkSession session;
+        /** 所有者的实例配置：启动时读一次，之后只读；不经任何工具参数暴露。 */
+        private InstanceConfig instanceConfig;
         private ControlLoop controlLoop;
         private DefaultMenuActions menuActions;
         private DefaultInteractionSender interactionSender;
@@ -228,7 +230,12 @@ public final class Bootstrap {
         private boolean startupAutomationPending;
 
         /** 创建客户端全程共用的服务，并把 Mixin 需要的实例登记到静态登记点。 */
-        void createSharedServices() {
+        void createSharedServices(LoaderEnvironment loader) {
+            // 实例配置启动时读一次：所有者在 config/maicraft.json 里放的开关，全进程只认这份文件。
+            instanceConfig = InstanceConfig.read(loader.configDirectory());
+            if (instanceConfig.allowGameCommands()) {
+                LOG.info("{} 本实例允许角色执行游戏命令（配置文件放开）", ModIdentity.NAME);
+            }
             // 交互提交与容器界面操作共用同一份每刻一次的交互机会；两边都建好后互相接上，再挂进角色上下文。
             // 行为层的生存需求要靠这条轨道挖掘与放水，所以在这里创建并互相接好。
             InteractionOpportunity opportunity = new InteractionOpportunity();
@@ -325,7 +332,7 @@ public final class Bootstrap {
                 UseKeyProjection useKeyProjection = new UseKeyHoldProjection(useKeyHold);
                 WorldScope scope = new WorldScope(minecraft, playerControl, blockScans, session,
                         subtitles, interactions, useKeyProjection, walks, combatSenses,
-                        abilities, interactionSender, menuActions);
+                        abilities, interactionSender, menuActions, instanceConfig.allowGameCommands());
                 worldScope[0] = scope;
                 goals.attachPlaces(scope.memory());
                 // 开关开启时，这次进世界要逐刻请求控制权直到拿到；直播待机没有目标也守得住角色。

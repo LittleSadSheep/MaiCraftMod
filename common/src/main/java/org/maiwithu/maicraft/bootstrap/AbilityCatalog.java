@@ -143,7 +143,8 @@ public final class AbilityCatalog {
             TravelProgressListener travelProgress,
             ChatChannel chat,
             LongSupplier clientTicks,
-            InputDriver inputs) {
+            InputDriver inputs,
+            boolean allowGameCommands) {
 
         public Deps {
             Objects.requireNonNull(context, "context");
@@ -232,8 +233,8 @@ public final class AbilityCatalog {
                 new DestinationResolver(deps.travelWorld(), deps.memory(), new SceneSeenTargets(deps::scene)),
                 deps.walkInternals(), deps.travelProgress()));
 
-        // 聊天：发送与回显确认都走游戏聊天通道。
-        registry.register(new ChatAbility(deps.chat()::send, deps.chat()::echoed));
+        // 聊天：发送与回显确认都走游戏聊天通道；是否放行游戏命令由所有者的实例配置决定。
+        registry.register(new ChatAbility(deps.chat()::send, deps.chat()::echoed, deps.allowGameCommands()));
 
         // 记地点：只改世界记忆，当场完成；位置从角色、场景里的观察编号与已记的地点解析。
         registry.register(new RememberAbility(deps.memory(), deps.characterPosition(),

@@ -12,7 +12,8 @@ import org.maiwithu.maicraft.game.ClientHooks;
  *
  * <p>发送就是玩家在聊天栏打字发送，走角色自己的网络连接；发没发出去看回显——
  * 这句话出现在本地聊天栏里才算说过，读不到回显不算失败也不算成功。
- * 只在控制循环的刻内调用。命令（以 / 开头）不归这里：能力一侧已经拦下，通道本身不区分。
+ * 只在控制循环的刻内调用。以 / 开头的是给游戏的命令：原版聊天界面按前缀分别走命令与聊天
+ * 两个发送方法，这里按同样的前缀路由，命令以角色自己的权限交给服务器裁决。
  */
 public final class ChatChannel {
 
@@ -22,13 +23,18 @@ public final class ChatChannel {
         this.context = Objects.requireNonNull(context, "context");
     }
 
-    /** 把一句话提交给游戏的聊天输入，对全体玩家可见。 */
+    /** 把一句话提交给游戏的聊天输入；以 / 开头的按游戏命令发送，其余按聊天发送。 */
     public void send(String message) {
         PlayerContext current = context.get();
         if (current == null || current.localPlayer() == null) {
             return;
         }
-        current.localPlayer().connection.sendChat(message);
+        if (message.startsWith("/")) {
+            // 原版聊天界面的路由：命令去掉斜杠走命令发送件，服务器按角色自己的权限裁决。
+            current.localPlayer().connection.sendCommand(message.substring(1));
+        } else {
+            current.localPlayer().connection.sendChat(message);
+        }
     }
 
     /** 这句话是否已经出现在本地聊天栏里（回显）。 */

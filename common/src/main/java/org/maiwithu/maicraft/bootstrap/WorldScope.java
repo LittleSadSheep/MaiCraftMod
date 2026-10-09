@@ -70,7 +70,8 @@ public final class WorldScope {
     public WorldScope(Minecraft minecraft, PlayerControlBoundary playerControl, BlockScanService blockScans,
             ServerLinkSession session, SubtitleFeed subtitles, Interactions interactions,
             UseKeyProjection useKeyProjection, BaritoneInternals walks, CombatSenses senses,
-            AbilityRegistry abilities, InteractionSender interactionSender, MenuActions menuActions) {
+            AbilityRegistry abilities, InteractionSender interactionSender, MenuActions menuActions,
+            boolean allowGameCommands) {
         StateIdentity identity = StateIdentity.resolve(minecraft)
                 .orElseThrow(() -> new IllegalStateException("进了世界却识别不出世界身份，记忆无处安放"));
         this.blockScans = Objects.requireNonNull(blockScans, "blockScans");
@@ -105,7 +106,8 @@ public final class WorldScope {
                 new ChatChannel(now),
                 // 客户端刻号跟着所在世界走；没进世界读不到，按 0 兜底（只在读端内部量时长用）。
                 () -> minecraft.level == null ? 0 : minecraft.level.getGameTime(),
-                new InputDriver(playerControl)), abilities);
+                new InputDriver(playerControl),
+                allowGameCommands), abilities);
     }
 
     /**
