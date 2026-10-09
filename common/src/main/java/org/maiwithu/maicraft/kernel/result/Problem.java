@@ -17,7 +17,10 @@ public record Problem(Kind kind, String message, String suggestion) {
 
     /** 问题种类。新增种类前先确认现有种类确实表达不了，并同步更新对外接口文档。 */
     public enum Kind {
-        /** 参数在游戏里立不住：物品或方块 ID 不存在、标签下一件注册物品都没有。这类问题不进世界就能发现。 */
+        /**
+         * 参数不对，不进世界就能发现：物品或方块 ID 不存在、标签下一件注册物品都没有，
+         * 或者缺了必填的、取值超了范围、几个参数凑不到一起。
+         */
         INVALID_PARAMETER,
         /** 缺东西：材料、食物、床、够格的工具（例如镐的等级不够，挖了不掉落），而且自己弄不到。 */
         NEED_ITEM,
@@ -25,11 +28,13 @@ public record Problem(Kind kind, String message, String suggestion) {
         NEED_APPROVAL,
         /** 到不了：试过的站位和路线都不通。 */
         UNREACHABLE,
-        /** 查无此物：观察编号或名字对不上任何东西，与"曾经见过、后来没了"（TARGET_GONE）分开。 */
+        /**
+         * 没找到：观察编号或名字对不上任何东西，或者查过的范围里没有要找的（查了多大范围随问题写明）。
+         * 与"曾经见过、后来没了"（TARGET_GONE）分开：没找到要换地方找，没了要重新观察。
+         */
         NOT_FOUND,
         /** 目标对象没了：方块被拆、实体走远或消失。 */
         TARGET_GONE,
-        /** 查过的范围里没有找到要找的东西；查了多大范围随问题写明，与 TARGET_GONE（原来有、现在没了）分开。 */
         /** 危险：继续下去会死，或大概率重伤。 */
         DANGER,
         /** 游戏或模组拒绝了这次交互（包括服务器的领地保护、权限不够），附上游戏给的原因。 */
@@ -44,7 +49,6 @@ public record Problem(Kind kind, String message, String suggestion) {
         STUCK,
         /** 目前还不支持这件事，或者需要的模组没装。 */
         UNSUPPORTED,
-        /** 参数给得不对：缺了必填的、取值超了范围、几个参数凑不到一起；不进游戏就能发现。 */
         /** 程序出错；不是游戏里发生的事，应当修代码。 */
         INTERNAL_ERROR
     }

@@ -2,8 +2,10 @@
 package org.maiwithu.maicraft.behavior.acquire;
 
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
@@ -12,6 +14,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.shapes.CollisionContext;
 
 import org.maiwithu.maicraft.behavior.interaction.AimAndInteract;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
@@ -29,10 +32,10 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 就地摆工作站的生产实现：附近没有要用的设施时，把设施方块换到主手，对着身边
  * 一块能放的地面点一下放下去，再把新设施的位置与方块类型记进世界记忆。
  *
- * <p>放哪一格以当刻的现场为准：身边找"格子空着、下面是结实的地面"的格子，
+ * <p>放哪一格以当刻的现场为准：身边找"格子空着、没有人或生物挡着、下面是结实的地面"的格子，
  * 离角色最近的优先；一格都找不到、或游戏拒绝放置时，动作如实失败，
- * 来源换别的路，不挪用别人的方块也不隔空放。放下的位置记成"亲眼看到的工作站"，
- * 后面到那里动手、下次找设施都用这条记忆。
+ * 来源换别的路，不挪用别人的方块也不隔空放。对着支撑方块点一下，方块落在哪一格由点到的面决定，
+ * 所以按实际落下的那一格记成"亲眼看到的工作站"，后面到那里动手、下次找设施都用这条记忆。
  */
 public final class ClientWorkstationPlacer implements SetsUpWorkstation {
 
@@ -67,8 +70,10 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation {
         private Action moving;
         private AimAndInteract placing;
         private Problem failure;
-        /** 挑好的放格：准备阶段定下，确认阶段读它记进世界记忆。 */
+        /** 挑好的放格：准备阶段定下；点的是它下面那格支撑方块。 */
         private BlockPos spot;
+        /** 点下去之前支撑格四周已经是这种设施的格子：确认时只认新落下的那一格。 */
+        private Set<BlockPos> alreadyThere = Set.of();
 
         PlaceAction(String blockType) {
             this.blockType = blockType;
@@ -116,27 +121,31 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation {
                 failure = failed.problem();
                 return ActionStatus.failed(failure);
             }
-            // 主手已是设施方块：对着支撑方块的顶面点一下，落格就是挑好的那格。
-            BlockState expected = blockOf(blockType).orElseThrow().defaultBlockState();
-            BlockState before = current.level().getBlockState(spot);
-            placing = interactions.useBlock(spot.below(),
-                    InteractionConfirmation.blockState(spot, before, expected));
+            // 主手已是设施方块：对着挑好那格下面的支撑方块点一下。熔炉、石切台放下时带朝向，
+            // 只认方块种类；落在支撑格哪一面旁边由点到的面决定，六面都认。
+            Block block = blockOf(blockType).orElseThrow();
+            BlockPos support = spot.below();
+            alreadyThere = holding(current, support, block);
+            placing = interactions.useBlock(support, placedAround(support, block, alreadyThere));
             return ActionStatus.progressed();
         }
 
-        // 放置结果与记忆一起收尾：真放下了才记，没放下不冒充记得一台新设施。
+        // 放置结果与记忆一起收尾：真放下了才记，按实际落下的那一格记；没放下不冒充记得一台新设施。
         private ActionStatus confirmPlaced(PlayerContext current, TickContext tick) {
             ActionStatus status = placing.tick(tick);
             if (!(status instanceof ActionStatus.Done)) {
                 return status;
             }
-            BlockPos spot = placingTarget();
-            memory.workstationSeen(new WorldPosition(spot.getX(), spot.getY(), spot.getZ(), null),
+            Block block = blockOf(blockType).orElseThrow();
+            Set<BlockPos> now = holding(current, spot.below(), block);
+            now.removeAll(alreadyThere);
+            BlockPos landed = now.stream().findFirst().orElse(spot);
+            memory.workstationSeen(new WorldPosition(landed.getX(), landed.getY(), landed.getZ(), null),
                     blockType, Instant.now());
             return ActionStatus.done();
         }
 
-        // 挑放格：身边一格空着（或可被替换）、下面是顶面结实的地面，离角色最近的优先。
+        // 挑放格：身边一格空着（或可被替换）、没有人或生物挡着、下面是顶面结实的地面，离角色最近的优先。
         private BlockPos findSpot(PlayerContext current) {
             BlockPos base = current.localPlayer().blockPosition();
             BlockPos best = null;
@@ -164,13 +173,27 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation {
             if (!state.isAir() && !state.canBeReplaced()) {
                 return false;
             }
+            // 角色自己站的两格、别的生物占着的格子，原版不让把方块放进去。
+            BlockState placed = blockOf(blockType).orElseThrow().defaultBlockState();
+            if (!current.level().isUnobstructed(placed, cell, CollisionContext.empty())) {
+                return false;
+            }
             BlockPos below = cell.below();
             return current.level().getBlockState(below).isFaceSturdy(current.level(), below, Direction.UP);
         }
 
-        // 确认阶段读放格：放在哪个格是挑格时定下的。
-        private BlockPos placingTarget() {
-            return spot;
+        // 被生存需求打断：换手、放置先停住，恢复后接着推进。
+        @Override
+        public void pause() {
+            if (moving != null) moving.pause();
+            if (placing != null) placing.pause();
+        }
+
+        // 收尾：没做完的换手与放置一并收尾。
+        @Override
+        public void close() {
+            if (moving != null) moving.close();
+            if (placing != null) placing.close();
         }
 
         private String displayName() {
@@ -182,6 +205,41 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation {
         public String describe() {
             return "在身边放下" + displayName();
         }
+    }
+
+    // 支撑格六个邻格里此刻是这种方块的格子。
+    private static Set<BlockPos> holding(PlayerContext current, BlockPos support, Block block) {
+        Set<BlockPos> cells = new HashSet<>();
+        for (Direction face : Direction.values()) {
+            BlockPos cell = support.relative(face);
+            if (current.level().getBlockState(cell).is(block)) {
+                cells.add(cell.immutable());
+            }
+        }
+        return cells;
+    }
+
+    // 放下的确认条件：支撑格四周原来不是这种方块的一格变成了它，并等服务端确认这次放置。
+    private static InteractionConfirmation placedAround(BlockPos support, Block block, Set<BlockPos> before) {
+        BlockPos frozen = support.immutable();
+        return new InteractionConfirmation() {
+            @Override
+            public Verdict observe(PlayerContext context) {
+                for (Direction face : Direction.values()) {
+                    BlockPos cell = frozen.relative(face);
+                    if (!context.level().isLoaded(cell)) return Verdict.PENDING;
+                    if (!before.contains(cell) && context.level().getBlockState(cell).is(block)) {
+                        return Verdict.APPLIED;
+                    }
+                }
+                return Verdict.PENDING;
+            }
+
+            @Override
+            public boolean requiresBlockAcknowledgement() {
+                return true;
+            }
+        };
     }
 
     private static Optional<Block> blockOf(String blockTypeId) {

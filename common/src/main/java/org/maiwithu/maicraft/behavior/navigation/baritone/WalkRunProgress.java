@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.navigation.baritone;
 
+import java.util.Objects;
+
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.behavior.navigation.WalkArrival;
 import org.maiwithu.maicraft.behavior.navigation.WalkReport;
@@ -33,7 +35,8 @@ final class WalkRunProgress {
     private boolean stopRequested;
 
     WalkRunProgress(NavGoal goal) {
-        this.goal = goal;
+        // 没有目标就无从判断到没到：这是调用方的程序错误，建的时候就拒绝，不在走的路上兜底。
+        this.goal = Objects.requireNonNull(goal, "goal");
     }
 
     WalkReport report() {
@@ -43,6 +46,12 @@ final class WalkRunProgress {
     /** 请求中途停下；到达或失败后请求不再改变结果。 */
     void requestStop() {
         stopRequested = true;
+    }
+
+    /** 交出身体时就地按"已停下"结算：停在最近一次看到的位置；已经有结论的不改。 */
+    void stopWhereLastSeen() {
+        if (done()) return;
+        report = WalkReport.stopped(report.feet(), crossedWater);
     }
 
     boolean stopRequested() {
@@ -64,12 +73,6 @@ final class WalkRunProgress {
     Conclusion observe(Observation o) {
         if (done()) {
             return new Conclusion(report, Action.NONE, true, false);
-        }
-        // 手上没有目标就到不了任何地方：如实失败并结束这次走到，绝不在到达判断上崩出空指针。
-        if (goal == null) {
-            report = WalkReport.failed(
-                    Problem.of(Problem.Kind.INTERNAL_ERROR, "走到实现没有拿到目标，无法开始走", null), o.feet, crossedWater);
-            return new Conclusion(report, Action.CANCEL_ROUTE, true, false);
         }
         // 泅渡发生在路上就如实记账；到达后不再把水里的漂动算进这段路。
         crossedWater |= o.inWater && o.routePresent;

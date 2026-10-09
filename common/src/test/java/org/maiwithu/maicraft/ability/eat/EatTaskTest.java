@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.eat;
 
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.core.BlockPos;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -127,6 +130,7 @@ class EatTaskTest {
         @Override public long clientTick() { return tick; }
         @Override public boolean isCurrent() { return true; }
         @Override public boolean canInteractThisTick() { return true; }
+        @Override public boolean tryClaimInteraction() { return true; }
     }
 
     /** 按住投影替身：记次数，续期永远成功。 */
@@ -158,8 +162,11 @@ class EatTaskTest {
         @Override public Vec3 eyePosition() { return new Vec3(0.0, 64.0, 0.0); }
         @Override public Vec3 viewVector() { return new Vec3(0.0, 0.0, -1.0); }
         @Override public HitResult sightRay() { return null; }
-        @Override public net.minecraft.world.level.block.state.BlockState blockAt(net.minecraft.core.BlockPos pos) { return null; }
-        @Override public boolean isLoaded(net.minecraft.core.BlockPos pos) { return false; }
+        @Override public BlockHitResult visibleHit(BlockPos target) { return null; }
+        @Override public BlockHitResult visibleItemHit(BlockPos target, InteractionHand hand) { return null; }
+        @Override public boolean heldItemPointsAt(BlockPos target, InteractionHand hand) { return false; }
+        @Override public BlockState blockAt(BlockPos pos) { return null; }
+        @Override public boolean isLoaded(BlockPos pos) { return false; }
         @Override public ItemStack heldItem(InteractionHand hand) { return null; }
     }
 
@@ -282,5 +289,29 @@ class EatTaskTest {
         assertTrue(done.changes().stream()
                 .anyMatch(change -> change.kind() == Change.Kind.ITEM_CONSUMED
                         && change.what().equals(BREAD) && change.count() >= 1));
+    }
+
+    @Test
+    void 主手那一堆吃完了_先把下一堆换到主手再吃() {
+        // 主手只剩一块面包、背包里还有：吃完主手那块后先换手，再吃第二块，不对着空手按使用键。
+        Rig rig = new Rig().bread(3, 1);
+        EatTask eat = rig.task(2);
+        int[] bites = {0};
+        rig.worldStep = r -> {
+            r.confirmAnythingPending();
+            long starts = r.sender.submissions.stream()
+                    .filter(submission -> submission.kind() == PendingInteraction.Kind.USE_ITEM).count();
+            boolean breadInHand = r.equipment.slots.containsKey(GearSlotName.MAINHAND);
+            if (r.sender.last != null && r.sender.last.terminal() && bites[0] < starts && breadInHand) {
+                // 主手拿着面包、开始使用得到确认：吃掉一块；第一块吃完主手就空了。空手按使用键吃不到东西。
+                bites[0]++;
+                r.backpack.set(BREAD, r.backpack.countOf(BREAD) - 1);
+                if (bites[0] == 1) r.equipment.slots.remove(GearSlotName.MAINHAND);
+            }
+        };
+        TickResult result = rig.run(eat, 200);
+        assertTrue(result instanceof TickResult.Finished finished
+                && finished.result().status() == TaskResult.Status.DONE, String.valueOf(result));
+        assertEquals(2, bites[0]);
     }
 }

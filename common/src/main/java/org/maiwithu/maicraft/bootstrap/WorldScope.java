@@ -43,6 +43,7 @@ import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.goal.DocumentGoalRunStore;
 import org.maiwithu.maicraft.kernel.goal.GoalRunStore;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
+import org.maiwithu.maicraft.game.world.SaveIdentity;
 import org.maiwithu.maicraft.kernel.storage.StateIdentity;
 
 /**
@@ -76,8 +77,11 @@ public final class WorldScope {
             UseKeyProjection useKeyProjection, BaritoneInternals walks, CombatSenses senses,
             AbilityRegistry abilities, InteractionSender interactionSender, MenuActions menuActions,
             boolean allowGameCommands) {
-        StateIdentity identity = StateIdentity.resolve(minecraft)
+        // 游戏接口层认出是哪个存档或服务器，内核的世界身份只拿编号与目录。
+        SaveIdentity save = SaveIdentity.current(minecraft)
                 .orElseThrow(() -> new IllegalStateException("进了世界却识别不出世界身份，记忆无处安放"));
+        StateIdentity identity = new StateIdentity(save.key(), save.directory(),
+                save.directory().resolve(DocumentStore.FILE_NAME), "state");
         this.blockScans = Objects.requireNonNull(blockScans, "blockScans");
         this.subtitles = Objects.requireNonNull(subtitles, "subtitles");
         // 世界记忆与目标运行存在同一个文档库里，按世界身份分开；目标读回时按能力清单的参数规格整理参数。

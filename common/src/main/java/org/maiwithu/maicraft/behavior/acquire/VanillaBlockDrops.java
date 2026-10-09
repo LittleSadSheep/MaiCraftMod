@@ -21,7 +21,8 @@ public final class VanillaBlockDrops {
             Map.entry("minecraft:grass_block", "minecraft:dirt"),
             Map.entry("minecraft:mycelium", "minecraft:dirt"),
             Map.entry("minecraft:podzol", "minecraft:dirt"),
-            Map.entry("minecraft:coal_ore", "minecraft:coal"),            Map.entry("minecraft:deepslate_coal_ore", "minecraft:coal"),
+            Map.entry("minecraft:coal_ore", "minecraft:coal"),
+            Map.entry("minecraft:deepslate_coal_ore", "minecraft:coal"),
             Map.entry("minecraft:iron_ore", "minecraft:raw_iron"),
             Map.entry("minecraft:deepslate_iron_ore", "minecraft:raw_iron"),
             Map.entry("minecraft:copper_ore", "minecraft:raw_copper"),
@@ -62,8 +63,11 @@ public final class VanillaBlockDrops {
         }
         // 掉自己的通例：方块注册里与物品同名的那些（泥土、圆石、原木这类），挖掉掉自己；
         // 对照里已有条目的也一并算上（泥土既掉自泥土也掉自草方块）。没有同名方块的写法
-        // 在扫描里解析不到方块，自然落空，不碍事。
-        blockTypes.add(itemId);
+        // 在扫描里解析不到方块，自然落空，不碍事。对照里写明掉别的（石头掉圆石、矿石掉矿物）
+        // 的方块不掉自己：要石头不能去挖石头，挖了拿到的是圆石。
+        if (!BLOCK_TO_DROP.containsKey(itemId)) {
+            blockTypes.add(itemId);
+        }
         return List.copyOf(blockTypes);
     }
 

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.chat;
 
+import java.util.List;
+
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.ResultDetails;
@@ -33,8 +35,10 @@ public final class ChatTask extends PhasedTask<ChatTask.Phase> {
 
     /** 提交那一刻的游戏刻；算等回显等了多久用。 */
     private long sentTick;
-    /** 提交那一刻的毫秒时钟；命令反馈行按提交后有没有新行判断，要用同一时钟比对。 */
-    private long sentMillis;
+    /** 发命令前聊天栏的记号：之后新出现的话才算服务器对这条命令的回话。 */
+    private long feedbackMark;
+    /** 命令发出后聊天栏新出现的话（命令反馈行）；普通聊天为空。 */
+    private List<String> feedback = List.of();
     /** 以 / 开头的是游戏命令：没有自己的回显，完成依据换成命令反馈行。 */
     private final boolean command;
 
@@ -46,8 +50,8 @@ public final class ChatTask extends PhasedTask<ChatTask.Phase> {
         this.command = message.startsWith("/");
     }
 
-    /** 发话的结果细节：发了哪句话，供 LLM 对照与直播解说。 */
-    private record ChatDetails(String message) implements ResultDetails {}
+    /** 发话的结果细节：发了哪句话；游戏命令另附发出后聊天栏新出现的话，成没成由 LLM 看它判断。 */
+    private record ChatDetails(String message, List<String> feedback) implements ResultDetails {}
 
     @Override
     protected Action enter(Phase phase) {
@@ -66,7 +70,9 @@ public final class ChatTask extends PhasedTask<ChatTask.Phase> {
     /** 把话交给聊天输入，随后进入等证据。 */
     private Next<Phase> tickSend(TickContext context) {
         sentTick = context.gameTick();
-        sentMillis = System.currentTimeMillis();
+        if (command) {
+            feedbackMark = echo.mark();
+        }
         sender.send(message);
         recordProgress("已把话交给聊天输入");
         return Next.go(Phase.CONFIRM, command ? "已提交命令，等聊天栏出现命令反馈行" : "已提交，等聊天栏出现自己那条");
@@ -76,8 +82,11 @@ public final class ChatTask extends PhasedTask<ChatTask.Phase> {
     private Next<Phase> tickConfirm(TickContext context) {
         // 命令与聊天分开确认：命令看提交后冒出的反馈行，聊天看自己那条回显。
         if (command) {
-            if (echo.anyLineAfter(sentMillis)) {
-                return Next.done(TaskResult.done("命令已交给游戏执行，聊天栏出现了命令反馈行"));
+            // 反馈行一冒出来就收场，并把它原样写进结果：执行成了还是被拒（例如未知命令、权限不够）由 LLM 看回话判断。
+            List<String> said = echo.shownSince(feedbackMark);
+            if (!said.isEmpty()) {
+                feedback = said;
+                return Next.done(TaskResult.done("命令已交给游戏执行，聊天栏随后出现命令反馈行：" + String.join(" / ", said)));
             }
             if (context.gameTick() - sentTick >= CONFIRM_TICKS) {
                 recordUnconfirmed(new Change(Change.Kind.OTHER, message, 1,
@@ -99,7 +108,7 @@ public final class ChatTask extends PhasedTask<ChatTask.Phase> {
 
     @Override
     protected ResultDetails details() {
-        return new ChatDetails(message);
+        return new ChatDetails(message, feedback);
     }
 
     @Override

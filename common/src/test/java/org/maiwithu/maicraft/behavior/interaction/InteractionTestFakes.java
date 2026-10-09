@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.interaction;
 
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.core.Direction;
+import java.util.Set;
+import java.util.HashSet;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -60,6 +64,7 @@ final class InteractionTestFakes {
         @Override public long clientTick() { return tick; }
         @Override public boolean isCurrent() { return current; }
         @Override public boolean canInteractThisTick() { return canInteract; }
+        @Override public boolean tryClaimInteraction() { return canInteractThisTick(); }
 
         TickContext asTickContext() {
             return new TickContext() {
@@ -106,6 +111,20 @@ final class InteractionTestFakes {
 
         @Override public Vec3 eyePosition() { return eye; }
         @Override public HitResult sightRay() { return ray; }
+        /** 看得见的部位；默认每格都从正上方的中心看得见，测"一面都看不到"时把格子放进 hidden。 */
+        final Set<BlockPos> hidden = new HashSet<>();
+        /** 手里物品按自己射线规则会作用到的格子；测倒水时由测试声明。 */
+        final Set<BlockPos> itemPointsAt = new HashSet<>();
+        @Override public BlockHitResult visibleItemHit(BlockPos target, InteractionHand hand) {
+            return visibleHit(target.below());
+        }
+        @Override public boolean heldItemPointsAt(BlockPos target, InteractionHand hand) {
+            return itemPointsAt.contains(target);
+        }
+        @Override public BlockHitResult visibleHit(BlockPos target) {
+            return hidden.contains(target) ? null
+                    : new BlockHitResult(Vec3.atCenterOf(target), Direction.UP, target, false);
+        }
         @Override public BlockState blockAt(BlockPos pos) { return blocks.get(pos); }
         @Override public boolean isLoaded(BlockPos pos) { return blocks.containsKey(pos); }
         @Override public ItemStack heldItem(InteractionHand hand) { return held; }

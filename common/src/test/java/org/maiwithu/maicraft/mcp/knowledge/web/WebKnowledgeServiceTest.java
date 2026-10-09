@@ -14,6 +14,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
+import java.util.concurrent.CompletionStage;
 
 /** 用已知网页回放核对查阅流程：本地标题匹配、条目读取、错误分包；不触碰真实百科，也不启动游戏。 */
 class WebKnowledgeServiceTest {
@@ -87,7 +88,7 @@ class WebKnowledgeServiceTest {
         return new WebKnowledgeService(fetch, new KnowledgeEnvironment());
     }
 
-    private static JsonObject complete(java.util.concurrent.CompletionStage<JsonElement> stage) throws Exception {
+    private static JsonObject complete(CompletionStage<JsonElement> stage) throws Exception {
         return stage.toCompletableFuture().get(5, TimeUnit.SECONDS).getAsJsonObject();
     }
 

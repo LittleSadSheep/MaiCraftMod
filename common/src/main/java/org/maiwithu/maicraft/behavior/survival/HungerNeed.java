@@ -10,15 +10,15 @@ import org.maiwithu.maicraft.kernel.task.Urgency;
 /**
  * 饥饿这项生存需求：饿了趁干活的空当掏点吃的；饿到不能疾跑要尽快吃；饿到掉血必须立刻吃。
  *
- * <p>三档阈值（原版事实）：饱食度满 20；低于 6 不能疾跑也不回血；0 时身体开始扣血。
+ * <p>三档阈值（原版事实）：饱食度满 20；6 及以下不能疾跑；0 时身体开始扣血。
  * 临时任务组合进食的流程——本需求只负责"什么时候吃、弄不到怎么办"，不重写进食。
  */
 public final class HungerNeed implements SurvivalNeed {
 
-    /** 低于这条线不能疾跑、也不回血。 */
+    /** 饱食度到这条线及以下就不能疾跑。 */
     public static final int SPRINT_FLOOR = 6;
 
-    /** 饥饿处境：饱食度、是否已在掉血、身上有没有能直接吃的。 */
+    /** 饥饿处境：饱食度、是否已在掉血、身上有没有饿了就能顺手吃的普通食物（见 {@link FoodPicker#plain}）。 */
     public record Facts(int food, boolean losingHealth, boolean carryingEdible) {}
 
     /** 饥饿的三档判断，纯函数；不到档位返回 null。 */
@@ -63,6 +63,7 @@ public final class HungerNeed implements SurvivalNeed {
 
     @Override
     public Task createTask(TickContext context) {
-        return new EatSoonTask(moves, reader, events);
+        // 插进来的这一刻读一次处境，吃饭任务一开始就按它挑吃什么。
+        return new EatSoonTask(moves, reader, events, reader.read(context));
     }
 }

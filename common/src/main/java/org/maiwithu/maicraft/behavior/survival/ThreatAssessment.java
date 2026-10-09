@@ -141,12 +141,15 @@ public final class ThreatAssessment {
      */
     public static List<Foe> sortedByThreat(List<Foe> foes) {
         List<Foe> sorted = new ArrayList<>(foes);
-        sorted.sort(Comparator
-                .comparingInt((Foe foe) -> foe.kind() == Kind.EXPLOSIVE && foe.armed() ? 0 : 1)
-                .thenComparing(foe -> foe.chasingMe() ? 0 : 1)
-                .thenComparingDouble(Foe::distance));
+        sorted.sort(BY_THREAT);
         return sorted;
     }
+
+    /** 威胁先后：点了引信的会炸的最先，其次正在追我的，同档里近的在前。 */
+    public static final Comparator<Foe> BY_THREAT = Comparator
+            .comparingInt((Foe foe) -> foe.kind() == Kind.EXPLOSIVE && foe.armed() ? 0 : 1)
+            .thenComparing(foe -> foe.chasingMe() ? 0 : 1)
+            .thenComparingDouble(Foe::distance);
 
     /**
      * 近战候选：会炸但没点引信的目标，手里又没有远程手段时不进近战候选——

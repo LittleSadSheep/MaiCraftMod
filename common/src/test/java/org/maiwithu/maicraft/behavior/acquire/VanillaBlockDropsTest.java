@@ -37,6 +37,13 @@ class VanillaBlockDropsTest {
     }
 
     @Test
+    void blocksThatDropSomethingElseDoNotDropThemselves() {
+        // 要石头、要钻石矿石：挖石头掉圆石、挖矿石掉矿物，都不是这次要的东西。
+        assertTrue(VanillaBlockDrops.blocksDropping("minecraft:stone").isEmpty());
+        assertTrue(VanillaBlockDrops.blocksDropping("minecraft:diamond_ore").isEmpty());
+    }
+
+    @Test
     void glassDropsNothingAtAll() {
         assertTrue(VanillaBlockDrops.blocksDropping("minecraft:glass").isEmpty());
         assertTrue(VanillaBlockDrops.blocksDropping("minecraft:ice").isEmpty());

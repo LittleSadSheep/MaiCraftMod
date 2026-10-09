@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.behavior.navigation.baritone;
+package org.maiwithu.maicraft.game.world;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.BlockGetter;
@@ -17,10 +17,11 @@ import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.level.material.WaterFluid;
 
 /**
- * 落地放水的规则与瞄准帮助：识别水源和含水方块，找脚下可点击表面，确认一桶水实际会进入哪一格。
+ * 用水桶放水与收水的方块规则：哪些格能被水替换、哪些方块能含水、脚下可点击的表面在哪、一桶水实际会进入哪一格、
+ * 放下的水能不能收回。落地放水自救、出行里的放水下落都用它。
  */
-public final class WaterBucketFall {
-    private WaterBucketFall() {}
+public final class BucketWater {
+    private BucketWater() {}
 
     public static boolean replaceableByWater(BlockState target) {
         return target.isAir() || target.getFluidState().isEmpty() && target.canBeReplaced(Fluids.WATER);

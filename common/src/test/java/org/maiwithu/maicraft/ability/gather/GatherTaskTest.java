@@ -30,6 +30,8 @@ import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
+import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.kernel.task.CloseReason;
 
 /**
  * 采集的任务：只收熟了的作物、工具不够格如实说、收完顺手补种且补种失败不白收、
@@ -171,7 +173,7 @@ class GatherTaskTest {
                 return gameTick;
             }
 
-            @Override public org.maiwithu.maicraft.game.player.PlayerContext player() {
+            @Override public PlayerContext player() {
                 return null;
             }
         };
@@ -182,7 +184,7 @@ class GatherTaskTest {
         for (int i = 1; i <= 200; i++) {
             TickResult result = task.tick(tick(i));
             if (result instanceof TickResult.Finished finished) {
-                task.close(org.maiwithu.maicraft.kernel.task.CloseReason.FINISHED);
+                task.close(CloseReason.FINISHED);
                 return finished.result();
             }
         }

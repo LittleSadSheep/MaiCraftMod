@@ -115,6 +115,17 @@ public interface InteractionSender {
             PendingInteraction pending,
             String boundaryReason);
 
+    /**
+     * 两刻之间结束任务、拿不到当刻上下文时：发不了停挖，先登记停挖原因，下一刻在新任务操作角色之前停掉。
+     */
+    void deferBreakCancellationForTaskBoundary(PendingInteraction pending, String boundaryReason);
+
+    /**
+     * 两刻之间结束任务时交还还在等确认的一次性提交：按效果不确定收尾（提交可能已经生效），不留等待占位。
+     * 持续挖掘与持续使用要走各自的停手。
+     */
+    void abandonOneShotForTaskBoundary(PendingInteraction pending, String boundaryReason);
+
     /** 逐刻结算：先核对上下文仍是本刻、动作仍是本角色的，再运行只读确认条件。 */
     PendingInteraction poll(PlayerContext context, PendingInteraction pending);
 }

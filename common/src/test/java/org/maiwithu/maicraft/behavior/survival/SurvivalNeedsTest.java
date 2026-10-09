@@ -24,7 +24,6 @@ import static org.maiwithu.maicraft.behavior.survival.SurvivalFakes.TestPlayer;
 import static org.maiwithu.maicraft.behavior.survival.SurvivalFakes.TestTick;
 import static org.maiwithu.maicraft.behavior.survival.SurvivalFakes.inAir;
 import static org.maiwithu.maicraft.behavior.survival.SurvivalFakes.scripted;
-import static org.maiwithu.maicraft.behavior.survival.SurvivalFakes.situation;
 import static org.maiwithu.maicraft.behavior.survival.SurvivalFakes.underwater;
 
 /**
@@ -80,7 +79,7 @@ class SurvivalNeedsTest {
         assertEquals("换气", finished.interrupting().name());
         assertEquals(TaskResult.Status.DONE, finished.finished().status());
 
-        // 下一刻轮回主流程：从原地接着做，这时才第一次 start；被压住的那几刻没有轮到它。
+        // 下一刻轮到主流程：从原地接着做，这时才第一次 start；被压住的那几刻没有轮到它。
         player.nextTick();
         ControlLoop.Decision.Advanced resumed = advance(loop.tick(tick));
         assertSame(main, resumed.task());
@@ -92,9 +91,8 @@ class SurvivalNeedsTest {
     void soonDrowningInterruptsWorkButNotUnsafeWork() {
         TestPlayer player = new TestPlayer();
         TestTick tick = new TestTick(player);
-        // 氧气剩三泡：尽快换气，但不算立刻。
-        SurvivalSituation.SituationReader reader = scripted(
-                situation(0, 20.0, 40.0, 0.0f, true, 3, false, false, null, false));
+        // 氧气剩三泡、浅水里游上去来得及：尽快换气，但不算立刻。
+        SurvivalSituation.SituationReader reader = scripted(SurvivalFakes.calm().feet(40.0).underwater(90).build());
         MainTask working = new MainTask(Interruptibility.WORKING);
         ControlLoop loop = new ControlLoop(List.of(new BreathNeed(reader)));
         loop.setMainTask(working);
@@ -107,7 +105,7 @@ class SurvivalNeedsTest {
         // 停下不安全的活（悬空搭桥）：先忍住，主任务继续，被按住的需求留给调用方。
         MainTask unsafe = new MainTask(Interruptibility.UNSAFE_TO_STOP);
         ControlLoop unsafeLoop = new ControlLoop(List.of(new BreathNeed(scripted(
-                situation(0, 20.0, 40.0, 0.0f, true, 3, false, false, null, false)))));
+                SurvivalFakes.calm().feet(40.0).underwater(90).build()))));
         unsafeLoop.setMainTask(unsafe);
         ControlLoop.Decision.Advanced heldUnsafe = advance(unsafeLoop.tick(tick));
         assertSame(unsafe, heldUnsafe.task());
@@ -119,8 +117,8 @@ class SurvivalNeedsTest {
         TestPlayer player = new TestPlayer();
         TestTick tick = new TestTick(player);
         // 又被埋又在水里憋到只剩一泡：两件都是立刻，按登记顺序被埋先处理。
-        SurvivalSituation both = situation(0, 20.0, 40.0, 0.0f, true, 1, false, true,
-                new BlockPos(1, 64, 2), false);
+        SurvivalSituation both = SurvivalFakes.calm().feet(40.0).underwater(30)
+                .buriedAt(new BlockPos(1, 64, 2)).build();
         ControlLoop loop = new ControlLoop(List.of(
                 new DigOutNeed(scripted(both), SurvivalFakes.FakeBreaking::new),
                 new BreathNeed(scripted(both))));
@@ -136,10 +134,10 @@ class SurvivalNeedsTest {
     void deadlyFallInterruptsEvenUnsafeWork() {
         TestPlayer player = new TestPlayer();
         TestTick tick = new TestTick(player);
-        // 悬空搭桥时往虚空掉：预计落地伤害远超生命，落地防护立刻打断。
-        SurvivalSituation falling = situation(20.0, 6.0, 200.0, 0.0f, false, 10, false, false, null, true);
+        // 悬空搭桥时往虚空掉：掉下去就是死，落地防护立刻打断。
+        SurvivalSituation falling = SurvivalFakes.calm().feet(200.0).fallingIntoVoid().build();
         MainTask bridging = new MainTask(Interruptibility.UNSAFE_TO_STOP);
-        ControlLoop loop = new ControlLoop(List.of(new FallNeed(scripted(falling), null, null)));
+        ControlLoop loop = new ControlLoop(List.of(new FallNeed(scripted(falling), null, null, null)));
         loop.setMainTask(bridging);
 
         ControlLoop.Decision.Advanced decision = advance(loop.tick(tick));
@@ -152,11 +150,11 @@ class SurvivalNeedsTest {
     void healthySituationLeavesTheMainTaskAlone() {
         TestPlayer player = new TestPlayer();
         TestTick tick = new TestTick(player);
-        SurvivalSituation fine = situation(0, 20.0, 64.0, 0.0f, false, 10, false, false, null, false);
+        SurvivalSituation fine = SurvivalFakes.calm().build();
         ControlLoop loop = new ControlLoop(List.of(
                 new DigOutNeed(scripted(fine), SurvivalFakes.FakeBreaking::new),
                 new BreathNeed(scripted(fine)),
-                new FallNeed(scripted(fine), null, null)));
+                new FallNeed(scripted(fine), null, null, null)));
         MainTask main = new MainTask(Interruptibility.WORKING);
         loop.setMainTask(main);
 

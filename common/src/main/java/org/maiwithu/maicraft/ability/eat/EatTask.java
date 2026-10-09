@@ -140,9 +140,8 @@ final class EatTask extends PhasedTask<EatTask.Phase> {
 
     // 一件吃完了：按确认窗口里的实际扣减记账，吃出来的效果做差累计，还有件数就再来一件。
     private Next<Phase> afterOneEaten() {
-        int after = carried();
-        // 拾取干扰可能把总数顶回基准之上：按见过的最低值算这一件确实少了多少。
-        int consumed = Math.max(1, baseline - Math.min(after, baseline));
+        // 拾取干扰可能把总数顶回基准之上：按按住期间见过的最低值算这一件确实少了多少。
+        int consumed = Math.max(1, baseline - lowestSeen);
         eaten += consumed;
         recordChange(new Change(Change.Kind.ITEM_CONSUMED, input.itemId(), consumed, null));
         for (String effect : effects.active()) {
@@ -151,7 +150,9 @@ final class EatTask extends PhasedTask<EatTask.Phase> {
             }
         }
         if (unitsLeft() > 0 && carried() > 0) {
-            return Next.go(Phase.EATING, "再吃一件");
+            // 主手那一堆吃完了、剩下的在背包别的格子：先换到主手再吃，不对着空手按使用键。
+            return mainhandMatches() ? Next.go(Phase.EATING, "再吃一件")
+                    : Next.go(Phase.TO_HAND, "主手这一堆吃完了，把下一堆换到主手");
         }
         return Next.done(TaskResult.builder(TaskResult.Status.DONE,
                         "吃完了 " + eaten + " 件 " + input.itemId())

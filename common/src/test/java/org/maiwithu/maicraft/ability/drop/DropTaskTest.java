@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.drop;
 
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.item.Items;
+import net.minecraft.core.BlockPos;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -121,6 +125,8 @@ class DropTaskTest {
                 InteractionConfirmation cf, int t) { throw new UnsupportedOperationException(); }
         @Override public PendingInteraction submitControlProtocol(PlayerContext c, String op, Runnable run,
                 InteractionConfirmation cf, int t) { throw new UnsupportedOperationException(); }
+        @Override public void deferBreakCancellationForTaskBoundary(PendingInteraction pending, String reason) {}
+        @Override public void abandonOneShotForTaskBoundary(PendingInteraction pending, String reason) {}
         @Override public PendingInteraction retireOneShotForTaskBoundary(
                 PlayerContext c, PendingInteraction p, String reason) {
             throw new UnsupportedOperationException(); }
@@ -151,6 +157,7 @@ class DropTaskTest {
         @Override public long clientTick() { return tick; }
         @Override public boolean isCurrent() { return true; }
         @Override public boolean canInteractThisTick() { return true; }
+        @Override public boolean tryClaimInteraction() { return true; }
     }
 
     /** 现场替身：主手握着给定数量的圆石；注册表先经引导才能造真实物品。 */
@@ -158,11 +165,14 @@ class DropTaskTest {
         int held;
         @Override public Vec3 eyePosition() { return new Vec3(0.0, 64.0, 0.0); }
         @Override public Vec3 viewVector() { return new Vec3(0.0, 0.0, -1.0); }
-        @Override public net.minecraft.world.phys.HitResult sightRay() { return null; }
-        @Override public net.minecraft.world.level.block.state.BlockState blockAt(net.minecraft.core.BlockPos pos) { return null; }
-        @Override public boolean isLoaded(net.minecraft.core.BlockPos pos) { return false; }
+        @Override public HitResult sightRay() { return null; }
+        @Override public BlockHitResult visibleHit(BlockPos target) { return null; }
+        @Override public BlockHitResult visibleItemHit(BlockPos target, InteractionHand hand) { return null; }
+        @Override public boolean heldItemPointsAt(BlockPos target, InteractionHand hand) { return false; }
+        @Override public BlockState blockAt(BlockPos pos) { return null; }
+        @Override public boolean isLoaded(BlockPos pos) { return false; }
         @Override public ItemStack heldItem(InteractionHand hand) {
-            return held > 0 ? new ItemStack(net.minecraft.world.item.Items.COBBLESTONE, held) : ItemStack.EMPTY;
+            return held > 0 ? new ItemStack(Items.COBBLESTONE, held) : ItemStack.EMPTY;
         }
     }
 

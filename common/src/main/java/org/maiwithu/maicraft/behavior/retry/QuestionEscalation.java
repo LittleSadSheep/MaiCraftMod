@@ -40,7 +40,9 @@ public final class QuestionEscalation {
     /** 请求同意：要做的事（{@code request}）超出许可，附上它要碰到的现场事实。 */
     public static Question approval(String situation, String request) {
         return new Question(Question.Reason.NEED_APPROVAL,
-                situation + "。要继续就得：" + request + "，可以吗？",
+                // 没有把握说清要开哪一项许可时，就只问同不同意，不编一句"要继续就得：null"。
+                request == null || request.isBlank() ? situation + "。同意这么做吗？"
+                        : situation + "。要继续就得：" + request + "，可以吗？",
                 List.of(new Question.Option("yes", "同意这么做"),
                         new Question.Option("no", "不同意，任务按没获得同意结束")));
     }

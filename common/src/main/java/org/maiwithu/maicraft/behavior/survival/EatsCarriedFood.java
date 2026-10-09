@@ -25,8 +25,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 吃随身食物的动作来源：从背包里挑一件能直接吃的，换到主手后原生按住吃完一口。
  *
  * <p>吃饭的临时任务只管什么时候吃，怎么吃组合进食的原生动作：先像真人一样把食物换到
- * 主手（背包界面的交换），再按住使用键等游戏自己把这一口吃完。身上没有任何能直接吃的
- * 东西时给不出动作，由吃饭任务如实报告"没吃的"。
+ * 主手（背包界面的交换），再按住使用键等游戏自己把这一口吃完。挑哪件按 {@link FoodPicker#forHunger}；
+ * 身上没有这会儿该吃的东西时给不出动作，由吃饭任务去弄或如实报告"没吃的"。
  */
 public final class EatsCarriedFood implements EatSoonTask.FoodMoves {
 
@@ -44,27 +44,16 @@ public final class EatsCarriedFood implements EatSoonTask.FoodMoves {
     }
 
     @Override
-    public Action eating() {
-        String food = firstCarriedFood();
-        if (food == null) {
-            return null;
-        }
-        return new BiteAction(food);
+    public Action eating(HungerNeed.Facts hunger) {
+        // 按饥饿处境挑：平时只吃补得刚好的普通食物，饱食度见底在掉血才什么都吃。
+        return FoodPicker.forHunger(FoodPicker.carried(backpack.stacks(), foods), hunger.food(), hunger.losingHealth())
+                .map(food -> (Action) new BiteAction(food))
+                .orElse(null);
     }
 
     @Override
     public Action fetching(long budgetTicks) {
         // 有预算地弄吃的（翻已知容器、合成、采集）还没有实现方；给 null 让任务如实说弄不到。
-        return null;
-    }
-
-    // 身上第一件能直接吃的东西；没有给 null。
-    private String firstCarriedFood() {
-        for (var stack : backpack.stacks()) {
-            if (foods.of(stack.itemId()).isPresent()) {
-                return stack.itemId();
-            }
-        }
         return null;
     }
 
@@ -135,7 +124,7 @@ public final class EatsCarriedFood implements EatSoonTask.FoodMoves {
             return ActionStatus.running();
         }
 
-        // 换手做成了主手却还不是它：可能被别的流程动了手，再要一次换手，不无限赌下去。
+        // 换手做成了主手却还不是它：可能被别的流程动了手，这一口如实失败，由吃饭任务决定要不要再试。
         private ActionStatus failAgain() {
             failure = Problem.of(Problem.Kind.STUCK,
                     "把 " + food + " 换到主手后主手却不是它，吃不了一口", null);

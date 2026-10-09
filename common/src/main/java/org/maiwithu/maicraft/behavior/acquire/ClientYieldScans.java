@@ -23,6 +23,7 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.BlockScanService;
+import org.maiwithu.maicraft.game.world.ScanTargets;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 /**
@@ -42,11 +43,13 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
 
     private final BlockScanService scans;
     private final Supplier<PlayerContext> context;
-    private boolean registered;
+    /** 每次要找的方块都不一样（要煤找煤矿、要土豆找土豆地）：每次查询前按维度补登记。 */
+    private final ScanTargets registered;
 
     public ClientYieldScans(BlockScanService scans, Supplier<PlayerContext> context) {
         this.scans = Objects.requireNonNull(scans, "scans");
         this.context = Objects.requireNonNull(context, "context");
+        this.registered = new ScanTargets(scans);
     }
 
     @Override
@@ -116,7 +119,7 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
         if (level == null || targets.isEmpty()) {
             return List.of();
         }
-        ensureRegistered(level, targets);
+        registered.ensure(level, targets);
         BlockPos at = new BlockPos(center.x(), center.y(), center.z());
         var result = scans.query(level, at, targets, WANT,
                 Math.max(1, Math.min(MAX_CHUNK_RADIUS, radiusBlocks / 16 + 1)), BUILD_BUDGET);
@@ -125,15 +128,6 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
         hits.removeIf(hit -> Math.sqrt(hit.distSqr(at)) > radiusBlocks);
         hits.sort(Comparator.comparingDouble(hit -> hit.distSqr(at)));
         return hits;
-    }
-
-    // 首次用到时把目标方块登记进扫描索引；登记计数在扫描服务里，重复登记不叠加负担。
-    private void ensureRegistered(ClientLevel level, Set<Block> targets) {
-        if (registered) {
-            return;
-        }
-        scans.register(level, targets);
-        registered = true;
     }
 
     // 要的东西展开成具体的物品 ID：标签按注册表里挂这个标签的物品展开，写法不合法给空。

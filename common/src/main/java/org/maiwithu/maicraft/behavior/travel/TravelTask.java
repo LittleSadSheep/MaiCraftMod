@@ -8,8 +8,6 @@ import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
-import org.maiwithu.maicraft.kernel.goal.Question;
-import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Change;
@@ -24,7 +22,6 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 
 /**
  * 出行任务：去一个地方。解析目的地 → 交给走到逐刻推进 → 到达或停下时如实结算。
@@ -37,51 +34,39 @@ import java.util.Optional;
  */
 public final class TravelTask extends PhasedTask<TravelTask.Phase> {
 
-    /** 出行的阶段：先确认要去哪，再在路上。 */
-    public enum Phase { RESOLVE, WALK }
+    /** 出行的阶段：在路上。 */
+    public enum Phase { WALK }
 
     /** 连续半分钟离目的地没有更近，就算在原地打转。 */
     private static final long STUCK_AFTER_TICKS = 20L * 30;
 
-    private final Target target;
-    private final double radius;
+    private final TravelDestination destination;
     private final TerrainPermit permit;
     private final WalkTo walks;
-    private final DestinationResolver resolver;
     private final ReadsPlacedBlocks placedBlocks;
     private final TravelProgressListener progressListener;
 
-    private TravelDestination destination;
     private WalkRun walk;
-    private Question pendingQuestion;
     private TravelSettlement settlement;
     private boolean stopRequested;
     private boolean crossedWater;
     private double bestRemaining = Double.MAX_VALUE;
 
     /**
-     * @param target        去哪：坐标（y 可省略）、叫得出名字的地点、看得见的东西、往某方向走多远
-     * @param radius        到达容差，单位格；0 表示要站进那一格
-     * @param maxSeconds    最多走多久（秒）；不超过 0 表示不设时限
-     * @param permit        这次被允许动多少地形（能不能挖路垫路）
+     * @param destination 已经解析好的目的地：能力做决定时用 {@link DestinationResolver} 解析，
+     *                    说不清就向 LLM 提问、已经站在那里就直接结束，都不用开这个任务
+     * @param maxSeconds  最多走多久（秒）；不超过 0 表示不设时限
+     * @param permit      这次被允许动多少地形（能不能挖路垫路）
      */
-    public TravelTask(Target target, double radius, int maxSeconds, TerrainPermit permit,
-            WalkTo walks, DestinationResolver resolver, ReadsPlacedBlocks placedBlocks,
-            TravelProgressListener progressListener) {
-        super("出行", Phase.RESOLVE, new ProgressTracker(STUCK_AFTER_TICKS,
+    public TravelTask(TravelDestination destination, int maxSeconds, TerrainPermit permit,
+            WalkTo walks, ReadsPlacedBlocks placedBlocks, TravelProgressListener progressListener) {
+        super("出行", Phase.WALK, new ProgressTracker(STUCK_AFTER_TICKS,
                 maxSeconds > 0 ? maxSeconds * 20L : Long.MAX_VALUE));
-        this.target = target;
-        this.radius = radius;
+        this.destination = destination;
         this.permit = permit;
         this.walks = walks;
-        this.resolver = resolver;
         this.placedBlocks = placedBlocks;
         this.progressListener = progressListener;
-    }
-
-    /** 目标说不清时挂起的提问；内核的提问钩子取走它去问玩家。 */
-    public Optional<Question> pendingQuestion() {
-        return Optional.ofNullable(pendingQuestion);
     }
 
     /** 请求中途停下：先向走到请求，落到安全边界才真停，随后按取消结算。 */
@@ -91,8 +76,7 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> {
 
     @Override
     protected Action enter(Phase phase) {
-        // 只有在路上有动作；解析阶段只读现场、给结论。
-        return phase == Phase.WALK ? startWalk() : null;
+        return startWalk();
     }
 
     /** 把目的地编译成导航目标交给走到；出行不碰寻路内部。 */
@@ -104,34 +88,10 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> {
 
     @Override
     protected Next<Phase> tick(Phase phase, TickContext context) {
-        return switch (phase) {
-            case RESOLVE -> tickResolve();
-            case WALK -> tickWalk(context);
-        };
+        return tickWalk(context);
     }
 
-    private Next<Phase> tickResolve() {
-        if (pendingQuestion != null) {
-            // 在等玩家回答：内核的提问钩子会暂停本任务，这里不重复解析也不超时瞎猜。
-            return Next.stay();
-        }
-        DestinationResolver.Resolution resolution = resolver.resolve(target, radius);
-        if (resolution instanceof DestinationResolver.Resolution.Ready ready) {
-            destination = ready.destination();
-            recordProgress("目的地定了：" + destination.describe());
-            return Next.go(Phase.WALK, "目的地解析完成，出发");
-        }
-        if (resolution instanceof DestinationResolver.Resolution.AlreadyThere spot) {
-            settlement = new TravelSettlement(spot.spot(), null, List.of(), false);
-            return Next.done(TaskResult.done("出行：开始时已经站在目的地"));
-        }
-        if (resolution instanceof DestinationResolver.Resolution.Unclear unclear) {
-            pendingQuestion = unclear.question();
-            recordProgress("目的地说不清，已向玩家提问");
-            return Next.stay();
-        }
-        return Next.fail(((DestinationResolver.Resolution.DeadEnd) resolution).problem());
-    }    private Next<Phase> tickWalk(TickContext context) {
+    private Next<Phase> tickWalk(TickContext context) {
         if (stopRequested) {
             return tickStopping(context);
         }
@@ -243,7 +203,7 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> {
 
     @Override
     protected String describePhase(Phase value) {
-        return value == Phase.RESOLVE ? "确认要去哪" : stopRequested ? "正在安全停下" : "在路上";
+        return stopRequested ? "正在安全停下" : "在路上：去" + destination.describe();
     }
 
     private String shortSpot(BlockPos feet) {

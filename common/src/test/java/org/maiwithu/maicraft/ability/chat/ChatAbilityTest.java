@@ -30,7 +30,8 @@ class ChatAbilityTest {
     /** 不发话、读不到任何回显的替身：能力测试只看决定与说明，不碰发送。 */
     private static final ReadsChatEcho SILENT_ECHO = new ReadsChatEcho() {
         @Override public boolean appearsInChat(String message) { return false; }
-        @Override public boolean anyLineAfter(long sinceMillis) { return false; }
+        @Override public long mark() { return 0; }
+        @Override public List<String> shownSince(long mark) { return List.of(); }
     };
 
     /** 能决定阶段用的上下文：只有目标。 */

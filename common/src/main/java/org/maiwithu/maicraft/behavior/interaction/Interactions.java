@@ -32,6 +32,17 @@ public final class Interactions {
                 FirstPersonScene::of);
     }
 
+    /**
+     * 朝一格使用手里的物品：物品按自己的射线规则作用到那一格（水桶把水倒进去），生效与否按给定的确认条件核对。
+     *
+     * @param affected 物品要作用到的那一格，例如水该落进的那一格
+     */
+    public AimAndInteract useHeldItemToward(BlockPos affected, InteractionHand hand,
+                                            InteractionConfirmation confirmation) {
+        return new AimAndInteract(new InteractionTarget.BlockTarget(affected), AimAndInteract.Gesture.USE_HELD_ITEM,
+                hand, confirmation, FirstPersonScene::of);
+    }
+
     /** 右键一只实体（剪毛、挤奶、骑乘这类），准星必须真的落在它身上。 */
     public AimAndInteract useEntity(Entity target, InteractionConfirmation confirmation) {
         return new AimAndInteract(new InteractionTarget.EntityTarget(target), confirmation,

@@ -24,6 +24,7 @@ import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
+import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /**
  * 穿卸装备的离线场景：卸下先腾地方、逐格核对；部分没卸下来按仍穿着如实列出，
@@ -105,7 +106,7 @@ class EquipTaskTest {
     private static final class StubTick implements TickContext {
         long tick;
         @Override public long gameTick() { return tick; }
-        @Override public org.maiwithu.maicraft.game.player.PlayerContext player() { return null; }
+        @Override public PlayerContext player() { return null; }
     }
 
     private static TickResult run(Task task, int ticks) {

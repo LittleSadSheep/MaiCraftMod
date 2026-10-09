@@ -7,6 +7,7 @@ import org.maiwithu.maicraft.game.world.WorldTime;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
+import org.maiwithu.maicraft.game.player.PlayerContext;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -20,7 +21,7 @@ class WaitTaskTest {
 
     /** 刻号替身：任务只读刻号。 */
     private record Tick(long gameTick) implements TickContext {
-        @Override public org.maiwithu.maicraft.game.player.PlayerContext player() {
+        @Override public PlayerContext player() {
             throw new IllegalStateException("等待任务不碰角色对象");
         }
     }

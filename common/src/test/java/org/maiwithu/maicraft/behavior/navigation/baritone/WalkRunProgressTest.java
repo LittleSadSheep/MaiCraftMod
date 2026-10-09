@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.navigation.baritone;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import net.minecraft.core.BlockPos;
@@ -121,7 +122,7 @@ class WalkRunProgressTest {
         assertTrue(conclusion.done());
     }
 
-    @org.junit.jupiter.api.Test
+    @Test
     void externalFailureIsRecordedOnlyOnce() {
         var progress = progressExact();
         progress.observe(seen(ELSEWHERE, true, false, true, false));
@@ -137,17 +138,9 @@ class WalkRunProgressTest {
     }
 
     @Test
-    void drivingWithoutAGoalFailsHonestlyInsteadOfCrashing() {
-        // 走到实现没拿到目标就开始驱动：如实失败并结束，不在到达判断上崩出空指针。
-        var progress = new WalkRunProgress(null);
-        var conclusion = progress.observe(seen(ELSEWHERE, true, false, false, false));
-        assertEquals(WalkReport.State.FAILED, conclusion.report().state());
-        assertEquals(Problem.Kind.INTERNAL_ERROR, conclusion.report().problem().kind());
-        assertEquals(WalkRunProgress.Action.CANCEL_ROUTE, conclusion.action());
-        assertTrue(conclusion.done());
-        // 之后的观察不再改变结果，也不会碰空目标。
-        var after = progress.observe(seen(TARGET, true, false, true, false));
-        assertEquals(WalkReport.State.FAILED, after.report().state());
+    void aRunWithoutAGoalIsRejectedWhenBuilt() {
+        // 没有目标的走到是调用方的程序错误：建的时候就拒绝，不等到路上才发现。
+        assertThrows(NullPointerException.class, () -> new WalkRunProgress(null));
     }
 
     @Test
@@ -160,5 +153,19 @@ class WalkRunProgressTest {
         var ready = progress.observe(seen(ELSEWHERE.east(), true, false, true, false));
         assertEquals(WalkReport.State.ON_THE_WAY, ready.report().state());
         assertFalse(ready.done());
+    }
+
+    @Test
+    void yieldingTheBodySettlesAsStoppedButKeepsAnEarlierConclusion() {
+        // 被暂停的走到交出身体：按"已停下"结算，恢复时任务会从原地重新上路；已经有结论的不改。
+        var stopped = progressExact();
+        stopped.observe(seen(ELSEWHERE, true, false, true, false));
+        stopped.stopWhereLastSeen();
+        assertEquals(WalkReport.State.STOPPED, stopped.report().state());
+
+        var failed = progressExact();
+        failed.fail(Problem.of(Problem.Kind.STUCK, "走不动"), null);
+        failed.stopWhereLastSeen();
+        assertEquals(WalkReport.State.FAILED, failed.report().state());
     }
 }

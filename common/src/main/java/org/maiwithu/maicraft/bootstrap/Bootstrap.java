@@ -12,6 +12,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.state.BlockState;
+import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyHoldProjection;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
@@ -39,7 +40,6 @@ import org.maiwithu.maicraft.game.ModIdentity;
 import org.maiwithu.maicraft.game.interaction.DefaultInteractionSender;
 import org.maiwithu.maicraft.game.interaction.InteractionSender;
 import org.maiwithu.maicraft.game.menu.MenuActions;
-import org.maiwithu.maicraft.game.interaction.InteractionOpportunity;
 import org.maiwithu.maicraft.game.loader.LoaderEnvironment;
 import org.maiwithu.maicraft.game.ChatLog;
 import org.maiwithu.maicraft.game.ClientHooks;
@@ -47,6 +47,7 @@ import org.maiwithu.maicraft.game.SubtitleFeed;
 import org.maiwithu.maicraft.game.menu.DefaultMenuActions;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerControlBoundary;
+import org.maiwithu.maicraft.game.player.ReadsFoodValues;
 import org.maiwithu.maicraft.game.player.UseKeyHold;
 import org.maiwithu.maicraft.game.serverlink.ClientOperation;
 import org.maiwithu.maicraft.game.serverlink.LinkTransport;
@@ -76,6 +77,8 @@ import org.maiwithu.maicraft.mcp.transport.EmbeddedMcpService;
 import org.maiwithu.maicraft.mcp.transport.McpConfig;
 import org.maiwithu.maicraft.network.MaiCraftPayload;
 import org.maiwithu.maicraft.server.BlockOwnershipRecord;
+import org.maiwithu.maicraft.server.OwnershipFile;
+import org.maiwithu.maicraft.server.OwnershipQuery;
 import org.maiwithu.maicraft.server.ServerConfirmations;
 import org.maiwithu.maicraft.server.ServerLinkNetwork;
 import org.maiwithu.maicraft.server.ServerLinkServices;
@@ -96,7 +99,18 @@ import org.slf4j.LoggerFactory;
 public final class Bootstrap {
     private static final Logger LOG = LoggerFactory.getLogger(Bootstrap.class);
 
+    /** 方块归属记录有改动时多久存一次盘：五分钟，和原版自动存档的节奏一样。 */
+    private static final int OWNERSHIP_SAVE_INTERVAL_TICKS = 20 * 60 * 5;
+
     private Bootstrap() {}
+
+    // 有改动才写；还没登记（第一刻之前）就什么都不做。
+    private static void saveOwnership(MinecraftServer server) {
+        BlockOwnershipRecord record = ServerLinkServices.ownership(server);
+        if (record != null) {
+            OwnershipFile.of(server).saveIfDirty(record);
+        }
+    }
 
     /** 本刻的控制循环上下文：游戏刻号来自所在世界，角色来自控制权边界发出的当刻上下文。 */
     private record ClientTickContext(long gameTick, PlayerContext player) implements TickContext {}
@@ -106,36 +120,20 @@ public final class Bootstrap {
         LOG.info("{} 通用部分启动（加载器：{}）", ModIdentity.NAME, loader.loaderName());
         ServerOperationRegistry operations = new ServerOperationRegistry();
         ServerLinkNetwork network = new ServerLinkNetwork(operations);
-        // 客户端可查询的只读操作：一格方块是谁放的。归属记录按服务器实例在第一个刻结束时登记。
-        operations.register("ownership.query", 1, false, (player, body) -> {
-            var server = player.serverLevel().getServer();
-            var record = ServerLinkServices.ownership(server);
-            JsonObject result = new JsonObject();
-            if (record == null) {
-                result.addProperty("owned", false);
-                return result;
-            }
-            var position = body.getAsJsonObject("position");
-            var owner = record.ownerOf(player.serverLevel().dimension().location().toString(),
-                    new BlockPos(position.get("x").getAsInt(), position.get("y").getAsInt(),
-                            position.get("z").getAsInt()));
-            if (owner.isEmpty()) {
-                result.addProperty("owned", false);
-                return result;
-            }
-            result.addProperty("owned", true);
-            result.addProperty("owner", owner.get().playerId().toString());
-            result.addProperty("placedTick", owner.get().tick());
-            return result;
-        });
+        // 客户端可查询的只读操作：一格方块是谁放的。归属记录按服务器实例在第一个刻结束时从存档读回并登记。
+        operations.register(OwnershipQuery.OPERATION, 1, false, new OwnershipQuery());
         return new ServerLifecycle() {
             @Override public void tickEnd(MinecraftServer server) {
-                // 首刻登记本服务器实例的归属记录与确认通道；停服时移除，不跨服残留。
-                ServerLinkServices.attachIfAbsent(server, BlockOwnershipRecord::new,
+                // 首刻从存档读回本服务器的归属记录并登记确认通道；之后每五分钟把改动存一次盘，停服时再存一次。
+                ServerLinkServices.attachIfAbsent(server, () -> OwnershipFile.of(server).load(),
                         () -> new ServerConfirmations(push, network::hasSession));
+                if (server.getTickCount() % OWNERSHIP_SAVE_INTERVAL_TICKS == 0) {
+                    saveOwnership(server);
+                }
             }
 
             @Override public void stopped(MinecraftServer server) {
+                saveOwnership(server);
                 ServerLinkServices.detach(server);
                 network.stopped(server);
                 LOG.info("{} 服务端已停止", ModIdentity.NAME);
@@ -155,6 +153,11 @@ public final class Bootstrap {
             }
 
             @Override public void playerBrokeBlock(ServerPlayer player, BlockPos position, BlockState state) {
+                // 方块被拆了，这一格原来的归属就不再对应任何方块。
+                var ownership = ServerLinkServices.ownership(player.serverLevel().getServer());
+                if (ownership != null) {
+                    ownership.forget(player.serverLevel().dimension().location().toString(), position);
+                }
                 var confirmations = ServerLinkServices.confirmations(player.serverLevel().getServer());
                 if (confirmations != null) confirmations.broke(player, position, state);
             }
@@ -168,18 +171,19 @@ public final class Bootstrap {
      */
     private static ControlLoop withSurvivalNeeds(
             TaskEventSink events,
-            InteractionSender interactionSender, MenuActions menuActions,
+            InteractionSender interactionSender, MenuActions menuActions, Interactions interactions,
             CombatSenses combatSenses, WalkTo walks,
-            EatSoonTask.FoodMoves foodMoves) {
+            EatSoonTask.FoodMoves foodMoves, ReadsFoodValues foods) {
         return new ControlLoop(List.of(
                 new DigOutNeed(new SurvivalSituation.FromPlayer(),
                         () -> new NativeBlockBreaking(interactionSender, menuActions)),
                 new BreathNeed(new SurvivalSituation.FromPlayer()),
-                new FallNeed(new SurvivalSituation.FromPlayer(), interactionSender, menuActions),
+                new FallNeed(new SurvivalSituation.FromPlayer(), interactions, FirstPersonScene::of,
+                        PlayerContext::backpack),
                 new SelfDefenseNeed(combatSenses, new LiveCombatMoves(walks), events),
-                new HungerNeed(new LiveHungerView(), foodMoves, events),
+                new HungerNeed(new LiveHungerView(foods), foodMoves, events),
                 new NightfallNeed(new LiveNightView(combatSenses),
-                        LiveNightAndEdgeMoves.burrow(events), events),
+                        LiveNightAndEdgeMoves.burrow(events)),
                 new EdgeProximityNeed(new LiveEdgeView(),
                         LiveNightAndEdgeMoves.retreat(walks, events))));
     }
@@ -238,35 +242,37 @@ public final class Bootstrap {
             if (instanceConfig.allowGameCommands()) {
                 LOG.info("{} 本实例允许角色执行游戏命令（配置文件放开）", ModIdentity.NAME);
             }
-            // 交互提交与容器界面操作共用同一份每刻一次的交互机会；两边都建好后互相接上，再挂进角色上下文。
+            // 交互提交与容器界面操作共用角色上下文里同一份每刻一次的交互机会；两边建好后互相接上，再挂进角色上下文。
             // 行为层的生存需求要靠这条轨道挖掘与放水，所以在这里创建并互相接好。
-            InteractionOpportunity opportunity = new InteractionOpportunity();
-            menuActions = new DefaultMenuActions(opportunity, playerControl.input());
-            interactionSender = new DefaultInteractionSender(menuActions, opportunity);
+            menuActions = new DefaultMenuActions(playerControl.input());
+            interactionSender = new DefaultInteractionSender(menuActions);
             menuActions.attachSender(interactionSender);
             playerControl.attachInteractionEntries(interactionSender, menuActions);
             // 按住使用键的投影：持续使用的提交方接入前没有任务占用，投影读到的始终是真实键值。
             UseKeyProjection useKeyProjection = new UseKeyHoldProjection(useKeyHold);
             // 吃随身食物：挑一件能直接吃的，换到主手后原生按住吃完一口。
+            // 食物数值一份：饿了挑吃的、数口粮都按游戏的食物组件认。
+            ReadsFoodValues foods = PlayerViews.foods(() -> playerControl.activeContext().orElse(null));
             EatsCarriedFood foodMoves = new EatsCarriedFood(
                     PlayerViews.backpack(() -> playerControl.activeContext().orElse(null)),
-                    PlayerViews.foods(() -> playerControl.activeContext().orElse(null)),
+                    foods,
                     new ClientMovesToMainhand(() -> playerControl.activeContext().orElse(null)),
                     useKeyProjection);
             // 战斗感观一份：生存需求的自卫与战斗能力看的是同一份伤害证据。
-            combatSenses = new LiveCombatSenses(new CombatMemory());
+            combatSenses = new LiveCombatSenses(new CombatMemory(), foods);
             // 控制循环按急迫程度登记生存需求：必须立刻处理的先登记，同样急时它先插进来；
             // 生存需求的事件从同一条任务事件流出去。主任务由目标运行表挂上：LLM 用 execute 派了活，
             // 目标就成为主任务。
-            controlLoop = withSurvivalNeeds(taskEvents, interactionSender, menuActions, combatSenses, walks, foodMoves);
+            // 交互动作入口与按住使用键投影：生存需求的落地放水、能力清单在进世界时都用它们。
+            interactions = new Interactions(useKeyProjection);
+            controlLoop = withSurvivalNeeds(taskEvents, interactionSender, menuActions, interactions,
+                    combatSenses, walks, foodMoves, foods);
             // Mixin 钩子拿不到构造注入，只能在这里登记；服务本体仍以实例传递。
             ClientHooks.registerPlayerControl(playerControl);
             ClientHooks.registerBlockScans(blockScans);
             ClientHooks.registerUseKeyHold(useKeyHold);
             ClientHooks.registerSubtitleFeed(subtitles);
             ClientHooks.registerChatLog(new ChatLog());
-            // 交互动作入口与按住使用键投影：能力清单在进世界时用它们拼装各能力。
-            interactions = new Interactions(useKeyProjection);
             // 目标执行与 MCP 工具：LLM 用 execute 下达的目标经目标运行表成为控制循环的主任务；
             // 目标处境与生存需求的事件都进同一条任务事件流，宿主用 events 读。
             // 没进世界时的占位存储：进世界时换成那个世界的存盘（见 enterWorld），不在世界里也下达不了目标。
@@ -302,7 +308,7 @@ public final class Bootstrap {
         void connectSession(LinkTransport transport) {
             session = new ServerLinkSession(transport);
             // 查询方块归属是第一个只读操作。
-            session.router().register(new ClientOperation("ownership.query", 1, false));
+            session.router().register(new ClientOperation(OwnershipQuery.OPERATION, 1, false));
         }
 
         @Override public void started() {
@@ -344,10 +350,20 @@ public final class Bootstrap {
                 // 开关开启时，这次进世界要逐刻请求控制权直到拿到；直播待机没有目标也守得住角色。
                 startupAutomationPending = automationOnJoin;
             } else if (minecraft.level == null) {
-                // 离开世界：没做完的目标停手存成暂停，下次进这个世界时恢复；不让它跟进下一个世界接着跑。
-                if (worldScope[0] != null) goals.leaveWorld();
-                worldScope[0] = null;
+                leaveWorld();
             }
+        }
+
+        // 离开世界：没做完的目标停手存成暂停（下次进这个世界时恢复），再把世界记忆里还没存盘的改动写下去，
+        // 最后丢掉现场；不让目标跟进下一个世界接着跑。方块扫描索引按维度名分开，不清空的话
+        // 下一个世界的同名维度会读到上一个世界的命中。
+        private void leaveWorld() {
+            if (worldScope[0] != null) {
+                goals.leaveWorld();
+                worldScope[0].memory().flush();
+                blockScans.dropAll();
+            }
+            worldScope[0] = null;
         }
 
         /**
@@ -386,7 +402,7 @@ public final class Bootstrap {
         @Override public void stopping() {
             playerControl.shutdown();
             blockScans.dropAll();
-            worldScope[0] = null;
+            leaveWorld();
             if (mcp != null) mcp.stop();
             LOG.info("{} 客户端即将退出", ModIdentity.NAME);
         }

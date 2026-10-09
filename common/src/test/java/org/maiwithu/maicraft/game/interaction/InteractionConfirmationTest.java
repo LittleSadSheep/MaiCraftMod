@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Assertions;
 
 /**
  * 组合确认的结算顺序：任一匹配即通过，还有等待项就继续等，全部结束才综合未生效或不一致；
@@ -30,7 +31,7 @@ class InteractionConfirmationTest {
 
     @Test
     void anyOfRejectsAnEmptyConditionList() {
-        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+        Assertions.assertThrows(IllegalArgumentException.class,
                 InteractionConfirmation::anyOf);
     }
 

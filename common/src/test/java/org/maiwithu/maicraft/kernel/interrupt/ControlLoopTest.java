@@ -170,7 +170,7 @@ class ControlLoopTest {
         assertEquals("换气", finished.interrupting().name());
         assertEquals(TaskResult.Status.DONE, finished.finished().status());
 
-        // 下一刻轮回主任务：从原地接着做，不再 start，也没有再被暂停；被打断的那两刻没有轮到它。
+        // 下一刻轮到主任务：从原地接着做，不再 start，也没有再被暂停；被打断的那两刻没有轮到它。
         ControlLoop.Decision.Advanced resumed = assertAdvanced(loop.tick(TICK));
         assertSame(main, resumed.task());
         assertNull(resumed.interrupting());
@@ -304,6 +304,25 @@ class ControlLoopTest {
         assertTrue(main.ticks > 0, "缓冲期里主任务照常推进");
         loop.tick(new TestContext(ControlLoop.RETRY_AFTER_FAILED_TICKS + 1));
         assertEquals(2, buried.created, "缓冲期过了再试一次");
+    }
+
+    @Test
+    void needThatKeepsFailingWaitsLongerEachTime() {
+        // 饿了却弄不到吃的：接连没做成，等待逐次加倍，不每隔五秒就打断一次手上的活。
+        FakeTask main = new FakeTask("挖矿", Interruptibility.WORKING);
+        FakeNeed hunger = FakeNeed.always("饥饿", Urgency.SOON, () -> new FailingTask("进食临时"));
+        ControlLoop loop = new ControlLoop(List.of(hunger));
+        loop.setMainTask(main);
+
+        long secondTry = ControlLoop.RETRY_AFTER_FAILED_TICKS;
+        long thirdTry = secondTry + 2 * ControlLoop.RETRY_AFTER_FAILED_TICKS;
+        for (long tick = 0; tick < thirdTry; tick++) {
+            loop.tick(new TestContext(tick));
+        }
+
+        assertEquals(2, hunger.created, "第二次没做成后要等两倍的时间");
+        loop.tick(new TestContext(thirdTry));
+        assertEquals(3, hunger.created, "加倍后的等待过了再试一次");
     }
 
     @Test

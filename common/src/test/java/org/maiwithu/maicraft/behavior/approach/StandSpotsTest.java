@@ -97,7 +97,8 @@ class StandSpotsTest {
         StandSpots.Ranking far = StandSpots.find(entity, REACH, world, walking, guarded);
         assertFalse(far.spots().isEmpty());
         assertEquals(7.0, far.spots().getFirst().walkCost());
-        // 实体距离收得极紧时一个候选都留不下；把身体能探进实体的两格头顶封住，免得替身里站进实体。
+        // 实体距离收得极紧时一个候选都留不下；把身体能探进实体的三格头顶封住，免得替身里站进实体。
+        world.lowCeiling.add(new BlockPos(4, 62, 0));
         world.lowCeiling.add(new BlockPos(4, 63, 0));
         world.lowCeiling.add(new BlockPos(4, 64, 0));
         ReachRules 贴脸 = new ReachRules(4.5, 0.4, 3, 1.62);

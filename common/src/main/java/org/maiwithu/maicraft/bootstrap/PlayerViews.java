@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.bootstrap;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.OptionalInt;
 import java.util.Optional;
 import java.util.function.Supplier;
 
@@ -49,6 +50,16 @@ public final class PlayerViews {
             @Override public int totalSlots() {
                 BackpackView current = currentBackpack(context);
                 return current == null ? 0 : current.totalSlots();
+            }
+
+            @Override public OptionalInt hotbarSlotOf(String itemId) {
+                BackpackView current = currentBackpack(context);
+                return current == null ? OptionalInt.empty() : current.hotbarSlotOf(itemId);
+            }
+
+            @Override public int selectedHotbarSlot() {
+                BackpackView current = currentBackpack(context);
+                return current == null ? -1 : current.selectedHotbarSlot();
             }
         };
     }

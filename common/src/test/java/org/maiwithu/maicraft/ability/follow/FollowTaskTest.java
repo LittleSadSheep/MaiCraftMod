@@ -19,6 +19,8 @@ import org.maiwithu.maicraft.kernel.task.TickResult;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import org.maiwithu.maicraft.game.player.PlayerContext;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -31,7 +33,7 @@ class FollowTaskTest {
 
     /** 刻号替身。 */
     private record Tick(long gameTick) implements TickContext {
-        @Override public org.maiwithu.maicraft.game.player.PlayerContext player() {
+        @Override public PlayerContext player() {
             throw new IllegalStateException("跟随任务的离线测试不碰角色对象");
         }
     }
@@ -167,7 +169,7 @@ class FollowTaskTest {
         FollowTask follow = new FollowTask(
                 new FollowInput(SEEN, 3, new Permissions(
                         Permissions.BlockChanges.NONE, Permissions.Fight.HOSTILE_MOBS, false,
-                        Permissions.AnimalKilling.WILD, Permissions.SurvivalNeeds.ON, java.util.Set.of())),
+                        Permissions.AnimalKilling.WILD, Permissions.SurvivalNeeds.ON, Set.of())),
                 view, walks);
         follow.start(new Tick(0));
         follow.tick(new Tick(0));

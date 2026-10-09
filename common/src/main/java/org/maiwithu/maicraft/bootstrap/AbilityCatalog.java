@@ -254,7 +254,9 @@ public final class AbilityCatalog {
         ChatChannel chat = deps.chat();
         ReadsChatEcho echo = new ReadsChatEcho() {
             @Override public boolean appearsInChat(String message) { return chat.appearsInChat(message); }
-            @Override public boolean anyLineAfter(long sinceMillis) { return chat.anyLineAfter(sinceMillis); }
+            // 游戏命令不回显成聊天：发前记下聊天栏的记号，发后读这之后服务器回了什么。
+            @Override public long mark() { return chat.mark(); }
+            @Override public List<String> shownSince(long mark) { return chat.shownSince(mark); }
         };
         return new ChatAbility(chat::send, echo, deps.allowGameCommands());
     }
@@ -284,9 +286,10 @@ public final class AbilityCatalog {
     private static AbilityModule obtainModule(Deps deps, LiveApproaches bringsClose,
             ClientMovesToMainhand toMainhand, PermissionCheck permission) {
         ClientQuickMoves obtainQuickMoves = new ClientQuickMoves();
-        RecipeRuns recipeRuns = new MenuRecipeRuns(bringsClose, deps.interactions(),
-                obtainQuickMoves, deps.memory(), deps.context());
         RegistryRecipeReads recipeReads = new RegistryRecipeReads(deps.context(), deps.itemTags());
+        // 在工作站上动手：熔炉添燃料时按同一份燃料表挑身上烧得最久的。
+        RecipeRuns recipeRuns = new MenuRecipeRuns(bringsClose, deps.interactions(),
+                recipeReads, deps.memory(), deps.context());
         ClientYieldScans yieldScans = new ClientYieldScans(deps.blockScans(), deps.context());
         ClientDigsBlocks digs = new ClientDigsBlocks();
         ClientWorkstationPlacer placer = new ClientWorkstationPlacer(

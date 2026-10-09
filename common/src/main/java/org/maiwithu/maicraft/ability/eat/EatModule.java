@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
 import org.maiwithu.maicraft.behavior.acquire.ReadsItemTags;
 import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
+import org.maiwithu.maicraft.behavior.survival.FoodPicker;
 import org.maiwithu.maicraft.behavior.inventory.MovesToMainhand;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
@@ -147,14 +148,9 @@ public final class EatModule implements AbilityModule {
 
     // 身上（主背包加副手）带着的能吃的：数量累计，数值问游戏的食物组件。
     private List<FoodPicker.Carried> carriedFoods() {
-        List<FoodPicker.Carried> candidates = new ArrayList<>();
         List<BackpackStack> stacks = new ArrayList<>(backpack.stacks());
         offhand.heldInOffhand().ifPresent(stacks::add);
-        for (BackpackStack stack : stacks) {
-            foods.of(stack.itemId()).ifPresent(value ->
-                    candidates.add(new FoodPicker.Carried(stack.itemId(), stack.count(), value)));
-        }
-        return candidates;
+        return FoodPicker.carried(stacks, foods);
     }
 
     /** 直接结束的失败：问题种类写明是缺食物、时间不对，还是不支持。 */

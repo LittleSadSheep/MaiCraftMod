@@ -14,6 +14,7 @@ import org.maiwithu.maicraft.game.interaction.PendingInteraction;
 import org.maiwithu.maicraft.game.interaction.ScriptedInteractionSender;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
+import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /**
  * 持续使用的离线场景：确认开始后才进入按住；按住期间逐刻续期投影；
@@ -72,7 +73,7 @@ class SustainedUseTest {
         // 确认条件按测试开关翻转：翻真那一刻松手，松开确认后再如实记生效。
         class Done implements InteractionConfirmation {
             boolean reached;
-            @Override public Verdict observe(org.maiwithu.maicraft.game.player.PlayerContext context) {
+            @Override public Verdict observe(PlayerContext context) {
                 return reached ? Verdict.APPLIED : Verdict.PENDING;
             }
         }

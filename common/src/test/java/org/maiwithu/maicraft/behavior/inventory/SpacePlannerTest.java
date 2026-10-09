@@ -28,7 +28,8 @@ class SpacePlannerTest {
 
     private static SpacePlanner.Scene scene(List<BackpackStack> stacks, int freeSlots, int needed,
                                             boolean carried, List<KnownContainer> containers) {
-        return new SpacePlanner.Scene(stacks, freeSlots, needed, Set.of(), true, carried, containers);
+        // 有随身背包时给它足够的空格，测试只关心先后顺序。
+        return new SpacePlanner.Scene(stacks, freeSlots, needed, Set.of(), true, carried ? 27 : 0, containers);
     }
 
     @Test
@@ -104,10 +105,23 @@ class SpacePlannerTest {
     void 任务留用的东西不算进能动与能问的范围() {
         BackpackStack reserved = stack("minecraft:iron_ingot", 30);
         SpacePlanner.Scene withReserved = new SpacePlanner.Scene(
-                List.of(reserved), 0, 1, Set.of("minecraft:iron_ingot"), true, false, List.of());
+                List.of(reserved), 0, 1, Set.of("minecraft:iron_ingot"), true, 0, List.of());
         SpacePlanner.Plan plan = SpacePlanner.plan(withReserved);
         // 唯一的物品是任务要用的：既不自动动它，也不把它列进要问的贵重品。
         assertNull(plan.question());
         assertEquals(Problem.Kind.INVENTORY_FULL, plan.problem().kind());
+    }
+
+    @Test
+    void fullCarriedBackpackFallsBackToChestsThenTheGround() {
+        // 随身背包只剩一格：第一堆放进去，第二堆存进记得的箱子，第三堆才丢。
+        List<BackpackStack> stacks = List.of(junk("minecraft:dirt", 64), junk("minecraft:gravel", 64),
+                junk("minecraft:sand", 64));
+        SpacePlanner.Scene scene = new SpacePlanner.Scene(stacks, 0, 3, Set.of(), false, 1,
+                List.of(new KnownContainer("门口的箱子", 1, 64, 1)));
+        List<SpaceMove> moves = SpacePlanner.plan(scene).moves();
+        assertTrue(moves.get(0) instanceof SpaceMove.ToCarriedBackpack);
+        assertTrue(moves.get(1) instanceof SpaceMove.ToKnownContainer);
+        assertTrue(moves.get(2) instanceof SpaceMove.DropStack);
     }
 }

@@ -49,12 +49,14 @@ public final class LiveSeenTargets implements SeenTargets {
             return null;
         }
         Entity entity = level.getEntity(entityId);
-        if (entity == null || !entity.isAlive()) {
+        if (entity == null) {
             return null;
         }
+        // 刚被打死的生物还会在客户端倒地一小会儿（死亡动画）：这时它已经不算活着，正是确认击败的证据，
+        // 不能当成"不在了"；动画放完实体被移除后才查不到。
         double distance = context.player().localPlayer().distanceTo(entity);
-        boolean dead = entity instanceof LivingEntity living && living.isDeadOrDying();
-        return new Observed(distance, dead);
+        boolean dead = !entity.isAlive() || entity instanceof LivingEntity living && living.isDeadOrDying();
+        return new Observed(entity.getX(), entity.getY(), entity.getZ(), distance, dead);
     }
 
     private static ClientLevel level(TickContext context) {

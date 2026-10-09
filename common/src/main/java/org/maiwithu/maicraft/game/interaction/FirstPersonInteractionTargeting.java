@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.game.interaction;
 
+import org.maiwithu.maicraft.game.world.InteractionRange;
+import net.minecraft.world.phys.EntityHitResult;
+import net.minecraft.world.entity.projectile.ProjectileUtil;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.world.entity.Pose;
+
+
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.BucketItem;
 import net.minecraft.world.item.Item;
@@ -24,10 +28,10 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
-import java.util.Comparator;
-import java.util.Set;
-import java.util.List;
-import java.util.ArrayList;
+
+
+
+
 import java.util.function.Predicate;
 
 /**
@@ -40,6 +44,34 @@ public final class FirstPersonInteractionTargeting {
     private static final double FACE_INSET = 1.0e-3D;
 
     private FirstPersonInteractionTargeting() {}
+
+    /**
+     * 原版准星此刻指着谁：方块按方块触及距离、实体按实体触及距离各算各的（两者都读玩家属性），
+     * 墙后的实体点不到，超过方块距离的方块算没指着。和原版每刻刷新准星的规则一致。
+     */
+    public static HitResult crosshairTarget(LocalPlayer player) {
+        double blockRange = InteractionRange.blockReach(player);
+        double entityRange = InteractionRange.entityReach(player);
+        double range = Math.max(blockRange, entityRange);
+        Level level = player.level();
+        Vec3 eye = player.getEyePosition();
+        Vec3 reachVec = player.getViewVector(1.0f).scale(range);
+        Vec3 end = eye.add(reachVec);
+        BlockHitResult block = level.clip(new ClipContext(
+                eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
+        double blockDistanceSq = block.getType() == HitResult.Type.MISS
+                ? range * range : block.getLocation().distanceToSqr(eye);
+        double entityLimitSq = Math.min(blockDistanceSq, entityRange * entityRange);
+        AABB box = player.getBoundingBox().expandTowards(reachVec).inflate(1.0);
+        EntityHitResult entityHit = ProjectileUtil.getEntityHitResult(
+                player, eye, end, box, e -> !e.isSpectator() && e.isPickable(), entityLimitSq);
+        if (entityHit != null) return entityHit;
+        // 方块比方块触及距离远：原版准星不认它，按没指着处理。
+        if (block.getType() != HitResult.Type.MISS && blockDistanceSq > blockRange * blockRange) {
+            return BlockHitResult.miss(block.getLocation(), block.getDirection(), block.getBlockPos());
+        }
+        return block;
+    }
 
     /** 桶由原版 useItem 沿视线取水／倒水，不要改成点击水后面的机器。 */
     public static boolean usesBucketRay(Item item) {
@@ -228,72 +260,6 @@ public final class FirstPersonInteractionTargeting {
     public static boolean admitsIgnitionPlacement(Level level, BlockHitResult hit) {
         BlockPos placement = hit.getBlockPos().relative(hit.getDirection());
         return level.isLoaded(placement) && level.getBlockState(placement).isAir();
-    }
-
-    /**
-     * 选择最近的已加载可站立脚位格，确保能从该处实际点击 {@code target} 的某个表面。
-     * 这是通用的物理交互几何判定，不是工作台专用规则。
-     */
-    // 只在目标水平三格、上下有限高度内找干燥站位；要有落脚支撑、身体两格空且能看到目标。
-    // 最后按与玩家的直线距离选择，不在这里证明有路能走到。
-    public static BlockPos nearestVisibleStand(
-            LocalPlayer player, BlockPos target, double reach, Set<Long> excluded) {
-        if (target == null || !player.level().isLoaded(target)) return null;
-        BlockPos current = player.blockPosition();
-        ArrayList<BlockPos> candidates = new ArrayList<>();
-        for (int radius = 1; radius <= 3; radius++) {
-            for (int dx = -radius; dx <= radius; dx++) {
-                for (int dz = -radius; dz <= radius; dz++) {
-                    if (Math.max(Math.abs(dx), Math.abs(dz)) != radius) continue;
-                    for (int dy = -2; dy <= 1; dy++) {
-                        BlockPos feet = target.offset(dx, dy, dz);
-                        if ((excluded == null || !excluded.contains(feet.asLong()))
-                                && standable(player.level(), feet)
-                                && visibleBlockHit(
-                                        player.level(), player,
-                                        Vec3.atBottomCenterOf(feet)
-                                                .add(0.0D, player.getEyeHeight(Pose.STANDING), 0.0D),
-                                        target, reach) != null) {
-                            candidates.add(feet.immutable());
-                        }
-                    }
-                }
-            }
-        }
-        return candidates.stream()
-                .min(Comparator.comparingDouble(candidate -> candidate.distSqr(current)))
-                .orElse(null);
-    }
-
-    // 这是较保守的站位筛选：不接受水中或身体格里有碰撞形状的位置，脚下还得能托住上表面。
-    private static boolean standable(Level level, BlockPos feet) {
-        if (!level.isLoaded(feet) || !level.isLoaded(feet.above())
-                || !level.isLoaded(feet.below())) return false;
-        if (!level.getFluidState(feet).isEmpty()
-                || !level.getFluidState(feet.above()).isEmpty()) return false;
-        if (!level.getBlockState(feet).getCollisionShape(level, feet).isEmpty()
-                || !level.getBlockState(feet.above())
-                        .getCollisionShape(level, feet.above()).isEmpty()) return false;
-        BlockPos support = feet.below();
-        return level.getBlockState(support).isFaceSturdy(level, support, Direction.UP);
-    }
-
-    /** 将同一目标周围全部可见脚位交给寻路器比较路程，不能先按直线距离锁死一个上不去的高台。 */
-    public static List<BlockPos> visibleInteractionStands(
-            LocalPlayer player, BlockPos target, Set<Long> excluded, Predicate<Vec3> visibleFrom) {
-        ArrayList<BlockPos> candidates = new ArrayList<>();
-        // 角色已在真实眼位够到目标时保留原姿态，不用格心眼位或干燥整格筛选否决当前可执行的动作。
-        BlockPos current = player.blockPosition();
-        if (!excluded.contains(current.asLong()) && visibleFrom.test(player.getEyePosition())) candidates.add(current);
-        // 眼睛高于脚位，低于目标三到五格也可能够得到；最终以原生射线和真实触及距离筛选。
-        for (int dx = -4; dx <= 4; dx++) for (int dz = -4; dz <= 4; dz++) for (int dy = -5; dy <= 3; dy++) {
-            BlockPos feet = target.offset(dx, dy, dz);
-            if (excluded.contains(feet.asLong()) || !standable(player.level(), feet)
-                    || !player.level().getWorldBorder().isWithinBounds(feet)) continue;
-            Vec3 eyes = Vec3.atBottomCenterOf(feet).add(0, player.getEyeHeight(Pose.STANDING), 0);
-            if (visibleFrom.test(eyes) && !candidates.contains(feet)) candidates.add(feet.immutable());
-        }
-        return List.copyOf(candidates);
     }
 
     private static Vec3 offset(BlockPos pos, double x, double y, double z) {

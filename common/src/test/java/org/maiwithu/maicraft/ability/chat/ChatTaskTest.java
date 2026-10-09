@@ -48,22 +48,37 @@ class ChatTaskTest {
     /** 回显替身：出现哪些话、哪些时刻出现过新行，由测试摆。 */
     private static final class StubEcho implements ReadsChatEcho {
         private final Set<String> echoed = new HashSet<>();
-        private boolean lineAfter;
+        private final List<String> lines = new ArrayList<>();
+        /** 提交后服务器回的一行：记号一取走就冒出来，模拟反馈在命令发出之后才到。 */
+        private String replyAfterSend;
 
         void echo(String message) {
             echoed.add(message);
         }
 
         void feedbackLine() {
-            lineAfter = true;
+            replyAfterSend = "Set the time to 1000";
+        }
+
+        void earlierLine(String line) {
+            lines.add(line);
         }
 
         @Override public boolean appearsInChat(String message) {
             return echoed.contains(message);
         }
 
-        @Override public boolean anyLineAfter(long sinceMillis) {
-            return lineAfter;
+        @Override public long mark() {
+            long mark = lines.size();
+            if (replyAfterSend != null) {
+                lines.add(replyAfterSend);
+                replyAfterSend = null;
+            }
+            return mark;
+        }
+
+        @Override public List<String> shownSince(long mark) {
+            return List.copyOf(lines.subList((int) mark, lines.size()));
         }
     }
 
@@ -128,7 +143,20 @@ class ChatTaskTest {
         assertEquals(List.of("/time set day"), sender.sent);
         assertEquals(TaskResult.Status.DONE, result.status());
         assertTrue(result.summary().contains("命令反馈行"), result.summary());
+        assertTrue(result.summary().contains("Set the time to 1000"), "服务器回的话原样写进结果");
         assertTrue(result.unconfirmed().isEmpty(), "看到了反馈行就不留没能确认的交互");
+    }
+
+    @Test
+    void chatBeforeTheCommandIsNotTakenAsItsFeedback() {
+        // 发命令之前聊天栏里已有的话不算这条命令的回话：没有新行就按没能确认收场。
+        StubSender sender = new StubSender();
+        StubEcho echo = new StubEcho();
+        echo.earlierLine("<Steve> 早上好");
+        TaskResult result = runToFinish(new ChatTask("/time set day", sender, echo), new TestTick());
+
+        assertEquals(1, result.unconfirmed().size());
+        assertTrue(!result.summary().contains("早上好"), result.summary());
     }
 
     @Test

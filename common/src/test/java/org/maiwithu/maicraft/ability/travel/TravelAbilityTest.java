@@ -12,6 +12,7 @@ import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
 import org.maiwithu.maicraft.behavior.travel.DestinationResolver;
 import org.maiwithu.maicraft.behavior.travel.ReadsPlacedBlocks;
 import org.maiwithu.maicraft.behavior.travel.TravelProgressListener;
+import org.maiwithu.maicraft.behavior.travel.TravelDestination;
 import org.maiwithu.maicraft.behavior.travel.TravelProgress;
 import org.maiwithu.maicraft.behavior.travel.TravelTask;
 import org.maiwithu.maicraft.behavior.travel.TravelWorldView;
@@ -40,7 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** 出行能力：目标、容差、时限与许可凑成一次出行任务；能力本身不解析目的地、不走路。 */
+/** 出行能力：做决定时解析目的地（说不清就问一次），再把目的地、时限与许可凑成一次出行任务；能力本身不走路。 */
 class TravelAbilityTest {
 
     private final StubWalks walks = new StubWalks();
@@ -92,8 +93,9 @@ class TravelAbilityTest {
 
         StepDecision.Run run = assertInstanceOf(StepDecision.Run.class, decision);
         TravelInput input = assertInstanceOf(TravelInput.class, run.input());
-        assertEquals(new Target.Position(12, null, -2, null), input.target());
-        assertEquals(2.0, input.radius());
+        // 没给 y：只走到那一柱列，到了再找能站的格子。
+        assertFalse(input.destination().heightConfirmed());
+        assertEquals(2.0, input.destination().radius());
         assertEquals(0, input.maxSeconds(), "没给时限就不设时限");
         // 默认许可 natural：可以挖开天然方块、垫临时方块开路。
         assertEquals(TerrainPermit.NATURAL, input.permit());
@@ -101,10 +103,10 @@ class TravelAbilityTest {
 
     @Test
     void decideCarriesToleranceTimeLimitAndPermission() {
-        Goal request = goal(new Target.Landmark("家"), "{\"radius\":0,\"max_seconds\":90}");
+        Goal request = goal(new Target.Position(5, 70, 5, null), "{\"radius\":0,\"max_seconds\":90}");
         StepDecision.Run run = assertInstanceOf(StepDecision.Run.class, ability.decide(step(request)));
         TravelInput input = assertInstanceOf(TravelInput.class, run.input());
-        assertEquals(0.0, input.radius(), "给 0 表示必须站进那一格");
+        assertEquals(0.0, input.destination().radius(), "给 0 表示必须站进那一格");
         assertEquals(90, input.maxSeconds());
     }
 
@@ -132,13 +134,56 @@ class TravelAbilityTest {
     void factoryCreatesTravelTaskCarryingCollaborators() {
         TaskFactories factories = new TaskFactories();
         ability.registerTasks(factories);
-        TravelInput input = new TravelInput(new Target.Position(1, 2, 3, null), 2.0, 0, TerrainPermit.NATURAL);
+        TravelInput input = new TravelInput(
+                TravelDestination.confirmed(new WorldPosition(1, 2, 3, null), 2.0), 0, TerrainPermit.NATURAL);
 
         assertTrue(factories.supports(TravelInput.class));
         Task task = factories.create(input);
         assertInstanceOf(TravelTask.class, task);
         assertNotNull(task.describe());
         assertFalse(task.describe().isBlank());
+    }
+
+    @Test
+    void unknownLandmarkIsAskedOnceThenEnds() {
+        Goal request = goal(new Target.Landmark("粮仓"), "{}");
+        // 没记过的地点：问一次，不拿脚边顶替。
+        StepDecision.Ask ask = assertInstanceOf(StepDecision.Ask.class, ability.decide(step(request)));
+        assertNotNull(ask.question());
+        // 问过以后不再问同一个问题：选"这次不去"就取消，别的回答按说不清目的地结束。
+        StepDecision.Finish gaveUp = assertInstanceOf(StepDecision.Finish.class,
+                ability.decide(answered(request, "give_up")));
+        assertEquals(TaskResult.Status.CANCELLED, gaveUp.result().status());
+        StepDecision.Finish unclear = assertInstanceOf(StepDecision.Finish.class,
+                ability.decide(answered(request, "tell_where")));
+        assertEquals(Problem.Kind.NOT_FOUND, unclear.result().problem().kind());
+    }
+
+    @Test
+    void hereEndsWithoutRunningATask() {
+        StepDecision.Finish finish = assertInstanceOf(StepDecision.Finish.class,
+                ability.decide(step(goal(new Target.Here(), "{}"))));
+        assertEquals(TaskResult.Status.DONE, finish.result().status());
+    }
+
+    private static StepContext answered(Goal goal, String answer) {
+        return new StepContext() {
+            @Override public Goal goal() {
+                return goal;
+            }
+
+            @Override public int stepIndex() {
+                return 0;
+            }
+
+            @Override public TickContext tick() {
+                throw new IllegalStateException("决定阶段不应碰到每刻上下文");
+            }
+
+            @Override public List<String> answers() {
+                return List.of(answer);
+            }
+        };
     }
 
     /** 能力决定阶段不会开始走到；真走了说明薄皮越界。 */

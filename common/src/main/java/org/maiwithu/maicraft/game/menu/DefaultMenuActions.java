@@ -15,7 +15,6 @@ import net.minecraft.world.item.crafting.RecipeHolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.maiwithu.maicraft.game.interaction.InteractionOpportunity;
 import org.maiwithu.maicraft.game.interaction.InteractionSender;
 import org.maiwithu.maicraft.game.interaction.PendingInteraction;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -25,7 +24,6 @@ import org.maiwithu.maicraft.game.player.PlayerInput;
 public final class DefaultMenuActions implements MenuActions {
     private static final Logger LOG = LoggerFactory.getLogger(DefaultMenuActions.class);
 
-    private final InteractionOpportunity opportunity;
     private final PlayerInput playerInput;
     /** 挂起的菜单协议要与世界动作互斥；交互提交方由启动时在两端都建好后接进来。 */
     private InteractionSender sender;
@@ -34,8 +32,7 @@ public final class DefaultMenuActions implements MenuActions {
     private AbstractContainerMenu closingMenu;
     private GuiPreparation worldPreparation;
 
-    public DefaultMenuActions(InteractionOpportunity opportunity, PlayerInput playerInput) {
-        this.opportunity = opportunity;
+    public DefaultMenuActions(PlayerInput playerInput) {
         this.playerInput = playerInput;
     }
 
@@ -80,11 +77,11 @@ public final class DefaultMenuActions implements MenuActions {
         // 保留玩家打开的其他对话框；新打开的背包也须实际渲染一帧后才能点击。
         if (MenuVisibility.worldInputAllowed(minecraft.screen)
                 && player.containerMenu == player.inventoryMenu) {
-            if (!opportunity.available(context)) return false;
-            opportunity.tryClaim(context);
+            if (!context.canInteractThisTick()) return false;
+            context.tryClaimInteraction();
             minecraft.setScreen(new MenuVisibility.PlayerInventoryScreen(player));
         }
-        return opportunity.available(context) && visibility.ready(minecraft, context);
+        return context.canInteractThisTick() && visibility.ready(minecraft, context);
     }
 
     @Override
@@ -261,13 +258,13 @@ public final class DefaultMenuActions implements MenuActions {
         }
         boolean visible = MenuVisibility.matches(Minecraft.getInstance(), closingMenu);
         playerInput.releaseAll(context.localPlayer());
-        if (!opportunity.available(context)) return;
+        if (!context.canInteractThisTick()) return;
         if (visible && !visibility.ready(Minecraft.getInstance(), context)) {
             // 原任务可能已经结束；关闭菜单尚未确认时，仍需阻止后继任务接管菜单。
-            opportunity.tryClaim(context);
+            context.tryClaimInteraction();
             return;
         }
-        opportunity.tryClaim(context);
+        context.tryClaimInteraction();
         try {
             context.localPlayer().closeContainer();
             closingMenu = null;
@@ -448,7 +445,7 @@ public final class DefaultMenuActions implements MenuActions {
             poll(context, pending);
             if (!pending.terminal() && pending.kind() == PendingMenuAction.Kind.CLOSE) {
                 playerInput.releaseAll(context.localPlayer());
-                opportunity.tryClaim(context);
+                context.tryClaimInteraction();
             }
         }
     }

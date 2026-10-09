@@ -12,9 +12,9 @@ import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilitySpec;
 import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
 import org.maiwithu.maicraft.kernel.ability.Listing;
-import org.maiwithu.maicraft.kernel.goal.AbilityHooks;
+
 import org.maiwithu.maicraft.kernel.goal.Goal;
-import org.maiwithu.maicraft.kernel.goal.Question;
+
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
@@ -25,14 +25,14 @@ import org.maiwithu.maicraft.kernel.param.ParamType;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
-import org.maiwithu.maicraft.kernel.task.TaskInput;
 
 import java.util.List;
 import java.util.Set;
 
 /**
- * 出行能力：走到一个地方。能力只做薄皮——把目标对象、容差、时限和许可凑成一次出行交给
- * 玩家行为层的出行任务；解析目的地、走到、到达确认与结算都是出行任务自己的事。
+ * 出行能力：走到一个地方。能力只做薄皮——做决定时用玩家行为层的目的地解析器把目标对象落成目的地
+ * （说不清就向 LLM 提问，已经站在那里就直接结束），再把目的地、时限和许可交给出行任务；
+ * 走到、到达确认与结算都是出行任务自己的事。
  *
  * <p>里程碑一只有步行：目的地在别的维度、乘船、飞行、电梯都由目的地解析或任务以
  * "暂不支持"如实结束，本能力不做变通。需要的走到、目的地解析、垫方块记录与进展去处
@@ -47,9 +47,6 @@ public final class TravelAbility implements AbilityModule {
     private final DestinationResolver resolver;
     private final ReadsPlacedBlocks placedBlocks;
     private final TravelProgressListener progressListener;
-
-    /** 正在运行的出行任务；目的地解析不清时提问钩子要从它这里取问题。 */
-    private TravelTask running;
 
     public TravelAbility(WalkTo walks, DestinationResolver resolver,
             ReadsPlacedBlocks placedBlocks, TravelProgressListener progressListener) {
@@ -88,32 +85,37 @@ public final class TravelAbility implements AbilityModule {
                     Problem.of(Problem.Kind.UNSUPPORTED,
                             "出行的目标对象没有给：要用坐标、地点名、观察编号或方向说明去哪")));
         }
-        // 坐标是否给全 y、地标是否记得住，由目的地解析在任务里处理，这里不预判。
-        TerrainPermit permit = terrainPermit(goal);
-        return new StepDecision.Run(new TravelInput(goal.target(), step.goal().params().number("radius"),
-                maxSeconds(goal), permit));
+        // 目的地现在就解析：坐标没给 y 走那一柱列，地标没记过就问，观察编号失效就如实结束。
+        var resolution = resolver.resolve(goal.target(), goal.params().number("radius"));
+        if (resolution instanceof DestinationResolver.Resolution.Ready ready) {
+            return new StepDecision.Run(new TravelInput(ready.destination(), maxSeconds(goal), terrainPermit(goal)));
+        }
+        if (resolution instanceof DestinationResolver.Resolution.AlreadyThere) {
+            return new StepDecision.Finish(TaskResult.done("出行：开始时已经站在目的地"));
+        }
+        if (resolution instanceof DestinationResolver.Resolution.Unclear unclear) {
+            // 问过一次就不再问同一个问题：LLM 选了"这次不去"就取消，其余按说不清目的地结束，让它换个说法重新下达。
+            if (step.answers().isEmpty()) {
+                return new StepDecision.Ask(unclear.question());
+            }
+            if (step.answers().contains("give_up")) {
+                return new StepDecision.Finish(TaskResult.cancelled("出行：这次不去了"));
+            }
+            return new StepDecision.Finish(TaskResult.failed("出行：目的地说不清",
+                    Problem.of(Problem.Kind.NOT_FOUND, unclear.question().text(),
+                            "改用坐标或观察编号重新下达出行")));
+        }
+        return new StepDecision.Finish(TaskResult.failed("出行：去不了",
+                ((DestinationResolver.Resolution.DeadEnd) resolution).problem()));
     }
 
     @Override
     public void registerTasks(TaskFactories factories) {
         factories.register(TravelInput.class, input -> {
-            // 每次运行新建出行任务；走到与解析器通过闭包交给任务，不经全局单例。
-            TravelTask task = new TravelTask(input.target(), input.radius(), input.maxSeconds(),
-                    input.permit(), walks, resolver, placedBlocks, progressListener);
-            running = task;
-            return task;
+            // 每次运行新建出行任务；走到与垫方块记录通过闭包交给任务，不经全局单例。
+            return new TravelTask(input.destination(), input.maxSeconds(), input.permit(),
+                    walks, placedBlocks, progressListener);
         });
-    }
-
-    @Override
-    public AbilityHooks hooks() {
-        return new AbilityHooks() {
-            @Override
-            public Question duringTask(StepContext step, TaskInput input) {
-                // 目的地解析不清时出行任务挂起等玩家回答；问题从这里交给内核暂停任务去问。
-                return running == null ? null : running.pendingQuestion().orElse(null);
-            }
-        };
     }
 
     /** 把这次目标的方块许可折算成走到能动多少地形；能不能挖某一格由寻路的方块通行判断把关。 */

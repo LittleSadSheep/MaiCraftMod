@@ -18,10 +18,15 @@ import java.util.Set;
  */
 public final class MenuLayout {
 
-    /** 只存东西的普通容器：容器侧每个槽的放取都按普通槽核对。 */
+    /**
+     * 只存东西的普通容器界面：容器侧每个槽的放取都按普通槽核对。
+     * 这里是菜单类型的注册 ID，不是方块 ID：箱子、木桶、末影箱用 generic_9x1 到 generic_9x6（大箱子是 9x6），
+     * 发射器与投掷器用 generic_3x3，潜影盒与漏斗有自己的菜单类型。类别：游戏事实（原版菜单类型注册表）。
+     */
     private static final Set<String> PLAIN_STORAGE = Set.of(
-            "minecraft:chest", "minecraft:barrel", "minecraft:shulker_box",
-            "minecraft:hopper", "minecraft:dispenser", "minecraft:dropper");
+            "minecraft:generic_9x1", "minecraft:generic_9x2", "minecraft:generic_9x3",
+            "minecraft:generic_9x4", "minecraft:generic_9x5", "minecraft:generic_9x6",
+            "minecraft:generic_3x3", "minecraft:shulker_box", "minecraft:hopper");
 
     /** 熔炉一族：第 0 格是投入口，第 1 格是燃料槽，第 2 格是产出格。 */
     private static final Set<String> FURNACE_LIKE = Set.of(

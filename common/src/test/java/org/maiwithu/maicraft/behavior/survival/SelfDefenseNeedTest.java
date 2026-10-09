@@ -12,6 +12,11 @@ import org.maiwithu.maicraft.kernel.task.Urgency;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import net.minecraft.world.entity.Entity;
+import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.kernel.result.TaskResult;
+import org.maiwithu.maicraft.kernel.task.CloseReason;
+import org.maiwithu.maicraft.kernel.task.TickResult;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -21,7 +26,7 @@ class SelfDefenseNeedTest {
 
     /** 刻号替身。 */
     private record Tick(long gameTick) implements TickContext {
-        @Override public org.maiwithu.maicraft.game.player.PlayerContext player() {
+        @Override public PlayerContext player() {
             throw new IllegalStateException("分流测试不碰角色对象");
         }
     }
@@ -35,14 +40,14 @@ class SelfDefenseNeedTest {
 
         @Override public CombatSenses.CombatProfile profile(TickContext context) { return profile; }
 
-        @Override public net.minecraft.world.entity.Entity entityById(TickContext context, int entityId) { return null; }
+        @Override public Entity entityById(TickContext context, int entityId) { return null; }
     }
 
     /** 什么都不做的任务替身：只占"主任务"这个位置。 */
     private static final Task IDLE_TASK = new Task() {
-        @Override public org.maiwithu.maicraft.kernel.task.TickResult tick(TickContext context) { return null; }
-        @Override public org.maiwithu.maicraft.kernel.result.TaskResult close(
-                org.maiwithu.maicraft.kernel.task.CloseReason reason) { return null; }
+        @Override public TickResult tick(TickContext context) { return null; }
+        @Override public TaskResult close(
+                CloseReason reason) { return null; }
         @Override public void pause() {}
         @Override public String describe() { return "占位的任务"; }
     };
@@ -53,9 +58,9 @@ class SelfDefenseNeedTest {
     /** 既是任务，又声明接得住眼前的威胁。 */
     private static final class ConfidentFightTask implements Task, ThreatResponder {
         @Override public boolean confidentAgainstCurrentThreats() { return true; }
-        @Override public org.maiwithu.maicraft.kernel.task.TickResult tick(TickContext context) { return null; }
-        @Override public org.maiwithu.maicraft.kernel.result.TaskResult close(
-                org.maiwithu.maicraft.kernel.task.CloseReason reason) { return null; }
+        @Override public TickResult tick(TickContext context) { return null; }
+        @Override public TaskResult close(
+                CloseReason reason) { return null; }
         @Override public void pause() {}
         @Override public String describe() { return "在打的活"; }
     }

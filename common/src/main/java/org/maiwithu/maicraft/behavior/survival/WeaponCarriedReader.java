@@ -45,16 +45,6 @@ public final class WeaponCarriedReader {
         return isArrow(player.getOffhandItem());
     }
 
-    /** 是不是能直接吃的东西：威胁评估按它数"带了几份口粮"。 */
-    static boolean isEdible(String item) {
-        return item.endsWith("_apple") || item.endsWith("_carrot") || item.endsWith("_potato")
-                || item.endsWith("_chicken") || item.endsWith("_porkchop") || item.endsWith("_beef")
-                || item.endsWith("_mutton") || item.endsWith("_rabbit") || item.endsWith("_fish")
-                || item.endsWith(":bread") || item.endsWith(":cookie") || item.endsWith(":pumpkin_pie")
-                || item.endsWith(":rotten_flesh") || item.endsWith(":sweet_berries")
-                || item.endsWith(":golden_apple") || item.endsWith(":cooked_salmon");
-    }
-
     /** 手上或背包里是不是能垫能封的方块：极端自保（挖三填一）用它。 */
     static boolean isPlaceableBlock(ItemStack stack) {
         return stack.getItem() instanceof BlockItem;

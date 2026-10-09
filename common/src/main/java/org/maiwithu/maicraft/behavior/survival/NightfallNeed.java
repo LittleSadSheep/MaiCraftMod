@@ -1,16 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.survival;
 
-import org.maiwithu.maicraft.kernel.event.TaskEvent;
-import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.interrupt.SurvivalNeed;
 import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.Urgency;
 
 /**
- * 夜晚这项生存需求：到了能睡的时间，能弄到床就插夜间休息（入睡归睡觉规格，本需求只管分流）；
- * 弄不到床时看处境——安全处或打得过就接着干活，露天又打不过才极端自保。
+ * 夜晚这项生存需求：到了能睡的时间，能弄到床就该去睡（夜间休息还没接上，先接着干活）；
+ * 弄不到床时看处境——安全处或打得过就接着干活，露天又打不过才挖坑封顶熬到天亮。
  */
 public final class NightfallNeed implements SurvivalNeed {
 
@@ -24,7 +22,8 @@ public final class NightfallNeed implements SurvivalNeed {
             return null;
         }
         if (facts.bedAvailable()) {
-            return Urgency.LATER;
+            // 能弄到床就该找空当去睡；夜间休息还没接上之前接着干活，不拿封坑熬夜顶替睡觉。
+            return null;
         }
         if (facts.inShelter()) {
             // 地下矿道、屋里、照明充足：怪物进不来，接着干。
@@ -52,12 +51,10 @@ public final class NightfallNeed implements SurvivalNeed {
 
     private final ReadsNight reader;
     private final BurrowMoves burrow;
-    private final TaskEventSink events;
 
-    public NightfallNeed(ReadsNight reader, BurrowMoves burrow, TaskEventSink events) {
+    public NightfallNeed(ReadsNight reader, BurrowMoves burrow) {
         this.reader = reader;
         this.burrow = burrow;
-        this.events = events;
     }
 
     @Override public String name() { return "夜晚"; }
@@ -70,12 +67,7 @@ public final class NightfallNeed implements SurvivalNeed {
 
     @Override
     public Task createTask(TickContext context) {
-        Facts facts = reader.read(context);
-        if (facts != null && facts.bedAvailable()) {
-            // 夜间休息任务归睡觉规格；这一轨没合进来时退回极端自保，事件里说明。
-            events.publish(TaskEvent.Kind.NEED_UNHANDLED,
-                    "天黑了，附近有床但夜间休息还没接上流程；先按极端自保封顶等待");
-        }
+        // 只有露天又打不过才会插进来：挖个坑把自己封起来熬到天亮。
         return burrow.burrowIn();
     }
 }

@@ -27,6 +27,8 @@ import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
+import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.kernel.task.CloseReason;
 
 /**
  * 拿东西的任务：开始时已够直接完成；引擎做完按实际入包结算，拿到一部分是 partial 加还差几件；
@@ -102,7 +104,7 @@ class ObtainTaskTest {
                 return gameTick;
             }
 
-            @Override public org.maiwithu.maicraft.game.player.PlayerContext player() {
+            @Override public PlayerContext player() {
                 return null;
             }
         };
@@ -212,7 +214,7 @@ class ObtainTaskTest {
 
     /** 收尾理由占位：测试只关心 tick 出的结果。 */
     private static final class CloseReasonForTest {
-        static final org.maiwithu.maicraft.kernel.task.CloseReason REASON =
-                org.maiwithu.maicraft.kernel.task.CloseReason.FINISHED;
+        static final CloseReason REASON =
+                CloseReason.FINISHED;
     }
 }

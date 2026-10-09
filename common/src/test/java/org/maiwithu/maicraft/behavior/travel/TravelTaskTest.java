@@ -14,7 +14,6 @@ import org.maiwithu.maicraft.behavior.travel.TravelFakes.FakeWorld;
 import org.maiwithu.maicraft.behavior.travel.TravelFakes.ProgressRecorder;
 import org.maiwithu.maicraft.behavior.travel.TravelFakes.ScriptedWalk;
 import org.maiwithu.maicraft.behavior.travel.TravelFakes.TestTick;
-import org.maiwithu.maicraft.kernel.goal.Question;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Change;
@@ -29,7 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** 出行任务：解析完就上路，到达、中途停下、失败与打断后的接续都按现场如实结算。 */
+/** 出行任务：拿着解析好的目的地上路，到达、中途停下、失败与打断后的接续都按现场如实结算。 */
 class TravelTaskTest {
 
     private static final BlockPos HOME = new BlockPos(12, 64, -2);
@@ -45,7 +44,8 @@ class TravelTaskTest {
 
     private TravelTask task(Target target) {
         DestinationResolver resolver = new DestinationResolver(world, places, seen);
-        return new TravelTask(target, 2, 0, permit, walks, resolver, placed, progress);
+        var ready = assertInstanceOf(DestinationResolver.Resolution.Ready.class, resolver.resolve(target, 2));
+        return new TravelTask(ready.destination(), 0, permit, walks, placed, progress);
     }
 
     /** 推进到出结果为止（最多几十刻），返回最终结果。 */
@@ -166,24 +166,6 @@ class TravelTaskTest {
         TravelSettlement details = assertInstanceOf(TravelSettlement.class, result.details());
         assertEquals(List.of("5, 65, 0", "6, 66, -1"), details.placedBlocks());
         assertTrue(result.changes().get(0).note().contains("没有自动收回"));
-    }
-
-    @Test
-    void unknownLandmarkKeepsTaskRunningWithQuestion() {
-        TravelTask travel = task(new Target.Landmark("粮仓"));
-        travel.start(tick);
-        assertTrue(travel.tick(tick) instanceof TickResult.Running);
-
-        Question question = travel.pendingQuestion().orElseThrow();
-        assertEquals(Question.Reason.UNCLEAR_TARGET, question.reason());
-    }
-
-    @Test
-    void hereTargetFinishesWithoutWalking() {
-        TaskResult result = runToFinish(task(new Target.Here()));
-        assertEquals(TaskResult.Status.DONE, result.status());
-        assertEquals(0, walks.started.size(), "已经在目的地就不用走");
-        assertTrue(result.summary().contains("开始时已经站在目的地"));
     }
 
     @Test

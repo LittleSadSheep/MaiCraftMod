@@ -27,6 +27,7 @@ import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.BlockScanService;
+import org.maiwithu.maicraft.game.world.ScanTargets;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 /**
@@ -46,13 +47,15 @@ public final class ClientSpotsContainers implements SpotsContainers {
     private final BlockScanService scans;
     private final Supplier<PlayerContext> context;
     private final WorldMemory memory;
-    private boolean registered;
+    /** 容器方块按维度登记进扫描索引：去了下界、末地照样认得出那里的箱子。 */
+    private final ScanTargets registered;
     private boolean lastScanComplete;
 
     public ClientSpotsContainers(BlockScanService scans, Supplier<PlayerContext> context, WorldMemory memory) {
         this.scans = Objects.requireNonNull(scans, "scans");
         this.context = Objects.requireNonNull(context, "context");
         this.memory = Objects.requireNonNull(memory, "memory");
+        this.registered = new ScanTargets(scans);
     }
 
     @Override
@@ -64,7 +67,7 @@ public final class ClientSpotsContainers implements SpotsContainers {
             return List.of();
         }
         Set<Block> kinds = containerBlocks();
-        ensureRegistered(level, kinds);
+        registered.ensure(level, kinds);
         var result = scans.query(level, center, kinds, Integer.MAX_VALUE,
                 Math.min(MAX_CHUNK_RADIUS, Math.max(1, radius / 16 + 1)), BUILD_BUDGET);
         lastScanComplete = result.complete();
@@ -185,12 +188,4 @@ public final class ClientSpotsContainers implements SpotsContainers {
         return Set.copyOf(blocks);
     }
 
-    // 首次用到时把容器方块登记进扫描索引；重复登记不叠加负担。
-    private void ensureRegistered(ClientLevel level, Set<Block> kinds) {
-        if (registered) {
-            return;
-        }
-        scans.register(level, kinds);
-        registered = true;
-    }
 }

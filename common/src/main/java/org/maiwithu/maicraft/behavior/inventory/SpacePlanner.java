@@ -31,7 +31,7 @@ final class SpacePlanner {
      * @param slotsNeeded               要腾出几格
      * @param reservedItemIds           这次任务要留用的物品注册 ID
      * @param stackMergerAvailable      合并散堆的接缝接上了没有
-     * @param carriedBackpackAvailable  随身背包接缝接上了没有
+     * @param carriedBackpackFreeSlots  随身背包还空着几格；没有随身背包时为 0
      * @param nearbyContainers          记得的附近容器；接缝没接上时为空
      */
     record Scene(
@@ -40,7 +40,7 @@ final class SpacePlanner {
             int slotsNeeded,
             Set<String> reservedItemIds,
             boolean stackMergerAvailable,
-            boolean carriedBackpackAvailable,
+            int carriedBackpackFreeSlots,
             List<KnownContainer> nearbyContainers) {
     }
 
@@ -63,13 +63,15 @@ final class SpacePlanner {
         // 挪东西从最不值钱的开始：垃圾、普通掉落、建材、食物依次往后，贵重及以上不进计划。
         List<BackpackStack> movable = movableStacksWorthLeastFirst(scene);
         int containerIndex = 0;
+        int carriedRoom = scene.carriedBackpackFreeSlots();
         for (BackpackStack stack : movable) {
             if (slotsFreed >= scene.slotsNeeded) {
                 return new Plan(List.copyOf(moves), null, null);
             }
-            // 随身背包优先，其次是记得的容器，都接不上才丢——附近有箱子就不往地上扔。
-            if (scene.carriedBackpackAvailable()) {
+            // 随身背包有空就先放进去，满了再存记得的容器，都不行才丢——附近有箱子就不往地上扔。
+            if (carriedRoom > 0) {
                 moves.add(new SpaceMove.ToCarriedBackpack(stack));
+                carriedRoom--;
             } else if (containerIndex < scene.nearbyContainers().size()) {
                 moves.add(new SpaceMove.ToKnownContainer(scene.nearbyContainers().get(containerIndex), stack));
                 containerIndex++;

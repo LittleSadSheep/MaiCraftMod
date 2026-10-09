@@ -58,6 +58,11 @@ final class BaritoneWalkRun implements WalkRun {
     private boolean engineFailedPath;
     private boolean activated;
     private boolean abandoned;
+    /** 最近一次被推进的客户端刻：拥有身体却连续几刻没人推进，说明它的任务被暂停或已丢下它。 */
+    private long lastDrivenTick = Long.MIN_VALUE;
+
+    /** 连续这么多刻没人推进，就把身体让给排队的运行。 */
+    private static final long IDLE_BEFORE_YIELD_TICKS = 2;
 
     BaritoneWalkRun(BaritoneInternals owner, GoalCompiler.Compiled target, TerrainPermit permit) {
         this.owner = owner;
@@ -112,6 +117,26 @@ final class BaritoneWalkRun implements WalkRun {
         if (abandoned && !progress.done()) {
             progress.fail(Problem.of(Problem.Kind.STUCK, "排队等待上路时被更新的走到请求取代", null), null);
         }
+    }
+
+    /** 这一刻有人推进它。 */
+    void markDriven(long clientTick) {
+        lastDrivenTick = clientTick;
+    }
+
+    /** 拥有身体却已经连续几刻没人推进：任务被生存需求暂停，或调用方没收尾就丢下了它。 */
+    boolean idleAt(long clientTick) {
+        return clientTick - lastDrivenTick >= IDLE_BEFORE_YIELD_TICKS;
+    }
+
+    /**
+     * 把身体让给排队的运行：按"已停下"结算，松开引擎。被暂停的任务恢复后读到"已停下"，
+     * 会像打断后那样从原地重新上路；没人再管的运行就此结束，不再挡住后面所有的走到。
+     */
+    void yieldBody() {
+        progress.stopWhereLastSeen();
+        owner.release(this);
+        finishEngineQuietly();
     }
 
     /** 排队期间被更新的请求顶掉：结算自己，不再占队位。 */
@@ -268,8 +293,13 @@ final class BaritoneWalkRun implements WalkRun {
         if (!progress.done()) {
             progress.fail(Problem.of(Problem.Kind.STUCK, "走到被任务放弃", null), null);
         }
-        owner.release(this);
-        finishEngineQuietly();
+        // 只收拾自己占着的引擎：已经交出身体、或还在排队的运行不能去撤别人正在走的路线。
+        if (owner.owns(this)) {
+            owner.release(this);
+            finishEngineQuietly();
+        } else {
+            owner.dropQueued(this);
+        }
     }
 
     private void finishEngineQuietly() {
@@ -291,12 +321,6 @@ final class BaritoneWalkRun implements WalkRun {
 
     @Override
     public String describe() {
-        // 没有目标时只通报走到本身的状态，不去读目标内容，避免空目标崩了通报。
-        if (goal == null) {
-            return report().state() == WalkReport.State.FAILED
-                    ? "走不下去：" + report().problem().message()
-                    : "走到没有拿到目标";
-        }
         var report = progress.report();
         return switch (report.state()) {
             case PLANNING -> "正在算路（目标 " + goal.center().toShortString() + "）";

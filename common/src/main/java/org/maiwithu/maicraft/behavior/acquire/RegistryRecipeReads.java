@@ -98,8 +98,9 @@ public final class RegistryRecipeReads implements ReadsRecipes, ReadsFuels {
         return List.copyOf(stacks);
     }
 
-    // 一格原料想要什么：配方的原料多半是"这一类都行"。能对上一张正好装着这些物品的物品标签
-    // 就写成标签；对不上才落成第一种具体物品。一格什么都不要的不算原料。
+    // 一格原料想要什么：配方的原料多半是"这一类都行"。能对上一张装的物品与这一格完全相同的物品标签
+    // 就写成标签；对不上才落成第一种具体物品，这一格照样计数，不能因为没有标签就少算一份原料。
+    // 一格什么都不要的不算原料。
     private static Optional<String> specifierOf(Ingredient ingredient) {
         ItemStack[] items = ingredient.getItems();
         if (items.length == 0) {
@@ -108,29 +109,26 @@ public final class RegistryRecipeReads implements ReadsRecipes, ReadsFuels {
         if (items.length == 1) {
             return Optional.of(itemId(items[0]));
         }
-        return smallestTagCovering(items).map(tag -> "#" + tag.location());
+        return Optional.of(exactTag(items).map(tag -> "#" + tag.location()).orElse(itemId(items[0])));
     }
 
-    // 找装着这几种物品的标签里最小的一张：标签越小，备料要弄的东西越贴近配方的本意。
-    private static Optional<TagKey<Item>> smallestTagCovering(ItemStack[] items) {
-        Optional<TagKey<Item>> best = Optional.empty();
-        int bestSize = Integer.MAX_VALUE;
+    // 找装的物品与这一格接受的完全相同的标签：只认相同，不认更大的——更大的标签里有配方不收的东西，
+    // 照它备料会去弄一样放不进合成格的物品。
+    private static Optional<TagKey<Item>> exactTag(ItemStack[] items) {
         var wanted = new HashSet<String>();
         for (ItemStack stack : items) {
             wanted.add(itemId(stack));
         }
         for (var tag : BuiltInRegistries.ITEM.getTagNames().toList()) {
             var contents = BuiltInRegistries.ITEM.getTag(tag).orElse(null);
-            if (contents == null) continue;
-            var ids = contents.stream().map(holder -> BuiltInRegistries.ITEM.getKey(holder.value()).toString())
-                    .toList();
-            if (!ids.containsAll(wanted)) continue;
-            if (ids.size() < bestSize) {
-                best = Optional.of(tag);
-                bestSize = ids.size();
+            if (contents == null || contents.size() != wanted.size()) continue;
+            boolean same = contents.stream()
+                    .allMatch(holder -> wanted.contains(BuiltInRegistries.ITEM.getKey(holder.value()).toString()));
+            if (same) {
+                return Optional.of(tag);
             }
         }
-        return best;
+        return Optional.empty();
     }
 
     private static String itemId(ItemStack stack) {
