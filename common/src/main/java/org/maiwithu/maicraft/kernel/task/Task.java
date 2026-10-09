@@ -7,7 +7,7 @@ import org.maiwithu.maicraft.kernel.result.TaskResult;
  * 任务：逐刻控制角色做一件事的对象，每次运行新建一个。角色每刻只听一个任务的，被选中的任务才会被推进一刻。
  *
  * <p>生命周期：{@code start}（一次性准备）→ 若干次 {@code tick}（中间可能被生存需求打断而 {@code pause}，
- * 轮回来后直接接着 tick，不会再 start）→ {@code close}（无论怎样结束都会调用且只调用一次）。
+ * 打断结束后直接接着 tick，不会再 start）→ {@code close}（无论怎样结束都会调用且只调用一次）。
  *
  * <p>新写的任务一律继承 {@link PhasedTask}，不要直接实现本接口。
  */

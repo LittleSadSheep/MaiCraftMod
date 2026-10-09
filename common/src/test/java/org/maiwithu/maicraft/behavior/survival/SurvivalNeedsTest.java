@@ -79,7 +79,7 @@ class SurvivalNeedsTest {
         assertEquals("换气", finished.interrupting().name());
         assertEquals(TaskResult.Status.DONE, finished.finished().status());
 
-        // 下一刻轮回主流程：从原地接着做，这时才第一次 start；被压住的那几刻没有轮到它。
+        // 下一刻轮到主流程：从原地接着做，这时才第一次 start；被压住的那几刻没有轮到它。
         player.nextTick();
         ControlLoop.Decision.Advanced resumed = advance(loop.tick(tick));
         assertSame(main, resumed.task());

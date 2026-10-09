@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.retry;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.kernel.goal.Question;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -57,5 +58,12 @@ class QuestionEscalationTest {
         assertEquals(Question.Reason.UNCLEAR_TARGET, question.reason());
         assertTrue(question.text().contains("两个都叫「家」的地标"));
         assertEquals(2, question.options().size());
+    }
+
+    @Test
+    void approvalWithoutASuggestionAsksPlainly() {
+        // 被拒时说不清要开哪一项许可：只问同不同意，问句里不出现 null。
+        var question = QuestionEscalation.escalate(Problem.of(Problem.Kind.NEED_APPROVAL, "要拆的墙是玩家盖的")).orElseThrow();
+        assertFalse(question.text().contains("null"));
     }
 }

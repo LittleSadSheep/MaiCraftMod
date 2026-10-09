@@ -170,7 +170,7 @@ class ControlLoopTest {
         assertEquals("换气", finished.interrupting().name());
         assertEquals(TaskResult.Status.DONE, finished.finished().status());
 
-        // 下一刻轮回主任务：从原地接着做，不再 start，也没有再被暂停；被打断的那两刻没有轮到它。
+        // 下一刻轮到主任务：从原地接着做，不再 start，也没有再被暂停；被打断的那两刻没有轮到它。
         ControlLoop.Decision.Advanced resumed = assertAdvanced(loop.tick(TICK));
         assertSame(main, resumed.task());
         assertNull(resumed.interrupting());

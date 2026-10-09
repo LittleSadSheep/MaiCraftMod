@@ -120,7 +120,7 @@ class ChildTaskRunnerTest {
         runner.pause();
         assertEquals(1, child.pauses, "父任务被打断时暂停要转发给子任务");
 
-        // 轮回来后接着推进，不再重新 start，脚本从上次的位置继续走完。
+        // 打断结束后接着推进，不再重新 start，脚本从上次的位置继续走完。
         assertEquals(TickResult.RUNNING, runner.tick(TICK));
         TaskResult result = resultOf(runner.tick(TICK));
         assertEquals(TaskResult.Status.DONE, result.status());
