@@ -31,8 +31,11 @@ import org.maiwithu.maicraft.ability.use.LiveSeenResolver;
 import org.maiwithu.maicraft.ability.use.RefusalReads;
 import org.maiwithu.maicraft.ability.use.UseModule;
 import org.maiwithu.maicraft.ability.wait.WaitModule;
-import org.maiwithu.maicraft.behavior.acquire.ItemAcquisition;
+import org.maiwithu.maicraft.behavior.acquire.ClientCropReplanting;
 import org.maiwithu.maicraft.behavior.acquire.ClientDigsBlocks;
+import org.maiwithu.maicraft.behavior.acquire.ContainerSource;
+import org.maiwithu.maicraft.behavior.acquire.ItemAcquisition;
+import org.maiwithu.maicraft.behavior.acquire.MenuContainerTakes;
 import org.maiwithu.maicraft.behavior.acquire.LiveBlockDigging;
 import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
 import org.maiwithu.maicraft.behavior.acquire.ReadsCharacterPosition;
@@ -168,10 +171,15 @@ public final class AbilityCatalog {
                 deps.characterPosition(), new DropAvoidance(), Optional.of(toMainhand),
                 Optional.of(new ClientStepsAside(deps.inputs()))));
 
-        // 拿到物品：合成、烧炼、找容器、挖矿、收获、交易各来源还没有实现方，
-        // 先用一份没有来源的引擎登记——拿到物品的目标会如实以"没有途径"失败。
+        // 拿到物品：记得的箱子这一路接上了——走到、点开、整堆搬进背包、关上都在生产实现里；
+        // 合成、烧炼、挖矿、收获、交易还没有实现方，拿到物品只在这些路上如实说没有途径。
         registry.register(new ObtainAbility(
-                new ItemAcquisition(List.of(), deps.backpack(), deps.offhand(), deps.itemTags(),
+                new ItemAcquisition(
+                        List.of(new ContainerSource(deps.memory(), deps.itemTags(),
+                                new MenuContainerTakes(bringsClose, deps.interactions(),
+                                        new ClientMenuContent(deps.context()), new ClientQuickMoves(),
+                                        deps.itemTags(), deps.memory()))),
+                        deps.backpack(), deps.offhand(), deps.itemTags(),
                         deps.characterPosition(), Optional.empty(), ItemAcquisition.DEFAULT_MAX_DEPTH),
                 deps.itemRegistry(), deps.backpack(), deps.offhand(), deps.itemTags()));
 
@@ -185,10 +193,12 @@ public final class AbilityCatalog {
                 deps.creatures());
 
         // 采集：观察编号从场景查，现场从世界读，靠近用站位与走到，挖用原生挖掘；
-        // 补种的接缝还没有实现方，收完不补种。
+        // 收完把身上的种子补种回原格，没有种子就不补，不额外去找。
         registry.register(new GatherAbility(new LiveSceneTargets(deps::scene), new LiveSpotReads(deps.context()),
                 approaches(bringsClose), new LiveBlockDigging(deps.digging()),
-                deps.toolRequirements(), null, permission, deps.backpack(), deps.offhand()));
+                deps.toolRequirements(),
+                new ClientCropReplanting(toMainhand, deps.interactions(), deps.context()),
+                permission, deps.backpack(), deps.offhand()));
 
         // 战斗：感观与生存需求共用一份，观察编号与动手都接在真实客户端上。
         registry.register(new FightModule(deps.senses(),
