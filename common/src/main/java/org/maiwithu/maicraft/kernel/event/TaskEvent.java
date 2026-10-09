@@ -40,7 +40,9 @@ public record TaskEvent(long cursor, Kind kind, long goalRunId, String message, 
         /** 临时任务结束：威胁解除或条件恢复，主任务接着做。 */
         TEMPORARY_TASK_FINISHED,
         /** 角色自己处理不了的生存需求，例如饿了、身上没吃的、也弄不到。 */
-        NEED_UNHANDLED
+        NEED_UNHANDLED,
+        /** 角色死了：血量见底进了死亡流程，循环停摆只报这一条，等重生。 */
+        CHARACTER_DIED
     }
 
     public TaskEvent {

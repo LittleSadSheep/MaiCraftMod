@@ -174,6 +174,7 @@ public final class Bootstrap {
             InteractionSender interactionSender, MenuActions menuActions, Interactions interactions,
             CombatSenses combatSenses, WalkTo walks,
             EatSoonTask.FoodMoves foodMoves, ReadsFoodValues foods) {
+        // 角色死亡这类循环自身的处境变化也从同一条事件流出去。
         return new ControlLoop(List.of(
                 new DigOutNeed(new SurvivalSituation.FromPlayer(),
                         () -> new NativeBlockBreaking(interactionSender, menuActions)),
@@ -185,7 +186,7 @@ public final class Bootstrap {
                 new NightfallNeed(new LiveNightView(combatSenses),
                         LiveNightAndEdgeMoves.burrow(events)),
                 new EdgeProximityNeed(new LiveEdgeView(),
-                        LiveNightAndEdgeMoves.retreat(walks, events))));
+                        LiveNightAndEdgeMoves.retreat(walks, events))), events);
     }
 
     /**

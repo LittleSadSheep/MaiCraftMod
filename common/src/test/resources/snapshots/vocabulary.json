@@ -119,7 +119,8 @@
     "finished",
     "temporary_task_started",
     "temporary_task_finished",
-    "need_unhandled"
+    "need_unhandled",
+    "character_died"
   ],
   "error_codes": [
     "invalid_parameter",

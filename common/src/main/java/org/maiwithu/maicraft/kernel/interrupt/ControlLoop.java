@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.kernel.interrupt;
 
+import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.kernel.event.TaskEvent;
+import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.child.ChildTaskRunner;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
@@ -54,6 +57,10 @@ public final class ControlLoop {
     static final long MAX_RETRY_AFTER_FAILED_TICKS = 20L * 60 * 5;
 
     private final List<SurvivalNeed> needs;
+    /** 角色死亡这类循环自身的处境变化从这里告诉宿主。 */
+    private final TaskEventSink events;
+    /** 上一刻是否已在死亡停摆里；只在本刻刚看到死亡时收尾插着的任务、发一次事件。 */
+    private boolean waitingRespawn;
     /** 主任务被停在半路时的一句话说明；没被停过为 null。 */
     private String parkedWhere;
     /** 从底到顶的运行栈；最底是主任务，上面是插进来的临时任务。只在客户端线程读写。 */
@@ -67,7 +74,15 @@ public final class ControlLoop {
 
     /** 各生存需求在启动时登记一次；顺序决定同样急时谁先插进来。 */
     public ControlLoop(List<SurvivalNeed> needs) {
+        this(needs, TaskEventSink.NONE);
+    }
+
+    /**
+     * @param events 角色死亡这类循环自身的处境变化从这里告诉宿主；测试没接事件流时用空实现。
+     */
+    public ControlLoop(List<SurvivalNeed> needs, TaskEventSink events) {
         this.needs = List.copyOf(needs);
+        this.events = Objects.requireNonNull(events, "events");
     }
 
     /**
@@ -104,6 +119,7 @@ public final class ControlLoop {
         backoffs.clear();
         brokenNeeds.clear();
         parkedWhere = null;
+        waitingRespawn = false;
     }
 
     /** 本刻正在被推进（或被压着等待恢复）的任务里最上面的那个；没有任务时为 null。 */
@@ -113,6 +129,13 @@ public final class ControlLoop {
 
     /** 推进一刻。 */
     public Decision tick(TickContext context) {
+        // 角色死了（血量见底、死亡界面）循环就停摆：不再插生存需求的临时任务、不推进任务，
+        // 也不把死亡当成"处境不急"继续谎报。重生后（角色对象换掉、活着）从这里自然恢复。
+        PlayerContext player = context.player();
+        if (player != null && player.isDeadOrDying()) {
+            return waitForRespawn(context);
+        }
+        waitingRespawn = false;
         if (stack.isEmpty()) {
             // 手上没有任务，没有东西要保护：任何生存需求此刻都能插进来，找空当的也不例外。
             Choice choice = choose(context, Interruptibility.BETWEEN_ACTIONS, null);
@@ -148,6 +171,32 @@ public final class ControlLoop {
         }
         // 没有人能插进来：忍住，手上的任务继续；被按住的需求交给调用方提醒。
         return advance(current, context, choice.deferred);
+    }
+
+    /**
+     * 死亡停摆：只在看到死亡的第一刻收尾与发事件，之后每刻如实回答"还在等重生"。
+     * 插着的临时任务按"角色没了"收尾——已经发生的消耗留在它们交代的结果里；
+     * 主任务不收尾，重生后从原地接着做。
+     */
+    private Decision waitForRespawn(TickContext context) {
+        if (!waitingRespawn) {
+            waitingRespawn = true;
+            for (int i = stack.size() - 1; i >= 0; i--) {
+                Frame frame = stack.get(i);
+                if (frame.from != null) {
+                    stack.remove(i);
+                    frame.close(CloseReason.PLAYER_GONE);
+                }
+            }
+            // 主任务停在原地：先停手上的动作，别让上一刻的输入继续压在一个死掉的身体上。
+            if (!stack.isEmpty()) {
+                stack.getFirst().pause();
+            }
+            events.publish(TaskEvent.Kind.CHARACTER_DIED,
+                    "角色死了，等重生；插着的任务已结束，主任务停在原地，重生后接着做");
+            LOG.info("角色死亡：控制循环停摆，等重生");
+        }
+        return new Decision.WaitingRespawn(stack.isEmpty() ? null : stack.getFirst().task);
     }
 
     /** 按打断规则挑出这一刻最急又能插进来的需求，同时记下最急的那个被按住的需求。 */
@@ -356,5 +405,12 @@ public final class ControlLoop {
 
         /** 本刻什么都没做。 */
         record Idle() implements Decision {}
+
+        /**
+         * 角色死了：循环停摆，本刻不推进任何任务，等重生。
+         *
+         * @param mainTask 停在原地的主任务；手上没有主任务时为 null
+         */
+        record WaitingRespawn(Task mainTask) implements Decision {}
     }
 }

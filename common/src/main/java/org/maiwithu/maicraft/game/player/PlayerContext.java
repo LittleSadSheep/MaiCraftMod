@@ -62,4 +62,13 @@ public interface PlayerContext {
      * 世界动作、容器界面点击与模组协议共用这一份机会，由交互提交与界面操作在真正发包前调用。
      */
     boolean tryClaimInteraction();
+
+    /**
+     * 本刻的角色是否已经死了或在死亡流程里（血量见底、死亡界面）。
+     * 控制循环每刻推进前先看这里：死了就不再插生存需求的临时任务、不推进任务，等重生。
+     */
+    default boolean isDeadOrDying() {
+        LocalPlayer player = localPlayer();
+        return player != null && player.isDeadOrDying();
+    }
 }
