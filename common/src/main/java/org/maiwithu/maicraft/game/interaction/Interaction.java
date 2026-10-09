@@ -473,7 +473,7 @@ public final class Interaction {
         receipt = sender.attack(
                 context,
                 entity,
-                InteractionConfirmation.entityHurt(entity),
+                InteractionConfirmation.entityStruck(player, entity),
                 CONFIRM_TIMEOUT_TICKS);
         return false;
     }

@@ -125,16 +125,31 @@ public interface InteractionConfirmation {
         };
     }
 
-    public static InteractionConfirmation entityHurt(Entity entity) {
-        // 按原实体编号寻找目标，看到血量下降或死亡即匹配；这不单独区分是哪一次攻击造成的伤害。
-        int id = entity.getId();
-        float health = entity instanceof LivingEntity living ? living.getHealth() : Float.NaN;
+    /**
+     * 近战出手的结算证据：目标死了、血量比出手前低、或正处在受击红闪里，都是打中的客户端权威事实；
+     * 这些一窗口内都没出现时，攻击充能被清零也算数——原版攻击入口挥出这一刀时会清零充能，
+     * 出手前充能已回到位（出手门槛更高），窗口内再低于出手线只能是这次挥击留下的。
+     * 打中了和目标最终被打死分开判断：确认这一刀后目标还活着，由上层任务接着决定要不要再打。
+     */
+    public static InteractionConfirmation entityStruck(LocalPlayer attacker, Entity target) {
+        int id = target.getId();
+        float health = target instanceof LivingEntity living ? living.getHealth() : Float.NaN;
         return context -> {
-            Entity live = context.level().getEntity(id);
-            if (!(live instanceof LivingEntity living)) return Verdict.PENDING;
-            if (!living.isAlive() || living.getHealth() < health) return Verdict.APPLIED;
-            return Verdict.PENDING;
+            // 目标实体不在了分不清是这次打死的还是别的原因，维持等待由超期如实收场。
+            if (!(context.level().getEntity(id) instanceof LivingEntity living)) return Verdict.PENDING;
+            return strikeVerdict(living.isAlive(), living.getHealth(), health,
+                    living.hurtTime, attacker.getAttackStrengthScale(0.0f));
         };
+    }
+
+    /**
+     * 近战出手的判定表（离线可测）：命中三证据（死亡、掉血、受击红闪）任一成立即确认；
+     * 都没成立而攻击充能低于出手线，说明挥击已发生（充能清零的恢复要十几刻，窗口内回不到出手线以上）。
+     */
+    static Verdict strikeVerdict(boolean targetAlive, float liveHealth, float healthBefore,
+                                 int hurtTime, float attackScale) {
+        if (!targetAlive || liveHealth < healthBefore || hurtTime > 0) return Verdict.APPLIED;
+        return attackScale < 0.9f ? Verdict.APPLIED : Verdict.PENDING;
     }
 
     public static InteractionConfirmation anyOf(InteractionConfirmation... confirmations) {
