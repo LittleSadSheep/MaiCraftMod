@@ -7,8 +7,6 @@ import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.behavior.survival.BlockBreaking;
 import org.maiwithu.maicraft.kernel.task.Action;
-import org.maiwithu.maicraft.kernel.task.ActionStatus;
-import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 挖方块的生产实现：每要挖一格，就请一套原生挖掘基础代码上场，
@@ -26,42 +24,9 @@ public final class LiveBlockDigging implements DigsBlocks {
 
     @Override
     public Optional<Action> dig(BlockPos target) {
-        return Optional.of(new DigCell(diggings.get(), target.immutable()));
-    }
-
-    /** 挖掉一格的动作：推进一刻挖一下，被打断就停手，收尾结清占着的交互与按键。 */
-    private static final class DigCell implements Action {
-
-        private final BlockBreaking digging;
-        private final BlockPos target;
-        /** 最近一次推进拿到的上下文；停手要结清交互，用的就是它。 */
-        private TickContext lastTick;
-
-        DigCell(BlockBreaking digging, BlockPos target) {
-            this.digging = digging;
-            this.target = target;
-        }
-
-        @Override
-        public ActionStatus tick(TickContext context) {
-            lastTick = context;
-            return digging.dig(context, target);
-        }
-
-        @Override
-        public void pause() {
-            // 还没推进过就没有占着的交互与按键，不必停。
-            if (lastTick != null) digging.stop(lastTick);
-        }
-
-        @Override
-        public void close() {
-            if (lastTick != null) digging.stop(lastTick);
-        }
-
-        @Override
-        public String describe() {
-            return "正在挖 " + target.toShortString();
-        }
+        // 挖掘本身就是一个动作：瞄准这一格交给它，推进、被打断停手、收尾结清都由它自己管。
+        BlockBreaking digging = diggings.get();
+        digging.aimAt(target.immutable());
+        return Optional.of(digging);
     }
 }

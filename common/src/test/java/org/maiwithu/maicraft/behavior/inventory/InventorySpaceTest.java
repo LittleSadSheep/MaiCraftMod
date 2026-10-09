@@ -9,6 +9,7 @@ import org.maiwithu.maicraft.kernel.result.Change;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.OptionalInt;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -40,6 +41,16 @@ class InventorySpaceTest {
         @Override
         public int totalSlots() {
             return capacity;
+        }
+
+        @Override
+        public OptionalInt hotbarSlotOf(String itemId) {
+            return OptionalInt.empty();
+        }
+
+        @Override
+        public int selectedHotbarSlot() {
+            return 0;
         }
 
         void clearAll() {

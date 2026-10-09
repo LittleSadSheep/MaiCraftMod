@@ -16,6 +16,7 @@ import net.minecraft.client.player.LocalPlayer;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.OptionalInt;
 import java.util.Objects;
 
 /**
@@ -29,6 +30,8 @@ public final class ClientBackpackView implements BackpackView {
 
     // 背包主格：36 格，含快捷栏；盔甲与副手各占自己的栏位，不算在里面。
     private static final int MAIN_SLOTS = 36;
+    // 快捷栏：主格的前 9 格，数字键 1–9 能直接选中。
+    private static final int HOTBAR_SLOTS = 9;
 
     private final LocalPlayer player;
 
@@ -62,6 +65,23 @@ public final class ClientBackpackView implements BackpackView {
     @Override
     public int totalSlots() {
         return MAIN_SLOTS;
+    }
+
+    @Override
+    public OptionalInt hotbarSlotOf(String itemId) {
+        // 快捷栏就是主格的前 9 格：按格子顺序找第一格放着它的。
+        for (int slot = 0; slot < HOTBAR_SLOTS; slot++) {
+            ItemStack stack = player.getInventory().getItem(slot);
+            if (!stack.isEmpty() && BuiltInRegistries.ITEM.getKey(stack.getItem()).toString().equals(itemId)) {
+                return OptionalInt.of(slot);
+            }
+        }
+        return OptionalInt.empty();
+    }
+
+    @Override
+    public int selectedHotbarSlot() {
+        return player.getInventory().selected;
     }
 
     // 把一格物品读成事实快照：是什么、有多少、腾地方要用的几个分类标记。

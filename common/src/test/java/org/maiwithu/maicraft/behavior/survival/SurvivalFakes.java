@@ -108,18 +108,21 @@ final class SurvivalFakes {
         @Override public long gameTick() { return player.tick; }
     }
 
-    /** 挖掘动作替身：按次序回答每次 dig 的结果，记下被挖的格子与是否已停手。 */
+    /** 挖掘动作替身：按次序回答每次推进的结果，记下被挖的格子与是否已收尾。 */
     static final class FakeBreaking implements BlockBreaking {
         final List<ActionStatus> script;
         final List<BlockPos> dug = new ArrayList<>();
-        boolean stopped;
+        boolean closed;
+        private BlockPos cell;
         private int calls;
 
         FakeBreaking(ActionStatus... script) {
             this.script = List.of(script);
         }
 
-        @Override public ActionStatus dig(TickContext context, BlockPos cell) {
+        @Override public void aimAt(BlockPos target) { cell = target; }
+
+        @Override public ActionStatus tick(TickContext context) {
             dug.add(cell);
             if (script.isEmpty()) return ActionStatus.running();
             ActionStatus status = script.get(Math.min(calls, script.size() - 1));
@@ -127,7 +130,7 @@ final class SurvivalFakes {
             return status;
         }
 
-        @Override public void stop(TickContext context) { stopped = true; }
+        @Override public void close() { closed = true; }
 
         @Override public String describe() { return "测试挖掘"; }
     }
