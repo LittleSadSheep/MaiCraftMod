@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.google.gson.JsonObject;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import com.google.gson.JsonArray;
 
 /** 知识库按元数据发现、按需读取：内置资料完整可读，目录分页绑定版本，搜索不展开正文。 */
 class KnowledgeLibraryTest {
@@ -50,7 +51,7 @@ class KnowledgeLibraryTest {
         assertThrows(IllegalArgumentException.class, () -> limitedSearch(library, "塌落", 0), "limit 越界明确报错");
     }
 
-    private static com.google.gson.JsonArray limitedSearch(KnowledgeLibrary library, String query, int limit) {
+    private static JsonArray limitedSearch(KnowledgeLibrary library, String query, int limit) {
         JsonObject request = new JsonObject();
         request.addProperty("action", "search");
         request.addProperty("query", query);

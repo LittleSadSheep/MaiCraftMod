@@ -122,7 +122,7 @@ class WalkRunProgressTest {
         assertTrue(conclusion.done());
     }
 
-    @org.junit.jupiter.api.Test
+    @Test
     void externalFailureIsRecordedOnlyOnce() {
         var progress = progressExact();
         progress.observe(seen(ELSEWHERE, true, false, true, false));

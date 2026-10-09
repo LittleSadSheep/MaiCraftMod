@@ -20,6 +20,10 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.Optional;
+import java.util.HashMap;
+import java.util.Map;
+import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
+import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /** 出行的离线测试替身：摆现场、演走到，不碰游戏对象。 */
 final class TravelFakes {
@@ -34,7 +38,7 @@ final class TravelFakes {
             return gameTick;
         }
 
-        @Override public org.maiwithu.maicraft.game.player.PlayerContext player() {
+        @Override public PlayerContext player() {
             throw new IllegalStateException("出行测试不应该碰到角色对象");
         }
 
@@ -58,8 +62,8 @@ final class TravelFakes {
     }
 
     /** 记过的地点替身：手工登记。 */
-    static final class FakePlaces implements org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces {
-        private final java.util.Map<String, WorldPosition> places = new java.util.HashMap<>();
+    static final class FakePlaces implements ReadsRememberedPlaces {
+        private final Map<String, WorldPosition> places = new HashMap<>();
 
         void put(String name, WorldPosition position) {
             places.put(name, position);
@@ -72,7 +76,7 @@ final class TravelFakes {
 
     /** 观察编号替身：手工登记。 */
     static final class FakeSeen implements ReadsSeenTargets {
-        private final java.util.Map<String, WorldPosition> seen = new java.util.HashMap<>();
+        private final Map<String, WorldPosition> seen = new HashMap<>();
 
         void put(String id, WorldPosition position) {
             seen.put(id, position);

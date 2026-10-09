@@ -114,8 +114,9 @@ class SourceRulesTest {
 
     @Test
     void noFullyQualifiedNamesInCode() {
+        // 测试代码同样只用短名：替身与断言里的类型也写进 import。
         List<String> problems = new ArrayList<>();
-        for (JavaSource source : mainSources) {
+        for (JavaSource source : concat(mainSources, testSources)) {
             String[] codeLines = source.code.split("\n", -1);
             for (int i = 0; i < codeLines.length; i++) {
                 if (isImportOrPackage(codeLines[i])) continue;
