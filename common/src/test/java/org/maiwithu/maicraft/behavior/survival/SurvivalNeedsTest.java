@@ -137,7 +137,7 @@ class SurvivalNeedsTest {
         // 悬空搭桥时往虚空掉：掉下去就是死，落地防护立刻打断。
         SurvivalSituation falling = SurvivalFakes.calm().feet(200.0).fallingIntoVoid().build();
         MainTask bridging = new MainTask(Interruptibility.UNSAFE_TO_STOP);
-        ControlLoop loop = new ControlLoop(List.of(new FallNeed(scripted(falling), null, null)));
+        ControlLoop loop = new ControlLoop(List.of(new FallNeed(scripted(falling), null, null, null)));
         loop.setMainTask(bridging);
 
         ControlLoop.Decision.Advanced decision = advance(loop.tick(tick));
@@ -154,7 +154,7 @@ class SurvivalNeedsTest {
         ControlLoop loop = new ControlLoop(List.of(
                 new DigOutNeed(scripted(fine), SurvivalFakes.FakeBreaking::new),
                 new BreathNeed(scripted(fine)),
-                new FallNeed(scripted(fine), null, null)));
+                new FallNeed(scripted(fine), null, null, null)));
         MainTask main = new MainTask(Interruptibility.WORKING);
         loop.setMainTask(main);
 

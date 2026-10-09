@@ -8,7 +8,6 @@ import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.maiwithu.maicraft.behavior.survival.SurvivalFakes.TestPlayer;
 import static org.maiwithu.maicraft.behavior.survival.SurvivalFakes.TestTick;
@@ -16,7 +15,7 @@ import static org.maiwithu.maicraft.behavior.survival.SurvivalFakes.inAir;
 import static org.maiwithu.maicraft.behavior.survival.SurvivalFakes.scripted;
 import static org.maiwithu.maicraft.behavior.survival.SurvivalFakes.underwater;
 
-/** 换气临时任务：水下游＝抬头加按住跳跃，头出水即完成；一直上不去就按卡住收场。 */
+/** 换气临时任务：水下抬头按跳上游；头出水后踩着水等氧气补满才结束；一直上不去按卡住收场。 */
 class BreathTaskTest {
 
     private final TestPlayer player = new TestPlayer();
@@ -30,7 +29,6 @@ class BreathTaskTest {
         TickResult result = task.tick(tick);
 
         assertTrue(result instanceof TickResult.Running);
-        assertEquals(1, player.movements);
         PlayerInput.Movement movement = player.applied.get(0);
         assertTrue(movement.jumping(), "水里要按住跳跃才上浮");
         assertEquals(0.0f, movement.forward(), "上浮不需要前进");
@@ -39,29 +37,32 @@ class BreathTaskTest {
     }
 
     @Test
-    void finishesOnceTheHeadLeavesTheWater() {
-        BreathTask task = new BreathTask(scripted(underwater(40.0), inAir(41.5)));
+    void headAboveWaterKeepsTreadingUntilAirIsFull() {
+        // 刚露头氧气还只有一半：先踩着水等，补满了才结束，不让手上的活马上又把人带回水下。
+        BreathTask task = new BreathTask(scripted(underwater(40.0),
+                SurvivalFakes.calm().feet(41.5).air(150).build(), inAir(41.5)));
         task.start(tick);
         task.tick(tick);
         player.nextTick();
 
+        assertTrue(task.tick(tick) instanceof TickResult.Running, "氧气没补满就不结束");
+        assertTrue(player.applied.get(1).jumping(), "在水面上按住跳跃踩水");
+        player.nextTick();
         TickResult result = task.tick(tick);
 
         assertTrue(result instanceof TickResult.Finished);
         assertEquals(TaskResult.Status.DONE, ((TickResult.Finished) result).result().status());
-        // 出水的这一刻不再续发游泳输入，下一刻按键自然松开。
-        assertEquals(1, player.movements);
     }
 
     @Test
     void stuckWhenItNeverRises() {
-        // 高度一直不涨：进度跟踪等不到真实进展，按卡住收场并写明最后一次进展。
+        // 高度和氧气都一直不涨：进度跟踪等不到真实进展，按卡住收场。
         BreathTask task = new BreathTask(scripted(underwater(40.0)));
         task.start(tick);
         TaskResult result = null;
         for (int i = 0; i < 250; i++) {
-            TickResult tickResult = task.tick(tick);
-            if (tickResult instanceof TickResult.Finished finished) {
+            player.nextTick();
+            if (task.tick(tick) instanceof TickResult.Finished finished) {
                 result = finished.result();
                 break;
             }

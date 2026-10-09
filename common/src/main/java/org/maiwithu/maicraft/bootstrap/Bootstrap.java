@@ -12,6 +12,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.state.BlockState;
+import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyHoldProjection;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
@@ -167,14 +168,15 @@ public final class Bootstrap {
      */
     private static ControlLoop withSurvivalNeeds(
             TaskEventSink events,
-            InteractionSender interactionSender, MenuActions menuActions,
+            InteractionSender interactionSender, MenuActions menuActions, Interactions interactions,
             CombatSenses combatSenses, WalkTo walks,
             EatSoonTask.FoodMoves foodMoves) {
         return new ControlLoop(List.of(
                 new DigOutNeed(new SurvivalSituation.FromPlayer(),
                         () -> new NativeBlockBreaking(interactionSender, menuActions)),
                 new BreathNeed(new SurvivalSituation.FromPlayer()),
-                new FallNeed(new SurvivalSituation.FromPlayer(), interactionSender, menuActions),
+                new FallNeed(new SurvivalSituation.FromPlayer(), interactions, FirstPersonScene::of,
+                        PlayerContext::backpack),
                 new SelfDefenseNeed(combatSenses, new LiveCombatMoves(walks), events),
                 new HungerNeed(new LiveHungerView(), foodMoves, events),
                 new NightfallNeed(new LiveNightView(combatSenses),
@@ -256,15 +258,16 @@ public final class Bootstrap {
             // 控制循环按急迫程度登记生存需求：必须立刻处理的先登记，同样急时它先插进来；
             // 生存需求的事件从同一条任务事件流出去。主任务由目标运行表挂上：LLM 用 execute 派了活，
             // 目标就成为主任务。
-            controlLoop = withSurvivalNeeds(taskEvents, interactionSender, menuActions, combatSenses, walks, foodMoves);
+            // 交互动作入口与按住使用键投影：生存需求的落地放水、能力清单在进世界时都用它们。
+            interactions = new Interactions(useKeyProjection);
+            controlLoop = withSurvivalNeeds(taskEvents, interactionSender, menuActions, interactions,
+                    combatSenses, walks, foodMoves);
             // Mixin 钩子拿不到构造注入，只能在这里登记；服务本体仍以实例传递。
             ClientHooks.registerPlayerControl(playerControl);
             ClientHooks.registerBlockScans(blockScans);
             ClientHooks.registerUseKeyHold(useKeyHold);
             ClientHooks.registerSubtitleFeed(subtitles);
             ClientHooks.registerChatLog(new ChatLog());
-            // 交互动作入口与按住使用键投影：能力清单在进世界时用它们拼装各能力。
-            interactions = new Interactions(useKeyProjection);
             // 目标执行与 MCP 工具：LLM 用 execute 下达的目标经目标运行表成为控制循环的主任务；
             // 目标处境与生存需求的事件都进同一条任务事件流，宿主用 events 读。
             // 没进世界时的占位存储：进世界时换成那个世界的存盘（见 enterWorld），不在世界里也下达不了目标。

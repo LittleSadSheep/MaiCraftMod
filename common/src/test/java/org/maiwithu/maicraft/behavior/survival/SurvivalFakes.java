@@ -28,8 +28,6 @@ import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
-import org.maiwithu.maicraft.kernel.result.Problem;
-import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
@@ -181,32 +179,6 @@ final class SurvivalFakes {
         @Override public void close() { closed = true; }
 
         @Override public String describe() { return "测试挖掘"; }
-    }
-
-    /** 动作替身：按脚本做满指定刻数后完成或失败。 */
-    static final class FakeCushion implements Action {
-        private final long finishAfterTicks;
-        private final Problem failure;
-        long ticks;
-
-        FakeCushion(long finishAfterTicks, Problem failure) {
-            this.finishAfterTicks = finishAfterTicks;
-            this.failure = failure;
-        }
-
-        static FakeCushion succeedingAfter(long ticks) { return new FakeCushion(ticks, null); }
-
-        static FakeCushion failing() {
-            return new FakeCushion(2, Problem.of(Problem.Kind.REFUSED_BY_GAME, "测试失败"));
-        }
-
-        @Override public ActionStatus tick(TickContext context) {
-            ticks++;
-            if (ticks < finishAfterTicks) return ActionStatus.running();
-            return failure == null ? ActionStatus.done() : ActionStatus.failed(failure);
-        }
-
-        @Override public String describe() { return "测试放水"; }
     }
 
     /** 第一人称现场替身：哪些格子够得着由测试声明，其余一律看不到。 */
