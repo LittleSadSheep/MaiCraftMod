@@ -31,7 +31,7 @@ import org.maiwithu.maicraft.ability.travel.TravelAbility;
 import org.maiwithu.maicraft.ability.use.UseModule;
 import org.maiwithu.maicraft.ability.wait.WaitModule;
 import org.maiwithu.maicraft.behavior.acquire.ClientCropReplanting;
-import org.maiwithu.maicraft.behavior.acquire.ClientDigsBlocks;
+import org.maiwithu.maicraft.behavior.acquire.ClientCollectsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.ClientWorkstationPlacer;
 import org.maiwithu.maicraft.behavior.acquire.ClientYieldScans;
 import org.maiwithu.maicraft.behavior.acquire.ContainerSource;
@@ -61,6 +61,7 @@ import org.maiwithu.maicraft.behavior.interaction.ClientGameRefusals;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
 import org.maiwithu.maicraft.behavior.inventory.ClientGearChanges;
+import org.maiwithu.maicraft.behavior.inventory.ClientDropPickup;
 import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
 import org.maiwithu.maicraft.behavior.inventory.ClientStepsAside;
 import org.maiwithu.maicraft.behavior.inventory.DropAvoidance;
@@ -172,6 +173,11 @@ public final class AbilityCatalog {
         // 换手读端提前建好：用东西的备手、进食的换手、装备的穿卸共用同一套界面搬运。
         ClientMovesToMainhand toMainhand = new ClientMovesToMainhand(deps.context());
 
+        // 挖一格与捡掉落物共用一套：采集、拿东西时挖矿收庄稼、存东西挖开盖子，都是"走过去、挖掉、捡起这一下掉出来的"。
+        LiveBlockDigging digging = new LiveBlockDigging(deps.digging());
+        ClientDropPickup drops = new ClientDropPickup(deps.context(), deps.walks());
+        ClientCollectsBlocks collects = new ClientCollectsBlocks(bringsClose, digging, drops);
+
         // 拿到物品引擎的内需入口先建好：用东西缺了要用的东西去拿一件、来源备料缺原料缺工具，都回到同一个引擎，
         // 引擎在登记拿到物品时建好再接上。
         DeferredInnerNeeds innerNeeds = new DeferredInnerNeeds();
@@ -201,19 +207,25 @@ public final class AbilityCatalog {
         PermissionCheck permission = new PermissionCheck(deps.protection(), deps.creatures());
 
         // 拿到物品：身上的不算来源（引擎开场就清点），已实现的途径都登记，见 obtainModule。
-        registry.register(obtainModule(deps, bringsClose, toMainhand, permission, innerNeeds));
+        registry.register(obtainModule(deps, bringsClose, toMainhand, permission, innerNeeds, collects));
 
         // 存东西：找容器把现场扫描与世界记忆并起来，打开容器、逐笔搬运与挖盖子都接上了。
-        registry.register(depositModule(deps, bringsClose));
+        registry.register(depositModule(deps, bringsClose, collects));
 
         // 采集：观察编号从场景查，现场从世界读，靠近用站位与走到，挖用原生挖掘；
         // 收完把身上的种子补种回原格，没有种子就不补，不额外去找。
         registry.register(new GatherAbility(new LiveSceneTargets(deps::scene), new LiveSpotReads(deps.context()),
-                approaches(bringsClose), new LiveBlockDigging(deps.digging()),
+                approaches(bringsClose), digging,
                 deps.toolRequirements(),
                 new ClientCropReplanting(toMainhand, deps.interactions(), deps.context()),
-                permission, deps.backpack(), deps.offhand()));
+                drops, permission, deps.backpack(), deps.offhand()));
 
+        registerStandalone(registry, deps);
+        return registry;
+    }
+
+    /** 不和别的能力共用现场部件的那些能力：战斗、跟随、等待、出行、聊天、记地点、按顺序做事。 */
+    private static void registerStandalone(AbilityRegistry registry, Deps deps) {
         // 战斗：感观与生存需求共用一份，观察编号与动手都接在真实客户端上。
         registry.register(new FightModule(deps.senses(),
                 new LiveSeenTargets(deps.scene().seen()), new LiveFightMoves(deps.walks())));
@@ -239,7 +251,6 @@ public final class AbilityCatalog {
 
         // 按顺序做事：逐步推进在目标推进里，这里只登记"接受步骤"的能力。
         registry.register(new SequenceModule());
-        return registry;
     }
 
     /** 聊天能力的一份：命令的完成依据（提交后聊天栏冒出的反馈行）与聊天回显同出一个聊天栏日志。 */
@@ -270,13 +281,13 @@ public final class AbilityCatalog {
      * 引擎要等来源清单建好才建得出来，所以内需入口先接住、引擎建好后接上。
      */
     private static AbilityModule obtainModule(Deps deps, LiveApproaches bringsClose,
-            ClientMovesToMainhand toMainhand, PermissionCheck permission, DeferredInnerNeeds innerNeeds) {
+            ClientMovesToMainhand toMainhand, PermissionCheck permission, DeferredInnerNeeds innerNeeds,
+            ClientCollectsBlocks collects) {
         RegistryRecipeReads recipeReads = new RegistryRecipeReads(deps.context(), deps.itemTags(), deps.furnaceFuels());
         // 在工作站上动手：熔炉添燃料时按同一份燃料表挑身上烧得最久的。
         RecipeRuns recipeRuns = new MenuRecipeRuns(bringsClose, deps.interactions(),
                 recipeReads, deps.memory(), deps.context());
         ClientYieldScans yieldScans = new ClientYieldScans(deps.blockScans(), deps.context());
-        ClientDigsBlocks digs = new ClientDigsBlocks();
         ClientWorkstationPlacer placer = new ClientWorkstationPlacer(
                 deps.interactions(), toMainhand, deps.memory(), deps.context());
         RecipeSource craftSource = new RecipeSource(
@@ -287,9 +298,9 @@ public final class AbilityCatalog {
                 Set.of(RecipeView.Kind.SMELTING),
                 recipeReads, deps.memory(), recipeReads, recipeRuns,
                 deps.backpack(), deps.offhand(), deps.itemTags(), innerNeeds, placer, permission);
-        MiningSource miningSource = new MiningSource(yieldScans, digs, deps.toolRequirements(),
+        MiningSource miningSource = new MiningSource(yieldScans, collects, deps.toolRequirements(),
                 permission, deps.backpack(), deps.offhand(), innerNeeds);
-        HarvestSource harvestSource = new HarvestSource(yieldScans, digs, permission,
+        HarvestSource harvestSource = new HarvestSource(yieldScans, collects, permission,
                 new ClientCropReplanting(toMainhand, deps.interactions(), deps.context()));
         ItemAcquisition acquisition = new ItemAcquisition(
                 List.of(new ContainerSource(deps.memory(), deps.itemTags(),
@@ -305,8 +316,8 @@ public final class AbilityCatalog {
     }
 
     /** 存东西能力的一份：找容器把现场扫描与世界记忆并起来，归属与压住盖子的方块问这个世界的保护判断。 */
-    private static DepositModule depositModule(Deps deps, LiveApproaches bringsClose) {
-        return DepositModule.live(deps.context(), bringsClose, deps.interactions(), new ClientDigsBlocks(),
+    private static DepositModule depositModule(Deps deps, LiveApproaches bringsClose, ClientCollectsBlocks collects) {
+        return DepositModule.live(deps.context(), bringsClose, deps.interactions(), collects,
                 deps.itemTags(), deps.memory(), deps.backpack(), deps.blockScans(), deps.protection(), deps::scene);
     }
 

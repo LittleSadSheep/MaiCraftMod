@@ -29,17 +29,17 @@ public final class MiningSource implements ItemSource {
     public static final int SEARCH_RADIUS_BLOCKS = 48;
 
     private final ScansMinables minables;
-    private final DigsBlocks digs;
+    private final CollectsBlocks collects;
     private final ReadsToolRequirements tools;
     private final PermissionCheck permission;
     private final BackpackView backpack;
     private final OffhandContents offhand;
     private final ItemNeeds needs;
 
-    public MiningSource(ScansMinables minables, DigsBlocks digs, ReadsToolRequirements tools,
+    public MiningSource(ScansMinables minables, CollectsBlocks collects, ReadsToolRequirements tools,
             PermissionCheck permission, BackpackView backpack, OffhandContents offhand, ItemNeeds needs) {
         this.minables = minables;
-        this.digs = digs;
+        this.collects = collects;
         this.tools = tools;
         this.permission = permission;
         this.backpack = backpack;
@@ -87,7 +87,8 @@ public final class MiningSource implements ItemSource {
         Permissions permissions = context.permissions();
         List<Action> steps = new ArrayList<>();
         boolean toolArranged = false;
-        for (MinableSpot spot : screened.allowed()) {
+        // 一格至少掉一件：要几件就挖几格，不把附近的矿一口气挖光；挖少了引擎清点后会再来。
+        for (MinableSpot spot : screened.allowed().stream().limit(request.count()).toList()) {
             if (!toolArranged) {
                 Optional<Action> tool = toolStep(spot, request, permissions);
                 if (tool.isPresent()) {
@@ -95,12 +96,13 @@ public final class MiningSource implements ItemSource {
                     toolArranged = true;
                 }
             }
-            Optional<Action> dig = digs.dig(spot.pos());
-            if (dig.isEmpty()) {
-                // 挖的入口接不上，一步都还没动：整串放弃，由引擎换别的路。
+            // 走过去、挖掉、捡起掉出来的东西：一格一格来，不隔空挖，也不把矿丢在地上。
+            Optional<Action> collect = collects.collect(spot.pos(), permissions);
+            if (collect.isEmpty()) {
+                // 收的入口接不上，一步都还没动：整串放弃，由引擎换别的路。
                 return Optional.empty();
             }
-            steps.add(dig.get());
+            steps.add(collect.get());
         }
         return Optional.of(new StepwiseActions("挖出" + request.wanted().describe(), steps.toArray(Action[]::new)));
     }

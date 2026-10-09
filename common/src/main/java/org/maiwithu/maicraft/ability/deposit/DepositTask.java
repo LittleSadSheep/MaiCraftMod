@@ -185,7 +185,8 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
         reopened = 0;
         carryOver = null;
         if (current.digLidFirst()) {
-            Optional<Action> dig = services.digs() == null ? Optional.empty() : services.digs().dig(lidCell());
+            Optional<Action> dig = services.digs() == null ? Optional.empty()
+                    : services.digs().dig(lidCell(), input.permissions());
             if (dig.isEmpty()) {
                 recordAttempt("清开" + name() + "盖子上的方块", "挖不了，换下一只");
                 return Next.go(Phase.NEXT, "这只的盖子清不开，换下一只");

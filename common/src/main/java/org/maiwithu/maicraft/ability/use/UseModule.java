@@ -10,6 +10,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.interaction.ClientGameRefusals;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
+import org.maiwithu.maicraft.behavior.inventory.ClientDropPickup;
 import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.perception.Scene;
@@ -86,7 +87,7 @@ public final class UseModule implements AbilityModule {
                 new LiveNearbySearcher(scans, context),
                 refusals::latestMessage,
                 new MenuSignEditors(),
-                new LiveDropGathering(context, walks),
+                new ClientDropPickup(context, walks),
                 new LiveUseTravel(walks),
                 new LiveMenuLooks(context),
                 memory));

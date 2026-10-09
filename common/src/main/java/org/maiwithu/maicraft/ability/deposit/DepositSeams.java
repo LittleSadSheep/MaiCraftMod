@@ -23,9 +23,9 @@ final class DepositSeams {
         MenuOpening open(BlockPos at, Permissions permissions);
     }
 
-    /** 挖开压住容器盖子的方块；挖不了时给空。 */
+    /** 挖开压住容器盖子的方块：走过去、挖掉、把掉出来的捡进包；挖不了时给空。 */
     interface DigsLid {
-        Optional<Action> dig(BlockPos lidCell);
+        Optional<Action> dig(BlockPos lidCell, Permissions permissions);
     }
 
     /** 背包物品标签判断：一个物品 ID 在不在一个标签里；接缝没接上时永远为假。 */

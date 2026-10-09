@@ -381,14 +381,13 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
                 services.world().dimension()), target.typeId(), itemIds, Instant.now());
     }
 
-    // 顺手捡起这一下新掉出来的东西（剪下来的羊毛）；没有就做下一次或收工。
+    // 顺手捡起这一下新掉出来的东西（剪下来的羊毛）：等一小会儿看有没有东西冒出来，有就走过去捡；
+    // 没接上捡东西就直接做下一次或收工。
     private Next<Phase> collectOrNext() {
-        Optional<Action> gather = services.drops() == null ? Optional.empty()
-                : services.drops().collectNewSince(dropsBefore);
-        if (gather.isPresent()) {
-            return goWith(Phase.COLLECT, gather.get(), "捡起掉出的东西");
+        if (services.drops() == null) {
+            return nextOrDone();
         }
-        return nextOrDone();
+        return goWith(Phase.COLLECT, services.drops().pickUpNewSince(dropsBefore), "捡起掉出的东西");
     }
 
     private Next<Phase> collect(TickContext context) {

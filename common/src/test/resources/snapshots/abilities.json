@@ -56,7 +56,7 @@
       {
         "ability": "maicraft:gather",
         "summary": "采掉、收获、捡起世界里指定的东西",
-        "parameters": "block?: string, item?: string, radius?: integer",
+        "parameters": "block?: string, item?: string",
         "targets": [
           "position",
           "seen"
@@ -392,14 +392,6 @@
           "type": "string",
           "required": false,
           "doc": "认为会掉出的东西，用于确认；不给按实际掉落记录"
-        },
-        {
-          "name": "radius",
-          "type": "integer",
-          "required": false,
-          "doc": "捡掉落物时的范围（格）",
-          "min": 1,
-          "max": 64
         }
       ],
       "targets": [

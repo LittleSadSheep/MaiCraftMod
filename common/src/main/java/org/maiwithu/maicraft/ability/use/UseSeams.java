@@ -3,7 +3,6 @@ package org.maiwithu.maicraft.ability.use;
 
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
@@ -141,15 +140,6 @@ final class UseSeams {
     /** 告示牌编辑界面：右键提交后界面的读取入口；界面没开着给空。 */
     interface ReadsSignEditor {
         Optional<SignEditor> current();
-    }
-
-    /** 顺手捡起：交互掉在地上的东西（剪下来的羊毛）。 */
-    interface GathersDrops {
-        /** 角色附近几格此刻有哪些掉落物（实体编号）；出手前记一份，用来认出这次新掉出来的。 */
-        Set<Integer> nearby();
-
-        /** 走过去捡起出手后新掉出来的东西；没有新掉出来的给空。 */
-        Optional<Action> collectNewSince(Set<Integer> before);
     }
 
     /** 游戏的拒绝：动作栏此刻显示的提示语（"箱子已上锁"、领地保护）；没有在显示为空。 */

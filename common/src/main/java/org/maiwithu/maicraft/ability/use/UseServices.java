@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.ability.use;
 
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
+import org.maiwithu.maicraft.behavior.inventory.PicksUpDrops;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 
 /**
@@ -35,7 +36,7 @@ record UseServices(
         SearchesNearby search,
         UseSeams.ReadsGameRefusal refusal,
         UseSeams.ReadsSignEditor signEditors,
-        UseSeams.GathersDrops drops,
+        PicksUpDrops drops,
         UseSeams.TravelsTo travel,
         UseSeams.LooksInMenus menus,
         WorldMemory memory) {

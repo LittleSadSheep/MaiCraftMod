@@ -9,6 +9,7 @@ import org.maiwithu.maicraft.behavior.acquire.DigsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
 import org.maiwithu.maicraft.behavior.acquire.ReadsToolRequirements;
 import org.maiwithu.maicraft.behavior.acquire.ReplantsCrops;
+import org.maiwithu.maicraft.behavior.inventory.PicksUpDrops;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;
@@ -44,12 +45,13 @@ public final class GatherAbility implements AbilityModule {
     private final DigsBlocks digs;
     private final ReadsToolRequirements tools;
     private final ReplantsCrops replants;
+    private final PicksUpDrops drops;
     private final PermissionCheck permission;
     private final BackpackView backpack;
     private final OffhandContents offhand;
 
     public GatherAbility(SeesTargets seen, ReadsSpot world, ApproachesTargets approaches, DigsBlocks digs,
-            ReadsToolRequirements tools, ReplantsCrops replants, PermissionCheck permission,
+            ReadsToolRequirements tools, ReplantsCrops replants, PicksUpDrops drops, PermissionCheck permission,
             BackpackView backpack, OffhandContents offhand) {
         this.seen = seen;
         this.world = world;
@@ -57,6 +59,7 @@ public final class GatherAbility implements AbilityModule {
         this.digs = digs;
         this.tools = tools;
         this.replants = replants;
+        this.drops = drops;
         this.permission = permission;
         this.backpack = backpack;
         this.offhand = offhand;
@@ -80,9 +83,7 @@ public final class GatherAbility implements AbilityModule {
                         Param.of("block", ParamType.BLOCK_OR_TAG)
                                 .doc("配 position 目标用：要采的方块 ID").build(),
                         Param.of("item", ParamType.ITEM_OR_TAG)
-                                .doc("认为会掉出的东西，用于确认；不给按实际掉落记录").build(),
-                        Param.of("radius", ParamType.INTEGER).range(1, 64)
-                                .doc("捡掉落物时的范围（格）").build()),
+                                .doc("认为会掉出的东西，用于确认；不给按实际掉落记录").build()),
                 Set.of(TargetKind.SEEN, TargetKind.POSITION),
                 ExecutionMode.CONTROLS_PLAYER, Set.of(), List.of(), Listing.LISTED);
     }
@@ -113,13 +114,6 @@ public final class GatherAbility implements AbilityModule {
                 + "坐标要能落到一格上（缺高度时附近也找不到顶面）");
     }
 
-    // 观察编号：查它最后看到的位置；不在册（失效、写岔）就以目标消失结束，不猜。
-    private Optional<GatherSpot> resolveSeen(String id, String expectedItem, Permissions permissions) {
-        return seen.lookup(id).map(found -> new GatherSpot(found.at(), !found.block(), null,
-                expectedItem, permissions,
-                "采集 " + id + (found.block() ? " 处的方块" : " 的掉落物")));
-    }
-
     // 坐标目标：y 可以省略，找这一柱列的顶面；整列没加载就说不清，不瞎猜高度。
     private Optional<GatherSpot> resolvePosition(Target.Position position, Params params, String expectedItem,
             Permissions permissions) {
@@ -147,6 +141,6 @@ public final class GatherAbility implements AbilityModule {
 
     @Override public void registerTasks(TaskFactories factories) {
         factories.register(GatherSpot.class, input -> new GatherTask(input, approaches, digs, tools,
-                world, replants, permission, backpack, offhand, input.permissions()));
+                world, replants, drops, permission, backpack, offhand, input.permissions()));
     }
 }

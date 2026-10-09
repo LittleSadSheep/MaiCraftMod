@@ -69,7 +69,7 @@ class MiningSourceTest {
     }
 
     /** 替身：挖一格记一格，当场做完；接不上时返回 empty。 */
-    private static final class FakeDigs implements DigsBlocks {
+    private static final class FakeDigs implements CollectsBlocks {
         final List<BlockPos> dug = new ArrayList<>();
         private boolean wired = true;
 
@@ -78,7 +78,7 @@ class MiningSourceTest {
             return this;
         }
 
-        @Override public Optional<Action> dig(BlockPos target) {
+        @Override public Optional<Action> collect(BlockPos target, Permissions permissions) {
             if (!wired) return Optional.empty();
             dug.add(target);
             return Optional.of(new Action() {
@@ -106,7 +106,7 @@ class MiningSourceTest {
         return new MinableSpot(new BlockPos(x, 64, z), "minecraft:coal_ore", "minecraft:coal");
     }
 
-    private MiningSource source(ScansMinables minables, DigsBlocks digs) {
+    private MiningSource source(ScansMinables minables, CollectsBlocks digs) {
         // 真许可检查点加全空的替身保护：本场景里没有任何受保护的东西，挡路的只有许可档位。
         PermissionCheck check = new PermissionCheck(
                 new Protection((dimension, x, y, z) -> Optional.empty(), () -> List.of(),
@@ -178,5 +178,16 @@ class MiningSourceTest {
             if (!(action.tick(new StubTick(tick)) instanceof ActionStatus.Running)) return;
         }
         throw new AssertionError("一百刻还没做完");
+    }
+
+    @Test
+    void 要几件就挖几格_不把附近的矿挖光() {
+        FakeDigs digs = new FakeDigs();
+        backpack.add("minecraft:iron_pickaxe", 1);
+        source(new FakeMinables(List.of(coalAt(3, 0), coalAt(4, 0), coalAt(5, 0), coalAt(6, 0)), true), digs)
+                .begin(new ItemRequest(WantedItem.ofItem("minecraft:coal"), 2, "火把"),
+                        new SourceQuote.Offer("采掘", 4, new AcquisitionCost(3, 4), null), CONTEXT)
+                .orElseThrow();
+        assertEquals(2, digs.dug.size());
     }
 }

@@ -42,7 +42,7 @@ class HarvestSourceTest {
     }
 
     /** 替身：挖一格记一格，当场做完；接不上时返回 empty。 */
-    private static final class FakeDigs implements DigsBlocks {
+    private static final class FakeDigs implements CollectsBlocks {
         final List<BlockPos> dug = new ArrayList<>();
         private boolean wired = true;
 
@@ -51,7 +51,7 @@ class HarvestSourceTest {
             return this;
         }
 
-        @Override public Optional<Action> dig(BlockPos target) {
+        @Override public Optional<Action> collect(BlockPos target, Permissions permissions) {
             if (!wired) return Optional.empty();
             dug.add(target);
             return Optional.of(new Action() {
@@ -65,7 +65,7 @@ class HarvestSourceTest {
         }
     }
 
-    private HarvestSource source(ScansMatureCrops crops, DigsBlocks digs) {
+    private HarvestSource source(ScansMatureCrops crops, CollectsBlocks digs) {
         // 真许可检查点加全空的替身保护：本场景里没有任何受保护的东西。
         PermissionCheck check = new PermissionCheck(
                 new Protection((dimension, x, y, z) -> Optional.empty(), () -> List.of(),
@@ -113,5 +113,31 @@ class HarvestSourceTest {
                 .begin(new ItemRequest(WantedItem.ofItem("minecraft:wheat"), 1, "烹饪原料"),
                         new SourceQuote.Offer("收熟作物", 1, new AcquisitionCost(2, 1), null), CONTEXT)
                 .isEmpty());
+    }
+
+    @Test
+    void 补种在收完捡完之后才问_按收掉的作物认种子() {
+        FakeDigs digs = new FakeDigs();
+        List<String> asked = new ArrayList<>();
+        ReplantsCrops replants = (spot, cropType) -> {
+            asked.add(cropType + "@" + digs.dug.size());
+            return Optional.empty();
+        };
+        HarvestSource harvest = new HarvestSource(new FakeCrops(List.of(
+                new CropSpot(new BlockPos(2, 64, 0), "minecraft:carrots"))), digs, permissionCheck(), replants);
+        Action action = harvest.begin(new ItemRequest(WantedItem.ofItem("minecraft:carrot"), 1, "烹饪原料"),
+                new SourceQuote.Offer("收庄稼", 1, new AcquisitionCost(2, 1), null), CONTEXT).orElseThrow();
+        assertTrue(asked.isEmpty(), "动手前不该问补种：那时格子还没空、种子也还没进包");
+        while (!(action.tick(null) instanceof ActionStatus.Done)) {
+            // 一步步推进到做完。
+        }
+        assertEquals(List.of("minecraft:carrots@1"), asked);
+    }
+
+    private static PermissionCheck permissionCheck() {
+        return new PermissionCheck(
+                new Protection((dimension, x, y, z) -> Optional.empty(), () -> List.of(),
+                        name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self"),
+                entityId -> Optional.empty());
     }
 }

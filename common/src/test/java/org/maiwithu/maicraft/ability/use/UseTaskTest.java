@@ -24,6 +24,7 @@ import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
 import org.maiwithu.maicraft.behavior.interaction.InteractionVerdict;
 import org.maiwithu.maicraft.behavior.interaction.ItemUseAim;
 import org.maiwithu.maicraft.behavior.interaction.SignEditor;
+import org.maiwithu.maicraft.behavior.inventory.PicksUpDrops;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.Target;
@@ -498,17 +499,17 @@ class UseTaskTest {
         @Override public Optional<String> latestMessage() { return Optional.ofNullable(message); }
     }
 
-    private static final class FakeDrops implements UseSeams.GathersDrops {
+    private static final class FakeDrops implements PicksUpDrops {
         Set<Integer> before = Set.of();
         Set<Integer> askedSince;
         Scripted pickUp;
 
         @Override public Set<Integer> nearby() { return before; }
 
-        @Override public Optional<Action> collectNewSince(Set<Integer> since) {
+        @Override public Action pickUpNewSince(Set<Integer> since) {
             askedSince = since;
             pickUp = new Scripted(2, ActionStatus.done(), () -> { });
-            return Optional.of(pickUp);
+            return pickUp;
         }
     }
 

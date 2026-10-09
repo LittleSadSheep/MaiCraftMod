@@ -6,7 +6,7 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.function.Supplier;
 
-import org.maiwithu.maicraft.behavior.acquire.ClientDigsBlocks;
+import org.maiwithu.maicraft.behavior.acquire.CollectsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.ReadsItemTags;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
@@ -71,7 +71,7 @@ public final class DepositModule implements AbilityModule {
      * 找位置、挖盖子与标签判断的生产实现再建模块，启动清单只认这个入口。
      */
     public static DepositModule live(Supplier<PlayerContext> contexts, BringsPlayerClose close,
-            Interactions interactions, ClientDigsBlocks digs, ReadsItemTags tags, WorldMemory memory,
+            Interactions interactions, CollectsBlocks digs, ReadsItemTags tags, WorldMemory memory,
             BackpackView backpack, BlockScanService scans, Protection protection, Supplier<Scene> scene) {
         return new DepositModule(new DepositServices(
                 new ClientSpotsContainers(scans, contexts, memory, protection),

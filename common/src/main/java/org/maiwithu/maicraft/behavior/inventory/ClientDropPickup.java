@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.ability.use;
+package org.maiwithu.maicraft.behavior.inventory;
 
 import java.util.HashSet;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
 
@@ -23,23 +22,26 @@ import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
- * 顺手捡起的生产实现：出手后脚边新冒出来的掉落物（剪下来的羊毛），一件件走过去让原版拾取吸进包。
+ * 捡起掉出来的东西的生产实现：动手后脚边新冒出来的掉落物（挖下的矿、剪下的羊毛），
+ * 一件件走过去让原版拾取吸进包。
  *
- * <p>只捡这一下带出来的：出手前就躺在地上的东西不是这次的，不去碰。走路交给走到（不挖不垫，
+ * <p>只捡这一下带出来的：动手前就躺在地上的东西不是这次的，不去碰。走路交给走到（不挖不垫，
  * 不会为捡一团羊毛走下悬崖）；东西进没进包以地上那件消失为准，限时没捡到如实失败，
  * 不把"走过去了"当成"捡到了"。
  */
-final class LiveDropGathering implements UseSeams.GathersDrops {
+public final class ClientDropPickup implements PicksUpDrops {
 
-    /** 只认近处的：交互掉出来的东西就在脚边，走远了的不算"顺手"。 */
-    private static final double NEARBY_BLOCKS = 6.0;
+    /** 只认近处的：挖下、剪下的东西就落在动手的地方附近，走远了的不算这一下带出来的。 */
+    private static final double NEARBY_BLOCKS = 8.0;
+    /** 动手后等新掉落物冒出来的耐心（刻）；过了还没有就是这一下没掉东西。 */
+    private static final int APPEAR_TICKS = 10;
     /** 每件东西的耐心；到点没捡到就放弃这一件，不在一件东西上耗着。 */
     private static final int GIVE_UP_TICKS = 100;
 
     private final Supplier<PlayerContext> context;
     private final WalkTo walks;
 
-    LiveDropGathering(Supplier<PlayerContext> context, WalkTo walks) {
+    public ClientDropPickup(Supplier<PlayerContext> context, WalkTo walks) {
         this.context = Objects.requireNonNull(context, "context");
         this.walks = Objects.requireNonNull(walks, "walks");
     }
@@ -58,10 +60,8 @@ final class LiveDropGathering implements UseSeams.GathersDrops {
     }
 
     @Override
-    public Optional<Action> collectNewSince(Set<Integer> before) {
-        Set<Integer> fresh = new HashSet<>(nearby());
-        fresh.removeAll(before);
-        return fresh.isEmpty() ? Optional.empty() : Optional.of(new PickUp(before));
+    public Action pickUpNewSince(Set<Integer> before) {
+        return new PickUp(before);
     }
 
     private LocalPlayer player() {
@@ -79,6 +79,9 @@ final class LiveDropGathering implements UseSeams.GathersDrops {
         private WalkRun walk;
         private int waited;
         private int missed;
+        private int picked;
+        /** 还没看到新东西冒出来时已经等了几刻：掉落物要过一两刻才同步到客户端。 */
+        private int appearWaited;
 
         PickUp(Set<Integer> before) {
             this.skip = new HashSet<>(before);
@@ -94,12 +97,17 @@ final class LiveDropGathering implements UseSeams.GathersDrops {
             if (current != null && (drop == null || !drop.isAlive())) {
                 // 地上那件不在了：被原版吸进了包（也可能被别人拿走），接着捡下一件。
                 current = null;
+                picked++;
             } else if (current != null && ++waited > GIVE_UP_TICKS) {
                 skip.add(current);
                 missed++;
                 current = null;
             }
             if (current == null && !pickNext(player)) {
+                // 一件都还没看到：掉落物刚生成要过一两刻才同步过来，先等一等再说没有。
+                if (picked == 0 && missed == 0 && ++appearWaited <= APPEAR_TICKS) {
+                    return ActionStatus.running();
+                }
                 stopWalking();
                 return missed == 0 ? ActionStatus.done() : ActionStatus.failed(Problem.of(Problem.Kind.STUCK,
                         "有 " + missed + " 件掉出的东西走过去了还在地上，先不捡了", null));
