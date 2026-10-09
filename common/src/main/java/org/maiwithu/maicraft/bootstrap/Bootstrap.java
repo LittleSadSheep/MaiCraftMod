@@ -47,6 +47,7 @@ import org.maiwithu.maicraft.game.SubtitleFeed;
 import org.maiwithu.maicraft.game.menu.DefaultMenuActions;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerControlBoundary;
+import org.maiwithu.maicraft.game.player.ReadsFoodValues;
 import org.maiwithu.maicraft.game.player.UseKeyHold;
 import org.maiwithu.maicraft.game.serverlink.ClientOperation;
 import org.maiwithu.maicraft.game.serverlink.LinkTransport;
@@ -172,7 +173,7 @@ public final class Bootstrap {
             TaskEventSink events,
             InteractionSender interactionSender, MenuActions menuActions, Interactions interactions,
             CombatSenses combatSenses, WalkTo walks,
-            EatSoonTask.FoodMoves foodMoves) {
+            EatSoonTask.FoodMoves foodMoves, ReadsFoodValues foods) {
         return new ControlLoop(List.of(
                 new DigOutNeed(new SurvivalSituation.FromPlayer(),
                         () -> new NativeBlockBreaking(interactionSender, menuActions)),
@@ -180,7 +181,7 @@ public final class Bootstrap {
                 new FallNeed(new SurvivalSituation.FromPlayer(), interactions, FirstPersonScene::of,
                         PlayerContext::backpack),
                 new SelfDefenseNeed(combatSenses, new LiveCombatMoves(walks), events),
-                new HungerNeed(new LiveHungerView(), foodMoves, events),
+                new HungerNeed(new LiveHungerView(foods), foodMoves, events),
                 new NightfallNeed(new LiveNightView(combatSenses),
                         LiveNightAndEdgeMoves.burrow(events)),
                 new EdgeProximityNeed(new LiveEdgeView(),
@@ -250,20 +251,22 @@ public final class Bootstrap {
             // 按住使用键的投影：持续使用的提交方接入前没有任务占用，投影读到的始终是真实键值。
             UseKeyProjection useKeyProjection = new UseKeyHoldProjection(useKeyHold);
             // 吃随身食物：挑一件能直接吃的，换到主手后原生按住吃完一口。
+            // 食物数值一份：饿了挑吃的、数口粮都按游戏的食物组件认。
+            ReadsFoodValues foods = PlayerViews.foods(() -> playerControl.activeContext().orElse(null));
             EatsCarriedFood foodMoves = new EatsCarriedFood(
                     PlayerViews.backpack(() -> playerControl.activeContext().orElse(null)),
-                    PlayerViews.foods(() -> playerControl.activeContext().orElse(null)),
+                    foods,
                     new ClientMovesToMainhand(() -> playerControl.activeContext().orElse(null)),
                     useKeyProjection);
             // 战斗感观一份：生存需求的自卫与战斗能力看的是同一份伤害证据。
-            combatSenses = new LiveCombatSenses(new CombatMemory());
+            combatSenses = new LiveCombatSenses(new CombatMemory(), foods);
             // 控制循环按急迫程度登记生存需求：必须立刻处理的先登记，同样急时它先插进来；
             // 生存需求的事件从同一条任务事件流出去。主任务由目标运行表挂上：LLM 用 execute 派了活，
             // 目标就成为主任务。
             // 交互动作入口与按住使用键投影：生存需求的落地放水、能力清单在进世界时都用它们。
             interactions = new Interactions(useKeyProjection);
             controlLoop = withSurvivalNeeds(taskEvents, interactionSender, menuActions, interactions,
-                    combatSenses, walks, foodMoves);
+                    combatSenses, walks, foodMoves, foods);
             // Mixin 钩子拿不到构造注入，只能在这里登记；服务本体仍以实例传递。
             ClientHooks.registerPlayerControl(playerControl);
             ClientHooks.registerBlockScans(blockScans);

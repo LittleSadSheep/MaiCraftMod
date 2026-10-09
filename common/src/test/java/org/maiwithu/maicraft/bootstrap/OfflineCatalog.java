@@ -79,7 +79,7 @@ final class OfflineCatalog {
                 new ServerLinkSession(NO_TRANSPORT),
                 "00000000-0000-0000-0000-000000000000",
                 (ReadsCreatureSituation) entityId -> Optional.empty(),
-                new LiveCombatSenses(new CombatMemory()),
+                new LiveCombatSenses(new CombatMemory(), itemId -> Optional.empty()),
                 PlayerViews.backpack(nobody),
                 LiveCarryReads.offhand(nobody),
                 LiveCarryReads.itemTags(),

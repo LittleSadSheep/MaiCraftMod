@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.survival;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -12,11 +13,10 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.monster.Enemy;
-import net.minecraft.world.entity.Mob;
-import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.monster.Slime;
 import net.minecraft.world.phys.AABB;
 
+import org.maiwithu.maicraft.game.player.ReadsFoodValues;
 import org.maiwithu.maicraft.game.world.ObservationVisibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
@@ -30,9 +30,12 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 public final class LiveCombatSenses implements CombatSenses {
 
     private final CombatMemory memory;
+    private final ReadsFoodValues foods;
 
-    public LiveCombatSenses(CombatMemory memory) {
+    /** @param foods 食物数值：数"带了几份口粮"时按游戏的食物组件认，不按物品名猜。 */
+    public LiveCombatSenses(CombatMemory memory, ReadsFoodValues foods) {
         this.memory = memory;
+        this.foods = Objects.requireNonNull(foods, "foods");
     }
 
     @Override
@@ -78,9 +81,10 @@ public final class LiveCombatSenses implements CombatSenses {
         }
         List<WeaponChoice.Carried> carried = WeaponCarriedReader.read(self);
         boolean hasArrows = WeaponCarriedReader.hasArrows(self);
+        // 数口粮：按游戏的食物组件认，吃了不伤身的才算（金苹果算，腐肉、毒马铃薯不算）。
         int foodCount = 0;
         for (WeaponChoice.Carried stack : carried) {
-            if (WeaponCarriedReader.isEdible(stack.item())) {
+            if (foods.of(stack.item()).filter(FoodPicker::harmless).isPresent()) {
                 foodCount += stack.count();
             }
         }

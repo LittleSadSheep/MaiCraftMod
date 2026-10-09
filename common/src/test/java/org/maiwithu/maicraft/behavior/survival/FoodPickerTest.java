@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.ability.eat;
+package org.maiwithu.maicraft.behavior.survival;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -43,6 +43,31 @@ class FoodPickerTest {
                 carried("minecraft:golden_apple", 1, food("minecraft:golden_apple", 4, 9.6f,
                         new FoodEffect("minecraft:absorption", true))));
         assertEquals(Optional.of("minecraft:golden_apple"), FoodPicker.autoPick(carried));
+    }
+
+    @Test
+    void 饿了顺手吃挑补得刚好的普通食物_不拿牛排补一格() {
+        List<FoodPicker.Carried> carried = List.of(
+                carried("minecraft:cooked_beef", 2, food("minecraft:cooked_beef", 8, 12.8f)),
+                carried("minecraft:bread", 3, food("minecraft:bread", 5, 6.0f)),
+                carried("minecraft:cookie", 4, food("minecraft:cookie", 2, 0.4f)));
+        assertEquals(Optional.of("minecraft:cookie"), FoodPicker.forHunger(carried, 19, false));
+        assertEquals(Optional.of("minecraft:bread"), FoodPicker.forHunger(carried, 14, false));
+        assertEquals(Optional.of("minecraft:cooked_beef"), FoodPicker.forHunger(carried, 6, false));
+    }
+
+    @Test
+    void 饿了顺手吃不动金苹果和腐肉_见底掉血时才什么都吃() {
+        FoodValue goldenApple = new FoodValue("minecraft:golden_apple", 4, 9.6f, 1.6f, true,
+                List.of(new FoodEffect("minecraft:regeneration", true)));
+        List<FoodPicker.Carried> carried = List.of(
+                carried("minecraft:golden_apple", 1, goldenApple),
+                carried("minecraft:rotten_flesh", 5, food("minecraft:rotten_flesh", 4, 0.8f,
+                        new FoodEffect("minecraft:hunger", false))));
+        assertEquals(Optional.empty(), FoodPicker.forHunger(carried, 5, false));
+        assertEquals(Optional.of("minecraft:golden_apple"), FoodPicker.forHunger(carried, 0, true));
+        assertTrue(FoodPicker.harmless(goldenApple));
+        assertTrue(!FoodPicker.plain(goldenApple));
     }
 
     @Test

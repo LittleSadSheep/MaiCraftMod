@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.survival;
 
-import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.world.item.ItemStack;
+import java.util.Objects;
 
+import net.minecraft.client.player.LocalPlayer;
+
+import org.maiwithu.maicraft.game.player.BackpackView;
+import org.maiwithu.maicraft.game.player.ReadsFoodValues;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -14,6 +16,12 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  */
 public final class LiveHungerView implements HungerNeed.ReadsFacts {
 
+    private final ReadsFoodValues foods;
+
+    public LiveHungerView(ReadsFoodValues foods) {
+        this.foods = Objects.requireNonNull(foods, "foods");
+    }
+
     @Override
     public HungerNeed.Facts read(TickContext context) {
         LocalPlayer self = self(context);
@@ -21,18 +29,11 @@ public final class LiveHungerView implements HungerNeed.ReadsFacts {
             return null;
         }
         int food = self.getFoodData().getFoodLevel();
-        boolean carryingEdible = false;
-        for (var stack : self.getInventory().items) {
-            if (!stack.isEmpty() && WeaponCarriedReader.isEdible(itemId(stack))) {
-                carryingEdible = true;
-                break;
-            }
-        }
+        // 有没有饿了就能顺手吃的：按游戏的食物组件认普通食物，和吃饭任务挑吃的用同一条规则。
+        BackpackView backpack = context.player().backpack();
+        boolean carryingEdible = backpack != null && FoodPicker.carried(backpack.stacks(), foods).stream()
+                .anyMatch(candidate -> FoodPicker.plain(candidate.value()));
         return new HungerNeed.Facts(food, food <= 0, carryingEdible);
-    }
-
-    static String itemId(ItemStack stack) {
-        return BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
     }
 
     private static LocalPlayer self(TickContext context) {
