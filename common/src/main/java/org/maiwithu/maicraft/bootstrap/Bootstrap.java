@@ -294,6 +294,10 @@ public final class Bootstrap {
                     return playerControl.input().automationOwnsControls();
                 }
 
+                @Override public boolean humanTookOver() {
+                    return playerControl.input().humanTookOver();
+                }
+
                 @Override public void requestControl() {
                     // 本刻的角色上下文只在 beginTick 与 endTick 之间有效；下达与恢复都发生在客户端刻里，
                     // 这里取的是当刻的玩家本体，不在世界里时边界会如实拒绝。
@@ -374,7 +378,10 @@ public final class Bootstrap {
          * 但不推进控制循环，生存需求不能去抢人类手上的角色。
          */
         private void tickInWorld(Minecraft minecraft, PlayerContext current) {
-            // 启动接管开关还欠着控制权时每刻请求一次；请求是幂等的，拿到为止。
+            // 启动接管开关还欠着控制权时每刻请求一次；请求是幂等的，拿到为止。人按了 F8 就不再追着要。
+            if (startupAutomationPending && playerControl.input().humanTookOver()) {
+                startupAutomationPending = false;
+            }
             if (startupAutomationPending) {
                 playerControl.requestAutomationControl(current.localPlayer());
                 if (playerControl.input().automationOwnsControls()) {

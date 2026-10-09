@@ -28,6 +28,14 @@ public interface PlayerInput {
     // 是否已经把玩家输入实际交给自动任务；仅提交了接管请求还不算。
     boolean automationOwnsControls();
 
+    /**
+     * 人按 F8 把角色收回去了，而且还没按 F8 交回来。F8 是人的急停：这期间自动化不自己抢回控制权，
+     * 目标下达、恢复、进世界自动接管都等人交回。
+     */
+    default boolean humanTookOver() {
+        return false;
+    }
+
     // 只接受当前游戏刻的指令，旧任务保存的编号不能在以后继续使用。
     void applyMovement(Movement movement, long leaseTickRevision);
 

@@ -25,7 +25,7 @@ import java.util.Optional;
  * 带同一个请求键的下达只算一次：网络重试时角色不会把同一件事做两遍。
  *
  * <p>目标成为主任务的那一刻（新下达，或暂停的目标被恢复），经控制权交接接缝向输入层请求角色
- * 的控制权；没拿到之前不推进，查询端如实说在等交接。人类按 F8 抢回控制权后自动化不立刻抢回，
+ * 的控制权；没拿到之前不推进，查询端如实说在等交接。人按 F8 收回角色后不会被抢回来，
  * 等下一个目标下达或恢复时才再次请求。
  *
  * <p>结束了的目标只保留最近 {@value #KEPT_FINISHED} 条供查询；还没结束的一条都不丢。只在客户端线程使用。
@@ -151,8 +151,11 @@ public final class GoalRunTable {
         if (!runner.run().unfinished()) return Optional.empty();
         String describe = runner.describe();
         if (runner.run().state() == GoalRunState.RUNNING && !handover.automationOwnsControls()) {
-            return Optional.of("等待控制权交接（角色此刻由人类操作，自动化拿到控制权后才会推进；"
-                    + "重新下达或恢复目标会再次请求，人类按 F8 也能把控制权交给自动化）：" + describe);
+            // 人按 F8 收回了角色：只能等人交回，重新下达也抢不回来，如实说清，免得 LLM 反复下达。
+            if (handover.humanTookOver()) {
+                return Optional.of("角色在玩家手上（按过 F8），玩家再按 F8 交回之前不会推进：" + describe);
+            }
+            return Optional.of("等待控制权交接（下一刻生效）：" + describe);
         }
         return Optional.of(describe);
     }
@@ -216,7 +219,7 @@ public final class GoalRunTable {
         if (mainRunId != id) {
             makeMain(runner);
         } else {
-            // 已经是主任务也要请求：人类可能趁着暂停按 F8 拿回了控制权，恢复是一次明确的下达。
+            // 已经是主任务也要请求：恢复是一次明确的下达；人按 F8 收回了角色时请求不生效，由输入层把关。
             handover.requestControl();
         }
     }

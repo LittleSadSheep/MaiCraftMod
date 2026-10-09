@@ -46,6 +46,7 @@ class GoalRunTableTest {
     private static final class RecordingHandover implements PlayerControlHandover {
         int requests;
         boolean automationOwns = true;
+        boolean humanTookOver;
 
         @Override public boolean automationOwnsControls() {
             return automationOwns;
@@ -53,6 +54,10 @@ class GoalRunTableTest {
 
         @Override public void requestControl() {
             requests++;
+        }
+
+        @Override public boolean humanTookOver() {
+            return humanTookOver;
         }
     }
 
@@ -101,8 +106,8 @@ class GoalRunTableTest {
         table.pause(runner.run().id());
         table.resume(runner.run().id());
 
-        // 下达请求了一次，恢复时再请求一次：恢复也是一次明确的下达——
-        // 人类可能趁着暂停按 F8 拿回了控制权，恢复不能让它继续停在人类手上。
+        // 下达请求了一次，恢复时再请求一次：恢复也是一次明确的下达；
+        // 人按 F8 收回了角色时请求不生效，由输入层把关。
         assertEquals(2, handover.requests);
     }
 
@@ -121,6 +126,18 @@ class GoalRunTableTest {
         // 暂停的目标在等恢复，不是在等控制权。
         table.pause(id);
         assertFalse(table.doing(id).orElseThrow().contains("等待控制权交接"));
+    }
+
+    @Test
+    void playerWhoPressedF8IsReportedAsHoldingTheCharacter() {
+        // 人按 F8 收回了角色：如实说等人交回，不提示重新下达去抢。
+        handover.automationOwns = false;
+        handover.humanTookOver = true;
+        long id = table.launch(GOAL, null).runner().run().id();
+
+        String doing = table.doing(id).orElseThrow();
+        assertTrue(doing.contains("F8"), doing);
+        assertFalse(doing.contains("重新下达"), doing);
     }
 
     @Test
