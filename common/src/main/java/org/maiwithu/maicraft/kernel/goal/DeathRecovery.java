@@ -8,10 +8,12 @@ import org.maiwithu.maicraft.kernel.param.Params;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * 死亡恢复决策：角色死后给 LLM 的一个选择——请求原版重生、请求切观战，或取消任务把死亡屏幕留给人。
@@ -29,12 +31,17 @@ public final class DeathRecovery {
     /** 决策在 MCP 里显示的名字：不是能力 ID，内核不认识任何能力，这里只是决策种类在任务列表里的叫法。 */
     public static final String DECISION_NAME = "death_recovery";
 
+    /** 留着最近多少轮的决策编号供迟到答复辨认；死亡不频繁，十六轮足够。 */
+    private static final int KEPT_DECISION_IDS = 16;
+
     private final TaskEventLog events;
     private GoalRun decision;
     /** 挂着的问题原文：答复会把问题从记录上消费掉，重新挂时要按原文挂回去。 */
     private Question lastQuestion;
     /** 下一条决策的编号：负数往回数，与目标运行的正数编号永不相遇。 */
     private long nextDecisionId = -1;
+    /** 最近挂过的决策编号：决策了结后迟到的答复据此得到"本轮已了结"的回话，而不是被当成编号不存在。 */
+    private final Set<Long> issuedDecisionIds = new LinkedHashSet<>();
 
     public DeathRecovery(TaskEventLog events) {
         this.events = Objects.requireNonNull(events, "events");
@@ -52,6 +59,11 @@ public final class DeathRecovery {
         }
         Question question = new Question(Question.Reason.CHOOSE_ONE, questionText(facts), options(connectionAlive));
         decision = new GoalRun(nextDecisionId--, goal(), GoalRun.NO_PARENT, -1);
+        issuedDecisionIds.add(decision.id());
+        while (issuedDecisionIds.size() > KEPT_DECISION_IDS) {
+            // 只留最近几轮的编号：死亡不频繁，更早的迟到答复当作编号不存在也说得通。
+            issuedDecisionIds.remove(issuedDecisionIds.iterator().next());
+        }
         decision.ask(question);
         lastQuestion = question;
         events.append(TaskEvent.Kind.ASKED, decision.id(), question.text(), null);
@@ -108,6 +120,10 @@ public final class DeathRecovery {
      */
     public Choice answer(long runId, String optionId) {
         if (!owns(runId)) {
+            if (issuedDecisionIds.contains(runId)) {
+                // 编号确实是某轮死亡决策的，但那轮已经了结：迟到的答复如实说不再收，不冒充编号不存在。
+                throw new GoalRunTable.WrongGoalRunState("本轮死亡恢复已了结，不再收回答");
+            }
             throw new GoalRunTable.UnknownGoalRun(runId);
         }
         Question question = decision.question();

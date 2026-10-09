@@ -136,6 +136,21 @@ class DeathRecoveryTest {
         assertTrue(event.message().contains("角色死了"), event.message());
     }
 
+    @Test
+    void describeFollowsTheQuestionLifecycle() {
+        // 挂着问题在等回答；答复并执行后，说明要说清已答复以及执行了什么——
+        // 这是按编号查"此刻在做什么"时给 LLM 看的话。
+        recovery.onDeath(FACTS, true);
+        long id = recovery.decisionRun().orElseThrow().id();
+        assertTrue(recovery.describe().contains("等回答"), recovery.describe());
+
+        recovery.answer(id, "respawn");
+        recovery.applied(DeathRecovery.Choice.RESPAWN, true);
+        String described = recovery.describe();
+        assertTrue(described.contains("已答复"), described);
+        assertTrue(described.contains("重生"), described);
+    }
+
     private List<String> optionIds(Question question) {
         return question.options().stream().map(Question.Option::id).toList();
     }

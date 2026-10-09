@@ -171,6 +171,11 @@ public final class GoalRunTable {
     /** 这个目标此刻在做什么的一句话；已经结束时为空。
      *  自动化还没拿到控制权时如实说明在等交接，不把"卡在第 0 步"呈现成正在推进。 */
     public Optional<String> doing(long id) {
+        if (deathRecovery.owns(id)) {
+            // 死亡恢复决策的编号不在 runners 表里：和按编号查目标一样先认领，返回决策的说明。
+            // answer 成功后同一次工具调用还会回来查视图，这里漏特判会把已经成功的回答污染成"编号不存在"。
+            return Optional.of(deathRecovery.describe());
+        }
         GoalRunner runner = require(id);
         if (!runner.run().unfinished()) return Optional.empty();
         String describe = runner.describe();
@@ -280,8 +285,9 @@ public final class GoalRunTable {
      * @param optionId 所选回答的编号，必须是问题给出的选项之一
      */
     public void answer(long id, String optionId) {
-        if (deathRecovery.owns(id)) {
-            // 死亡恢复的回答不进目标的回答列表：它是一个 Mod 该动手的选择，在这里就地执行。
+        if (id < 0) {
+            // 负数编号是死亡恢复决策的数域：不管本轮决策还挂着没有，回答都先走死亡恢复这边，
+            // 决策已了结的迟到答复才能得到"本轮已了结"的明确回话，而不是被当成编号不存在。
             applyDeathChoice(deathRecovery.answer(id, optionId));
             return;
         }

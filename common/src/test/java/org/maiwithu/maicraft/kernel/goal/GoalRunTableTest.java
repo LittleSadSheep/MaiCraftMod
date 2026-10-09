@@ -135,6 +135,36 @@ class GoalRunTableTest {
         assertFalse(deaths.recent().get(0).id() == decision.id(), "下次死亡是一条新的决策记录");
     }
 
+    @Test
+    void answeredDeathDecisionIsDescribedNotReportedAsUnknown() {
+        // answer 成功后同一次工具调用还会按同一编号查视图：doing 必须认得死亡决策的负数编号，
+        // 说清已经答复并发出重生请求，不能把成功的回答污染成"编号不存在"。
+        RecordingDeathActions actions = new RecordingDeathActions();
+        GoalRunTable deaths = new GoalRunTable(registry, store, (name, position) -> {
+            throw new IllegalStateException("用不到");
+        }, loop, handover, new DeathRecovery(new TaskEventLog()), actions);
+        deaths.characterDied(new DeathFacts(3, "minecraft:overworld", 0, 64, 0), true);
+        GoalRun decision = deaths.recent().get(0);
+
+        deaths.answer(decision.id(), "respawn");
+        assertEquals(1, actions.respawnRequests, "回答已经执行：重生请求发出去了");
+
+        assertTrue(deaths.doing(decision.id()).orElseThrow().contains("已答复"),
+                "视图查询说清已答复：" + deaths.doing(decision.id()));
+        assertTrue(deaths.find(decision.id()).isPresent(), "决策记录还查得到");
+
+        // 迟到的重复答复给明确回话：本轮已了结，不再收回答，不冒充编号不存在。
+        var duplicate = assertThrows(GoalRunTable.WrongGoalRunState.class,
+                () -> deaths.answer(decision.id(), "respawn"));
+        assertTrue(duplicate.getMessage().contains("已经答复过了"), duplicate.getMessage());
+
+        // 回到活体后决策丢掉，迟到的答复同样得到"本轮已了结"的明确回话。
+        deaths.characterAliveAgain();
+        var late = assertThrows(GoalRunTable.WrongGoalRunState.class,
+                () -> deaths.answer(decision.id(), "respawn"));
+        assertTrue(late.getMessage().contains("已了结"), late.getMessage());
+    }
+
     private void runTicks(int count) {
         for (int i = 0; i < count; i++) {
             loop.tick(new GoalTestTick(tick++));
