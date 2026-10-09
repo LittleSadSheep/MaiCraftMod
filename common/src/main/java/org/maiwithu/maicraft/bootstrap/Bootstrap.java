@@ -355,11 +355,13 @@ public final class Bootstrap {
         }
 
         // 离开世界：没做完的目标停手存成暂停（下次进这个世界时恢复），再把世界记忆里还没存盘的改动写下去，
-        // 最后丢掉现场；不让目标跟进下一个世界接着跑。
+        // 最后丢掉现场；不让目标跟进下一个世界接着跑。方块扫描索引按维度名分开，不清空的话
+        // 下一个世界的同名维度会读到上一个世界的命中。
         private void leaveWorld() {
             if (worldScope[0] != null) {
                 goals.leaveWorld();
                 worldScope[0].memory().flush();
+                blockScans.dropAll();
             }
             worldScope[0] = null;
         }
