@@ -54,6 +54,27 @@ public final class GoalRun {
     }
 
     /**
+     * 从存盘读回一条还没结束的记录：处境、步骤、挂着的问题和回答原样接上。读回的记录交给目标推进恢复为暂停，
+     * 这里不改处境，也不做走法检查——存盘时它就是这个样子。
+     */
+    public static GoalRun fromSaved(long id, Goal goal, long parentRunId, int stepOfParent, GoalRunState state,
+                                    int stepIndex, Question question, List<String> answers, long startedTick) {
+        if (state == GoalRunState.FINISHED) {
+            throw new IllegalArgumentException("目标运行 " + id + " 已经结束，存盘只读回没结束的记录");
+        }
+        if (state == GoalRunState.AWAITING_ANSWER && question == null) {
+            throw new IllegalArgumentException("目标运行 " + id + " 存成等回答，却没有挂着的问题");
+        }
+        GoalRun run = new GoalRun(id, goal, parentRunId, stepOfParent);
+        run.state = Objects.requireNonNull(state, "state");
+        run.stepIndex = stepIndex;
+        run.question = question;
+        run.answers.addAll(answers);
+        run.startedTick = startedTick;
+        return run;
+    }
+
+    /**
      * 开始被推进时调用：只记第一次的开始时刻。重启后恢复的记录照样会被再 start 一次
      * （可能还挂着问题或处于暂停），这不改变它的处境，也不改写原来的开始时刻。
      */
