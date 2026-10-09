@@ -65,3 +65,17 @@ term 清册 改说"旧逻辑清单"
 term 换芯 改说"重写"
 word Navigator 已改名：对外的寻路入口叫 WalkTo（走到），一次运行叫 WalkRun（走到运行）
 term 导航器 已改名：对外的寻路入口叫走到（WalkTo），一次运行叫走到运行（WalkRun）
+
+# 成员名里词的本义正好就是要说的，逐个放行（MemberNamesTest 读）
+allow mcp.transport.McpConfig.port MCP 服务真的在监听这个网络端口
+allow mcp.transport.EmbeddedMcpService.port MCP 服务真的在监听这个网络端口
+allow debug.StatusSnapshot$Connection.mcpPort MCP 服务的网络端口
+allow mcp.knowledge.web.WebFetch$Page.body HTTP 响应体
+allow mcp.transport.EmbeddedMcpService.readBody 读 HTTP 请求体
+allow mcp.transport.EmbeddedMcpService.executor 真的是处理 HTTP 请求的线程池
+allow behavior.navigation.baritone.PathPlannerPool$Generation.executor 真的是算路的线程池
+allow mcp.transport.EmbeddedMcpService.handle 动词：处理一个 HTTP 请求
+allow mcp.transport.EmbeddedMcpService.handlePost 动词：处理 POST 请求
+allow mcp.transport.EmbeddedMcpService.handleDelete 动词：处理 DELETE 请求
+allow mcp.transport.EmbeddedMcpService.handleInitialize 动词：处理 MCP 的 initialize 请求
+allow behavior.navigation.baritone.BaritoneWalkRun.handleStall 动词：处理卡住

@@ -101,7 +101,7 @@ public final class BreathingRoute {
         return new View() {
             public boolean clear(Vec3 from, Vec3 to) {
                 if (!geometry.clear(from, to)) return false;
-                AABB swept = body(from, player.getBbWidth(), player.getBbHeight()).minmax(body(to, player.getBbWidth(), player.getBbHeight()));
+                AABB swept = playerBox(from, player.getBbWidth(), player.getBbHeight()).minmax(playerBox(to, player.getBbWidth(), player.getBbHeight()));
                 return world.getWorldBorder().isWithinBounds(swept);
             }
             public boolean breathable(Vec3 feet) { return geometry.breathable(feet); }
@@ -113,7 +113,7 @@ public final class BreathingRoute {
         return new View() {
             public boolean clear(Vec3 from, Vec3 to) {
                 // 搜索的每条边沿单轴移动，合并起止身体盒就是完整扫掠；少量斜向纠偏使用保守包围盒。
-                    AABB body = body(from, width, height).minmax(body(to, width, height)), origins = body.inflate(1);
+                    AABB body = playerBox(from, width, height).minmax(playerBox(to, width, height)), origins = body.inflate(1);
                     if (body.minY < world.getMinBuildHeight() || body.maxY >= world.getMaxBuildHeight()) return false;
                     for (BlockPos pos : BlockPos.betweenClosed(BlockPos.containing(origins.minX, origins.minY, origins.minZ),
                             BlockPos.containing(origins.maxX, origins.maxY, origins.maxZ))) {
@@ -133,7 +133,7 @@ public final class BreathingRoute {
             }
         };
     }
-    private static AABB body(Vec3 feet, double width, double height) {
+    private static AABB playerBox(Vec3 feet, double width, double height) {
         double half = width / 2;
         return new AABB(feet.x - half, feet.y + .001, feet.z - half, feet.x + half, feet.y + height - .001, feet.z + half);
     }

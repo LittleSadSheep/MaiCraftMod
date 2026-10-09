@@ -145,7 +145,7 @@ public final class Bootstrap {
      *
      * @param compatCatalog 这个加载器服务端一侧的联动清单；没有联动的加载器传空列表
      */
-    public static ServerLifecycle startCommon(LoaderEnvironment loader, ServerConfirmations.Push push,
+    public static ServerLifecycle startOnBothSides(LoaderEnvironment loader, ServerConfirmations.Push push,
                                               List<SupportedMod> compatCatalog) {
         LOG.info("{} 通用部分启动（加载器：{}）", ModIdentity.NAME, loader.loaderName());
         // 服务端一侧的联动清单同样逐行检查并写日志。服务端还没有可登记的槽（读模组数据的服务端操作

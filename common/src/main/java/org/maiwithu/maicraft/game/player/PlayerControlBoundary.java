@@ -31,7 +31,7 @@ public final class PlayerControlBoundary {
     private InteractionSender interactionSender;
     private MenuActions menuActions;
     private LocalPlayer observedPlayer;
-    private long bodyEpoch;
+    private long playerEpoch;
     private long controlRevision;
     private long tickRevision;
     private long mutationClaimedTick = Long.MIN_VALUE;
@@ -79,9 +79,9 @@ public final class PlayerControlBoundary {
         if (playerChanged) {
             // 同一连接、同一身份的死亡重生延续自动控制许可，使恢复思考期间也能自卫；活体替换和换服不继承。
             boolean preserveControl = input.automationControlRequested() && samePlayerRespawn(previousPlayer, player);
-            input.bodyReplaced(player, preserveControl);
+            input.playerReplaced(player, preserveControl);
             observedPlayer = player;
-            bodyEpoch = nextRevision(bodyEpoch, "body epoch");
+            playerEpoch = nextRevision(playerEpoch, "body epoch");
         }
         input.beginTick(tickRevision);
         updateWindowControl(input.effectiveAutomationRequested());
@@ -119,7 +119,7 @@ public final class PlayerControlBoundary {
                 minecraft.getConnection(),
                 interactionSender,
                 menuActions,
-                bodyEpoch,
+                playerEpoch,
                 controlRevision,
                 tickRevision,
                 ownedAfter && mutationClaimedTick != tickRevision);
@@ -235,7 +235,7 @@ public final class PlayerControlBoundary {
         // 不只比较时间，也比较玩家、世界和网络连接，任何一项换了都不能使用旧上下文。
         return minecraft.isSameThread() && activeContext == context
                 && context.clientTick() == tickRevision
-                && context.bodyEpoch() == bodyEpoch
+                && context.playerEpoch() == playerEpoch
                 && context.controlRevision() == controlRevision
                 && context.localPlayer() == observedPlayer && minecraft.player == observedPlayer
                 && minecraft.level == context.level();
@@ -264,7 +264,7 @@ public final class PlayerControlBoundary {
         activeContext = null;
         observedPlayer = null;
         mutationClaimedTick = Long.MIN_VALUE;
-        bodyEpoch = nextRevision(bodyEpoch, "body epoch");
+        playerEpoch = nextRevision(playerEpoch, "body epoch");
         controlRevision = nextRevision(controlRevision, "control revision");
     }
 

@@ -186,7 +186,7 @@ public final class ItemUseAim {
         if (nature != CellNature.SOLID) return Optional.empty();
         Direction towardPlayer = faceToward(around.feet(), target);
         BlockPos effect = target.relative(towardPlayer);
-        if (overlapsBody(effect, around.feet())) return Optional.empty();
+        if (overlapsPlayer(effect, around.feet())) return Optional.empty();
         return Optional.of(new Aim(target, effect, confirmation,
                 "点目标朝向角色的面，" + doing + "在面外的 " + effect.toShortString()));
     }
@@ -230,7 +230,7 @@ public final class ItemUseAim {
     }
 
     // 效果格压着身体（脚下或头顶）就不点：换站位解决，不把火烧到自己身上。
-    private static boolean overlapsBody(BlockPos cell, BlockPos feet) {
+    private static boolean overlapsPlayer(BlockPos cell, BlockPos feet) {
         return cell.equals(feet) || cell.equals(feet.above());
     }
 

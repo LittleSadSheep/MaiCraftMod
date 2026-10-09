@@ -18,7 +18,7 @@ enum Worth {
     /** 整块建材：能搭能垫，也最容易再弄到。 */
     BUILDING_MATERIAL,
     /** 普通掉落：没什么用也没什么损失。 */
-    COMMON_LOOT,
+    ORDINARY_LOOT,
     /** 垃圾：堆多了一文不值的方块和腐肉。 */
     JUNK;
 

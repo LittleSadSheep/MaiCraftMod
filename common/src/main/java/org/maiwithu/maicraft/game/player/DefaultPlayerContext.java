@@ -21,7 +21,7 @@ final class DefaultPlayerContext implements PlayerContext {
     private final MenuActions menuActions;
     // 背包视图只包住当刻玩家对象，随上下文一起过期；读它没有副作用，不用等控制权。
     private final BackpackView backpack;
-    private final long bodyEpoch;
+    private final long playerEpoch;
     private final long controlRevision;
     private final long tickRevision;
     private final boolean permitsNativeActions;
@@ -33,7 +33,7 @@ final class DefaultPlayerContext implements PlayerContext {
             ClientPacketListener connection,
             InteractionSender interactionSender,
             MenuActions menuActions,
-            long bodyEpoch,
+            long playerEpoch,
             long controlRevision,
             long tickRevision,
             boolean permitsNativeActions) {
@@ -44,7 +44,7 @@ final class DefaultPlayerContext implements PlayerContext {
         this.interactionSender = interactionSender;
         this.menuActions = menuActions;
         this.backpack = new ClientBackpackView(player);
-        this.bodyEpoch = bodyEpoch;
+        this.playerEpoch = playerEpoch;
         this.controlRevision = controlRevision;
         this.tickRevision = tickRevision;
         this.permitsNativeActions = permitsNativeActions;
@@ -77,7 +77,7 @@ final class DefaultPlayerContext implements PlayerContext {
     }
 
     /** 本刻的玩家与控制权版本；交互轨的端口用它核对确认仍然属于同一次操作。 */
-    long bodyEpoch() { return bodyEpoch; }
+    long playerEpoch() { return playerEpoch; }
     long controlRevision() { return controlRevision; }
 
     // 死亡现场的可见事实：分数与位置此刻读得到就直接给；死因随死亡界面走，客户端身上没有。

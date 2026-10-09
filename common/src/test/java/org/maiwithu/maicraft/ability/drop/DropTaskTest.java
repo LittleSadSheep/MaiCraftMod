@@ -147,8 +147,8 @@ class DropTaskTest {
         @Override public PlayerInput input() {
             return new PlayerInput() {
                 @Override public boolean automationOwnsControls() { return true; }
-                @Override public void applyMovement(Movement movement, long leaseTickRevision) {}
-                @Override public void requestLook(float yaw, float pitch, long leaseTickRevision) {}
+                @Override public void applyMovement(Movement movement, long requestTick) {}
+                @Override public void requestLook(float yaw, float pitch, long requestTick) {}
                 @Override public void clearLook() {}
                 @Override public void releaseAll() {}
                 @Override public void lookAt(LocalPlayer player, Vec3 point) {}

@@ -38,9 +38,9 @@ public final class LocalPlayerInput implements PlayerInput {
     private long requestRevision;
     private long activeTick;
     // 每条移动、转头指令都带当前游戏刻的编号。下一刻没有重新发出，就不再沿用。
-    private long movementLease = Long.MIN_VALUE;
-    private long lookLease = Long.MIN_VALUE;
-    private long interactionLookLease = Long.MIN_VALUE;
+    private long movementTick = Long.MIN_VALUE;
+    private long lookTick = Long.MIN_VALUE;
+    private long interactionLookTick = Long.MIN_VALUE;
     private Movement movement = Movement.STOPPED;
     private Steering steering;
     private boolean navigationRelativeMovement;
@@ -60,17 +60,17 @@ public final class LocalPlayerInput implements PlayerInput {
      * previousYaw/previousPitch 为 null 表示借用前主任务并没有视角目标，归还时就该彻底放开准星。
      */
     private record AuxiliaryAim(Float previousYaw, Float previousPitch, Float aimYaw, Float aimPitch,
-                               long interventionLease, long mainAimLease, Movement movement, Steering steering,
+                               long interventionTick, long mainAimTick, Movement movement, Steering steering,
                                boolean navigationRelative, float speedYaw, float speedPitch,
                                boolean initialized) {
         /** 只换瞄准方向，其余借用事实原样保留；续订转向时不能顺手覆盖归还所需的信息。 */
         AuxiliaryAim withAim(Float yaw, Float pitch) {
-            return new AuxiliaryAim(previousYaw, previousPitch, yaw, pitch, interventionLease, mainAimLease,
+            return new AuxiliaryAim(previousYaw, previousPitch, yaw, pitch, interventionTick, mainAimTick,
                     movement, steering, navigationRelative, speedYaw, speedPitch, initialized);
         }
         /** 只换借用前的移动策略；转向续订不能覆盖它，否则归还时收不回原来那套按键补偿。 */
         AuxiliaryAim withSteering(Steering restored) {
-            return new AuxiliaryAim(previousYaw, previousPitch, aimYaw, aimPitch, interventionLease, mainAimLease,
+            return new AuxiliaryAim(previousYaw, previousPitch, aimYaw, aimPitch, interventionTick, mainAimTick,
                     movement, restored, navigationRelative, speedYaw, speedPitch, initialized);
         }
     }
@@ -98,76 +98,76 @@ public final class LocalPlayerInput implements PlayerInput {
 
     @Override
     // 只保存本刻想按哪些键；真正写进玩家输入发生在本刻收尾。
-    public void applyMovement(Movement movement, long leaseTickRevision) {
-        requireLease(leaseTickRevision);
+    public void applyMovement(Movement movement, long requestTick) {
+        requireActiveTick(requestTick);
         this.movement = movement;
         this.steering = null;
         this.navigationRelativeMovement = false;
-        this.movementLease = leaseTickRevision;
+        this.movementTick = requestTick;
     }
 
-    @Override public void applyNavigationMovement(Movement movement, long leaseTickRevision) {
+    @Override public void applyNavigationMovement(Movement movement, long requestTick) {
         // 行走方向由 Baritone 的物理旋转桥负责；这里保持其前进、横移和疾跑语义，不随补光镜头二次变换。
-        applyMovement(movement, leaseTickRevision);
+        applyMovement(movement, requestTick);
         navigationRelativeMovement = true;
     }
 
     @Override
     // 移动算法也可以给出“朝向变了以后该按哪些键”。转镜头时再算一次，避免仍按旧朝向走。
-    public void applySteering(Steering steering, float currentYaw, long leaseTickRevision) {
-        applyMovement(steering.atYaw(currentYaw), leaseTickRevision);
+    public void applySteering(Steering steering, float currentYaw, long requestTick) {
+        applyMovement(steering.atYaw(currentYaw), requestTick);
         this.steering = steering;
     }
 
     @Override
     // 记录想看的方向，左右转角绕回一圈之内，上下视角限制在垂直范围内。
-    public void requestLook(float yaw, float pitch, long leaseTickRevision) {
-        requireLease(leaseTickRevision);
+    public void requestLook(float yaw, float pitch, long requestTick) {
+        requireActiveTick(requestTick);
         // 主动作重新要求瞄准时立即拥有镜头，迟到的辅助收尾不能把它改回旧路线。
         auxiliaryAim = null;
-        interactionLookLease = leaseTickRevision;
-        setLook(yaw, pitch, leaseTickRevision);
+        interactionLookTick = requestTick;
+        setLook(yaw, pitch, requestTick);
     }
 
-    @Override public void requestNavigationLook(float yaw, float pitch, long leaseTickRevision) {
-        requireLease(leaseTickRevision);
+    @Override public void requestNavigationLook(float yaw, float pitch, long requestTick) {
+        requireActiveTick(requestTick);
         // 帧末寻路晚于战斗调度执行，也不能抢掉本刻已经请求的真实瞄准；移动输入仍由导航正常续订。
-        if (interactionLookLease == leaseTickRevision) return;
-        setLook(yaw, pitch, leaseTickRevision);
+        if (interactionLookTick == requestTick) return;
+        setLook(yaw, pitch, requestTick);
     }
 
     @Override
     // 随行补光只登记方向：镜头按正常转头速度逐帧转过去，不再瞬转，等对准后调用方才提交点击。
-    public void requestSmoothLook(float yaw, float pitch, long leaseTickRevision) {
-        if (auxiliaryAim != null && auxiliaryAim.interventionLease() == leaseTickRevision) {
+    public void requestSmoothLook(float yaw, float pitch, long requestTick) {
+        if (auxiliaryAim != null && auxiliaryAim.interventionTick() == requestTick) {
             auxiliaryAim = auxiliaryAim.withAim(Mth.wrapDegrees(yaw), Mth.clamp(pitch, -90.0f, 90.0f));
             return;
         }
-        requestLook(yaw, pitch, leaseTickRevision);
+        requestLook(yaw, pitch, requestTick);
     }
 
-    @Override public boolean tryAuxiliaryLook(float yaw, float pitch, long leaseTickRevision) {
-        requireLease(leaseTickRevision);
-        if (!auxiliaryLookAvailable(leaseTickRevision)) return false;
+    @Override public boolean tryAuxiliaryLook(float yaw, float pitch, long requestTick) {
+        requireActiveTick(requestTick);
+        if (!auxiliaryLookAvailable(requestTick)) return false;
         // 借来的瞄准方向先按本次请求记下，任何一帧都不能出现"有借用记录却没有目标角"的空目标。
         Float aimYaw = Mth.wrapDegrees(yaw), aimPitch = Mth.clamp(pitch, -90.0f, 90.0f);
-        AuxiliaryAim saved = new AuxiliaryAim(targetYaw, targetPitch, aimYaw, aimPitch, leaseTickRevision,
-                interactionLookLease, movement, steering, navigationRelativeMovement, yawVelocity, pitchVelocity,
+        AuxiliaryAim saved = new AuxiliaryAim(targetYaw, targetPitch, aimYaw, aimPitch, requestTick,
+                interactionLookTick, movement, steering, navigationRelativeMovement, yawVelocity, pitchVelocity,
                 cameraInitialized);
         // 跑动中低头插灯只改变视线；已有路线转向器继续工作，普通移动则按原世界方向补偿横移。
-        if (movementLease == leaseTickRevision && steering == null && !navigationRelativeMovement) {
+        if (movementTick == requestTick && steering == null && !navigationRelativeMovement) {
             Movement original = movement;
             float oldYaw = controlledPlayer.getYRot();
             saved = saved.withSteering(nextYaw -> preserveHeading(original, oldYaw, nextYaw));
         }
-        requestSmoothLook(yaw, pitch, leaseTickRevision);
+        requestSmoothLook(yaw, pitch, requestTick);
         auxiliaryAim = saved;
         return true;
     }
 
-    @Override public void finishAuxiliaryLook(boolean submitted, long leaseTickRevision) {
+    @Override public void finishAuxiliaryLook(boolean submitted, long requestTick) {
         // 交还身体、换刻或主任务已经接管时，不得用旧记录覆盖新的操作者。
-        if (!automationOwnsControls() || activeTick != leaseTickRevision || auxiliaryAim == null) return;
+        if (!automationOwnsControls() || activeTick != requestTick || auxiliaryAim == null) return;
         var saved = auxiliaryAim;
         auxiliaryAim = null;
         Float restoreYaw = saved.previousYaw() == null ? saved.aimYaw() : saved.previousYaw();
@@ -179,8 +179,8 @@ public final class LocalPlayerInput implements PlayerInput {
         // 否则同一刻的路线续订会被当成抢瞄准挡掉，镜头只能等下一刻才转得回去。
         // 借用会顺带把本刻登记成"精确瞄准"；归还时恢复借用前的登记，
         // 否则同一刻主任务想按路线续订视角时，会被当成"正在精确瞄准"挡掉。
-        interactionLookLease = saved.mainAimLease();
-        lookLease = leaseTickRevision;
+        interactionLookTick = saved.mainAimTick();
+        lookTick = requestTick;
         yawVelocity = saved.speedYaw();
         pitchVelocity = saved.speedPitch();
         lastLookUpdateNanos = 0L;
@@ -189,14 +189,14 @@ public final class LocalPlayerInput implements PlayerInput {
         if (movement == saved.movement() && navigationRelativeMovement == saved.navigationRelative()) steering = saved.steering();
     }
 
-    @Override public boolean auxiliaryLookAvailable(long leaseTickRevision) {
-        requireLease(leaseTickRevision);
+    @Override public boolean auxiliaryLookAvailable(long requestTick) {
+        requireActiveTick(requestTick);
         // 补光正在转向时本刻准星已经记在它名下：续订继续推进即可，否则连自己都续订不上，镜头会卡在半路。
         // 新的一刻起跳、潜行、主任务瞄准都仍按下面的条件拦下，不会借到新的准星。
         if (auxiliaryAim != null) return true;
         // 即将起跳或沿边缘潜行时身体仍在地面，但下一次物理更新已经有精确动作，不能借准星插灯。
-        return interactionLookLease != leaseTickRevision
-                && (movementLease != leaseTickRevision || !movement.jumping() && !movement.sneaking());
+        return interactionLookTick != requestTick
+                && (movementTick != requestTick || !movement.jumping() && !movement.sneaking());
     }
 
     static Movement preserveHeading(Movement original, float oldYaw, float nextYaw) {
@@ -206,20 +206,20 @@ public final class LocalPlayerInput implements PlayerInput {
                 original.jumping(), original.sneaking(), original.sprinting());
     }
 
-    private void setLook(float yaw, float pitch, long leaseTickRevision) {
+    private void setLook(float yaw, float pitch, long requestTick) {
         targetYaw = Mth.wrapDegrees(yaw);
         targetPitch = Mth.clamp(pitch, -90.0f, 90.0f);
-        lookLease = leaseTickRevision;
+        lookTick = requestTick;
     }
 
     @Override
     // 取消继续转头，同时清除转动惯性，避免下一次看向别处时继承旧速度。
     public void clearLook() {
         auxiliaryAim = null;
-        interactionLookLease = Long.MIN_VALUE;
+        interactionLookTick = Long.MIN_VALUE;
         targetYaw = null;
         targetPitch = null;
-        lookLease = Long.MIN_VALUE;
+        lookTick = Long.MIN_VALUE;
         yawVelocity = 0.0f;
         pitchVelocity = 0.0f;
         lastLookUpdateNanos = 0L;
@@ -227,8 +227,8 @@ public final class LocalPlayerInput implements PlayerInput {
 
     @Override
     // 需要立即瞄准时直接转到目标角度，不经过后面的缓慢转头。
-    public void requestImmediateLook(float yaw, float pitch, long leaseTickRevision) {
-        requestLook(yaw,pitch,leaseTickRevision);
+    public void requestImmediateLook(float yaw, float pitch, long requestTick) {
+        requestLook(yaw,pitch,requestTick);
         cameraYaw = targetYaw; cameraPitch = targetPitch;
         yawVelocity = 0; pitchVelocity = 0; cameraInitialized = true;
         lastLookUpdateNanos = System.nanoTime();
@@ -240,7 +240,7 @@ public final class LocalPlayerInput implements PlayerInput {
     public void releaseAll() {
         movement = Movement.STOPPED;
         steering = null;
-        movementLease = Long.MIN_VALUE;
+        movementTick = Long.MIN_VALUE;
         clearLook();
         writeStoppedInput();
     }
@@ -273,8 +273,8 @@ public final class LocalPlayerInput implements PlayerInput {
         auxiliaryAim = null;
         activeTick = tickRevision;
         // 上一刻按着前进，不代表这一刻还要前进；任务必须每刻重新发出指令。
-        if (movementLease != tickRevision) { movement = Movement.STOPPED; steering = null; }
-        if (lookLease != tickRevision) {
+        if (movementTick != tickRevision) { movement = Movement.STOPPED; steering = null; }
+        if (lookTick != tickRevision) {
             targetYaw = null;
             targetPitch = null;
         }
@@ -289,11 +289,11 @@ public final class LocalPlayerInput implements PlayerInput {
      */
     AutomationRequest requestAutomation(LocalPlayer player) {
         if (player == null || player.input == null) {
-            throw new IllegalStateException("the local-player input body is unavailable");
+            throw new IllegalStateException("the local-player input is unavailable");
         }
         if (automationRequested) {
             if (controlledPlayer != player && requestedPlayer != null && requestedPlayer != player) {
-                throw new IllegalStateException("automatic control is awaiting another local-player body");
+                throw new IllegalStateException("automatic control is awaiting another local player");
             }
             if (requestedPlayer == null) requestedPlayer = player;
             return new AutomationRequest(requestRevision, false);
@@ -318,10 +318,10 @@ public final class LocalPlayerInput implements PlayerInput {
      * 换维度或重生会更换玩家对象，先还回旧对象的键盘输入。
      * 调用方确认这是允许继续的传送后，可保留自动控制请求；否则取消。
      */
-    void bodyReplaced(LocalPlayer replacement, boolean preserveRequest) {
+    void playerReplaced(LocalPlayer replacement, boolean preserveRequest) {
         boolean exactPendingTarget = automationRequested && controlledPlayer == null
                 && requestedPlayer == replacement;
-        detachBody();
+        detachPlayer();
         if (automationRequested && (preserveRequest || exactPendingTarget)) {
             requestedPlayer = replacement;
             return;
@@ -336,7 +336,7 @@ public final class LocalPlayerInput implements PlayerInput {
                 || (requestedPlayer != null && requestedPlayer != player)) {
             return false;
         }
-        attachBody(player);
+        attachPlayer(player);
         return automationOwnsControls();
     }
 
@@ -380,7 +380,7 @@ public final class LocalPlayerInput implements PlayerInput {
         BotInput input = botInput;
         if (input == null || player == null) return;
 
-        if (lookLease == tickRevision && targetYaw != null && targetPitch != null) {
+        if (lookTick == tickRevision && targetYaw != null && targetPitch != null) {
             advanceLook(player, System.nanoTime());
         } else {
             synchronizeCamera(player);
@@ -393,7 +393,7 @@ public final class LocalPlayerInput implements PlayerInput {
 
     // 箱子等界面打开时停止走路；没有界面或只有聊天框时才允许移动。
     private void writeMovement(LocalPlayer player, BotInput input, Screen screen) {
-        Movement command = movementLease == activeTick && permitsWorldMovement(screen)
+        Movement command = movementTick == activeTick && permitsWorldMovement(screen)
                 ? steering == null ? movement : steering.atYaw(player.getYRot()) : Movement.STOPPED;
         input.forwardImpulse = command.forward();
         input.leftImpulse = command.strafe();
@@ -435,11 +435,11 @@ public final class LocalPlayerInput implements PlayerInput {
         if (automationRequested) requestRevision = nextRequestRevision(requestRevision);
         automationRequested = false;
         requestedPlayer = null;
-        detachBody();
+        detachPlayer();
     }
 
     // 只恢复自己替换过的输入对象；其他 Mod 已经换走它时，不覆盖对方的新对象。
-    private void detachBody() {
+    private void detachPlayer() {
         LocalPlayer player = controlledPlayer;
         BotInput injected = botInput;
         releaseAll();
@@ -452,9 +452,9 @@ public final class LocalPlayerInput implements PlayerInput {
     }
 
     // 保存原来的键盘输入，换上自动输入，并从玩家当前视角开始接管。
-    private void attachBody(LocalPlayer player) {
+    private void attachPlayer(LocalPlayer player) {
         if (automationOwnsControls() && controlledPlayer == player) return;
-        detachBody();
+        detachPlayer();
         humanInput = player.input;
         botInput = new BotInput();
         controlledPlayer = player;
@@ -468,9 +468,9 @@ public final class LocalPlayerInput implements PlayerInput {
     }
 
     // 没有自动控制权，或拿着上一刻的编号，都拒绝写入新输入。
-    private void requireLease(long leaseTickRevision) {
-        if (!automationOwnsControls()) throw new IllegalStateException("automation does not own the body");
-        if (leaseTickRevision != activeTick) throw new IllegalArgumentException("input lease is not for the active tick");
+    private void requireActiveTick(long requestTick) {
+        if (!automationOwnsControls()) throw new IllegalStateException("automation does not own the player");
+        if (requestTick != activeTick) throw new IllegalArgumentException("input request is not for the active tick");
     }
 
     private void writeStoppedInput() {
