@@ -63,7 +63,7 @@ public final class SelfView {
                 json.addProperty("player_took_over", true);
             }
         }
-        json.add("task", task(mainGoal, doing));
+        json.add("goal", goal(mainGoal, doing));
         json.add("permissions", permissions(mainGoal == null ? Permissions.DEFAULT : mainGoal.goal().permissions()));
         return json;
     }
@@ -83,14 +83,14 @@ public final class SelfView {
         return list;
     }
 
-    /** 手上的主任务一句话；没有主任务时说"空闲"，免得 LLM 以为没读到。 */
-    private static JsonObject task(GoalRun mainGoal, String doing) {
+    /** 手上在做的目标（主任务）一句话；没有时说"空闲"，免得 LLM 以为没读到。 */
+    private static JsonObject goal(GoalRun mainGoal, String doing) {
         JsonObject json = new JsonObject();
         if (mainGoal == null) {
-            json.addProperty("doing", "空闲，没有主任务");
+            json.addProperty("doing", "空闲，没有在做的目标");
             return json;
         }
-        json.addProperty("task_id", mainGoal.id());
+        json.addProperty("goal_id", mainGoal.id());
         json.addProperty("ability", mainGoal.goal().ability());
         json.addProperty("state", SceneView.lower(mainGoal.state()));
         if (doing != null) json.addProperty("doing", doing);

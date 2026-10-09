@@ -86,7 +86,7 @@ import org.maiwithu.maicraft.mcp.tool.EventsTool;
 import org.maiwithu.maicraft.mcp.tool.ExecuteTool;
 import org.maiwithu.maicraft.mcp.tool.LookupTool;
 import org.maiwithu.maicraft.mcp.tool.ObserveTool;
-import org.maiwithu.maicraft.mcp.tool.TaskTool;
+import org.maiwithu.maicraft.mcp.tool.GoalTool;
 import org.maiwithu.maicraft.mcp.tool.ToolDispatcher;
 import org.maiwithu.maicraft.mcp.transport.EmbeddedMcpService;
 import org.maiwithu.maicraft.mcp.transport.McpConfig;
@@ -110,7 +110,7 @@ import org.maiwithu.maicraft.game.world.FurnaceFuels;
  *
  * <p>服务端一侧已接好：方块归属记录、交互确认通道与只读的归属查询。
  * 客户端一侧已接好游戏接口层的每刻服务、和服务端 MaiCraft 的会话、七项生存需求与控制循环、
- * 进世界时的世界记忆与感知场景，以及目标执行与四个 MCP 工具（lookup、execute、task、events）。
+ * 进世界时的世界记忆与感知场景，以及目标执行与四个 MCP 工具（lookup、execute、goal、events）。
  */
 public final class Bootstrap {
     private static final Logger LOG = LoggerFactory.getLogger(Bootstrap.class);
@@ -546,7 +546,7 @@ public final class Bootstrap {
                 // 查资料先接随包的游戏机制常识；联网的资料来源还没登记。
                 new LookupTool(abilities, KnowledgeLibrary.offline()),
                 new ExecuteTool(abilities, goals, clientWork),
-                new TaskTool(goals, clientWork),
+                new GoalTool(goals, clientWork),
                 new EventsTool(taskEvents, chatEvents, goals, clientWork)));
     }
 }

@@ -152,7 +152,7 @@ class ObserveToolTest {
 
         assertEquals(18, self.get("food").getAsInt());
         assertEquals("minecraft:stone_pickaxe", self.get("held").getAsString());
-        assertEquals("空闲，没有主任务", self.getAsJsonObject("task").get("doing").getAsString());
+        assertEquals("空闲，没有在做的目标", self.getAsJsonObject("goal").get("doing").getAsString());
         assertEquals("natural", self.getAsJsonObject("permissions").get("change_blocks").getAsString());
     }
 
@@ -218,7 +218,7 @@ class ObserveToolTest {
         assertEquals("done", remembered.getAsJsonObject("result").get("status").getAsString(), remembered::toString);
         assertEquals("箱子", data(observe("{\"what\": \"world_memory\"}")).getAsJsonArray("places").get(1)
                 .getAsJsonObject().get("name").getAsString(), chest::toString);
-        assertEquals("空闲，没有主任务", data(observe("{\"what\": \"self\"}")).getAsJsonObject("task")
+        assertEquals("空闲，没有在做的目标", data(observe("{\"what\": \"self\"}")).getAsJsonObject("goal")
                 .get("doing").getAsString());
 
         data(execute("{\"ability\": \"remember\", \"parameters\": {\"name\": \"家\", \"operation\": \"forget\"}}"));

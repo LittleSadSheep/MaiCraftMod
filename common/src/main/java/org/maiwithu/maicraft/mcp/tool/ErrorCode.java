@@ -13,7 +13,7 @@ public enum ErrorCode {
     INVALID_PARAMETER,
     /** 没有这个能力；message 里附上相近的能力名。 */
     UNKNOWN_ABILITY,
-    /** 编号不存在：任务编号、计划编号、资料地址，或者结束太久已经不保留。 */
+    /** 编号不存在：目标编号、计划编号、资料地址，或者结束太久已经不保留。 */
     UNKNOWN_ID,
     /** 角色不在世界里（在主菜单、正在进入世界、已断线），这时不能看也不能做。 */
     NOT_IN_WORLD,

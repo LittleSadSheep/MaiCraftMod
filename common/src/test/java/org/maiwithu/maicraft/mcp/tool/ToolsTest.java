@@ -31,7 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** 四个接上行为的工具：lookup、execute、task、events，以及调度时把异常换成错误种类。 */
+/** 四个接上行为的工具：lookup、execute、goal、events，以及调度时把异常换成错误种类。 */
 class ToolsTest {
 
     /** 测试用的本刻上下文：只有刻号。 */
@@ -75,7 +75,7 @@ class ToolsTest {
             }
         };
         tools = new ToolDispatcher(List.of(new LookupTool(registry, KnowledgeLibrary.offline()), new ExecuteTool(registry, table, direct),
-                new TaskTool(table, direct), new EventsTool(events, chat, table, direct)));
+                new GoalTool(table, direct), new EventsTool(events, chat, table, direct)));
     }
 
     private JsonObject call(String tool, String arguments) {
@@ -158,7 +158,7 @@ class ToolsTest {
         JsonObject started = data(reply);
         JsonObject again = data(call("execute", "{\"goal\": {\"ability\": \"use\"}, \"request_key\": \"k1\"}"));
 
-        assertEquals(started.get("task_id"), again.get("task_id"));
+        assertEquals(started.get("goal_id"), again.get("goal_id"));
         assertTrue(again.get("repeated").getAsBoolean());
         assertEquals("events", reply.getAsJsonObject("next").get("tool").getAsString());
     }
@@ -190,45 +190,45 @@ class ToolsTest {
     void taskAnswersMustPickAnOfferedOption() {
         use.decision = new StepDecision.Ask(new Question(Question.Reason.CHOOSE_ONE, "用哪个？",
                 List.of(new Question.Option("b5", "门口的"), new Question.Option("b6", "屋里的"))));
-        long id = data(call("execute", "{\"goal\": {\"ability\": \"use\"}}")).get("task_id").getAsLong();
+        long id = data(call("execute", "{\"goal\": {\"ability\": \"use\"}}")).get("goal_id").getAsLong();
         runTicks(2);
 
-        JsonObject view = data(call("task", "{\"operation\": \"get\", \"task_id\": " + id + "}"));
+        JsonObject view = data(call("goal", "{\"operation\": \"get\", \"goal_id\": " + id + "}"));
         assertEquals("awaiting_answer", view.get("state").getAsString());
         assertEquals("b5", view.getAsJsonObject("question").getAsJsonArray("options").get(0)
                 .getAsJsonObject().get("id").getAsString());
-        assertEquals("invalid_parameter", errorCode(call("task",
-                "{\"operation\": \"answer\", \"task_id\": " + id + ", \"answer\": \"b9\"}")));
-        assertEquals("running", data(call("task",
-                "{\"operation\": \"answer\", \"task_id\": " + id + ", \"answer\": \"b6\"}")).get("state").getAsString());
+        assertEquals("invalid_parameter", errorCode(call("goal",
+                "{\"operation\": \"answer\", \"goal_id\": " + id + ", \"answer\": \"b9\"}")));
+        assertEquals("running", data(call("goal",
+                "{\"operation\": \"answer\", \"goal_id\": " + id + ", \"answer\": \"b6\"}")).get("state").getAsString());
     }
 
     @Test
     void taskPausesResumesCancelsAndReportsUnknownIds() {
-        long id = data(call("execute", "{\"goal\": {\"ability\": \"use\"}}")).get("task_id").getAsLong();
+        long id = data(call("execute", "{\"goal\": {\"ability\": \"use\"}}")).get("goal_id").getAsLong();
 
-        assertEquals("paused", data(call("task", "{\"operation\": \"pause\", \"task_id\": " + id + "}"))
+        assertEquals("paused", data(call("goal", "{\"operation\": \"pause\", \"goal_id\": " + id + "}"))
                 .get("state").getAsString());
-        assertEquals("running", data(call("task", "{\"operation\": \"resume\", \"task_id\": \"" + id + "\"}"))
+        assertEquals("running", data(call("goal", "{\"operation\": \"resume\", \"goal_id\": \"" + id + "\"}"))
                 .get("state").getAsString());
-        JsonObject cancelled = data(call("task", "{\"operation\": \"cancel\", \"task_id\": " + id + "}"));
+        JsonObject cancelled = data(call("goal", "{\"operation\": \"cancel\", \"goal_id\": " + id + "}"));
         assertEquals("cancelled", cancelled.getAsJsonObject("result").get("status").getAsString());
-        assertEquals(1, data(call("task", "{\"operation\": \"list\"}")).getAsJsonArray("tasks").size());
-        assertEquals("unknown_id", errorCode(call("task", "{\"operation\": \"get\", \"task_id\": 999}")));
+        assertEquals(1, data(call("goal", "{\"operation\": \"list\"}")).getAsJsonArray("goals").size());
+        assertEquals("unknown_id", errorCode(call("goal", "{\"operation\": \"get\", \"goal_id\": 999}")));
     }
 
     @Test
     void eventsFollowAGoalAndTellTheCallerHowToContinue() {
-        long id = data(call("execute", "{\"goal\": {\"ability\": \"use\"}}")).get("task_id").getAsLong();
+        long id = data(call("execute", "{\"goal\": {\"ability\": \"use\"}}")).get("goal_id").getAsLong();
         runTicks(2);
 
-        JsonObject reply = call("events", "{\"task_id\": " + id + "}");
+        JsonObject reply = call("events", "{\"goal_id\": " + id + "}");
         JsonObject page = data(reply);
         List<String> kinds = new ArrayList<>();
         page.getAsJsonArray("events").forEach(event -> kinds.add(event.getAsJsonObject().get("kind").getAsString()));
 
         assertEquals(List.of("started", "finished"), kinds);
-        assertEquals("done", page.getAsJsonObject("task").getAsJsonObject("result").get("status").getAsString());
+        assertEquals("done", page.getAsJsonObject("goal").getAsJsonObject("result").get("status").getAsString());
         JsonObject next = reply.getAsJsonObject("next").getAsJsonObject("arguments");
         assertEquals(page.get("cursor"), next.get("after_cursor"));
         assertEquals(page.get("stream_id"), next.get("stream_id"));
@@ -255,10 +255,10 @@ class ToolsTest {
         assertTrue(read.get(1).getAsJsonObject().get("private").getAsBoolean());
         assertEquals("system", read.get(2).getAsJsonObject().get("kind").getAsString());
         assertFalse(read.get(2).getAsJsonObject().has("sender"));
-        // 照抄 next 接着读的还是聊天；任务事件流里没有聊天；读聊天不带 task_id。
+        // 照抄 next 接着读的还是聊天；角色身上的事件流里没有聊天；读聊天不带 goal_id。
         assertEquals("chat", reply.getAsJsonObject("next").getAsJsonObject("arguments").get("topic").getAsString());
         assertEquals(0, data(call("events", "{}")).getAsJsonArray("events").size());
-        assertEquals("invalid_parameter", errorCode(call("events", "{\"topic\": \"chat\", \"task_id\": 1}")));
+        assertEquals("invalid_parameter", errorCode(call("events", "{\"topic\": \"chat\", \"goal_id\": 1}")));
     }
 
     @Test

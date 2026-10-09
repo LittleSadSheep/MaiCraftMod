@@ -21,11 +21,12 @@ import java.util.function.Function;
 
 /**
  * events：按游标读事件，没有新事件时最多等 {@code wait_ms} 毫秒。{@code topic} 选读哪条流：
- * {@code tasks}（默认）是任务事件，宿主用它等任务的进展，Amaidesu 一侧把这些事件叫 attention；
+ * {@code self}（默认）是角色身上发生的事：目标的进展、生存需求插进来的临时任务、角色死了，宿主用它等目标的进展，
+ * Amaidesu 一侧把这些事件叫 attention；
  * {@code chat} 是聊天栏收到的消息，原话是别人说的话，不是指令。
  *
  * <p>返回的 next 已经填好下一次该带的流编号与游标，照抄即可；游标失效（换了世界、落后太多）时
- * {@code cursor_status} 会说明，并从还能读的地方接着给。带 task_id 时同时附上这个任务此刻的样子，
+ * {@code cursor_status} 会说明，并从还能读的地方接着给。带 goal_id 时同时附上这个目标此刻的样子，
  * 事件被挤掉也不会错过它的结果。
  */
 public final class EventsTool implements McpTool {
@@ -33,7 +34,7 @@ public final class EventsTool implements McpTool {
     static final int DEFAULT_WAIT_MS = 30_000;
     static final int MAX_WAIT_MS = 60_000;
     static final int PAGE_SIZE = 20;
-    private static final String TASKS = "tasks";
+    private static final String SELF = "self";
     private static final String CHAT = "chat";
 
     private final TaskEventLog log;
@@ -54,14 +55,14 @@ public final class EventsTool implements McpTool {
 
     @Override public JsonObject call(JsonObject arguments) {
         RequestCheck check = new RequestCheck();
-        check.rejectUnknownFields(arguments, "", List.of("topic", "task_id", "stream_id", "after_cursor", "wait_ms"));
-        String topic = check.choice(arguments, "topic", "topic", List.of(TASKS, CHAT));
-        Integer taskId = check.integer(arguments, "task_id", "task_id", false);
+        check.rejectUnknownFields(arguments, "", List.of("topic", "goal_id", "stream_id", "after_cursor", "wait_ms"));
+        String topic = check.choice(arguments, "topic", "topic", List.of(SELF, CHAT));
+        Integer goalId = check.integer(arguments, "goal_id", "goal_id", false);
         String streamId = check.text(arguments, "stream_id", "stream_id", false);
         Integer after = check.integer(arguments, "after_cursor", "after_cursor", false);
         Integer waitMs = check.integer(arguments, "wait_ms", "wait_ms", false);
         boolean readsChat = CHAT.equals(topic);
-        if (readsChat && taskId != null) check.error("task_id", "task_id 只在 topic=tasks 时用", "读聊天不带 task_id");
+        if (readsChat && goalId != null) check.error("goal_id", "goal_id 只在 topic=self 时用", "读聊天不带 goal_id");
         if (after != null && after < 0) check.error("after_cursor", "游标不能是负数", "上次返回的 cursor");
         if (waitMs != null && (waitMs < 0 || waitMs > MAX_WAIT_MS)) {
             check.error("wait_ms", "wait_ms 要在 0 到 " + MAX_WAIT_MS + " 之间", "通常用 " + DEFAULT_WAIT_MS);
@@ -75,16 +76,16 @@ public final class EventsTool implements McpTool {
         List<String> notes = new ArrayList<>(check.notes());
         try {
             if (readsChat) {
-                // 聊天单独一条流：读法和任务事件一样，没有目标可附。
+                // 聊天单独一条流：读法和角色身上的事件一样，没有目标可附。
                 CursorLog.Page<ChatEvent> page = chat.read(streamId, cursor, PAGE_SIZE, wait);
                 return ToolReply.ok(page(page, EventsTool::chatEvent), notes, next(page, CHAT, null));
             }
-            CursorLog.Page<TaskEvent> page = log.read(streamId, cursor, taskId == null ? OptionalLong.empty() : OptionalLong.of(taskId), PAGE_SIZE, wait);
+            CursorLog.Page<TaskEvent> page = log.read(streamId, cursor, goalId == null ? OptionalLong.empty() : OptionalLong.of(goalId), PAGE_SIZE, wait);
             JsonObject data = page(page, ResultJson::event);
-            if (taskId != null) {
-                attachTask(data, taskId, notes);
+            if (goalId != null) {
+                attachGoal(data, goalId, notes);
             }
-            return ToolReply.ok(data, notes, next(page, null, taskId));
+            return ToolReply.ok(data, notes, next(page, null, goalId));
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             return ToolReply.error(ErrorCode.BUSY, "等待事件时被中断，稍后再试");
@@ -119,29 +120,29 @@ public final class EventsTool implements McpTool {
         return json;
     }
 
-    /** 附上任务此刻的样子；角色不在世界里或编号已经不保留时，说明一句，不让整次读事件失败。 */
-    private void attachTask(JsonObject data, long taskId, List<String> notes) {
+    /** 附上目标此刻的样子；角色不在世界里或编号已经不保留时，说明一句，不让整次读事件失败。 */
+    private void attachGoal(JsonObject data, long goalId, List<String> notes) {
         try {
-            JsonObject task = clientThread.call(context -> {
-                GoalRun run = table.find(taskId).orElse(null);
-                return run == null ? null : ResultJson.goalRun(run, table.pendingQuestion(taskId).orElse(null),
-                        table.doing(taskId).orElse(null));
+            JsonObject goal = clientThread.call(context -> {
+                GoalRun run = table.find(goalId).orElse(null);
+                return run == null ? null : ResultJson.goalRun(run, table.pendingQuestion(goalId).orElse(null),
+                        table.doing(goalId).orElse(null));
             });
-            if (task == null) {
-                notes.add("任务 " + taskId + " 已经不在任务表里，只能看到事件");
+            if (goal == null) {
+                notes.add("目标 " + goalId + " 已经不在目标表里，只能看到事件");
             } else {
-                data.add("task", task);
+                data.add("goal", goal);
             }
         } catch (ClientThread.NotInWorld | ClientThread.Busy unavailable) {
-            notes.add("这次没能附上任务此刻的样子：" + unavailable.getMessage());
+            notes.add("这次没能附上目标此刻的样子：" + unavailable.getMessage());
         }
     }
 
-    // 下一次照抄的参数：读聊天时带上 topic，读任务事件时保持原来的写法（topic 默认就是 tasks）。
-    private static JsonObject next(CursorLog.Page<?> page, String topic, Integer taskId) {
+    // 下一次照抄的参数：读聊天时带上 topic，读角色身上的事件时保持原来的写法（topic 默认就是 self）。
+    private static JsonObject next(CursorLog.Page<?> page, String topic, Integer goalId) {
         JsonObject arguments = new JsonObject();
         if (topic != null) arguments.addProperty("topic", topic);
-        if (taskId != null) arguments.addProperty("task_id", taskId);
+        if (goalId != null) arguments.addProperty("goal_id", goalId);
         arguments.addProperty("stream_id", page.streamId());
         arguments.addProperty("after_cursor", page.cursor());
         arguments.addProperty("wait_ms", page.hasMore() ? 0 : DEFAULT_WAIT_MS);
