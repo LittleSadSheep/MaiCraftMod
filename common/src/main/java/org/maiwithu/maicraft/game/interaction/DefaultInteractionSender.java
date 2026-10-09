@@ -233,7 +233,7 @@ public final class DefaultInteractionSender implements InteractionSender {
                     ? acknowledgement.maicraft$currentBlockSequence() : Integer.MIN_VALUE;
             var result = gameMode(context).useItemOn(player, hand, hit);
             if (acknowledged != null) acknowledged.submitted();
-            pending.attachUseOnTrace(useOnTrace(context, hand, hit, result, sequenceBefore));
+            pending.attachUseOnTrace(UseOnTrace.describe(context, hand, hit, result, sequenceBefore));
             // 点击现场已随确认记录交给调用方（提交失败记录带 use_on_trace）；日志降为 debug，
             // 建造时每放一块都打 INFO 会刷屏，排查时再打开 debug 对照服务端现场。
             LOG.debug("[maicraft-interaction] {}", pending.useOnTrace());
@@ -243,44 +243,6 @@ public final class DefaultInteractionSender implements InteractionSender {
                     "native block use threw after entering the client action path");
         }
         return poll(context, pending);
-    }
-
-    /**
-     * 一次右键方块提交现场的逐项事实：提交的点击面与位置、客户端原生预测结果、
-     * 点击后客户端观察到的落格状态，以及方块操作编号是否前进（前进＝预测包已发出，
-     * 服务端收到了这次点击；不前进＝客户端本地就拒绝了，根本没有发包）。
-     * 只读观察与字符串拼装，不改变任何世界状态。
-     */
-    private static String useOnTrace(PlayerContext context, InteractionHand hand, BlockHitResult hit,
-                                     InteractionResult result, int sequenceBefore) {
-        try {
-            var level = context.level();
-            var player = context.localPlayer();
-            var clicked = hit.getBlockPos();
-            var placementCell = clicked.relative(hit.getDirection());
-            int sequenceAfter = level instanceof BlockUseAcknowledgement acknowledgement
-                    ? acknowledgement.maicraft$currentBlockSequence() : Integer.MIN_VALUE;
-            BiFunction<BlockPos, BlockState, String> describe =
-                    (pos, state) -> pos.toShortString() + "=" + BuiltInRegistries.BLOCK.getKey(state.getBlock());
-            return "use_on{hand=" + hand
-                    + ", held=" + BuiltInRegistries.ITEM.getKey(
-                            player.getItemInHand(hand).getItem()) + "x" + player.getItemInHand(hand).getCount()
-                    + ", clicked=" + describe.apply(clicked, level.getBlockState(clicked))
-                    + ", face=" + hit.getDirection()
-                    + ", point=(" + Math.round(hit.getLocation().x * 100) / 100.0
-                    + "," + Math.round(hit.getLocation().y * 100) / 100.0
-                    + "," + Math.round(hit.getLocation().z * 100) / 100.0 + ")"
-                    + ", eye_dist=" + Math.round(player.getEyePosition().distanceTo(hit.getLocation()) * 100) / 100.0
-                    + ", feet=" + player.blockPosition().toShortString()
-                    + ", sneak=" + player.isShiftKeyDown()
-                    + ", native_result=" + result
-                    + ", placement_cell=" + describe.apply(placementCell, level.getBlockState(placementCell))
-                    + ", prediction_packet=" + (sequenceBefore == Integer.MIN_VALUE ? "unknown"
-                            : sequenceAfter > sequenceBefore ? "sent" : "none")
-                    + "}";
-        } catch (RuntimeException traceFailure) {
-            return "use_on{trace_failed=" + traceFailure + "}";
-        }
     }
 
     @Override
@@ -492,9 +454,15 @@ public final class DefaultInteractionSender implements InteractionSender {
     public PendingInteraction attack(PlayerContext context, Entity target,
                                      InteractionConfirmation confirmation, int timeoutTicks) {
         requireSubmission(context);
+        // 同一目标的挥击还在等确认时，重提交按幂等等待：不重复挥手、不抛异常，
+        // 把仍在进行的等待原样交回，调用方逐刻读它自己的结算结果。
+        if (sameTargetAttackAwaiting(active, context, target.getId())) {
+            return active;
+        }
         requireIdle(context);
         PendingInteraction pending = oneShot(
                 PendingInteraction.Kind.ATTACK_ENTITY, context, confirmation, timeoutTicks);
+        pending.attachAttackTarget(target.getId());
         try {
             gameMode(context).attack(context.localPlayer(), target);
             context.localPlayer().swing(InteractionHand.MAIN_HAND);
@@ -672,6 +640,19 @@ public final class DefaultInteractionSender implements InteractionSender {
         if (context == null || !context.isCurrent()) {
             throw new IllegalArgumentException("the player context must belong to the current tick");
         }
+    }
+
+    /**
+     * 同一目标、同一角色且未过期的攻击等待才算"还在等同一次挥击"，重提交幂等等待；
+     * 换目标、过了期限或换了角色都不算，仍走正常的回收与提交检查。
+     * 纯判断，离线可测。
+     */
+    static boolean sameTargetAttackAwaiting(PendingInteraction active, PlayerContext context, int targetId) {
+        return active != null && !active.terminal()
+                && active.kind() == PendingInteraction.Kind.ATTACK_ENTITY
+                && active.attackTargetId() == targetId
+                && active.fromSamePlayer(context)
+                && context.clientTick() < active.deadlineTick();
     }
 
     private void requireIdle(PlayerContext context) {

@@ -31,6 +31,8 @@ public final class PendingInteraction {
     private String detail = "awaiting authoritative client facts";
     /** 右键方块提交现场的插桩事实（点击面、客户端预测结果、预测包是否发出）；只有 useBlock 提交时写入一次。 */
     private String useOnTrace = "";
+    /** 攻击等待记录的目标实体编号；非攻击提交为 -1，供同一目标的重提交幂等等待比对。 */
+    private int attackTargetId = -1;
 
     PendingInteraction(
             Kind kind,
@@ -64,6 +66,9 @@ public final class PendingInteraction {
     public String useOnTrace() { return useOnTrace; }
     /** 提交现场的插桩事实随确认记录走，避免全局最新值被后续提交覆盖后张冠李戴。 */
     void attachUseOnTrace(String trace) { if (useOnTrace.isEmpty()) useOnTrace = trace == null ? "" : trace; }
+    /** 攻击提交时记下目标编号；攻击动作拿它判断同一目标的重提交是不是还在等同一次挥击。 */
+    void attachAttackTarget(int entityId) { if (kind == Kind.ATTACK_ENTITY) attackTargetId = entityId; }
+    int attackTargetId() { return attackTargetId; }
     public boolean terminal() { return status != Status.PENDING; }
 
     InteractionConfirmation confirmation() { return confirmation; }
