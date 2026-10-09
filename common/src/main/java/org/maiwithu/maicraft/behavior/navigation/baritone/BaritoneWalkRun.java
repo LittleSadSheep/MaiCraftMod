@@ -12,7 +12,6 @@ import baritone.api.utils.input.Input;
 import baritone.behavior.PathingBehavior;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
@@ -54,6 +53,10 @@ final class BaritoneWalkRun implements WalkRun {
     private final NavigationDispatchWatchdog dispatch = new NavigationDispatchWatchdog();
     /** 这段路垫上的临时方块；逐格进结算结果，不自动收回。 */
     private final List<BlockPos> placements = new ArrayList<>();
+    /** 引擎在路上按下的左右键：挖开挡路的、垫方块、开门，都经它交给原生交互并等确认。 */
+    private final EngineClicks clicks = new EngineClicks();
+    /** 最近一刻的角色上下文；暂停、放弃时用它停挖、交还没等到确认的右键。 */
+    private PlayerContext lastContext;
     /** 引擎本刻请求的按键是否读出来过；用于区分排队与真正在走。 */
     private boolean engineFailedPath;
     private boolean activated;
@@ -90,12 +93,12 @@ final class BaritoneWalkRun implements WalkRun {
     }
 
     /**
-     * 引擎报告一格方块变了：变化后是实心方块（不是空气、不是水与岩浆）就记成这段路垫上的临时方块；
-     * 挖掉的变化（变成空气）不记。垫了什么如实进结算结果，收不收回由 LLM 决定。
+     * 记下这段路上自己垫的一格：只有右键得到游戏确认、那一格确实长出了方块才记。
+     * 垫了什么如实进结算结果，收不收回由 LLM 决定。
      */
-    void recordPlacedIfSolid(BlockPos position, BlockState after) {
+    private void recordPlaced(BlockPos position) {
         if (permit.changes() == Permissions.BlockChanges.NONE) return;
-        if (!after.isAir() && !after.liquid() && !placements.contains(position)) {
+        if (!placements.contains(position)) {
             placements.add(position.immutable());
         }
     }
@@ -134,6 +137,7 @@ final class BaritoneWalkRun implements WalkRun {
      * 会像打断后那样从原地重新上路；没人再管的运行就此结束，不再挡住后面所有的走到。
      */
     void yieldBody() {
+        clicks.stop(lastContext);
         progress.stopWhereLastSeen();
         owner.release(this);
         finishEngineQuietly();
@@ -181,7 +185,7 @@ final class BaritoneWalkRun implements WalkRun {
     }
 
     void driveBody(PlayerContext context) {
-
+        lastContext = context;
         LocalPlayer player = context.localPlayer();
         var pathing = owner.pathing();
         IBaritone engine = owner.engine();
@@ -236,7 +240,8 @@ final class BaritoneWalkRun implements WalkRun {
         boolean sprint = input.isInputForcedDown(Input.SPRINT);
         PlayerInput playerInput = context.input();
         if (progress.done()) {
-            // 运行结束：松开全部按键，把身体交回给下一个动作或玩家。
+            // 运行结束：停挖、交还没等到确认的右键，松开全部按键，把身体交回给下一个动作或玩家。
+            clicks.stop(context);
             playerInput.releaseAll(player);
             owner.release(this);
             finishEngine(engine, pathing);
@@ -250,7 +255,20 @@ final class BaritoneWalkRun implements WalkRun {
             playerInput.applyNavigationMovement(PlayerInput.Movement.STOPPED, context.clientTick());
         }
         lookAlongRoute(engine, playerInput, context, player, routePresent);
+        workBlocks(context, input);
         engineFailedPath = false;
+    }
+
+    // 引擎按着左右键时真的去挖、去点：挖开一格、垫上一块都算真实进展，挖掘推进中也不算原地卡住，
+    // 免得挖一块硬石头的工夫就被"长时间没有位移"判成走不下去。
+    private void workBlocks(PlayerContext context, IInputOverrideHandler input) {
+        boolean left = input.isInputForcedDown(Input.CLICK_LEFT);
+        boolean right = input.isInputForcedDown(Input.CLICK_RIGHT);
+        EngineClicks.Doing doing = clicks.tick(context, left, right);
+        clicks.takePlaced().ifPresent(this::recordPlaced);
+        if (doing != EngineClicks.Doing.NOTHING) {
+            displacement.confirm(context.clientTick());
+        }
     }
 
     // 普通走路用缓慢改变的路线朝向：镜头不追随引擎每刻的方块中心瞄准点，减少逐格点头。
@@ -282,6 +300,7 @@ final class BaritoneWalkRun implements WalkRun {
         // 生存需求打断：请求停下，安全时立刻撤路线、松开按键；停稳后这一趟按"已停下"结算，
         // 不会自己续上——调用方恢复时读到"已停下"，从原地重新上路。
         progress.requestStop();
+        clicks.stop(lastContext);
         var pathing = owner.pathing();
         if (activated && pathing != null && pathing.isSafeToCancel()) {
             pathing.forceCancel();
@@ -294,6 +313,7 @@ final class BaritoneWalkRun implements WalkRun {
         if (!progress.done()) {
             progress.fail(Problem.of(Problem.Kind.STUCK, "走到被任务放弃", null), null);
         }
+        clicks.stop(lastContext);
         // 只收拾自己占着的引擎：已经交出身体、或还在排队的运行不能去撤别人正在走的路线。
         if (owner.owns(this)) {
             owner.release(this);
