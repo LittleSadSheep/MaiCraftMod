@@ -402,6 +402,42 @@ class ControlLoopTest {
         assertSame(ControlLoop.Decision.IDLE, loop.tick(TICK));
     }
 
+    @Test
+    void layersListTheMainTaskFirstAndTheInterruptingNeedOnTop() {
+        // 调试面板照这个画运行栈：最底是主任务，插进来的临时任务在上面，写明是哪个需求、插进来时多急。
+        FakeTask main = new FakeTask("挖矿", Interruptibility.WORKING);
+        ControlLoop loop = new ControlLoop(List.of(FakeNeed.always("自卫", Urgency.SOON)));
+        loop.setMainTask(main);
+        loop.tick(TICK);
+
+        List<ControlLoop.Layer> layers = loop.layers();
+
+        assertEquals(2, layers.size());
+        assertSame(main, layers.get(0).task());
+        assertNull(layers.get(0).needName(), "主任务不是哪个需求插进来的");
+        assertEquals("自卫", layers.get(1).needName());
+        assertEquals(Urgency.SOON, layers.get(1).urgency());
+        assertEquals(Interruptibility.WORKING, loop.askedInterruptibility(), "本刻问过主任务能不能打断");
+    }
+
+    @Test
+    void failedTempTaskLeavesARetryWaitThatSaysWhy() {
+        // 刨不动：面板要说得出"上次为什么没做成、还要等多久、接连没做成几次"，而不是只说"缓一阵"。
+        FakeTask main = new FakeTask("挖矿", Interruptibility.WORKING);
+        ControlLoop loop = new ControlLoop(List.of(
+                FakeNeed.always("刨出", Urgency.NOW, () -> new FailingTask("刨出临时"))));
+        loop.setMainTask(main);
+        loop.tick(new TestContext(10));
+
+        List<ControlLoop.RetryWait> waits = loop.retryWaits();
+
+        assertEquals(1, waits.size());
+        assertEquals("刨出", waits.get(0).needName());
+        assertEquals("做不了", waits.get(0).why(), "原因用问题本身的说法");
+        assertEquals(1, waits.get(0).failures());
+        assertEquals(10 + ControlLoop.RETRY_AFTER_FAILED_TICKS, waits.get(0).untilTick());
+    }
+
     /** 一推进就失败的临时任务：模拟刨不动、换不上气这类自救没成功的处境。 */
     static class FailingTask extends FakeTask {
         FailingTask(String name) {
