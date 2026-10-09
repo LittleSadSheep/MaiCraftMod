@@ -39,24 +39,24 @@ public final class CompatRegistry {
     }
 
     /** 从联动清单建登记表：逐行检查，登记通过的，每行的结论写进日志。 */
-    public static CompatRegistry load(List<CompatRow> catalog, LoaderEnvironment loader) {
+    public static CompatRegistry load(List<SupportedMod> catalog, LoaderEnvironment loader) {
         Objects.requireNonNull(loader, "loader");
         CompatRegistry registry = new CompatRegistry();
-        for (CompatRow row : catalog) {
-            registry.loadRow(row, loader);
+        for (SupportedMod mod : catalog) {
+            registry.check(mod, loader);
         }
         return registry;
     }
 
-    private void loadRow(CompatRow row, LoaderEnvironment loader) {
-        if (!loader.isModLoaded(row.modId())) {
-            decide(row, "没装，跳过");
+    private void check(SupportedMod mod, LoaderEnvironment loader) {
+        if (!loader.isModLoaded(mod.modId())) {
+            decide(mod, "没装，跳过");
             return;
         }
-        String version = loader.modVersion(row.modId()).orElse("");
-        if (!row.verified().contains(version)) {
-            decide(row, "装的是 " + (version.isBlank() ? "不明版本" : version) + "，验证过的范围是 "
-                    + row.verified().describe() + "，不登记");
+        String version = loader.modVersion(mod.modId()).orElse("");
+        if (!mod.verified().contains(version)) {
+            decide(mod, "装的是 " + (version.isBlank() ? "不明版本" : version) + "，验证过的范围是 "
+                    + mod.verified().describe() + "，不登记");
             return;
         }
         // 创建与交接可能抛 LinkageError（读写端一碰模组类就对不上），也一并当作这一行出错，不让它炸掉启动。
@@ -65,21 +65,21 @@ public final class CompatRegistry {
         int knowledge = knowledgeSources.size();
         CompatModule module;
         try {
-            module = Objects.requireNonNull(row.create().get(), "创建返回了 null");
+            module = Objects.requireNonNull(mod.create().get(), "创建返回了 null");
             module.contribute(this);
         } catch (RuntimeException | LinkageError failure) {
             itemSources.subList(sources, itemSources.size()).clear();
             carriedBackpacks.subList(backpacks, carriedBackpacks.size()).clear();
             knowledgeSources.subList(knowledge, knowledgeSources.size()).clear();
-            decide(row, "创建时出错，不登记：" + failure);
+            decide(mod, "创建时出错，不登记：" + failure);
             return;
         }
         modules.add(module);
-        decide(row, "已登记，版本 " + version);
+        decide(mod, "已登记，版本 " + version);
     }
 
-    private void decide(CompatRow row, String conclusion) {
-        String line = row.name() + "（" + row.modId() + "）：" + conclusion;
+    private void decide(SupportedMod mod, String conclusion) {
+        String line = mod.name() + "（" + mod.modId() + "）：" + conclusion;
         decisions.add(line);
         LOG.info("联动 {}", line);
     }

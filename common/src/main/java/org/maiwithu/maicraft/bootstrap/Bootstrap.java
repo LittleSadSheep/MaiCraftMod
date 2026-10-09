@@ -109,7 +109,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.maiwithu.maicraft.game.world.FurnaceFuels;
 import org.maiwithu.maicraft.compat.CompatRegistry;
-import org.maiwithu.maicraft.compat.CompatRow;
+import org.maiwithu.maicraft.compat.SupportedMod;
 
 /**
  * 公共启动入口。两个加载器的入口类只调用这里，再把加载器事件转给返回的接收端。
@@ -146,7 +146,7 @@ public final class Bootstrap {
      * @param compatCatalog 这个加载器服务端一侧的联动清单；没有联动的加载器传空列表
      */
     public static ServerLifecycle startCommon(LoaderEnvironment loader, ServerConfirmations.Push push,
-                                              List<CompatRow> compatCatalog) {
+                                              List<SupportedMod> compatCatalog) {
         LOG.info("{} 通用部分启动（加载器：{}）", ModIdentity.NAME, loader.loaderName());
         // 服务端一侧的联动清单同样逐行检查并写日志。服务端还没有可登记的槽（读模组数据的服务端操作
         // 等第一个需要它的模组再加），所以现在只核对装没装、版本对不对。
@@ -230,7 +230,7 @@ public final class Bootstrap {
      *                      清单在客户端启动完成时才逐行检查，那时所有模组都构造完了
      */
     public static ClientLifecycle startClient(LoaderEnvironment loader, LinkTransport transport,
-                                              List<CompatRow> compatCatalog) {
+                                              List<SupportedMod> compatCatalog) {
         LOG.info("{} 客户端部分启动（加载器：{}，开发环境：{}）",
                 ModIdentity.NAME, loader.loaderName(), loader.isDevelopment());
         ClientEntry entry = new ClientEntry(loader, compatCatalog);
@@ -251,7 +251,7 @@ public final class Bootstrap {
         // 能力需要的模组装没装由加载器回答，没装的能力不登记。
         private final AbilityRegistry abilities;
         /** 这个加载器的联动清单；客户端启动完成时逐行检查成登记表。 */
-        private final List<CompatRow> compatCatalog;
+        private final List<SupportedMod> compatCatalog;
         /** 联动登记表：启动完成前是空的，之后是按清单检查过的那份；进世界建能力清单时把登记的来源交进去。 */
         private CompatRegistry compat = CompatRegistry.empty();
         // MCP 请求线程排工作、客户端刻里做：下达、暂停、回答与控制循环推进在同一个线程上。
@@ -290,7 +290,7 @@ public final class Bootstrap {
         /** 上一刻自动化是否拿着角色；变了就记一行日志，排查"下了目标却不动"时先看这里。 */
         private boolean automationOwned;
 
-        ClientEntry(LoaderEnvironment loader, List<CompatRow> compatCatalog) {
+        ClientEntry(LoaderEnvironment loader, List<SupportedMod> compatCatalog) {
             this.abilities = new AbilityRegistry(new TaskFactories(), loader::isModLoaded);
             this.compatCatalog = List.copyOf(compatCatalog);
         }

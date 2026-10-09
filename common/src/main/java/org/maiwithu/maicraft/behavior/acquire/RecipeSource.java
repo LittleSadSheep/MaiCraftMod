@@ -22,7 +22,7 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
-import org.maiwithu.maicraft.behavior.acquire.spi.AcquireRoute;
+import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 
 /**
  * 做出来的来源：合成、烧炼、石切台同走一条路——配方从世界真实的配方管理器读（含模组配方），
@@ -83,8 +83,8 @@ public final class RecipeSource implements ItemSource {
                 ? "烧炼" : "自己做";
     }
 
-    @Override public AcquireRoute route() {
-        return kinds.contains(RecipeView.Kind.CRAFTING) ? AcquireRoutes.CRAFT : AcquireRoutes.SMELT;
+    @Override public AcquireVia via() {
+        return kinds.contains(RecipeView.Kind.CRAFTING) ? AcquireVia.CRAFT : AcquireVia.SMELT;
     }
 
     @Override public SourceQuote quote(ItemRequest request, SourceContext context) {

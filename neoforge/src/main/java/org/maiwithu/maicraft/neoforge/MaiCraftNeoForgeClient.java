@@ -15,7 +15,6 @@ import net.neoforged.neoforge.client.event.RenderGuiEvent;
 import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
 import net.neoforged.neoforge.client.event.ScreenEvent;
 import net.neoforged.neoforge.common.NeoForge;
-import net.minecraft.client.Minecraft;
 import net.neoforged.neoforge.event.GameShuttingDownEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 import org.maiwithu.maicraft.bootstrap.Bootstrap;
@@ -43,7 +42,7 @@ public final class MaiCraftNeoForgeClient {
             @Override public void send(JsonObject envelope) {
                 PacketDistributor.sendToServer(MaiCraftPayload.of(envelope));
             }
-        }, ClientCompatCatalog.rows());
+        }, ClientCompatCatalog.mods());
         // 客户端准备完成后创建内核与能力 -> 每刻结束推进角色当前的任务与会话 -> 退出前收尾。
         modBus.addListener(this::onClientSetup);
         NeoForge.EVENT_BUS.addListener(this::onClientTick);

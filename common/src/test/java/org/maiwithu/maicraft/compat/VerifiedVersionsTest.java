@@ -9,9 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 /** 验证过的版本范围：下界含、上界不含，多出来的段算在后面。 */
-class VersionRangeTest {
+class VerifiedVersionsTest {
 
-    private final VersionRange range = new VersionRange("3.25.69", "3.26");
+    private final VerifiedVersions range = new VerifiedVersions("3.25.69", "3.26");
 
     @Test
     void 下界算在范围内上界不算() {
@@ -36,8 +36,8 @@ class VersionRangeTest {
 
     @Test
     void 下界不小于上界的范围写错了() {
-        assertThrows(IllegalArgumentException.class, () -> new VersionRange("3.26", "3.25.69"));
-        assertThrows(IllegalArgumentException.class, () -> new VersionRange("3.26", "3.26"));
+        assertThrows(IllegalArgumentException.class, () -> new VerifiedVersions("3.26", "3.25.69"));
+        assertThrows(IllegalArgumentException.class, () -> new VerifiedVersions("3.26", "3.26"));
     }
 
     @Test

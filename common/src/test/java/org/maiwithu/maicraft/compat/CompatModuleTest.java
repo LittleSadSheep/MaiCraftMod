@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
-import org.maiwithu.maicraft.behavior.acquire.spi.AcquireRoute;
+import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 import org.maiwithu.maicraft.behavior.acquire.WantedItem;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquisitionCost;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
@@ -31,7 +31,7 @@ class CompatModuleTest {
 
     private static final ItemRequest REQUEST = new ItemRequest(WantedItem.ofItem("minecraft:coal"), 2, "测试");
     private static final SourceContext CONTEXT = new SourceContext(WorldPosition.here(0, 64, 0), Permissions.DEFAULT);
-    private static final AcquireRoute BACKPACK_ROUTE = new AcquireRoute("backpack", "随身背包里拿");
+    private static final AcquireVia BACKPACK_ROUTE = new AcquireVia("backpack", "随身背包里拿");
 
     /** 不交任何接口的联动入口，只用它的调用包装。 */
     private static final class BareModule extends CompatModule {
@@ -90,7 +90,7 @@ class CompatModuleTest {
         BareModule module = new BareModule();
         ItemSource breaking = new ItemSource() {
             @Override public String describe() { return "随身背包"; }
-            @Override public AcquireRoute route() { return BACKPACK_ROUTE; }
+            @Override public AcquireVia via() { return BACKPACK_ROUTE; }
             @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
                 return module.call("读背包内容", () -> { throw new NoSuchFieldError("inventory"); });
             }
@@ -113,7 +113,7 @@ class CompatModuleTest {
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, wrapped.quote(REQUEST, CONTEXT));
         assertEquals(2, offer.obtainableCount());
         assertEquals(1, asked.get());
-        assertEquals(BACKPACK_ROUTE, wrapped.route());
+        assertEquals(BACKPACK_ROUTE, wrapped.via());
     }
 
     @Test
@@ -141,7 +141,7 @@ class CompatModuleTest {
     private static ItemSource offering(String name, AtomicInteger asked) {
         return new ItemSource() {
             @Override public String describe() { return name; }
-            @Override public AcquireRoute route() { return BACKPACK_ROUTE; }
+            @Override public AcquireVia via() { return BACKPACK_ROUTE; }
             @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
                 asked.incrementAndGet();
                 return new SourceQuote.Offer(name, 2, AcquisitionCost.free(), null);

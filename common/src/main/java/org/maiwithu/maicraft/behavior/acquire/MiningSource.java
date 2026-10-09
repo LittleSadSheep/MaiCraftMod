@@ -16,7 +16,7 @@ import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
-import org.maiwithu.maicraft.behavior.acquire.spi.AcquireRoute;
+import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 
 /**
  * 采掘的来源：挖掉会掉出想要的东西的方块（矿石、地表的石头这类），只算看得见的——不透视，埋在石头里的不算。
@@ -52,8 +52,8 @@ public final class MiningSource implements ItemSource {
         return "采掘";
     }
 
-    @Override public AcquireRoute route() {
-        return AcquireRoutes.MINE;
+    @Override public AcquireVia via() {
+        return AcquireVia.MINE;
     }
 
     @Override public SourceQuote quote(ItemRequest request, SourceContext context) {

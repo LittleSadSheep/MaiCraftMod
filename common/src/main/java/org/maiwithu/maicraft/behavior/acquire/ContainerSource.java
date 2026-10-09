@@ -15,7 +15,7 @@ import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.task.Action;
-import org.maiwithu.maicraft.behavior.acquire.spi.AcquireRoute;
+import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 
 /**
  * 容器的来源：角色记得的箱子（世界记忆里记过的），加上只看见过、没开过的。
@@ -47,8 +47,8 @@ public final class ContainerSource implements ItemSource {
         return "记得的箱子";
     }
 
-    @Override public AcquireRoute route() {
-        return AcquireRoutes.CONTAINER;
+    @Override public AcquireVia via() {
+        return AcquireVia.CONTAINER;
     }
 
     @Override public SourceQuote quote(ItemRequest request, SourceContext context) {

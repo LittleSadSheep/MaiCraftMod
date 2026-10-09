@@ -4,7 +4,8 @@ package org.maiwithu.maicraft.compat;
 import java.util.Objects;
 
 /**
- * 验证过的版本范围：下界含、上界不含，写成 [3.25.69, 3.26)。实测过的模组版本才写进来；
+ * 验证过的版本范围：下界含、上界不含，写成 [3.25.69, 3.26)；不是 mods.toml 里 Maven 写法的 versionRange。
+ * 实测过的模组版本才写进来；
  * 装的版本不在范围内就不登记这个模组的联动，换了版本实测通过后再放宽。
  *
  * <p>版本按点号分段、逐段比数字：段数不同时少的那边补 0，所以 3.25.69.1979 在 3.25.69 之后、3.26 之前；
@@ -13,9 +14,9 @@ import java.util.Objects;
  * @param lowest 范围的下界，含
  * @param below  范围的上界，不含
  */
-public record VersionRange(String lowest, String below) {
+public record VerifiedVersions(String lowest, String below) {
 
-    public VersionRange {
+    public VerifiedVersions {
         Objects.requireNonNull(lowest, "lowest");
         Objects.requireNonNull(below, "below");
         if (lowest.isBlank() || below.isBlank()) {

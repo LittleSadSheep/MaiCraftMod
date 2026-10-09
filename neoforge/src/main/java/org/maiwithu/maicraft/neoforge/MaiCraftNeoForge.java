@@ -30,7 +30,7 @@ public final class MaiCraftNeoForge {
         // 服务端把确认信封直接发给目标玩家的客户端；通道保持 optional，没装 Mod 的普通玩家照样进服。
         server = Bootstrap.startCommon(new NeoForgeLoaderEnvironment(),
                 (player, envelope) -> PacketDistributor.sendToPlayer(player, MaiCraftPayload.of(envelope)),
-                ServerCompatCatalog.rows());
+                ServerCompatCatalog.mods());
         modBus.addListener(this::registerPayloads);
         NeoForge.EVENT_BUS.addListener(this::onServerTick);
         NeoForge.EVENT_BUS.addListener(this::onServerStopped);

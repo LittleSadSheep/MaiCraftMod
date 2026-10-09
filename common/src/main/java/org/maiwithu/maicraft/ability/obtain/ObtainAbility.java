@@ -29,7 +29,7 @@ import org.maiwithu.maicraft.kernel.param.Params;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
-import org.maiwithu.maicraft.behavior.acquire.spi.AcquireRoute;
+import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 
 /**
  * 拿东西的能力：让背包里某样东西再多几件。决定只做两件事——
@@ -43,21 +43,21 @@ public final class ObtainAbility implements AbilityModule {
     private static final long MAX_RADIUS = 64;
 
     private final StartsAcquisition acquisition;
-    private final List<AcquireRoute> routes;
+    private final List<AcquireVia> vias;
     private final ReadsItemRegistry registry;
     private final BackpackView backpack;
     private final OffhandContents offhand;
     private final ReadsItemTags tags;
 
     /**
-     * @param routes 登记的来源自报的途径，按来源顺序、去重：via 的可选值与说明从它生成，
+     * @param vias 登记的来源自报的途径，按来源顺序、去重：via 的可选值与说明从它生成，
      *               联动模组接入的途径装了才在里面
      */
-    public ObtainAbility(StartsAcquisition acquisition, List<AcquireRoute> routes, ReadsItemRegistry registry,
+    public ObtainAbility(StartsAcquisition acquisition, List<AcquireVia> vias, ReadsItemRegistry registry,
             BackpackView backpack, OffhandContents offhand, ReadsItemTags tags) {
         this.acquisition = acquisition;
-        this.routes = List.copyOf(Objects.requireNonNull(routes, "routes"));
-        if (this.routes.isEmpty()) throw new IllegalArgumentException("拿东西至少要有一条途径");
+        this.vias = List.copyOf(Objects.requireNonNull(vias, "vias"));
+        if (this.vias.isEmpty()) throw new IllegalArgumentException("拿东西至少要有一条途径");
         this.registry = registry;
         this.backpack = backpack;
         this.offhand = offhand;
@@ -74,8 +74,8 @@ public final class ObtainAbility implements AbilityModule {
                         Param.of("count", ParamType.INTEGER).defaultValue(1L).range(1, Integer.MAX_VALUE)
                                 .doc("再多拿几件（不是背包里的总数）").build(),
                         Param.of("via", ParamType.CHOICE)
-                                .choices(routes.stream().map(AcquireRoute::name).toArray(String[]::new))
-                                .doc("只走指定途径，不给就按总代价自己挑：" + describeRoutes()).build(),
+                                .choices(vias.stream().map(AcquireVia::name).toArray(String[]::new))
+                                .doc("只走指定途径，不给就按总代价自己挑：" + describeVias()).build(),
                         Param.of("radius", ParamType.INTEGER).range(1, MAX_RADIUS)
                                 .doc("容器与采掘的搜索范围（格）；给了就冻结在这个范围里").build(),
                         Param.of("max_distance", ParamType.INTEGER).range(1, Integer.MAX_VALUE)
@@ -122,8 +122,8 @@ public final class ObtainAbility implements AbilityModule {
     }
 
     /** 每条途径一句说明，写进参数表：craft 工作台上做出来（含石切台）；smelt 熔炉里烧出来…… */
-    private String describeRoutes() {
-        return routes.stream().map(route -> route.name() + " " + route.description())
+    private String describeVias() {
+        return vias.stream().map(via -> via.name() + " " + via.description())
                 .collect(Collectors.joining("；"));
     }
 
@@ -145,9 +145,9 @@ public final class ObtainAbility implements AbilityModule {
 
     /** 把 via、radius、max_distance 换成引擎认的限定；via 没给就是全部途径都参与。 */
     private ItemAcquisition.Scope scope(Params params) {
-        Set<String> routes = params.has("via") ? Set.of(params.text("via")) : Set.of();
+        Set<String> vias = params.has("via") ? Set.of(params.text("via")) : Set.of();
         Double maxDistance = params.has("max_distance") ? Double.valueOf(params.integer("max_distance")) : null;
         Integer radius = params.has("radius") ? Integer.valueOf((int) params.integer("radius")) : null;
-        return new ItemAcquisition.Scope(routes, maxDistance, radius);
+        return new ItemAcquisition.Scope(vias, maxDistance, radius);
     }
 }

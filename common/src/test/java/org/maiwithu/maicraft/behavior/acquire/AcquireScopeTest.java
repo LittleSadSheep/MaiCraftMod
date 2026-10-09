@@ -24,7 +24,7 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
-import org.maiwithu.maicraft.behavior.acquire.spi.AcquireRoute;
+import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 
 /**
  * 带限定的一次拿东西：via 只走指定途径、距离上限把太远的报价挡下、半径原样传给来源、
@@ -38,15 +38,15 @@ class AcquireScopeTest {
     /** 替身：问价就给一条固定报价，动手就往背包里放货；记住问到的半径。 */
     class OfferingSource implements ItemSource {
         final String name;
-        final AcquireRoute route;
+        final AcquireVia via;
         final FakeBackpack backpack;
         final AcquisitionCost cost;
         Integer askedRadius;
         int begunCount;
 
-        OfferingSource(String name, AcquireRoute route, FakeBackpack backpack, double distance) {
+        OfferingSource(String name, AcquireVia via, FakeBackpack backpack, double distance) {
             this.name = name;
-            this.route = route;
+            this.via = via;
             this.backpack = backpack;
             this.cost = new AcquisitionCost(distance, 1);
         }
@@ -55,8 +55,8 @@ class AcquireScopeTest {
             return name;
         }
 
-        @Override public AcquireRoute route() {
-            return route;
+        @Override public AcquireVia via() {
+            return via;
         }
 
         @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
@@ -91,14 +91,14 @@ class AcquireScopeTest {
     @Test
     void via只让指定途径的来源动手() {
         FakeBackpack backpack = backpack();
-        OfferingSource mine = new OfferingSource("采掘", AcquireRoutes.MINE, backpack, 5);
-        OfferingSource container = new OfferingSource("箱子", AcquireRoutes.CONTAINER, backpack, 5);
+        OfferingSource mine = new OfferingSource("采掘", AcquireVia.MINE, backpack, 5);
+        OfferingSource container = new OfferingSource("箱子", AcquireVia.CONTAINER, backpack, 5);
         ItemAcquisition acquisition = engine(backpack, mine, container);
 
         ActionStatus status = runToEnd(acquisition.need(
                 new ItemRequest(WantedItem.ofItem("minecraft:coal"), 2, "测试"),
                 Permissions.DEFAULT,
-                new ItemAcquisition.Scope(Set.of(AcquireRoutes.MINE.name()), null, null), null));
+                new ItemAcquisition.Scope(Set.of(AcquireVia.MINE.name()), null, null), null));
 
         assertEquals(ActionStatus.Done.class, status.getClass());
         assertEquals(1, mine.begunCount);
@@ -108,7 +108,7 @@ class AcquireScopeTest {
     @Test
     void 距离上限把太远的报价挡下() {
         FakeBackpack backpack = backpack();
-        OfferingSource far = new OfferingSource("远处的矿", AcquireRoutes.MINE, backpack, 120);
+        OfferingSource far = new OfferingSource("远处的矿", AcquireVia.MINE, backpack, 120);
         ItemAcquisition acquisition = engine(backpack, far);
 
         ActionStatus status = runToEnd(acquisition.need(
@@ -125,7 +125,7 @@ class AcquireScopeTest {
     @Test
     void 半径原样传给来源_没给就是没给() {
         FakeBackpack backpack = backpack();
-        OfferingSource mine = new OfferingSource("采掘", AcquireRoutes.MINE, backpack, 5);
+        OfferingSource mine = new OfferingSource("采掘", AcquireVia.MINE, backpack, 5);
         ItemAcquisition acquisition = engine(backpack, mine);
         runToEnd(acquisition.need(
                 new ItemRequest(WantedItem.ofItem("minecraft:coal"), 1, "测试"),
@@ -134,7 +134,7 @@ class AcquireScopeTest {
         assertEquals(16, mine.askedRadius);
 
         FakeBackpack other = backpack();
-        OfferingSource plain = new OfferingSource("采掘", AcquireRoutes.MINE, other, 5);
+        OfferingSource plain = new OfferingSource("采掘", AcquireVia.MINE, other, 5);
         runToEnd(engine(other, plain).need(
                 new ItemRequest(WantedItem.ofItem("minecraft:coal"), 1, "测试"), Permissions.DEFAULT));
         assertFalse(plain.askedRadius != null, "没给半径就不该带上半径");
@@ -143,16 +143,16 @@ class AcquireScopeTest {
     @Test
     void 真拿到东西时报告途径_白跑一趟不报() {
         FakeBackpack backpack = backpack();
-        OfferingSource mine = new OfferingSource("采掘", AcquireRoutes.MINE, backpack, 5);
+        OfferingSource mine = new OfferingSource("采掘", AcquireVia.MINE, backpack, 5);
         List<String> delivered = new ArrayList<>();
         runToEnd(engine(backpack, mine).need(
                 new ItemRequest(WantedItem.ofItem("minecraft:coal"), 2, "测试"),
                 Permissions.DEFAULT, ItemAcquisition.Scope.ALL, delivered::add));
-        assertEquals(List.of(AcquireRoutes.MINE.name()), delivered);
+        assertEquals(List.of(AcquireVia.MINE.name()), delivered);
 
         // 白跑一趟：做完了但一件没进背包，途径不该被报告。
         FakeBackpack silent = backpack();
-        OfferingSource liar = new OfferingSource("空箱子", AcquireRoutes.CONTAINER, silent, 5) {
+        OfferingSource liar = new OfferingSource("空箱子", AcquireVia.CONTAINER, silent, 5) {
             @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer,
                     SourceContext context) {
                 return Optional.of(new Action() {
@@ -178,14 +178,14 @@ class AcquireScopeTest {
         SourceQuote quote = trade.quote(
                 new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), 1, "测试"), CONTEXT);
         assertInstanceOf(SourceQuote.Unsupported.class, quote);
-        assertEquals(AcquireRoutes.TRADE, trade.route());
+        assertEquals(AcquireVia.TRADE, trade.via());
     }
 
     @Test
     void 内部备料不受外层途径限制() {
         // via=smelt 时，缺的原料仍可以问遍所有来源：指定"烧炼"不等于连挖煤都不许。
         FakeBackpack backpack = backpack();
-        OfferingSource furnace = new OfferingSource("烧炼", AcquireRoutes.SMELT, backpack, 5);
+        OfferingSource furnace = new OfferingSource("烧炼", AcquireVia.SMELT, backpack, 5);
         ItemAcquisition acquisition = engine(backpack, furnace);
         // 内部需求走 actionFor：途径与距离都不限。
         Action backup = acquisition.actionFor(

@@ -96,7 +96,7 @@ import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 import org.maiwithu.maicraft.game.world.FurnaceFuels;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
-import org.maiwithu.maicraft.behavior.acquire.spi.AcquireRoute;
+import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 import org.maiwithu.maicraft.compat.CompatRegistry;
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 
@@ -323,13 +323,13 @@ public final class AbilityCatalog {
                 deps.characterPosition(), Optional.empty(), ItemAcquisition.DEFAULT_MAX_DEPTH);
         innerNeeds.attach(acquisition);
         // via 的可选值就是这些来源自报的途径：来源列表变了，能力说明里的参数表跟着变。
-        return new ObtainAbility(acquisition, routesOf(sources),
+        return new ObtainAbility(acquisition, viasOf(sources),
                 deps.itemRegistry(), deps.backpack(), deps.offhand(), deps.itemTags());
     }
 
     /** 来源自报的途径，按来源顺序去重；合成与烧炼各是一条，同一条途径有几个来源也只列一次。 */
-    private static List<AcquireRoute> routesOf(List<ItemSource> sources) {
-        return sources.stream().map(ItemSource::route).distinct().toList();
+    private static List<AcquireVia> viasOf(List<ItemSource> sources) {
+        return sources.stream().map(ItemSource::via).distinct().toList();
     }
 
     /** 存东西能力的一份：找容器把现场扫描与世界记忆并起来，归属与压住盖子的方块问这个世界的保护判断。 */

@@ -28,7 +28,7 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.TickContext;
-import org.maiwithu.maicraft.behavior.acquire.AcquireRoutes;
+import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 
 /**
  * 拿东西的能力决定：参数在游戏里立不住时一次报全、不进世界；立得住时给出带限定的任务输入。
@@ -57,8 +57,8 @@ class ObtainAbilityTest {
 
     private ObtainAbility ability() {
         return new ObtainAbility(new UselessAcquisition(),
-                List.of(AcquireRoutes.CRAFT, AcquireRoutes.SMELT, AcquireRoutes.CONTAINER,
-                        AcquireRoutes.MINE, AcquireRoutes.HARVEST, AcquireRoutes.TRADE),
+                List.of(AcquireVia.CRAFT, AcquireVia.SMELT, AcquireVia.CONTAINER,
+                        AcquireVia.MINE, AcquireVia.HARVEST, AcquireVia.TRADE),
                 new FakeRegistry(), emptyBackpack(), null, itemId -> Set.of());
     }
 
@@ -115,7 +115,7 @@ class ObtainAbilityTest {
         ObtainItems input = assertInstanceOf(ObtainItems.class, run.input());
         assertEquals("minecraft:torch", input.wanted().specifier());
         assertEquals(8, input.count());
-        assertEquals(Set.of("craft"), input.scope().routes());
+        assertEquals(Set.of("craft"), input.scope().vias());
         assertEquals(Double.valueOf(40), input.scope().maxDistanceBlocks());
         assertEquals(Integer.valueOf(16), input.scope().radiusBlocks());
     }

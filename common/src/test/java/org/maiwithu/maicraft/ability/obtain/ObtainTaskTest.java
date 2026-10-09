@@ -199,7 +199,7 @@ class ObtainTaskTest {
         ObtainTask task = new ObtainTask(input(1, scope), acquisition, backpack, null, itemId -> Set.of());
         task.start(tick(0));
         runTask(task);
-        assertEquals(Set.of("mine"), acquisition.lastScope.routes());
+        assertEquals(Set.of("mine"), acquisition.lastScope.vias());
         assertEquals(Double.valueOf(30), acquisition.lastScope.maxDistanceBlocks());
         assertEquals(Integer.valueOf(12), acquisition.lastScope.radiusBlocks());
         assertEquals(1, acquisition.lastRequest.count());
