@@ -8,6 +8,7 @@ import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.Next;
 import org.maiwithu.maicraft.kernel.task.PhasedTask;
+import org.maiwithu.maicraft.kernel.task.Standing;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.game.world.WorldTime;
 
@@ -20,7 +21,7 @@ import java.util.function.Function;
  * <p>计时从任务第一次被推进那刻起，按世界时刻算：被生存需求打断的这段时间也算已经过去，
  * 不重置也不倒扣。条件不成立就继续等，没有超时——要停下由 LLM 取消任务。
  */
-final class WaitTask extends PhasedTask<WaitTask.Phase> {
+final class WaitTask extends PhasedTask<WaitTask.Phase> implements Standing {
 
     /** 等待只有一个阶段：逐刻检查。 */
     enum Phase { WATCH }

@@ -6,6 +6,7 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
+import org.maiwithu.maicraft.kernel.task.Standing;
 import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 import org.maiwithu.maicraft.kernel.task.TaskInput;
@@ -84,8 +85,9 @@ public final class ChildTaskRunner {
             return TickResult.finished(result);
         }
         // 子任务还在做：先让它把本刻算进预算，再看继承的时限有没有用完。
+        // 常驻任务（等待、跟随）等的就是时间本身，兜底时限对它豁免；卡没卡住由它自己的进度跟踪负责。
         budget.tick();
-        if (budget.status() instanceof ProgressTracker.Status.TimedOut timedOut) {
+        if (budget.status() instanceof ProgressTracker.Status.TimedOut timedOut && !(child instanceof Standing)) {
             settle(TaskResult.failed("子任务被父任务的时限截停",
                             Problem.of(Problem.Kind.STUCK, "子任务已推进 " + timedOut.activeTicks()
                                     + " 刻还没有结果，超过父任务交给它的时间")),

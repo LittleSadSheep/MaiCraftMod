@@ -11,6 +11,8 @@ import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.Next;
 import org.maiwithu.maicraft.kernel.task.PhasedTask;
+import org.maiwithu.maicraft.kernel.task.Standing;
+import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
@@ -155,6 +157,46 @@ class ChildTaskRunnerTest {
         assertTrue(result.problem().message().contains("超过"));
         assertEquals(1, child.closes);
         assertEquals(CloseReason.CANCELLED, child.closedWith, "没走到结局被截停的子任务按取消收尾");
+    }
+
+    @Test
+    void standingChildIsNotStoppedByInheritedBudget() {
+        // 常驻任务（等待、跟随）等的就是时间本身：兜底时限到点也不截停，由它自己的进度跟踪负责。
+        StandingChild child = new StandingChild();
+        ChildTaskRunner runner = new ChildTaskRunner(new ProgressTracker(1, 5));
+        runner.begin(child, TICK);
+
+        for (int tick = 0; tick < 10; tick++) {
+            assertEquals(TickResult.RUNNING, runner.tick(TICK), "常驻子任务超过兜底时限也照常推进");
+        }
+        assertTrue(!runner.finished(), "常驻子任务不该被继承的时限截停");
+        assertEquals(0, child.closes);
+    }
+
+    /** 一直做、不结束的常驻子任务替身：模拟等待与跟随这类没有做完时刻的任务。 */
+    static final class StandingChild implements Task, Standing {
+        int closes;
+
+        @Override public void start(TickContext context) {}
+
+        @Override public TickResult tick(TickContext context) {
+            return TickResult.RUNNING;
+        }
+
+        @Override public void pause() {}
+
+        @Override public TaskResult close(CloseReason reason) {
+            closes++;
+            return TaskResult.done("收尾了");
+        }
+
+        @Override public Interruptibility interruptibility(TickContext context) {
+            return Interruptibility.WORKING;
+        }
+
+        @Override public String describe() {
+            return "常驻替身";
+        }
     }
 
     @Test

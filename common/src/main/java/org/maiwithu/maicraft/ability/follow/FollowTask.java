@@ -20,6 +20,7 @@ import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.Next;
 import org.maiwithu.maicraft.kernel.task.PhasedTask;
+import org.maiwithu.maicraft.kernel.task.Standing;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 import java.util.Objects;
@@ -31,7 +32,7 @@ import java.util.Objects;
  * 每刻用实体的真实身份核对目标：编号被重用给了别的东西就判目标丢失，不跟着新实体走。
  * 路线走不通时以 UNREACHABLE 结束，附上"允许改哪些方块就能过去"的说明。
  */
-final class FollowTask extends PhasedTask<FollowTask.Phase> {
+final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing {
 
     /** 跟随的阶段：先锁定目标，之后一直保持距离。 */
     enum Phase { LOCK, KEEP }
