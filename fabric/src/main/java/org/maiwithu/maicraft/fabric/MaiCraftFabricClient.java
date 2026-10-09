@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.bootstrap.Bootstrap;
 import org.maiwithu.maicraft.bootstrap.ClientLifecycle;
 import org.maiwithu.maicraft.game.serverlink.LinkTransport;
 import org.maiwithu.maicraft.network.MaiCraftPayload;
+import java.util.List;
 
 /**
  * Fabric 的客户端入口：只把客户端事件转给公共代码，不写业务。
@@ -24,10 +25,11 @@ import org.maiwithu.maicraft.network.MaiCraftPayload;
 public final class MaiCraftFabricClient implements ClientModInitializer {
     @Override public void onInitializeClient() {
         // 与服务端 MaiCraft 的发送通道；服务端发来的信封由下面的全局接收器转给客户端部分。
+        // Fabric 一侧暂时没有联动模组，联动清单传空。
         ClientLifecycle client = Bootstrap.startClient(new FabricLoaderEnvironment(), new LinkTransport() {
             @Override public boolean available() { return ClientPlayNetworking.canSend(MaiCraftPayload.TYPE); }
             @Override public void send(JsonObject envelope) { ClientPlayNetworking.send(MaiCraftPayload.of(envelope)); }
-        });
+        }, List.of());
         ClientLifecycleEvents.CLIENT_STARTED.register(minecraft -> client.started());
         ClientTickEvents.END_CLIENT_TICK.register(client::tickEnd);
         ClientLifecycleEvents.CLIENT_STOPPING.register(minecraft -> client.stopping());

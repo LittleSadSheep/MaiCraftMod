@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.bootstrap;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.Objects;
@@ -96,6 +97,7 @@ import org.maiwithu.maicraft.kernel.task.TaskFactories;
 import org.maiwithu.maicraft.game.world.FurnaceFuels;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireRoute;
+import org.maiwithu.maicraft.compat.CompatRegistry;
 
 /**
  * 能力清单：启动时按这份明确的清单创建并登记能力，新增能力在清单里加一行，不做类路径扫描。
@@ -140,7 +142,8 @@ public final class AbilityCatalog {
             InputDriver inputs,
             boolean allowGameCommands,
             Protection protection,
-            FurnaceFuels furnaceFuels) {
+            FurnaceFuels furnaceFuels,
+            CompatRegistry compat) {
 
         public Deps {
             Objects.requireNonNull(context, "context");
@@ -151,6 +154,7 @@ public final class AbilityCatalog {
             Objects.requireNonNull(session, "session");
             Objects.requireNonNull(selfPlayerId, "selfPlayerId");
             Objects.requireNonNull(blockScans, "blockScans");
+            Objects.requireNonNull(compat, "compat");
         }
     }
 
@@ -304,11 +308,13 @@ public final class AbilityCatalog {
                 permission, deps.backpack(), deps.offhand(), innerNeeds);
         HarvestSource harvestSource = new HarvestSource(yieldScans, collects, permission,
                 new ClientCropReplanting(toMainhand, deps.interactions(), deps.context()));
-        List<ItemSource> sources = List.of(
+        // 自带的来源在前，联动模组登记的在后：装了才有，停用后由登记表那一层回答不支持。
+        List<ItemSource> sources = new ArrayList<>(List.of(
                 new ContainerSource(deps.memory(), deps.itemTags(), deps.protection(),
                         new MenuContainerTakes(bringsClose, deps.interactions(), deps.itemTags(),
                                 deps.memory(), deps.context())),
-                craftSource, smeltSource, miningSource, harvestSource, new TradeSource());
+                craftSource, smeltSource, miningSource, harvestSource, new TradeSource()));
+        sources.addAll(deps.compat().itemSources());
         ItemAcquisition acquisition = new ItemAcquisition(sources,
                 deps.backpack(), deps.offhand(), deps.itemTags(),
                 deps.characterPosition(), Optional.empty(), ItemAcquisition.DEFAULT_MAX_DEPTH);

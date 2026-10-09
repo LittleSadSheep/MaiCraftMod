@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.bootstrap.Bootstrap;
 import org.maiwithu.maicraft.bootstrap.ServerLifecycle;
 import org.maiwithu.maicraft.game.ModIdentity;
 import org.maiwithu.maicraft.network.MaiCraftPayload;
+import org.maiwithu.maicraft.neoforge.compat.ServerCompatCatalog;
 
 /**
  * NeoForge 的通用入口，独立服务器和客户端都会加载。
@@ -28,7 +29,8 @@ public final class MaiCraftNeoForge {
     public MaiCraftNeoForge(IEventBus modBus) {
         // 服务端把确认信封直接发给目标玩家的客户端；通道保持 optional，没装 Mod 的普通玩家照样进服。
         server = Bootstrap.startCommon(new NeoForgeLoaderEnvironment(),
-                (player, envelope) -> PacketDistributor.sendToPlayer(player, MaiCraftPayload.of(envelope)));
+                (player, envelope) -> PacketDistributor.sendToPlayer(player, MaiCraftPayload.of(envelope)),
+                ServerCompatCatalog.rows());
         modBus.addListener(this::registerPayloads);
         NeoForge.EVENT_BUS.addListener(this::onServerTick);
         NeoForge.EVENT_BUS.addListener(this::onServerStopped);

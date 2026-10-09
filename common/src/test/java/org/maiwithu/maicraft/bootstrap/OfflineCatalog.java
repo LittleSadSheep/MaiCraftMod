@@ -27,6 +27,7 @@ import org.maiwithu.maicraft.game.serverlink.LinkTransport;
 import org.maiwithu.maicraft.game.serverlink.ServerLinkSession;
 import org.maiwithu.maicraft.game.world.BlockScanService;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
+import org.maiwithu.maicraft.compat.CompatRegistry;
 
 import java.nio.file.Path;
 import java.util.Optional;
@@ -107,6 +108,7 @@ final class OfflineCatalog {
                 false,
                 new Protection((dimension, x, y, z) -> Optional.empty(), memory, memory, GuessesPlayerMade.NOTHING,
                         SELF_ID),
-                stack -> 0);
+                stack -> 0,
+                CompatRegistry.empty());
     }
 }

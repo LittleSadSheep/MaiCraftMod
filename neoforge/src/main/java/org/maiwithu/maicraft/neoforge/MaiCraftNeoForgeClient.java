@@ -23,6 +23,7 @@ import org.maiwithu.maicraft.bootstrap.ClientLifecycle;
 import org.maiwithu.maicraft.game.ModIdentity;
 import org.maiwithu.maicraft.game.serverlink.LinkTransport;
 import org.maiwithu.maicraft.network.MaiCraftPayload;
+import org.maiwithu.maicraft.neoforge.compat.ClientCompatCatalog;
 
 /**
  * NeoForge 的客户端入口：dist=CLIENT 限定它只在客户端加载，只把客户端事件转给公共代码，不写业务。
@@ -42,7 +43,7 @@ public final class MaiCraftNeoForgeClient {
             @Override public void send(JsonObject envelope) {
                 PacketDistributor.sendToServer(MaiCraftPayload.of(envelope));
             }
-        });
+        }, ClientCompatCatalog.rows());
         // 客户端准备完成后创建内核与能力 -> 每刻结束推进角色当前的任务与会话 -> 退出前收尾。
         modBus.addListener(this::onClientSetup);
         NeoForge.EVENT_BUS.addListener(this::onClientTick);

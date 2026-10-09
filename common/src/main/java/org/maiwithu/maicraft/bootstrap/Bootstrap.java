@@ -108,6 +108,8 @@ import org.maiwithu.maicraft.server.ServerOperationRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.maiwithu.maicraft.game.world.FurnaceFuels;
+import org.maiwithu.maicraft.compat.CompatRegistry;
+import org.maiwithu.maicraft.compat.CompatRow;
 
 /**
  * 公共启动入口。两个加载器的入口类只调用这里，再把加载器事件转给返回的接收端。
@@ -138,9 +140,17 @@ public final class Bootstrap {
     /** 本刻的控制循环上下文：游戏刻号来自所在世界，角色来自控制权边界发出的当刻上下文。 */
     private record ClientTickContext(long gameTick, PlayerContext player) implements TickContext {}
 
-    /** 通用部分：在两端都执行；只创建服务端一侧的东西，不引用任何仅客户端的类。 */
-    public static ServerLifecycle startCommon(LoaderEnvironment loader, ServerConfirmations.Push push) {
+    /**
+     * 通用部分：在两端都执行；只创建服务端一侧的东西，不引用任何仅客户端的类。
+     *
+     * @param compatCatalog 这个加载器服务端一侧的联动清单；没有联动的加载器传空列表
+     */
+    public static ServerLifecycle startCommon(LoaderEnvironment loader, ServerConfirmations.Push push,
+                                              List<CompatRow> compatCatalog) {
         LOG.info("{} 通用部分启动（加载器：{}）", ModIdentity.NAME, loader.loaderName());
+        // 服务端一侧的联动清单同样逐行检查并写日志。服务端还没有可登记的槽（读模组数据的服务端操作
+        // 等第一个需要它的模组再加），所以现在只核对装没装、版本对不对。
+        CompatRegistry.load(compatCatalog, loader);
         ServerOperationRegistry operations = new ServerOperationRegistry();
         ServerLinkNetwork network = new ServerLinkNetwork(operations);
         // 客户端可查询的只读操作：一个区块里哪些格是谁放的。归属记录按服务器实例在第一个刻结束时从存档读回并登记。
@@ -215,11 +225,15 @@ public final class Bootstrap {
     /**
      * 客户端部分：只在客户端执行。创建游戏接口层的每刻服务、和服务端的会话、控制循环与生存需求、
      * 目标执行与 MCP 工具；进世界时再创建世界记忆、感知场景与能力清单（见 WorldScope）。
+     *
+     * @param compatCatalog 这个加载器客户端一侧的联动清单；没有联动的加载器传空列表。
+     *                      清单在客户端启动完成时才逐行检查，那时所有模组都构造完了
      */
-    public static ClientLifecycle startClient(LoaderEnvironment loader, LinkTransport transport) {
+    public static ClientLifecycle startClient(LoaderEnvironment loader, LinkTransport transport,
+                                              List<CompatRow> compatCatalog) {
         LOG.info("{} 客户端部分启动（加载器：{}，开发环境：{}）",
                 ModIdentity.NAME, loader.loaderName(), loader.isDevelopment());
-        ClientEntry entry = new ClientEntry();
+        ClientEntry entry = new ClientEntry(loader, compatCatalog);
         entry.createSharedServices(loader);
         entry.connectSession(transport);
         return entry;
@@ -233,8 +247,13 @@ public final class Bootstrap {
         private final UseKeyHold useKeyHold = new UseKeyHold();
         private final SubtitleFeed subtitles = new SubtitleFeed();
         private final McpConfig mcpConfig = McpConfig.localForProcess(8766);
-        // 能力注册表客户端全程一份：进世界时按清单把各能力登记进来，退世界清掉，不跨世界残留。
-        private final AbilityRegistry abilities = new AbilityRegistry(new TaskFactories());
+        // 能力注册表客户端全程一份：进世界时按清单把各能力登记进来，退世界清掉，不跨世界残留；
+        // 能力需要的模组装没装由加载器回答，没装的能力不登记。
+        private final AbilityRegistry abilities;
+        /** 这个加载器的联动清单；客户端启动完成时逐行检查成登记表。 */
+        private final List<CompatRow> compatCatalog;
+        /** 联动登记表：启动完成前是空的，之后是按清单检查过的那份；进世界建能力清单时把登记的来源交进去。 */
+        private CompatRegistry compat = CompatRegistry.empty();
         // MCP 请求线程排工作、客户端刻里做：下达、暂停、回答与控制循环推进在同一个线程上。
         private final ClientTickWork clientWork = new ClientTickWork();
         // 任务事件流一份：目标处境变化与生存需求的事件都进它，events 工具从这里读。
@@ -270,6 +289,11 @@ public final class Bootstrap {
         private boolean startupAutomationPending;
         /** 上一刻自动化是否拿着角色；变了就记一行日志，排查"下了目标却不动"时先看这里。 */
         private boolean automationOwned;
+
+        ClientEntry(LoaderEnvironment loader, List<CompatRow> compatCatalog) {
+            this.abilities = new AbilityRegistry(new TaskFactories(), loader::isModLoaded);
+            this.compatCatalog = List.copyOf(compatCatalog);
+        }
 
         /** 创建客户端全程共用的服务，并把 Mixin 需要的实例登记到静态登记点。 */
         void createSharedServices(LoaderEnvironment loader) {
@@ -315,8 +339,6 @@ public final class Bootstrap {
             // 控制权交接接在玩家控制权边界上：目标成为主任务时向输入层请求控制权（下一刻生效），
             // 查询端读此刻自动化是否真的拥有控制权。启动与查询都发生在客户端刻里，线程要求满足。
             goals = buildGoalRunTable(goalRuns, places);
-
-            tools = goalTools(abilities, goals, clientWork, taskEvents, chatEvents, () -> worldScope[0], recentCalls);
         }
 
         /**
@@ -424,6 +446,11 @@ public final class Bootstrap {
         }
 
         @Override public void started() {
+            // 联动清单到这里才逐行检查：所有模组都构造完了，装没装、什么版本都已确定。
+            // 登记上来的物品来源进能力清单（进世界时建），知识来源现在就接进知识库。
+            compat = CompatRegistry.load(compatCatalog, loader);
+            tools = goalTools(abilities, goals, clientWork, taskEvents, chatEvents, () -> worldScope[0], recentCalls,
+                    new KnowledgeLibrary(compat.knowledgeSources()));
             try {
                 mcp = EmbeddedMcpService.startWithFallback(mcpConfig, 2, tools);
                 LOG.info("{} MCP 服务已启动（端口 {}；五个工具都已接上）",
@@ -473,7 +500,8 @@ public final class Bootstrap {
                 UseKeyProjection useKeyProjection = new UseKeyHoldProjection(useKeyHold);
                 WorldScope scope = new WorldScope(minecraft, playerControl, blockScans, session,
                         subtitles, interactions, useKeyProjection, walks, combatSenses,
-                        abilities, interactionSender, menuActions, instanceConfig.allowGameCommands(), furnaceFuels);
+                        abilities, interactionSender, menuActions, instanceConfig.allowGameCommands(), furnaceFuels,
+                        compat);
                 worldScope[0] = scope;
                 // 换了世界，任务事件流换一条新的，宿主手里的旧游标如实作废；再把这个世界上次没做完的目标
                 // 读回来，全部恢复为暂停，等 LLM 决定接不接着做。读回时的暂停事件进的是新的这条流。
@@ -576,12 +604,12 @@ public final class Bootstrap {
     private static ToolDispatcher goalTools(AbilityRegistry abilities, GoalRunTable goals,
                                             ClientTickWork clientWork, TaskEventLog taskEvents,
                                             ChatEventLog chatEvents, Supplier<WorldScope> worldScope,
-                                            RecentToolCalls recentCalls) {
+                                            RecentToolCalls recentCalls, KnowledgeLibrary knowledge) {
         return new ToolDispatcher(List.of(
                 new ObserveTool(() -> worldScope.get() == null ? null : worldScope.get().scene(),
                         () -> worldScope.get() == null ? null : worldScope.get().memory(), goals, clientWork),
-                // 查资料先接随包的游戏机制常识；联网的资料来源还没登记。
-                new LookupTool(abilities, KnowledgeLibrary.offline()),
+                // 查资料接随包的游戏机制常识与联动模组登记的资料来源；联网的资料来源还没登记。
+                new LookupTool(abilities, knowledge),
                 new ExecuteTool(abilities, goals, clientWork),
                 new GoalTool(goals, clientWork),
                 new EventsTool(taskEvents, chatEvents, goals, clientWork)), recentCalls);

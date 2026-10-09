@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import java.security.NoSuchAlgorithmException;
 import org.maiwithu.maicraft.kernel.knowledge.KnowledgeDocument;
 import org.maiwithu.maicraft.kernel.knowledge.KnowledgeSource;
@@ -59,13 +60,19 @@ public final class KnowledgeLibrary {
                     "lighting torch 火把 照明 光照 亮 刷怪 spawn 黑暗 洞穴 地下 煤 木炭 木棍 灯笼 萤石"},
     };
 
-    private final KnowledgeSource source;
+    private final List<KnowledgeSource> sources;
     private final Map<String, KnowledgeDocument> builtins;
     // 内置资料的目录条目：比正文多一份检索词，目录与搜索都用它。
     private final Map<String, KnowledgeDocument.Entry> builtinEntries;
 
+    /** 只有一个登记来源的知识库。 */
     public KnowledgeLibrary(KnowledgeSource source) {
-        this.source = source;
+        this(List.of(source));
+    }
+
+    /** 内置资料加上登记的来源：目录合并、正文按来源先后找；联动模组交来的资料来源也从这里进。 */
+    public KnowledgeLibrary(List<KnowledgeSource> sources) {
+        this.sources = List.copyOf(sources);
         // 内置资料随包发布；缺一篇就在启动时失败，不把空正文当知识交给模型。
         Map<String, KnowledgeDocument> docs = new LinkedHashMap<>();
         Map<String, KnowledgeDocument.Entry> entries = new LinkedHashMap<>();
@@ -84,10 +91,7 @@ public final class KnowledgeLibrary {
 
     /** 没有任何登记来源时的空知识库：只剩内置资料，来源状态如实标为不可用。 */
     public static KnowledgeLibrary offline() {
-        return new KnowledgeLibrary(new KnowledgeSource() {
-            @Override public List<KnowledgeDocument.Entry> entries() { return List.of(); }
-            @Override public KnowledgeDocument read(String uri) { return null; }
-        });
+        return new KnowledgeLibrary(List.of());
     }
 
     /** 知识请求的四类操作：列目录、读模板、读正文、搜索；未知操作明确报错。 */
@@ -97,7 +101,9 @@ public final class KnowledgeLibrary {
             case "templates" -> {
                 if (string(request, "cursor") != null) throw new IllegalArgumentException("Invalid template cursor");
                 JsonObject result = new JsonObject();
-                result.add("resourceTemplates", source.templates());
+                JsonArray templates = new JsonArray();
+                for (KnowledgeSource source : sources) templates.addAll(source.templates());
+                result.add("resourceTemplates", templates);
                 yield result;
             }
             case "read" -> {
@@ -117,7 +123,10 @@ public final class KnowledgeLibrary {
     public KnowledgeDocument read(String uri) {
         if (uri.length() > 2048) throw new IllegalArgumentException("Resource URI is too long");
         KnowledgeDocument document = builtins.get(uri);
-        if (document == null) document = source.read(uri);
+        for (KnowledgeSource source : sources) {
+            if (document != null) break;
+            document = source.read(uri);
+        }
         // 目录之外的地址不偷换成相近正文；调用方须重新发现目录。
         if (document == null) throw KnowledgeException.missing(uri);
         return document;
@@ -175,10 +184,18 @@ public final class KnowledgeLibrary {
                 .toList();
     }
 
+    /** 各登记来源的状态并成一句；一个来源都没有时如实说不可用，空结果不冒充"没有这回事"。 */
+    private String providerStatus() {
+        if (sources.isEmpty()) return "unavailable";
+        return sources.stream().map(KnowledgeSource::status).collect(Collectors.joining("; "));
+    }
+
     private List<KnowledgeDocument.Entry> catalog() {
         Map<String, KnowledgeDocument.Entry> entries = new LinkedHashMap<>();
         entries.putAll(builtinEntries);
-        source.entries().forEach(entry -> entries.putIfAbsent(entry.uri(), entry));
+        for (KnowledgeSource source : sources) {
+            source.entries().forEach(entry -> entries.putIfAbsent(entry.uri(), entry));
+        }
         return entries.values().stream()
                 .sorted(Comparator.comparing(KnowledgeDocument.Entry::uri)).toList();
     }
@@ -214,7 +231,9 @@ public final class KnowledgeLibrary {
         if (cleaned.length() > 256) throw new IllegalArgumentException("Knowledge query is too long");
         Map<String, KnowledgeDocument.Entry> candidates = new LinkedHashMap<>();
         candidates.putAll(builtinEntries);
-        source.searchCandidates(cleaned).forEach(entry -> candidates.putIfAbsent(entry.uri(), entry));
+        for (KnowledgeSource source : sources) {
+            source.searchCandidates(cleaned).forEach(entry -> candidates.putIfAbsent(entry.uri(), entry));
+        }
         String[] terms = cleaned.isEmpty() ? new String[0] : cleaned.split("\\s+");
         List<KnowledgeDocument.Entry> matches = candidates.values().stream()
                 .filter(entry -> Arrays.stream(terms).allMatch(entry.searchable()::contains))
@@ -226,7 +245,7 @@ public final class KnowledgeLibrary {
         result.add("resources", hits);
         result.addProperty("total_matches", matches.size());
         result.addProperty("truncated", matches.size() > limit);
-        result.addProperty("provider_status", source.status());
+        result.addProperty("provider_status", providerStatus());
         result.addProperty("content_loaded", false);
         // 搜索只比较目录元数据；正文、配方与动态进度不在搜索时展开。
         result.addProperty("search_scope",
@@ -243,7 +262,9 @@ public final class KnowledgeLibrary {
         Map<String, KnowledgeDocument.Entry> candidates = new LinkedHashMap<>();
         candidates.putAll(builtinEntries);
         // 候选召回也必须允许错字；否则目标在精确过滤阶段已经消失，后续排序无法补救。
-        source.searchCandidates(query, true).forEach(entry -> candidates.putIfAbsent(entry.uri(), entry));
+        for (KnowledgeSource source : sources) {
+            source.searchCandidates(query, true).forEach(entry -> candidates.putIfAbsent(entry.uri(), entry));
+        }
         var matches = new ArrayList<JsonObject>();
         for (var entry : candidates.values()) {
             // 文档标题可能附有说明文字，精确名称排序以原始注册名为准。
@@ -264,7 +285,7 @@ public final class KnowledgeLibrary {
         matcher.describe(result, matches.isEmpty());
         result.addProperty("truncated", matches.size() > limit);
         result.addProperty("content_loaded", false);
-        result.addProperty("provider_status", source.status());
+        result.addProperty("provider_status", providerStatus());
         result.addProperty("search_scope", "Names, identifiers and declared metadata only; document bodies are not loaded.");
         result.addProperty("match_policy",
                 "Exact identifiers/names rank first. Keywords are literal; 3..48 character terms allow bounded name/identifier edits. ranking_score is ordering evidence, not a probability.");

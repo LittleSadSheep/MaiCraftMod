@@ -13,6 +13,7 @@ import org.maiwithu.maicraft.bootstrap.Bootstrap;
 import org.maiwithu.maicraft.bootstrap.ServerLifecycle;
 import org.maiwithu.maicraft.game.ModIdentity;
 import org.maiwithu.maicraft.network.MaiCraftPayload;
+import java.util.List;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 
 /**
@@ -22,8 +23,9 @@ import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 public final class MaiCraftFabric implements ModInitializer {
     @Override public void onInitialize() {
         // 服务端把确认信封直接发给目标玩家的客户端；通道保持 optional，没装 Mod 的普通玩家照样进服。
+        // Fabric 一侧暂时没有联动模组，联动清单传空。
         ServerLifecycle server = Bootstrap.startCommon(new FabricLoaderEnvironment(),
-                (player, envelope) -> ServerPlayNetworking.send(player, MaiCraftPayload.of(envelope)));
+                (player, envelope) -> ServerPlayNetworking.send(player, MaiCraftPayload.of(envelope)), List.of());
         PayloadTypeRegistry.playC2S().register(MaiCraftPayload.TYPE, MaiCraftPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(MaiCraftPayload.TYPE, MaiCraftPayload.CODEC);
         ServerPlayNetworking.registerGlobalReceiver(MaiCraftPayload.TYPE, (payload, context) -> {

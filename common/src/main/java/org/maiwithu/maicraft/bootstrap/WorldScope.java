@@ -52,6 +52,7 @@ import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 import org.maiwithu.maicraft.game.world.SaveIdentity;
 import org.maiwithu.maicraft.kernel.storage.StateIdentity;
 import org.maiwithu.maicraft.game.world.FurnaceFuels;
+import org.maiwithu.maicraft.compat.CompatRegistry;
 
 /**
  * 进世界时创建、退世界时丢弃的这一份现场：世界记忆、感知场景，并把能力按清单登记进客户端共用的注册表。
@@ -91,7 +92,7 @@ public final class WorldScope {
             ServerLinkSession session, SubtitleFeed subtitles, Interactions interactions,
             UseKeyProjection useKeyProjection, BaritoneInternals walks, CombatSenses senses,
             AbilityRegistry abilities, InteractionSender interactionSender, MenuActions menuActions,
-            boolean allowGameCommands, FurnaceFuels furnaceFuels) {
+            boolean allowGameCommands, FurnaceFuels furnaceFuels, CompatRegistry compat) {
         // 游戏接口层认出是哪个存档或服务器，内核的世界身份只拿编号与目录。
         SaveIdentity save = SaveIdentity.current(minecraft)
                 .orElseThrow(() -> new IllegalStateException("进了世界却识别不出世界身份，记忆无处安放"));
@@ -146,7 +147,8 @@ public final class WorldScope {
                 new InputDriver(playerControl),
                 allowGameCommands,
                 protection,
-                furnaceFuels), abilities);
+                furnaceFuels,
+                compat), abilities);
     }
 
     /**
