@@ -29,6 +29,8 @@ import org.maiwithu.maicraft.kernel.interrupt.ControlLoop;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
+import org.maiwithu.maicraft.behavior.perception.FakeBlockTags;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ClientPacketListener;
@@ -84,7 +86,7 @@ class ObserveToolTest {
     @BeforeEach
     void world() {
         memory = new WorldMemory(new DocumentStore(temp.resolve("state.sqlite")), "a".repeat(64));
-        scene = new Scene(memory);
+        scene = new Scene(memory, new FacilityKinds(FakeBlockTags.vanilla()));
         // 角色站在原点，脸朝北；正前方 12 格一只僵尸盯着它，右边 4 格一只箱子。
         scene.updateSelf(new SelfSight.Facts(0.5, 64, 0.5, 180f,
                 20, 18, 300, 300, "minecraft:stone_pickaxe", List.of(), List.of(), true, false));

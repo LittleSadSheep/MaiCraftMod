@@ -98,6 +98,7 @@ import org.maiwithu.maicraft.game.world.FurnaceFuels;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireRoute;
 import org.maiwithu.maicraft.compat.CompatRegistry;
+import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 
 /**
  * 能力清单：启动时按这份明确的清单创建并登记能力，新增能力在清单里加一行，不做类路径扫描。
@@ -143,7 +144,8 @@ public final class AbilityCatalog {
             boolean allowGameCommands,
             Protection protection,
             FurnaceFuels furnaceFuels,
-            CompatRegistry compat) {
+            CompatRegistry compat,
+            FacilityKinds facilities) {
 
         public Deps {
             Objects.requireNonNull(context, "context");
@@ -155,6 +157,7 @@ public final class AbilityCatalog {
             Objects.requireNonNull(selfPlayerId, "selfPlayerId");
             Objects.requireNonNull(blockScans, "blockScans");
             Objects.requireNonNull(compat, "compat");
+            Objects.requireNonNull(facilities, "facilities");
         }
     }
 
@@ -332,7 +335,8 @@ public final class AbilityCatalog {
     /** 存东西能力的一份：找容器把现场扫描与世界记忆并起来，归属与压住盖子的方块问这个世界的保护判断。 */
     private static DepositModule depositModule(Deps deps, LiveApproaches bringsClose, ClientCollectsBlocks collects) {
         return DepositModule.live(deps.context(), bringsClose, deps.interactions(), collects,
-                deps.itemTags(), deps.memory(), deps.backpack(), deps.blockScans(), deps.protection(), deps::scene);
+                deps.itemTags(), deps.memory(), deps.backpack(), deps.blockScans(), deps.protection(), deps::scene,
+                deps.facilities());
     }
 
     /**

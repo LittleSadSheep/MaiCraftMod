@@ -52,12 +52,15 @@ public final class ClientSpotsContainers implements SpotsContainers {
     private final ScanTargets registered;
     /** 这个世界的保护判断：容器与压住盖子的方块是不是别人的。 */
     private final Protection protection;
+    /** 设施分类：哪些方块算容器按标签认，模组的箱子也在内，末影箱不在内。 */
+    private final FacilityKinds kinds;
     private boolean lastScanComplete;
 
     public ClientSpotsContainers(BlockScanService scans, Supplier<PlayerContext> context, WorldMemory memory,
-            Protection protection) {
+            Protection protection, FacilityKinds kinds) {
         this.scans = Objects.requireNonNull(scans, "scans");
         this.context = Objects.requireNonNull(context, "context");
+        this.kinds = Objects.requireNonNull(kinds, "kinds");
         this.memory = Objects.requireNonNull(memory, "memory");
         this.protection = Objects.requireNonNull(protection, "protection");
         this.registered = new ScanTargets(scans);
@@ -110,7 +113,7 @@ public final class ClientSpotsContainers implements SpotsContainers {
         BlockPos at = new BlockPos(position.x(), position.y(), position.z());
         if (level.isLoaded(at)) {
             String blockTypeId = blockTypeIdOf(level.getBlockState(at));
-            if (FacilityKinds.isContainer(blockTypeId)) {
+            if (kinds.isContainer(blockTypeId)) {
                 return candidateFromWorld(level, at, at);
             }
             return Optional.empty();
@@ -121,7 +124,7 @@ public final class ClientSpotsContainers implements SpotsContainers {
     // 现场的一格容器读成候选：盖子、坐着的猫、开过的内容都按当刻的事实读。
     private Optional<ContainerChooser.Candidate> candidateFromWorld(ClientLevel level, BlockPos at, BlockPos from) {
         String blockTypeId = blockTypeIdOf(level.getBlockState(at));
-        if (!FacilityKinds.isContainer(blockTypeId)) {
+        if (!kinds.isContainer(blockTypeId)) {
             return Optional.empty();
         }
         // 记忆里开过的内容跟位置走：现场还在，上次看到的清单仍可当"已经放着同种东西"的线索。
@@ -194,7 +197,7 @@ public final class ClientSpotsContainers implements SpotsContainers {
 
     private Set<Block> containerBlocks() {
         Set<Block> blocks = new HashSet<>();
-        for (String id : FacilityKinds.CONTAINERS) {
+        for (String id : kinds.containerBlockTypes()) {
             BuiltInRegistries.BLOCK.getOptional(ResourceLocation.parse(id.toLowerCase(Locale.ROOT)))
                     .ifPresent(blocks::add);
         }

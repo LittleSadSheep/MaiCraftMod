@@ -25,7 +25,7 @@ class SceneTest {
     @BeforeEach
     void freshScene() {
         memory = new RecordingMemory();
-        scene = new Scene(memory);
+        scene = new Scene(memory, new FacilityKinds(FakeBlockTags.vanilla()));
         // 角色站在原点，脸朝北（视角角 180）。
         scene.updateSelf(new SelfSight.Facts(0.5, 64, 0.5, 180f,
                 20, 20, 300, 300, null, List.of(), List.of(), true, false));

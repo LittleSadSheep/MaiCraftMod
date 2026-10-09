@@ -31,6 +31,7 @@ import org.maiwithu.maicraft.kernel.param.Param;
 import org.maiwithu.maicraft.kernel.param.ParamSpec;
 import org.maiwithu.maicraft.kernel.param.ParamType;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
+import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 
 /**
  * 存东西能力：把背包里的东西存进箱子、木桶、潜影盒这类容器。
@@ -72,9 +73,10 @@ public final class DepositModule implements AbilityModule {
      */
     public static DepositModule live(Supplier<PlayerContext> contexts, BringsPlayerClose close,
             Interactions interactions, CollectsBlocks digs, ReadsItemTags tags, WorldMemory memory,
-            BackpackView backpack, BlockScanService scans, Protection protection, Supplier<Scene> scene) {
+            BackpackView backpack, BlockScanService scans, Protection protection, Supplier<Scene> scene,
+            FacilityKinds facilities) {
         return new DepositModule(new DepositServices(
-                new ClientSpotsContainers(scans, contexts, memory, protection),
+                new ClientSpotsContainers(scans, contexts, memory, protection, facilities),
                 (at, permissions) -> new ClientMenuOpening(at, permissions, close, interactions, contexts),
                 new LiveDepositPlaces(scene, memory, contexts),
                 new NativeLidDigging(digs),

@@ -40,14 +40,16 @@ public final class ClientNearbyBlocksSight implements NearbyBlocksSight {
 
     private final BlockScanService scans;
     private final Supplier<PlayerContext> context;
+    private final FacilityKinds kinds;
     /** 设施种类与这次要看的方块按维度登记进扫描索引：没登记的方块索引里查不到。 */
     private final ScanTargets registered;
-    /** 感知常驻关心的设施种类（容器、工作站、床）；第一次用到时按注册表找齐。 */
+    /** 感知常驻关心的设施种类（容器、工作站、床）；第一次用到时按标签与注册表找齐。 */
     private Set<Block> facilities;
 
-    public ClientNearbyBlocksSight(BlockScanService scans, Supplier<PlayerContext> context) {
+    public ClientNearbyBlocksSight(BlockScanService scans, Supplier<PlayerContext> context, FacilityKinds kinds) {
         this.scans = Objects.requireNonNull(scans, "scans");
         this.context = Objects.requireNonNull(context, "context");
+        this.kinds = Objects.requireNonNull(kinds, "kinds");
         this.registered = new ScanTargets(scans);
     }
 
@@ -88,10 +90,10 @@ public final class ClientNearbyBlocksSight implements NearbyBlocksSight {
             return this.facilities;
         }
         Set<Block> facilities = new LinkedHashSet<>();
-        for (String typeId : FacilityKinds.CONTAINERS) {
+        for (String typeId : kinds.containerBlockTypes()) {
             blockOf(typeId).ifPresent(facilities::add);
         }
-        for (String typeId : FacilityKinds.WORKSTATIONS) {
+        for (String typeId : kinds.workstationBlockTypes()) {
             blockOf(typeId).ifPresent(facilities::add);
         }
         // 床有十六种染色，按注册表按名找齐；名字以外的新床出现时也会在下次登记前进来。
