@@ -139,8 +139,9 @@ class EatSoonTaskTest {
     }
 
     /** 饥饿处境替身：掉不掉血固定为否，饱食度与身上有没有能吃的是测试给的。 */
+    // 带着吃的时身上最小的一件普通食物按面包（补 5）算。
     private static HungerNeed.Facts facts(int food, boolean carryingEdible) {
-        return new HungerNeed.Facts(food, false, carryingEdible);
+        return new HungerNeed.Facts(food, false, carryingEdible ? 5 : 0);
     }
 
     /** 吃一口的替身：每次给一个新动作，按脚本回答推进结果，记下开了几口、收尾了几口、真推了几刻。 */

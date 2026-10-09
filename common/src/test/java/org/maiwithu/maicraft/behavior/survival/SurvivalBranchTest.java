@@ -20,13 +20,16 @@ class SurvivalBranchTest {
 
     @Test
     void hungerThreeLevels() {
-        assertEquals(Urgency.NOW, HungerNeed.assess(new HungerNeed.Facts(0, true, true)));
-        assertEquals(Urgency.SOON, HungerNeed.assess(new HungerNeed.Facts(6, false, false)));
-        assertEquals(Urgency.SOON, HungerNeed.assess(new HungerNeed.Facts(3, false, true)));
+        assertEquals(Urgency.NOW, HungerNeed.assess(new HungerNeed.Facts(0, true, 5)));
+        assertEquals(Urgency.SOON, HungerNeed.assess(new HungerNeed.Facts(6, false, 0)));
+        assertEquals(Urgency.SOON, HungerNeed.assess(new HungerNeed.Facts(3, false, 5)));
         // 低于满但还有吃的：找空当吃；没吃的且还不急：不插。
-        assertEquals(Urgency.LATER, HungerNeed.assess(new HungerNeed.Facts(15, false, true)));
-        assertNull(HungerNeed.assess(new HungerNeed.Facts(15, false, false)));
-        assertNull(HungerNeed.assess(new HungerNeed.Facts(20, false, true)));
+        assertEquals(Urgency.LATER, HungerNeed.assess(new HungerNeed.Facts(15, false, 5)));
+        assertNull(HungerNeed.assess(new HungerNeed.Facts(15, false, 0)));
+        // 趁空当吃要整份补得进去：身上最小是面包（5），饱食度 16 时整份补进去会溢出就先不吃，15 时才吃。
+        assertNull(HungerNeed.assess(new HungerNeed.Facts(16, false, 5)));
+        assertEquals(Urgency.LATER, HungerNeed.assess(new HungerNeed.Facts(15, false, 5)));
+        assertNull(HungerNeed.assess(new HungerNeed.Facts(20, false, 5)));
     }
 
     @Test

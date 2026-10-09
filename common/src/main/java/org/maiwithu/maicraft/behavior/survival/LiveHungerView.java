@@ -29,11 +29,14 @@ public final class LiveHungerView implements HungerNeed.ReadsFacts {
             return null;
         }
         int food = self.getFoodData().getFoodLevel();
-        // 有没有饿了就能顺手吃的：按游戏的食物组件认普通食物，和吃饭任务挑吃的用同一条规则。
+        // 身上补得最少的一件普通食物：按游戏的食物组件认，和吃饭任务挑吃的用同一条规则；
+        // 趁空当吃要看它能不能整份补进去。
         BackpackView backpack = context.player().backpack();
-        boolean carryingEdible = backpack != null && FoodPicker.carried(backpack.stacks(), foods).stream()
-                .anyMatch(candidate -> FoodPicker.plain(candidate.value()));
-        return new HungerNeed.Facts(food, food <= 0, carryingEdible);
+        int smallest = backpack == null ? 0 : FoodPicker.carried(backpack.stacks(), foods).stream()
+                .filter(candidate -> FoodPicker.plain(candidate.value()))
+                .mapToInt(candidate -> candidate.value().nutrition())
+                .min().orElse(0);
+        return new HungerNeed.Facts(food, food <= 0, smallest);
     }
 
     private static LocalPlayer self(TickContext context) {
