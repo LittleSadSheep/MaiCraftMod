@@ -18,6 +18,8 @@ public final class PanelLayout {
     static final String ELLIPSIS = "…";
     /** 标签和正文之间空几个空格宽。 */
     static final String LABEL_GAP = "  ";
+    /** 不放在行首的标点：中文排版的常规，碰到时把前一个字一起带到下一行。 */
+    static final String NO_LINE_START = "，。、；：？！）」』】》…·";
 
     /** 量一段文字画出来有多宽（界面像素）；游戏里用字体的宽度，离线测试用假的。 */
     public interface TextWidth {
@@ -124,7 +126,8 @@ public final class PanelLayout {
         return lines;
     }
 
-    // 逐字量宽度断行：中文没有空格可断，按字断；断行处的空格不带到下一行行首。
+    // 逐字量宽度断行：中文没有空格可断，按字断；断行处的空格不带到下一行行首；
+    // 逗号、句号这类标点不放行首，碰到时把这一段里的前一个字一起带下去。
     private List<List<PanelLine.Piece>> breakLines(List<PanelLine.Piece> pieces, int available) {
         List<List<PanelLine.Piece>> lines = new ArrayList<>();
         List<PanelLine.Piece> current = new ArrayList<>();
@@ -138,11 +141,18 @@ public final class PanelLayout {
                 String glyph = new String(Character.toChars(codePoint));
                 int glyphWidth = font.width(glyph);
                 if (used + glyphWidth > available && used > 0) {
+                    String carried = "";
+                    if (NO_LINE_START.contains(glyph) && run.codePointCount(0, run.length()) > 1) {
+                        int cut = run.offsetByCodePoints(run.length(), -1);
+                        carried = run.substring(cut);
+                        run.setLength(cut);
+                    }
                     if (!run.isEmpty()) current.add(new PanelLine.Piece(run.toString(), piece.color()));
                     lines.add(current);
                     current = new ArrayList<>();
                     run.setLength(0);
-                    used = 0;
+                    run.append(carried);
+                    used = font.width(carried);
                     if (glyph.equals(" ")) continue;
                 }
                 run.append(glyph);

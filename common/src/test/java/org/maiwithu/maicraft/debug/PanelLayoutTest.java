@@ -181,6 +181,18 @@ class PanelLayoutTest {
     }
 
     @Test
+    void punctuationNeverStartsALine() {
+        // 中文排版的常规：折行时逗号不挤到下一行行首，把前一个字一起带下去。
+        PanelScene scene = new PanelScene().working("maicraft:travel", "回家睡觉", "出行");
+        scene.heldBack = PanelScene.held("饥饿", Urgency.LATER, Interruptibility.UNSAFE_TO_STOP);
+
+        for (PanelLine line : lay(scene, PanelLevel.BRIEF)) {
+            assertFalse(!line.text().isEmpty() && PanelLayout.NO_LINE_START.indexOf(line.text().charAt(0)) >= 0,
+                    "标点出现在行首：" + line.text());
+        }
+    }
+
+    @Test
     void readFailureShowsOneLineSayingThePanelItselfFailed() {
         List<PanelLine> lines = layout.failure(new IllegalStateException("坏了"), WIDTH);
 
