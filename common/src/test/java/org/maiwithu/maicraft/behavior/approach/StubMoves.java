@@ -21,6 +21,7 @@ final class StubMoves implements WalksToSpot {
     final List<BlockPos> begun = new ArrayList<>();
     final Deque<ActionStatus> script = new ArrayDeque<>();
     int stops;
+    int pauses;
     /** 每次真的走到（step 吐出 Done）之后调用，测试用它摆出"走过去时世界变了"的场景。 */
     Runnable onArrive = () -> {};
     private BlockPos heading;
@@ -48,6 +49,10 @@ final class StubMoves implements WalksToSpot {
 
     @Override public void stop() {
         stops++;
+    }
+
+    @Override public void pause() {
+        pauses++;
     }
 
     /** 测试里把角色挪回原点用。 */

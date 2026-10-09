@@ -56,7 +56,6 @@ import org.maiwithu.maicraft.behavior.acquire.TradeSource;
 import org.maiwithu.maicraft.behavior.approach.InteractionTarget;
 import org.maiwithu.maicraft.behavior.approach.LiveApproachWorld;
 import org.maiwithu.maicraft.behavior.approach.LiveApproaches;
-import org.maiwithu.maicraft.behavior.approach.LiveSpotWalks;
 import org.maiwithu.maicraft.behavior.interaction.ClientGameRefusals;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
@@ -168,7 +167,7 @@ public final class AbilityCatalog {
 
         // 靠近与走向站位：站位判断问当刻的世界，走路交给走到（内嵌 Baritone）。
         LiveApproaches bringsClose = new LiveApproaches(deps.context(),
-                new LiveApproachWorld(deps.context()), new LiveSpotWalks(deps.walks()));
+                new LiveApproachWorld(deps.context()), deps.walks());
 
         // 换手读端提前建好：用东西的备手、进食的换手、装备的穿卸共用同一套界面搬运。
         ClientMovesToMainhand toMainhand = new ClientMovesToMainhand(deps.context());
