@@ -500,7 +500,7 @@ public final class Bootstrap {
                 UseKeyProjection useKeyProjection = new UseKeyHoldProjection(useKeyHold);
                 WorldScope scope = new WorldScope(minecraft, playerControl, blockScans, session,
                         subtitles, interactions, useKeyProjection, walks, combatSenses,
-                        abilities, interactionSender, menuActions, instanceConfig.allowGameCommands(), furnaceFuels,
+                        abilities, interactionSender, menuActions, instanceConfig, furnaceFuels,
                         compat);
                 worldScope[0] = scope;
                 // 换了世界，任务事件流换一条新的，宿主手里的旧游标如实作废；再把这个世界上次没做完的目标

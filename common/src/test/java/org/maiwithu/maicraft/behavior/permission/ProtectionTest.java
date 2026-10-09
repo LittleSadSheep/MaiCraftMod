@@ -84,6 +84,32 @@ class ProtectionTest {
         }
     }
 
+    @Test
+    void 存储_自己和自家人放的能用_别人的不能用_拆照旧受保护() {
+        String bob = UUID.randomUUID().toString();
+        WorldPosition bobsChest = new WorldPosition(30, 64, 30, "minecraft:overworld");
+        WorldPosition mine = new WorldPosition(31, 64, 30, "minecraft:overworld");
+        var protection = new Protection(recorded(Map.of(WALL, OTHER, bobsChest, bob, mine, SELF)), fixed(List.of()),
+                remembered(Map.of()), GuessesPlayerMade.NOTHING, SELF,
+                new TrustedPlayers(List.of(bob), name -> Optional.empty()));
+        assertTrue(protection.mayUseStorage(bobsChest, "minecraft:chest", Set.of()), "自家人的箱子能取能存");
+        assertTrue(protection.mayUseStorage(mine, "minecraft:chest", Set.of()));
+        assertFalse(protection.mayUseStorage(WALL, "minecraft:chest", Set.of()), "别人的箱子不用");
+        assertTrue(protection.blockProtected(bobsChest, "minecraft:chest", Set.of()), "自家人的箱子也不拆");
+    }
+
+    @Test
+    void 存储_没记录的看地盘与推断_野外无主的能用_额外保护的地标旁不用() {
+        WorldPosition wild = new WorldPosition(900, 64, 900, "minecraft:overworld");
+        var regions = List.of(new RememberedRegion("河东的农场", new WorldPosition(500, 64, 500, "minecraft:overworld"), 16));
+        var protection = protection(Map.of(), regions, Map.of("家", new WorldPosition(900, 64, 905, "minecraft:overworld")),
+                GuessesPlayerMade.NOTHING);
+        assertTrue(protection.mayUseStorage(wild, "minecraft:chest", Set.of()), "野外、遗迹里无主的箱子能用");
+        assertFalse(protection.mayUseStorage(new WorldPosition(505, 64, 500, "minecraft:overworld"),
+                "minecraft:chest", Set.of()), "玩家地盘里没记录的不知道是谁的，按别人的算");
+        assertFalse(protection.mayUseStorage(wild, "minecraft:chest", Set.of("家")), "这次额外保护的地标旁不用");
+    }
+
     private static Protection protection(Map<WorldPosition, String> placements,
             List<RememberedRegion> regions, Map<String, WorldPosition> places,
             GuessesPlayerMade guesses) {

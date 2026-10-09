@@ -23,8 +23,8 @@ import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
  * 排在明确够数的后面——有确定的货就不赌运气。到了跟前以现场为准，开了才算数。
  * 用哪只箱子、里面实际有多少，由开箱取物的执行接缝到现场核对并如实回报。
  *
- * <p>受保护的箱子不碰：玩家放的、在玩家地盘里的、这次任务额外保护的地标旁的，归属还没问清的也算，
- * 记得里面有货也不去翻——默认绝不碰玩家的箱子。
+ * <p>别人的箱子不碰：别人放的、在玩家地盘里的、这次任务额外保护的地标旁的，归属还没问清的也算，
+ * 记得里面有货也不去翻——默认绝不碰玩家的箱子。自己放的、自家人（所有者信任的玩家）放的照常翻。
  */
 public final class ContainerSource implements ItemSource {
 
@@ -58,7 +58,7 @@ public final class ContainerSource implements ItemSource {
         boolean skippedProtected = false;
         for (MemoryRecord record : records) {
             if (record.kind() != MemoryKind.CONTAINER) continue;
-            // 玩家的箱子不翻：记得里面有货也跳过，只在说明里交代一句。
+            // 别人的箱子不翻：记得里面有货也跳过，只在说明里交代一句；自家人的照常翻。
             if (protectedContainer(record, context)) {
                 skippedProtected = true;
                 continue;
@@ -85,7 +85,7 @@ public final class ContainerSource implements ItemSource {
         }
         return new SourceQuote.Unavailable(describe(),
                 "记得的容器里没有装着" + request.wanted().describe() + "的"
-                        + (skippedProtected ? "（玩家的箱子不翻）" : ""));
+                        + (skippedProtected ? "（别人的箱子不翻）" : ""));
     }
 
     @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
@@ -106,9 +106,9 @@ public final class ContainerSource implements ItemSource {
         return takes.take(known, request, context.permissions());
     }
 
-    /** 这只箱子受不受保护：按方块归属、记住的区域、这次额外保护的地标与玩家放置推断判断，拿不准算受保护。 */
+    /** 这只箱子能不能翻：自己或自家人放的、野外无主的能翻；别人的、在玩家地盘里的、额外保护的、拿不准的不翻。 */
     private boolean protectedContainer(MemoryRecord record, SourceContext context) {
-        return protection.blockProtected(record.position(), record.blockType(),
+        return !protection.mayUseStorage(record.position(), record.blockType(),
                 context.permissions().protectedLandmarks());
     }
 

@@ -138,7 +138,8 @@ public final class ClientSpotsContainers implements SpotsContainers {
                 known.filter(MemoryRecord::openedBefore).map(MemoryRecord::contents).orElse(null),
                 true,
                 Math.sqrt(at.distSqr(from)),
-                protection.blockProtected(position, blockTypeId, Set.of()),
+                // 存东西只往能用的容器里放：自己或自家人放的、野外无主的；别人的算受保护。
+                !protection.mayUseStorage(position, blockTypeId, Set.of()),
                 true,
                 lidOf(level, at),
                 catSitting(level, at)));
@@ -155,7 +156,7 @@ public final class ClientSpotsContainers implements SpotsContainers {
                 record.openedBefore() ? record.contents() : null,
                 true,
                 Math.sqrt(at.distSqr(from)),
-                protection.blockProtected(record.position(), blockTypeId, Set.of()),
+                !protection.mayUseStorage(record.position(), blockTypeId, Set.of()),
                 true,
                 ContainerChooser.Lid.CLEAR,
                 false);

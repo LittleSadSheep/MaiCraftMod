@@ -8,7 +8,9 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -55,5 +57,23 @@ class InstanceConfigTest {
     void missingKeyMeansClosed() throws IOException {
         Files.writeString(configDir.resolve("maicraft.json"), "{}", StandardCharsets.UTF_8);
         assertFalse(InstanceConfig.read(configDir).allowGameCommands(), "缺键按关闭，不算坏文件");
+        assertEquals(List.of(), InstanceConfig.read(configDir).trustedPlayers(), "缺键就是没有自家人");
+    }
+
+    @Test
+    void trustedPlayersReadFromFile() throws IOException {
+        // 名字两头的空白去掉、空条目跳过；名字和编号都收，交给保护判断去对人。
+        Files.writeString(configDir.resolve("maicraft.json"),
+                "{\"trustedPlayers\": [\" LittleSadSheep \", \"\", \"0000002a-0000-0000-0000-000000000000\"]}",
+                StandardCharsets.UTF_8);
+        assertEquals(List.of("LittleSadSheep", "0000002a-0000-0000-0000-000000000000"),
+                InstanceConfig.read(configDir).trustedPlayers());
+
+        // 名单里混了不是字符串的：整份按坏文件收场，不放半份名单进去。
+        Files.writeString(configDir.resolve("maicraft.json"),
+                "{\"allowGameCommands\": true, \"trustedPlayers\": [\"甲\", 3]}", StandardCharsets.UTF_8);
+        InstanceConfig broken = InstanceConfig.read(configDir);
+        assertEquals(List.of(), broken.trustedPlayers());
+        assertFalse(broken.allowGameCommands());
     }
 }
