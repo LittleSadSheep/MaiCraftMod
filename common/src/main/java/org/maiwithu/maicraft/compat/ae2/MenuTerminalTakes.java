@@ -184,9 +184,10 @@ public final class MenuTerminalTakes implements TerminalTakes {
 
             List<Ae2TerminalMenu.StockEntry> stock = compat.networkStock(raw).orElse(List.of());
             SlotSnapshot cursor = SlotSnapshot.of(raw.getCarried());
+            // 光标上挂着不是这次要取的东西：多半是有人动过光标，不是程序出错。不在上面叠，收场时由关界面放回背包。
             if (!cursor.isEmpty() && !wanted(cursor.stack())) {
-                return stopNow(Problem.of(Problem.Kind.INTERNAL_ERROR,
-                        "终端界面的光标上有不是这次要取的东西：" + itemId(cursor.stack()), null));
+                return stopNow(Problem.of(Problem.Kind.STUCK, "终端界面的光标上挂着 " + cursor.count() + " 个"
+                        + itemId(cursor.stack()) + "，不是这次要取的，先停手", null));
             }
             Ae2TerminalMenu.StockEntry entry = cursor.isEmpty() ? firstWanted(stock) : entryFor(cursor, stock);
             if (entry == null) {
