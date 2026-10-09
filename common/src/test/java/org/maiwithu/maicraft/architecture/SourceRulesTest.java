@@ -26,8 +26,8 @@ import static org.junit.jupiter.api.Assertions.fail;
  * 源码检查：扫描源文件文本，违反时构建失败。
  *
  * <p>覆盖：许可证头、类型必须有中文类注释、禁止全限定名、能力 ID 字面量只出现在能力包里、
- * 类与方法的大小上限、测试不用 Unsafe 与反射改私有成员，以及命名：类型名不用空泛或容易误解的词、
- * 不再使用已经改掉的旧说法、注释不引用文档章节与版本号。
+ * 类与方法的大小上限、测试不用 Unsafe 与反射改私有成员、NeoForge 模块只在联动读写端里 import 模组的类，
+ * 以及命名：类型名不用空泛或容易误解的词、不再使用已经改掉的旧说法、注释不引用文档章节与版本号。
  *
  * <p>大小上限的例外登记在测试资源 architecture-exemptions.txt 里并写明理由；
  * 命名的词表在测试资源 naming-rules.txt 里，每个词都写了原因和改法。
@@ -46,6 +46,13 @@ class SourceRulesTest {
             REPO.resolve("common/src/main/java/com/github"),
             REPO.resolve("common/src/main/java/fi"));
     private static final Path TEST_ROOT = REPO.resolve("common/src/test/java");
+    // 模组的类只许出现在 NeoForge 模块的联动读写端里；别的地方只能 import 本项目、Minecraft 及其自带库、NeoForge 与 JDK。
+    private static final Path NEOFORGE_ROOT = REPO.resolve("neoforge/src/main/java");
+    private static final Path NEOFORGE_COMPAT = NEOFORGE_ROOT.resolve("org/maiwithu/maicraft/neoforge/compat");
+    private static final List<String> NEOFORGE_ALLOWED_IMPORTS = List.of(
+            "org.maiwithu.maicraft.", "net.minecraft.", "com.mojang.", "net.neoforged.",
+            "java.", "javax.", "com.google.gson.", "org.joml.", "org.slf4j.");
+    private static final Pattern IMPORT = Pattern.compile("^import\\s+(?:static\\s+)?([\\w.]+)");
     private static final Path ABILITY_DOC_ROOT = REPO.resolve("common/src/main/resources");
     private static final String LICENSE_HEADER = "// SPDX-License-Identifier: GPL-3.0-only";
     private static final int MAX_CLASS_LINES = 800;
@@ -199,6 +206,27 @@ class SourceRulesTest {
             }
         }
         report("测试反射进私有实现", problems);
+    }
+
+    @Test
+    void neoForgeImportsModsOnlyInCompat() {
+        // 没装的模组一个类都不能被加载：只有 neoforge.compat 下的读写端可以 import 模组的类，
+        // 入口与别的类 import 了，启动时一碰就是 NoClassDefFoundError。
+        List<String> problems = new ArrayList<>();
+        for (JavaSource source : mainSources) {
+            Path path = source.path.toAbsolutePath().normalize();
+            if (!path.startsWith(NEOFORGE_ROOT) || path.startsWith(NEOFORGE_COMPAT)) continue;
+            for (int i = 0; i < source.lines.size(); i++) {
+                Matcher matcher = IMPORT.matcher(source.lines.get(i).trim());
+                if (!matcher.find()) continue;
+                String imported = matcher.group(1);
+                if (NEOFORGE_ALLOWED_IMPORTS.stream().noneMatch(imported::startsWith)) {
+                    problems.add(relative(source.path) + ":" + (i + 1) + " import 了 " + imported
+                            + "；模组的类只能在 neoforge.compat 的读写端里用，别的地方只认本项目、Minecraft、NeoForge 与 JDK");
+                }
+            }
+        }
+        report("NeoForge 模块在联动读写端之外碰了模组", problems);
     }
 
     @Test

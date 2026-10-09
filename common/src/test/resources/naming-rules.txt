@@ -33,6 +33,8 @@ word Descriptor 已改名：能力的静态信息用 AbilitySpec
 word Gateway 会被读成 API 网关；MCP 入口在 mcp 包
 word Integration 会被读成集成测试；联动模组在 compat 包
 word Platform 在多加载器模板里专指加载器抽象；和游戏打交道的代码在 game 包
+word Bridge 会被读成反射桥或网桥；直接调用模组类的那一层叫模组读写端，放在 NeoForge 模块的 neoforge.compat.<模组>；搭方块走过空当的游戏动作起名用 Bridging（搭桥）
+word Reflection 联动不用反射：要调用的类和方法以事实清单为准，在模组读写端直接写
 
 term 回执 说清是哪一种：任务的"结果"，或游戏对交互的"确认"
 term 卡点 改说"问题"（Problem）
