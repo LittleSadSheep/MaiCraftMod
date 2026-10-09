@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.survival;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 import java.util.Objects;
@@ -65,6 +66,17 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
     private final double[] anchor = new double[3];
     private double healthAtStart = -1;
     private Action current;
+    /** 当前动作在做什么、冲着谁：同一种做法、同一个目标时沿用，不每刻重建。 */
+    private Mode currentMode;
+    private int currentTarget = -1;
+    /** 追击动作出发时目标在哪：目标跑开超过几格才重新规划，不每刻重新寻路。 */
+    private final double[] chaseGoal = new double[3];
+
+    /** 当前动作的做法：出手打，或追过去。 */
+    private enum Mode { STRIKE, CHASE }
+
+    /** 目标离追击出发时的位置超过这么远（格）才重新规划追击路线。 */
+    private static final double RECHASE_AFTER = 3.0;
     private int watchTicksLeft;
     /** 收尾时走不回打点：主任务不能在新地点悄悄续上。 */
     private boolean displaced;
@@ -102,24 +114,54 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         }
         if (situation.foes().isEmpty()) {
             watchTicksLeft = WATCH_TICKS;
-            current = null;
+            dropCurrent();
             return Next.go(Phase.WATCH, "威胁暂时消失，观察一阵");
         }
-        var target = situation.foes().get(0);
-        double[] self = moves.selfPosition(context);
+        // 自卫只会近战：没点引信的会炸的不凑上去打，一拳可能把它点着；躲它归撤离与避险。
+        Tracked target = situation.foes().stream()
+                .filter(foe -> !(foe.foe().kind() == ThreatAssessment.Kind.EXPLOSIVE && !foe.foe().armed()))
+                .findFirst().orElse(null);
+        if (target == null) {
+            dropCurrent();
+            recordProgress("只剩没点引信的会炸的，不凑上去打，守在原地");
+            return Next.stay();
+        }
         // 追击上限只比水平距离：出打点 16 格的敌人不再追，守在打点附近迎击。
         double horizontalFromAnchor = Math.hypot(target.x() - anchor[0], target.z() - anchor[2]);
-        if (target.distance() <= STRIKE_RANGE && horizontalFromAnchor <= CHASE_LIMIT) {
-            current = moves.strike(context, target.entityId());
-            stepCurrent(context, "出手打 " + target.type());
-        } else if (horizontalFromAnchor <= CHASE_LIMIT) {
-            current = moves.walkTo(target.x(), target.y(), target.z());
-            stepCurrent(context, "追向 " + target.type());
-        } else {
-            current = null;
+        Mode want = horizontalFromAnchor > CHASE_LIMIT ? null
+                : target.distance() <= STRIKE_RANGE ? Mode.STRIKE : Mode.CHASE;
+        if (want == null) {
+            dropCurrent();
             recordProgress("敌人在追击圈外，守在打点附近");
+            return Next.stay();
         }
+        // 换了做法、换了目标、或追的目标已跑开：收尾旧动作再起新的；否则沿用，让出手与寻路做完。
+        boolean ranOff = want == Mode.CHASE
+                && Math.hypot(target.x() - chaseGoal[0], target.z() - chaseGoal[2]) > RECHASE_AFTER;
+        if (current != null && (want != currentMode || target.entityId() != currentTarget || ranOff)) {
+            dropCurrent();
+        }
+        if (current == null) {
+            current = want == Mode.STRIKE ? moves.strike(context, target.entityId())
+                    : moves.walkTo(target.x(), target.y(), target.z());
+            currentMode = want;
+            currentTarget = target.entityId();
+            chaseGoal[0] = target.x();
+            chaseGoal[1] = target.y();
+            chaseGoal[2] = target.z();
+        }
+        stepCurrent(context, (want == Mode.STRIKE ? "出手打 " : "追向 ") + target.type());
         return Next.stay();
+    }
+
+    // 收尾并放下当前动作：换做法、换目标或威胁消失时用，旧的出手与寻路不能悬着。
+    private void dropCurrent() {
+        if (current != null) {
+            current.close();
+            current = null;
+        }
+        currentMode = null;
+        currentTarget = -1;
     }
 
     private Next<Phase> watch(TickContext context) {
@@ -128,6 +170,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
             return Next.go(Phase.ENGAGE, "又有威胁出现，继续打");
         }
         if (--watchTicksLeft <= 0) {
+            dropCurrent();
             return Next.go(Phase.RETURN, "观察期内没有新威胁，走回打点");
         }
         recordProgress("观察期还剩 " + watchTicksLeft + " 刻");
@@ -163,19 +206,19 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
             recordProgress(current.describe());
         }
         if (status instanceof ActionStatus.Done) {
-            current = null;
+            dropCurrent();
         }
         return Next.stay();
     }
 
-    // 推进当前动作一刻；做完了清掉等下一轮，失败也清掉（下一轮重新决定走还是打）。
+    // 推进当前动作一刻；做完了收尾等下一轮，失败也收尾（下一轮重新决定走还是打）。
     private void stepCurrent(TickContext context, String what) {
         if (current == null) {
             return;
         }
         ActionStatus status = current.tick(context);
         if (status instanceof ActionStatus.Done || status instanceof ActionStatus.Failed) {
-            current = null;
+            dropCurrent();
             recordProgress(what + "：一轮结束");
         } else if (status instanceof ActionStatus.Running running && running.progressed()) {
             recordProgress(what);
@@ -241,29 +284,16 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         for (CombatSenses.Attacker attacker : senses.recentAttackers(context)) {
             attackers.add(attacker.uuid());
         }
-        List<ThreatAssessment.Foe> ordered = new ArrayList<>();
-        List<CombatSenses.Threat> threats = senses.threats(context, ThreatAssessment.VIGILANCE_RADIUS).stream()
-                .filter(threat -> threatening(threat, attackers))
-                .toList();
-        for (CombatSenses.Threat threat : threats) {
-            boolean chasing = attackers.contains(threat.uuid()) || threat.armed();
-            ordered.add(new ThreatAssessment.Foe(threat.distance(), threat.kind(), chasing, threat.armed()));
-        }
-        ordered = ThreatAssessment.sortedByThreat(ordered);
+        // 只认正在威胁角色的怪；每只连同它的评估输入一起排序，同种同距离的两只不会被认成同一只。
         List<Tracked> tracked = new ArrayList<>();
-        for (ThreatAssessment.Foe foe : ordered) {
-            CombatSenses.Threat match = null;
-            for (CombatSenses.Threat threat : threats) {
-                if (threat.distance() == foe.distance() && threat.kind() == foe.kind()) {
-                    match = threat;
-                    break;
-                }
-            }
-            if (match != null) {
-                tracked.add(new Tracked(match.entityId(), match.type(),
-                        match.x(), match.y(), match.z(), match.distance(), foe));
-            }
+        for (CombatSenses.Threat threat : senses.threats(context, ThreatAssessment.VIGILANCE_RADIUS)) {
+            if (!threatening(threat, attackers)) continue;
+            boolean chasing = attackers.contains(threat.uuid()) || threat.armed();
+            ThreatAssessment.Foe foe = new ThreatAssessment.Foe(threat.distance(), threat.kind(), chasing, threat.armed());
+            tracked.add(new Tracked(threat.entityId(), threat.type(),
+                    threat.x(), threat.y(), threat.z(), threat.distance(), foe));
         }
+        tracked.sort(Comparator.comparing(Tracked::foe, ThreatAssessment.BY_THREAT));
         return new ThreatSituation(mine, tracked);
     }
 
