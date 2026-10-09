@@ -42,10 +42,13 @@ class FollowTaskTest {
     private static final class FakeView implements FollowView {
         private Locked locked;
         private Observed current;
+        /** 锁定时拿到的每刻上下文：生产实现要靠它读世界。 */
+        private TickContext lockedWith;
         private final List<Observed> script = new ArrayList<>();
 
         @Override
         public Locked lock(TickContext context, Target target) {
+            lockedWith = context;
             return locked;
         }
 
@@ -181,5 +184,16 @@ class FollowTaskTest {
         assertTrue(finished.problem().suggestion().contains("change_blocks"), "附上开路要放开的许可");
         // 默认许可不改地形：走到只走不改。
         assertEquals(TerrainPermit.WALK_ONLY, walks.permits.get(0));
+    }
+
+    @Test
+    void lockingSeesTheFirstTickContext() {
+        // 第一刻就要锁定目标：生产实现读世界离不开当刻的上下文，不能交给它一个空的。
+        FakeView view = new FakeView().at(2.0);
+        FollowTask follow = task(view, new FakeWalks(), 3);
+        Tick first = new Tick(0);
+        follow.start(first);
+        follow.tick(first);
+        assertEquals(first, view.lockedWith);
     }
 }
