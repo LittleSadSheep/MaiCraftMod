@@ -75,8 +75,6 @@ import org.maiwithu.maicraft.behavior.inventory.ClientStepsAside;
 import org.maiwithu.maicraft.behavior.inventory.DropAvoidance;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
-import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
-import org.maiwithu.maicraft.behavior.permission.OwnershipQueries;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
@@ -146,7 +144,8 @@ public final class AbilityCatalog {
             ChatChannel chat,
             LongSupplier clientTicks,
             InputDriver inputs,
-            boolean allowGameCommands) {
+            boolean allowGameCommands,
+            Protection protection) {
 
         public Deps {
             Objects.requireNonNull(context, "context");
@@ -200,12 +199,8 @@ public final class AbilityCatalog {
                 deps.characterPosition(), dropAvoidance, Optional.of(toMainhand),
                 Optional.of(new ClientStepsAside(deps.inputs(), dropAvoidance))));
 
-        // 许可检查点：归属记录问服务端，区域与地标问世界记忆；玩家放置推断没有接，先按不受保护处理。
-        // 拿到物品的来源与采集都用这一份，先建。
-        PermissionCheck permission = new PermissionCheck(
-                new Protection(new OwnershipQueries(deps.session()), deps.memory(), deps.memory(),
-                        GuessesPlayerMade.NOTHING, deps.selfPlayerId()),
-                deps.creatures());
+        // 许可检查点：保护判断是这个世界的那一份（生存需求挖三填一也用它），拿到物品的来源与采集都用这一份，先建。
+        PermissionCheck permission = new PermissionCheck(deps.protection(), deps.creatures());
 
         // 拿到物品：身上的不算来源（引擎开场就清点），已实现的途径都登记，见 obtainModule。
         registry.register(obtainModule(deps, bringsClose, toMainhand, permission));

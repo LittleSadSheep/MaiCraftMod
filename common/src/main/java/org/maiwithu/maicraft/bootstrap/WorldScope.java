@@ -14,6 +14,9 @@ import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
 import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 import org.maiwithu.maicraft.behavior.permission.ClientCreatureSituations;
+import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
+import org.maiwithu.maicraft.behavior.permission.OwnershipQueries;
+import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.perception.ClientEntitySight;
 import org.maiwithu.maicraft.behavior.perception.ClientEnvironmentSight;
 import org.maiwithu.maicraft.behavior.perception.ClientNearbyBlocksSight;
@@ -58,6 +61,8 @@ public final class WorldScope {
     private final BlockScanService blockScans;
     private final SubtitleFeed subtitles;
     private final WorldMemory memory;
+    /** 这个世界的保护判断：能力挑方块、生存需求挖三填一都问它，归属查询的在途请求只留一份。 */
+    private final Protection protection;
     /** 这个世界的目标运行存盘：退出游戏、换世界之后，没做完的目标从这里读回来。 */
     private final GoalRunStore goalRuns;
     private final Scene scene;
@@ -89,6 +94,9 @@ public final class WorldScope {
         this.memory = new WorldMemory(documents, identity.key());
         this.goalRuns = new DocumentGoalRunStore(documents, identity.key(), abilities);
         this.scene = new Scene(memory);
+        // 保护判断：归属记录问服务端，区域与地标问世界记忆；玩家放置推断没有接，先按不受保护处理。
+        this.protection = new Protection(new OwnershipQueries(session), memory, memory,
+                GuessesPlayerMade.NOTHING, minecraft.player.getUUID().toString());
 
         // 当刻角色的供给者：感知、背包、聊天都从它拿这一刻的角色，不留到下一刻。
         Supplier<PlayerContext> now = () -> playerControl.activeContext().orElse(null);
@@ -118,7 +126,8 @@ public final class WorldScope {
                 // 客户端刻号跟着所在世界走；没进世界读不到，按 0 兜底（只在读端内部量时长用）。
                 () -> minecraft.level == null ? 0 : minecraft.level.getGameTime(),
                 new InputDriver(playerControl),
-                allowGameCommands), abilities);
+                allowGameCommands,
+                protection), abilities);
     }
 
     /**
@@ -153,6 +162,11 @@ public final class WorldScope {
     /** 世界记忆：宿主查询与能力共用的那份。 */
     public WorldMemory memory() {
         return memory;
+    }
+
+    /** 这个世界的保护判断。 */
+    public Protection protection() {
+        return protection;
     }
 
     /** 这个世界的目标运行存盘：进世界时交给目标运行表，读回上次没做完的目标。 */

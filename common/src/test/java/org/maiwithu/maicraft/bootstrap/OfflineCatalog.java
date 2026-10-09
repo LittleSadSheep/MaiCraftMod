@@ -4,6 +4,9 @@ package org.maiwithu.maicraft.bootstrap;
 import com.google.gson.JsonObject;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
+import org.maiwithu.maicraft.behavior.permission.Protection;
+import org.maiwithu.maicraft.behavior.permission.OwnershipQueries;
+import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.acquire.LiveCarryReads;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
@@ -61,6 +64,9 @@ final class OfflineCatalog {
         }
     };
 
+    /** 离线角色的玩家编号。 */
+    private static final String SELF_ID = "00000000-0000-0000-0000-000000000000";
+
     private OfflineCatalog() {}
 
     /** 一份依赖；世界记忆的库文件放在给定的临时目录里。 */
@@ -68,6 +74,7 @@ final class OfflineCatalog {
         Supplier<PlayerContext> nobody = () -> null;
         WorldMemory memory = new WorldMemory(new DocumentStore(tempDir.resolve("state.sqlite")), WORLD_KEY);
         ClientHooks.registerChatLog(new ChatLog());
+        ServerLinkSession session = new ServerLinkSession(NO_TRANSPORT);
         // 交互动作入口允许没有按住使用键投影；生存需求共用的挖掘走原生交互，离线给空壳。
         return new AbilityCatalog.Deps(
                 nobody,
@@ -76,8 +83,8 @@ final class OfflineCatalog {
                 new BaritoneInternals(),
                 new BlockScanService(),
                 new Scene(memory), memory,
-                new ServerLinkSession(NO_TRANSPORT),
-                "00000000-0000-0000-0000-000000000000",
+                session,
+                SELF_ID,
                 (ReadsCreatureSituation) entityId -> Optional.empty(),
                 new LiveCombatSenses(new CombatMemory(), itemId -> Optional.empty()),
                 PlayerViews.backpack(nobody),
@@ -98,6 +105,7 @@ final class OfflineCatalog {
                 new ChatChannel(nobody),
                 () -> 0,
                 new InputDriver(new PlayerControlBoundary()),
-                false);
+                false,
+                new Protection(new OwnershipQueries(session), memory, memory, GuessesPlayerMade.NOTHING, SELF_ID));
     }
 }
