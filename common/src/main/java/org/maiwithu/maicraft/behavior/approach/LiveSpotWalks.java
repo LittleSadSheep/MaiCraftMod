@@ -6,6 +6,7 @@ import java.util.Objects;
 import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
+import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
@@ -24,6 +25,10 @@ public final class LiveSpotWalks implements WalksToSpot {
     private final WalkTo walks;
     private final TerrainPermit permit;
     private WalkRun walk;
+    /** 要站进的那一格：被打断后从原地重新上路时还去这里。 */
+    private BlockPos feet;
+    /** 被打断过：走到停稳后报的"已停下"不是到了，要重新上路。 */
+    private boolean paused;
 
     /** @param permit 这次任务许可折算出的地形许可 */
     public LiveSpotWalks(WalkTo walks, TerrainPermit permit) {
@@ -35,19 +40,33 @@ public final class LiveSpotWalks implements WalksToSpot {
     public void begin(BlockPos feet) {
         // 换目标前先把上一次的走向收尾、交出身体，新的一趟才上得了路。
         stop();
+        this.feet = feet;
         walk = walks.start(GoalCompiler.standOn(feet), permit);
     }
 
     @Override
     public ActionStatus step(TickContext context) {
         // 站进目标格并落地是做完，还在走是进行中，这条路走不了是失败——三种情况都出自走到情况。
-        return walk == null ? ActionStatus.running() : walk.tick(context);
+        if (walk == null) return ActionStatus.running();
+        ActionStatus status = walk.tick(context);
+        if (paused && walk.report().state() == WalkReport.State.STOPPED) {
+            // 被打断时走到停稳了、报的是"已停下"：不是到了，从原地重新上路去同一格。
+            paused = false;
+            walk.close();
+            walk = walks.start(GoalCompiler.standOn(feet), permit);
+            return ActionStatus.running();
+        }
+        if (!(status instanceof ActionStatus.Running)) paused = false;
+        return status;
     }
 
     // 被打断：走到自己松键撤路线、保留去处，恢复后接着推进时重新算路。
     @Override
     public void pause() {
-        if (walk != null) walk.pause();
+        if (walk != null) {
+            paused = true;
+            walk.pause();
+        }
     }
 
     @Override
