@@ -18,6 +18,9 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.maiwithu.maicraft.kernel.ability.AbilityModule;
+import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.GoalRun;
@@ -34,6 +37,7 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.mcp.tool.ErrorCode;
 import org.maiwithu.maicraft.mcp.tool.FieldError;
+import org.maiwithu.maicraft.mcp.tool.LookupTool;
 import org.maiwithu.maicraft.mcp.tool.ResultJson;
 import org.maiwithu.maicraft.mcp.tool.ToolCatalog;
 import org.maiwithu.maicraft.mcp.tool.ToolReply;
@@ -53,12 +57,36 @@ class InterfaceSnapshotTest {
     private static final boolean UPDATE = "1".equals(System.getenv("MAICRAFT_UPDATE_SNAPSHOTS"));
     private static final Gson PRETTY = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 
+    @TempDir
+    Path tempDir;
+
     @Test
     void theToolsMatchTheSnapshot() throws IOException {
         JsonObject tools = new JsonObject();
         tools.addProperty("instructions", ToolCatalog.INSTRUCTIONS);
         tools.add("tools", ToolCatalog.definitions());
         check("mcp-tools.json", tools);
+    }
+
+    @Test
+    void theAbilitiesMatchTheSnapshot() throws IOException {
+        AbilityRegistry registry = AbilityCatalog.create(OfflineCatalog.deps(tempDir));
+        LookupTool lookup = new LookupTool(registry);
+        JsonObject abilities = new JsonObject();
+        // 开局 lookup() 给 LLM 的一行签名清单，按登记顺序。
+        abilities.add("listing", data(lookup.call(new JsonObject())));
+        // 每个能力的完整条目（含不列出的），正文另有资源文件，只记它在哪。
+        JsonArray details = new JsonArray();
+        for (AbilityModule module : registry.all()) {
+            JsonObject query = new JsonObject();
+            query.addProperty("id", module.spec().id());
+            JsonObject detail = data(lookup.call(query)).getAsJsonObject();
+            detail.remove("doc");
+            detail.addProperty("doc_resource", module.spec().doc().resourcePath());
+            details.add(detail);
+        }
+        abilities.add("abilities", details);
+        check("abilities.json", abilities);
     }
 
     @Test
@@ -126,6 +154,10 @@ class InterfaceSnapshotTest {
         shapes.add("goal_run", ResultJson.goalRun(asking, question, "在等回答"));
         shapes.add("event", ResultJson.event(new TaskEvent(7, TaskEvent.Kind.ASKED, 12, "动哪个箱子？", null)));
         return shapes;
+    }
+
+    private static JsonElement data(JsonObject reply) {
+        return reply.get("data");
     }
 
     private static JsonArray lowerNames(Enum<?>[] values) {

@@ -1,0 +1,604 @@
+{
+  "listing": {
+    "abilities": [
+      {
+        "ability": "maicraft:use",
+        "summary": "对一个方块或实体用一下手上的东西（开门、按钮、拉杆、开箱看看、骑乘、剪毛、点火……）",
+        "parameters": "item?: string, block?: string, entity?: string, count: integer = 1, radius: integer = 32, text?: string",
+        "targets": [
+          "here",
+          "landmark",
+          "position",
+          "previous",
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:eat",
+        "summary": "吃身上带的食物",
+        "parameters": "item?: string, count: integer = 1",
+        "targets": [],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:equip",
+        "summary": "穿装备或卸装备",
+        "parameters": "operation: string, slot?: string, item?: string",
+        "targets": [],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:drop",
+        "summary": "把身上带的东西丢出去",
+        "parameters": "item: string, count: integer",
+        "targets": [],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:obtain",
+        "summary": "让背包里某样东西再多几件；可用 via 指定途径",
+        "parameters": "item: string, count: integer = 1, via?: string, radius?: integer, max_distance?: integer",
+        "targets": [],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:deposit",
+        "summary": "把背包里的东西存进容器",
+        "parameters": "items?: array, count?: integer, radius: integer = 32",
+        "targets": [
+          "here",
+          "landmark",
+          "position",
+          "previous",
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:gather",
+        "summary": "采掉、收获、捡起世界里指定的东西",
+        "parameters": "block?: string, item?: string, radius?: integer",
+        "targets": [
+          "position",
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:fight",
+        "summary": "打指定的目标，或清掉附近一片区域的敌对生物；打得过才打，血见底会先撤",
+        "parameters": "entity?: string, radius: integer = 32, count?: integer",
+        "targets": [
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:follow",
+        "summary": "跟着一位玩家或一个实体，保持几格距离，它走就跟、它停就停",
+        "parameters": "distance: integer = 3",
+        "targets": [
+          "player",
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:wait",
+        "summary": "在游戏里等一个条件：等一段时间、等天黑天亮、等血回满或不再饥饿",
+        "parameters": "condition: string = elapsed, after_seconds: integer = 0",
+        "targets": [],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:travel",
+        "summary": "走到一个地方：给坐标、地点名、看得见的东西或往某方向走多远",
+        "parameters": "radius: number = 2.0, max_seconds?: integer",
+        "targets": [
+          "direction",
+          "here",
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:chat",
+        "summary": "向游戏聊天发一句话（对全体玩家可见）",
+        "parameters": "message: string",
+        "targets": [],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:remember",
+        "summary": "记住或忘掉一个按名字叫的地点",
+        "parameters": "name: string, operation: string = remember",
+        "targets": [
+          "here",
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "memory_only"
+      },
+      {
+        "ability": "maicraft:sequence",
+        "summary": "按顺序做几件事：steps 里每一步是一个完整的目标",
+        "parameters": "",
+        "targets": [],
+        "mode": "controls_player"
+      }
+    ]
+  },
+  "abilities": [
+    {
+      "ability": "maicraft:use",
+      "summary": "对一个方块或实体用一下手上的东西（开门、按钮、拉杆、开箱看看、骑乘、剪毛、点火……）",
+      "parameters": [
+        {
+          "name": "item",
+          "type": "string",
+          "required": false,
+          "doc": "手上拿什么；不给就空手。标签表示其中任意一种，例如 #minecraft:hoes"
+        },
+        {
+          "name": "block",
+          "type": "string",
+          "required": false,
+          "doc": "没指定是哪一个时按它找最近的；指定了时核对目标是不是它"
+        },
+        {
+          "name": "entity",
+          "type": "string",
+          "required": false,
+          "doc": "对实体用时它的类型；同 block，对实体"
+        },
+        {
+          "name": "count",
+          "type": "integer",
+          "required": false,
+          "doc": "做几次；某一次没有效果就停下",
+          "default": 1,
+          "min": 1,
+          "max": 64
+        },
+        {
+          "name": "radius",
+          "type": "integer",
+          "required": false,
+          "doc": "按 block、entity 找目标的范围（格）",
+          "default": 32,
+          "min": 1,
+          "max": 128
+        },
+        {
+          "name": "text",
+          "type": "string",
+          "required": false,
+          "doc": "写到告示牌上的文字，用换行分行，最多 4 行；给了 text 就必须空手"
+        }
+      ],
+      "targets": [
+        "here",
+        "landmark",
+        "position",
+        "previous",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/use.md"
+    },
+    {
+      "ability": "maicraft:eat",
+      "summary": "吃身上带的食物",
+      "parameters": [
+        {
+          "name": "item",
+          "type": "string",
+          "required": false,
+          "doc": "要吃的物品 ID；不给时在身上能吃的里自动挑一种"
+        },
+        {
+          "name": "count",
+          "type": "integer",
+          "required": false,
+          "doc": "吃几件",
+          "default": 1,
+          "min": 1,
+          "max": 64
+        }
+      ],
+      "targets": [],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/eat.md"
+    },
+    {
+      "ability": "maicraft:equip",
+      "summary": "穿装备或卸装备",
+      "parameters": [
+        {
+          "name": "operation",
+          "type": "string",
+          "required": true,
+          "doc": "equip 穿上 / unequip 卸下",
+          "choices": [
+            "equip",
+            "unequip"
+          ]
+        },
+        {
+          "name": "slot",
+          "type": "string",
+          "required": false,
+          "doc": "目标栏位；armor 只配合 unequip，表示整套护甲卸下",
+          "choices": [
+            "mainhand",
+            "offhand",
+            "head",
+            "chest",
+            "legs",
+            "feet",
+            "armor"
+          ]
+        },
+        {
+          "name": "item",
+          "type": "string",
+          "required": false,
+          "doc": "要穿的物品 ID；身上候选唯一时可以不给"
+        }
+      ],
+      "targets": [],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/equip.md"
+    },
+    {
+      "ability": "maicraft:drop",
+      "summary": "把身上带的东西丢出去",
+      "parameters": [
+        {
+          "name": "item",
+          "type": "string",
+          "required": true,
+          "doc": "要丢的物品 ID"
+        },
+        {
+          "name": "count",
+          "type": "integer",
+          "required": true,
+          "doc": "要丢几件；超过实际持有时会按实际持有的丢",
+          "min": 1,
+          "max": 999
+        }
+      ],
+      "targets": [],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/drop.md"
+    },
+    {
+      "ability": "maicraft:obtain",
+      "summary": "让背包里某样东西再多几件；可用 via 指定途径",
+      "parameters": [
+        {
+          "name": "item",
+          "type": "string",
+          "required": true,
+          "doc": "要多拿的物品 ID，或 # 开头的标签"
+        },
+        {
+          "name": "count",
+          "type": "integer",
+          "required": false,
+          "doc": "再多拿几件（不是背包里的总数）",
+          "default": 1,
+          "min": 1,
+          "max": 2147483647
+        },
+        {
+          "name": "via",
+          "type": "string",
+          "required": false,
+          "doc": "只走指定途径；不给就按总代价自己挑",
+          "choices": [
+            "craft",
+            "smelt",
+            "container",
+            "mine",
+            "harvest",
+            "trade"
+          ]
+        },
+        {
+          "name": "radius",
+          "type": "integer",
+          "required": false,
+          "doc": "容器与采掘的搜索范围（格）；给了就冻结在这个范围里",
+          "min": 1,
+          "max": 64
+        },
+        {
+          "name": "max_distance",
+          "type": "integer",
+          "required": false,
+          "doc": "愿意为此走多远（格）",
+          "min": 1,
+          "max": 2147483647
+        }
+      ],
+      "targets": [],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/obtain.md"
+    },
+    {
+      "ability": "maicraft:deposit",
+      "summary": "把背包里的东西存进容器",
+      "parameters": [
+        {
+          "name": "items",
+          "type": "array",
+          "required": false,
+          "doc": "存哪些（物品 ID 或 # 标签的列表）；不给就把随身要留的东西以外的全部存掉"
+        },
+        {
+          "name": "count",
+          "type": "integer",
+          "required": false,
+          "doc": "一共存几件；不给就全存",
+          "min": 1,
+          "max": 576
+        },
+        {
+          "name": "radius",
+          "type": "integer",
+          "required": false,
+          "doc": "自己挑容器时的范围（格）",
+          "default": 32,
+          "min": 1,
+          "max": 128
+        }
+      ],
+      "targets": [
+        "here",
+        "landmark",
+        "position",
+        "previous",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/deposit.md"
+    },
+    {
+      "ability": "maicraft:gather",
+      "summary": "采掉、收获、捡起世界里指定的东西",
+      "parameters": [
+        {
+          "name": "block",
+          "type": "string",
+          "required": false,
+          "doc": "配 position 目标用：要采的方块 ID"
+        },
+        {
+          "name": "item",
+          "type": "string",
+          "required": false,
+          "doc": "认为会掉出的东西，用于确认；不给按实际掉落记录"
+        },
+        {
+          "name": "radius",
+          "type": "integer",
+          "required": false,
+          "doc": "捡掉落物时的范围（格）",
+          "min": 1,
+          "max": 64
+        }
+      ],
+      "targets": [
+        "position",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/gather.md"
+    },
+    {
+      "ability": "maicraft:fight",
+      "summary": "打指定的目标，或清掉附近一片区域的敌对生物；打得过才打，血见底会先撤",
+      "parameters": [
+        {
+          "name": "entity",
+          "type": "string",
+          "required": false,
+          "doc": "区域清扫时只清这种实体类型；省略即全部敌对生物"
+        },
+        {
+          "name": "radius",
+          "type": "integer",
+          "required": false,
+          "doc": "区域清扫的范围，单位格",
+          "default": 32,
+          "min": 1,
+          "max": 64
+        },
+        {
+          "name": "count",
+          "type": "integer",
+          "required": false,
+          "doc": "区域清扫时最多处理几只；省略即区域内全部",
+          "min": 1,
+          "max": 64
+        }
+      ],
+      "targets": [
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/fight.md"
+    },
+    {
+      "ability": "maicraft:follow",
+      "summary": "跟着一位玩家或一个实体，保持几格距离，它走就跟、它停就停",
+      "parameters": [
+        {
+          "name": "distance",
+          "type": "integer",
+          "required": false,
+          "doc": "保持的距离，单位格",
+          "default": 3,
+          "min": 2,
+          "max": 16
+        }
+      ],
+      "targets": [
+        "player",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/follow.md"
+    },
+    {
+      "ability": "maicraft:wait",
+      "summary": "在游戏里等一个条件：等一段时间、等天黑天亮、等血回满或不再饥饿",
+      "parameters": [
+        {
+          "name": "condition",
+          "type": "string",
+          "required": false,
+          "doc": "等什么：elapsed（只等时间，默认）/ day / night / health_full / not_hungry",
+          "default": "elapsed",
+          "choices": [
+            "elapsed",
+            "day",
+            "night",
+            "health_full",
+            "not_hungry"
+          ]
+        },
+        {
+          "name": "after_seconds",
+          "type": "integer",
+          "required": false,
+          "doc": "最短先等多少秒再开始查条件（elapsed 条件下过了这段时间即完成）",
+          "default": 0,
+          "min": 0,
+          "max": 3600
+        }
+      ],
+      "targets": [],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/wait.md"
+    },
+    {
+      "ability": "maicraft:travel",
+      "summary": "走到一个地方：给坐标、地点名、看得见的东西或往某方向走多远",
+      "parameters": [
+        {
+          "name": "radius",
+          "type": "number",
+          "required": false,
+          "doc": "到达容差，单位格，默认 2；给 0 表示必须站进那一格",
+          "default": 2.0,
+          "min": 0,
+          "max": 2048
+        },
+        {
+          "name": "max_seconds",
+          "type": "integer",
+          "required": false,
+          "doc": "最多走多久（秒）；超时以卡住结束，写明停在哪、离目标多远"
+        }
+      ],
+      "targets": [
+        "direction",
+        "here",
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/travel.md"
+    },
+    {
+      "ability": "maicraft:chat",
+      "summary": "向游戏聊天发一句话（对全体玩家可见）",
+      "parameters": [
+        {
+          "name": "message",
+          "type": "string",
+          "required": true,
+          "doc": "要发到游戏聊天的话，全体玩家可见；以 / 开头的是游戏命令，角色不执行"
+        }
+      ],
+      "targets": [],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/chat.md"
+    },
+    {
+      "ability": "maicraft:remember",
+      "summary": "记住或忘掉一个按名字叫的地点",
+      "parameters": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "doc": "地点名；首尾空白去掉后原样比较，不改大小写"
+        },
+        {
+          "name": "operation",
+          "type": "string",
+          "required": false,
+          "doc": "remember 记住（默认，同名覆盖），forget 忘掉",
+          "default": "remember",
+          "choices": [
+            "remember",
+            "forget"
+          ]
+        }
+      ],
+      "targets": [
+        "here",
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "memory_only",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/remember.md"
+    },
+    {
+      "ability": "maicraft:sequence",
+      "summary": "按顺序做几件事：steps 里每一步是一个完整的目标",
+      "parameters": [],
+      "targets": [],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/sequence.md"
+    }
+  ]
+}
