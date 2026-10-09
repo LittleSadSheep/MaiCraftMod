@@ -26,7 +26,7 @@
 - `status`：`done` 拿够了；`partial` 拿到了一部分（`remaining` 写还差几件）；`failed` 一件都没拿到。
 - `changes`：这次实际拿到的数量（`item_gained`）。做合成、烧炼过程中消耗和挖掉的东西也照实记。
 - `details.obtained_via`：东西实际从哪些途径拿到的（craft / smelt / container / mine / harvest / trade），
-  按拿到先后排；开始时身上就够时为空。
+  按拿到先后排。`count` 是这次再多拿几件，身上原有的不算这次拿到的。
 - `problem`：`NEED_ITEM` 时 `attempts` 与 message 写清试过哪些来源、各差多少——缺料、缺台子、
   缺工具、附近已采完，说的是哪一种看 message。概率掉落（例如砾石出燧石）允许方差，会多试几轮才下结论。
 

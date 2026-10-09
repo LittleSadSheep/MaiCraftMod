@@ -31,7 +31,7 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
 
 /**
- * 拿东西的任务：开始时已够直接完成；引擎做完按实际入包结算，拿到一部分是 partial 加还差几件；
+ * 拿东西的任务：count 是再多拿几件，身上原有的不算；引擎做完按实际入包结算，拿到一部分是 partial 加还差几件；
  * 实际拿到东西的途径进结果细节。引擎与背包都是替身，不碰游戏。
  */
 class ObtainTaskTest {
@@ -116,16 +116,21 @@ class ObtainTaskTest {
     }
 
     @Test
-    void 开始时已够直接完成() {
+    void 身上原有的不算_还是再去拿这么多() {
+        // 身上已有 8 个火把，再要 8 个：照样去拿，拿到的 8 个才是这次的。
         FakeBackpack backpack = new FakeBackpack();
         backpack.add("minecraft:torch", 8);
+        ScriptedAcquisition acquisition = new ScriptedAcquisition();
+        acquisition.backpack = backpack;
+        acquisition.deliverPerTick = 8;
+        acquisition.deliveredRoute = "craft";
         ObtainTask task = new ObtainTask(input(8, ItemAcquisition.Scope.ALL),
-                new ScriptedAcquisition(), backpack, null, itemId -> Set.of());
+                acquisition, backpack, null, itemId -> Set.of());
         task.start(tick(0));
         TaskResult finished = runTask(task);
         assertEquals(TaskResult.Status.DONE, finished.status());
-        assertTrue(finished.summary().contains("开始时身上已够"));
-        assertEquals(0, finished.changes().size(), "开始时已够不该记入包变化");
+        assertEquals(8, acquisition.lastRequest.count());
+        assertEquals(8, finished.changes().get(0).count());
     }
 
     @Test
@@ -164,7 +169,7 @@ class ObtainTaskTest {
         TaskResult finished = runTask(task);
         assertEquals(TaskResult.Status.PARTIAL, finished.status());
         assertEquals(Problem.Kind.NEED_ITEM, finished.problem().kind());
-        assertEquals(List.of("还差 3 个" + new WantedItem("minecraft:torch").describe()),
+        assertEquals(List.of("还差 6 个" + new WantedItem("minecraft:torch").describe()),
                 finished.remaining());
         assertEquals(2, finished.changes().get(0).count());
     }
