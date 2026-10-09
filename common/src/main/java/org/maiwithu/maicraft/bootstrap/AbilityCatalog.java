@@ -60,8 +60,6 @@ import org.maiwithu.maicraft.behavior.approach.LiveSpotWalks;
 import org.maiwithu.maicraft.behavior.interaction.ClientGameRefusals;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
-import org.maiwithu.maicraft.behavior.menu.ClientMenuContent;
-import org.maiwithu.maicraft.behavior.menu.ClientQuickMoves;
 import org.maiwithu.maicraft.behavior.inventory.ClientGearChanges;
 import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
 import org.maiwithu.maicraft.behavior.inventory.ClientStepsAside;
@@ -272,7 +270,6 @@ public final class AbilityCatalog {
      */
     private static AbilityModule obtainModule(Deps deps, LiveApproaches bringsClose,
             ClientMovesToMainhand toMainhand, PermissionCheck permission, DeferredInnerNeeds innerNeeds) {
-        ClientQuickMoves obtainQuickMoves = new ClientQuickMoves();
         RegistryRecipeReads recipeReads = new RegistryRecipeReads(deps.context(), deps.itemTags(), deps.furnaceFuels());
         // 在工作站上动手：熔炉添燃料时按同一份燃料表挑身上烧得最久的。
         RecipeRuns recipeRuns = new MenuRecipeRuns(bringsClose, deps.interactions(),
@@ -295,9 +292,8 @@ public final class AbilityCatalog {
                 new ClientCropReplanting(toMainhand, deps.interactions(), deps.context()));
         ItemAcquisition acquisition = new ItemAcquisition(
                 List.of(new ContainerSource(deps.memory(), deps.itemTags(),
-                                new MenuContainerTakes(bringsClose, deps.interactions(),
-                                        new ClientMenuContent(deps.context()), obtainQuickMoves,
-                                        deps.itemTags(), deps.memory())),
+                                new MenuContainerTakes(bringsClose, deps.interactions(), deps.itemTags(),
+                                        deps.memory(), deps.context())),
                         craftSource, smeltSource, miningSource, harvestSource, new TradeSource()),
                 deps.backpack(), deps.offhand(), deps.itemTags(),
                 deps.characterPosition(), Optional.empty(), ItemAcquisition.DEFAULT_MAX_DEPTH);
