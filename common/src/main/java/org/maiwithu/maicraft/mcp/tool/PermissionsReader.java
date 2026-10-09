@@ -9,10 +9,14 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * 读目标里的 permissions：这次任务允许角色改变世界到什么程度。没写的字段用默认值，
  * 默认值就是"像正常玩家一样"；这不是游戏或服务器的 OP 权限。
+ *
+ * <p>sequence 里的一步：没写的字段沿用整件事的许可，写了的以这一步为准；
+ * 额外保护的地标两边合在一起，不会因为某一步自己写了许可就丢了整件事的保护。
  */
 final class PermissionsReader {
     private static final List<String> FIELDS = List.of(
@@ -20,14 +24,15 @@ final class PermissionsReader {
 
     private PermissionsReader() {}
 
-    static Permissions read(JsonElement raw, String path, RequestCheck check) {
+    /** @param inherited 整件事的许可（读 sequence 的一步时）；最外层为 null，没写的字段用默认值 */
+    static Permissions read(JsonElement raw, String path, Permissions inherited, RequestCheck check) {
+        Permissions fallback = inherited == null ? Permissions.DEFAULT : inherited;
         if (!raw.isJsonObject()) {
             check.error(path, "permissions 应该是一个对象", "{\"fight\": \"self_defense\"}");
-            return Permissions.DEFAULT;
+            return fallback;
         }
         JsonObject object = raw.getAsJsonObject();
         check.rejectUnknownFields(object, path, FIELDS);
-        Permissions fallback = Permissions.DEFAULT;
         Boolean rare = check.bool(object, "use_rare_items", path + ".use_rare_items");
         List<String> protectedLandmarks = check.texts(object, "protected_landmarks", path + ".protected_landmarks");
         return new Permissions(
@@ -36,7 +41,14 @@ final class PermissionsReader {
                 rare == null ? fallback.useRareItems() : rare,
                 choice(object, "kill_animals", path, Permissions.AnimalKilling.values(), fallback.killAnimals(), check),
                 survivalNeeds(object, path, fallback.survivalNeeds(), check),
-                protectedLandmarks == null ? fallback.protectedLandmarks() : new HashSet<>(protectedLandmarks));
+                landmarks(fallback.protectedLandmarks(), protectedLandmarks));
+    }
+
+    /** 额外保护的地标：沿用的和这次写的合在一起；只能加，不能借一步许可把保护撤掉。 */
+    private static Set<String> landmarks(Set<String> inherited, List<String> written) {
+        Set<String> all = new HashSet<>(inherited);
+        if (written != null) all.addAll(written);
+        return all;
     }
 
     private static <E extends Enum<E>> E choice(JsonObject object, String key, String path, E[] values,
