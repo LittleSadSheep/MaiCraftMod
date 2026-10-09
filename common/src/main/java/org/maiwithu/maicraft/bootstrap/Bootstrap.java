@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.bootstrap;
 
 import com.google.gson.JsonObject;
 import java.io.IOException;
+import java.util.Optional;
 import java.util.List;
 import java.util.function.Consumer;
 import net.minecraft.client.Minecraft;
@@ -10,6 +11,10 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.state.BlockState;
+import org.maiwithu.maicraft.behavior.interaction.Interactions;
+import org.maiwithu.maicraft.behavior.interaction.UseKeyHoldProjection;
+import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
+import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.survival.BreathNeed;
 import org.maiwithu.maicraft.behavior.survival.DigOutNeed;
@@ -33,7 +38,9 @@ import org.maiwithu.maicraft.game.interaction.InteractionSender;
 import org.maiwithu.maicraft.game.menu.MenuActions;
 import org.maiwithu.maicraft.game.interaction.InteractionOpportunity;
 import org.maiwithu.maicraft.game.loader.LoaderEnvironment;
+import org.maiwithu.maicraft.game.ChatLog;
 import org.maiwithu.maicraft.game.ClientHooks;
+import org.maiwithu.maicraft.game.SubtitleFeed;
 import org.maiwithu.maicraft.game.menu.DefaultMenuActions;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerControlBoundary;
@@ -138,14 +145,13 @@ public final class Bootstrap {
 
     /**
      * 控制循环的生存需求清单：按急迫程度登记，必须立刻处理的先登记，同样急时先插进来。
-     * 任务事件的真实出口、走到与进食流程由各自的接线轨提供；接上之前相关临时任务会如实报告做不了。
+     * 战斗感观由外面递进来，与战斗能力共用一份；走到已接上，撤离与绕行用真的走路完成；
+     * 进食流程还没有接，饿了的临时任务先如实报告做不了。
      */
     private static ControlLoop withSurvivalNeeds(
-            InteractionSender interactionSender, MenuActions menuActions) {
-        CombatMemory combatMemory = new CombatMemory();
-        CombatSenses combatSenses = new LiveCombatSenses(combatMemory);
+            InteractionSender interactionSender, MenuActions menuActions,
+            CombatSenses combatSenses, WalkTo walks) {
         TaskEventSink events = TaskEventSink.NONE;
-        WalkTo walks = null;
         EatSoonTask.FoodMoves foodMoves = null;
         return new ControlLoop(List.of(
                 new DigOutNeed(new SurvivalSituation.FromPlayer(),
@@ -160,80 +166,130 @@ public final class Bootstrap {
                         LiveNightAndEdgeMoves.retreat(walks, events))));
     }
 
-    /** 客户端部分：只在客户端执行，创建游戏接口层的每刻服务、和服务端的会话、控制循环与生存需求；能力与 MCP 入口还没有接入。 */
+    /**
+     * 客户端部分：只在客户端执行。创建游戏接口层的每刻服务、和服务端的会话、控制循环与生存需求，
+     * 以及走到与交互的玩家行为层入口；进世界时再创建世界记忆、感知场景与能力清单（见 WorldScope）。
+     */
     public static ClientLifecycle startClient(LoaderEnvironment loader, LinkTransport transport) {
         LOG.info("{} 客户端部分启动（加载器：{}，开发环境：{}）",
                 ModIdentity.NAME, loader.loaderName(), loader.isDevelopment());
-        PlayerControlBoundary playerControl = new PlayerControlBoundary();
-        BlockScanService blockScans = new BlockScanService();
-        // 交互提交与容器界面操作共用同一份每刻一次的交互机会；两边都建好后互相接上，再挂进角色上下文。
-        // 行为层的生存需求要靠这条轨道挖掘与放水，所以在这里创建并互相接好。
-        InteractionOpportunity opportunity = new InteractionOpportunity();
-        DefaultMenuActions menuActions = new DefaultMenuActions(opportunity, playerControl.input());
-        DefaultInteractionSender interactionSender = new DefaultInteractionSender(menuActions, opportunity);
-        menuActions.attachSender(interactionSender);
-        playerControl.attachInteractionEntries(interactionSender, menuActions);
-        // 控制循环按急迫程度登记生存需求：必须立刻处理的先登记，同样急时它先插进来；
-        // 每项需求自己按处境报急，登记顺序只在同样急时定先后。
-        // 主任务由目标执行侧接线：LLM 派了活就调 controlLoop.setMainTask(...)，这里暂不挂载，
-        // 因此现在只有生存需求的临时任务在跑——没有主任务时它们同样随时可以插进来。
-        ControlLoop controlLoop = withSurvivalNeeds(interactionSender, menuActions);
-        // Mixin 钩子拿不到构造注入，只能在这里登记；服务本体仍以实例传递。
-        ClientHooks.registerPlayerControl(playerControl);
-        ClientHooks.registerBlockScans(blockScans);
-        // 按住使用键的投影：持续使用的提交方接入前没有任务占用，投影读到的始终是真实键值。
-        ClientHooks.registerUseKeyHold(new UseKeyHold());
-        ServerLinkSession session = new ServerLinkSession(transport);
-        // 入服前登记客户端知道的操作清单；查询方块归属是第一个只读操作。
-        session.router().register(new ClientOperation("ownership.query", 1, false));
-        // 内嵌 MCP 服务：五个工具的空壳已登记在服务内部，这里只负责启动与停止。
-        McpConfig mcpConfig = McpConfig.localForProcess(8766);
-        final EmbeddedMcpService[] mcpHolder = new EmbeddedMcpService[1];
-        return new ClientLifecycle() {
-            @Override public void started() {
-                try {
-                    mcpHolder[0] = EmbeddedMcpService.startWithFallback(mcpConfig, 2);
-                    LOG.info("{} MCP 服务已启动（端口 {}；五个工具为空壳）",
-                            ModIdentity.NAME, mcpHolder[0].port());
-                } catch (IOException exception) {
-                    LOG.error("{} MCP 服务启动失败", ModIdentity.NAME, exception);
-                    return;
-                }
-                LOG.info("{} 客户端启动完成；生存需求与控制循环已接入，目标执行与能力还没有接入", ModIdentity.NAME);
-            }
+        ClientEntry entry = new ClientEntry();
+        entry.createSharedServices();
+        entry.connectSession(transport);
+        return entry;
+    }
 
-            @Override public void tickEnd(Minecraft minecraft) {
-                // 先核对这一刻谁能操作角色，再推进世界扫描与控制循环，最后把本刻输入写进玩家。
-                var context = playerControl.beginTick();
-                if (minecraft.level != null) blockScans.tick(minecraft.level);
-                // 控制循环必须在 beginTick 与 endTick 之间推进：任务此刻发出的移动与转头指令，
-                // 要等 endTick 统一写进角色。自动化没有实际拿到控制权（例如 F8 已归还）时不推进，
-                // 生存需求不能去抢人类手上的角色。
-                context.ifPresent(current -> {
-                    if (playerControl.input().automationOwnsControls()) {
-                        long gameTick = minecraft.level == null ? 0 : minecraft.level.getGameTime();
-                        controlLoop.tick(new ClientTickContext(gameTick, current));
-                    }
-                    playerControl.endTick(current);
-                });
-                // 与服务端的会话跟着每个客户端刻推进。
-                session.tick(minecraft);
-            }
+    /** 客户端共享服务与每刻入口：进世界的现场（WorldScope）在这里建与丢。 */
+    private static final class ClientEntry implements ClientLifecycle {
+        private final PlayerControlBoundary playerControl = new PlayerControlBoundary();
+        private final BlockScanService blockScans = new BlockScanService();
+        private final BaritoneInternals walks = new BaritoneInternals();
+        private final UseKeyHold useKeyHold = new UseKeyHold();
+        private final SubtitleFeed subtitles = new SubtitleFeed();
+        private final McpConfig mcpConfig = McpConfig.localForProcess(8766);
+        private final WorldScope[] worldScope = new WorldScope[1];
+        private EmbeddedMcpService mcp;
+        private ServerLinkSession session;
+        private ControlLoop controlLoop;
+        private DefaultMenuActions menuActions;
+        private DefaultInteractionSender interactionSender;
+        private CombatSenses combatSenses;
+        private Interactions interactions;
 
-            @Override public void stopping() {
-                playerControl.shutdown();
-                blockScans.dropAll();
-                if (mcpHolder[0] != null) mcpHolder[0].stop();
-                LOG.info("{} 客户端即将退出", ModIdentity.NAME);
-            }
+        /** 创建客户端全程共用的服务，并把 Mixin 需要的实例登记到静态登记点。 */
+        void createSharedServices() {
+            // 交互提交与容器界面操作共用同一份每刻一次的交互机会；两边都建好后互相接上，再挂进角色上下文。
+            // 行为层的生存需求要靠这条轨道挖掘与放水，所以在这里创建并互相接好。
+            InteractionOpportunity opportunity = new InteractionOpportunity();
+            menuActions = new DefaultMenuActions(opportunity, playerControl.input());
+            interactionSender = new DefaultInteractionSender(menuActions, opportunity);
+            menuActions.attachSender(interactionSender);
+            playerControl.attachInteractionEntries(interactionSender, menuActions);
+            // 战斗感观一份：生存需求的自卫与战斗能力看的是同一份伤害证据。
+            combatSenses = new LiveCombatSenses(new CombatMemory());
+            // 控制循环按急迫程度登记生存需求：必须立刻处理的先登记，同样急时它先插进来；
+            // 主任务由目标主任务槽下达，进世界时建好。
+            controlLoop = withSurvivalNeeds(interactionSender, menuActions, combatSenses, walks);
+            // Mixin 钩子拿不到构造注入，只能在这里登记；服务本体仍以实例传递。
+            ClientHooks.registerPlayerControl(playerControl);
+            ClientHooks.registerBlockScans(blockScans);
+            ClientHooks.registerUseKeyHold(useKeyHold);
+            ClientHooks.registerSubtitleFeed(subtitles);
+            ClientHooks.registerChatLog(new ChatLog());
+            // 交互动作入口与按住使用键投影：能力清单在进世界时用它们拼装各能力。
+            interactions = new Interactions(new UseKeyHoldProjection(useKeyHold));
+        }
 
-            @Override public void serverLinkReceived(Minecraft minecraft, String json) {
-                session.received(minecraft, json);
-            }
+        /** 建与服务端的会话，并在入服前登记客户端知道的操作清单。 */
+        void connectSession(LinkTransport transport) {
+            session = new ServerLinkSession(transport);
+            // 查询方块归属是第一个只读操作。
+            session.router().register(new ClientOperation("ownership.query", 1, false));
+        }
 
-            @Override public void serverLinkDisconnected(Minecraft minecraft) {
-                session.disconnected(minecraft);
+        @Override public void started() {
+            try {
+                mcp = EmbeddedMcpService.startWithFallback(mcpConfig, 2);
+                LOG.info("{} MCP 服务已启动（端口 {}；五个工具为空壳）", ModIdentity.NAME, mcp.port());
+            } catch (IOException exception) {
+                LOG.error("{} MCP 服务启动失败", ModIdentity.NAME, exception);
+                return;
             }
-        };
+            LOG.info("{} 客户端启动完成；生存需求、控制循环、走到与交互已接入，"
+                    + "目标下达等 MCP 工具还没有接行为", ModIdentity.NAME);
+        }
+
+        @Override public void tickEnd(Minecraft minecraft) {
+            // 先核对这一刻谁能操作角色，再推进世界扫描与控制循环，最后把本刻输入写进玩家。
+            var context = playerControl.beginTick();
+            if (minecraft.level != null) blockScans.tick(minecraft.level);
+            keepWorldScopeFresh(minecraft, context);
+            context.ifPresent(current -> tickInWorld(minecraft, current));
+            // 与服务端的会话跟着每个客户端刻推进。
+            session.tick(minecraft);
+        }
+
+        /** 进世界建现场、退世界丢现场：世界记忆按世界身份分开，感知场景不跨世界残留。 */
+        private void keepWorldScopeFresh(Minecraft minecraft, Optional<PlayerContext> context) {
+            if (minecraft.level != null && worldScope[0] == null && context.isPresent()) {
+                UseKeyProjection useKeyProjection = new UseKeyHoldProjection(useKeyHold);
+                worldScope[0] = new WorldScope(minecraft, playerControl, blockScans, session,
+                        subtitles, interactions, useKeyProjection, walks, combatSenses, controlLoop,
+                        interactionSender, menuActions);
+            } else if (minecraft.level == null) {
+                worldScope[0] = null;
+            }
+        }
+
+        /** 控制循环必须在 beginTick 与 endTick 之间推进：任务此刻发出的移动与转头指令，
+         * 要等 endTick 统一写进角色。自动化没有实际拿到控制权（例如 F8 已归还）时不推进，
+         * 生存需求不能去抢人类手上的角色。 */
+        private void tickInWorld(Minecraft minecraft, PlayerContext current) {
+            // 世界扫描：感知各读端读当刻的观察事实，整理进场景；顺序在控制循环之前。
+            WorldScope scope = worldScope[0];
+            if (scope != null) {
+                scope.observe(current, minecraft.level.getGameTime());
+            }
+            if (playerControl.input().automationOwnsControls()) {
+                controlLoop.tick(new ClientTickContext(minecraft.level.getGameTime(), current));
+            }
+            playerControl.endTick(current);
+        }
+
+        @Override public void stopping() {
+            playerControl.shutdown();
+            blockScans.dropAll();
+            worldScope[0] = null;
+            if (mcp != null) mcp.stop();
+            LOG.info("{} 客户端即将退出", ModIdentity.NAME);
+        }
+
+        @Override public void serverLinkReceived(Minecraft minecraft, String json) {
+            session.received(minecraft, json);
+        }
+
+        @Override public void serverLinkDisconnected(Minecraft minecraft) {
+            session.disconnected(minecraft);
+        }
     }
 }

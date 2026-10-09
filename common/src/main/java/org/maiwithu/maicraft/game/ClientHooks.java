@@ -18,6 +18,7 @@ public final class ClientHooks {
     private static final AtomicReference<BlockScanService> BLOCK_SCANS = new AtomicReference<>();
     private static final AtomicReference<UseKeyHold> USE_KEY_HOLD = new AtomicReference<>();
     private static final AtomicReference<SubtitleFeed> SUBTITLE_FEED = new AtomicReference<>();
+    private static final AtomicReference<ChatLog> CHAT_LOG = new AtomicReference<>();
 
     private ClientHooks() {}
 
@@ -41,6 +42,11 @@ public final class ClientHooks {
         SUBTITLE_FEED.set(feed);
     }
 
+    /** 启动时登记本地聊天栏的记录端；聊天栏每加一条消息由 Mixin 转过来。 */
+    public static void registerChatLog(ChatLog log) {
+        CHAT_LOG.set(log);
+    }
+
     /** Mixin 类跨包读取；这里是与 Mixin 之间唯一允许的静态通道。 */
     public static PlayerControlBoundary playerControl() {
         return PLAYER_CONTROL.get();
@@ -56,5 +62,9 @@ public final class ClientHooks {
 
     public static SubtitleFeed subtitleFeed() {
         return SUBTITLE_FEED.get();
+    }
+
+    public static ChatLog chatLog() {
+        return CHAT_LOG.get();
     }
 }

@@ -28,11 +28,11 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * <p>出手按游戏接口层的攻击交互走：充能够格才挥、换手当刻与目标无敌帧不挥。
  * 有主生物（有名字、被驯服、拴绳、围栏）的保护判断等处境视图接上后在许可检查点统一生效。
  */
-final class LiveFightMoves implements FightMoves {
+public final class LiveFightMoves implements FightMoves {
 
     private final WalkTo walks;
 
-    LiveFightMoves(WalkTo walks) {
+    public LiveFightMoves(WalkTo walks) {
         this.walks = walks;
     }
 

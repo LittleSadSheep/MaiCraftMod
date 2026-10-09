@@ -5,6 +5,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
+import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
+import org.maiwithu.maicraft.behavior.interaction.Interactions;
+import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.ModIdentity;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
@@ -55,6 +58,17 @@ public final class UseModule implements AbilityModule {
 
     public UseModule(UseServices services) {
         this.services = services;
+    }
+
+    /**
+     * 生产用：把各读端与接缝交给本包拼好协作服务再建模块，启动清单只认这个入口。
+     * 可选接缝（游戏拒绝、告示牌界面、顺手捡起、跨未加载坐标、界面读数、世界记忆）没接上就传 null，
+     * 相应环节按接缝缺失如实失败；交互、靠近与手上准备缺了能力做不了事，不许为 null。
+     */
+    public static UseModule assemble(Interactions interactions, BringsPlayerClose close,
+            UseSeams.PreparesHand hand, ResolvesSeen seen, SearchesNearby search, WorldMemory memory) {
+        return new UseModule(new UseServices(interactions, close, hand, seen, search,
+                null, null, null, null, null, memory));
     }
 
     @Override public AbilitySpec spec() {

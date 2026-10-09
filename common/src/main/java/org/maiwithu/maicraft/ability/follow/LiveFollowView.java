@@ -19,11 +19,11 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  *
  * <p>身份核对在这里做：同一编号的实体类型换了就是编号被重用，按看不见处理，不跟错东西。
  */
-final class LiveFollowView implements FollowView {
+public final class LiveFollowView implements FollowView {
 
     private final SeenRegistry seen;
 
-    LiveFollowView(SeenRegistry seen) {
+    public LiveFollowView(SeenRegistry seen) {
         this.seen = seen;
     }
 

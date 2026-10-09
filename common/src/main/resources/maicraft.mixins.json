@@ -16,7 +16,8 @@
     "UseKeyHoldMixin",
     "ScreenVisibilityMixin",
     "InventoryScreenModeMixin",
-    "MinecraftLevelSubtitleMixin"
+    "MinecraftLevelSubtitleMixin",
+    "ChatComponentMessageMixin"
   ],
   "server": [],
   "injectors": {

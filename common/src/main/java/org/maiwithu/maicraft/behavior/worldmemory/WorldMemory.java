@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.function.UnaryOperator;
 import org.maiwithu.maicraft.behavior.perception.RemembersSightings;
+import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
 import org.maiwithu.maicraft.kernel.goal.RemembersPlaces;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
@@ -24,7 +25,8 @@ import org.maiwithu.maicraft.kernel.storage.DocumentStore;
  * <p>记忆按世界身份分开存：构造时传入文档库与世界身份编号，连到另一个世界时
  * 由身份编号隔离，读不到上一个世界的记忆。
  */
-public final class WorldMemory implements RemembersPlaces, RemembersRegions, RemembersSightings {
+public final class WorldMemory implements RemembersPlaces, RemembersRegions, RemembersSightings,
+        ReadsRememberedPlaces {
 
     /** 文档库里的范围名：世界记忆的数据都存这个范围下，与别的用途互不覆盖。 */
     public static final String SCOPE = "world-memory";

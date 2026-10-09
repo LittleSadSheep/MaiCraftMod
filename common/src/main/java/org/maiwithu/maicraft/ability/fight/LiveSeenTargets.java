@@ -17,11 +17,11 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * <p>编号被重用给了别的东西（类型换了）就当目标没了，不跟着新实体打。
  * 死亡证据按游戏事实读：有生命值的生物生命归零才算死。
  */
-final class LiveSeenTargets implements SeenTargets {
+public final class LiveSeenTargets implements SeenTargets {
 
     private final SeenRegistry seen;
 
-    LiveSeenTargets(SeenRegistry seen) {
+    public LiveSeenTargets(SeenRegistry seen) {
         this.seen = seen;
     }
 

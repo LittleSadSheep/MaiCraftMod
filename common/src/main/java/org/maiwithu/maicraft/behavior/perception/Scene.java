@@ -173,6 +173,11 @@ public final class Scene {
         return ids.get(id);
     }
 
+    /** 观察编号登记表：战斗与跟随拿它把编号换回游戏实体。 */
+    public SeenRegistry seen() {
+        return ids;
+    }
+
     public SceneSelf self() {
         return self;
     }
