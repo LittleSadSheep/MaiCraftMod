@@ -194,9 +194,11 @@ public final class AbilityCatalog {
                 deps.gearFit(), Optional.empty(), Optional.of(new ClientGearChanges(deps.context(), toMainhand))));
 
         // 丢弃：换手接上了；丢完朝旁边走两步，别让丢出的东西落回自己头上。
+        // 落点登记与走开共用同一份避让：登记写进去，走开的每一步绕开它。
+        DropAvoidance dropAvoidance = new DropAvoidance();
         registry.register(new DropModule(deps.backpack(), deps.offhand(), deps.itemTags(),
-                deps.characterPosition(), new DropAvoidance(), Optional.of(toMainhand),
-                Optional.of(new ClientStepsAside(deps.inputs()))));
+                deps.characterPosition(), dropAvoidance, Optional.of(toMainhand),
+                Optional.of(new ClientStepsAside(deps.inputs(), dropAvoidance))));
 
         // 许可检查点：归属记录问服务端，区域与地标问世界记忆；玩家放置推断没有接，先按不受保护处理。
         // 拿到物品的来源与采集都用这一份，先建。
@@ -235,7 +237,6 @@ public final class AbilityCatalog {
                 new DestinationResolver(deps.travelWorld(), deps.memory(), new SceneSeenTargets(deps::scene)),
                 deps.walkInternals(), deps.travelProgress()));
 
-        // 聊天：发送与回显确认都走游戏聊天通道；是否放行游戏命令由所有者的实例配置决定。
         // 聊天：发送与回显确认都走游戏聊天通道；是否放行游戏命令由所有者的实例配置决定。
         registry.register(chatModule(deps));
 

@@ -177,9 +177,11 @@ final class DropTask extends PhasedTask<DropTask.Phase> {
         return action() instanceof ThrowsItems throwing ? throwing.remaining() : 0;
     }
 
-    // 落点登记是近似：抛出方向前面几格外的那一格。拾取有半格余量，避让半径在 DropAvoidance 放宽。
+    // 落点登记是近似：抛出方向前面几格外的那一格；被墙弹回来的东西常落在脚下，
+    // 所以丢出时站的格子也一并登记，走开与避让两条路都认这两处。拾取有半格余量，避让半径在 DropAvoidance 放宽。
     private void registerLanding(long gameTick) {
         if (thrownAt == null) return;
+        avoidance.register(thrownAt, gameTick);
         WorldPosition landing = WorldPosition.here(
                 thrownAt.x() + (int) Math.round(throwDirection.x * LANDING_DISTANCE),
                 thrownAt.y(),
