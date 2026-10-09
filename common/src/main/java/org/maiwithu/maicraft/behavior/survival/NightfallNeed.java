@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.survival;
 
+import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.interrupt.SurvivalNeed;
 import org.maiwithu.maicraft.kernel.task.Task;
@@ -72,7 +73,7 @@ public final class NightfallNeed implements SurvivalNeed {
         Facts facts = reader.read(context);
         if (facts != null && facts.bedAvailable()) {
             // 夜间休息任务归睡觉规格；这一轨没合进来时退回极端自保，事件里说明。
-            events.publish("need_unmet",
+            events.publish(TaskEvent.Kind.NEED_UNHANDLED,
                     "天黑了，附近有床但夜间休息还没接上流程；先按极端自保封顶等待");
         }
         return burrow.burrowIn();

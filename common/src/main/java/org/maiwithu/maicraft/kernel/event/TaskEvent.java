@@ -35,6 +35,10 @@ public record TaskEvent(long cursor, Kind kind, long goalRunId, String message, 
         STEP_FINISHED,
         /** 目标结束，完整结果按编号查。 */
         FINISHED,
+        /** 临时任务开始：生存需求自己派活（自卫、回洞、退开）顶上，主任务让路。 */
+        TEMPORARY_TASK_STARTED,
+        /** 临时任务结束：威胁解除或条件恢复，主任务接着做。 */
+        TEMPORARY_TASK_FINISHED,
         /** 角色自己处理不了的生存需求，例如饿了、身上没吃的、也弄不到。 */
         NEED_UNHANDLED
     }

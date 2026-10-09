@@ -18,13 +18,23 @@ import java.util.concurrent.TimeUnit;
  * 中间的事件已经被挤掉时，同样会被告知，而不是悄悄跳过。目标的完整情况始终可以按编号查目标运行，不靠事件。
  *
  * <p>写在客户端线程，读在 MCP 的请求线程：所有方法都在本对象的锁上进行，等新事件时在锁上等。
+ *
+ * <p>它同时是任务事件的出口：生存需求与临时任务不认识目标编号，从这里发的事件
+ * 都记在"与目标无关"（编号 -1）上，宿主在 events 里照样看得到。
  */
-public final class TaskEventLog {
+public final class TaskEventLog implements TaskEventSink {
     static final int CAPACITY = 256;
+    /** 与目标无关的事件（生存需求、临时任务）在记录上写的编号。 */
+    private static final long NO_GOAL = -1;
 
     private final Deque<TaskEvent> events = new ArrayDeque<>();
     private String streamId = newStreamId();
     private long latest;
+
+    /** 生存需求与临时任务发的任务事件：不挂在任何目标上，只把发生了什么告诉宿主。 */
+    @Override public void publish(TaskEvent.Kind kind, String message) {
+        append(kind, NO_GOAL, message, null);
+    }
 
     /** 记一条事件并叫醒正在等的读者；返回带上序号的事件。 */
     public synchronized TaskEvent append(TaskEvent.Kind kind, long goalRunId, String message, TaskResult.Status status) {

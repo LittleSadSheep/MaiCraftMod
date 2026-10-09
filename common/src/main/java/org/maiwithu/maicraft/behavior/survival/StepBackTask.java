@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.survival;
 
 import java.util.Objects;
 
+import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -57,7 +58,7 @@ final class StepBackTask extends PhasedTask<StepBackTask.Phase> {
         double remaining = Math.hypot(self[0] - safeSpot[0], self[2] - safeSpot[2]);
         if (remaining <= ARRIVED_WITHIN) {
             if (events != null) {
-                events.publish("temporary_task_finished", "退回了安全处，继续干活");
+                events.publish(TaskEvent.Kind.TEMPORARY_TASK_FINISHED, "退回了安全处，继续干活");
             }
             return Next.done(TaskResult.builder(TaskResult.Status.DONE, "退离边沿，站回了安全处").build());
         }

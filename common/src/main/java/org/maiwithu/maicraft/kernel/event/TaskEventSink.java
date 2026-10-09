@@ -12,10 +12,10 @@ public interface TaskEventSink {
     /**
      * 发一条任务事件。
      *
-     * @param kind    事件的种类，例如 temporary_task_started、need_unmet、temporary_task_finished
+     * @param kind    事件的种类，取 TaskEvent.Kind 里的值
      * @param message 用游戏里的话说清发生了什么
      */
-    void publish(String kind, String message);
+    void publish(TaskEvent.Kind kind, String message);
 
     /** 没有接上出口时的空实现：事件就地丢弃。 */
     TaskEventSink NONE = (kind, message) -> {};

@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.Objects;
 
+import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.interrupt.DisplacedTask;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
@@ -96,7 +97,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
             anchor[0] = self[0];
             anchor[1] = self[1];
             anchor[2] = self[2];
-            events.publish("temporary_task_started",
+            events.publish(TaskEvent.Kind.TEMPORARY_TASK_STARTED,
                     "被威胁，插入自卫：打点在 " + Math.round(self[0]) + ", " + Math.round(self[1]) + ", " + Math.round(self[2]));
         }
         if (situation.foes().isEmpty()) {
@@ -138,7 +139,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         double drift = Math.hypot(self[0] - anchor[0], self[2] - anchor[2]);
         double heartsLost = Math.max(0, (healthAtStart - situationOf(senses, context).mine().health()) / 2.0);
         if (drift < 1.5) {
-            events.publish("temporary_task_finished",
+            events.publish(TaskEvent.Kind.TEMPORARY_TASK_FINISHED,
                     "自卫结束，回到打点；位移 " + Math.round(drift) + " 格，掉了约 " + Math.round(heartsLost) + " 颗心");
             return Next.done(TaskResult.builder(TaskResult.Status.DONE, "自卫结束，回到打点继续干活")
                     .details(new DefenseDetails(drift, heartsLost)).build());
@@ -151,7 +152,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
             // 走不回去：不冒充回到了岗位。主任务停在半路，事件里说明停在了哪里。
             displaced = true;
             String where = Math.round(self[0]) + ", " + Math.round(self[1]) + ", " + Math.round(self[2]);
-            events.publish("need_unmet",
+            events.publish(TaskEvent.Kind.NEED_UNHANDLED,
                     "自卫结束但走不回打点（还差 " + Math.round(drift) + " 格），停在了 " + where
                             + "；主任务已暂停，等下一步指示");
             return Next.done(TaskResult.builder(TaskResult.Status.DONE,

@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.survival;
 
 import java.util.Objects;
 
+import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.ResultDetails;
@@ -87,7 +88,7 @@ public final class EatSoonTask extends PhasedTask<EatSoonTask.Phase> {
         }
         if (current == null) {
             // 没有进食流程可组合：身上有吃的才轮到这一步，连吃都不能自动吃就如实说。
-            events.publish("need_unmet",
+            events.publish(TaskEvent.Kind.NEED_UNHANDLED,
                     "饿了但进食还没接上流程，吃不了一口；主任务照常继续");
             return Next.done(TaskResult.builder(TaskResult.Status.DONE,
                     "饿了；身上有吃的但没法自动吃，等下一个空当或人工指派进食").build());
@@ -112,7 +113,7 @@ public final class EatSoonTask extends PhasedTask<EatSoonTask.Phase> {
                     fetchedSomething ? "弄到吃的并吃上了" : "不知怎么就不饿了，回去干活").build());
         }
         if (current == null) {
-            events.publish("need_unmet",
+            events.publish(TaskEvent.Kind.NEED_UNHANDLED,
                     "饿了，身上没有吃的，弄吃的也没接上流程；先回去干活，缺食物这件事已上报");
             return Next.done(TaskResult.builder(TaskResult.Status.DONE,
                     "饿了且身上没吃的；弄不到（流程未接入），主任务不受影响").build());
@@ -123,7 +124,7 @@ public final class EatSoonTask extends PhasedTask<EatSoonTask.Phase> {
                 fetchedSomething = true;
                 return Next.go(Phase.EAT, "弄到能吃的了，回来吃");
             }
-            events.publish("need_unmet",
+            events.publish(TaskEvent.Kind.NEED_UNHANDLED,
                     "饿了，身上没吃的，弄吃的也弄不到（箱子空的、做不了、采不到都可能）；先回去继续干活");
             return Next.done(TaskResult.builder(TaskResult.Status.DONE,
                     "弄不到吃的：试过的路都没走通，主任务不受影响，继续干活").build());
@@ -149,7 +150,7 @@ public final class EatSoonTask extends PhasedTask<EatSoonTask.Phase> {
             current = moves.eating();
             return Next.stay();
         }
-        events.publish("need_unmet",
+        events.publish(TaskEvent.Kind.NEED_UNHANDLED,
                 "弄吃的没成：" + failed.problem().message() + "；先回去继续干活");
         return Next.done(TaskResult.builder(TaskResult.Status.DONE,
                 "弄不到吃的：" + failed.problem().message() + "；主任务不受影响").build());

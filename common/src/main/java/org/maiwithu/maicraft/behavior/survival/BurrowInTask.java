@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.survival;
 
 import java.util.Objects;
 
+import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.ResultDetails;
@@ -59,7 +60,7 @@ final class BurrowInTask extends PhasedTask<BurrowInTask.Phase> {
     protected Next<Phase> tick(Phase phase, TickContext context) {
         recordProgress("自保中");
         if (!status.stillNight(context)) {
-            events.publish("temporary_task_finished", "天亮了或威胁解除，从自保里出来，回去干活");
+            events.publish(TaskEvent.Kind.TEMPORARY_TASK_FINISHED, "天亮了或威胁解除，从自保里出来，回去干活");
             return Next.done(TaskResult.builder(TaskResult.Status.DONE,
                     sealed ? "封着顶熬过去了，出来继续干活" : "站到威胁解除，继续干活").build());
         }
@@ -73,7 +74,7 @@ final class BurrowInTask extends PhasedTask<BurrowInTask.Phase> {
                         recordProgress("头顶封上了");
                     } else if (outcome instanceof ActionStatus.Failed failed) {
                         // 放不上去就不再试：站定硬熬，不为一块方块冒险。
-                        events.publish("need_unmet", "想封顶没封上：" + failed.problem().message() + "；站定硬熬");
+                        events.publish(TaskEvent.Kind.NEED_UNHANDLED, "想封顶没封上：" + failed.problem().message() + "；站定硬熬");
                         sealed = true;
                     }
                 }

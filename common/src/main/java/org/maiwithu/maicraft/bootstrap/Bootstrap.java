@@ -166,10 +166,10 @@ public final class Bootstrap {
      * 饿了的临时任务吃随身食物：先换到主手，再原生按住吃完一口；有预算地弄吃的还没接。
      */
     private static ControlLoop withSurvivalNeeds(
+            TaskEventSink events,
             InteractionSender interactionSender, MenuActions menuActions,
             CombatSenses combatSenses, WalkTo walks,
             EatSoonTask.FoodMoves foodMoves) {
-        TaskEventSink events = TaskEventSink.NONE;
         return new ControlLoop(List.of(
                 new DigOutNeed(new SurvivalSituation.FromPlayer(),
                         () -> new NativeBlockBreaking(interactionSender, menuActions)),
@@ -208,6 +208,8 @@ public final class Bootstrap {
         private final AbilityRegistry abilities = new AbilityRegistry(new TaskFactories());
         // MCP 请求线程排工作、客户端刻里做：下达、暂停、回答与控制循环推进在同一个线程上。
         private final ClientTickWork clientWork = new ClientTickWork();
+        // 任务事件流一份：目标处境变化与生存需求的事件都进它，events 工具从这里读。
+        private final TaskEventLog taskEvents = new TaskEventLog();
         private final WorldScope[] worldScope = new WorldScope[1];
         private EmbeddedMcpService mcp;
         private ServerLinkSession session;
@@ -217,6 +219,7 @@ public final class Bootstrap {
         private CombatSenses combatSenses;
         private Interactions interactions;
         private ToolDispatcher tools;
+        private GoalRunTable goals;
 
         /** 创建客户端全程共用的服务，并把 Mixin 需要的实例登记到静态登记点。 */
         void createSharedServices() {
@@ -238,8 +241,9 @@ public final class Bootstrap {
             // 战斗感观一份：生存需求的自卫与战斗能力看的是同一份伤害证据。
             combatSenses = new LiveCombatSenses(new CombatMemory());
             // 控制循环按急迫程度登记生存需求：必须立刻处理的先登记，同样急时它先插进来；
-            // 主任务由目标运行表挂上：LLM 用 execute 派了活，目标就成为主任务。
-            controlLoop = withSurvivalNeeds(interactionSender, menuActions, combatSenses, walks, foodMoves);
+            // 生存需求的事件从同一条任务事件流出去。主任务由目标运行表挂上：LLM 用 execute 派了活，
+            // 目标就成为主任务。
+            controlLoop = withSurvivalNeeds(taskEvents, interactionSender, menuActions, combatSenses, walks, foodMoves);
             // Mixin 钩子拿不到构造注入，只能在这里登记；服务本体仍以实例传递。
             ClientHooks.registerPlayerControl(playerControl);
             ClientHooks.registerBlockScans(blockScans);
@@ -248,8 +252,9 @@ public final class Bootstrap {
             ClientHooks.registerChatLog(new ChatLog());
             // 交互动作入口与按住使用键投影：能力清单在进世界时用它们拼装各能力。
             interactions = new Interactions(useKeyProjection);
-            // 目标执行与 MCP 工具：LLM 用 execute 下达的目标经目标运行表成为控制循环的主任务。
-            tools = goalTools(abilities, controlLoop, clientWork, () -> worldScope[0]);
+            // 目标执行与 MCP 工具：LLM 用 execute 下达的目标经目标运行表成为控制循环的主任务；
+            // 目标处境与生存需求的事件都进同一条任务事件流，宿主用 events 读。
+            tools = goalTools(abilities, controlLoop, clientWork, taskEvents, () -> worldScope[0]);
         }
 
         /** 建与服务端的会话，并在入服前登记客户端知道的操作清单。 */
@@ -331,14 +336,15 @@ public final class Bootstrap {
         }
     }
 
+
     /**
      * 目标执行与 MCP 工具：能力注册表、目标运行表与任务事件流。LLM 用 execute 下达的目标经目标运行表
      * 成为控制循环的主任务；目标处境每次变化都发成任务事件，宿主用 events 等。
-     * 能力按清单在进世界时登记进这份注册表。
+     * 能力按清单在进世界时登记进这份注册表。事件流用 ClientEntry 的那一份：目标处境与生存需求共一条流。
      */
     private static ToolDispatcher goalTools(AbilityRegistry abilities, ControlLoop controlLoop,
-                                            ClientTickWork clientWork, Supplier<WorldScope> worldScope) {
-        TaskEventLog taskEvents = new TaskEventLog();
+                                            ClientTickWork clientWork, TaskEventLog taskEvents,
+                                            Supplier<WorldScope> worldScope) {
         GoalRunStore goalRuns = new EventPublishingGoalRunStore(new InMemoryGoalRunStore(), taskEvents);
         // 记地点交给当前世界的世界记忆；不在世界里时如实以程序错误收场，不悄悄丢掉。
         RemembersPlaces places = (name, position) -> {

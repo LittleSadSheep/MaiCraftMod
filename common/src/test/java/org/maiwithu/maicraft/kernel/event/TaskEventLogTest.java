@@ -23,6 +23,20 @@ class TaskEventLogTest {
     }
 
     @Test
+    void publishedSurvivalEventsCarryNoGoalId() throws InterruptedException {
+        TaskEventLog log = new TaskEventLog();
+
+        log.publish(TaskEvent.Kind.TEMPORARY_TASK_STARTED, "被威胁，插入自卫");
+
+        Page page = log.read(null, 0, -1, 10, 0);
+        assertEquals(1, page.events().size());
+        TaskEvent event = page.events().get(0);
+        assertEquals(TaskEvent.Kind.TEMPORARY_TASK_STARTED, event.kind());
+        assertEquals(-1, event.goalRunId());
+        assertEquals("被威胁，插入自卫", event.message());
+    }
+
+    @Test
     void firstReadWithoutProgressGivesOnlyTheLatestEvents() throws InterruptedException {
         TaskEventLog log = new TaskEventLog();
         append(log, 1, 5);
