@@ -8,12 +8,10 @@ import org.maiwithu.maicraft.kernel.param.Params;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 
 /**
  * 死亡恢复决策：角色死后给 LLM 的一个选择——回到世界里（普通世界是重生，极限模式是旁观世界），
@@ -26,24 +24,20 @@ import java.util.Set;
  * 执行成功或选了取消就了结本轮，迟到的重复答复不会再落在消费掉的问题上。
  * 回到活体（重生或人以别的方式救回来）或离开世界时，整份决策丢掉，下次死亡从头再来。
  *
- * <p>决策编号是负数（-1 起往回数），和下达的目标运行编号不在一个数域里，一眼分得清。
+ * <p>决策编号是负数（-2 起往回数），和下达的目标运行编号不在一个数域里，一眼分得清；
+ * -1 留给事件流里"与目标无关"的事件，不和它撞，按编号读事件时只读得到这条决策的。
  * 只在客户端线程使用。
  */
 public final class DeathRecovery {
     /** 决策在 MCP 里显示的名字：不是能力 ID，内核不认识任何能力，这里只是决策种类在任务列表里的叫法。 */
     public static final String DECISION_NAME = "death_recovery";
 
-    /** 留着最近多少轮的决策编号供迟到答复辨认；死亡不频繁，十六轮足够。 */
-    private static final int KEPT_DECISION_IDS = 16;
-
     private final TaskEventLog events;
     private GoalRun decision;
     /** 挂着的问题原文：答复会把问题从记录上消费掉，重新挂时要按原文挂回去。 */
     private Question lastQuestion;
-    /** 下一条决策的编号：负数往回数，与目标运行的正数编号永不相遇。 */
-    private long nextDecisionId = -1;
-    /** 最近挂过的决策编号：决策了结后迟到的答复据此得到"本轮已了结"的回话，而不是被当成编号不存在。 */
-    private final Set<Long> issuedDecisionIds = new LinkedHashSet<>();
+    /** 下一条决策的编号：从"与目标无关"的编号再往回一格起，负数往回数，与目标运行的正数编号永不相遇。 */
+    private long nextDecisionId = TaskEventLog.NO_GOAL - 1;
 
     public DeathRecovery(TaskEventLog events) {
         this.events = Objects.requireNonNull(events, "events");
@@ -62,11 +56,6 @@ public final class DeathRecovery {
         Question question = new Question(Question.Reason.CHOOSE_ONE, questionText(facts),
                 options(facts != null && facts.hardcore(), connectionAlive));
         decision = new GoalRun(nextDecisionId--, goal(), GoalRun.NO_PARENT, -1);
-        issuedDecisionIds.add(decision.id());
-        while (issuedDecisionIds.size() > KEPT_DECISION_IDS) {
-            // 只留最近几轮的编号：死亡不频繁，更早的迟到答复当作编号不存在也说得通。
-            issuedDecisionIds.remove(issuedDecisionIds.iterator().next());
-        }
         decision.ask(question);
         lastQuestion = question;
         events.append(TaskEvent.Kind.ASKED, decision.id(), question.text(), null);
@@ -85,6 +74,12 @@ public final class DeathRecovery {
     /** 这个编号是不是本轮死亡决策的记录。 */
     public boolean owns(long runId) {
         return decision != null && decision.id() == runId;
+    }
+
+    // 这个编号是不是以前某轮死亡挂过的决策：编号从"与目标无关"的下一格起按顺序往回数，
+    // 挂过的正好是这一段连续的负数，用不着另记一份名单。
+    private boolean issuedEarlier(long runId) {
+        return runId < TaskEventLog.NO_GOAL && runId > nextDecisionId;
     }
 
     /** 本轮死亡决策的记录；死亡过程之外为空。 */
@@ -123,7 +118,7 @@ public final class DeathRecovery {
      */
     public Choice answer(long runId, String optionId) {
         if (!owns(runId)) {
-            if (issuedDecisionIds.contains(runId)) {
+            if (issuedEarlier(runId)) {
                 // 编号确实是某轮死亡决策的，但那轮已经了结：迟到的答复如实说不再收，不冒充编号不存在。
                 throw new GoalRunTable.WrongGoalRunState("本轮死亡恢复已了结，不再收回答");
             }

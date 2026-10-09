@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.kernel.event;
 
+import java.util.OptionalLong;
+
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 
 /**
@@ -14,8 +16,8 @@ import org.maiwithu.maicraft.kernel.result.TaskResult;
  */
 public final class TaskEventLog implements TaskEventSink {
     static final int CAPACITY = 256;
-    /** 与目标无关的事件（生存需求、临时任务）在记录上写的编号。 */
-    private static final long NO_GOAL = -1;
+    /** 与目标无关的事件（生存需求、临时任务、角色死了）在记录上写的编号。 */
+    public static final long NO_GOAL = -1;
 
     private final CursorLog<TaskEvent> log = new CursorLog<>(CAPACITY, TaskEvent::cursor);
 
@@ -44,14 +46,14 @@ public final class TaskEventLog implements TaskEventSink {
      *
      * @param expectedStream 读的一方上次拿到的流编号；第一次读时为 null
      * @param afterCursor    上次读到的游标；第一次读时为 0
-     * @param goalRunId      只看这个目标的事件；-1 表示全部
+     * @param goalRunId      只看这条记录（目标运行或死亡恢复决策）的事件；空表示全部
      * @param limit          这次最多返回几条，至少 1
      * @param waitMillis     没有新事件时最多等多久；0 表示不等
      */
-    public CursorLog.Page<TaskEvent> read(String expectedStream, long afterCursor, long goalRunId, int limit,
+    public CursorLog.Page<TaskEvent> read(String expectedStream, long afterCursor, OptionalLong goalRunId, int limit,
                                           long waitMillis) throws InterruptedException {
-        // 只看某个记录时按编号精确匹配；-1 才是"全部"，死亡恢复决策的负数编号也是能按编号筛的记录。
+        // 只看某条记录时按编号精确匹配；"全部"单独表示，不借用任何编号，死亡恢复决策的负数编号也筛得出来。
         return log.read(expectedStream, afterCursor,
-                event -> goalRunId == -1 || event.goalRunId() == goalRunId, limit, waitMillis);
+                event -> goalRunId.isEmpty() || event.goalRunId() == goalRunId.getAsLong(), limit, waitMillis);
     }
 }

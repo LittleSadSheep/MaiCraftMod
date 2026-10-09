@@ -7,9 +7,11 @@ import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.kernel.event.TaskEventLog;
 
 import java.util.List;
+import java.util.OptionalLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -160,6 +162,16 @@ class DeathRecoveryTest {
         assertTrue(described.contains("重生"), described);
     }
 
+    @Test
+    void decisionIdNeverCollidesWithEventsThatBelongToNoGoal() {
+        // 与目标无关的事件记在 NO_GOAL 上；决策编号要和它分开，宿主按决策编号读事件时才只拿到这条决策的。
+        recovery.onDeath(FACTS, true);
+
+        long id = recovery.decisionRun().orElseThrow().id();
+        assertTrue(id < 0, "决策编号是负数，和目标运行的正数编号分开");
+        assertNotEquals(TaskEventLog.NO_GOAL, id);
+    }
+
     private List<String> optionIds(Question question) {
         return question.options().stream().map(Question.Option::id).toList();
     }
@@ -169,7 +181,7 @@ class DeathRecoveryTest {
     }
 
     private TaskEvent latestEvent() throws InterruptedException {
-        var page = events.read(null, 0, -1, 256, 0);
+        var page = events.read(null, 0, OptionalLong.empty(), 256, 0);
         return page.events().get(page.events().size() - 1);
     }
 }
