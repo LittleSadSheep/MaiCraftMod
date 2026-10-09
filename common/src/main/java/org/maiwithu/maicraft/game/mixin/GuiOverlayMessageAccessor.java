@@ -11,6 +11,6 @@ import org.spongepowered.asm.mixin.gen.Accessor;
 public interface GuiOverlayMessageAccessor {
 
     /** 动作栏此刻的提示语；没有在显示时为 null。 */
-    @Accessor("overlayMessage")
+    @Accessor("overlayMessageString")
     Component maicraft$overlayMessage();
 }
