@@ -23,8 +23,10 @@ import org.maiwithu.maicraft.ability.gather.LiveSceneTargets;
 import org.maiwithu.maicraft.ability.gather.LiveSpotReads;
 import org.maiwithu.maicraft.ability.obtain.ObtainAbility;
 import org.maiwithu.maicraft.ability.travel.TravelAbility;
+import org.maiwithu.maicraft.ability.use.LiveDropGathering;
 import org.maiwithu.maicraft.ability.use.LiveHandPreparation;
 import org.maiwithu.maicraft.ability.use.LiveNearbySearcher;
+import org.maiwithu.maicraft.ability.use.MenuSignEditors;
 import org.maiwithu.maicraft.ability.use.LiveSeenResolver;
 import org.maiwithu.maicraft.ability.use.RefusalReads;
 import org.maiwithu.maicraft.ability.use.UseModule;
@@ -149,16 +151,8 @@ public final class AbilityCatalog {
         ClientMovesToMainhand toMainhand = new ClientMovesToMainhand(deps.context());
 
         // 用东西：交互、靠近、手上准备、观察编号解析、附近搜索、游戏拒绝读端与界面读数都接上了；
-        // 告示牌界面、顺手捡起、跨未加载坐标还没有实现方，先留空。
-        // 游戏拒绝读端看动作栏与服务端确认流：确认流从会话里读，刻号从所在世界取。
-        registry.register(UseModule.assemble(deps.interactions(), bringsClose,
-                new LiveHandPreparation(toMainhand, deps.context()),
-                new LiveSeenResolver(deps::scene),
-                new LiveNearbySearcher(deps.blockScans(), deps.context()),
-                new RefusalReads(new ClientGameRefusals(new OverlayMessages(),
-                        () -> deps.session().confirmations().recent(), deps.clientTicks())),
-                new ClientMenuContent(deps.context()),
-                deps.memory()));
+        // 跨未加载坐标还没有实现方，先留空。
+        registry.register(useModule(deps, bringsClose, toMainhand));
 
         // 进食：把食物换到主手走背包界面的原生搬运；手上不是食物时能换手了。
         registry.register(new EatModule(deps.backpack(), deps.offhand(), deps.hunger(), deps.foods(),
@@ -182,11 +176,7 @@ public final class AbilityCatalog {
                 deps.itemRegistry(), deps.backpack(), deps.offhand(), deps.itemTags()));
 
         // 存东西：找容器把现场扫描与世界记忆并起来，界面读数、整堆搬运与挖盖子都接上了。
-        registry.register(DepositModule.assemble(
-                new ClientSpotsContainers(deps.blockScans(), deps.context(), deps.memory()),
-                bringsClose, deps.interactions(), new ClientMenuContent(deps.context()),
-                new ClientQuickMoves(), new ClientDigsBlocks(), deps.itemTags(),
-                deps.memory(), deps.context(), deps.backpack()));
+        registry.register(depositModule(deps, bringsClose));
 
         // 许可检查点：归属记录问服务端，区域与地标问世界记忆；玩家放置推断没有接，先按不受保护处理。
         PermissionCheck permission = new PermissionCheck(
@@ -219,6 +209,31 @@ public final class AbilityCatalog {
         // 聊天：发送与回显确认都走游戏聊天通道。
         registry.register(new ChatAbility(deps.chat()::send, deps.chat()::echoed));
         return registry;
+    }
+
+    /** 用东西能力的一份：游戏拒绝读端看动作栏与服务端确认流，刻号从所在世界取。 */
+    private static UseModule useModule(Deps deps, LiveApproaches bringsClose, ClientMovesToMainhand toMainhand) {
+        ClientGameRefusals refusals = new ClientGameRefusals(new OverlayMessages(),
+                () -> deps.session().confirmations().recent(), deps.clientTicks());
+        return UseModule.assemble(deps.interactions(), bringsClose,
+                new LiveHandPreparation(toMainhand, deps.context()),
+                new LiveSeenResolver(deps::scene),
+                new LiveNearbySearcher(deps.blockScans(), deps.context()),
+                new RefusalReads(refusals),
+                new MenuSignEditors(),
+                new LiveDropGathering(deps.context(), deps.inputs()),
+                null,
+                new ClientMenuContent(deps.context()),
+                deps.memory());
+    }
+
+    /** 存东西能力的一份：找容器把现场扫描与世界记忆并起来，界面读数、整堆搬运与挖盖子走生产实现。 */
+    private static DepositModule depositModule(Deps deps, LiveApproaches bringsClose) {
+        return DepositModule.assemble(
+                new ClientSpotsContainers(deps.blockScans(), deps.context(), deps.memory()),
+                bringsClose, deps.interactions(), new ClientMenuContent(deps.context()),
+                new ClientQuickMoves(), new ClientDigsBlocks(), deps.itemTags(),
+                deps.memory(), deps.context(), deps.backpack());
     }
 
     /** 采集的靠近：目标落实成一格方块后交给靠近模型，许可用默认档。 */

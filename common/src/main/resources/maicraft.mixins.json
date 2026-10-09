@@ -9,6 +9,7 @@
   ],
   "client": [
     "GuiOverlayMessageAccessor",
+    "AbstractSignEditScreenAccessor",
     "ClientLevelBlockChangeMixin",
     "GameRendererCameraMixin",
     "MouseHandlerControlMixin",

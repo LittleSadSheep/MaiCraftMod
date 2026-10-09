@@ -68,9 +68,10 @@ public final class UseModule implements AbilityModule {
      */
     public static UseModule assemble(Interactions interactions, BringsPlayerClose close,
             UseSeams.PreparesHand hand, ResolvesSeen seen, SearchesNearby search,
-            UseSeams.ReadsGameRefusal refusal, MenuContent menus, WorldMemory memory) {
+            UseSeams.ReadsGameRefusal refusal, UseSeams.ReadsSignEditor signEditors,
+            UseSeams.GathersDrops drops, UseSeams.TravelsTo travel, MenuContent menus, WorldMemory memory) {
         return new UseModule(new UseServices(interactions, close, hand, seen, search,
-                refusal, null, null, null, menus, memory));
+                refusal, signEditors, drops, travel, menus, memory));
     }
 
     @Override public AbilitySpec spec() {
