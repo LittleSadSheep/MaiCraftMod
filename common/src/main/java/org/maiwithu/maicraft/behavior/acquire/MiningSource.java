@@ -18,7 +18,7 @@ import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
 
 /**
- * 采掘的来源：挖掉会掉出想要的东西的方块（矿石、地表的石头这类）。
+ * 采掘的来源：挖掉会掉出想要的东西的方块（矿石、地表的石头这类），只算看得见的——不透视，埋在石头里的不算。
  * 做出来的加工品（铁锭、木板这类）没有方块直接掉它，明确回答"这里给不了"，
  * 不装作能挖；挖矿要的工具（合用的镐）缺了就先按同一套需求去弄，用途标签写清是采掘要用的。
  * 挖哪几格由许可说了算：别人搭的、玩家放的，一格都不动。
@@ -64,7 +64,8 @@ public final class MiningSource implements ItemSource {
         List<MinableSpot> spots = minables.minable(request.wanted(), context.characterAt(), searchRadius(context));
         if (spots.isEmpty()) {
             return new SourceQuote.Unavailable(describe(),
-                    "附近没有会掉出" + request.wanted().describe() + "的方块");
+                    "附近看得见的地方没有会掉出" + request.wanted().describe()
+                            + "的方块；埋在石头里的看不见，要先下矿洞、挖开或换个地方看看");
         }
         PermittedSpots.Screen<MinableSpot> screened = PermittedSpots.screen(spots, MinableSpot::pos,
                 MinableSpot::blockType, context.permissions(), permission);
