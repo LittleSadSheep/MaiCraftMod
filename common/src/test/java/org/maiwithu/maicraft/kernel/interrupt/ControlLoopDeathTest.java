@@ -110,6 +110,7 @@ class ControlLoopDeathTest {
         @Override public long clientTick() { return 0; }
         @Override public boolean isCurrent() { return true; }
         @Override public boolean canInteractThisTick() { return false; }
+        @Override public boolean tryClaimInteraction() { return false; }
         @Override public boolean isDeadOrDying() { return dead; }
     }
 
