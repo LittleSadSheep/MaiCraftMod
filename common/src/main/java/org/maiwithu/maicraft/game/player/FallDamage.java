@@ -11,7 +11,6 @@ import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.item.enchantment.EnchantmentEffectComponents;
-import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.item.enchantment.effects.AddValue;
 import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Blocks;
@@ -19,7 +18,9 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.storage.loot.predicates.DamageSourceCondition;
 
 /**
- * 按当前生命、黄心、摔落相关属性和能理解的附魔，估算某个落差能否活下来。计算前取样，实际离地前仍要复查。
+ * 摔落伤害：按当前生命、黄心、摔落相关属性（安全摔落距离、摔落伤害倍率）、落点方块、药水效果和能理解的附魔，
+ * 估算某个落差会扣多少血、能不能活下来。出行判断能不能往下跳、生存需求判断这一掉会不会摔死都用它，
+ * 同一条游戏事实只算这一处。计算前取样，实际离地前仍要复查。
  * 抗性与缓降效果要能持续到估计的落地时刻才计入；模组自定义伤害和不能理解的附魔效果不在完整模拟范围内。
  */
 public record FallDamage(float health, float absorption, float safeFallDistance,
@@ -105,9 +106,8 @@ public record FallDamage(float health, float absorption, float safeFallDistance,
                 if (!holder.value().matchingSlot(slot)) continue;
                 var components = holder.value().getEffects(EnchantmentEffectComponents.DAMAGE_PROTECTION);
                 if (components.isEmpty()) continue;
-                // 未知保护效果也可能降低既有保护；遇到这种情况就不计入任何保护值，而不是依据熟悉的附魔名称臆测加成可叠加。
-                // 当前先按附魔名称筛选，遇到火焰保护等其他名称会直接把总保护返回零，连已知的摔落保护也丢掉。
-                if (!holder.is(Enchantments.PROTECTION) && !holder.is(Enchantments.FEATHER_FALLING)) return 0;
+                // 只认"固定加值、只按伤害类型筛选"的保护效果：火焰保护这类只对别的伤害类型生效的按类型跳过，
+                // 看不懂的效果（还要看来源实体等）就不计入任何保护值，宁可少算保护、早一点自救。
                 for (var component : components) {
                     if (!(component.effect() instanceof AddValue add)) return 0;
                     if (component.requirements().isPresent()) {

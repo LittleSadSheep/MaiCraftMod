@@ -24,7 +24,7 @@ class DigOutTaskTest {
     private static final BlockPos HEAD_CELL = new BlockPos(10, 64, -3);
 
     private static SurvivalSituation buried() {
-        return SurvivalFakes.situation(0, 20.0, 64.0, 37.0f, false, 10, false, true, HEAD_CELL, false);
+        return SurvivalFakes.calm().buriedAt(HEAD_CELL).build();
     }
 
     @Test

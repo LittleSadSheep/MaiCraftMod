@@ -1,26 +1,37 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.survival;
 
-import org.maiwithu.maicraft.game.menu.MenuActions;
-import org.maiwithu.maicraft.game.interaction.InteractionSender;
-import net.minecraft.client.multiplayer.ClientPacketListener;
-import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.client.player.LocalPlayer;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashSet;
 import java.util.List;
+import java.util.OptionalInt;
+import java.util.Set;
 
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
+import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
+import org.maiwithu.maicraft.game.interaction.InteractionSender;
+import org.maiwithu.maicraft.game.menu.MenuActions;
+import org.maiwithu.maicraft.game.player.BackpackStack;
+import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
-import org.maiwithu.maicraft.kernel.task.TickResult;
 
 /**
  * 生存需求的离线测试替身：不接触真实客户端，按脚本回答处境、记下发出的输入与挖过的格子。
@@ -29,20 +40,57 @@ final class SurvivalFakes {
 
     private SurvivalFakes() {}
 
-    /** 测试用处境：直接给字段值，不读游戏。 */
-    static SurvivalSituation situation(double fallDistance, double health, double feetY, float facingYaw,
-                                       boolean headInWater, int airBubbles, boolean drowning,
-                                       boolean stuck, BlockPos buriedCell, boolean overVoid) {
-        return new SurvivalSituation(fallDistance, health, feetY, facingYaw,
-                headInWater, airBubbles, drowning, stuck, buriedCell, overVoid);
+    /** 处境构造器：默认是站在地上、头在空气里、氧气满、没被埋的平静处境，测试只改要的那几项。 */
+    static final class Situation {
+        double health = 20.0;
+        double feetY = 64.0;
+        float yaw = 37.0f;
+        boolean falling;
+        boolean overVoid;
+        boolean landsInWater;
+        boolean survivesLanding = true;
+        BlockPos waterCell;
+        boolean headInWater;
+        boolean canBreatheUnderwater;
+        int air = 300;
+        int maxAir = 300;
+        int airToSurface = 69;
+        boolean stuck;
+        BlockPos buried;
+
+        Situation feet(double y) { feetY = y; return this; }
+        Situation fallingOnto(BlockPos cell, boolean survives) {
+            falling = true;
+            waterCell = cell;
+            survivesLanding = survives;
+            return this;
+        }
+        Situation fallingIntoVoid() { falling = true; overVoid = true; survivesLanding = false; return this; }
+        Situation fallingIntoWater() { falling = true; landsInWater = true; return this; }
+        Situation underwater(int airTicks) { headInWater = true; air = airTicks; return this; }
+        Situation breathing() { canBreatheUnderwater = true; return this; }
+        Situation surfaceNeeds(int airTicks) { airToSurface = airTicks; return this; }
+        Situation air(int airTicks) { air = airTicks; return this; }
+        Situation buriedAt(BlockPos cell) { stuck = true; buried = cell; return this; }
+
+        SurvivalSituation build() {
+            return new SurvivalSituation(health, feetY, yaw, falling, overVoid, landsInWater, survivesLanding,
+                    waterCell, headInWater, canBreatheUnderwater, air, maxAir, airToSurface, stuck, buried);
+        }
     }
 
+    static Situation calm() {
+        return new Situation();
+    }
+
+    /** 头在水里、氧气只剩一泡：必须立刻换气。 */
     static SurvivalSituation underwater(double feetY) {
-        return situation(0, 20.0, feetY, 37.0f, true, 1, false, false, null, false);
+        return calm().feet(feetY).underwater(30).build();
     }
 
+    /** 头在水面上、氧气已经补满。 */
     static SurvivalSituation inAir(double feetY) {
-        return situation(0, 20.0, feetY, 37.0f, false, 10, false, false, null, false);
+        return calm().feet(feetY).build();
     }
 
     /** 处境读取器替身：每刻给一份脚本里的处境（同一刻内重复读取得到同一份），用完后重复最后一份。 */
@@ -159,5 +207,40 @@ final class SurvivalFakes {
         }
 
         @Override public String describe() { return "测试放水"; }
+    }
+
+    /** 第一人称现场替身：哪些格子够得着由测试声明，其余一律看不到。 */
+    static final class FakeScene implements FirstPersonScene {
+        final Set<BlockPos> reachable = new HashSet<>();
+
+        @Override public Vec3 eyePosition() { return Vec3.ZERO; }
+        @Override public Vec3 viewVector() { return new Vec3(0, -1, 0); }
+        @Override public HitResult sightRay() { return null; }
+        @Override public BlockHitResult visibleHit(BlockPos target) {
+            return reachable.contains(target)
+                    ? new BlockHitResult(Vec3.atCenterOf(target), Direction.UP, target, false) : null;
+        }
+        @Override public BlockHitResult visibleItemHit(BlockPos target, InteractionHand hand) {
+            return visibleHit(target);
+        }
+        @Override public boolean heldItemPointsAt(BlockPos target, InteractionHand hand) { return false; }
+        @Override public BlockState blockAt(BlockPos pos) { return null; }
+        @Override public boolean isLoaded(BlockPos pos) { return true; }
+        @Override public ItemStack heldItem(InteractionHand hand) { return null; }
+    }
+
+    /** 背包替身：快捷栏哪一格放着水桶、选中第几格由测试声明。 */
+    static final class FakeHotbar implements BackpackView {
+        Integer waterBucketSlot;
+        int selected;
+
+        @Override public List<BackpackStack> stacks() { return List.of(); }
+        @Override public int usedSlots() { return 0; }
+        @Override public int totalSlots() { return 36; }
+        @Override public OptionalInt hotbarSlotOf(String itemId) {
+            return "minecraft:water_bucket".equals(itemId) && waterBucketSlot != null
+                    ? OptionalInt.of(waterBucketSlot) : OptionalInt.empty();
+        }
+        @Override public int selectedHotbarSlot() { return selected; }
     }
 }

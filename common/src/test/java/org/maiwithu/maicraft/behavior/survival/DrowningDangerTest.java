@@ -7,49 +7,43 @@ import org.maiwithu.maicraft.kernel.task.Urgency;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
-/** 溺水判断：氧气见底或已在掉血就立刻浮头；剩不到三分之一找空当换气；头没在水里不管。 */
+/** 溺水判断：头在水里才管；氧气不够游上去、只剩两泡或已在掉血是立刻，不到三分之一是尽快。 */
 class DrowningDangerTest {
 
     @Test
     void headOutOfWaterIsNotDrowning() {
-        // 只有脚泡在水里、头露在外面：不缺氧，哪怕氧气条已经空了。
-        assertNull(DrowningDanger.assess(situation(false, 0, false)));
+        // 只有脚泡在水里、头露在外面：不缺氧，哪怕氧气条还没补满。
+        assertNull(DrowningDanger.assess(SurvivalFakes.calm().air(0).build()));
+    }
+
+    @Test
+    void waterBreathingNeedsNoAir() {
+        assertNull(DrowningDanger.assess(SurvivalFakes.calm().underwater(10).breathing().build()),
+                "有水下呼吸时不缺氧");
     }
 
     @Test
     void plentyOfAirIsNotUrgent() {
-        assertNull(DrowningDanger.assess(situation(true, 8, false)));
-        assertNull(DrowningDanger.assess(situation(true, DrowningDanger.MAX_BUBBLES, false)));
+        assertNull(DrowningDanger.assess(SurvivalFakes.calm().underwater(240).build()));
+        assertNull(DrowningDanger.assess(SurvivalFakes.calm().underwater(300).build()));
     }
 
     @Test
     void airBelowOneThirdNeedsAGapSoon() {
-        // 剩 3 泡，刚低于三分之一：不急，但两个动作之间该浮头了。
-        assertEquals(Urgency.SOON, DrowningDanger.assess(situation(true, 3, false)));
+        // 剩 90 刻（三泡），刚低于三分之一，浅水里游上去绰绰有余：两个动作之间该浮头了。
+        assertEquals(Urgency.SOON, DrowningDanger.assess(SurvivalFakes.calm().underwater(90).build()));
     }
 
     @Test
     void criticalAirOrDrowningDamageMustBeHandledNow() {
-        // 只剩两泡：再不换气就开始掉血。
-        assertEquals(Urgency.NOW, DrowningDanger.assess(situation(true, 2, false)));
-        assertEquals(Urgency.NOW, DrowningDanger.assess(situation(true, 0, false)));
-        // 氧气还够但已经开始掉血：马上浮头。
-        assertEquals(Urgency.NOW, DrowningDanger.assess(situation(true, 5, true)));
+        assertEquals(Urgency.NOW, DrowningDanger.assess(SurvivalFakes.calm().underwater(60).build()), "只剩两泡");
+        assertEquals(Urgency.NOW, DrowningDanger.assess(SurvivalFakes.calm().underwater(0).build()), "已经在掉血");
     }
 
-    private DrowningDanger.View situation(boolean headInWater, int airBubbles, boolean drowning) {
-        return new DrowningDanger.View() {
-            @Override public boolean headInWater() {
-                return headInWater;
-            }
-
-            @Override public int airBubbles() {
-                return airBubbles;
-            }
-
-            @Override public boolean drowning() {
-                return drowning;
-            }
-        };
+    @Test
+    void notEnoughAirToSwimUpFromDeepWaterIsNow() {
+        // 深水底下还剩 150 刻：看着有五泡，可游上去要 160 刻，再不走就来不及。
+        assertEquals(Urgency.NOW,
+                DrowningDanger.assess(SurvivalFakes.calm().underwater(150).surfaceNeeds(160).build()));
     }
 }
