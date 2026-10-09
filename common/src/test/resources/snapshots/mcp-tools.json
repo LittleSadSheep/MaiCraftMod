@@ -1,0 +1,130 @@
+{
+  "instructions": "MaiCraft 操作 Minecraft 世界里的本地玩家（角色）。五个工具：observe 看世界和自己；lookup 查能力与资料，先调用 lookup() 列出能力；execute 下达一个目标；events 等目标的进展；task 查看、暂停、恢复、取消目标，或回答它提出的问题。",
+  "tools": [
+    {
+      "name": "observe",
+      "description": "看世界和自己：角色状态与背包、周围场景、某个看到的东西的细节、世界记忆。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "what": {
+            "type": "string",
+            "description": "看什么：self、scene（默认）、detail、world_memory",
+            "default": "scene"
+          },
+          "id": {
+            "type": "string",
+            "description": "只在 what=detail 时用：观察编号（e12、f3、b5）或地标名"
+          },
+          "grid": {
+            "type": "boolean",
+            "description": "只在 what=scene 时用：true 时附带近处的俯视网格"
+          }
+        }
+      }
+    },
+    {
+      "name": "lookup",
+      "description": "查资料：能力列表与能力说明、离线知识库、Minecraft Wiki、配方。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string",
+            "description": "查什么：abilities（默认）、knowledge、wiki、recipe",
+            "default": "abilities"
+          },
+          "id": {
+            "type": "string",
+            "description": "精确条目：能力 ID、知识 URI、物品 ID"
+          },
+          "query": {
+            "type": "string",
+            "description": "关键词搜索；与 id 二选一"
+          },
+          "url": {
+            "type": "string",
+            "description": "只在 topic=wiki 时用：直接读一篇条目"
+          }
+        }
+      }
+    },
+    {
+      "name": "execute",
+      "description": "开始做一件事（下达一个目标）；dry_run=true 只检查、不动手。这不是 Minecraft 的 /execute 命令，发消息或命令用能力 chat。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "goal": {
+            "type": "object",
+            "description": "目标：要说做什么、对谁、按什么许可"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "description": "true 时只做校验和预检，返回计划编号和发现的问题"
+          },
+          "plan_id": {
+            "type": "string",
+            "description": "执行一次 dry_run 通过的计划；与 goal 二选一"
+          },
+          "request_key": {
+            "type": "string",
+            "description": "网络重试用的幂等键；不给时由入口自动生成"
+          }
+        },
+        "required": [
+          "goal"
+        ]
+      }
+    },
+    {
+      "name": "task",
+      "description": "查看、暂停、恢复、取消任务，回答任务提出的问题，分页读证据。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "type": "string",
+            "description": "操作：get、list、pause、resume、cancel、answer"
+          },
+          "task_id": {
+            "type": "integer",
+            "description": "除 list 外都要给：execute 返回的任务编号"
+          },
+          "answer": {
+            "type": "string",
+            "description": "只在 operation=answer 时用：所选回答的编号"
+          }
+        },
+        "required": [
+          "operation"
+        ]
+      }
+    },
+    {
+      "name": "events",
+      "description": "按游标读任务事件，没有新事件时可以等一会儿。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "integer",
+            "description": "只读这个任务的事件"
+          },
+          "stream_id": {
+            "type": "string",
+            "description": "事件流的编号，照抄上次返回的 stream_id"
+          },
+          "after_cursor": {
+            "type": "integer",
+            "description": "从这个游标之后开始读，照抄上次返回的 cursor"
+          },
+          "wait_ms": {
+            "type": "integer",
+            "description": "没有新事件时最多等多久（毫秒，0 到 60000）"
+          }
+        }
+      }
+    }
+  ]
+}

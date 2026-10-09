@@ -1,0 +1,218 @@
+{
+  "parameter_names": {
+    "after_seconds": "先至少经过多少秒，再开始做检查",
+    "block": "方块 ID，或 # 开头的方块标签",
+    "blocks": "多个方块 ID 或方块标签",
+    "condition": "要等到的条件：elapsed / day / night / health_full / not_hungry",
+    "count": "这次要多做多少：拿东西就是再多拿几件（不是背包里的总数），做动作就是做几次",
+    "distance": "保持的距离，单位格，例如跟随时与目标相隔几格",
+    "entity": "实体类型 ID",
+    "item": "物品 ID，或 # 开头的物品标签",
+    "items": "多个物品 ID 或物品标签",
+    "max_distance": "出行或搜索的最远距离，单位格",
+    "max_seconds": "最多花多少秒",
+    "message": "要发到游戏聊天的一句话，对全体玩家可见",
+    "name": "名字，例如要记住的地点名",
+    "operation": "一个能力内部的几种操作选哪一种，例如 enable、disable、status",
+    "radius": "工作或搜索范围，单位格",
+    "slot": "装备与卸下的目标栏位：mainhand / offhand / head / chest / legs / feet / armor（armor 只配合卸下）",
+    "text": "要发送或书写的文字",
+    "via": "指定途径，例如拿东西时指定合成、烧炼或采掘"
+  },
+  "target_kinds": [
+    "here",
+    "seen",
+    "landmark",
+    "position",
+    "player",
+    "direction",
+    "previous"
+  ],
+  "towards": [
+    "forward",
+    "backward",
+    "left",
+    "right",
+    "north",
+    "south",
+    "east",
+    "west"
+  ],
+  "permissions": {
+    "change_blocks": [
+      "none",
+      "temporary",
+      "natural",
+      "any"
+    ],
+    "fight": [
+      "self_defense",
+      "hostile_mobs",
+      "any"
+    ],
+    "kill_animals": [
+      "none",
+      "wild",
+      "any"
+    ],
+    "survival_needs": [
+      "on",
+      "off"
+    ],
+    "defaults": {
+      "change_blocks": "natural",
+      "fight": "hostile_mobs",
+      "use_rare_items": false,
+      "kill_animals": "wild",
+      "survival_needs": "on"
+    }
+  },
+  "on_failure": [
+    "stop",
+    "continue"
+  ],
+  "goal_run_states": [
+    "running",
+    "awaiting_answer",
+    "paused",
+    "finished"
+  ],
+  "question_reasons": [
+    "need_approval",
+    "choose_one",
+    "unclear_target"
+  ],
+  "problem_kinds": [
+    "INVALID_PARAMETER",
+    "NEED_ITEM",
+    "NEED_APPROVAL",
+    "UNREACHABLE",
+    "NOT_FOUND",
+    "TARGET_GONE",
+    "DANGER",
+    "REFUSED_BY_GAME",
+    "WRONG_TIME",
+    "NOT_POSSIBLE_HERE",
+    "INVENTORY_FULL",
+    "STUCK",
+    "UNSUPPORTED",
+    "INTERNAL_ERROR"
+  ],
+  "change_kinds": [
+    "item_gained",
+    "item_consumed",
+    "item_stored",
+    "item_dropped",
+    "block_placed",
+    "block_broken",
+    "block_changed",
+    "entity_affected",
+    "moved",
+    "other"
+  ],
+  "event_kinds": [
+    "started",
+    "asked",
+    "paused",
+    "resumed",
+    "step_finished",
+    "finished",
+    "temporary_task_started",
+    "temporary_task_finished",
+    "need_unhandled"
+  ],
+  "error_codes": [
+    "invalid_parameter",
+    "unknown_ability",
+    "unknown_id",
+    "not_in_world",
+    "busy",
+    "internal_error"
+  ],
+  "reply_shapes": {
+    "ok": {
+      "ok": true,
+      "data": {},
+      "notes": [
+        "count：\"6\" 按 6 处理"
+      ],
+      "next": {
+        "tool": "events",
+        "arguments": {}
+      }
+    },
+    "error": {
+      "ok": false,
+      "error": {
+        "code": "invalid_parameter",
+        "message": "参数有 1 处问题",
+        "fields": [
+          {
+            "field": "goal.parameters.count",
+            "message": "count 应在 1..256",
+            "expected": "1..256"
+          }
+        ]
+      }
+    },
+    "result": {
+      "status": "partial",
+      "summary": "拿到 3 块原木，还差 5 块",
+      "changes": [
+        {
+          "kind": "item_gained",
+          "what": "minecraft:oak_log",
+          "count": 3
+        }
+      ],
+      "remaining": [
+        "再拿 5 块原木"
+      ],
+      "problem": {
+        "kind": "UNREACHABLE",
+        "message": "剩下的树在河对岸",
+        "suggestion": "换个地方找树"
+      },
+      "unconfirmed": [
+        {
+          "kind": "block_broken",
+          "what": "minecraft:oak_log",
+          "count": 1,
+          "note": "没等到服务端确认"
+        }
+      ],
+      "attempts": [
+        {
+          "tried": "砍门口那棵树",
+          "result": "砍倒了"
+        }
+      ]
+    },
+    "goal_run": {
+      "task_id": 12,
+      "ability": "maicraft:obtain",
+      "state": "awaiting_answer",
+      "question": {
+        "reason": "choose_one",
+        "text": "动哪个箱子？",
+        "options": [
+          {
+            "id": "b5",
+            "meaning": "门口那个"
+          },
+          {
+            "id": "b6",
+            "meaning": "屋里那个"
+          }
+        ]
+      },
+      "doing": "在等回答"
+    },
+    "event": {
+      "cursor": 7,
+      "kind": "asked",
+      "task_id": 12,
+      "message": "动哪个箱子？"
+    }
+  }
+}

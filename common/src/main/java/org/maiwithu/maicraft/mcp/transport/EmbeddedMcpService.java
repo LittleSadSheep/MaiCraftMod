@@ -312,10 +312,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
         result.addProperty("protocolVersion", negotiated);
         result.add("capabilities", capabilities);
         result.add("serverInfo", serverInfo);
-        result.addProperty("instructions",
-                "MaiCraft controls the local player in a Minecraft world. "
-                        + "Five tools are available: observe, lookup, execute, task, events. "
-                        + "Call lookup() first to list abilities; execute starts one, events waits for its progress, task inspects or answers it.");
+        result.addProperty("instructions", ToolCatalog.INSTRUCTIONS);
         sendJson(exchange, 200, JsonRpc.success(id, result), session);
     }
 
