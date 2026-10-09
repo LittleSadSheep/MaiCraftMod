@@ -2,7 +2,9 @@
 package org.maiwithu.maicraft.ability.drop;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -93,7 +95,20 @@ public final class DropModule implements AbilityModule {
             return new StepDecision.Finish(TaskResult.failed("丢不了：身上没有 " + item,
                     Problem.of(Problem.Kind.NEED_ITEM, "身上没有 " + item, null)));
         }
-        return new StepDecision.Run(new DropInput(item, count));
+        // 给的是标签：丢身上挂着这个标签、数量最多的那一种；丢的动作一次只认一种具体的物品。
+        return new StepDecision.Run(new DropInput(item.startsWith("#") ? mostCarriedIn(item.substring(1)) : item,
+                count));
+    }
+
+    private String mostCarriedIn(String tagId) {
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        for (var stack : backpack.stacks()) {
+            if (tags.tagsOf(stack.itemId()).contains(tagId)) counts.merge(stack.itemId(), stack.count(), Integer::sum);
+        }
+        offhand.heldInOffhand()
+                .filter(stack -> tags.tagsOf(stack.itemId()).contains(tagId))
+                .ifPresent(stack -> counts.merge(stack.itemId(), stack.count(), Integer::sum));
+        return counts.entrySet().stream().max(Map.Entry.comparingByValue()).orElseThrow().getKey();
     }
 
     @Override
