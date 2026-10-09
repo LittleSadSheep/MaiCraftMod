@@ -24,6 +24,7 @@ import org.maiwithu.maicraft.ability.gather.GatherAbility;
 import org.maiwithu.maicraft.ability.gather.LiveSceneTargets;
 import org.maiwithu.maicraft.ability.gather.LiveSpotReads;
 import org.maiwithu.maicraft.ability.obtain.ObtainAbility;
+import org.maiwithu.maicraft.ability.remember.RememberAbility;
 import org.maiwithu.maicraft.ability.travel.TravelAbility;
 import org.maiwithu.maicraft.ability.use.LiveDropGathering;
 import org.maiwithu.maicraft.ability.use.LiveHandPreparation;
@@ -233,6 +234,10 @@ public final class AbilityCatalog {
 
         // 聊天：发送与回显确认都走游戏聊天通道。
         registry.register(new ChatAbility(deps.chat()::send, deps.chat()::echoed));
+
+        // 记地点：只改世界记忆，当场完成；位置从角色、场景里的观察编号与已记的地点解析。
+        registry.register(new RememberAbility(deps.memory(), deps.characterPosition(),
+                new SceneSeenTargets(deps::scene)));
         return registry;
     }
 

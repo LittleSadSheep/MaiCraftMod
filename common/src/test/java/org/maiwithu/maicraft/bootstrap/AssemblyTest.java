@@ -77,9 +77,9 @@ class AssemblyTest {
         for (var module : registry.all()) {
             registered.add(module.spec().name());
         }
-        // 存东西能力接上了：找容器、界面读数、整堆搬运与挖盖子都有实现方。
+        // 存东西与记地点能力接上了：找容器、界面读数、整堆搬运与挖盖子都有实现方；记地点只改记忆。
         assertEquals(Set.of("use", "eat", "equip", "drop", "obtain", "gather", "deposit",
-                "fight", "follow", "wait", "travel", "chat"), registered,
+                "fight", "follow", "wait", "travel", "chat", "remember"), registered,
                 "清单里的能力要一个不少地登记上");
     }
 

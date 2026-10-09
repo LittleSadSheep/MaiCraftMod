@@ -117,6 +117,16 @@ public final class WorldMemory implements RemembersPlaces, RemembersRegions, Rem
         modify(book -> book.withoutRegion(name));
     }
 
+    /** 忘掉一个按名字记的地点；名字没记过就不动，返回有没有真的忘掉。 */
+    public boolean forgetPlace(String name) {
+        // 先查再删：名字没记过时不进文档库的事务，也如实回答没忘掉什么。
+        if (readBook().places().containsKey(name)) {
+            modify(book -> book.withoutPlace(name));
+            return true;
+        }
+        return false;
+    }
+
     /** 全部记住的区域，按名字排好；保护判断逐块核对位置在不在里面。 */
     @Override
     public List<RememberedRegion> regions() {

@@ -73,4 +73,12 @@ record MemoryBook(List<MemoryRecord> records, Map<String, WorldPosition> places,
         next.remove(name);
         return new MemoryBook(records, places, next);
     }
+
+    /** 忘掉一个按名字记的地点：名字没记过时原册返回，别的记忆不动。 */
+    MemoryBook withoutPlace(String name) {
+        if (!places.containsKey(name)) return this;
+        var next = new HashMap<>(places);
+        next.remove(name);
+        return new MemoryBook(records, next, regions);
+    }
 }
