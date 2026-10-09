@@ -254,7 +254,8 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
 
         @Override
         public void close() {
-            if (current != null) current.close();
+            // 换阶段或任务结束时基类收尾外壳：当前动作一并收尾放下，换阶段后不会沿用已收尾的动作。
+            dropCurrent();
         }
 
         @Override

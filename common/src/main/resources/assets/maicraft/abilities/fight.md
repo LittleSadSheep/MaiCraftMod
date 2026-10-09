@@ -13,9 +13,10 @@
 | 字段 | 含义 |
 | --- | --- |
 | `defeated` | 确认击败的目标（有死亡证据才算） |
+| `lostTrack` | 点名目标在确认击败前就不见了（走远或被别的东西打死），不算击败；有跟丢的时任务为 partial（打掉了一部分）或 failed（一个都没确认），问题种类 `TARGET_GONE` |
 | `fled` | 是否以撤离收场（此时任务为 failed，目标没死） |
 | `threatVerdict` | 开打前的威胁评估结论：winnable / risky / outmatched |
 | `weaponUsed` | 实际用的武器 |
 | `lootGained` | 拾荒捡到的物品 |
 
-常见问题：`DANGER`（打不过或撤离）、`NOT_FOUND`（观察编号对不上）、`NEED_APPROVAL`（要点名打有主的或玩家）。战斗被生存需求打断再回来，进度不丢。
+常见问题：`DANGER`（打不过或撤离）、`NOT_FOUND`（观察编号对不上）、`TARGET_GONE`（点名目标打到一半不见了）、`NEED_APPROVAL`（要点名打有主的或玩家）。战斗被生存需求打断再回来，进度不丢。

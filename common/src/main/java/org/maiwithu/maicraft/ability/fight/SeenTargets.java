@@ -17,6 +17,6 @@ interface SeenTargets {
     /** 刚锁定时的目标：游戏实体编号与类型。 */
     record Locked(int entityId, String type) {}
 
-    /** 实体此刻的观察：距离与是否已经死亡（死亡证据由游戏侧确认）。 */
-    record Observed(double distance, boolean dead) {}
+    /** 实体此刻的观察：在哪、离多远、是否已经死亡（死亡证据由游戏侧确认）。 */
+    record Observed(double x, double y, double z, double distance, boolean dead) {}
 }
