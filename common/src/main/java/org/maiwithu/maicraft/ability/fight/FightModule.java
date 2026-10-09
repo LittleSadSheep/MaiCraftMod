@@ -58,7 +58,7 @@ public final class FightModule implements AbilityModule {
                             .build(),
                     Param.of("count", ParamType.INTEGER)
                             .range(1, 64)
-                            .doc("区域清扫时最多处理几只；省略即区域内全部")
+                            .doc("区域清扫时最多处理几只；省略即开打那一刻看得见的这一批")
                             .build()),
             Set.of(TargetKind.SEEN),
             ExecutionMode.CONTROLS_PLAYER,
