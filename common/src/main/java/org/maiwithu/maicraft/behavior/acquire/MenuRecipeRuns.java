@@ -92,7 +92,7 @@ public final class MenuRecipeRuns implements RecipeRuns {
     }
 
     @Override
-    public Optional<Action> run(RecipeView recipe, WorldPosition station, int times) {
+    public Optional<Action> run(RecipeView recipe, WorldPosition station, int times, Permissions permissions) {
         PlayerContext current = context.get();
         ClientLevel level = current == null ? null : current.level();
         if (level == null) {
@@ -103,11 +103,12 @@ public final class MenuRecipeRuns implements RecipeRuns {
         if (id == null) {
             return Optional.empty();
         }
-        return level.getRecipeManager().byKey(id).map(holder -> new WorkAction(holder, recipe, station, times));
+        return level.getRecipeManager().byKey(id)
+                .map(holder -> new WorkAction(holder, recipe, station, times, permissions));
     }
 
     @Override
-    public Optional<Action> runAtRememberedStation(RecipeView recipe, int times) {
+    public Optional<Action> runAtRememberedStation(RecipeView recipe, int times, Permissions permissions) {
         // 刚就地摆下的那台就是最新记下的：按方块类型从记忆里找记录时刻最新的工作站。
         String blockType = workstationBlockType(recipe.kind());
         return memory.allRecords().stream()
@@ -115,7 +116,7 @@ public final class MenuRecipeRuns implements RecipeRuns {
                 .filter(record -> blockType.equals(record.blockType()))
                 .sorted((a, b) -> b.recordedAt().compareTo(a.recordedAt()))
                 .findFirst()
-                .flatMap(record -> run(recipe, record.position(), times));
+                .flatMap(record -> run(recipe, record.position(), times, permissions));
     }
 
     /** 一下点击确认之后要做的结算；拿到的是这下点击最后的状态。 */
@@ -131,6 +132,8 @@ public final class MenuRecipeRuns implements RecipeRuns {
         private enum Stage { APPROACH, OPEN, WAIT, WORK, TIDY, CLOSE }
 
         private final RecipeHolder<?> holder;
+        /** 这次任务的许可：走到设施跟前时能动多少地形按它来。 */
+        private final Permissions permissions;
         private final RecipeView recipe;
         private final WorldPosition station;
         private final int batches;
@@ -154,7 +157,9 @@ public final class MenuRecipeRuns implements RecipeRuns {
         private int feedFrom = -1;
         private int feedLeft;
 
-        WorkAction(RecipeHolder<?> holder, RecipeView recipe, WorldPosition station, int batches) {
+        WorkAction(RecipeHolder<?> holder, RecipeView recipe, WorldPosition station, int batches,
+                Permissions permissions) {
+            this.permissions = permissions;
             this.holder = holder;
             this.recipe = recipe;
             this.station = station;
@@ -194,7 +199,8 @@ public final class MenuRecipeRuns implements RecipeRuns {
         private ActionStatus approach(TickContext tick) {
             if (approaching == null) {
                 BlockPos at = new BlockPos(station.x(), station.y(), station.z());
-                approaching = close.toward(InteractionTarget.ofBlock(at), Permissions.DEFAULT);
+                // 走过去能动多少地形按这次任务的许可来，不另开一套默认档。
+                approaching = close.toward(InteractionTarget.ofBlock(at), permissions);
             }
             ActionStatus status = approaching.tick(tick);
             if (status instanceof ActionStatus.Running) {

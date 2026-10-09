@@ -85,7 +85,7 @@ public final class ContainerSource implements ItemSource {
         KnownContainer known = new KnownContainer(
                 container.blockType() + " " + offer.hint(),
                 container.position().x(), container.position().y(), container.position().z());
-        return takes.take(known, request);
+        return takes.take(known, request, context.permissions());
     }
 
     /** 这次搜多大范围：任务给了半径就在这个范围里找（给了就不越界），没给用来源自己的默认。 */

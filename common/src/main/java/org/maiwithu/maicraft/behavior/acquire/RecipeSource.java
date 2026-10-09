@@ -141,7 +141,7 @@ public final class RecipeSource implements ItemSource {
         if (station == null) {
             // 附近没有记住的设施：先去弄一个设施方块、在身边放下，再到新设施上做。
             steps.addAll(placeSteps(recipe, permissions));
-            Optional<Action> run = runs.runAtRememberedStation(recipe, times);
+            Optional<Action> run = runs.runAtRememberedStation(recipe, times, permissions);
             if (run.isEmpty()) {
                 return steps.isEmpty()
                         ? nothingToDo(recipe)
@@ -152,7 +152,7 @@ public final class RecipeSource implements ItemSource {
             return new StepwiseActions("就地摆下" + workstationName(recipe.kind()) + "再做"
                     + recipe.result().describe(), steps.toArray(Action[]::new));
         }
-        Optional<Action> run = runs.run(recipe, station, times);
+        Optional<Action> run = runs.run(recipe, station, times, permissions);
         if (run.isEmpty()) {
             // 备齐了也动不了手（设施没了、界面进不去）：整串放弃，由引擎换别的路。
             return steps.isEmpty()

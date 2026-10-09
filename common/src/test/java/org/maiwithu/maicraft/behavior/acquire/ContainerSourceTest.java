@@ -53,7 +53,7 @@ class ContainerSourceTest {
         WorldMemory memory = memory();
         memory.rememberContainerOpened(CHEST_AT, "minecraft:chest",
                 List.of("minecraft:iron_ingot", "minecraft:iron_ingot", "minecraft:bread"), NOW);
-        ContainerSource source = new ContainerSource(memory, tags, (container, request) -> Optional.empty());
+        ContainerSource source = new ContainerSource(memory, tags, (container, request, permissions) -> Optional.empty());
 
         SourceQuote quote = source.quote(request(2), CONTEXT);
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, quote);
@@ -66,7 +66,7 @@ class ContainerSourceTest {
     void 只看见过的箱子报不知道有多少_排在后面由选择器决定() {
         WorldMemory memory = memory();
         memory.rememberContainerSeen(CHEST_AT, "minecraft:chest", NOW);
-        ContainerSource source = new ContainerSource(memory, tags, (container, request) -> Optional.empty());
+        ContainerSource source = new ContainerSource(memory, tags, (container, request, permissions) -> Optional.empty());
 
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class,
                 source.quote(request(1), CONTEXT));
@@ -78,7 +78,7 @@ class ContainerSourceTest {
     void 记忆里没有装着它的箱子_如实回答给不了() {
         WorldMemory memory = memory();
         memory.rememberContainerOpened(CHEST_AT, "minecraft:chest", List.of("minecraft:bread"), NOW);
-        ContainerSource source = new ContainerSource(memory, tags, (container, request) -> Optional.empty());
+        ContainerSource source = new ContainerSource(memory, tags, (container, request, permissions) -> Optional.empty());
 
         SourceQuote quote = source.quote(request(1), CONTEXT);
         SourceQuote.Unavailable unavailable = assertInstanceOf(SourceQuote.Unavailable.class, quote);
@@ -90,7 +90,7 @@ class ContainerSourceTest {
         WorldMemory memory = memory();
         memory.rememberContainerOpened(CHEST_AT, "minecraft:chest", List.of("minecraft:iron_ingot"), NOW);
         AtomicReference<KnownContainer> taken = new AtomicReference<>();
-        ContainerSource source = new ContainerSource(memory, tags, (container, request) -> {
+        ContainerSource source = new ContainerSource(memory, tags, (container, request, permissions) -> {
             taken.set(container);
             return Optional.of(new Action() {
                 @Override public ActionStatus tick(TickContext context) {
@@ -112,7 +112,7 @@ class ContainerSourceTest {
     @Test
     void 报价认的箱子从记忆里没了_交回空由引擎换路() {
         WorldMemory memory = memory();
-        ContainerSource source = new ContainerSource(memory, tags, (container, request) -> Optional.empty());
+        ContainerSource source = new ContainerSource(memory, tags, (container, request, permissions) -> Optional.empty());
         SourceQuote.Offer stale = new SourceQuote.Offer("记得的箱子", 3,
                 new AcquisitionCost(5, 4), null, "99,64,99");
         assertTrue(source.begin(request(1), stale, CONTEXT).isEmpty());

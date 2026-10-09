@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.acquire;
 import java.util.Optional;
 import org.maiwithu.maicraft.behavior.inventory.KnownContainer;
 import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.goal.Permissions;
 
 /**
  * 开箱取物的执行接缝：走到容器跟前，打开界面，核对现场后把要的物品搬进背包，再关上界面。
@@ -14,5 +15,5 @@ import org.maiwithu.maicraft.kernel.task.Action;
 public interface ContainerTakes {
 
     /** 为一次取物生成动作：做完时想要的东西已在背包里（拿到多少以重新清点为准）。 */
-    Optional<Action> take(KnownContainer container, ItemRequest request);
+    Optional<Action> take(KnownContainer container, ItemRequest request, Permissions permissions);
 }

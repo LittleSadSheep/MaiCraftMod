@@ -346,8 +346,8 @@ public final class AbilityCatalog {
         }
     }
 
-    /** 采集的靠近：目标落实成一格方块后交给靠近模型，许可用默认档。 */
+    /** 采集的靠近：目标落实成一格方块后交给靠近模型，走过去能动多少地形按这次任务的许可来。 */
     private static ApproachesTargets approaches(LiveApproaches bringsClose) {
-        return target -> bringsClose.toward(InteractionTarget.ofBlock(target), Permissions.DEFAULT);
+        return (target, permissions) -> bringsClose.toward(InteractionTarget.ofBlock(target), permissions);
     }
 }
