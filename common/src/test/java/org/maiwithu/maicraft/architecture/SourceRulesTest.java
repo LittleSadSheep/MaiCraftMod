@@ -113,6 +113,30 @@ class SourceRulesTest {
     }
 
     @Test
+    void testMethodNamesUseOneLanguagePerClass() {
+        // 测试方法名写成一句场景，中文英文都行，但同一个测试类里统一一种，读测试报告时不来回切换。
+        Pattern testMethod = Pattern.compile("@Test\\s+(?:@\\w+(?:\\([^)]*\\))?\\s+)*void\\s+([^\\s(]+)\\s*\\(");
+        List<String> problems = new ArrayList<>();
+        for (JavaSource source : testSources) {
+            Matcher matcher = testMethod.matcher(source.code);
+            int chinese = 0;
+            int other = 0;
+            while (matcher.find()) {
+                if (matcher.group(1).codePoints().anyMatch(c -> Character.UnicodeScript.of(c) == Character.UnicodeScript.HAN)) {
+                    chinese++;
+                } else {
+                    other++;
+                }
+            }
+            if (chinese > 0 && other > 0) {
+                problems.add(relative(source.path) + " 里中文测试方法名 " + chinese + " 个、英文 " + other
+                        + " 个；同一个测试类统一一种写法");
+            }
+        }
+        report("测试方法名混用两种写法", problems);
+    }
+
+    @Test
     void noFullyQualifiedNamesInCode() {
         // 测试代码同样只用短名：替身与断言里的类型也写进 import。
         List<String> problems = new ArrayList<>();
