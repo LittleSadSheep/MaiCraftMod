@@ -85,7 +85,14 @@ public final class GoalReader {
         AbilityModule module = registry.find(id).orElse(null);
         if (module == null) {
             check.markUnknownAbility();
-            check.error(path + ".ability", "没有能力 " + raw, SimilarAbilities.hint(registry, id));
+            List<String> missing = registry.missingModsFor(id);
+            if (missing.isEmpty()) {
+                check.error(path + ".ability", "没有能力 " + raw, SimilarAbilities.hint(registry, id));
+            } else {
+                // 能力是有的，只是这个实例没装它要的模组：说清缺哪个，别让 LLM 去猜名字拼错了没有。
+                check.error(path + ".ability", "能力 " + raw + " 需要模组 " + String.join("、", missing)
+                        + "，这个实例没装", "装上模组再用，或换一个能力");
+            }
         }
         return module;
     }

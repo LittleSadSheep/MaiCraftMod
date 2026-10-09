@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.behavior.inventory;
+package org.maiwithu.maicraft.behavior.inventory.spi;
 
+import org.maiwithu.maicraft.behavior.inventory.SpaceStepResult;
 import org.maiwithu.maicraft.game.player.BackpackStack;
-
 
 /**
  * 随身背包接缝：便携模组给的随身容器（背包、潜影盒之类），腾地方时先把东西塞进去。
  *
- * <p>联动模组轨之后才有实现；现在没有实现，腾地方跳过这一步。
+ * <p>实现由联动模组提供，启动时按模组是否安装登记；还没有实现方时，腾地方跳过这一步。
  */
 public interface CarriedBackpack {
 

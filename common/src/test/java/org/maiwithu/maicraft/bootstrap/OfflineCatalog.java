@@ -27,6 +27,9 @@ import org.maiwithu.maicraft.game.serverlink.LinkTransport;
 import org.maiwithu.maicraft.game.serverlink.ServerLinkSession;
 import org.maiwithu.maicraft.game.world.BlockScanService;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
+import org.maiwithu.maicraft.compat.CompatRegistry;
+import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
+import org.maiwithu.maicraft.behavior.perception.FakeBlockTags;
 
 import java.nio.file.Path;
 import java.util.Optional;
@@ -74,6 +77,7 @@ final class OfflineCatalog {
         WorldMemory memory = new WorldMemory(new DocumentStore(tempDir.resolve("state.sqlite")), WORLD_KEY);
         ClientHooks.registerChatLog(new ChatLog());
         ServerLinkSession session = new ServerLinkSession(NO_TRANSPORT);
+        FacilityKinds facilities = new FacilityKinds(FakeBlockTags.vanilla());
         // 交互动作入口允许没有按住使用键投影；生存需求共用的挖掘走原生交互，离线给空壳。
         return new AbilityCatalog.Deps(
                 nobody,
@@ -81,7 +85,7 @@ final class OfflineCatalog {
                 new BaritoneInternals(),
                 new BaritoneInternals(),
                 new BlockScanService(),
-                new Scene(memory), memory,
+                new Scene(memory, facilities), memory,
                 session,
                 SELF_ID,
                 (ReadsCreatureSituation) entityId -> Optional.empty(),
@@ -107,6 +111,8 @@ final class OfflineCatalog {
                 false,
                 new Protection((dimension, x, y, z) -> Optional.empty(), memory, memory, GuessesPlayerMade.NOTHING,
                         SELF_ID),
-                stack -> 0);
+                stack -> 0,
+                CompatRegistry.empty(),
+                facilities);
     }
 }

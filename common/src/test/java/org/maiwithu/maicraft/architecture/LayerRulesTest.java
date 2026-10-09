@@ -90,6 +90,13 @@ class LayerRulesTest {
             .should().notDependOnEachOther()
             .allowEmptyShould(true);
 
+    /** 服务端一侧按模组分的读取之间同样互不依赖。 */
+    @ArchTest
+    static final ArchRule serverCompatModsAreIndependent = slices()
+            .matching(ROOT + "server.compat.(*)..")
+            .should().notDependOnEachOther()
+            .allowEmptyShould(true);
+
     /** 只有寻路的 Baritone 适配层可以使用 Baritone 的非 api 包。 */
     @ArchTest
     static final ArchRule baritoneInternalsStayInNavigation = noClasses()

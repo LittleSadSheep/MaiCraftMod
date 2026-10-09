@@ -27,6 +27,7 @@ public final class Scene {
 
     private final SeenRegistry ids = new SeenRegistry();
     private final RemembersSightings memory;
+    private final FacilityKinds kinds;
 
     private SceneSelf self;
     private SceneEnvironment environment;
@@ -36,8 +37,12 @@ public final class Scene {
     private List<TerrainFeature> features = List.of();
     private List<FacilitySighting> facilities = List.of();
 
-    public Scene(RemembersSightings memory) {
+    /**
+     * @param kinds 设施分类：看见的功能方块是容器还是工作设施，按它写进世界记忆
+     */
+    public Scene(RemembersSightings memory, FacilityKinds kinds) {
         this.memory = memory;
+        this.kinds = kinds;
     }
 
     /** 更新角色自己的观察：方位说法的基准，先有它，别的观察才整理得出方位。 */
@@ -142,9 +147,9 @@ public final class Scene {
             String id = ids.facility(sighting.position(), direction, nowTick);
             next.add(new FacilitySighting(id, sighting.blockType(), sighting.position(),
                     direction, DirectionWords.compassOf(dx, dz), (int) Math.round(distance)));
-            if (FacilityKinds.isContainer(sighting.blockType())) {
+            if (kinds.isContainer(sighting.blockType())) {
                 memory.containerSeen(sighting.position(), sighting.blockType(), when);
-            } else if (FacilityKinds.isWorkstation(sighting.blockType())) {
+            } else if (kinds.isWorkstation(sighting.blockType())) {
                 memory.workstationSeen(sighting.position(), sighting.blockType(), when);
             }
         }

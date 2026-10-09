@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.mcp.knowledge;
+package org.maiwithu.maicraft.kernel.knowledge;
 
 import com.google.gson.JsonArray;
 import java.util.List;

@@ -10,6 +10,8 @@ import com.google.gson.JsonObject;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import com.google.gson.JsonArray;
+import org.maiwithu.maicraft.kernel.knowledge.KnowledgeDocument;
+import org.maiwithu.maicraft.kernel.knowledge.KnowledgeSource;
 
 /** 知识库按元数据发现、按需读取：内置资料完整可读，目录分页绑定版本，搜索不展开正文。 */
 class KnowledgeLibraryTest {

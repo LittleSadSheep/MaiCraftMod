@@ -52,6 +52,8 @@ import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 import org.maiwithu.maicraft.game.world.SaveIdentity;
 import org.maiwithu.maicraft.kernel.storage.StateIdentity;
 import org.maiwithu.maicraft.game.world.FurnaceFuels;
+import org.maiwithu.maicraft.compat.CompatRegistry;
+import org.maiwithu.maicraft.game.world.RegistryBlockTags;
 
 /**
  * 进世界时创建、退世界时丢弃的这一份现场：世界记忆、感知场景，并把能力按清单登记进客户端共用的注册表。
@@ -75,6 +77,8 @@ public final class WorldScope {
     private volatile String dimension;
     /** 这个世界的目标运行存盘：退出游戏、换世界之后，没做完的目标从这里读回来。 */
     private final GoalRunStore goalRuns;
+    /** 设施分类：容器与工作设施按这个世界同步过来的方块标签认。 */
+    private final FacilityKinds kinds;
     private final Scene scene;
     private final TravelProgressListener travelProgress = new LatestTravelProgress();
 
@@ -91,7 +95,7 @@ public final class WorldScope {
             ServerLinkSession session, SubtitleFeed subtitles, Interactions interactions,
             UseKeyProjection useKeyProjection, BaritoneInternals walks, CombatSenses senses,
             AbilityRegistry abilities, InteractionSender interactionSender, MenuActions menuActions,
-            boolean allowGameCommands, FurnaceFuels furnaceFuels) {
+            boolean allowGameCommands, FurnaceFuels furnaceFuels, CompatRegistry compat) {
         // 游戏接口层认出是哪个存档或服务器，内核的世界身份只拿编号与目录。
         SaveIdentity save = SaveIdentity.current(minecraft)
                 .orElseThrow(() -> new IllegalStateException("进了世界却识别不出世界身份，记忆无处安放"));
@@ -103,7 +107,8 @@ public final class WorldScope {
         DocumentStore documents = new DocumentStore(identity.databaseFile());
         this.memory = new WorldMemory(documents, identity.key());
         this.goalRuns = new DocumentGoalRunStore(documents, identity.key(), abilities);
-        this.scene = new Scene(memory);
+        this.kinds = new FacilityKinds(new RegistryBlockTags());
+        this.scene = new Scene(memory, kinds);
         // 保护判断：归属记录按区块问服务端（还没问到的按受保护处理），区域读每刻抄一份的快照，地标问世界记忆；
         // 玩家放置推断没有接。
         this.ownership = new OwnershipMap(session);
@@ -146,7 +151,9 @@ public final class WorldScope {
                 new InputDriver(playerControl),
                 allowGameCommands,
                 protection,
-                furnaceFuels), abilities);
+                furnaceFuels,
+                compat,
+                kinds), abilities);
     }
 
     /**
@@ -174,11 +181,12 @@ public final class WorldScope {
         // 俯视网格以角色为中心画一张：地形特征从网格里聚出来，路过成片的树顺路记产地线索。
         scene.updateGrid(OverheadGrid.render(current.level(), player.blockPosition(), OverheadGrid.DEFAULT_RADIUS),
                 gameTick, when);
-        // 设施观察：容器与工作设施两类都查，看见的写进世界记忆；床不在扫描清单里（按颜色散成十六种）。
-        Set<String> facilities = new LinkedHashSet<>(FacilityKinds.CONTAINERS);
-        facilities.addAll(FacilityKinds.WORKSTATIONS);
+        // 设施观察：容器与工作设施两类都查（按方块标签认，模组的箱子、损坏的铁砧都算），看见的写进世界记忆；
+        // 床不在扫描清单里（按颜色散成十六种）。
+        Set<String> facilities = new LinkedHashSet<>(kinds.containerBlockTypes());
+        facilities.addAll(kinds.workstationBlockTypes());
         scene.updateFacilities(gameTick, when,
-                new ClientNearbyBlocksSight(blockScans, () -> current).nearby(facilities));
+                new ClientNearbyBlocksSight(blockScans, () -> current, kinds).nearby(facilities));
         scene.expire(gameTick);
     }
 

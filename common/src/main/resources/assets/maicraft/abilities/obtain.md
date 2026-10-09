@@ -36,7 +36,7 @@
 | --- | :---: | --- |
 | `item` | ✅ | 物品 ID 或 `#` 开头的标签；写岔了（不存在的物品、空标签）不进游戏就报 `INVALID_PARAMETER` |
 | `count` | | 再多拿几件，默认 1；不设上限，做不完如实 partial |
-| `via` | | `craft` / `smelt` / `container` / `mine` / `harvest` / `trade`；不给按代价自己挑 |
+| `via` | | `craft` / `smelt` / `container` / `mine` / `harvest` / `trade`，联动模组接入的途径装了才有，以参数表列的为准；不给按代价自己挑 |
 | `radius` | | 容器与采掘的搜索范围（格），给了就冻结在范围内，上限 64 |
 | `max_distance` | | 愿意为此走多远（格）；太远的来源不参与 |
 

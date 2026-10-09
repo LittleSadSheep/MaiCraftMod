@@ -19,11 +19,12 @@ public interface ItemSource {
     String describe();
 
     /**
-     * 来源属于哪条途径，写法与拿东西的 via 取值一致（见 AcquireRoutes）。
+     * 来源属于哪条途径：取值就是拿东西的 via 可选值，说明写进能力说明的参数表。
      * via 给了就只走指定途径：引擎按它过滤来源；结果细节 obtained_via 也用它回答东西从哪来的。
      * 一个实现只认一条途径；合成与烧炼是两条途径，分别登记各自的来源实例。
+     * 自带的几条是 AcquireVia 上的常量；联动模组的来源自己报一条带说明的途径。
      */
-    String route();
+    AcquireVia via();
 
     /** 问价：回答能拿到多少、代价、风险；给不了、超出许可或还不支持，都如实回答。 */
     SourceQuote quote(ItemRequest request, SourceContext context);

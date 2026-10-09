@@ -90,22 +90,22 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
      * 一次拿东西的限定：只走哪些途径、愿意走多远、在多大半径里找。
      * 空的途径集合与 null 的距离、半径都表示不限。
      *
-     * @param routes            允许的途径（来源自报的门户）；空集合表示全部参与
+     * @param vias            允许的途径（来源自报的门户）；空集合表示全部参与
      * @param maxDistanceBlocks 愿意为此走多远（格）；来源报的距离超过它的不参与
      * @param radiusBlocks      容器与采掘的搜索半径（格）；传给来源，给了就不越界
      */
-    public record Scope(Set<String> routes, Double maxDistanceBlocks, Integer radiusBlocks) {
+    public record Scope(Set<String> vias, Double maxDistanceBlocks, Integer radiusBlocks) {
 
         /** 什么都不限：问遍所有来源，按代价挑。 */
         public static final Scope ALL = new Scope(Set.of(), null, null);
 
         public Scope {
-            routes = Set.copyOf(routes);
+            vias = Set.copyOf(vias);
         }
 
         /** 这条途径这次能不能参与。 */
-        public boolean allows(String route) {
-            return routes.isEmpty() || routes.contains(route);
+        public boolean allows(String via) {
+            return vias.isEmpty() || vias.contains(via);
         }
     }
 
@@ -148,7 +148,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         private List<Planned> plan = List.of();
         private Action step;
         private String stepSource;
-        private String stepSourceRoute;
+        private String stepSourceVia;
         private int carriedAtStepStart;
         /** 拿够了是身上有几件：第一次推进时身上原有的加上这次要多拿的；还没推进过为 -1。 */
         private int target = -1;
@@ -196,7 +196,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             List<SourceQuote> refusals = new ArrayList<>();
             for (ItemSource source : sources) {
                 if (excluded.contains(source.describe())) continue;
-                if (!scope.allows(source.route())) {
+                if (!scope.allows(source.via().name())) {
                     // via 指定了别条路：这条不参与，也不算"问过没货"，不必写进结果。
                     continue;
                 }
@@ -257,7 +257,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                         deadEnds.add(stepSource + "（做完了，但一件都没拿到）");
                     } else if (onDelivered != null) {
                         // 真有东西进了背包：这条途径记进 obtained_via。
-                        onDelivered.accept(stepSourceRoute);
+                        onDelivered.accept(stepSourceVia);
                     }
                     stage = Stage.CONSULT;
                     yield ActionStatus.progressed();
@@ -287,7 +287,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             }
             step = begun.get();
             stepSource = planned.offer().source();
-            stepSourceRoute = planned.source().route();
+            stepSourceVia = planned.source().via().name();
             carriedAtStepStart = CarriedItems.matching(backpack, offhand, request, tags);
             stage = Stage.RUN;
             return ActionStatus.progressed();

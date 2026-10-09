@@ -6,6 +6,7 @@ import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilitySpec;
 import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
 import org.maiwithu.maicraft.kernel.ability.Listing;
+import org.maiwithu.maicraft.kernel.ability.RequiredMod;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.goal.TargetKind;
@@ -14,6 +15,7 @@ import org.maiwithu.maicraft.kernel.param.ParamSpec;
 import org.maiwithu.maicraft.kernel.param.ParamType;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -54,6 +56,14 @@ final class ToolTestAbility implements AbilityModule {
         return new ToolTestAbility(spec("maicraft:remember", "记住或忘掉一个地点", ParamSpec.of(
                         Param.of("name", ParamType.TEXT).required().doc("地点名").build()),
                 Set.of(TargetKind.HERE, TargetKind.POSITION), ExecutionMode.MEMORY_ONLY, Listing.LISTED), false);
+    }
+
+    /** 需要某些联动模组才可用的能力，例如读机器。 */
+    static ToolTestAbility needsMods(String id, String... modIds) {
+        Set<RequiredMod> mods = new HashSet<>();
+        for (String modId : modIds) mods.add(RequiredMod.of(modId));
+        return new ToolTestAbility(new AbilitySpec(id, "读机器", AbilityDoc.forAbility(id.substring(id.indexOf(':') + 1)),
+                ParamSpec.EMPTY, Set.of(), ExecutionMode.READ_ONLY, mods, List.of(), Listing.LISTED), false);
     }
 
     static ToolTestAbility hidden() {
