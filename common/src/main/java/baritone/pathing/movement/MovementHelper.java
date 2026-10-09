@@ -62,6 +62,7 @@ import static baritone.api.utils.RotationUtils.DEG_TO_RAD_F;
 import static baritone.pathing.movement.Movement.HORIZONTALS_BUT_ALSO_DOWN_____SO_EVERY_DIRECTION_EXCEPT_UP;
 import static baritone.pathing.precompute.Ternary.*;
 import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
+import org.maiwithu.maicraft.behavior.navigation.HazardEscapePolicy;
 
 /**
  * Static helpers for cost calculation
@@ -86,7 +87,7 @@ public interface MovementHelper extends ActionCosts, Helper {
      * 常规的「邻格有岩浆禁挖」会把所有出逃路线全数拒绝；其余规则原样不变。
      */
     static boolean avoidBreaking(BlockStateInterface bsi,
-                                 org.maiwithu.maicraft.behavior.navigation.HazardEscapePolicy escape,
+                                 HazardEscapePolicy escape,
                                  net.minecraft.core.BlockPos escapeBody,
                                  int x, int y, int z, BlockState state) {
         if (!bsi.worldBorder.canPlaceAt(x, z)) {

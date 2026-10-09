@@ -54,6 +54,7 @@ import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationProtection;
 import org.maiwithu.maicraft.behavior.navigation.baritone.PhysicalObstacleSnapshot;
 import org.maiwithu.maicraft.behavior.navigation.baritone.MaiCraftGoals;
 import org.maiwithu.maicraft.behavior.navigation.baritone.ClearanceWhitelist;
+import org.maiwithu.maicraft.behavior.navigation.HazardEscapePolicy;
 
 /**
  * @author Brady
@@ -118,7 +119,7 @@ public class CalculationContext {
      * 起点在岩浆致死邻域内时的脱困放行策略；无危险邻域时为 INACTIVE，
      * 常规危险回避原样生效。检测在上下文构造时冻结一次，搜索全程一致。
      */
-    public final org.maiwithu.maicraft.behavior.navigation.HazardEscapePolicy hazardEscape;
+    public final HazardEscapePolicy hazardEscape;
 
     public CalculationContext(IBaritone baritone) {
         this(baritone, false);
@@ -157,7 +158,7 @@ public class CalculationContext {
         this.world = baritone.getPlayerContext().world();
         this.worldData = (WorldData) baritone.getPlayerContext().worldData();
         this.bsi = new BlockStateInterface(baritone.getPlayerContext(), forUseOnAnotherThread);
-        this.hazardEscape = org.maiwithu.maicraft.behavior.navigation.HazardEscapePolicy.detect(
+        this.hazardEscape = HazardEscapePolicy.detect(
                 bsi.access, baritone.getPlayerContext().playerFeet().immutable(),
                 pos -> bsi.worldContainsLoadedChunk(pos.getX(), pos.getZ()));
         this.collisionGeometry = new CollisionGeometry(bsi.access, forUseOnAnotherThread,
@@ -243,7 +244,7 @@ public class CalculationContext {
         this.worldBorder = new BetterWorldBorder(world.getWorldBorder());
         this.maicraftPolicy = Objects.requireNonNull(frozenPolicy, "frozenPolicy");
         this.portalEntryCells = portalEntryCells(
-                org.maiwithu.maicraft.behavior.navigation.baritone.MaiCraftGoals.unwrap(
+                MaiCraftGoals.unwrap(
                         baritone.getPathingBehavior().getGoal()));
     }
 
