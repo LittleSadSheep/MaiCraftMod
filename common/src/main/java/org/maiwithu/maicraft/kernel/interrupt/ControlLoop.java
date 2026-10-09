@@ -76,6 +76,8 @@ public final class ControlLoop {
     private final Set<SurvivalNeed> brokenNeeds = new HashSet<>();
     /** 本刻问到的手上任务能不能打断；本刻没问（手上没任务、停在半路、等重生）时为 null。只给面板看。 */
     private Interruptibility askedInterruptibility;
+    /** 本刻想插进来、却被打断规则按住或正等着再试的需求；没有时为 null。只给面板看。 */
+    private HeldBackNeed heldBackNeed;
 
     /** 各生存需求在启动时登记一次；顺序决定同样急时谁先插进来。 */
     public ControlLoop(List<SurvivalNeed> needs) {
@@ -180,9 +182,15 @@ public final class ControlLoop {
         return askedInterruptibility;
     }
 
+    /** 本刻想插进来、却被打断规则按住或正等着再试的那个最急的需求；没有时为 null。 */
+    public HeldBackNeed heldBackNeed() {
+        return heldBackNeed;
+    }
+
     /** 推进一刻。 */
     public Decision tick(TickContext context) {
         askedInterruptibility = null;
+        heldBackNeed = null;
         // 角色死了（血量见底、死亡界面）循环就停摆：不再插生存需求的临时任务、不推进任务，
         // 也不把死亡当成"处境不急"继续谎报。重生后（角色对象换掉、活着）从这里自然恢复。
         PlayerContext player = context.player();
@@ -228,7 +236,8 @@ public final class ControlLoop {
             current.pause();
             return takeOver(choice, context);
         }
-        // 没有人能插进来：忍住，手上的任务继续；被按住的需求交给调用方提醒。
+        // 没有人能插进来：忍住，手上的任务继续；被按住的需求交给调用方提醒，也留给面板说清是谁在等。
+        if (choice.deferred != null) heldBackNeed = new HeldBackNeed(choice.deferred.name(), choice.deferredUrgency);
         return advance(current, context, choice.deferred);
     }
 
@@ -461,6 +470,14 @@ public final class ControlLoop {
      * @param parked   主任务被临时任务停在了半路，不再推进
      */
     public record Layer(Task task, String needName, Urgency urgency, boolean parked) {}
+
+    /**
+     * 想插进来却没插进来的需求：被打断规则按住，或者上次没做成正等着再试。
+     *
+     * @param needName 需求的名字
+     * @param urgency  此刻多急
+     */
+    public record HeldBackNeed(String needName, Urgency urgency) {}
 
     /**
      * 一个临时任务没做成、正在等着再试的需求。

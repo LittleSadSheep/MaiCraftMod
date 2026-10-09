@@ -107,6 +107,8 @@ class ControlLoopTest {
         assertSame(mob, advanced.deferred());
         assertEquals(0, mob.created);
         assertEquals(0, main.pauses);
+        assertEquals(new ControlLoop.HeldBackNeed("自卫", Urgency.SOON), loop.heldBackNeed(), "面板说得出是谁被按住、多急");
+        assertEquals(Interruptibility.UNSAFE_TO_STOP, loop.askedInterruptibility(), "面板说得出为什么插不进来");
     }
 
     @Test

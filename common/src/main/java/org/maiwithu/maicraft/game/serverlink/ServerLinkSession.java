@@ -41,6 +41,9 @@ public final class ServerLinkSession {
     /** 服务端迟迟没有完成握手；为真时客户端应当断开并提示服主安装 MaiCraft。 */
     public boolean confirmationExpired() { return router.serverConfirmationExpired(); }
 
+    /** 和服务端 MaiCraft 握手到哪一步、没握手好的原因；只读，给调试面板说清"服务端那边怎么了"。 */
+    public ServerCapabilityState capabilities() { return router.session().capabilities; }
+
     /** 每个客户端刻结束调用：跟随当前连接与世界绑定会话，推进握手、分发与核对。 */
     public void tick(Minecraft minecraft) {
         requireClientThread(minecraft);
