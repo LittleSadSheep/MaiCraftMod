@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.game.menu;
 
-import java.util.concurrent.atomic.AtomicReference;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.ChatScreen;
@@ -16,12 +15,8 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /** 管理菜单可见性的等待：界面必须对应当前菜单，并在改变后真正绘制过，自动化才可以点下一次。 */
 public final class MenuVisibility {
-    /** 最近一次真正绘制出来的界面与帧号；渲染事件从 Mixin 进入，这里只留这一个静态登记点。 */
-    private record Rendered(Screen screen, long frame) {}
-
-    // 用不可变的整体快照登记渲染帧，帧号单调前进，避免出现半更新的可见状态。
-    private static final AtomicReference<Rendered> LAST_RENDERED =
-            new AtomicReference<>(new Rendered(null, 0));
+    /** 最近一次真正画出来的界面与帧号；渲染从 Mixin 进来，记在启动时登记的那一份里。 */
+    private final RenderedScreens screens;
     private Screen observedScreen;
     private AbstractContainerMenu observedMenu;
     private long readyTick;
@@ -56,19 +51,17 @@ public final class MenuVisibility {
         return true;
     }
 
-    /** 界面实际渲染完成后才登记可见状态，游戏刻更新不能代替可见证据。 */
-    public static void rendered(Screen screen) {
-        Rendered current = LAST_RENDERED.get();
-        LAST_RENDERED.set(new Rendered(screen, current.frame() + 1));
+    MenuVisibility(RenderedScreens screens) {
+        this.screens = screens;
     }
 
-    /** 当前登记过的渲染帧号；界面切换观察靠帧号判断“画过一帧”。 */
-    private static long renderedFrame() {
-        return LAST_RENDERED.get().frame();
+    // 当前登记过的渲染帧号；界面切换观察靠帧号判断"画过一帧"。
+    private long renderedFrame() {
+        return screens.frame();
     }
 
-    private static Screen renderedScreen() {
-        return LAST_RENDERED.get().screen();
+    private Screen renderedScreen() {
+        return screens.screen();
     }
 
     boolean ready(PlayerContext context) {
@@ -105,6 +98,6 @@ public final class MenuVisibility {
     void reset() {
         observedScreen = null;
         observedMenu = null;
-        LAST_RENDERED.set(new Rendered(null, 0));
+        screens.reset();
     }
 }

@@ -49,6 +49,7 @@ import org.maiwithu.maicraft.game.ChatLog;
 import org.maiwithu.maicraft.game.ClientHooks;
 import org.maiwithu.maicraft.game.SubtitleFeed;
 import org.maiwithu.maicraft.game.menu.DefaultMenuActions;
+import org.maiwithu.maicraft.game.menu.RenderedScreens;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerControlBoundary;
 import org.maiwithu.maicraft.game.player.ReadsFoodValues;
@@ -253,36 +254,17 @@ public final class Bootstrap {
             }
             // 交互提交与容器界面操作共用角色上下文里同一份每刻一次的交互机会；两边建好后互相接上，再挂进角色上下文。
             // 行为层的生存需求要靠这条轨道挖掘与放水，所以在这里创建并互相接好。
-            menuActions = new DefaultMenuActions(playerControl.input());
+            // 界面真正画出来的记录：渲染从 Mixin 进来记帧，容器界面点击前要等改变后的界面画过一帧。
+            RenderedScreens renderedScreens = new RenderedScreens();
+            ClientHooks.registerRenderedScreens(renderedScreens);
+            menuActions = new DefaultMenuActions(playerControl.input(), renderedScreens);
             interactionSender = new DefaultInteractionSender(menuActions);
             menuActions.attachSender(interactionSender);
             playerControl.attachInteractionEntries(interactionSender, menuActions);
             // 按住使用键的投影：持续使用的提交方接入前没有任务占用，投影读到的始终是真实键值。
             UseKeyProjection useKeyProjection = new UseKeyHoldProjection(useKeyHold);
-            // 吃随身食物：挑一件能直接吃的，换到主手后原生按住吃完一口。
-            // 食物数值一份：饿了挑吃的、数口粮都按游戏的食物组件认。
-            ReadsFoodValues foods = PlayerViews.foods(() -> playerControl.activeContext().orElse(null));
-            EatsCarriedFood foodMoves = new EatsCarriedFood(
-                    PlayerViews.backpack(() -> playerControl.activeContext().orElse(null)),
-                    foods,
-                    new ClientMovesToMainhand(() -> playerControl.activeContext().orElse(null)),
-                    useKeyProjection);
-            // 战斗感观一份：生存需求的自卫与战斗能力看的是同一份伤害证据。
-            combatSenses = new LiveCombatSenses(new CombatMemory(), foods);
-            // 控制循环按急迫程度登记生存需求：必须立刻处理的先登记，同样急时它先插进来；
-            // 生存需求的事件从同一条任务事件流出去。主任务由目标运行表挂上：LLM 用 execute 派了活，
-            // 目标就成为主任务。
-            // 交互动作入口与按住使用键投影：生存需求的落地放水、能力清单在进世界时都用它们。
-            interactions = new Interactions(useKeyProjection);
-            // 挖三填一：挖用原生挖掘、封口换方块原生放下、出坑用走到；脚下是不是别人的东西问当前世界的保护判断。
-            Supplier<PlayerContext> now = () -> playerControl.activeContext().orElse(null);
-            // 换气时水面被盖住，挖开头顶那一格也问同一份保护判断。
-            Supplier<Protection> protection = () -> worldScope[0] == null ? null : worldScope[0].protection();
-            Supplier<BlockBreaking> diggings = () -> new NativeBlockBreaking(interactionSender, menuActions);
-            LiveBurrow burrow = new LiveBurrow(now, diggings, interactions, new ClientMovesToMainhand(now), walks,
-                    protection);
-            controlLoop = withSurvivalNeeds(taskEvents, interactionSender, menuActions, interactions,
-                    combatSenses, walks, foodMoves, foods, burrow, new LiveCeilingDigs(diggings, protection));
+            // 生存需求与战斗感观：控制循环在这里建好，目标运行表把主任务挂上去。
+            buildSurvival(useKeyProjection);
             // Mixin 钩子拿不到构造注入，只能在这里登记；服务本体仍以实例传递。
             ClientHooks.registerPlayerControl(playerControl);
             ClientHooks.registerBlockScans(blockScans);
@@ -322,6 +304,34 @@ public final class Bootstrap {
                 }
             });
             tools = goalTools(abilities, goals, clientWork, taskEvents, () -> worldScope[0]);
+        }
+
+        // 生存需求一套：吃随身食物、战斗感观、交互入口、挖三填一与换气挖顶，按急迫程度登记进控制循环。
+        private void buildSurvival(UseKeyProjection useKeyProjection) {
+            // 吃随身食物：挑一件能直接吃的，换到主手后原生按住吃完一口。
+            // 食物数值一份：饿了挑吃的、数口粮都按游戏的食物组件认。
+            ReadsFoodValues foods = PlayerViews.foods(() -> playerControl.activeContext().orElse(null));
+            EatsCarriedFood foodMoves = new EatsCarriedFood(
+                    PlayerViews.backpack(() -> playerControl.activeContext().orElse(null)),
+                    foods,
+                    new ClientMovesToMainhand(() -> playerControl.activeContext().orElse(null)),
+                    useKeyProjection);
+            // 战斗感观一份：生存需求的自卫与战斗能力看的是同一份伤害证据。
+            combatSenses = new LiveCombatSenses(new CombatMemory(), foods);
+            // 控制循环按急迫程度登记生存需求：必须立刻处理的先登记，同样急时它先插进来；
+            // 生存需求的事件从同一条任务事件流出去。主任务由目标运行表挂上：LLM 用 execute 派了活，
+            // 目标就成为主任务。
+            // 交互动作入口与按住使用键投影：生存需求的落地放水、能力清单在进世界时都用它们。
+            interactions = new Interactions(useKeyProjection);
+            // 挖三填一：挖用原生挖掘、封口换方块原生放下、出坑用走到；脚下是不是别人的东西问当前世界的保护判断。
+            Supplier<PlayerContext> now = () -> playerControl.activeContext().orElse(null);
+            // 换气时水面被盖住，挖开头顶那一格也问同一份保护判断。
+            Supplier<Protection> protection = () -> worldScope[0] == null ? null : worldScope[0].protection();
+            Supplier<BlockBreaking> diggings = () -> new NativeBlockBreaking(interactionSender, menuActions);
+            LiveBurrow burrow = new LiveBurrow(now, diggings, interactions, new ClientMovesToMainhand(now), walks,
+                    protection);
+            controlLoop = withSurvivalNeeds(taskEvents, interactionSender, menuActions, interactions,
+                    combatSenses, walks, foodMoves, foods, burrow, new LiveCeilingDigs(diggings, protection));
         }
 
         /** 建与服务端的会话，并在入服前登记客户端知道的操作清单。 */

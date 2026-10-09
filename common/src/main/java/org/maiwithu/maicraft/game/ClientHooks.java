@@ -5,6 +5,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.maiwithu.maicraft.game.player.PlayerControlBoundary;
 import org.maiwithu.maicraft.game.player.UseKeyHold;
 import org.maiwithu.maicraft.game.world.BlockScanService;
+import org.maiwithu.maicraft.game.menu.RenderedScreens;
 
 /**
  * Mixin 进入游戏接口层的静态登记点。
@@ -19,6 +20,7 @@ public final class ClientHooks {
     private static final AtomicReference<UseKeyHold> USE_KEY_HOLD = new AtomicReference<>();
     private static final AtomicReference<SubtitleFeed> SUBTITLE_FEED = new AtomicReference<>();
     private static final AtomicReference<ChatLog> CHAT_LOG = new AtomicReference<>();
+    private static final AtomicReference<RenderedScreens> RENDERED_SCREENS = new AtomicReference<>();
 
     private ClientHooks() {}
 
@@ -45,6 +47,16 @@ public final class ClientHooks {
     /** 启动时登记本地聊天栏的记录端；聊天栏每加一条消息由 Mixin 转过来。 */
     public static void registerChatLog(ChatLog log) {
         CHAT_LOG.set(log);
+    }
+
+    /** 启动时登记界面真正画出来的记录；界面渲染的 Mixin 往里记帧。传 null 表示停止。 */
+    public static void registerRenderedScreens(RenderedScreens screens) {
+        RENDERED_SCREENS.set(screens);
+    }
+
+    /** Mixin 类跨包读取：界面这一帧画完往哪里记；没登记时为 null。 */
+    public static RenderedScreens renderedScreens() {
+        return RENDERED_SCREENS.get();
     }
 
     /** Mixin 类跨包读取；这里是与 Mixin 之间唯一允许的静态通道。 */

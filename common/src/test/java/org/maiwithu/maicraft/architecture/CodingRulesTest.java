@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.architecture;
 
+import com.tngtech.archunit.base.DescribedPredicate;
+import com.tngtech.archunit.core.domain.JavaField;
 import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.junit.AnalyzeClasses;
 import com.tngtech.archunit.junit.ArchTest;
@@ -26,6 +28,24 @@ class CodingRulesTest {
             .and().areDeclaredInClassesThat().resideOutsideOfPackage(ROOT + "game.mixin..")
             .and().areStatic()
             .should().beFinal()
+            .allowEmptyShould(true);
+
+    /**
+     * final 的静态字段里装着可变状态（原子引用、原子计数）也是全局可变状态：只准出现在三处——
+     * Mixin 进入游戏接口层的登记点 ClientHooks、Mixin 包、内嵌 Baritone 的桥（Baritone 的代码只能静态调用它们）。
+     */
+    @ArchTest
+    static final ArchRule mutableStaticHoldersStayInRegistrationPoints = fields()
+            .that().areDeclaredInClassesThat().resideInAPackage("org.maiwithu.maicraft..")
+            .and().areStatic()
+            .and(new DescribedPredicate<JavaField>("装着可变状态的原子类型") {
+                @Override public boolean test(JavaField field) {
+                    return field.getRawType().getPackageName().equals("java.util.concurrent.atomic");
+                }
+            })
+            .should().beDeclaredInClassesThat().haveFullyQualifiedName(ROOT + "game.ClientHooks")
+            .orShould().beDeclaredInClassesThat().resideInAnyPackage(
+                    ROOT + "game.mixin..", ROOT + "behavior.navigation.baritone..")
             .allowEmptyShould(true);
 
     /** 不写 get()、instance()、getInstance() 这类静态单例访问器；服务从构造函数传入。 */

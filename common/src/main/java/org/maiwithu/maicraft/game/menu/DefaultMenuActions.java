@@ -28,12 +28,14 @@ public final class DefaultMenuActions implements MenuActions {
     /** 挂起的菜单协议要与世界动作互斥；交互提交方由启动时在两端都建好后接进来。 */
     private InteractionSender sender;
     private PendingMenuAction active;
-    private final MenuVisibility visibility = new MenuVisibility();
+    private final MenuVisibility visibility;
     private AbstractContainerMenu closingMenu;
     private GuiPreparation worldPreparation;
 
-    public DefaultMenuActions(PlayerInput playerInput) {
+    /** @param screens 界面真正画出来的记录：渲染从 Mixin 进来，点击前要等改变后的界面画过一帧 */
+    public DefaultMenuActions(PlayerInput playerInput, RenderedScreens screens) {
         this.playerInput = playerInput;
+        this.visibility = new MenuVisibility(screens);
     }
 
     /** 启动时把同一个交互提交实例接进来；界面准备与它共享对挂起菜单协议的判断。 */
