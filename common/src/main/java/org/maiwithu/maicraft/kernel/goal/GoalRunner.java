@@ -76,6 +76,8 @@ public final class GoalRunner implements Task {
         this.registry = registry;
         this.store = store;
         this.remembers = remembers;
+        // 重启后恢复的 sequence：前面已经结束的步骤的结论从记录里接上，收尾时照样算进成败、并进事实。
+        finishedResults.addAll(run.stepResults());
     }
 
     /** 下达一个新目标：分配编号、记一条进行中的目标运行并立即存盘。 */
@@ -462,6 +464,7 @@ public final class GoalRunner implements Task {
         stepRunner = null;
         int index = run.stepIndex();
         finishedResults.add(stepResult);
+        run.recordStepResult(stepResult);
         Goal step = goal.steps().get(index);
         if (stepResult.status() != TaskResult.Status.DONE && step.onFailure() == Goal.OnFailure.STOP) {
             return settle(sequenceResult(index + 1), context);

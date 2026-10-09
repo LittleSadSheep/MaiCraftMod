@@ -14,6 +14,8 @@ import org.maiwithu.maicraft.kernel.param.Param;
 import org.maiwithu.maicraft.kernel.param.ParamSpec;
 import org.maiwithu.maicraft.kernel.param.ParamType;
 import org.maiwithu.maicraft.kernel.param.Params;
+import org.maiwithu.maicraft.kernel.result.Attempt;
+import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
@@ -89,8 +91,13 @@ class DocumentGoalRunStoreTest {
                 List.of(first, second, third), null);
         Question question = new Question(Question.Reason.CHOOSE_ONE, "动哪个箱子？",
                 List.of(new Question.Option("b5", "门口那个"), new Question.Option("b6", "屋里那个")));
+        // 第一步已经做完：走到时垫了一块泥土，结论随记录存着。
+        TaskResult firstDone = TaskResult.builder(TaskResult.Status.DONE, "到了矿洞口")
+                .change(new Change(Change.Kind.BLOCK_PLACED, "minecraft:dirt", 1, "路上垫的"))
+                .attempt(new Attempt("绕开水坑", "绕过去了"))
+                .build();
         GoalRun saved = GoalRun.fromSaved(store.nextId(), sequence, GoalRun.NO_PARENT, -1,
-                GoalRunState.AWAITING_ANSWER, 1, question, List.of("b6"), 120);
+                GoalRunState.AWAITING_ANSWER, 1, question, List.of("b6"), List.of(firstDone), 120);
         store.save(saved);
 
         // 换一个存储实例读：等于重启后重新打开同一个库。
@@ -102,6 +109,7 @@ class DocumentGoalRunStoreTest {
         assertEquals(question, back.question());
         assertEquals(List.of("b6"), back.answers());
         assertEquals(120, back.startedTick());
+        assertEquals(firstDone, back.stepResults().get(0), "前面做完的步骤的结论和变化原样读回");
         Goal goal = back.goal();
         assertEquals("挖矿洞", goal.purpose());
         assertEquals(careful, goal.permissions());

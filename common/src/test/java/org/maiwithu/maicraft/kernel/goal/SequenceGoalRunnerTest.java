@@ -296,7 +296,7 @@ class SequenceGoalRunnerTest {
         dig.next(new StepDecision.Run(new TestInput("挖坑")));
         GoalTestAbility build = new GoalTestAbility("maicraft:build", tasks);
         build.next(new StepDecision.Run(new TestInput("搭房")));
-        build.next(new StepDecision.Run(new TestInput("搭房")));
+        build.next(new StepDecision.Run(new TestInput("接着搭房")));
         tasks.keepRunning("搭房");
         AbilityRegistry registry = new AbilityRegistry(new TaskFactories());
         registry.register(dig);
@@ -317,10 +317,11 @@ class SequenceGoalRunnerTest {
 
         GoalRunner restored = GoalRunner.restore(runner.run(), registry, store, new GoalRunnerTest.TestMemory());
         restored.resumeGoal();
-        restored.start(new GoalTestTick(200));
-        for (long tick = 201; tick < 204; tick++) restored.tick(new GoalTestTick(tick));
+        TaskResult result = drive(restored, 10);
 
-        assertEquals(List.of("挖坑", "搭房", "搭房"), labels(tasks.started));
-        assertEquals(1, restored.run().stepIndex());
+        assertEquals(List.of("挖坑", "搭房", "接着搭房"), labels(tasks.started));
+        // 重启前挖好的坑照样算做成：整件事是完成，不是"做成一半"。
+        assertEquals(TaskResult.Status.DONE, result.status(), result::summary);
+        assertEquals("按顺序做完了全部 2 步", result.summary());
     }
 }

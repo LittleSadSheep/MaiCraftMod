@@ -35,6 +35,11 @@ public final class GoalRun {
     private Question question;
     /** 这次推进里 LLM 已经给过的回答，按先后顺序。 */
     private final List<String> answers = new ArrayList<>();
+    /**
+     * sequence 已经结束的各步骤的结论，按步骤先后；普通目标为空。随记录存盘：重启后靠它接上前面几步的成败
+     * 与已经发生的变化，整件事收尾时不会把重启前做完的步骤算成没做。
+     */
+    private final List<TaskResult> stepResults = new ArrayList<>();
     /** 结束后的结果；没结束时为 null。 */
     private TaskResult result;
     private long startedTick = -1;
@@ -58,7 +63,8 @@ public final class GoalRun {
      * 这里不改处境，也不做走法检查——存盘时它就是这个样子。
      */
     public static GoalRun fromSaved(long id, Goal goal, long parentRunId, int stepOfParent, GoalRunState state,
-                                    int stepIndex, Question question, List<String> answers, long startedTick) {
+                                    int stepIndex, Question question, List<String> answers,
+                                    List<TaskResult> stepResults, long startedTick) {
         if (state == GoalRunState.FINISHED) {
             throw new IllegalArgumentException("目标运行 " + id + " 已经结束，存盘只读回没结束的记录");
         }
@@ -70,6 +76,7 @@ public final class GoalRun {
         run.stepIndex = stepIndex;
         run.question = question;
         run.answers.addAll(answers);
+        run.stepResults.addAll(stepResults);
         run.startedTick = startedTick;
         return run;
     }
@@ -135,6 +142,14 @@ public final class GoalRun {
         finishedTick = gameTick;
     }
 
+    /** sequence 的一步结束了：记下它的结论，随记录存盘。 */
+    public void recordStepResult(TaskResult stepResult) {
+        if (state == GoalRunState.FINISHED) {
+            throw new IllegalStateException("目标运行 " + id + " 已经结束，不能再记步骤结论");
+        }
+        stepResults.add(Objects.requireNonNull(stepResult, "stepResult"));
+    }
+
     /** 推进到另一个步骤（sequence 用）。 */
     public void advanceToStep(int index) {
         if (state != GoalRunState.RUNNING) {
@@ -177,6 +192,11 @@ public final class GoalRun {
     /** LLM 已经给过的回答，按先后顺序。 */
     public List<String> answers() {
         return Collections.unmodifiableList(answers);
+    }
+
+    /** sequence 已经结束的各步骤的结论，按步骤先后；普通目标为空。 */
+    public List<TaskResult> stepResults() {
+        return Collections.unmodifiableList(stepResults);
     }
 
     /** 结束后的结果；还没结束时为 null。 */

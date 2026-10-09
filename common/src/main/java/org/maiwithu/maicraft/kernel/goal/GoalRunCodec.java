@@ -7,6 +7,10 @@ import com.google.gson.JsonObject;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.param.ParseResult;
+import org.maiwithu.maicraft.kernel.result.Attempt;
+import org.maiwithu.maicraft.kernel.result.Change;
+import org.maiwithu.maicraft.kernel.result.Problem;
+import org.maiwithu.maicraft.kernel.result.TaskResult;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -48,6 +52,9 @@ final class GoalRunCodec {
         JsonArray answers = new JsonArray();
         run.answers().forEach(answers::add);
         json.add("answers", answers);
+        JsonArray stepResults = new JsonArray();
+        run.stepResults().forEach(stepResult -> stepResults.add(result(stepResult)));
+        json.add("step_results", stepResults);
         json.addProperty("started_tick", run.startedTick());
         return json;
     }
@@ -57,11 +64,13 @@ final class GoalRunCodec {
             long id = json.get("id").getAsLong();
             List<String> answers = new ArrayList<>();
             json.getAsJsonArray("answers").forEach(answer -> answers.add(answer.getAsString()));
+            List<TaskResult> stepResults = new ArrayList<>();
+            json.getAsJsonArray("step_results").forEach(item -> stepResults.add(readResult(item.getAsJsonObject())));
             return GoalRun.fromSaved(id, readGoal(json.getAsJsonObject("goal")),
                     json.get("parent_run_id").getAsLong(), json.get("step_of_parent").getAsInt(),
                     GoalRunState.valueOf(upper(json.get("state").getAsString())), json.get("step_index").getAsInt(),
                     json.has("question") ? readQuestion(json.getAsJsonObject("question")) : null,
-                    answers, json.get("started_tick").getAsLong());
+                    answers, stepResults, json.get("started_tick").getAsLong());
         } catch (Unreadable unreadable) {
             throw unreadable;
         } catch (RuntimeException broken) {
@@ -192,6 +201,78 @@ final class GoalRunCodec {
                 item.getAsJsonObject().get("id").getAsString(), item.getAsJsonObject().get("meaning").getAsString())));
         return new Question(Question.Reason.valueOf(upper(json.get("reason").getAsString())),
                 json.get("text").getAsString(), options);
+    }
+
+    /**
+     * sequence 一步的结论：成败、一句话、已经发生的变化、没做完的、问题、没能确认的、试过的办法。
+     * 能力特有的细节不存——它的形状只有能力自己认得，读回时没人能还原；收尾要的成败与事实都在别的字段里。
+     */
+    private static JsonObject result(TaskResult result) {
+        JsonObject json = new JsonObject();
+        json.addProperty("status", lower(result.status()));
+        json.addProperty("summary", result.summary());
+        json.add("changes", changes(result.changes()));
+        JsonArray remaining = new JsonArray();
+        result.remaining().forEach(remaining::add);
+        json.add("remaining", remaining);
+        if (result.problem() != null) {
+            JsonObject problem = new JsonObject();
+            problem.addProperty("kind", lower(result.problem().kind()));
+            problem.addProperty("message", result.problem().message());
+            if (result.problem().suggestion() != null) problem.addProperty("suggestion", result.problem().suggestion());
+            json.add("problem", problem);
+        }
+        json.add("unconfirmed", changes(result.unconfirmed()));
+        JsonArray attempts = new JsonArray();
+        for (Attempt attempt : result.attempts()) {
+            JsonObject item = new JsonObject();
+            item.addProperty("tried", attempt.tried());
+            item.addProperty("result", attempt.result());
+            attempts.add(item);
+        }
+        json.add("attempts", attempts);
+        return json;
+    }
+
+    private static TaskResult readResult(JsonObject json) {
+        TaskResult.Builder builder = TaskResult.builder(TaskResult.Status.valueOf(upper(json.get("status").getAsString())),
+                json.get("summary").getAsString());
+        builder.changes(readChanges(json.getAsJsonArray("changes")));
+        json.getAsJsonArray("remaining").forEach(part -> builder.remaining(part.getAsString()));
+        if (json.has("problem")) {
+            JsonObject problem = json.getAsJsonObject("problem");
+            builder.problem(Problem.of(Problem.Kind.valueOf(upper(problem.get("kind").getAsString())),
+                    problem.get("message").getAsString(),
+                    problem.has("suggestion") ? problem.get("suggestion").getAsString() : null));
+        }
+        builder.unconfirmed(readChanges(json.getAsJsonArray("unconfirmed")));
+        json.getAsJsonArray("attempts").forEach(item -> builder.attempt(new Attempt(
+                item.getAsJsonObject().get("tried").getAsString(), item.getAsJsonObject().get("result").getAsString())));
+        return builder.build();
+    }
+
+    private static JsonArray changes(List<Change> changes) {
+        JsonArray array = new JsonArray();
+        for (Change change : changes) {
+            JsonObject item = new JsonObject();
+            item.addProperty("kind", lower(change.kind()));
+            item.addProperty("what", change.what());
+            item.addProperty("count", change.count());
+            if (change.note() != null) item.addProperty("note", change.note());
+            array.add(item);
+        }
+        return array;
+    }
+
+    private static List<Change> readChanges(JsonArray array) {
+        List<Change> changes = new ArrayList<>();
+        for (JsonElement element : array) {
+            JsonObject item = element.getAsJsonObject();
+            changes.add(new Change(Change.Kind.valueOf(upper(item.get("kind").getAsString())),
+                    item.get("what").getAsString(), item.get("count").getAsInt(),
+                    item.has("note") ? item.get("note").getAsString() : null));
+        }
+        return changes;
     }
 
     private static String lower(Enum<?> value) {
