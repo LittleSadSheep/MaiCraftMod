@@ -4,9 +4,19 @@ package org.maiwithu.maicraft.ability.deposit;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.function.Supplier;
 
+import org.maiwithu.maicraft.behavior.acquire.ClientDigsBlocks;
+import org.maiwithu.maicraft.behavior.acquire.ReadsItemTags;
+import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
+import org.maiwithu.maicraft.behavior.inventory.SpotsContainers;
+import org.maiwithu.maicraft.behavior.interaction.Interactions;
+import org.maiwithu.maicraft.behavior.menu.ClientQuickMoves;
+import org.maiwithu.maicraft.behavior.menu.MenuContent;
+import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.ModIdentity;
 import org.maiwithu.maicraft.game.player.BackpackView;
+import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilitySpec;
@@ -52,6 +62,21 @@ public final class DepositModule implements AbilityModule {
     public DepositModule(DepositServices services, BackpackView backpack) {
         this.services = services;
         this.backpack = backpack;
+    }
+
+    /**
+     * 生产用：把玩家行为层的读端交给本包拼好协作服务再建模块，启动清单只认这个入口。
+     * 标签判断转成存东西接缝的形状；挖盖子与整堆搬运在包内接上各自的生产实现。
+     */
+    public static DepositModule assemble(SpotsContainers spots, BringsPlayerClose close,
+            Interactions interactions, MenuContent menus, ClientQuickMoves quickMoves,
+            ClientDigsBlocks digs, ReadsItemTags tags,
+            WorldMemory memory, Supplier<PlayerContext> contexts, BackpackView backpack) {
+        return new DepositModule(new DepositServices(spots, close, interactions, menus,
+                new MenuQuickMoves(quickMoves, contexts),
+                new NativeLidDigging(digs),
+                tags == null ? null : (itemId, tagId) -> tags.tagsOf(itemId).contains(tagId),
+                memory), backpack);
     }
 
     @Override public AbilitySpec spec() {

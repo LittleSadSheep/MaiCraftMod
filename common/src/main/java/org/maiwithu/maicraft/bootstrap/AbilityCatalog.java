@@ -8,6 +8,7 @@ import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.ability.chat.ChatAbility;
+import org.maiwithu.maicraft.ability.deposit.DepositModule;
 import org.maiwithu.maicraft.ability.drop.DropModule;
 import org.maiwithu.maicraft.ability.eat.EatModule;
 import org.maiwithu.maicraft.ability.equip.EquipModule;
@@ -29,6 +30,7 @@ import org.maiwithu.maicraft.ability.use.RefusalReads;
 import org.maiwithu.maicraft.ability.use.UseModule;
 import org.maiwithu.maicraft.ability.wait.WaitModule;
 import org.maiwithu.maicraft.behavior.acquire.ItemAcquisition;
+import org.maiwithu.maicraft.behavior.acquire.ClientDigsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.LiveBlockDigging;
 import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
 import org.maiwithu.maicraft.behavior.acquire.ReadsCharacterPosition;
@@ -43,8 +45,10 @@ import org.maiwithu.maicraft.behavior.interaction.ClientGameRefusals;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuContent;
+import org.maiwithu.maicraft.behavior.menu.ClientQuickMoves;
 import org.maiwithu.maicraft.behavior.inventory.ClientGearChanges;
 import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
+import org.maiwithu.maicraft.behavior.inventory.ClientSpotsContainers;
 import org.maiwithu.maicraft.behavior.inventory.ClientStepsAside;
 import org.maiwithu.maicraft.behavior.inventory.DropAvoidance;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
@@ -176,6 +180,13 @@ public final class AbilityCatalog {
                 new ItemAcquisition(List.of(), deps.backpack(), deps.offhand(), deps.itemTags(),
                         deps.characterPosition(), Optional.empty(), ItemAcquisition.DEFAULT_MAX_DEPTH),
                 deps.itemRegistry(), deps.backpack(), deps.offhand(), deps.itemTags()));
+
+        // 存东西：找容器把现场扫描与世界记忆并起来，界面读数、整堆搬运与挖盖子都接上了。
+        registry.register(DepositModule.assemble(
+                new ClientSpotsContainers(deps.blockScans(), deps.context(), deps.memory()),
+                bringsClose, deps.interactions(), new ClientMenuContent(deps.context()),
+                new ClientQuickMoves(), new ClientDigsBlocks(), deps.itemTags(),
+                deps.memory(), deps.context(), deps.backpack()));
 
         // 许可检查点：归属记录问服务端，区域与地标问世界记忆；玩家放置推断没有接，先按不受保护处理。
         PermissionCheck permission = new PermissionCheck(
