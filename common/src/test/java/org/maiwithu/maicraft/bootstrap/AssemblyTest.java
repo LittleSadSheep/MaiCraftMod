@@ -20,7 +20,7 @@ import org.maiwithu.maicraft.kernel.goal.GoalRunTable;
 import org.maiwithu.maicraft.kernel.goal.InMemoryGoalRunStore;
 import org.maiwithu.maicraft.kernel.goal.PlayerControlHandover;
 import org.maiwithu.maicraft.kernel.interrupt.ControlLoop;
-import org.maiwithu.maicraft.kernel.param.Params;
+import org.maiwithu.maicraft.kernel.param.ParamValues;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
@@ -66,7 +66,7 @@ class AssemblyTest {
                     @Override public void requestControl() {
                     }
                 });
-        GoalRunTable.Launch launch = goals.launch(Goal.of("maicraft:wait", null, Params.EMPTY), null);
+        GoalRunTable.Launch launch = goals.launch(Goal.of("maicraft:wait", null, ParamValues.EMPTY), null);
         assertTrue(!launch.repeated(), "第一次下达要新开一个目标运行");
 
         // 下达后的第一刻能力做决定、开出任务，随后一刻任务走完：两刻内给结果。

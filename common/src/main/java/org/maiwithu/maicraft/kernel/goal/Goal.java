@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.kernel.goal;
 
-import org.maiwithu.maicraft.kernel.param.Params;
+import org.maiwithu.maicraft.kernel.param.ParamValues;
 
 import java.util.List;
 import java.util.Objects;
@@ -24,7 +24,7 @@ public record Goal(
         String ability,
         String purpose,
         Target target,
-        Params params,
+        ParamValues params,
         Permissions permissions,
         List<Goal> steps,
         OnFailure onFailure) {
@@ -37,14 +37,14 @@ public record Goal(
 
     public Goal {
         Objects.requireNonNull(ability, "ability");
-        params = params == null ? Params.EMPTY : params;
+        params = params == null ? ParamValues.EMPTY : params;
         permissions = permissions == null ? Permissions.DEFAULT : permissions;
         steps = steps == null ? List.of() : List.copyOf(steps);
         onFailure = onFailure == null ? OnFailure.STOP : onFailure;
     }
 
     /** 最常见的写法：一个能力、一个目标对象、一组参数，许可用默认值。 */
-    public static Goal of(String ability, Target target, Params params) {
+    public static Goal of(String ability, Target target, ParamValues params) {
         return new Goal(ability, null, target, params, Permissions.DEFAULT, List.of(), OnFailure.STOP);
     }
 }

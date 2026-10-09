@@ -24,10 +24,10 @@ import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.TargetKind;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
-import org.maiwithu.maicraft.kernel.param.Param;
 import org.maiwithu.maicraft.kernel.param.ParamSpec;
+import org.maiwithu.maicraft.kernel.param.ParamSpecs;
 import org.maiwithu.maicraft.kernel.param.ParamType;
-import org.maiwithu.maicraft.kernel.param.Params;
+import org.maiwithu.maicraft.kernel.param.ParamValues;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
@@ -79,10 +79,10 @@ public final class GatherAbility implements AbilityModule {
         return new AbilitySpec("maicraft:gather",
                 "采掉、收获、捡起世界里指定的东西",
                 AbilityDoc.forAbility("gather"),
-                ParamSpec.of(
-                        Param.of("block", ParamType.BLOCK_OR_TAG)
+                ParamSpecs.of(
+                        ParamSpec.of("block", ParamType.BLOCK_OR_TAG)
                                 .doc("配 position 目标用：要采的方块 ID").build(),
-                        Param.of("item", ParamType.ITEM_OR_TAG)
+                        ParamSpec.of("item", ParamType.ITEM_OR_TAG)
                                 .doc("认为会掉出的东西，用于确认；不给按实际掉落记录").build()),
                 Set.of(TargetKind.SEEN, TargetKind.POSITION),
                 ExecutionMode.CONTROLS_PLAYER, Set.of(), List.of(), Listing.LISTED);
@@ -94,7 +94,7 @@ public final class GatherAbility implements AbilityModule {
         if (target == null) {
             return invalid("缺少目标对象（target）：要采哪格方块、哪株庄稼或哪个掉落物，得指一个");
         }
-        Params params = goal.params();
+        ParamValues params = goal.params();
         String expectedItem = params.has("item") ? params.text("item") : null;
         if (target instanceof Target.Seen seenId) {
             // 观察编号在册与否当场能查：不在册或已失效，都是"目标没了"，不猜、不当成参数写岔。
@@ -115,7 +115,7 @@ public final class GatherAbility implements AbilityModule {
     }
 
     // 坐标目标：y 可以省略，找这一柱列的顶面；整列没加载就说不清，不瞎猜高度。
-    private Optional<GatherSpot> resolvePosition(Target.Position position, Params params, String expectedItem,
+    private Optional<GatherSpot> resolvePosition(Target.Position position, ParamValues params, String expectedItem,
             Permissions permissions) {
         int y = position.y() != null ? position.y()
                 : world.surfaceY(position.x(), position.z()).orElse(-1);

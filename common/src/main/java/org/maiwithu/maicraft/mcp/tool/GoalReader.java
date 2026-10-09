@@ -10,10 +10,10 @@ import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.Target;
-import org.maiwithu.maicraft.kernel.param.Param;
+import org.maiwithu.maicraft.kernel.param.ParamSpec;
 import org.maiwithu.maicraft.kernel.param.ParamError;
 import org.maiwithu.maicraft.kernel.param.ParseResult;
-import org.maiwithu.maicraft.kernel.param.Params;
+import org.maiwithu.maicraft.kernel.param.ParamValues;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -60,7 +60,7 @@ public final class GoalReader {
                 ? TargetReader.read(object.get("target"), path + ".target",
                 module == null ? null : module.spec().targets(), check)
                 : null;
-        Params params = parameters(object, path, module, check);
+        ParamValues params = parameters(object, path, module, check);
         Permissions permissions = present(object, "permissions")
                 ? PermissionsReader.read(object.get("permissions"), path + ".permissions", inherited, check)
                 : inherited;
@@ -100,7 +100,7 @@ public final class GoalReader {
     /** 能力的参数写到了 goal 这一层：挪进 parameters，并说明做过这样的整理。 */
     private static void moveMisplacedParameters(JsonObject object, String path, AbilityModule module, RequestCheck check) {
         if (module == null) return;
-        List<String> paramNames = module.spec().params().params().stream().map(Param::name).toList();
+        List<String> paramNames = module.spec().paramSpecs().all().stream().map(ParamSpec::name).toList();
         for (String key : List.copyOf(object.keySet())) {
             if (FIELDS.contains(key) || !paramNames.contains(key)) continue;
             JsonElement parameters = object.get("parameters");
@@ -116,14 +116,14 @@ public final class GoalReader {
     }
 
     /** 按能力的参数规格读 parameters；能力不认识时只检查它是不是对象。 */
-    private static Params parameters(JsonObject object, String path, AbilityModule module, RequestCheck check) {
+    private static ParamValues parameters(JsonObject object, String path, AbilityModule module, RequestCheck check) {
         JsonElement raw = object.get("parameters");
         if (raw != null && !raw.isJsonNull() && !raw.isJsonObject()) {
             check.error(path + ".parameters", "parameters 应该是一个对象", "{\"count\": 8}");
             return null;
         }
         if (module == null) return null;
-        ParseResult parsed = module.spec().params().parse(raw == null || raw.isJsonNull() ? null : raw.getAsJsonObject());
+        ParseResult parsed = module.spec().paramSpecs().parse(raw == null || raw.isJsonNull() ? null : raw.getAsJsonObject());
         for (ParamError error : parsed.errors()) {
             check.error(path + ".parameters." + error.field(), error.message(), error.expected());
         }

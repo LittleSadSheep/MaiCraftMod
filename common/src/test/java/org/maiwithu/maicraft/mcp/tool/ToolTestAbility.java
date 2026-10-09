@@ -10,8 +10,8 @@ import org.maiwithu.maicraft.kernel.ability.RequiredMod;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.goal.TargetKind;
-import org.maiwithu.maicraft.kernel.param.Param;
 import org.maiwithu.maicraft.kernel.param.ParamSpec;
+import org.maiwithu.maicraft.kernel.param.ParamSpecs;
 import org.maiwithu.maicraft.kernel.param.ParamType;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 
@@ -36,25 +36,25 @@ final class ToolTestAbility implements AbilityModule {
     /** 像 use 一样：对看到的东西或坐标做几次，可以指定手上拿什么。 */
     static ToolTestAbility use() {
         return new ToolTestAbility(spec("maicraft:use", "对一个方块或实体用一下手上的东西",
-                ParamSpec.of(
-                        Param.of("item", ParamType.ITEM_OR_TAG).doc("手上拿什么").build(),
-                        Param.of("count", ParamType.INTEGER).range(1, 64).defaultValue(1).doc("做几次").build()),
+                ParamSpecs.of(
+                        ParamSpec.of("item", ParamType.ITEM_OR_TAG).doc("手上拿什么").build(),
+                        ParamSpec.of("count", ParamType.INTEGER).range(1, 64).defaultValue(1).doc("做几次").build()),
                 Set.of(TargetKind.SEEN, TargetKind.POSITION), ExecutionMode.CONTROLS_PLAYER, Listing.LISTED), false);
     }
 
     static ToolTestAbility sleep() {
-        return new ToolTestAbility(spec("maicraft:sleep", "睡觉", ParamSpec.EMPTY,
+        return new ToolTestAbility(spec("maicraft:sleep", "睡觉", ParamSpecs.EMPTY,
                 Set.of(TargetKind.HERE, TargetKind.LANDMARK), ExecutionMode.CONTROLS_PLAYER, Listing.LISTED), false);
     }
 
     static ToolTestAbility sequence() {
-        return new ToolTestAbility(spec("maicraft:sequence", "按顺序做几件事", ParamSpec.EMPTY,
+        return new ToolTestAbility(spec("maicraft:sequence", "按顺序做几件事", ParamSpecs.EMPTY,
                 Set.of(), ExecutionMode.CONTROLS_PLAYER, Listing.LISTED), true);
     }
 
     static ToolTestAbility remember() {
-        return new ToolTestAbility(spec("maicraft:remember", "记住或忘掉一个地点", ParamSpec.of(
-                        Param.of("name", ParamType.TEXT).required().doc("地点名").build()),
+        return new ToolTestAbility(spec("maicraft:remember", "记住或忘掉一个地点", ParamSpecs.of(
+                        ParamSpec.of("name", ParamType.TEXT).required().doc("地点名").build()),
                 Set.of(TargetKind.HERE, TargetKind.POSITION), ExecutionMode.MEMORY_ONLY, Listing.LISTED), false);
     }
 
@@ -63,15 +63,15 @@ final class ToolTestAbility implements AbilityModule {
         Set<RequiredMod> mods = new HashSet<>();
         for (String modId : modIds) mods.add(RequiredMod.of(modId));
         return new ToolTestAbility(new AbilitySpec(id, "读机器", AbilityDoc.forAbility(id.substring(id.indexOf(':') + 1)),
-                ParamSpec.EMPTY, Set.of(), ExecutionMode.READ_ONLY, mods, List.of(), Listing.LISTED), false);
+                ParamSpecs.EMPTY, Set.of(), ExecutionMode.READ_ONLY, mods, List.of(), Listing.LISTED), false);
     }
 
     static ToolTestAbility hidden() {
-        return new ToolTestAbility(spec("maicraft:debug_probe", "调试用，不列出", ParamSpec.EMPTY,
+        return new ToolTestAbility(spec("maicraft:debug_probe", "调试用，不列出", ParamSpecs.EMPTY,
                 Set.of(), ExecutionMode.READ_ONLY, Listing.HIDDEN), false);
     }
 
-    private static AbilitySpec spec(String id, String summary, ParamSpec params, Set<TargetKind> targets,
+    private static AbilitySpec spec(String id, String summary, ParamSpecs params, Set<TargetKind> targets,
                                     ExecutionMode mode, Listing listing) {
         return new AbilitySpec(id, summary, AbilityDoc.forAbility(id.substring(id.indexOf(':') + 1)),
                 params, targets, mode, Set.of(), List.of(), listing);

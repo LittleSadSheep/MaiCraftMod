@@ -22,7 +22,7 @@ import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
-import org.maiwithu.maicraft.kernel.param.Params;
+import org.maiwithu.maicraft.kernel.param.ParamValues;
 import org.maiwithu.maicraft.kernel.param.ParseResult;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
@@ -67,9 +67,9 @@ class TravelAbilityTest {
     }
 
     /** 按能力自己的参数规格解析参数，得到与 MCP 入口一致的取值。 */
-    private static Params params(String json) {
+    private static ParamValues params(String json) {
         ParseResult result = new TravelAbility(new StubWalks(), null, List::of, progress -> {})
-                .spec().params().parse(JsonParser.parseString(json).getAsJsonObject());
+                .spec().paramSpecs().parse(JsonParser.parseString(json).getAsJsonObject());
         assertTrue(result.ok(), "参数应能解析：" + result.errors());
         return result.params();
     }

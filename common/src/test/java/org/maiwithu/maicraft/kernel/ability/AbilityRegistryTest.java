@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.goal.TargetKind;
-import org.maiwithu.maicraft.kernel.param.ParamSpec;
+import org.maiwithu.maicraft.kernel.param.ParamSpecs;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.Task;
@@ -75,7 +75,7 @@ class AbilityRegistryTest {
     }
 
     private static AbilitySpec rememberSpec(String id, Set<RequiredMod> requiredMods) {
-        return new AbilitySpec(id, "记住一个地点", AbilityDoc.forAbility("remember"), ParamSpec.EMPTY,
+        return new AbilitySpec(id, "记住一个地点", AbilityDoc.forAbility("remember"), ParamSpecs.EMPTY,
                 Set.of(TargetKind.HERE), ExecutionMode.MEMORY_ONLY, requiredMods, List.of(), Listing.LISTED);
     }
 

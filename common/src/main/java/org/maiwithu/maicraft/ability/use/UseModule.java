@@ -28,8 +28,8 @@ import org.maiwithu.maicraft.kernel.ability.Listing;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.goal.TargetKind;
-import org.maiwithu.maicraft.kernel.param.Param;
 import org.maiwithu.maicraft.kernel.param.ParamSpec;
+import org.maiwithu.maicraft.kernel.param.ParamSpecs;
 import org.maiwithu.maicraft.kernel.param.ParamType;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
@@ -48,18 +48,18 @@ public final class UseModule implements AbilityModule {
             ModIdentity.MOD_ID + ":use",
             "对一个方块或实体用一下手上的东西（开门、按钮、拉杆、开箱看看、骑乘、剪毛、点火……）",
             AbilityDoc.forAbility("use"),
-            ParamSpec.of(
-                    Param.of("item", ParamType.ITEM_OR_TAG)
+            ParamSpecs.of(
+                    ParamSpec.of("item", ParamType.ITEM_OR_TAG)
                             .doc("手上拿什么；不给就空手。标签表示其中任意一种，例如 #minecraft:hoes").build(),
-                    Param.of("block", ParamType.BLOCK_OR_TAG)
+                    ParamSpec.of("block", ParamType.BLOCK_OR_TAG)
                             .doc("没指定是哪一个时按它找最近的；指定了时核对目标是不是它").build(),
-                    Param.of("entity", ParamType.ENTITY_TYPE)
+                    ParamSpec.of("entity", ParamType.ENTITY_TYPE)
                             .doc("对实体用时它的类型；同 block，对实体").build(),
-                    Param.of("count", ParamType.INTEGER).range(1, 64).defaultValue(1)
+                    ParamSpec.of("count", ParamType.INTEGER).range(1, 64).defaultValue(1)
                             .doc("做几次；某一次没有效果就停下").build(),
-                    Param.of("radius", ParamType.INTEGER).range(1, 128).defaultValue(32)
+                    ParamSpec.of("radius", ParamType.INTEGER).range(1, 128).defaultValue(32)
                             .doc("按 block、entity 找目标的范围（格）").build(),
-                    Param.of("text", ParamType.TEXT)
+                    ParamSpec.of("text", ParamType.TEXT)
                             .doc("写到告示牌上的文字，用换行分行，最多 4 行；给了 text 就必须空手").build()),
             // 前面某一步确认过的位置（previous）还没有地方记，解析不了：不列进接受的目标，免得说接受却用不了。
             Set.of(TargetKind.HERE, TargetKind.SEEN, TargetKind.LANDMARK, TargetKind.POSITION),

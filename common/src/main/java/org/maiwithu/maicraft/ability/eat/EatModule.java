@@ -28,8 +28,8 @@ import org.maiwithu.maicraft.kernel.ability.Listing;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
-import org.maiwithu.maicraft.kernel.param.Param;
 import org.maiwithu.maicraft.kernel.param.ParamSpec;
+import org.maiwithu.maicraft.kernel.param.ParamSpecs;
 import org.maiwithu.maicraft.kernel.param.ParamType;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
@@ -83,10 +83,10 @@ public final class EatModule implements AbilityModule {
     public AbilitySpec spec() {
         return new AbilitySpec("maicraft:eat", "吃身上带的食物",
                 AbilityDoc.forAbility("eat"),
-                ParamSpec.of(
-                        Param.of("item", ParamType.ITEM_OR_TAG)
+                ParamSpecs.of(
+                        ParamSpec.of("item", ParamType.ITEM_OR_TAG)
                                 .doc("要吃的物品 ID；不给时只在普通食物里挑，没有再吃腐肉这类垃圾食物，金苹果、紫颂果、河豚要点名").build(),
-                        Param.of("count", ParamType.INTEGER).range(1, 64).defaultValue(1)
+                        ParamSpec.of("count", ParamType.INTEGER).range(1, 64).defaultValue(1)
                                 .doc("吃几件").build()),
                 Set.of(), ExecutionMode.CONTROLS_PLAYER, Set.of(), List.of(), Listing.LISTED);
     }

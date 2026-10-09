@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
-import org.maiwithu.maicraft.kernel.param.Params;
+import org.maiwithu.maicraft.kernel.param.ParamValues;
 import org.maiwithu.maicraft.kernel.param.ParseResult;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
@@ -51,9 +51,9 @@ class ChatAbilityTest {
         };
     }
 
-    private static Params messageParam(String message) {
+    private static ParamValues messageParam(String message) {
         ChatAbility ability = new ChatAbility(message2 -> true, SILENT_ECHO, false);
-        ParseResult result = ability.spec().params()
+        ParseResult result = ability.spec().paramSpecs()
                 .parse(JsonParser.parseString("{\"message\":\"" + message + "\"}").getAsJsonObject());
         assertTrue(result.ok(), "参数应能解析：" + result.errors());
         return result.params();
@@ -67,7 +67,7 @@ class ChatAbilityTest {
     void specIsChatWithRequiredMessage() {
         ChatAbility ability = new ChatAbility(message -> true, SILENT_ECHO, false);
         assertEquals("maicraft:chat", ability.spec().id());
-        assertFalse(ability.spec().params().parse(new JsonObject()).ok(),
+        assertFalse(ability.spec().paramSpecs().parse(new JsonObject()).ok(),
                 "缺 message 应报错");
     }
 

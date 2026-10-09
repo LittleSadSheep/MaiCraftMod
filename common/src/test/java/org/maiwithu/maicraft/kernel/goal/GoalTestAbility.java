@@ -6,7 +6,7 @@ import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilitySpec;
 import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
 import org.maiwithu.maicraft.kernel.ability.Listing;
-import org.maiwithu.maicraft.kernel.param.ParamSpec;
+import org.maiwithu.maicraft.kernel.param.ParamSpecs;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.Task;
@@ -135,7 +135,7 @@ final class GoalTestAbility implements AbilityModule {
 
     @Override public AbilitySpec spec() {
         return new AbilitySpec(id, "替身能力", AbilityDoc.forAbility("test"),
-                ParamSpec.EMPTY, Set.of(), ExecutionMode.CONTROLS_PLAYER, Set.of(), List.of(), Listing.LISTED);
+                ParamSpecs.EMPTY, Set.of(), ExecutionMode.CONTROLS_PLAYER, Set.of(), List.of(), Listing.LISTED);
     }
 
     @Override public StepDecision decide(StepContext step) {

@@ -107,7 +107,7 @@ class EquipModuleTest {
         ReadsEquipment nothingWorn = slot -> Optional.empty();
         EquipModule module = new EquipModule(backpack, offhand, nothingWorn, FIT, Optional.empty(), Optional.empty(),
                 itemId -> TAGS.getOrDefault(itemId, Set.of()));
-        ParseResult parsed = module.spec().params().parse(JsonParser.parseString(paramsJson).getAsJsonObject());
+        ParseResult parsed = module.spec().paramSpecs().parse(JsonParser.parseString(paramsJson).getAsJsonObject());
         assertTrue(parsed.ok(), "参数应能解析：" + parsed.errors());
         Goal goal = new Goal("maicraft:equip", null, null, parsed.params(), Permissions.DEFAULT, List.of(), null);
         return module.decide(new StepContext() {

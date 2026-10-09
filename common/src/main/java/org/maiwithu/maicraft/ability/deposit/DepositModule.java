@@ -28,8 +28,8 @@ import org.maiwithu.maicraft.kernel.ability.Listing;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.goal.TargetKind;
-import org.maiwithu.maicraft.kernel.param.Param;
 import org.maiwithu.maicraft.kernel.param.ParamSpec;
+import org.maiwithu.maicraft.kernel.param.ParamSpecs;
 import org.maiwithu.maicraft.kernel.param.ParamType;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
@@ -49,12 +49,12 @@ public final class DepositModule implements AbilityModule {
             ModIdentity.MOD_ID + ":deposit",
             "把背包里的东西存进容器",
             AbilityDoc.forAbility("deposit"),
-            ParamSpec.of(
-                    Param.of("items", ParamType.ITEM_LIST)
+            ParamSpecs.of(
+                    ParamSpec.of("items", ParamType.ITEM_LIST)
                             .doc("存哪些（物品 ID 或 # 标签的列表）；不给就把随身要留的东西以外的全部存掉").build(),
-                    Param.of("count", ParamType.INTEGER).range(1, 576)
+                    ParamSpec.of("count", ParamType.INTEGER).range(1, 576)
                             .doc("一共存几件；不给就全存").build(),
-                    Param.of("radius", ParamType.INTEGER).range(1, 128).defaultValue(32)
+                    ParamSpec.of("radius", ParamType.INTEGER).range(1, 128).defaultValue(32)
                             .doc("自己挑容器时的范围（格）").build()),
             // 前面某一步确认过的位置（previous）还没有地方记，解析不了：不列进接受的目标，免得说接受却用不了。
             Set.of(TargetKind.HERE, TargetKind.SEEN, TargetKind.LANDMARK, TargetKind.POSITION),

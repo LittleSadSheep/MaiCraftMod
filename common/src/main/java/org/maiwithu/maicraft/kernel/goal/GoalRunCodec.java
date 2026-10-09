@@ -100,7 +100,7 @@ final class GoalRunCodec {
                 new Unreadable("能力 " + ability + " 已经不在能力清单里"));
         // 参数按能力此刻的参数规格重新整理：存的是整理过的取值，规格没变时原样读回；变了就如实读不回。
         JsonElement raw = json.get("parameters");
-        ParseResult parsed = module.spec().params().parse(raw == null ? null : raw.getAsJsonObject());
+        ParseResult parsed = module.spec().paramSpecs().parse(raw == null ? null : raw.getAsJsonObject());
         if (!parsed.ok()) {
             throw new Unreadable("能力 " + ability + " 的参数和现在的参数规格对不上：" + parsed.errors());
         }

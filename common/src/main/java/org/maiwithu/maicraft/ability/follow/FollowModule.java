@@ -10,8 +10,8 @@ import org.maiwithu.maicraft.kernel.ability.Listing;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.goal.TargetKind;
-import org.maiwithu.maicraft.kernel.param.Param;
 import org.maiwithu.maicraft.kernel.param.ParamSpec;
+import org.maiwithu.maicraft.kernel.param.ParamSpecs;
 import org.maiwithu.maicraft.kernel.param.ParamType;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
@@ -41,8 +41,8 @@ public final class FollowModule implements AbilityModule {
             "maicraft:follow",
             "跟着一位玩家或一个实体，保持几格距离，它走就跟、它停就停",
             AbilityDoc.forAbility("follow"),
-            ParamSpec.of(
-                    Param.of("distance", ParamType.INTEGER)
+            ParamSpecs.of(
+                    ParamSpec.of("distance", ParamType.INTEGER)
                             .range(2, 16)
                             .defaultValue(3)
                             .doc("保持的距离，单位格")

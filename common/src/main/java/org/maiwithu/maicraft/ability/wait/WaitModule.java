@@ -8,8 +8,8 @@ import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
 import org.maiwithu.maicraft.kernel.ability.Listing;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
-import org.maiwithu.maicraft.kernel.param.Param;
 import org.maiwithu.maicraft.kernel.param.ParamSpec;
+import org.maiwithu.maicraft.kernel.param.ParamSpecs;
 import org.maiwithu.maicraft.kernel.param.ParamType;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -31,13 +31,13 @@ public final class WaitModule implements AbilityModule {
             "maicraft:wait",
             "在游戏里等一个条件：等一段时间、等天黑天亮、等血回满或不再饥饿",
             AbilityDoc.forAbility("wait"),
-            ParamSpec.of(
-                    Param.of("condition", ParamType.CHOICE)
+            ParamSpecs.of(
+                    ParamSpec.of("condition", ParamType.CHOICE)
                             .choices("elapsed", "day", "night", "health_full", "not_hungry")
                             .defaultValue("elapsed")
                             .doc("等什么：elapsed（只等时间，默认）/ day / night / health_full / not_hungry")
                             .build(),
-                    Param.of("after_seconds", ParamType.INTEGER)
+                    ParamSpec.of("after_seconds", ParamType.INTEGER)
                             .range(0, WaitInput.MAX_AFTER_SECONDS)
                             .defaultValue(0)
                             .doc("最短先等多少秒再开始查条件（elapsed 条件下过了这段时间即完成）")

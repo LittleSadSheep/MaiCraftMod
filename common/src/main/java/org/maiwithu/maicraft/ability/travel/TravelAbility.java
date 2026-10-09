@@ -18,8 +18,8 @@ import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.goal.TargetKind;
-import org.maiwithu.maicraft.kernel.param.Param;
 import org.maiwithu.maicraft.kernel.param.ParamSpec;
+import org.maiwithu.maicraft.kernel.param.ParamSpecs;
 import org.maiwithu.maicraft.kernel.param.ParamType;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
@@ -61,11 +61,11 @@ public final class TravelAbility implements AbilityModule {
                 "maicraft:travel",
                 "走到一个地方：给坐标、地点名、看得见的东西或往某方向走多远",
                 AbilityDoc.forAbility("travel"),
-                ParamSpec.of(
-                        Param.of("radius", ParamType.NUMBER)
+                ParamSpecs.of(
+                        ParamSpec.of("radius", ParamType.NUMBER)
                                 .defaultValue(2.0).range(0, 2048)
                                 .doc("到达容差，单位格，默认 2；给 0 表示必须站进那一格").build(),
-                        Param.of("max_seconds", ParamType.INTEGER)
+                        ParamSpec.of("max_seconds", ParamType.INTEGER)
                                 .doc("最多走多久（秒）；超时以卡住结束，写明停在哪、离目标多远").build()),
                 Set.of(TargetKind.HERE, TargetKind.SEEN, TargetKind.LANDMARK,
                         TargetKind.POSITION, TargetKind.DIRECTION),
