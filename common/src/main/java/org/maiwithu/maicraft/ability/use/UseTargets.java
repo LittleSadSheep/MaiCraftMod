@@ -16,6 +16,9 @@ import org.maiwithu.maicraft.kernel.result.Problem;
  * 脚边是一片地方，给了 block 或 entity 时在那片地方 radius 内找最近的，没给就用那一格本身。
  * 只给 item、不给目标时不对着任何东西用。别的维度去不了；没加载的先走过去，到了再找。
  * 扫描没扫完不冒充"没有"，下一刻接着问。
+ *
+ * <p>会改动世界的用法（倒流体、点火、耕地、剪毛、挤奶这类）只对角色自己挑的目标看归属：
+ * 按类型找时跳过别人的，坐标和地点落到别人的东西上时要 LLM 用观察编号点名；观察编号点名的就是许可。
  */
 final class UseTargets {
 
@@ -39,6 +42,8 @@ final class UseTargets {
 
     private final UseInput input;
     private final UseServices services;
+    /** 这一次按类型找时有没有因为是别人的而跳过：找不到时据此说清是"只有别人的"。 */
+    private boolean skippedOthers;
 
     UseTargets(UseInput input, UseServices services) {
         this.input = input;
@@ -47,6 +52,8 @@ final class UseTargets {
 
     /** 按目标对象的种类落实这一刻的目标。 */
     Lookup lookup() {
+        // 每次重新找都重新数跳过了几个别人的：上一刻的扫描结论不带到这一刻。
+        skippedOthers = false;
         return switch (input.target()) {
             case null -> nearOrHandOnly(services.world().feet());
             case Target.Here here -> nearOrHandOnly(services.world().feet());
@@ -87,7 +94,7 @@ final class UseTargets {
         if (seenId.startsWith("f") && (input.block() != null || input.entity() != null)) {
             return search(found.blockPos());
         }
-        return block(found.blockPos(), "观察编号 " + seenId);
+        return block(found.blockPos(), "观察编号 " + seenId, true);
     }
 
     // 坐标：别的维度去不了；没给 y 用那一列最上面的方块；没加载先走过去。
@@ -115,7 +122,7 @@ final class UseTargets {
         if (input.entity() != null) {
             return services.world().loaded(cell) ? search(cell) : travelTo(cell);
         }
-        return block(cell, "坐标");
+        return block(cell, "坐标", false);
     }
 
     // 记得的地点：没记过如实说没有，绝不退回到脚边去找；给了类型在那一片找，没给就是那一格。
@@ -137,7 +144,7 @@ final class UseTargets {
         if (input.block() != null || input.entity() != null) {
             return search(cell);
         }
-        return block(cell, "地点「" + name + "」");
+        return block(cell, "地点「" + name + "」", false);
     }
 
     // 在一片地方按类型找最近的；没扫完不说话，扫完了还没有就是没找到，写明查了多大范围。
@@ -148,15 +155,17 @@ final class UseTargets {
         }
         int radius = (int) input.radius();
         if (input.entity() != null) {
-            SearchesNearby.EntityResult result = services.search().nearestEntity(input.entity(), center, radius);
+            SearchesNearby.EntityResult result = services.search().nearestEntity(input.entity(), center, radius,
+                    this::othersCreature);
             if (result.found().isPresent()) {
                 return entity(result.found().getAsInt(), input.entity());
             }
             return result.scannedComplete() ? notFound(input.entity()) : new Lookup.Scanning("正在扫附近的" + input.entity());
         }
-        SearchesNearby.BlockResult result = services.search().nearestBlock(input.block(), center, radius);
+        SearchesNearby.BlockResult result = services.search().nearestBlock(input.block(), center, radius,
+                this::othersBlock);
         if (result.found().isPresent()) {
-            return block(result.found().get(), input.block());
+            return block(result.found().get(), input.block(), false);
         }
         return result.scannedComplete() ? notFound(input.block()) : new Lookup.Scanning("正在扫附近的" + input.block());
     }
@@ -184,8 +193,33 @@ final class UseTargets {
         return new Lookup.Found(ResolvedTarget.entity(entityId, now.cell(), now.typeId()));
     }
 
-    // 一格方块：没加载先走过去；给了 block 就核对那一格现在是不是它。
-    private Lookup block(BlockPos cell, String label) {
+    // 按类型找到的一格是别人的、这次的用法又会改动它：跳过，记下跳过过。
+    private boolean othersBlock(BlockPos cell) {
+        String now = services.world().blockId(cell).orElse("minecraft:air");
+        boolean skip = guarded(ResolvedTarget.block(cell, now, now));
+        skippedOthers |= skip;
+        return skip;
+    }
+
+    // 按类型找到的一只是别人的（有名字、驯服、拴绳、圈养）、这次的用法又会改动它：跳过，记下跳过过。
+    private boolean othersCreature(int entityId) {
+        boolean skip = services.world().entity(entityId)
+                .map(seen -> guarded(ResolvedTarget.entity(entityId, seen.cell(), seen.typeId())))
+                .orElse(false);
+        skippedOthers |= skip;
+        return skip;
+    }
+
+    // 角色自己挑的目标能不能用：只有会改动世界的用法才看归属；认不出别人的东西时一律当别人的，宁可不做。
+    private boolean guarded(ResolvedTarget target) {
+        UseSeams.OthersThings others = services.others();
+        if (others == null) return true;
+        return others.changesWorld(input.item(), target)
+                && others.someoneElses(target, input.permissions().protectedLandmarks());
+    }
+
+    // 一格方块：没加载先走过去；给了 block 就核对那一格现在是不是它；不是点名的，别人的东西用法会改动它时不碰。
+    private Lookup block(BlockPos cell, String label, boolean named) {
         if (!services.world().loaded(cell)) {
             return travelTo(cell);
         }
@@ -194,7 +228,13 @@ final class UseTargets {
             return new Lookup.Failed(Problem.of(Problem.Kind.TARGET_GONE,
                     "目标应为 " + input.block() + "，" + cell.toShortString() + " 现在是 " + now, null));
         }
-        return new Lookup.Found(ResolvedTarget.block(cell, now, label + " " + now + " " + cell.toShortString()));
+        ResolvedTarget target = ResolvedTarget.block(cell, now, label + " " + now + " " + cell.toShortString());
+        if (!named && guarded(target)) {
+            return new Lookup.Failed(Problem.of(Problem.Kind.NEED_APPROVAL,
+                    target.describe() + " 是别人的（玩家放的或在玩家的地盘里），这样用会改动它，不碰",
+                    "确实要用，就先 observe 再用观察编号点名它"));
+        }
+        return new Lookup.Found(target);
     }
 
     private Lookup travelTo(BlockPos cell) {
@@ -203,6 +243,12 @@ final class UseTargets {
     }
 
     private Lookup notFound(String what) {
+        if (skippedOthers) {
+            // 附近有，但都是别人的：要 LLM 点名才动，不是没有。
+            return new Lookup.Failed(Problem.of(Problem.Kind.NEED_APPROVAL,
+                    input.radius() + " 格内的 " + what + " 都是别人的，这样用会改动它们，不碰",
+                    "确实要用，就先 observe 再用观察编号点名其中一个"));
+        }
         return new Lookup.Failed(Problem.of(Problem.Kind.NOT_FOUND,
                 input.radius() + " 格内没有找到 " + what + "（只查了已加载的区域）", null));
     }

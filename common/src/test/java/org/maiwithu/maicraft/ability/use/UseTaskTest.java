@@ -11,6 +11,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
+import java.util.function.IntPredicate;
+import java.util.function.Predicate;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.AABB;
@@ -292,6 +294,40 @@ class UseTaskTest {
         assertTrue(result.changes().stream().anyMatch(change -> change.kind() == Change.Kind.ENTITY_AFFECTED));
     }
 
+    @Test
+    void 坐标落在别人的方块上_会改动它的用法要点名() {
+        // 拿打火石对着别人房子的地板点：不是点名的目标，不碰，说清要用观察编号点名。
+        Rig rig = new Rig();
+        rig.world.blocks.put(LEVER, "minecraft:oak_planks");
+        rig.others.owned.add(LEVER);
+        TaskResult result = rig.run(rig.input(position(LEVER), "minecraft:flint_and_steel", null, null, 1));
+        assertProblem(result, Problem.Kind.NEED_APPROVAL);
+        assertTrue(result.problem().suggestion().contains("观察编号"));
+        assertEquals(0, rig.interactions.builds);
+    }
+
+    @Test
+    void 别人的拉杆空手扳一下_不算改动照常用() {
+        // 按按钮、扳拉杆不算改动世界：别人的也可以。
+        Rig rig = new Rig();
+        rig.world.blocks.put(LEVER, "minecraft:lever");
+        rig.others.owned.add(LEVER);
+        rig.interactions.applied("拉杆扳动了");
+        TaskResult result = rig.run(rig.input(position(LEVER), null, "minecraft:lever", null, 1));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+    }
+
+    @Test
+    void 按类型找到的都是别人的_要点名而不是说没有() {
+        Rig rig = new Rig();
+        rig.world.blocks.put(LEVER, "minecraft:grass_block");
+        rig.others.owned.add(LEVER);
+        rig.nearestBlocks.add(LEVER);
+        TaskResult result = rig.run(rig.input(new Target.Here(), "minecraft:wooden_hoe", "minecraft:grass_block", null, 1));
+        assertProblem(result, Problem.Kind.NEED_APPROVAL);
+        assertTrue(result.problem().message().contains("都是别人的"), result.problem().message());
+    }
+
     private static Target position(BlockPos cell) {
         return new Target.Position(cell.getX(), cell.getY(), cell.getZ(), null);
     }
@@ -313,6 +349,9 @@ class UseTaskTest {
         final FakeDrops drops = new FakeDrops();
         final FakeTravel travel = new FakeTravel();
         final FakeMenus menus = new FakeMenus();
+        final FakeOthers others = new FakeOthers();
+        /** 附近搜索按由近到远给出的方块格子。 */
+        final List<BlockPos> nearestBlocks = new ArrayList<>();
         private long tick;
 
         UseInput input(Target target, String item, String block, String entity, long count) {
@@ -321,17 +360,19 @@ class UseTaskTest {
 
         UseTask task(UseInput input) {
             SearchesNearby search = new SearchesNearby() {
-                @Override public BlockResult nearestBlock(String blockOrTag, BlockPos center, int radius) {
-                    return new BlockResult(Optional.empty(), true);
+                @Override public BlockResult nearestBlock(String blockOrTag, BlockPos center, int radius,
+                        Predicate<BlockPos> skip) {
+                    return new BlockResult(nearestBlocks.stream().filter(cell -> !skip.test(cell)).findFirst(), true);
                 }
 
-                @Override public EntityResult nearestEntity(String entityTypeId, BlockPos center, int radius) {
+                @Override public EntityResult nearestEntity(String entityTypeId, BlockPos center, int radius,
+                        IntPredicate skip) {
                     return new EntityResult(OptionalInt.empty(), true);
                 }
             };
             UseServices services = new UseServices(world, interactions, close, hand, needs,
                     id -> Optional.ofNullable(seen.get(id)), search, refusal, FakeSignEditor::open,
-                    drops, travel, menus, null);
+                    drops, travel, menus, null, others);
             UseTask task = new UseTask(input, services);
             task.start(tick());
             return task;
@@ -510,6 +551,19 @@ class UseTaskTest {
             askedSince = since;
             pickUp = new Scripted(2, ActionStatus.done(), () -> { });
             return pickUp;
+        }
+    }
+
+    /** 别人的东西：拿着东西用算改动世界、空手不算；owned 里的格子是别人的。 */
+    private static final class FakeOthers implements UseSeams.OthersThings {
+        final Set<BlockPos> owned = new HashSet<>();
+
+        @Override public boolean changesWorld(String heldItem, ResolvedTarget target) {
+            return heldItem != null;
+        }
+
+        @Override public boolean someoneElses(ResolvedTarget target, Set<String> protectedLandmarks) {
+            return owned.contains(target.cell());
         }
     }
 

@@ -6,6 +6,8 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.function.Supplier;
 
+import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
+import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.interaction.ClientGameRefusals;
@@ -76,7 +78,8 @@ public final class UseModule implements AbilityModule {
      */
     public static UseModule live(Supplier<PlayerContext> context, Interactions interactions, BringsPlayerClose close,
             ClientMovesToMainhand toMainhand, ItemNeeds needs, Supplier<Scene> scene, BlockScanService scans,
-            ClientGameRefusals refusals, WalkTo walks, WorldMemory memory) {
+            ClientGameRefusals refusals, WalkTo walks, WorldMemory memory, Supplier<Protection> protection,
+            ReadsCreatureSituation creatures) {
         return new UseModule(new UseServices(
                 new LiveUseWorld(context),
                 new LiveUseInteractions(interactions, context),
@@ -90,7 +93,8 @@ public final class UseModule implements AbilityModule {
                 new ClientDropPickup(context, walks),
                 new LiveUseTravel(walks),
                 new LiveMenuLooks(context),
-                memory));
+                memory,
+                new LiveOthersThings(context, protection, creatures)));
     }
 
     @Override public AbilitySpec spec() {

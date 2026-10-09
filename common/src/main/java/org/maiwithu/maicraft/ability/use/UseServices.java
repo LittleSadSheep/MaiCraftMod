@@ -25,6 +25,7 @@ import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
  * @param travel       走到没加载的坐标；没接上时按到不了说
  * @param menus        看看点开的界面；没接上时点开的界面列不出内容，也由它关上
  * @param memory       世界记忆；记得的地点从这里查，看过的容器记进去
+ * @param others       别人的东西认不认得出；没接上时会改动世界的用法一律不碰自己挑的目标（宁可不做，不越权）
  */
 record UseServices(
         UseSeams.ReadsWorld world,
@@ -39,7 +40,8 @@ record UseServices(
         PicksUpDrops drops,
         UseSeams.TravelsTo travel,
         UseSeams.LooksInMenus menus,
-        WorldMemory memory) {
+        WorldMemory memory,
+        UseSeams.OthersThings others) {
 
     UseServices {
         if (world == null) throw new IllegalArgumentException("世界读数不能为空");

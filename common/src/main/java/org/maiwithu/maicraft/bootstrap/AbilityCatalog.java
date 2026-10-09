@@ -270,7 +270,8 @@ public final class AbilityCatalog {
         ClientGameRefusals refusals = new ClientGameRefusals(new OverlayMessages(),
                 () -> deps.session().confirmations().recent(), deps.clientTicks());
         return UseModule.live(deps.context(), deps.interactions(), bringsClose, toMainhand, needs,
-                deps::scene, deps.blockScans(), refusals, deps.walks(), deps.memory());
+                deps::scene, deps.blockScans(), refusals, deps.walks(), deps.memory(), deps::protection,
+                deps.creatures());
     }
 
     /**
