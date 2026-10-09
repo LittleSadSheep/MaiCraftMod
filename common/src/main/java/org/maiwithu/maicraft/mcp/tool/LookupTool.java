@@ -9,7 +9,7 @@ import org.maiwithu.maicraft.kernel.ability.AbilitySpec;
 import org.maiwithu.maicraft.kernel.ability.Listing;
 import org.maiwithu.maicraft.kernel.ability.RequiredMod;
 import org.maiwithu.maicraft.kernel.param.Param;
-import org.maiwithu.maicraft.mcp.knowledge.KnowledgeDocument;
+import org.maiwithu.maicraft.kernel.knowledge.KnowledgeDocument;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
 
 import java.util.ArrayList;

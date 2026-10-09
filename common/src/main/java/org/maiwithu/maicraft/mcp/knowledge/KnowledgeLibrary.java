@@ -16,6 +16,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.security.NoSuchAlgorithmException;
+import org.maiwithu.maicraft.kernel.knowledge.KnowledgeDocument;
+import org.maiwithu.maicraft.kernel.knowledge.KnowledgeSource;
 
 /**
  * 知识库：通过目录元数据发现资源、按需读取正文，并为没有资源读取能力的宿主提供搜索回退。
