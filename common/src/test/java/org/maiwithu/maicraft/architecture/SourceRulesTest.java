@@ -53,6 +53,9 @@ class SourceRulesTest {
             "org.maiwithu.maicraft.", "net.minecraft.", "com.mojang.", "net.neoforged.",
             "java.", "javax.", "com.google.gson.", "org.joml.", "org.slf4j.");
     private static final Pattern IMPORT = Pattern.compile("^import\\s+(?:static\\s+)?([\\w.]+)");
+    // 读写端按模组分在 neoforge.compat 的子包里：联动清单以外 import 了它们，没装那个模组时读写端类会被提前加载。
+    private static final Pattern NEOFORGE_MOD_READER = Pattern.compile(
+            "^org\\.maiwithu\\.maicraft\\.neoforge\\.compat\\.[a-z0-9_]+\\.");
     private static final Path ABILITY_DOC_ROOT = REPO.resolve("common/src/main/resources");
     private static final String LICENSE_HEADER = "// SPDX-License-Identifier: GPL-3.0-only";
     private static final int MAX_CLASS_LINES = 800;
@@ -223,6 +226,9 @@ class SourceRulesTest {
                 if (NEOFORGE_ALLOWED_IMPORTS.stream().noneMatch(imported::startsWith)) {
                     problems.add(relative(source.path) + ":" + (i + 1) + " import 了 " + imported
                             + "；模组的类只能在 neoforge.compat 的读写端里用，别的地方只认本项目、Minecraft、NeoForge 与 JDK");
+                } else if (NEOFORGE_MOD_READER.matcher(imported).find()) {
+                    problems.add(relative(source.path) + ":" + (i + 1) + " import 了读写端 " + imported
+                            + "；读写端只能由联动清单在 lambda 体里创建，别处 import 会在没装模组时把它提前加载");
                 }
             }
         }
