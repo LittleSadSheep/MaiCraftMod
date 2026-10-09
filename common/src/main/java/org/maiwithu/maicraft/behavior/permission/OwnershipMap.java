@@ -48,6 +48,8 @@ public final class OwnershipMap implements ReadsBlockOwnership {
     record ChunkOwners(Map<Long, String> owners, long fetchedAtMillis) {}
 
     private final ServerLinkSession session;
+    /** 角色此刻所在的维度：每刻刷新；位置没写维度（"角色当前维度"的坐标）时按它查。 */
+    private volatile String currentDimension;
     private final Map<ChunkKey, ChunkOwners> known = new ConcurrentHashMap<>();
     private final Set<ChunkKey> wanted = ConcurrentHashMap.newKeySet();
     /** 在途的请求与失败时刻：只在客户端刻里读写。 */
@@ -60,7 +62,8 @@ public final class OwnershipMap implements ReadsBlockOwnership {
 
     @Override
     public Optional<PlacedBy> whoPlaced(String dimension, int x, int y, int z) {
-        ChunkOwners chunk = known.get(keyOf(dimension, x, z));
+        ChunkKey key = keyOf(dimension, x, z);
+        ChunkOwners chunk = key == null ? null : known.get(key);
         if (chunk == null) return Optional.empty();
         return Optional.ofNullable(chunk.owners().get(BlockPos.asLong(x, y, z))).map(PlacedBy::new);
     }
@@ -68,6 +71,8 @@ public final class OwnershipMap implements ReadsBlockOwnership {
     @Override
     public boolean known(String dimension, int x, int y, int z) {
         ChunkKey key = keyOf(dimension, x, z);
+        // 连角色在哪个维度都还不知道（刚进世界还没走过一刻）：说不知道，也没法记下要问哪块。
+        if (key == null) return false;
         if (known.containsKey(key)) return true;
         // 还没问过：记下要问，下一刻在客户端刻里补问。
         wanted.add(key);
@@ -81,6 +86,7 @@ public final class OwnershipMap implements ReadsBlockOwnership {
      * @param feet      角色脚下那一格
      */
     public void tick(String dimension, BlockPos feet) {
+        standingIn(dimension);
         if (!session.serverConfirmed()) return;
         settle();
         long now = System.currentTimeMillis();
@@ -107,8 +113,20 @@ public final class OwnershipMap implements ReadsBlockOwnership {
         }
     }
 
+    /** 角色此刻在哪个维度：没写维度的位置按它查。 */
+    void standingIn(String dimension) {
+        currentDimension = dimension;
+    }
+
+    /** 记下一块问到的归属：位置 → 放置人编号。 */
+    void remember(ChunkKey key, Map<Long, String> owners, long fetchedAtMillis) {
+        known.put(key, new ChunkOwners(owners, fetchedAtMillis));
+        failedAt.remove(key);
+    }
+
     /** 离开世界或换了服务器：记下的归属全部作废，在途的请求不再等。 */
     public void forgetAll() {
+        currentDimension = null;
         known.clear();
         wanted.clear();
         pending.clear();
@@ -143,8 +161,7 @@ public final class OwnershipMap implements ReadsBlockOwnership {
             it.remove();
             Optional<Map<Long, String>> owners = snapshot.flatMap(OwnershipMap::parse);
             if (owners.isPresent()) {
-                known.put(entry.getKey(), new ChunkOwners(owners.get(), now));
-                failedAt.remove(entry.getKey());
+                remember(entry.getKey(), owners.get(), now);
             } else {
                 failedAt.put(entry.getKey(), now);
             }
@@ -168,7 +185,10 @@ public final class OwnershipMap implements ReadsBlockOwnership {
         return Optional.of(Map.copyOf(map));
     }
 
-    private static ChunkKey keyOf(String dimension, int x, int z) {
-        return new ChunkKey(dimension, SectionPos.blockToSectionCoord(x), SectionPos.blockToSectionCoord(z));
+    // 位置所在的区块；没写维度就是角色此刻所在的维度，那也不知道时给空。
+    private ChunkKey keyOf(String dimension, int x, int z) {
+        String resolved = dimension != null ? dimension : currentDimension;
+        if (resolved == null) return null;
+        return new ChunkKey(resolved, SectionPos.blockToSectionCoord(x), SectionPos.blockToSectionCoord(z));
     }
 }
