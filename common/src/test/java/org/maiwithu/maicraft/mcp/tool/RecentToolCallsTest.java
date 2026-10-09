@@ -47,6 +47,17 @@ class RecentToolCallsTest {
     }
 
     @Test
+    void callThatNeverRepliedIsNotLeftRunning() {
+        // 调用中途出了没接住的错、没有回话：照样结账，不能一直挂成"处理中"让面板以为宿主还在等。
+        calls.ended(calls.started("observe", new JsonObject()), null);
+
+        RecentToolCalls.Call call = calls.recent().getFirst();
+
+        assertEquals("internal_error", call.errorCode());
+        assertEquals("调用没有返回", call.errorMessage());
+    }
+
+    @Test
     void keepsOnlyTheMostRecentCallsAndShortensLongArguments() {
         for (int i = 0; i < RecentToolCalls.KEPT_CALLS + 5; i++) {
             calls.ended(calls.started("observe", new JsonObject()), ToolReply.ok(new JsonObject()));

@@ -46,7 +46,7 @@ public final class RecentToolCalls {
         return id;
     }
 
-    /** 一次调用结束了：按回话记下成功，或错误码、写错的字段与说明。 */
+    /** 一次调用结束了：按回话记下成功，或错误码、写错的字段与说明；没有回话（调用中途出了没接住的错）记成程序出错。 */
     public synchronized void ended(long id, JsonObject reply) {
         long now = clockMillis.getAsLong();
         List<Call> updated = new ArrayList<>(calls.size());
@@ -62,9 +62,13 @@ public final class RecentToolCalls {
         return List.copyOf(calls);
     }
 
-    // 回话里 ok=false 时取错误码、第一个写错的字段与说明；ok=true 时只记成功。
+    // 回话里 ok=false 时取错误码、第一个写错的字段与说明；ok=true 时只记成功；没有回话时记成程序出错。
     private static Call finished(Call call, JsonObject reply, long endedAt) {
-        if (reply != null && reply.has("ok") && !reply.get("ok").getAsBoolean() && reply.has("error")) {
+        if (reply == null) {
+            return new Call(call.id(), call.tool(), call.arguments(), call.startedAtMillis(), endedAt,
+                    ErrorCode.INTERNAL_ERROR.wireName(), null, "调用没有返回");
+        }
+        if (reply.has("ok") && reply.has("ok") && !reply.get("ok").getAsBoolean() && reply.has("error")) {
             JsonObject error = reply.getAsJsonObject("error");
             String field = null;
             String message = text(error, "message");

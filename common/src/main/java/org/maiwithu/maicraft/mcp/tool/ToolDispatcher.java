@@ -49,9 +49,14 @@ public final class ToolDispatcher {
             throw new IllegalArgumentException("工具 " + name + " 没有接上");
         }
         long callId = recentCalls.started(name, arguments);
-        JsonObject reply = dispatch(name, tool, arguments);
-        recentCalls.ended(callId, reply);
-        return reply;
+        JsonObject reply = null;
+        try {
+            reply = dispatch(name, tool, arguments);
+            return reply;
+        } finally {
+            // 连 Error 这类没接住的情况也要结账：不然这次调用会一直挂成"处理中"，面板就误以为宿主还在等。
+            recentCalls.ended(callId, reply);
+        }
     }
 
     private JsonObject dispatch(String name, McpTool tool, JsonObject arguments) {
