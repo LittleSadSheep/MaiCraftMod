@@ -10,9 +10,12 @@ import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Supplier;
 
 /**
@@ -36,11 +39,16 @@ import java.util.function.Supplier;
 public abstract class PhasedTask<P extends Enum<P>> implements Task {
     private static final Logger LOG = LoggerFactory.getLogger(PhasedTask.class);
 
+    /** 面板上"经过"一行最多回看几次换阶段：够看出在哪几个阶段之间来回，又不至于占满一行。 */
+    private static final int RECENT_PHASE_CHANGES = 5;
+
     private final String label;
     private final ProgressTracker progress;
     private final List<Change> changes = new ArrayList<>();
     private final List<Change> unconfirmed = new ArrayList<>();
     private final List<Attempt> attempts = new ArrayList<>();
+    /** 最近几次换阶段，先发生的在前；只给面板看，不参与判断。 */
+    private final Deque<TaskProgress.PhaseChange> recentPhases = new ArrayDeque<>();
     private P phase;
     private Action action;
     private boolean entered;
@@ -190,6 +198,15 @@ public abstract class PhasedTask<P extends Enum<P>> implements Task {
         return action == null ? Interruptibility.BETWEEN_ACTIONS : action.interruptibility();
     }
 
+    /** 此刻在哪个阶段、走过哪几段、多久没进展；任务已经结束时为空。 */
+    @Override
+    public final Optional<TaskProgress> currentProgress() {
+        if (result != null) return Optional.empty();
+        return Optional.of(new TaskProgress(describe(), describePhase(phase), List.copyOf(recentPhases),
+                progress.lastProgress(), progress.ticksSinceProgress(), progress.stuckAfterTicks(),
+                progress.activeTicks(), progress.maxTicks()));
+    }
+
     @Override
     public final String describe() {
         String text = label + "：" + describePhase(phase);
@@ -212,6 +229,9 @@ public abstract class PhasedTask<P extends Enum<P>> implements Task {
                 entered = false;
                 enterIfNeeded();
                 LOG.debug("{}：{} → {}（{}）", label, from, phase, go.why());
+                // 换阶段记一笔给面板：在两个阶段之间来回跳时，一眼就能从"经过"里看出来。
+                if (recentPhases.size() == RECENT_PHASE_CHANGES) recentPhases.removeFirst();
+                recentPhases.addLast(new TaskProgress.PhaseChange(describePhase(from), describePhase(phase), go.why()));
                 onPhaseChange(from, phase, go.why());
                 yield TickResult.RUNNING;
             }

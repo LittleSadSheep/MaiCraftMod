@@ -9,6 +9,13 @@ import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.Camera;
+import net.minecraft.client.gui.GuiGraphics;
+import org.joml.Matrix4f;
+import org.maiwithu.maicraft.debug.DebugPanel;
+import org.maiwithu.maicraft.debug.PanelSettings;
+import org.maiwithu.maicraft.debug.StatusReader;
+import org.maiwithu.maicraft.mcp.tool.RecentToolCalls;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.ChatType;
 import net.minecraft.network.chat.Component;
@@ -236,6 +243,14 @@ public final class Bootstrap {
         private final ChatEventLog chatEvents = new ChatEventLog();
         private final WorldScope[] worldScope = new WorldScope[1];
         private EmbeddedMcpService mcp;
+        /** MCP 入口启动失败的原因；启动成功时为 null。调试面板照实显示。 */
+        private String mcpStartFailure;
+        // MCP 入口最近收到的工具调用：调用分发处记，调试面板读它看 LLM 发了什么、成没成。
+        private final RecentToolCalls recentCalls = new RecentToolCalls();
+        /** F9 调试面板：启动完成后建，只读各层现状。 */
+        private DebugPanel debugPanel;
+        /** 启动时拿到的加载器环境：调试面板的设置文件放在它的 config 目录下。 */
+        private LoaderEnvironment loader;
         private ServerLinkSession session;
         /** 所有者的实例配置：启动时读一次，之后只读；不经任何工具参数暴露。 */
         private InstanceConfig instanceConfig;
@@ -259,6 +274,7 @@ public final class Bootstrap {
         /** 创建客户端全程共用的服务，并把 Mixin 需要的实例登记到静态登记点。 */
         void createSharedServices(LoaderEnvironment loader) {
             // 实例配置启动时读一次：所有者在 config/maicraft.json 里放的开关，全进程只认这份文件。
+            this.loader = loader;
             instanceConfig = InstanceConfig.read(loader.configDirectory());
             furnaceFuels = loader.furnaceFuels();
             if (instanceConfig.allowGameCommands()) {
@@ -300,7 +316,7 @@ public final class Bootstrap {
             // 查询端读此刻自动化是否真的拥有控制权。启动与查询都发生在客户端刻里，线程要求满足。
             goals = buildGoalRunTable(goalRuns, places);
 
-            tools = goalTools(abilities, goals, clientWork, taskEvents, chatEvents, () -> worldScope[0]);
+            tools = goalTools(abilities, goals, clientWork, taskEvents, chatEvents, () -> worldScope[0], recentCalls);
         }
 
         /**
@@ -414,9 +430,27 @@ public final class Bootstrap {
                         ModIdentity.NAME, mcp.port());
             } catch (IOException exception) {
                 LOG.error("{} MCP 服务启动失败", ModIdentity.NAME, exception);
-                return;
+                mcpStartFailure = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
             }
-            LOG.info("{} 客户端启动完成；生存需求、控制循环、目标执行与能力清单已接入", ModIdentity.NAME);
+            startDebugPanel();
+            if (mcp != null) {
+                LOG.info("{} 客户端启动完成；生存需求、控制循环、目标执行与能力清单已接入", ModIdentity.NAME);
+            }
+        }
+
+        // 调试面板：只拿各层的只读现状和正在走的路线；MCP 没起来也照样建，面板上要说清 MCP 没在监听。
+        private void startDebugPanel() {
+            StatusReader reader = new PanelStatusReader(() -> mcp, () -> mcpStartFailure, recentCalls, session,
+                    playerControl, goals, controlLoop, taskEvents);
+            debugPanel = new DebugPanel(reader, walks::currentPath, new PanelSettings(loader.configDirectory()));
+        }
+
+        @Override public void renderDebugPanel(GuiGraphics graphics) {
+            if (debugPanel != null) debugPanel.renderHud(graphics);
+        }
+
+        @Override public void renderWorldOverlay(Camera camera, Matrix4f view, Matrix4f projection) {
+            if (debugPanel != null) debugPanel.renderWorld(camera, view, projection);
         }
 
         @Override public void tickEnd(Minecraft minecraft) {
@@ -428,6 +462,8 @@ public final class Bootstrap {
             context.ifPresent(current -> tickInWorld(minecraft, current));
             // 与服务端的会话跟着每个客户端刻推进。
             session.tick(minecraft);
+            // 调试面板最后取现状：这一刻控制循环与会话都推进完了，读到的是这一刻的结果。
+            if (debugPanel != null) debugPanel.tick(minecraft);
         }
 
         /** 进世界建现场、退世界丢现场：世界记忆按世界身份分开，感知场景不跨世界残留。
@@ -539,7 +575,8 @@ public final class Bootstrap {
      */
     private static ToolDispatcher goalTools(AbilityRegistry abilities, GoalRunTable goals,
                                             ClientTickWork clientWork, TaskEventLog taskEvents,
-                                            ChatEventLog chatEvents, Supplier<WorldScope> worldScope) {
+                                            ChatEventLog chatEvents, Supplier<WorldScope> worldScope,
+                                            RecentToolCalls recentCalls) {
         return new ToolDispatcher(List.of(
                 new ObserveTool(() -> worldScope.get() == null ? null : worldScope.get().scene(),
                         () -> worldScope.get() == null ? null : worldScope.get().memory(), goals, clientWork),
@@ -547,6 +584,6 @@ public final class Bootstrap {
                 new LookupTool(abilities, KnowledgeLibrary.offline()),
                 new ExecuteTool(abilities, goals, clientWork),
                 new GoalTool(goals, clientWork),
-                new EventsTool(taskEvents, chatEvents, goals, clientWork)));
+                new EventsTool(taskEvents, chatEvents, goals, clientWork)), recentCalls);
     }
 }

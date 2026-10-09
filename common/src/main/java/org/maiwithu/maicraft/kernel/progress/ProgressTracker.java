@@ -53,6 +53,26 @@ public final class ProgressTracker {
         return activeTicks;
     }
 
+    /** 最后一次真实进展是什么；还没有进展时是"开始"。 */
+    public String lastProgress() {
+        return lastProgress;
+    }
+
+    /** 自最后一次真实进展起又推进了多少刻；离判卡住还有多远，拿它和 {@link #stuckAfterTicks()} 比。 */
+    public long ticksSinceProgress() {
+        return activeTicks - lastProgressTick;
+    }
+
+    /** 连续多少个推进刻没有真实进展就算卡住。 */
+    public long stuckAfterTicks() {
+        return stuckAfterTicks;
+    }
+
+    /** 最多推进多少刻；不设上限时是 {@link Long#MAX_VALUE}。 */
+    public long maxTicks() {
+        return maxTicks;
+    }
+
     /** 进度情况。 */
     public sealed interface Status {
         /** 还在前进，或者停下的时间还没长到算卡住。 */

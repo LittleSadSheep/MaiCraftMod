@@ -11,14 +11,17 @@ import baritone.api.event.listener.AbstractGameEventListener;
 import baritone.behavior.PathingBehavior;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
+import org.maiwithu.maicraft.behavior.navigation.debug.NavigationPathSnapshot;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.behavior.travel.ReadsPlacedBlocks;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -81,6 +84,30 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
         } finally {
             endTick();
         }
+    }
+
+    /**
+     * 此刻正在走的这条路线，给调试面板在世界里画线：从当前位置前一格起最多几百个路径点、目的地和下一个要走到的点。
+     * 没有运行在走、或引擎还没算出路线时为空。只读，不影响走路。
+     */
+    public Optional<NavigationPathSnapshot> currentPath() {
+        PathingBehavior pathing = active == null ? null : pathing();
+        var executor = pathing == null ? null : pathing.getCurrent();
+        if (executor == null) return Optional.empty();
+        var positions = executor.getPath().positions();
+        if (positions.isEmpty()) return Optional.empty();
+        int cursor = Math.clamp(executor.getPosition(), 0, positions.size() - 1);
+        // 只换算要画的那一段（当前位置前一格起），长路线不必每刻把几千个格子都换一遍。
+        int start = Math.max(0, cursor - 1);
+        List<Vec3> points = positions.subList(start, Math.min(positions.size(), start + NavigationPathSnapshot.MAX_POINTS))
+                .stream().map(BaritoneInternals::lineAnchor).toList();
+        return Optional.of(new NavigationPathSnapshot(points, cursor - start, lineAnchor(positions.getLast()),
+                lineAnchor(positions.get(Math.min(cursor + 1, positions.size() - 1)))));
+    }
+
+    // 线画在每格脚下略高一点的中心：贴着方块表面会被地面盖住一半。
+    private static Vec3 lineAnchor(BlockPos position) {
+        return Vec3.atBottomCenterOf(position).add(0, 0.08, 0);
     }
 
     /** 这个运行此刻是否拥有身体（引擎正按它的目标走）。 */

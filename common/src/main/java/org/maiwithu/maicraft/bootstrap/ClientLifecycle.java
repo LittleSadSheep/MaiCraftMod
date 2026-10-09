@@ -2,9 +2,12 @@
 package org.maiwithu.maicraft.bootstrap;
 
 import java.util.UUID;
+import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.ChatType;
 import net.minecraft.network.chat.Component;
+import org.joml.Matrix4f;
 
 /**
  * 加载器把客户端事件转交给公共代码的接收端。
@@ -18,6 +21,12 @@ public interface ClientLifecycle {
 
     /** 每个客户端刻结束时调用：核对角色控制权、写本刻输入，推进等待中的世界扫描，并推进与服务端的会话。 */
     void tickEnd(Minecraft minecraft);
+
+    /** 原版 HUD 层画完后调用一次，容器界面画完后再调用一次：画调试面板，界面打开时也看得到。 */
+    void renderDebugPanel(GuiGraphics graphics);
+
+    /** 世界画完后调用：调试面板的导航路线开关开着时，在世界里画出角色正在走的路线。 */
+    void renderWorldOverlay(Camera camera, Matrix4f view, Matrix4f projection);
 
     /** 客户端即将退出时调用：收尾任务、落盘记忆、关闭 MCP 入口。 */
     void stopping();

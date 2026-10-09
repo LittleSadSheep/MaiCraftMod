@@ -119,6 +119,44 @@ class PhasedTaskTest {
     }
 
     @Test
+    void progressShowsRecentPhasesAndHowLongWithoutRealProgress() {
+        // 在两个阶段之间来回跳：面板要看得出最近走过哪几个阶段，也要看得出多久没有真实进展、多久算卡住。
+        var task = new PhasedTask<Phase>("来回跳", Phase.APPROACH, new ProgressTracker(100, 1000)) {
+            @Override protected Action enter(Phase phase) {
+                return null;
+            }
+
+            @Override protected Next<Phase> tick(Phase phase, TickContext context) {
+                return Next.go(phase == Phase.APPROACH ? Phase.LIE_DOWN : Phase.APPROACH, "换个阶段试试");
+            }
+        };
+        for (int tick = 0; tick < 7; tick++) {
+            task.tick(new TestTick(tick));
+        }
+
+        TaskProgress progress = task.currentProgress().orElseThrow();
+
+        assertEquals(5, progress.recentPhases().size(), "只回看最近五次换阶段");
+        assertEquals(new TaskProgress.PhaseChange("APPROACH", "LIE_DOWN", "换个阶段试试"), progress.recentPhases().getLast());
+        assertEquals("LIE_DOWN", progress.phase());
+        assertEquals("开始", progress.lastProgress());
+        assertEquals(7, progress.ticksSinceProgress(), "换阶段本身不算进展");
+        assertEquals(100, progress.stuckAfterTicks());
+        assertEquals(1000, progress.maxTicks());
+    }
+
+    @Test
+    void finishedTaskHasNoProgressToShow() {
+        ScriptedAction approach = new ScriptedAction("走向床边", ActionStatus.done());
+        ScriptedAction lieDown = new ScriptedAction("右键床头", ActionStatus.done());
+        var task = new GoToBed(Map.of(Phase.APPROACH, approach, Phase.LIE_DOWN, lieDown), new ProgressTracker(20, 1000));
+
+        runUntilFinished(task, 10);
+
+        assertTrue(task.currentProgress().isEmpty(), "结束了就没有进展可说");
+    }
+
+    @Test
     void pauseReachesActionAndCloseReportsWhatHappened() {
         ScriptedAction approach = new ScriptedAction("走向床边", ActionStatus.progressed());
         var task = new GoToBed(Map.of(Phase.APPROACH, approach), new ProgressTracker(20, 1000));

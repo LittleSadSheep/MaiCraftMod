@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.kernel.child;
 
 import java.util.List;
+import java.util.Optional;
 
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
@@ -11,6 +12,7 @@ import org.maiwithu.maicraft.kernel.task.Standing;
 import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 import org.maiwithu.maicraft.kernel.task.TaskInput;
+import org.maiwithu.maicraft.kernel.task.TaskProgress;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 import org.slf4j.Logger;
@@ -147,6 +149,11 @@ public final class ChildTaskRunner {
             return Interruptibility.BETWEEN_ACTIONS;
         }
         return child.interruptibility(context);
+    }
+
+    /** 正在跑的子任务此刻的进展；还没开始或已结算时为空。 */
+    public Optional<TaskProgress> currentProgress() {
+        return child == null || result != null ? Optional.empty() : child.currentProgress();
     }
 
     /** 给调试面板和日志的一句话：子任务此刻在做什么。 */

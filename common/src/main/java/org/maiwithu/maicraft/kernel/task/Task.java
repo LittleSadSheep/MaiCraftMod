@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.kernel.task;
 
+import java.util.Optional;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 
 /**
@@ -35,4 +36,12 @@ public interface Task {
 
     /** 给调试面板和日志的一句话：此刻在做什么。 */
     String describe();
+
+    /**
+     * 给调试面板的只读进展：此刻真正在干活的那一层任务在哪个阶段、多久没进展。
+     * 运行子任务的任务转给正在跑的那一层；没有可说的进展（还没开始、已结束、在等回答）时为空。
+     */
+    default Optional<TaskProgress> currentProgress() {
+        return Optional.empty();
+    }
 }

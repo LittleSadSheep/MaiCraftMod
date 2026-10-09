@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TaskInput;
+import org.maiwithu.maicraft.kernel.task.TaskProgress;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 import org.slf4j.Logger;
@@ -279,6 +280,12 @@ public final class GoalRunner implements Task, SurvivalNeedsOff {
             return Interruptibility.BETWEEN_ACTIONS;
         }
         return childSays;
+    }
+
+    /** 目标在推进、手上有任务时，转给那个任务（sequence 时一路转到正在跑的那一步）；在等回答、暂停、等条件时为空。 */
+    @Override public Optional<TaskProgress> currentProgress() {
+        if (run.state() != GoalRunState.RUNNING || child == null || child.finished()) return Optional.empty();
+        return child.currentProgress();
     }
 
     @Override public String describe() {
