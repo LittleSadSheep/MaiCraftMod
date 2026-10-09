@@ -24,6 +24,7 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.maiwithu.maicraft.behavior.acquire.spi.AcquireRoute;
 
 /**
  * 带限定的一次拿东西：via 只走指定途径、距离上限把太远的报价挡下、半径原样传给来源、
@@ -37,13 +38,13 @@ class AcquireScopeTest {
     /** 替身：问价就给一条固定报价，动手就往背包里放货；记住问到的半径。 */
     class OfferingSource implements ItemSource {
         final String name;
-        final String route;
+        final AcquireRoute route;
         final FakeBackpack backpack;
         final AcquisitionCost cost;
         Integer askedRadius;
         int begunCount;
 
-        OfferingSource(String name, String route, FakeBackpack backpack, double distance) {
+        OfferingSource(String name, AcquireRoute route, FakeBackpack backpack, double distance) {
             this.name = name;
             this.route = route;
             this.backpack = backpack;
@@ -54,7 +55,7 @@ class AcquireScopeTest {
             return name;
         }
 
-        @Override public String route() {
+        @Override public AcquireRoute route() {
             return route;
         }
 
@@ -97,7 +98,7 @@ class AcquireScopeTest {
         ActionStatus status = runToEnd(acquisition.need(
                 new ItemRequest(WantedItem.ofItem("minecraft:coal"), 2, "测试"),
                 Permissions.DEFAULT,
-                new ItemAcquisition.Scope(Set.of(AcquireRoutes.MINE), null, null), null));
+                new ItemAcquisition.Scope(Set.of(AcquireRoutes.MINE.name()), null, null), null));
 
         assertEquals(ActionStatus.Done.class, status.getClass());
         assertEquals(1, mine.begunCount);
@@ -147,7 +148,7 @@ class AcquireScopeTest {
         runToEnd(engine(backpack, mine).need(
                 new ItemRequest(WantedItem.ofItem("minecraft:coal"), 2, "测试"),
                 Permissions.DEFAULT, ItemAcquisition.Scope.ALL, delivered::add));
-        assertEquals(List.of(AcquireRoutes.MINE), delivered);
+        assertEquals(List.of(AcquireRoutes.MINE.name()), delivered);
 
         // 白跑一趟：做完了但一件没进背包，途径不该被报告。
         FakeBackpack silent = backpack();

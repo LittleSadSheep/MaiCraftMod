@@ -15,6 +15,7 @@ import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.maiwithu.maicraft.behavior.acquire.spi.AcquireRoute;
 
 /**
  * 采集的来源：收成熟作物。只收熟了的（没熟的被踩掉就白长了），收哪几格由许可说了算——
@@ -47,7 +48,7 @@ public final class HarvestSource implements ItemSource {
         return "收熟作物";
     }
 
-    @Override public String route() {
+    @Override public AcquireRoute route() {
         return AcquireRoutes.HARVEST;
     }
 

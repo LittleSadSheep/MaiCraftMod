@@ -28,6 +28,7 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.maiwithu.maicraft.behavior.acquire.AcquireRoutes;
 
 /**
  * 拿东西的能力决定：参数在游戏里立不住时一次报全、不进世界；立得住时给出带限定的任务输入。
@@ -55,8 +56,10 @@ class ObtainAbilityTest {
     }
 
     private ObtainAbility ability() {
-        return new ObtainAbility(new UselessAcquisition(), new FakeRegistry(),
-                emptyBackpack(), null, itemId -> Set.of());
+        return new ObtainAbility(new UselessAcquisition(),
+                List.of(AcquireRoutes.CRAFT, AcquireRoutes.SMELT, AcquireRoutes.CONTAINER,
+                        AcquireRoutes.MINE, AcquireRoutes.HARVEST, AcquireRoutes.TRADE),
+                new FakeRegistry(), emptyBackpack(), null, itemId -> Set.of());
     }
 
     private StepDecision decide(JsonObject params) {

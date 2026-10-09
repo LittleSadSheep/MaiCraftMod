@@ -11,6 +11,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.AcquireRoute;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
@@ -20,6 +21,7 @@ import org.maiwithu.maicraft.kernel.task.Action;
 class CompatRegistryTest {
 
     private static final VersionRange TESTED = new VersionRange("3.25.69", "3.26");
+    private static final AcquireRoute MOD_ROUTE = new AcquireRoute("mod_route", "测试模组的途径");
 
     /** 交一个物品来源（或什么都不交）的联动入口替身。 */
     private static final class CountedModule extends CompatModule {
@@ -41,7 +43,7 @@ class CompatRegistryTest {
     private static ItemSource source(String name) {
         return new ItemSource() {
             @Override public String describe() { return name; }
-            @Override public String route() { return "mod_route"; }
+            @Override public AcquireRoute route() { return MOD_ROUTE; }
             @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
                 return new SourceQuote.Unavailable(name, "测试");
             }
@@ -91,7 +93,7 @@ class CompatRegistryTest {
         // 交上来的来源被包了一层，名字和途径照旧，模组停用后由这一层回答不支持。
         assertInstanceOf(CompatItemSource.class, registry.itemSources().getFirst());
         assertEquals("背包", registry.itemSources().getFirst().describe());
-        assertEquals("mod_route", registry.itemSources().getFirst().route());
+        assertEquals(MOD_ROUTE, registry.itemSources().getFirst().route());
         assertEquals(List.of("测试模组 backpack（backpack）：已登记，版本 3.25.69"), registry.decisions());
     }
 

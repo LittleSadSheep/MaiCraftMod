@@ -12,6 +12,7 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.maiwithu.maicraft.behavior.acquire.spi.AcquireRoute;
 
 /**
  * 测试替身：一个按剧本回答的物品来源。问价按排好的答案依次回答；
@@ -33,7 +34,7 @@ final class ScriptedSource implements ItemSource {
 
     final String name;
     /** 这条来源自报的途径；核对 via 只走指定路时用它。 */
-    private final String route;
+    private final AcquireRoute route;
     private final FakeBackpack backpack;
     private final Deque<SourceQuote> quotes = new ArrayDeque<>();
     private SourceQuote lastAnswer;
@@ -45,7 +46,7 @@ final class ScriptedSource implements ItemSource {
         this(name, AcquireRoutes.CARRIED, backpack);
     }
 
-    ScriptedSource(String name, String route, FakeBackpack backpack) {
+    ScriptedSource(String name, AcquireRoute route, FakeBackpack backpack) {
         this.name = name;
         this.route = route;
         this.backpack = backpack;
@@ -74,7 +75,7 @@ final class ScriptedSource implements ItemSource {
         return name;
     }
 
-    @Override public String route() {
+    @Override public AcquireRoute route() {
         return route;
     }
 

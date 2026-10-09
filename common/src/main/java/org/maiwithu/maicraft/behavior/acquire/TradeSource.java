@@ -7,6 +7,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.behavior.acquire.spi.AcquireRoute;
 
 /**
  * 交易的来源：和村民换东西。交易还没有接入——问价一律如实回答不支持，
@@ -19,7 +20,7 @@ public final class TradeSource implements ItemSource {
         return "和村民交易";
     }
 
-    @Override public String route() {
+    @Override public AcquireRoute route() {
         return AcquireRoutes.TRADE;
     }
 

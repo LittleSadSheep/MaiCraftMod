@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.maiwithu.maicraft.behavior.acquire.spi.AcquireRoute;
 
 /**
  * 身上的来源：主背包与副手里已经有了的。真人要东西先翻身上——已经带着的零代价，
@@ -32,7 +33,7 @@ public final class CarriedItemsSource implements ItemSource {
         return "身上的背包";
     }
 
-    @Override public String route() {
+    @Override public AcquireRoute route() {
         return AcquireRoutes.CARRIED;
     }
 

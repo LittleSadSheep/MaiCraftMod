@@ -196,7 +196,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             List<SourceQuote> refusals = new ArrayList<>();
             for (ItemSource source : sources) {
                 if (excluded.contains(source.describe())) continue;
-                if (!scope.allows(source.route())) {
+                if (!scope.allows(source.route().name())) {
                     // via 指定了别条路：这条不参与，也不算"问过没货"，不必写进结果。
                     continue;
                 }
@@ -287,7 +287,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             }
             step = begun.get();
             stepSource = planned.offer().source();
-            stepSourceRoute = planned.source().route();
+            stepSourceRoute = planned.source().route().name();
             carriedAtStepStart = CarriedItems.matching(backpack, offhand, request, tags);
             stage = Stage.RUN;
             return ActionStatus.progressed();

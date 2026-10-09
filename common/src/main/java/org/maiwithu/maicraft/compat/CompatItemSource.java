@@ -5,6 +5,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.AcquireRoute;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
@@ -29,7 +30,7 @@ public final class CompatItemSource implements ItemSource {
         return source.describe();
     }
 
-    @Override public String route() {
+    @Override public AcquireRoute route() {
         return source.route();
     }
 
