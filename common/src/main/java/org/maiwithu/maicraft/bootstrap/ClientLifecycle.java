@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.bootstrap;
 
+import java.util.UUID;
 import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.ChatType;
+import net.minecraft.network.chat.Component;
 
 /**
  * 加载器把客户端事件转交给公共代码的接收端。
@@ -24,4 +27,19 @@ public interface ClientLifecycle {
 
     /** 玩家离开世界：清掉这台服务器已确认的证据，下一台服务器重新握手。 */
     void serverLinkDisconnected(Minecraft minecraft);
+
+    /**
+     * 聊天栏收到玩家说的话（公屏或私聊）。加载器有什么给什么，拿不到的传 null。
+     *
+     * @param line     聊天栏显示的整行，带发言人名字
+     * @param content  不带名字的原话；没有签名的消息拿不到
+     * @param senderId 发言人 UUID；没有签名的消息拿不到
+     * @param sender   发言人名字；加载器没给时为 null
+     * @param chatType 消息类型：公屏、私聊……
+     */
+    void playerChatReceived(Minecraft minecraft, Component line, Component content, UUID senderId, String sender,
+                            ChatType.Bound chatType);
+
+    /** 收到服务器的系统消息；actionBar 为 true 时是动作栏提示，不算聊天。 */
+    void systemMessageReceived(Minecraft minecraft, Component message, boolean actionBar);
 }

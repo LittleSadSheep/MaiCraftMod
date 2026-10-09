@@ -2,8 +2,8 @@
 package org.maiwithu.maicraft.kernel.event;
 
 import org.junit.jupiter.api.Test;
-import org.maiwithu.maicraft.kernel.event.TaskEventLog.CursorStatus;
-import org.maiwithu.maicraft.kernel.event.TaskEventLog.Page;
+import org.maiwithu.maicraft.kernel.event.CursorLog.CursorStatus;
+import org.maiwithu.maicraft.kernel.event.CursorLog.Page;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -28,7 +28,7 @@ class TaskEventLogTest {
 
         log.publish(TaskEvent.Kind.TEMPORARY_TASK_STARTED, "被威胁，插入自卫");
 
-        Page page = log.read(null, 0, -1, 10, 0);
+        Page<TaskEvent> page = log.read(null, 0, -1, 10, 0);
         assertEquals(1, page.events().size());
         TaskEvent event = page.events().get(0);
         assertEquals(TaskEvent.Kind.TEMPORARY_TASK_STARTED, event.kind());
@@ -41,7 +41,7 @@ class TaskEventLogTest {
         TaskEventLog log = new TaskEventLog();
         append(log, 1, 5);
 
-        Page page = log.read(null, 0, -1, 3, 0);
+        Page<TaskEvent> page = log.read(null, 0, -1, 3, 0);
 
         assertEquals(3, page.events().size());
         assertEquals(3, page.events().get(0).cursor());
@@ -55,8 +55,8 @@ class TaskEventLogTest {
         TaskEventLog log = new TaskEventLog();
         append(log, 1, 5);
 
-        Page first = log.read(log.streamId(), 1, -1, 2, 0);
-        Page second = log.read(first.streamId(), first.cursor(), -1, 2, 0);
+        Page<TaskEvent> first = log.read(log.streamId(), 1, -1, 2, 0);
+        Page<TaskEvent> second = log.read(first.streamId(), first.cursor(), -1, 2, 0);
 
         assertEquals(2, first.events().get(0).cursor());
         assertTrue(first.hasMore());
@@ -73,7 +73,7 @@ class TaskEventLogTest {
         append(log, 2, 1);
         append(log, 1, 2);
 
-        Page page = log.read(log.streamId(), 0, 2, 10, 0);
+        Page<TaskEvent> page = log.read(log.streamId(), 0, 2, 10, 0);
 
         assertEquals(1, page.events().size());
         assertEquals(2, page.events().get(0).goalRunId());
@@ -88,7 +88,7 @@ class TaskEventLogTest {
         log.restart();
         append(log, 7, 1);
 
-        Page page = log.read(oldStream, 3, -1, 10, 0);
+        Page<TaskEvent> page = log.read(oldStream, 3, -1, 10, 0);
 
         assertEquals(CursorStatus.STREAM_CHANGED, page.cursorStatus());
         assertNotEquals(oldStream, page.streamId());
@@ -108,7 +108,7 @@ class TaskEventLogTest {
         TaskEventLog log = new TaskEventLog();
         append(log, 1, TaskEventLog.CAPACITY + 40);
 
-        Page page = log.read(log.streamId(), 10, -1, 5, 0);
+        Page<TaskEvent> page = log.read(log.streamId(), 10, -1, 5, 0);
 
         assertEquals(CursorStatus.HISTORY_LOST, page.cursorStatus());
         assertEquals(41, page.events().get(0).cursor());
@@ -118,7 +118,7 @@ class TaskEventLogTest {
     void waitingReturnsAsSoonAsAnEventArrives() throws Exception {
         TaskEventLog log = new TaskEventLog();
         String stream = log.streamId();
-        CompletableFuture<Page> reading = CompletableFuture.supplyAsync(() -> {
+        CompletableFuture<Page<TaskEvent>> reading = CompletableFuture.supplyAsync(() -> {
             try {
                 return log.read(stream, 0, -1, 10, 10_000);
             } catch (InterruptedException exception) {
@@ -128,7 +128,7 @@ class TaskEventLogTest {
         Thread.sleep(50);
         log.append(TaskEvent.Kind.FINISHED, 3, "做完了", null);
 
-        Page page = reading.get(5, TimeUnit.SECONDS);
+        Page<TaskEvent> page = reading.get(5, TimeUnit.SECONDS);
 
         assertEquals(1, page.events().size());
         assertEquals(TaskEvent.Kind.FINISHED, page.events().get(0).kind());
@@ -139,7 +139,7 @@ class TaskEventLogTest {
         TaskEventLog log = new TaskEventLog();
         append(log, 1, 2);
 
-        Page page = log.read(log.streamId(), 2, -1, 10, 30);
+        Page<TaskEvent> page = log.read(log.streamId(), 2, -1, 10, 30);
 
         assertTrue(page.events().isEmpty());
         assertEquals(CursorStatus.VALID, page.cursorStatus());

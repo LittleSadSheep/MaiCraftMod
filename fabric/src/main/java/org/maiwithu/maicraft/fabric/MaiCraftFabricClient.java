@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.Minecraft;
@@ -31,5 +32,13 @@ public final class MaiCraftFabricClient implements ClientModInitializer {
                 client.serverLinkReceived(Minecraft.getInstance(), payload.json()));
         ClientPlayConnectionEvents.DISCONNECT.register((handler, minecraft) ->
                 client.serverLinkDisconnected(minecraft));
+        // 聊天栏收到的消息：玩家说的话（有签名的带原话与 UUID，没签名的只有整行）与系统消息，有什么给什么。
+        ClientReceiveMessageEvents.CHAT.register((message, signedMessage, sender, chatType, receivedAt) ->
+                client.playerChatReceived(Minecraft.getInstance(), message,
+                        signedMessage == null ? null : signedMessage.decoratedContent(),
+                        sender != null ? sender.getId() : signedMessage == null ? null : signedMessage.sender(),
+                        sender == null ? null : sender.getName(), chatType));
+        ClientReceiveMessageEvents.GAME.register((message, actionBar) ->
+                client.systemMessageReceived(Minecraft.getInstance(), message, actionBar));
     }
 }
