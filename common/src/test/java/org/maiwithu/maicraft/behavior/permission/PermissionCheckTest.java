@@ -27,6 +27,9 @@ class PermissionCheckTest {
     private static final String SELF = UUID.randomUUID().toString();
     private static final String OTHER = UUID.randomUUID().toString();
     private static final UUID SHEEP = UUID.randomUUID();
+    private static final UUID WILD_COW = UUID.randomUUID();
+    private static final UUID TAMED_WOLF = UUID.randomUUID();
+    private static final UUID STEVE = UUID.randomUUID();
 
     private final Protection protection = new Protection(
             (dimension, x, y, z) -> {
@@ -46,8 +49,40 @@ class PermissionCheckTest {
     void 点名的观察编号_即许可_连玩家放的方块也放行() {
         assertEquals(Optional.empty(), check.allows(Permissions.DEFAULT,
                 PermissionCheck.WorldAction.DIG_BLOCK, new Target.Seen("f3")));
-        assertEquals(Optional.empty(), check.allows(Permissions.DEFAULT,
+        // 点名的生物要先找回是哪一只、看有没有主，不能只凭编号放行。
+        assertThrows(IllegalArgumentException.class, () -> check.allows(Permissions.DEFAULT,
                 PermissionCheck.WorldAction.FIGHT, new Target.Seen("e7")));
+    }
+
+    @Test
+    void 点名打野生动物_点名即许可() {
+        assertEquals(Optional.empty(), check.namedCreatureAllowed(Permissions.DEFAULT,
+                PermissionCheck.WorldAction.FIGHT, WILD_COW, "一头牛"));
+    }
+
+    @Test
+    void 点名打别人的狗_要再确认一次_开到any才放行() {
+        var refusal = check.namedCreatureAllowed(Permissions.DEFAULT,
+                PermissionCheck.WorldAction.FIGHT, TAMED_WOLF, "一只狗").orElseThrow();
+        assertEquals(Problem.Kind.NEED_APPROVAL, refusal.kind());
+        assertTrue(refusal.suggestion().contains("fight") && refusal.suggestion().contains("any"), refusal.suggestion());
+        var any = Permissions.DEFAULT.mergedWith(null, Permissions.Fight.ANY, null, null, null, null);
+        assertEquals(Optional.empty(), check.namedCreatureAllowed(any,
+                PermissionCheck.WorldAction.FIGHT, TAMED_WOLF, "一只狗"));
+    }
+
+    @Test
+    void 点名打玩家_默认拒_看不清的生物按有主() {
+        assertTrue(check.namedCreatureAllowed(Permissions.DEFAULT,
+                PermissionCheck.WorldAction.FIGHT, STEVE, "玩家 Steve").isPresent());
+        assertTrue(check.namedCreatureAllowed(Permissions.DEFAULT,
+                PermissionCheck.WorldAction.FIGHT, SHEEP, "草坡上的羊").isPresent());
+    }
+
+    @Test
+    void 没给高度的坐标_先落实到具体一格再问() {
+        assertThrows(IllegalArgumentException.class, () -> check.allows(Permissions.DEFAULT,
+                PermissionCheck.WorldAction.DIG_BLOCK, new Target.Position(1, null, 1, null)));
     }
 
     @Test
@@ -176,7 +211,19 @@ class PermissionCheckTest {
                 PermissionCheck.WorldAction.FIGHT, WALL, null));
     }
 
+    // 野牛、别人的狗、玩家各有处境；羊看不清。
     private static ReadsCreatureSituation fixedSituations() {
-        return entityId -> Optional.empty();
+        return entityId -> {
+            if (WILD_COW.equals(entityId)) {
+                return Optional.of(new ReadsCreatureSituation.CreatureSituation(false, false, false, false, false, false));
+            }
+            if (TAMED_WOLF.equals(entityId)) {
+                return Optional.of(new ReadsCreatureSituation.CreatureSituation(false, false, false, true, false, false));
+            }
+            if (STEVE.equals(entityId)) {
+                return Optional.of(new ReadsCreatureSituation.CreatureSituation(true, false, false, false, false, false));
+            }
+            return Optional.empty();
+        };
     }
 }

@@ -39,7 +39,7 @@ public final class LiveSeenTargets implements SeenTargets {
         if (entity == null) {
             return null;
         }
-        return new Locked(entity.getId(), EntityType.getKey(entity.getType()).toString());
+        return new Locked(entity.getId(), entity.getUUID(), EntityType.getKey(entity.getType()).toString());
     }
 
     @Override

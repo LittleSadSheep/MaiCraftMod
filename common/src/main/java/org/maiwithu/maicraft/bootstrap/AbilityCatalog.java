@@ -219,15 +219,15 @@ public final class AbilityCatalog {
                 new ClientCropReplanting(toMainhand, deps.interactions(), deps.context()),
                 drops, permission, deps.backpack(), deps.offhand()));
 
-        registerStandalone(registry, deps);
+        registerStandalone(registry, deps, permission);
         return registry;
     }
 
     /** 不和别的能力共用现场部件的那些能力：战斗、跟随、等待、出行、聊天、记地点、按顺序做事。 */
-    private static void registerStandalone(AbilityRegistry registry, Deps deps) {
+    private static void registerStandalone(AbilityRegistry registry, Deps deps, PermissionCheck permission) {
         // 战斗：感观与生存需求共用一份，观察编号与动手都接在真实客户端上。
         registry.register(new FightModule(deps.senses(),
-                new LiveSeenTargets(deps.scene().seen()), new LiveFightMoves(deps.walks())));
+                new LiveSeenTargets(deps.scene().seen()), new LiveFightMoves(deps.walks()), permission));
 
         // 跟随：常驻任务，目标从场景的观察编号找。
         registry.register(new FollowModule(deps.walks(), new LiveFollowView(deps.scene().seen())));

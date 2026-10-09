@@ -7,6 +7,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -55,6 +56,7 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     private final CombatSenses senses;
     private final SeenTargets seenTargets;
     private final FightMoves moves;
+    private final NamedTargetConsent consent;
 
     /** 点名目标：观察编号、实体编号、类型；区域清扫时为空。 */
     private final List<SeenTargets.Locked> named = new ArrayList<>();
@@ -87,12 +89,14 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     private int carriedBeforeLoot = -1;
     private List<FightMoves.Drop> pendingDrops = List.of();
 
-    FightTask(FightInput input, CombatSenses senses, SeenTargets seenTargets, FightMoves moves) {
+    FightTask(FightInput input, CombatSenses senses, SeenTargets seenTargets, FightMoves moves,
+            NamedTargetConsent consent) {
         super("战斗", Phase.CHECK, new ProgressTracker(STUCK_AFTER_TICKS, Long.MAX_VALUE));
         this.input = Objects.requireNonNull(input, "input");
         this.senses = Objects.requireNonNull(senses, "senses");
         this.seenTargets = Objects.requireNonNull(seenTargets, "seenTargets");
         this.moves = Objects.requireNonNull(moves, "moves");
+        this.consent = Objects.requireNonNull(consent, "consent");
     }
 
     private final Driver driver = new Driver();
@@ -118,6 +122,11 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
                 return Next.fail(Problem.of(Problem.Kind.NOT_FOUND,
                         "观察编号 " + observedId + " 对不上任何东西：先 observe 确认它在不在",
                         "重新观察后用新的观察编号再打"));
+            }
+            // 点名就是许可，但别人的宠物、有名字的动物和玩家点了名也要再确认一次：许可没开到 any 不动手。
+            Optional<Problem> refusal = consent.check(locked, input.permissions());
+            if (refusal.isPresent()) {
+                return Next.fail(refusal.get());
             }
             named.add(locked);
         }
