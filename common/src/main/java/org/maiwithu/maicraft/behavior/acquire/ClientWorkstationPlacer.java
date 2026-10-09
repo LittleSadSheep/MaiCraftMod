@@ -182,6 +182,20 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation {
             return current.level().getBlockState(below).isFaceSturdy(current.level(), below, Direction.UP);
         }
 
+        // 被生存需求打断：换手、放置先停住，恢复后接着推进。
+        @Override
+        public void pause() {
+            if (moving != null) moving.pause();
+            if (placing != null) placing.pause();
+        }
+
+        // 收尾：没做完的换手与放置一并收尾。
+        @Override
+        public void close() {
+            if (moving != null) moving.close();
+            if (placing != null) placing.close();
+        }
+
         private String displayName() {
             int nameStart = blockType.indexOf(':') + 1;
             return blockType.substring(nameStart);

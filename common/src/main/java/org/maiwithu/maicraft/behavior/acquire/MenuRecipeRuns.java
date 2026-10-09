@@ -562,6 +562,20 @@ public final class MenuRecipeRuns implements RecipeRuns {
             };
         }
 
+        // 被生存需求打断：正在走的那一趟、正在点的那一下先停住，恢复后接着推进。
+        @Override
+        public void pause() {
+            if (approaching != null) approaching.pause();
+            if (opening != null) opening.pause();
+        }
+
+        // 收尾：没走完的走到、没确认的点开一并收尾，不让它们悬着占着身体。
+        @Override
+        public void close() {
+            if (approaching != null) approaching.close();
+            if (opening != null) opening.close();
+        }
+
         @Override
         public String describe() {
             return "在工作站上做 " + recipe.result().describe();
