@@ -10,7 +10,7 @@
   - [掉落物物理](maicraft://knowledge/game_mechanics/item-drops)：拾取半径约 1 格、会漂移、会消失；"方块碎了没进包"的排查顺序。
   - [关键掉率与方差](maicraft://knowledge/game_mechanics/drop-rates)：燧石 10% 掉率是常态，连挖几块不掉不是故障。
   - [工具等级与挖掘资格](maicraft://knowledge/game_mechanics/tool-tiers)：等级不够挖不动或不掉落；黑曜石需钻石镐。
-  - [mine 源查询的公平语义与探矿许可](maicraft://knowledge/game_mechanics/mine-source-scope)：只取即时可见或见过的源；给了探矿许可后按已知生成带下降掘进，表外物品如实拒绝。
+  - [mine 源查询的公平语义与探矿许可](maicraft://knowledge/game_mechanics/ore-heights)：只取即时可见或见过的源；给了探矿许可后按已知生成带下降掘进，表外物品如实拒绝。
   - [食物与饥饿](maicraft://knowledge/game_mechanics/food)：进食规则与自动选食、打猎/耕种/加工获取链；农田采收自带留种补种。
   - [睡眠与夜晚](maicraft://knowledge/game_mechanics/sleep-night)：黑暗处刷怪、床跳夜与重设重生点、同色羊毛、3 天不睡刷幻翼。
   - [下降掘进与寻路死角](maicraft://knowledge/game_mechanics/tunneling)：垂直直挖易 planning_stall，斜向阶梯与水平掘进是可靠形状；探矿末段停滞时就地扫描暴露源。
