@@ -6,6 +6,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
@@ -32,6 +33,15 @@ public interface FirstPersonScene {
      * 判断哪一面看得见是游戏接口层的同一条事实，这里只转述，不另写一套。
      */
     BlockHitResult visibleHit(BlockPos target);
+
+    /**
+     * 方块上一个部件里看得见的部位：命中点必须落在部件框里；看不到、够不着时为 null。
+     * 默认按整格找一个可见部位再核对它在不在框里；真实现场改为只在框里找瞄准点。
+     */
+    default BlockHitResult visiblePartHit(BlockPos target, AABB part) {
+        BlockHitResult hit = visibleHit(target);
+        return hit != null && AimCheck.insidePart(hit, part) ? hit : null;
+    }
 
     /**
      * 手里的物品按它自己的射线规则使用时（水桶沿视线找支撑面，满桶的水落到命中面外侧那一格），

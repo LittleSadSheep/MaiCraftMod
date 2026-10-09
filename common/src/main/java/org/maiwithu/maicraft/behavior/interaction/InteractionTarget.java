@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.interaction;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.phys.AABB;
 
 /**
  * 这次交互要处理的目标对象：一格方块或一只实体。只有这两种，
@@ -10,14 +11,23 @@ import net.minecraft.world.entity.Entity;
  */
 public sealed interface InteractionTarget {
 
-    /** 一格方块；具体点哪个面在瞄准时按当时看得见的面决定。 */
-    record BlockTarget(BlockPos pos) implements InteractionTarget {
+    /**
+     * 一格方块；具体点哪个面在瞄准时按当时看得见的面决定。
+     *
+     * @param part 只点方块上的这个部件（世界坐标的框，例如挂在线缆上的终端面板）；为 null 时整格方块哪里都行
+     */
+    record BlockTarget(BlockPos pos, AABB part) implements InteractionTarget {
         public BlockTarget {
             pos = pos.immutable();
         }
 
+        /** 整格方块：瞄它看得见的任一部位。 */
+        public BlockTarget(BlockPos pos) {
+            this(pos, null);
+        }
+
         @Override public String describe() {
-            return "方块 " + pos.toShortString();
+            return part == null ? "方块 " + pos.toShortString() : "方块 " + pos.toShortString() + " 上的部件";
         }
     }
 

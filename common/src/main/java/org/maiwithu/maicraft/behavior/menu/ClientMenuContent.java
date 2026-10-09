@@ -33,8 +33,18 @@ public final class ClientMenuContent implements MenuContent {
     private int boundStateId;
     private long boundTick;
 
+    /** 认得出哪些界面：原版加上联动模组证明过的。 */
+    private final MenuLayouts layouts;
+
+    /** 只认原版界面的读端：合成、烧炼这类只会开原版工作站的地方用。 */
     public ClientMenuContent(Supplier<PlayerContext> contexts) {
+        this(contexts, MenuLayouts.VANILLA);
+    }
+
+    /** 按给定的一份布局判定读两侧：要开模组界面的地方带上联动模组的证明。 */
+    public ClientMenuContent(Supplier<PlayerContext> contexts, MenuLayouts layouts) {
         this.contexts = Objects.requireNonNull(contexts);
+        this.layouts = Objects.requireNonNull(layouts, "layouts");
     }
 
     // 绑定推迟到第一次读：动手动作可以先建读端再点开界面，绑上的就是点开的那份。
@@ -63,7 +73,7 @@ public final class ClientMenuContent implements MenuContent {
         PlayerContext context = contexts.get();
         if (context == null || channel == null) return Optional.empty();
         if (!synced(context)) return Optional.empty();
-        return reading(slots, channel, snapshotAt);
+        return reading(layouts.classify(slots), slots, channel, snapshotAt);
     }
 
     // 同步判断：看到菜单版本变过，或稳定地过了不止一次往返窗口，才算同步到了。
@@ -77,7 +87,12 @@ public final class ClientMenuContent implements MenuContent {
      * 布局证明不了时给空：读数只报证明得了两侧的界面。
      */
     static Optional<Reading> reading(MenuSlots slots, MenuChannel channel, IntFunction<SlotSnapshot> snapshotAt) {
-        MenuLayout.Layout layout = MenuLayout.classify(slots);
+        return reading(MenuLayout.classify(slots), slots, channel, snapshotAt);
+    }
+
+    // 布局已经判过：按判出的两侧逐格抄快照。
+    private static Optional<Reading> reading(MenuLayout.Layout layout, MenuSlots slots, MenuChannel channel,
+            IntFunction<SlotSnapshot> snapshotAt) {
         if (!(layout instanceof MenuLayout.Supported supported)) return Optional.empty();
         List<Integer> containerSlotIds = new ArrayList<>();
         List<SlotSnapshot> containerSnapshots = new ArrayList<>();

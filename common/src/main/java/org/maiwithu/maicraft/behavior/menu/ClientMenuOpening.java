@@ -6,6 +6,7 @@ import java.util.Optional;
 import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.approach.InteractionTarget;
@@ -25,6 +26,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * <p>读端每次点开都新建：读端只在第一次读时绑一次界面，复用上一次的会一直读旧的那份。
  * 点不开（锁着、盖子被压住、坐着猫、被服务器拒绝）如实按游戏拒绝失败；界面认不出两侧怎么分
  * 就一格都不点，按不支持失败；内容一直没同步完按卡住失败。失败时已经点开的界面请游戏关上。
+ *
+ * <p>界面挂在方块的一个部件上时（例如线缆上的 ME 终端面板），靠近与右键都对准部件框，不点线缆芯。
  */
 public final class ClientMenuOpening implements MenuOpening {
 
@@ -34,6 +37,9 @@ public final class ClientMenuOpening implements MenuOpening {
     private enum Stage { APPROACH, CLICK, SYNC, OPENED }
 
     private final BlockPos at;
+    /** 只点方块上的这个部件；为 null 时整格方块。 */
+    private final AABB part;
+    private final MenuLayouts layouts;
     private final Permissions permissions;
     private final BringsPlayerClose close;
     private final Interactions interactions;
@@ -46,12 +52,27 @@ public final class ClientMenuOpening implements MenuOpening {
     private OpenedMenu opened;
 
     /**
+     * 打开一只容器：整格方块。
+     *
      * @param at          容器方块的位置
      * @param permissions 这次任务的许可：走过去能动多少地形按它来
+     * @param layouts     认得出哪些界面：原版加上联动模组证明过的
      */
-    public ClientMenuOpening(BlockPos at, Permissions permissions, BringsPlayerClose close,
+    public ClientMenuOpening(BlockPos at, Permissions permissions, MenuLayouts layouts, BringsPlayerClose close,
             Interactions interactions, Supplier<PlayerContext> contexts) {
+        this(at, null, permissions, layouts, close, interactions, contexts);
+    }
+
+    /**
+     * 打开方块上一个部件的界面（例如挂在线缆上的 ME 终端）：靠近按部件框判够不够得着、看不看得见，右键也只点框里。
+     *
+     * @param part 部件框，世界坐标；读写端按模组的模型给出。为 null 时就是整格方块
+     */
+    public ClientMenuOpening(BlockPos at, AABB part, Permissions permissions, MenuLayouts layouts,
+            BringsPlayerClose close, Interactions interactions, Supplier<PlayerContext> contexts) {
         this.at = at.immutable();
+        this.part = part;
+        this.layouts = Objects.requireNonNull(layouts, "layouts");
         this.permissions = Objects.requireNonNull(permissions, "permissions");
         this.close = Objects.requireNonNull(close, "close");
         this.interactions = Objects.requireNonNull(interactions, "interactions");
@@ -74,7 +95,9 @@ public final class ClientMenuOpening implements MenuOpening {
     // 走到够得着、看得见容器的地方；走不到如实失败，不隔空点开。
     private ActionStatus approach(TickContext tick) {
         if (step == null) {
-            step = close.toward(InteractionTarget.ofBlock(at), permissions);
+            InteractionTarget target = part == null ? InteractionTarget.ofBlock(at)
+                    : InteractionTarget.ofBlockPart(at, part);
+            step = close.toward(target, permissions);
         }
         ActionStatus status = step.tick(tick);
         if (status instanceof ActionStatus.Failed failed) {
@@ -93,7 +116,8 @@ public final class ClientMenuOpening implements MenuOpening {
         if (step == null) {
             PlayerContext player = tick.player();
             int before = player.localPlayer().containerMenu.containerId;
-            step = interactions.useBlock(at, InteractionConfirmation.menuChanged(before));
+            InteractionConfirmation opened = InteractionConfirmation.menuChanged(before);
+            step = part == null ? interactions.useBlock(at, opened) : interactions.useBlockPart(at, part, opened);
         }
         ActionStatus status = step.tick(tick);
         if (status instanceof ActionStatus.Failed failed) {
@@ -107,7 +131,7 @@ public final class ClientMenuOpening implements MenuOpening {
             if (channel == null) {
                 return ActionStatus.failed(Problem.of(Problem.Kind.TARGET_GONE, "界面点开了又马上没了", null));
             }
-            content = new ClientMenuContent(contexts);
+            content = new ClientMenuContent(contexts, layouts);
             stage = Stage.SYNC;
             return ActionStatus.progressed();
         }
@@ -128,7 +152,7 @@ public final class ClientMenuOpening implements MenuOpening {
             return ActionStatus.running();
         }
         channel.requestClose();
-        if (MenuLayout.classify(new ClientMenuSlots(contexts)) instanceof MenuLayout.Unsupported unsupported) {
+        if (layouts.classify(new ClientMenuSlots(contexts)) instanceof MenuLayout.Unsupported unsupported) {
             return ActionStatus.failed(Problem.of(Problem.Kind.UNSUPPORTED,
                     "这种界面认不出两侧怎么分，一格都不点：" + unsupported.reason(), null));
         }

@@ -18,6 +18,7 @@ import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationProtection;
 import org.maiwithu.maicraft.behavior.permission.OwnershipMap;
 import org.maiwithu.maicraft.behavior.permission.Protection;
+import org.maiwithu.maicraft.behavior.permission.TrustedPlayers;
 import org.maiwithu.maicraft.behavior.permission.RegionsSnapshot;
 import org.maiwithu.maicraft.behavior.perception.ClientEntitySight;
 import org.maiwithu.maicraft.behavior.perception.ClientEnvironmentSight;
@@ -49,6 +50,7 @@ import org.maiwithu.maicraft.kernel.goal.DocumentGoalRunStore;
 import org.maiwithu.maicraft.kernel.goal.GoalRunStore;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
+import org.maiwithu.maicraft.game.world.OnlinePlayers;
 import org.maiwithu.maicraft.game.world.SaveIdentity;
 import org.maiwithu.maicraft.kernel.storage.StateIdentity;
 import org.maiwithu.maicraft.game.world.FurnaceFuels;
@@ -95,7 +97,7 @@ public final class WorldScope {
             ServerLinkSession session, SubtitleFeed subtitles, Interactions interactions,
             UseKeyProjection useKeyProjection, BaritoneInternals walks, CombatSenses senses,
             AbilityRegistry abilities, InteractionSender interactionSender, MenuActions menuActions,
-            boolean allowGameCommands, FurnaceFuels furnaceFuels, CompatRegistry compat) {
+            InstanceConfig instanceConfig, FurnaceFuels furnaceFuels, CompatRegistry compat) {
         // 游戏接口层认出是哪个存档或服务器，内核的世界身份只拿编号与目录。
         SaveIdentity save = SaveIdentity.current(minecraft)
                 .orElseThrow(() -> new IllegalStateException("进了世界却识别不出世界身份，记忆无处安放"));
@@ -114,8 +116,11 @@ public final class WorldScope {
         this.ownership = new OwnershipMap(session);
         this.regions = new RegionsSnapshot(memory);
         this.regions.refresh();
+        // 自家人：所有者在实例配置里列的信任玩家；名单写名字的，按在线玩家对上编号。
+        TrustedPlayers trusted = new TrustedPlayers(instanceConfig.trustedPlayers(),
+                name -> OnlinePlayers.idByName(minecraft, name));
         this.protection = new Protection(ownership, regions, memory,
-                GuessesPlayerMade.NOTHING, minecraft.player.getUUID().toString());
+                GuessesPlayerMade.NOTHING, minecraft.player.getUUID().toString(), trusted);
         this.dimension = minecraft.level.dimension().location().toString();
         // 寻路挖路、垫路也过这一份保护判断：不挖穿别人的房子，归属拿不准的格子不动。
         NavigationProtection.installWorldRule((x, y, z) ->
@@ -149,7 +154,7 @@ public final class WorldScope {
                 // 客户端刻号跟着所在世界走；没进世界读不到，按 0 兜底（只在读端内部量时长用）。
                 () -> minecraft.level == null ? 0 : minecraft.level.getGameTime(),
                 new InputDriver(playerControl),
-                allowGameCommands,
+                instanceConfig.allowGameCommands(),
                 protection,
                 furnaceFuels,
                 compat,

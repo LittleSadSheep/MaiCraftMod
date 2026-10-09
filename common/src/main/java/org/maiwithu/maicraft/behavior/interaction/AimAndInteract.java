@@ -148,7 +148,9 @@ public final class AimAndInteract implements Action {
     private Vec3 planAim(FirstPersonScene scene) {
         if (target instanceof InteractionTarget.BlockTarget block) {
             BlockHitResult visible = gesture == Gesture.USE_HELD_ITEM
-                    ? scene.visibleItemHit(block.pos(), hand) : scene.visibleHit(block.pos());
+                    ? scene.visibleItemHit(block.pos(), hand)
+                    : block.part() != null ? scene.visiblePartHit(block.pos(), block.part())
+                    : scene.visibleHit(block.pos());
             return visible == null ? null : visible.getLocation();
         }
         return ((InteractionTarget.EntityTarget) target).entity().getBoundingBox().getCenter();
@@ -239,7 +241,8 @@ public final class AimAndInteract implements Action {
 
     private boolean hitsTarget(HitResult hit) {
         if (target instanceof InteractionTarget.BlockTarget block) {
-            return AimCheck.hitsBlock(hit, block.pos());
+            return block.part() == null ? AimCheck.hitsBlock(hit, block.pos())
+                    : AimCheck.hitsPart(hit, block.pos(), block.part());
         }
         return target instanceof InteractionTarget.EntityTarget entity
                 && AimCheck.hitsEntity(hit, entity.entity());

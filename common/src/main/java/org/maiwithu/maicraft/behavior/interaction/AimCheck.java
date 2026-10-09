@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.interaction;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
@@ -16,6 +17,9 @@ public final class AimCheck {
 
     /** 实际视线与目标方向的最大夹角；差得太多时射线会点到目标旁边。 */
     static final double SETTLED_ANGLE_DEGREES = 7.0;
+
+    /** 部件框的余量：命中点算在框的表面上时，浮点误差可能让它差一丝落在框外。 */
+    private static final double PART_MARGIN = 1.0e-3;
 
     private AimCheck() {}
 
@@ -34,6 +38,16 @@ public final class AimCheck {
         return hit instanceof BlockHitResult blockHit
                 && hit.getType() == HitResult.Type.BLOCK
                 && blockHit.getBlockPos().equals(target);
+    }
+
+    /** 命中点落在部件框里（留一点余量，命中点正好在框的表面上也算）。 */
+    public static boolean insidePart(BlockHitResult hit, AABB part) {
+        return part.inflate(PART_MARGIN).contains(hit.getLocation());
+    }
+
+    /** 准星命中了方块上的那个部件：点到的是目标格，命中点也在部件框里；同一格上的线缆、别的面板不算。 */
+    public static boolean hitsPart(HitResult hit, BlockPos target, AABB part) {
+        return hitsBlock(hit, target) && insidePart((BlockHitResult) hit, part);
     }
 
     /** 准星命中了指定的那只实体；另一只实体走进射线不算命中。 */

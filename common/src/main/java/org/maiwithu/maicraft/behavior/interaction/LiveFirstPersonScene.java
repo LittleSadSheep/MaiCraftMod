@@ -8,6 +8,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
@@ -42,6 +43,12 @@ public final class LiveFirstPersonScene implements FirstPersonScene {
         // 先试形状中心，再试六个面内侧，射线命中的第一格必须就是目标、且在方块触及距离内。
         return FirstPersonInteractionTargeting.visibleBlockHit(player.level(), player, player.getEyePosition(),
                 target, InteractionRange.blockReach(player));
+    }
+
+    @Override public BlockHitResult visiblePartHit(BlockPos target, AABB part) {
+        // 只在部件框和方块形状重叠的那一块里试瞄准点：线缆上的面板，照整格瞄会点到线缆芯。
+        return FirstPersonInteractionTargeting.visiblePartHit(player.level(), player, player.getEyePosition(),
+                target, InteractionRange.blockReach(player), part);
     }
 
     @Override public BlockHitResult visibleItemHit(BlockPos target, InteractionHand hand) {

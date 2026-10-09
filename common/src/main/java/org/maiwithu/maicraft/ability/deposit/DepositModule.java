@@ -12,6 +12,7 @@ import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.inventory.ClientSpotsContainers;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuOpening;
+import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
 import org.maiwithu.maicraft.behavior.perception.Scene;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
@@ -74,10 +75,10 @@ public final class DepositModule implements AbilityModule {
     public static DepositModule live(Supplier<PlayerContext> contexts, BringsPlayerClose close,
             Interactions interactions, CollectsBlocks digs, ReadsItemTags tags, WorldMemory memory,
             BackpackView backpack, BlockScanService scans, Protection protection, Supplier<Scene> scene,
-            FacilityKinds facilities) {
+            FacilityKinds facilities, MenuLayouts layouts) {
         return new DepositModule(new DepositServices(
                 new ClientSpotsContainers(scans, contexts, memory, protection, facilities),
-                (at, permissions) -> new ClientMenuOpening(at, permissions, close, interactions, contexts),
+                (at, permissions) -> new ClientMenuOpening(at, permissions, layouts, close, interactions, contexts),
                 new LiveDepositPlaces(scene, memory, contexts),
                 new NativeLidDigging(digs),
                 (itemId, tagId) -> tags.tagsOf(itemId).contains(tagId),

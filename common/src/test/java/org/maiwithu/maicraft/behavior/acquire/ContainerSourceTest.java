@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.util.Optional;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
@@ -20,6 +21,7 @@ import org.maiwithu.maicraft.behavior.inventory.KnownContainer;
 import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsBlockOwnership;
+import org.maiwithu.maicraft.behavior.permission.TrustedPlayers;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -105,7 +107,23 @@ class ContainerSourceTest {
 
         SourceQuote.Unavailable unavailable = assertInstanceOf(SourceQuote.Unavailable.class,
                 source.quote(request(1), CONTEXT));
-        assertTrue(unavailable.reason().contains("玩家的箱子不翻"), unavailable.reason());
+        assertTrue(unavailable.reason().contains("别人的箱子不翻"), unavailable.reason());
+    }
+
+    @Test
+    void 自家人的箱子照常翻() {
+        // bob 是所有者在实例配置里列的自家人：他放的箱子和角色自己的一样，记得有铁就去拿。
+        WorldMemory memory = memory();
+        memory.rememberContainerOpened(CHEST_AT, "minecraft:chest", List.of("minecraft:iron_ingot"), NOW);
+        String bob = new UUID(0, 42).toString();
+        Protection family = new Protection((dimension, x, y, z) -> x == 10 && y == 64 && z == 5
+                ? Optional.of(new ReadsBlockOwnership.PlacedBy(bob)) : Optional.empty(),
+                List::of, name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self",
+                new TrustedPlayers(List.of(bob), name -> Optional.empty()));
+        ContainerSource source = new ContainerSource(memory, tags, family,
+                (container, request, permissions) -> Optional.empty());
+
+        assertInstanceOf(SourceQuote.Offer.class, source.quote(request(1), CONTEXT));
     }
 
     @Test

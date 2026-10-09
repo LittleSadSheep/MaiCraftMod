@@ -3,6 +3,8 @@ package org.maiwithu.maicraft.behavior.menu;
 
 import java.util.Optional;
 
+import org.maiwithu.maicraft.game.menu.MenuConfirmation;
+import org.maiwithu.maicraft.game.menu.PendingMenuAction;
 import org.maiwithu.maicraft.kernel.task.Action;
 
 /**
@@ -28,6 +30,18 @@ public interface OpenedMenu {
 
     /** 普通点击：左键 button=0 拿起或放下整份，右键 button=1 拿半堆或放一个。 */
     void click(int slotId, int button);
+
+    /**
+     * 经模组自己的协议对这份界面做一次操作（例如 AE2 终端里取一件）：这份界面还开着、上一下已经结清、
+     * 界面画过、本刻还有交互机会才发，发了返回这一下的挂起记录，调用方按它的状态等结果；本刻发不了时为空，下一刻再试。
+     *
+     * @param what 这一下在做什么，写进日志
+     * @param send 真正发模组的包的那一下
+     */
+    default Optional<PendingMenuAction> submitModAction(String what, Runnable send, MenuConfirmation confirmation,
+                                                        int timeoutTicks) {
+        throw new UnsupportedOperationException("这份界面不支持经模组协议操作");
+    }
 
     /** 光标上的东西是从这一格拿起的：关界面前先放回这里。 */
     void noteCursorTakenFrom(int slotId);

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.permission;
 
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import org.maiwithu.maicraft.behavior.worldmemory.RemembersRegions;
@@ -16,6 +17,9 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
  *
  * <p>这里只判断不动手：读的是只读接缝，给的是结论，纯函数可测。
  * 角色自己放的方块不算受保护（临时方块用完要收回），判据是归属记录里的编号就是角色自己。
+ *
+ * <p>存储另有一问（{@link #mayUseStorage}）：箱子、AE 网络这类拿来取用、存放的东西，
+ * 自家人（所有者在实例配置里列的信任玩家）放的也能用；拆、改仍按 {@link #blockProtected} 当别人的。
  */
 public final class Protection {
 
@@ -27,6 +31,7 @@ public final class Protection {
     private final ReadsRememberedPlaces places;
     private final GuessesPlayerMade guesses;
     private final String selfPlayerId;
+    private final TrustedPlayers trusted;
 
     /**
      * @param ownership     方块归属的只读接缝（服务端记录）
@@ -37,11 +42,20 @@ public final class Protection {
      */
     public Protection(ReadsBlockOwnership ownership, RemembersRegions regions,
             ReadsRememberedPlaces places, GuessesPlayerMade guesses, String selfPlayerId) {
+        this(ownership, regions, places, guesses, selfPlayerId, TrustedPlayers.NOBODY);
+    }
+
+    /**
+     * @param trusted 自家人：他们放的存储可以取用、存放；没配置时传 {@link TrustedPlayers#NOBODY}
+     */
+    public Protection(ReadsBlockOwnership ownership, RemembersRegions regions,
+            ReadsRememberedPlaces places, GuessesPlayerMade guesses, String selfPlayerId, TrustedPlayers trusted) {
         this.ownership = ownership;
         this.regions = regions;
         this.places = places;
         this.guesses = guesses;
         this.selfPlayerId = selfPlayerId;
+        this.trusted = Objects.requireNonNull(trusted, "trusted");
     }
 
     /**
@@ -68,6 +82,33 @@ public final class Protection {
         if (inProtectedLandmark(position, protectedLandmarks)) return true;
         // 记录与区域都说不清，才靠猜；猜像就当是。
         return guesses.likelyPlayerMade(position, blockType);
+    }
+
+    /**
+     * 一只箱子、一台终端这类存储，能不能拿来取用、存放（不是拆）。
+     *
+     * <p>这次任务额外保护的地标旁边的不用；归属还没问清的不用（拿不准就不用）。
+     * 有归属记录的看是谁放的：角色自己或自家人放的能用，别人放的不用。
+     * 没有记录的：在记住的区域里、或推断像是玩家放的，不知道是谁的，按别人的算；
+     * 野外、村庄、遗迹里不属于任何玩家的能用。
+     *
+     * @param position           存储方块的位置
+     * @param blockType          方块类型，例如 minecraft:chest；不知道传 null，推断这路就跳过
+     * @param protectedLandmarks 这次任务额外保护的地标名
+     */
+    public boolean mayUseStorage(WorldPosition position, String blockType, Set<String> protectedLandmarks) {
+        if (inProtectedLandmark(position, protectedLandmarks)) return false;
+        if (!ownership.known(position.dimension(), position.x(), position.y(), position.z())) return false;
+        Optional<ReadsBlockOwnership.PlacedBy> placedBy =
+                ownership.whoPlaced(position.dimension(), position.x(), position.y(), position.z());
+        if (placedBy.isPresent()) {
+            String owner = placedBy.get().playerId();
+            return owner.equals(selfPlayerId) || trusted.includes(owner);
+        }
+        for (RememberedRegion region : regions.regions()) {
+            if (region.contains(position)) return false;
+        }
+        return !guesses.likelyPlayerMade(position, blockType);
     }
 
     /** 一只生物受不受保护：有名字、被驯服、拴着绳、围栏里，占上一条就是别人的，不碰。 */

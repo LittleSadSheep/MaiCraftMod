@@ -16,6 +16,19 @@ public record InteractionTarget(InteractionKind kind, BlockPos block, AABB bound
         return new InteractionTarget(InteractionKind.BLOCK, at, new AABB(at));
     }
 
+    /**
+     * 对方块上的一个部件做事（例如挂在线缆上的终端面板）：够不够得着、看不看得见都按部件框判，
+     * 和瞄准用同一个框，免得站在看得见线缆、看不见面板的地方。
+     *
+     * @param part 部件框，世界坐标，必须和这一格重叠
+     */
+    public static InteractionTarget ofBlockPart(BlockPos at, AABB part) {
+        if (!new AABB(at).intersects(part)) {
+            throw new IllegalArgumentException("部件框不在 " + at.toShortString() + " 这一格里");
+        }
+        return new InteractionTarget(InteractionKind.BLOCK, at, part);
+    }
+
     /** 对一张床做事：给床头或床尾任意一半的格子，距离与视线都按床底面判。 */
     public static InteractionTarget ofBed(BlockPos half) {
         return new InteractionTarget(InteractionKind.BED, half, new AABB(half));
