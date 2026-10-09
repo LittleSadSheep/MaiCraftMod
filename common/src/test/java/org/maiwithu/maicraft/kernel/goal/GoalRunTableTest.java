@@ -129,6 +129,17 @@ class GoalRunTableTest {
     }
 
     @Test
+    void goalWhosePermissionsTurnSurvivalNeedsOffSaysSo() {
+        // survival_needs=off 的目标（寻死这类）对控制循环声明关掉生存需求；默认许可不关。
+        Permissions off = Permissions.DEFAULT.mergedWith(null, null, null, null,
+                Permissions.SurvivalNeeds.OFF, null);
+        Goal suicide = new Goal(ABILITY, null, null, Params.EMPTY, off, List.of(), Goal.OnFailure.STOP);
+
+        assertTrue(table.launch(suicide, null).runner().survivalNeedsOff());
+        assertFalse(table.launch(GOAL, null).runner().survivalNeedsOff());
+    }
+
+    @Test
     void playerWhoPressedF8IsReportedAsHoldingTheCharacter() {
         // 人按 F8 收回了角色：如实说等人交回，不提示重新下达去抢。
         handover.automationOwns = false;

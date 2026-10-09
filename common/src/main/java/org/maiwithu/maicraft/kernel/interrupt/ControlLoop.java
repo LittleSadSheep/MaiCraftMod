@@ -122,6 +122,13 @@ public final class ControlLoop {
         waitingRespawn = false;
     }
 
+    // 主任务的许可关掉了生存需求（寻死这类明确的事）：一个生存需求都不插，临时任务也不建。
+    private boolean survivalNeedsOff() {
+        if (stack.isEmpty()) return false;
+        Frame bottom = stack.get(0);
+        return bottom.from == null && bottom.task instanceof SurvivalNeedsOff off && off.survivalNeedsOff();
+    }
+
     /** 本刻正在被推进（或被压着等待恢复）的任务里最上面的那个；没有任务时为 null。 */
     public Task currentTask() {
         return stack.isEmpty() ? null : top().task;
@@ -144,7 +151,7 @@ public final class ControlLoop {
         Frame current = top();
         // 主任务被停在了半路：只等生存需求先救命，活不接着干；建不出救命任务就继续停着。
         if (current.paused) {
-            for (SurvivalNeed need : needs) {
+            for (SurvivalNeed need : survivalNeedsOff() ? List.<SurvivalNeed>of() : needs) {
                 if (hasLiveTask(need)) continue;
                 Urgency urgency = urgencyOf(need, context, null);
                 // 停着时也按没做成的等待来：救不成的需求不每刻重建一遍。
@@ -202,6 +209,9 @@ public final class ControlLoop {
     /** 按打断规则挑出这一刻最急又能插进来的需求，同时记下最急的那个被按住的需求。 */
     private Choice choose(TickContext context, Interruptibility interruptibility, Task currentTask) {
         Choice choice = new Choice();
+        if (survivalNeedsOff()) {
+            return choice;
+        }
         for (SurvivalNeed need : needs) {
             if (hasLiveTask(need)) continue;
             // 需求可以看到此刻被推进的任务：要不要让位给主任务由需求自己结合处境判断。
