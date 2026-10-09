@@ -290,4 +290,28 @@ class EatTaskTest {
                 .anyMatch(change -> change.kind() == Change.Kind.ITEM_CONSUMED
                         && change.what().equals(BREAD) && change.count() >= 1));
     }
+
+    @Test
+    void 主手那一堆吃完了_先把下一堆换到主手再吃() {
+        // 主手只剩一块面包、背包里还有：吃完主手那块后先换手，再吃第二块，不对着空手按使用键。
+        Rig rig = new Rig().bread(3, 1);
+        EatTask eat = rig.task(2);
+        int[] bites = {0};
+        rig.worldStep = r -> {
+            r.confirmAnythingPending();
+            long starts = r.sender.submissions.stream()
+                    .filter(submission -> submission.kind() == PendingInteraction.Kind.USE_ITEM).count();
+            boolean breadInHand = r.equipment.slots.containsKey(GearSlotName.MAINHAND);
+            if (r.sender.last != null && r.sender.last.terminal() && bites[0] < starts && breadInHand) {
+                // 主手拿着面包、开始使用得到确认：吃掉一块；第一块吃完主手就空了。空手按使用键吃不到东西。
+                bites[0]++;
+                r.backpack.set(BREAD, r.backpack.countOf(BREAD) - 1);
+                if (bites[0] == 1) r.equipment.slots.remove(GearSlotName.MAINHAND);
+            }
+        };
+        TickResult result = rig.run(eat, 200);
+        assertTrue(result instanceof TickResult.Finished finished
+                && finished.result().status() == TaskResult.Status.DONE, String.valueOf(result));
+        assertEquals(2, bites[0]);
+    }
 }
