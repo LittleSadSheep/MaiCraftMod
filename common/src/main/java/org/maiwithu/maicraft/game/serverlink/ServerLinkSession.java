@@ -6,8 +6,6 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.network.chat.Component;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.maiwithu.maicraft.network.ProtocolJson;
 
 /**
@@ -16,7 +14,6 @@ import org.maiwithu.maicraft.network.ProtocolJson;
  * 当前连接完成服务端确认之前不开放游戏能力；换服务器后旧确认不算数，必须重新握手。
  */
 public final class ServerLinkSession {
-    private static final Logger LOG = LoggerFactory.getLogger(ServerLinkSession.class);
     private final RequestRouter router;
     private final ReceivedConfirmations confirmations = new ReceivedConfirmations();
     private final ConcurrentLinkedQueue<Runnable> callbacks = new ConcurrentLinkedQueue<>();
@@ -60,8 +57,11 @@ public final class ServerLinkSession {
             // 重绑只发生在连接或维度真正变化时——每刻重绑会重置握手随机数，welcome 永远对不上。
             var dimension = minecraft.level.dimension().location().toString();
             if (connection != current || !dimension.equals(boundDimension)) {
-                connection = current;
-                connectionRevision++;
+                // 只有真换了连接才换会话身份；同一连接换维度只换绑定，已经确认的握手照旧有效。
+                if (connection != current) {
+                    connection = current;
+                    connectionRevision++;
+                }
                 boundDimension = dimension;
                 bindingRevision++;
                 router.bind(connectionRevision, bindingRevision, dimension, 0, true, tick);
