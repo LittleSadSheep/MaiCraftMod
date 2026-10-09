@@ -30,12 +30,12 @@ public final class ChatChannel {
     }
 
     /** 把一句话提交给游戏的聊天输入；以 / 开头的按游戏命令发送，其余按聊天发送。 */
-    public void send(String message) {
+    public boolean send(String message) {
         PlayerContext current = context.get();
         if (current == null || current.localPlayer() == null) {
-            // 交出去之前就断掉：留一条日志，免得"交出去了"其实没交出去时无迹可查。
+            // 交出去之前就断掉：如实告诉调用方没交出去，再留一条日志备查。
             LOG.warn("[maicraft-chat] 聊天通道没接上，这句话没有交出去：{}", message);
-            return;
+            return false;
         }
         if (message.startsWith("/")) {
             // 原版聊天界面的路由：命令去掉斜杠走命令发送件，服务器按角色自己的权限裁决。
@@ -45,6 +45,7 @@ public final class ChatChannel {
             LOG.info("[maicraft-chat] 提交聊天：{}", message);
             current.localPlayer().connection.sendChat(message);
         }
+        return true;
     }
 
     /** 聊天栏到此刻为止一共出现过几条：发游戏命令前记下。聊天栏还没接上时为 0。 */

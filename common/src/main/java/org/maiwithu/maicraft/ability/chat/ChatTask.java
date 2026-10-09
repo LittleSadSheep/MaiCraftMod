@@ -5,6 +5,7 @@ import java.util.List;
 
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Change;
+import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.ResultDetails;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -73,7 +74,11 @@ public final class ChatTask extends PhasedTask<ChatTask.Phase> {
         if (command) {
             feedbackMark = echo.mark();
         }
-        sender.send(message);
+        // 聊天通道没接上时这句话根本没交出去：如实收场，不往下等回显，更不说"已交给游戏执行"。
+        if (!sender.send(message)) {
+            return Next.fail(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+                    "聊天通道还没接上（角色不在世界里），这句话没有交出去", "等角色进了世界再说"));
+        }
         recordProgress("已把话交给聊天输入");
         return Next.go(Phase.CONFIRM, command ? "已提交命令，等聊天栏出现命令反馈行" : "已提交，等聊天栏出现自己那条");
     }
