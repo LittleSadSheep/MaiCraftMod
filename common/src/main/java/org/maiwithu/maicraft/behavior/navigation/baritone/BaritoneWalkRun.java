@@ -7,15 +7,25 @@ import baritone.api.event.events.TickEvent;
 import baritone.api.event.events.type.EventState;
 import baritone.api.utils.IInputOverrideHandler;
 import it.unimi.dsi.fastutil.longs.LongSet;
-import it.unimi.dsi.fastutil.longs.LongSets;
 import baritone.api.utils.input.Input;
 import baritone.behavior.PathingBehavior;
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.DoorBlock;
+import net.minecraft.world.level.block.FenceGateBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkReport;
@@ -38,8 +48,13 @@ import org.maiwithu.maicraft.kernel.result.Problem;
  */
 final class BaritoneWalkRun implements WalkRun {
 
-    /** 在路上连续这么多个游戏刻没有四分之一格的位移，就承认走不下去。 */
-    private static final int STALL_LIMIT_TICKS = 100;
+    private static final Logger LOG = LoggerFactory.getLogger(BaritoneWalkRun.class);
+
+    /**
+     * 在路上连续这么多个游戏刻没有四分之一格的位移，就承认走不下去。比执行段单步超时（预计耗时再加 100 刻）长：
+     * 先让执行段放弃这一步、由卡住记忆切门或绕开，再轮到这里判走不通。
+     */
+    private static final int STALL_LIMIT_TICKS = 200;
 
     private final BaritoneInternals owner;
     private final GoalCompiler.Compiled target;
@@ -57,6 +72,10 @@ final class BaritoneWalkRun implements WalkRun {
     private final EngineClicks clicks = new EngineClicks();
     /** 最近一刻的角色上下文；暂停、放弃时用它停挖、交还没等到确认的右键。 */
     private PlayerContext lastContext;
+    /** 这一趟在哪些面前格反复卡住：第一次先切途经的门，第二次列为障碍绕开，障碍用完才如实走不通。 */
+    private final NavigationStallMemory stalls = new NavigationStallMemory();
+    /** 刚列了新障碍、还没能安全撤路线：落地站稳后重算一次绕行。 */
+    private boolean replanWhenSafe;
     /** 引擎本刻请求的按键是否读出来过；用于区分排队与真正在走。 */
     private boolean engineFailedPath;
     private boolean activated;
@@ -88,8 +107,14 @@ final class BaritoneWalkRun implements WalkRun {
         return target.sacred();
     }
 
+    /** 身体不许进的格子：这一趟卡住两次被列为障碍的面前格。 */
     LongSet forbiddenBodyCells() {
-        return LongSets.EMPTY_SET;
+        return stalls.obstacles();
+    }
+
+    /** 卡住后为这扇门（下半格）登记的目标开关状态；没有登记为 null，按门板朝向判断。 */
+    Boolean passageOpen(BlockPos passage) {
+        return stalls.wantOpen(passage);
     }
 
     /**
@@ -200,6 +225,7 @@ final class BaritoneWalkRun implements WalkRun {
         routePresent = pathing.getCurrent() != null;
         calculating = pathing.getInProgress().isPresent();
         BlockPos feet = player.blockPosition();
+        handleStall(pathing, engine, context.level(), feet);
         boolean onGround = player.onGround();
         boolean inWater = player.isInWater();
 
@@ -257,6 +283,73 @@ final class BaritoneWalkRun implements WalkRun {
         lookAlongRoute(engine, playerInput, context, player, routePresent);
         workBlocks(context, input);
         engineFailedPath = false;
+    }
+
+    // 取走执行段这一刻记下的卡住位置交给卡住记忆；刚列了新障碍的，落地站稳后撤掉旧路线按新的禁入格重算绕行。
+    private void handleStall(PathingBehavior pathing, IBaritone engine, ClientLevel level, BlockPos feet) {
+        MovementStall stall = pathing.consumeStall();
+        if (stall != null) {
+            onMovementStalled(stall, level, feet);
+        }
+        if (replanWhenSafe && pathing.isSafeToCancel()) {
+            replanWhenSafe = false;
+            pathing.forceCancel();
+            engine.getCustomGoalProcess().setGoalAndPath(engineGoal);
+        }
+    }
+
+    // 执行段放弃了一步：同一面前格第一次卡住，先切换这一步途经的门（没有门就原样重试）；
+    // 第二次仍卡住就把面前格列为障碍、重算绕行；障碍用完就如实走不通。整个过程不额外挖也不额外放。
+    private void onMovementStalled(MovementStall stall, ClientLevel level, BlockPos feet) {
+        if (stall.front() == null || progress.done() || level == null) return;
+        BlockPos passage = null;
+        boolean open = false;
+        for (BlockPos cell : stall.passageCells()) {
+            if (!level.isLoaded(cell)) continue;
+            BlockState state = level.getBlockState(cell);
+            if (!handOpenable(state)) continue;
+            BlockPos key = MovementStall.passageKey(cell, state);
+            if (stalls.wantOpen(key) != null) continue;
+            passage = key;
+            open = !state.getValue(BlockStateProperties.OPEN);
+            break;
+        }
+        BlockPos front = stall.front();
+        // 这一格这次卡住会被算数（不是已经列了障碍、正等重算的那格）：换个办法重来，算一次真实进展。
+        boolean counted = !stalls.obstacles().contains(front.asLong());
+        Map<String, Object> facts = new LinkedHashMap<>();
+        facts.put("cause", stall.cause().name().toLowerCase(Locale.ROOT));
+        facts.put("movement", stall.movement());
+        facts.put("from", stall.src().toShortString());
+        facts.put("to", stall.dest().toShortString());
+        facts.put("feet_block", level.isLoaded(front) ? level.getBlockState(front).toString() : "unloaded");
+        facts.put("head_block", level.isLoaded(front.above()) ? level.getBlockState(front.above()).toString() : "unloaded");
+        facts.put("stalled_ticks", stall.ticks());
+        NavigationStallMemory.Decision decision = stalls.observe(front, passage, open, facts);
+        if (counted && decision != NavigationStallMemory.Decision.EXHAUSTED) {
+            displacement.confirm(lastDrivenTick);
+        }
+        switch (decision) {
+            case RETRY -> LOG.info("[maicraft-path] 在 {} 前卡住了一次，原样再试；{}", front.toShortString(), facts);
+            case TOGGLE_PASSAGE -> LOG.info("[maicraft-path] 在 {} 前卡住了，先把门 {} 切到 open={} 再试",
+                    front.toShortString(), passage.toShortString(), open);
+            case OBSTACLE -> {
+                LOG.warn("[maicraft-path] 在 {} 前卡住了 {} 次，列为障碍重算绕行；{}",
+                        front.toShortString(), NavigationStallMemory.ATTEMPTS, facts);
+                NavigationProtection.install(sacredCells(), forbiddenBodyCells(), Integer.MIN_VALUE);
+                replanWhenSafe = true;
+            }
+            case EXHAUSTED -> progress.fail(Problem.of(Problem.Kind.STUCK,
+                    "在 " + front.toShortString() + " 前又卡住了，已经绕开了 " + NavigationStallMemory.MAX_OBSTACLES
+                            + " 个卡住的格子 " + stalls.obstacleCells() + "，路上没挖也没垫",
+                    "看看那几格挡着什么，或者把 change_blocks 放开再走"), feet);
+        }
+    }
+
+    // 徒手能开关的：木门这类（铁门要红石）和栅栏门。
+    private static boolean handOpenable(BlockState state) {
+        return state.getBlock() instanceof DoorBlock door && door.type().canOpenByHand()
+                || state.getBlock() instanceof FenceGateBlock;
     }
 
     // 引擎按着左右键时真的去挖、去点：挖开一格、垫上一块都算真实进展，挖掘推进中也不算原地卡住，
