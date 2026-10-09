@@ -46,6 +46,10 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
     private static final long STUCK_AFTER_TICKS = 20L * 30;
     /** 撤离时朝远离最近威胁的方向走这么远（格）。 */
     private static final double FLEE_DISTANCE = 12.0;
+    /** 一条撤离路线失败后隔这么久才重开下一次（刻）：逃跑路线每秒最多重开一次。 */
+    private static final int FLEE_RETRY_INTERVAL_TICKS = 20;
+    /** 离上一次撤离失败点超过这么远（格）算真实位移，失败账清零。 */
+    private static final double FLEE_REAL_PROGRESS_BLOCKS = 2.0;
 
     /**
      * 出手与走位怎么落地：任务负责挑目标与时机，动手交给行为模型。
@@ -87,6 +91,17 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
     /** 目标离追击出发时的位置超过这么远（格）才重新规划追击路线。 */
     private static final double RECHASE_AFTER = 3.0;
     private int watchTicksLeft;
+    /** 撤离寻路连续失败的次数：只有两格以上的真实位移才清零，不因重开一次路线就当作没失败过。 */
+    private int fleeRouteFailures;
+    /** 连续失败的撤离尝试里已经转过几次方向：失败一次转 90 度，不反复撞同一堵墙。 */
+    private int fleeTurns;
+    /** 距上一次撤离起步还剩多少刻才能再起步。 */
+    private int fleeRetryCooldown;
+    /** 上一次撤离寻路失败时角色的位置：用来量这段路有没有两格的真实位移。 */
+    private final double[] lastFleeFailureAt = new double[3];
+    private boolean hasFleeFailurePosition;
+    /** 撤离寻路连续失败到上限：退无可退，就地迎战，血线不再触发撤离。 */
+    private boolean cornered;
     /** 收尾时走不回打点：主任务不能在新地点悄悄续上。 */
     private boolean displaced;
 
@@ -124,7 +139,8 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
                     "被威胁，插入自卫：打点在 " + Math.round(self[0]) + ", " + Math.round(self[1]) + ", " + Math.round(self[2]));
         }
         // 血快见底：本能优先，先撤离再说，不拿剩下的两颗心去换"再打一下"。
-        if (ThreatAssessment.belowRetreatLine(situation.mine())) {
+        // 退无可退时血线不再触发撤离——没有地方可撤，就地迎战（背水一战）。
+        if (!cornered && ThreatAssessment.belowRetreatLine(situation.mine())) {
             return goRetreat(Problem.of(Problem.Kind.DANGER, "血快见底，先撤离保命"));
         }
         if (situation.foes().isEmpty()) {
@@ -197,6 +213,8 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
     private Next<Phase> goRetreat(Problem why) {
         dropCurrent();
         ticksSinceProgress = 0;
+        fleeTurns = 0;
+        fleeRetryCooldown = 0;
         recordProgress(why.message());
         retreatProblem = why;
         return Next.go(Phase.RETREAT, why.message());
@@ -204,7 +222,8 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
 
     /**
      * 撤离：朝远离最近威胁的方向走，走到警戒圈里没有威胁就算甩掉了。
-     * 以"打不出去，已撤离"如实收场（FAILED），撤离也走不动就带着问题结束。
+     * 以"打不出去，已撤离"如实收场（FAILED）；一条路线走不通不等于没有退路：
+     * 换个方向、隔一秒再试，连续走不通到上限才承认退无可退，回去背水一战。
      */
     private Next<Phase> retreat(TickContext context) {
         ThreatSituation situation = situationOf(senses, context);
@@ -221,9 +240,15 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
                             : retreatProblem)
                     .details(new DefenseDetails(drift, heartsLost)).build());
         }
+        // 一条撤离路线失败后不立刻重开：逃跑路线每秒最多重开一次，给上一条路一点结算时间。
+        if (fleeRetryCooldown > 0) {
+            fleeRetryCooldown--;
+            return Next.stay();
+        }
         double[] self = moves.selfPosition(context);
         if (current == null) {
             // 朝背对最近威胁的方向直线走：走位只走不改，绕路交给走到。
+            // 刚失败过的方向转 90 度再试：同一个点走不通，换个方向才可能走出去。
             var nearest = situation.foes().get(0);
             double awayX = self[0] - nearest.x();
             double awayZ = self[2] - nearest.z();
@@ -233,16 +258,42 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
                 awayZ = 0;
                 length = 1;
             }
+            if (fleeTurns % 2 == 1) {
+                double swap = awayX;
+                awayX = -awayZ;
+                awayZ = swap;
+            }
             current = moves.walkTo(self[0] + awayX / length * FLEE_DISTANCE, self[1],
                     self[2] + awayZ / length * FLEE_DISTANCE);
         }
         ActionStatus status = current.tick(context);
         if (status instanceof ActionStatus.Failed failed) {
-            // 撤也撤不掉：如实把问题带回去，不硬撑也不装撤成了。
-            events.publish(TaskEvent.Kind.NEED_UNHANDLED,
-                    "想撤也走不动：" + failed.problem().message() + "；还留在威胁边上");
-            return Next.fail(Problem.of(Problem.Kind.UNREACHABLE,
-                    "撤离走不动：" + failed.problem().message()));
+            // 这条撤离路线走不通：换方向再试，连续走不通到上限才承认退无可退，不一次失败就把任务判死。
+            dropCurrent();
+            if (hasFleeFailurePosition
+                    && Math.hypot(self[0] - lastFleeFailureAt[0], self[2] - lastFleeFailureAt[2])
+                            >= FLEE_REAL_PROGRESS_BLOCKS) {
+                // 两格以上的真实位移说明已经甩开了上一个死路：失败账清零重新数。
+                fleeRouteFailures = 0;
+                fleeTurns = 0;
+            }
+            hasFleeFailurePosition = true;
+            lastFleeFailureAt[0] = self[0];
+            lastFleeFailureAt[1] = self[1];
+            lastFleeFailureAt[2] = self[2];
+            fleeRouteFailures++;
+            fleeTurns++;
+            fleeRetryCooldown = FLEE_RETRY_INTERVAL_TICKS;
+            if (fleeRouteFailures >= ThreatAssessment.ESCAPE_FAILURES_BEFORE_LAST_STAND) {
+                // 退无可退：回战斗就地迎战，血线不再触发撤离（没有地方可撤）。
+                cornered = true;
+                recordProgress("撤离路线连续走不通，退无可退，就地迎战");
+                events.publish(TaskEvent.Kind.NEED_UNHANDLED,
+                        "想撤也走不动：" + failed.problem().message() + "；退无可退，就地迎战");
+                return Next.go(Phase.ENGAGE, "退无可退，就地迎战");
+            }
+            recordProgress("撤离走不通（" + failed.problem().message() + "），换个方向再试");
+            return Next.stay();
         }
         if (status instanceof ActionStatus.Running running && running.progressed()) {
             recordProgress(current.describe());

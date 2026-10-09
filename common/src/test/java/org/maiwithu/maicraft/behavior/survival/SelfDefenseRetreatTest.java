@@ -25,8 +25,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 自卫的兜底撤离：攻击推进连续两次 600 刻没有真实进展（攻击通道失灵，出手一直没被确认），
- * 或血量跌破拒战线，就从"再打"升级为"撤离"，以"打不出去，已撤离"如实收场；
- * 撤离也走不动就带着问题结束，不硬撑也不装撤成了。
+ * 或血量跌破拒战线，就从"再打"升级为"撤离"，以"打不出去，已撤离"如实收场。
+ * 一条撤离路线走不通不算没有退路：换方向、隔一秒再试；连续走不通到上限才承认退无可退，
+ * 回去背水一战——不再把一次寻路失败当成整场撤离的死刑。
  */
 class SelfDefenseRetreatTest {
 
@@ -80,8 +81,8 @@ class SelfDefenseRetreatTest {
     }
 
     @Test
-    void retreatThatCannotWalkReportsStuckInsteadOfPretending() {
-        // 撤离走不动：带着 UNREACHABLE 的问题结束，不硬撑也不装撤成了。
+    void retreatThatCannotWalkTriesAnotherDirectionBeforeGivingUp() {
+        // 撤离路线走不通：不一次失败就判死，换方向重开；连续三次走不通才承认退无可退，回去迎战。
         FakeSenses senses = new FakeSenses();
         senses.threats = List.of(zombie(2));
         FakeMoves moves = new FakeMoves();
@@ -92,26 +93,63 @@ class SelfDefenseRetreatTest {
         SelfDefenseTask task = (SelfDefenseTask) need.createTask(null);
         task.start(new Tick(0));
 
-        // 威胁一直不散：撤离第一步就走不动，当场收场。
-        TickResult result = drive(task, senses, Long.MAX_VALUE, 4L * STALL_TICKS + 10);
+        // 两次空转转撤离，再给足三次失败加上各自的每秒一次重开间隔；任务不该收场，而是回头迎战。
+        TickResult result = drive(task, senses, Long.MAX_VALUE, 2L * STALL_TICKS + 600);
 
-        assertTrue(result instanceof TickResult.Finished finished, "撤离失败也收场，实际 " + result);
-        assertEquals(TaskResult.Status.FAILED, ((TickResult.Finished) result).result().status());
-        assertEquals(Problem.Kind.UNREACHABLE, ((TickResult.Finished) result).result().problem().kind());
-        assertTrue(events.messages.stream().anyMatch(m -> m.contains("走不动")),
-                "事件里如实说撤不走：" + events.messages);
+        assertTrue(result == null, "撤离走不通不该一次失败就收场，实际 " + result);
+        assertTrue(moves.walkCalls >= ThreatAssessment.ESCAPE_FAILURES_BEFORE_LAST_STAND,
+                "走不通会重开撤离路线，实际走了 " + moves.walkCalls + " 次");
+        assertTrue(events.messages.stream().anyMatch(m -> m.contains("退无可退")),
+                "连续走不通才声明退无可退：" + events.messages);
+        assertTrue(moves.strikeTicks > 0, "退无可退之后回到战斗，就地迎战");
     }
+
+    @Test
+    void realMovementWhileRetreatingResetsTheFailureAccount() {
+        // 撤离路上有真实位移（甩开了上一个死路）：失败账清零，不会把一路的失败累成退无可退。
+        FakeSenses senses = new FakeSenses();
+        senses.threats = List.of(zombie(2));
+        FakeMoves moves = new FakeMoves();
+        moves.strikeOutcome = ActionStatus.running();
+        moves.walkOutcome = ActionStatus.failed(Problem.of(Problem.Kind.UNREACHABLE, "前面走不过去"));
+        RecordingEvents events = new RecordingEvents();
+        SelfDefenseNeed need = new SelfDefenseNeed(senses, moves, events);
+        SelfDefenseTask task = (SelfDefenseTask) need.createTask(null);
+        task.start(new Tick(0));
+
+        // 每次撤离失败后都往前挪：反复走不通也始终不认"退无可退"。
+        TickResult result = driveWhileMoving(task, senses, moves, 2L * STALL_TICKS + 800);
+
+        assertTrue(result == null, "一直有真实位移就不该判退无可退，实际 " + result);
+        assertTrue(moves.walkCalls > ThreatAssessment.ESCAPE_FAILURES_BEFORE_LAST_STAND,
+                "失败账清零后撤离一直在重试，实际走了 " + moves.walkCalls + " 次");
+        assertTrue(events.messages.stream().noneMatch(m -> m.contains("退无可退")),
+                "有真实位移不该声明退无可退：" + events.messages);
+    }
+
 
     /**
      * 一刻一刻推进到任务收场为止；到 clearThreatsAtTick 那一刻把威胁清空，模拟"走到怪追不上了"。
      * 到顶还没收场就返回 null，让断言去暴露"该收场没收场"。
      */
-    private static TickResult drive(SelfDefenseTask task, FakeSenses senses,
+    private TickResult drive(SelfDefenseTask task, FakeSenses senses,
                                     long clearThreatsAtTick, long maxTicks) {
         for (long i = 1; i <= maxTicks; i++) {
             if (i == clearThreatsAtTick) {
                 senses.threats = List.of();
             }
+            TickResult result = task.tick(new Tick(i));
+            if (result instanceof TickResult.Finished) {
+                return result;
+            }
+        }
+        return null;
+    }
+
+    /** 一刻一刻推进且角色一直在挪（每刻挪三格）：模拟撤离路上有真实位移，走到收场为止。 */
+    private TickResult driveWhileMoving(SelfDefenseTask task, FakeSenses senses, FakeMoves moves, long maxTicks) {
+        for (long i = 1; i <= maxTicks; i++) {
+            moves.position[0] += 3;
             TickResult result = task.tick(new Tick(i));
             if (result instanceof TickResult.Finished) {
                 return result;
@@ -152,6 +190,8 @@ class SelfDefenseRetreatTest {
     private static final class FakeMoves implements SelfDefenseTask.CombatMoves {
         ActionStatus strikeOutcome = ActionStatus.done();
         ActionStatus walkOutcome = ActionStatus.done();
+        /** 角色所在位置：撤离路上有真实位移的场景由测试用例在外面挪动。 */
+        final double[] position = {0, 64, 0};
         int strikeCalls;
         int strikeTicks;
         int walkCalls;
@@ -178,7 +218,7 @@ class SelfDefenseRetreatTest {
 
         @Override
         public double[] selfPosition(TickContext context) {
-            return new double[] {0, 64, 0};
+            return new double[] {position[0], position[1], position[2]};
         }
     }
 
