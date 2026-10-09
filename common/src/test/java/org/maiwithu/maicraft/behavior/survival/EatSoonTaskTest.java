@@ -139,6 +139,16 @@ class EatSoonTaskTest {
     }
 
     /** 饥饿处境替身：掉不掉血固定为否，饱食度与身上有没有能吃的是测试给的。 */
+    @Test
+    void carryingFoodButUnableToEatEndsAsUnsupportedSoTheLoopWaits() {
+        // 身上有面包、进食流程却给不出吃的动作：以"不支持"收场，控制循环据此缓一阵再插，不每个空当都插进来又立刻收场。
+        TaskResult result = run(new Bites(), facts(5, true), () -> facts(5, true));
+
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertEquals(Problem.Kind.UNSUPPORTED, result.problem().kind());
+        assertEquals(1, events.size(), "真饿着才把事实告诉 LLM");
+    }
+
     // 带着吃的时身上最小的一件普通食物按面包（补 5）算。
     private static HungerNeed.Facts facts(int food, boolean carryingEdible) {
         return new HungerNeed.Facts(food, false, carryingEdible ? 5 : 0);

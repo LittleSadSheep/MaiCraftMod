@@ -106,13 +106,14 @@ public final class EatSoonTask extends PhasedTask<EatSoonTask.Phase> {
                         "弄来的东西不是这会儿能直接吃的", "给角色一些普通食物"));
             }
             if (latest != null && latest.carryingEdible()) {
-                // 身上有能吃的却给不出吃的动作：进食流程还没接上。真饿着就发事件把事实
-                // 告诉 LLM；只是想垫一口就不打扰。都以完成收场，主任务照常继续。
+                // 身上有普通食物却给不出吃的动作（进食流程没接上）：以"不支持"收场，控制循环据此缓一阵再插，
+                // 不在每个空当都插进来又立刻收场。真饿着才发事件把事实告诉 LLM，只是想垫一口就不打扰。
                 if (hungry(latest)) {
                     events.publish(TaskEvent.Kind.NEED_UNHANDLED,
                             "饿了但进食还没接上流程，吃不了一口；主任务照常继续");
                 }
-                return Next.done(TaskResult.done("身上有吃的但没法自动吃，等下一个空当或人工指派进食"));
+                return Next.fail(Problem.of(Problem.Kind.UNSUPPORTED,
+                        "身上有吃的但没法自动吃，等下一个空当或人工指派进食"));
             }
             return Next.go(Phase.FETCH, "身上没有这会儿该吃的东西，去弄");
         }
