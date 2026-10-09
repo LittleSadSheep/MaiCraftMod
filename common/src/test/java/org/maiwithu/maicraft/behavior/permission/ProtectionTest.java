@@ -104,4 +104,19 @@ class ProtectionTest {
     private static ReadsRememberedPlaces remembered(Map<String, WorldPosition> places) {
         return name -> Optional.ofNullable(places.get(name));
     }
+
+    @Test
+    void 归属还没问到_按受保护处理() {
+        ReadsBlockOwnership unknown = new ReadsBlockOwnership() {
+            @Override public Optional<PlacedBy> whoPlaced(String dimension, int x, int y, int z) {
+                return Optional.empty();
+            }
+
+            @Override public boolean known(String dimension, int x, int y, int z) {
+                return false;
+            }
+        };
+        var protection = new Protection(unknown, List::of, name -> Optional.empty(), GuessesPlayerMade.NOTHING, SELF);
+        assertTrue(protection.blockProtected(WALL, null, Set.of()));
+    }
 }

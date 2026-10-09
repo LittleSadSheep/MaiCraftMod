@@ -136,7 +136,7 @@ public final class Bootstrap {
         LOG.info("{} 通用部分启动（加载器：{}）", ModIdentity.NAME, loader.loaderName());
         ServerOperationRegistry operations = new ServerOperationRegistry();
         ServerLinkNetwork network = new ServerLinkNetwork(operations);
-        // 客户端可查询的只读操作：一格方块是谁放的。归属记录按服务器实例在第一个刻结束时从存档读回并登记。
+        // 客户端可查询的只读操作：一个区块里哪些格是谁放的。归属记录按服务器实例在第一个刻结束时从存档读回并登记。
         operations.register(OwnershipQuery.OPERATION, 1, false, new OwnershipQuery());
         return new ServerLifecycle() {
             @Override public void tickEnd(MinecraftServer server) {
@@ -403,7 +403,7 @@ public final class Bootstrap {
         /** 建与服务端的会话，并在入服前登记客户端知道的操作清单。 */
         void connectSession(LinkTransport transport) {
             session = new ServerLinkSession(transport);
-            // 查询方块归属是第一个只读操作。
+            // 按区块查方块归属是第一个只读操作。
             session.router().register(new ClientOperation(OwnershipQuery.OPERATION, 1, false));
         }
 
@@ -456,6 +456,7 @@ public final class Bootstrap {
         private void leaveWorld() {
             if (worldScope[0] != null) {
                 goals.leaveWorld();
+                worldScope[0].leave();
                 worldScope[0].memory().flush();
                 blockScans.dropAll();
                 // 聊天流在离开时换新：下一个世界登录后最早几条消息（谁进来了）可能比现场建好还早到，进世界时再换会把它们冲掉。

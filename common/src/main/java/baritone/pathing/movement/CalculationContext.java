@@ -342,7 +342,8 @@ public class CalculationContext {
     }
 
     public boolean isPossiblyProtected(int x, int y, int z) {
-        return maicraftPolicy.protects(x, y, z);
+        // 这一趟的保护格之外，还要过这个世界的保护判断：别人放的方块、记住的区域、归属拿不准的格子都不挖不垫。
+        return maicraftPolicy.protects(x, y, z) || NavigationProtection.worldProtects(x, y, z);
     }
 
     /** A semantic parent may forbid occupying exact body cells without changing block costs. */

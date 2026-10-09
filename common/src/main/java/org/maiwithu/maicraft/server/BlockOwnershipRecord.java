@@ -3,13 +3,16 @@ package org.maiwithu.maicraft.server;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.IntArrayTag;
 import net.minecraft.nbt.ListTag;
@@ -33,6 +36,8 @@ public final class BlockOwnershipRecord {
     public record Owner(UUID playerId, long tick) {}
 
     private final Map<String, LinkedHashMap<BlockPos, Owner>> byDimension = new LinkedHashMap<>();
+    /** 按区块分的索引：客户端一次问一整个区块里哪些格有主，不必逐格问，也不必翻遍整个维度。 */
+    private final Map<String, Map<Long, Set<BlockPos>>> byChunk = new HashMap<>();
     /** 有没有还没存盘的改动。 */
     private boolean dirty;
 
@@ -42,9 +47,11 @@ public final class BlockOwnershipRecord {
         // 重新放下的格子挪到最新的位置，淘汰时按真正的先后。
         placements.remove(position);
         placements.put(position.immutable(), new Owner(playerId, tick));
+        index(dimension, position.immutable());
         while (placements.size() > MAX_ENTRIES_PER_DIMENSION) {
             BlockPos eldest = placements.keySet().iterator().next();
             placements.remove(eldest);
+            unindex(dimension, eldest);
         }
         dirty = true;
     }
@@ -53,6 +60,7 @@ public final class BlockOwnershipRecord {
     public void forget(String dimension, BlockPos position) {
         var placements = byDimension.get(dimension);
         if (placements != null && placements.remove(position) != null) {
+            unindex(dimension, position);
             dirty = true;
         }
     }
@@ -61,6 +69,35 @@ public final class BlockOwnershipRecord {
     public Optional<Owner> ownerOf(String dimension, BlockPos position) {
         var placements = byDimension.get(dimension);
         return placements == null ? Optional.empty() : Optional.ofNullable(placements.get(position.immutable()));
+    }
+
+    /** 一个区块里每一格有主的方块是谁放的；这个区块一格都没记到时给空表。 */
+    public Map<BlockPos, Owner> ownedInChunk(String dimension, int chunkX, int chunkZ) {
+        var positions = byChunk.getOrDefault(dimension, Map.of()).get(ChunkPos.asLong(chunkX, chunkZ));
+        var placements = byDimension.get(dimension);
+        if (positions == null || placements == null) return Map.of();
+        Map<BlockPos, Owner> owned = new LinkedHashMap<>();
+        for (BlockPos position : positions) {
+            Owner owner = placements.get(position);
+            if (owner != null) owned.put(position, owner);
+        }
+        return owned;
+    }
+
+    private void index(String dimension, BlockPos position) {
+        byChunk.computeIfAbsent(dimension, ignored -> new HashMap<>())
+                .computeIfAbsent(ChunkPos.asLong(position), ignored -> new HashSet<>())
+                .add(position);
+    }
+
+    private void unindex(String dimension, BlockPos position) {
+        var chunks = byChunk.get(dimension);
+        if (chunks == null) return;
+        long key = ChunkPos.asLong(position);
+        var positions = chunks.get(key);
+        if (positions == null) return;
+        positions.remove(position);
+        if (positions.isEmpty()) chunks.remove(key);
     }
 
     /** 有没有还没存盘的改动。 */
@@ -133,7 +170,9 @@ public final class BlockOwnershipRecord {
             var placements = record.byDimension.computeIfAbsent(name, ignored -> new LinkedHashMap<>());
             for (int i = 0; i < positions.length && i < owners.length && i < ticks.length; i++) {
                 if (owners[i] >= 0 && owners[i] < people.size()) {
-                    placements.put(BlockPos.of(positions[i]), new Owner(people.get(owners[i]), ticks[i]));
+                    BlockPos position = BlockPos.of(positions[i]);
+                    placements.put(position, new Owner(people.get(owners[i]), ticks[i]));
+                    record.index(name, position);
                 }
             }
         }
