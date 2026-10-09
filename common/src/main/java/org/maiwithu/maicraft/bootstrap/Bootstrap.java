@@ -63,6 +63,7 @@ import org.maiwithu.maicraft.kernel.event.TaskEventLog;
 import org.maiwithu.maicraft.kernel.goal.GoalRunStore;
 import org.maiwithu.maicraft.kernel.goal.GoalRunTable;
 import org.maiwithu.maicraft.kernel.goal.InMemoryGoalRunStore;
+import org.maiwithu.maicraft.kernel.goal.PlayerControlHandover;
 import org.maiwithu.maicraft.kernel.goal.RemembersPlaces;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 import org.maiwithu.maicraft.mcp.tool.EventsTool;
@@ -220,6 +221,11 @@ public final class Bootstrap {
         private Interactions interactions;
         private ToolDispatcher tools;
         private GoalRunTable goals;
+        // 启动自动接管开关：maicraft.automation.on_join 开启时，进世界逐刻请求控制权直到拿到（默认关）。
+        // 它只管"进世界就接管"这一段：拿到之后开关就不再管，之后由目标下达的时机决定何时再请求，
+        // 人类按 F8 抢回不会被开关立刻夺回。重新进世界（现场重建）时重新生效。
+        private final boolean automationOnJoin = Boolean.getBoolean("maicraft.automation.on_join");
+        private boolean startupAutomationPending;
 
         /** 创建客户端全程共用的服务，并把 Mixin 需要的实例登记到静态登记点。 */
         void createSharedServices() {
@@ -264,7 +270,21 @@ public final class Bootstrap {
                 scope.memory().remember(name, position);
             };
             // 赋给字段：进世界时现场要经它把当期的世界记忆接上（attachPlaces）。
-            goals = new GoalRunTable(abilities, goalRuns, places, controlLoop);
+            // 控制权交接接在玩家控制权边界上：目标成为主任务时向输入层请求控制权（下一刻生效），
+            // 查询端读此刻自动化是否真的拥有控制权。启动与查询都发生在客户端刻里，线程要求满足。
+            goals = new GoalRunTable(abilities, goalRuns, places, controlLoop, new PlayerControlHandover() {
+                @Override public boolean automationOwnsControls() {
+                    return playerControl.input().automationOwnsControls();
+                }
+
+                @Override public void requestControl() {
+                    // 本刻的角色上下文只在 beginTick 与 endTick 之间有效；下达与恢复都发生在客户端刻里，
+                    // 这里取的是当刻的玩家本体，不在世界里时边界会如实拒绝。
+                    playerControl.requestAutomationControl(
+                            playerControl.activeContext().orElseThrow(
+                                    () -> new IllegalStateException("不在世界里，请求不了控制权")).localPlayer());
+                }
+            });
             tools = goalTools(abilities, goals, clientWork, taskEvents, () -> worldScope[0]);
         }
 
@@ -308,6 +328,8 @@ public final class Bootstrap {
                         abilities, interactionSender, menuActions);
                 worldScope[0] = scope;
                 goals.attachPlaces(scope.memory());
+                // 开关开启时，这次进世界要逐刻请求控制权直到拿到；直播待机没有目标也守得住角色。
+                startupAutomationPending = automationOnJoin;
             } else if (minecraft.level == null) {
                 if (worldScope[0] != null) goals.detachPlaces();
                 worldScope[0] = null;
@@ -321,6 +343,13 @@ public final class Bootstrap {
          * 但不推进控制循环，生存需求不能去抢人类手上的角色。
          */
         private void tickInWorld(Minecraft minecraft, PlayerContext current) {
+            // 启动接管开关还欠着控制权时每刻请求一次；请求是幂等的，拿到为止。
+            if (startupAutomationPending) {
+                playerControl.requestAutomationControl(current.localPlayer());
+                if (playerControl.input().automationOwnsControls()) {
+                    startupAutomationPending = false;
+                }
+            }
             // 世界扫描：感知各读端读当刻的观察事实，整理进场景；顺序在控制循环之前。
             WorldScope scope = worldScope[0];
             if (scope != null) {

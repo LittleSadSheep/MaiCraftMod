@@ -35,6 +35,7 @@ import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.GoalRunTable;
 import org.maiwithu.maicraft.kernel.goal.InMemoryGoalRunStore;
+import org.maiwithu.maicraft.kernel.goal.PlayerControlHandover;
 import org.maiwithu.maicraft.kernel.param.Params;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -90,8 +91,16 @@ class AssemblyTest {
         // 下达经目标运行表：LLM 用 execute 派的活走同一条路，目标成为控制循环的主任务。
         // 等待目标：条件是"过了 0 秒"，开工即完成——推进路径走的是真实的任务与控制循环。
         // 目标写能力的完整 ID：目标推进器按 ID 查清单。
+        // 控制权交接给空实现：总装测试不接输入层，只验证目标推得动。
         GoalRunTable goals = new GoalRunTable(registry, new InMemoryGoalRunStore(),
-                deps().memory(), controlLoop);
+                deps().memory(), controlLoop, new PlayerControlHandover() {
+                    @Override public boolean automationOwnsControls() {
+                        return true;
+                    }
+
+                    @Override public void requestControl() {
+                    }
+                });
         GoalRunTable.Launch launch = goals.launch(Goal.of("maicraft:wait", null, Params.EMPTY), null);
         assertTrue(!launch.repeated(), "第一次下达要新开一个目标运行");
 

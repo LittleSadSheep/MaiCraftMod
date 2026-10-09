@@ -15,6 +15,7 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.goal.GoalRunTable;
 import org.maiwithu.maicraft.kernel.goal.InMemoryGoalRunStore;
+import org.maiwithu.maicraft.kernel.goal.PlayerControlHandover;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.interrupt.ControlLoop;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
@@ -59,8 +60,16 @@ class ObserveToolTest {
                 WorldPosition.here(0, 64, -12), true, true, true, Map.of())));
         scene.updateFacilities(10, Instant.ofEpochMilli(1000),
                 List.of(new NearbyBlocksSight.BlockSighting(WorldPosition.here(4, 64, 0), "minecraft:chest")));
+        // 控制权交接给空实现：observe 测试不接输入层。
         GoalRunTable table = new GoalRunTable(new AbilityRegistry(new TaskFactories()), new InMemoryGoalRunStore(),
-                memory, new ControlLoop(List.of()));
+                memory, new ControlLoop(List.of()), new PlayerControlHandover() {
+                    @Override public boolean automationOwnsControls() {
+                        return true;
+                    }
+
+                    @Override public void requestControl() {
+                    }
+                });
         ClientThread direct = new ClientThread() {
             @Override public <T> T call(Function<TickContext, T> work) {
                 return work.apply(new Tick(10));

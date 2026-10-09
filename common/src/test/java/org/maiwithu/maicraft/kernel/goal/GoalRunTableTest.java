@@ -29,6 +29,7 @@ class GoalRunTableTest {
     private final AbilityRegistry registry = new AbilityRegistry(new TaskFactories());
     private final InMemoryGoalRunStore store = new InMemoryGoalRunStore();
     private final ControlLoop loop = new ControlLoop(List.of());
+    private final RecordingHandover handover = new RecordingHandover();
     private final GoalRunTable table;
     private long tick = 100;
 
@@ -37,7 +38,21 @@ class GoalRunTableTest {
         // 与启动一侧同样的占位：没接上世界记忆时记地点如实报程序错误。
         table = new GoalRunTable(registry, store, (name, position) -> {
             throw new IllegalStateException("没有当期的世界记忆，记不住地点 " + name);
-        }, loop);
+        }, loop, handover);
+    }
+
+    /** 控制权交接的替身：记下请求了几次，控制权此刻在谁手上可以拨。 */
+    private static final class RecordingHandover implements PlayerControlHandover {
+        int requests;
+        boolean automationOwns = true;
+
+        @Override public boolean automationOwnsControls() {
+            return automationOwns;
+        }
+
+        @Override public void requestControl() {
+            requests++;
+        }
     }
 
     private void runTicks(int count) {
@@ -64,6 +79,47 @@ class GoalRunTableTest {
         assertTrue(again.repeated());
         assertSame(first.runner(), again.runner());
         assertEquals(1, table.recent().size());
+    }
+
+    @Test
+    void becomingTheMainTaskAsksForControlOncePerNewGoal() {
+        table.launch(GOAL, "key-1").runner();
+        assertEquals(1, handover.requests);
+
+        // 同一请求键的重复下达不是新目标：人类抢回控制权后，它不会把控制权立刻抢回来。
+        table.launch(GOAL, "key-1");
+        assertEquals(1, handover.requests);
+
+        table.launch(GOAL, "key-2").runner();
+        assertEquals(2, handover.requests);
+    }
+
+    @Test
+    void resumingAPausedGoalAsksForControl() {
+        GoalRunner runner = table.launch(GOAL, null).runner();
+        table.pause(runner.run().id());
+        table.resume(runner.run().id());
+
+        // 下达请求了一次，恢复时再请求一次：恢复也是一次明确的下达——
+        // 人类可能趁着暂停按 F8 拿回了控制权，恢复不能让它继续停在人类手上。
+        assertEquals(2, handover.requests);
+    }
+
+    @Test
+    void waitingForControlIsReportedAsItIs() {
+        handover.automationOwns = false;
+        GoalRunner runner = table.launch(GOAL, null).runner();
+        long id = runner.run().id();
+
+        // 还没拿到控制权时不呈现成"正在推进"，如实说在等交接。
+        assertTrue(table.doing(id).orElseThrow().contains("等待控制权交接"));
+
+        handover.automationOwns = true;
+        assertFalse(table.doing(id).orElseThrow().contains("等待控制权交接"));
+
+        // 暂停的目标在等恢复，不是在等控制权。
+        table.pause(id);
+        assertFalse(table.doing(id).orElseThrow().contains("等待控制权交接"));
     }
 
     @Test

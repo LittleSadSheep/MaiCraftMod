@@ -22,6 +22,10 @@ import java.util.Optional;
  * <p>新目标成为控制循环的主任务，原来的主任务按"被替换"收尾——角色同一时间只做 LLM 给的一件事。
  * 带同一个请求键的下达只算一次：网络重试时角色不会把同一件事做两遍。
  *
+ * <p>目标成为主任务的那一刻（新下达，或暂停的目标被恢复），经控制权交接接缝向输入层请求角色
+ * 的控制权；没拿到之前不推进，查询端如实说在等交接。人类按 F8 抢回控制权后自动化不立刻抢回，
+ * 等下一个目标下达或恢复时才再次请求。
+ *
  * <p>结束了的目标只保留最近 {@value #KEPT_FINISHED} 条供查询；还没结束的一条都不丢。只在客户端线程使用。
  */
 public final class GoalRunTable {
@@ -33,6 +37,8 @@ public final class GoalRunTable {
     private final AbilityRegistry registry;
     private final GoalRunStore store;
     private final ControlLoop loop;
+    /** 控制权交接：目标成为主任务时经它请求控制权，查询端经它看此刻谁拥有控制权。 */
+    private final PlayerControlHandover handover;
     /** 当期的记地点入口：进世界时接上，退世界恢复占位。推进器都经 relay 读它，换世界不用换推进器。 */
     private RemembersPlaces places;
     /** 记地点的固定转发：目标推进器拿着它，每次记地点都落到当期的入口上。 */
@@ -49,12 +55,14 @@ public final class GoalRunTable {
     /** 现在作为主任务交给控制循环的目标；没有时为 -1。 */
     private long mainRunId = -1;
 
-    public GoalRunTable(AbilityRegistry registry, GoalRunStore store, RemembersPlaces remembers, ControlLoop loop) {
+    public GoalRunTable(AbilityRegistry registry, GoalRunStore store, RemembersPlaces remembers, ControlLoop loop,
+                        PlayerControlHandover handover) {
         this.registry = Objects.requireNonNull(registry, "registry");
         this.store = Objects.requireNonNull(store, "store");
         this.detachedPlaceholder = Objects.requireNonNull(remembers, "remembers");
         this.places = remembers;
         this.loop = Objects.requireNonNull(loop, "loop");
+        this.handover = Objects.requireNonNull(handover, "handover");
     }
 
     /**
@@ -114,10 +122,17 @@ public final class GoalRunTable {
         return runner.run();
     }
 
-    /** 这个目标此刻在做什么的一句话；已经结束时为空。 */
+    /** 这个目标此刻在做什么的一句话；已经结束时为空。
+     *  自动化还没拿到控制权时如实说明在等交接，不把"卡在第 0 步"呈现成正在推进。 */
     public Optional<String> doing(long id) {
         GoalRunner runner = require(id);
-        return runner.run().unfinished() ? Optional.of(runner.describe()) : Optional.empty();
+        if (!runner.run().unfinished()) return Optional.empty();
+        String describe = runner.describe();
+        if (runner.run().state() == GoalRunState.RUNNING && !handover.automationOwnsControls()) {
+            return Optional.of("等待控制权交接（角色此刻由人类操作，自动化拿到控制权后才会推进；"
+                    + "重新下达或恢复目标会再次请求，人类按 F8 也能把控制权交给自动化）：" + describe);
+        }
+        return Optional.of(describe);
     }
 
     /**
@@ -178,6 +193,9 @@ public final class GoalRunTable {
         runner.resumeGoal();
         if (mainRunId != id) {
             makeMain(runner);
+        } else {
+            // 已经是主任务也要请求：人类可能趁着暂停按 F8 拿回了控制权，恢复是一次明确的下达。
+            handover.requestControl();
         }
     }
 
@@ -217,6 +235,9 @@ public final class GoalRunTable {
     private void makeMain(GoalRunner runner) {
         loop.setMainTask(runner);
         mainRunId = runner.run().id();
+        // 成为决定角色在做什么的那一方，就向输入层请求控制权；人类 F8 抢回后不立刻抢回，
+        // 这里就是"下一个目标下达或恢复时才再次请求"的那个时机。
+        handover.requestControl();
     }
 
     private GoalRunner require(long id) {

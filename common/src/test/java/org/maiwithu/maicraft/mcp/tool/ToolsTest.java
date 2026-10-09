@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.kernel.event.EventPublishingGoalRunStore;
 import org.maiwithu.maicraft.kernel.event.TaskEventLog;
 import org.maiwithu.maicraft.kernel.goal.GoalRunTable;
 import org.maiwithu.maicraft.kernel.goal.InMemoryGoalRunStore;
+import org.maiwithu.maicraft.kernel.goal.PlayerControlHandover;
 import org.maiwithu.maicraft.kernel.goal.Question;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.interrupt.ControlLoop;
@@ -51,9 +52,17 @@ class ToolsTest {
         registry.register(ToolTestAbility.sleep());
         registry.register(remember);
         registry.register(ToolTestAbility.hidden());
+        // 控制权交接给空实现：工具测试不接输入层。
         GoalRunTable table = new GoalRunTable(registry,
                 new EventPublishingGoalRunStore(new InMemoryGoalRunStore(), events),
-                (name, position) -> remembered.add(name), loop);
+                (name, position) -> remembered.add(name), loop, new PlayerControlHandover() {
+                    @Override public boolean automationOwnsControls() {
+                        return true;
+                    }
+
+                    @Override public void requestControl() {
+                    }
+                });
         ClientThread direct = new ClientThread() {
             @Override public <T> T call(Function<TickContext, T> work) {
                 if (!inWorld) throw new NotInWorld();

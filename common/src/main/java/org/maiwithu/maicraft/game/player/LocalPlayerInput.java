@@ -18,6 +18,10 @@ import net.minecraft.client.Minecraft;
  * <p>接管不是直接改键盘事件，而是把玩家身上的 {@code Input} 换成只消费注入信号的替身；
  * 归还时只恢复自己换掉的那个对象，其他模组已经换走就不覆盖。任务每一刻都要重新说
  * “继续前进”或“继续看向这里”；漏发时自动松键，不让旧输入一直生效。
+ *
+ * <p>F8 是人类随时可用的急停：按下后控制权回到人类手上，自动化不会立刻抢回。
+ * 自动化这边只在目标下达（或暂停的目标恢复）成为主任务的那一刻重新请求一次控制权，
+ * 请求在下一个玩家更新时才安装自动输入。
  */
 public final class LocalPlayerInput implements PlayerInput {
     // controlledPlayer 是已接管的玩家，requestedPlayer 是正在等待接管的玩家。
