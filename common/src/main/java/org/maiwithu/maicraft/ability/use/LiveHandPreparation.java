@@ -15,12 +15,9 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 
 import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
-import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
+import org.maiwithu.maicraft.behavior.inventory.HotbarSelection;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.result.Problem;
-import org.maiwithu.maicraft.kernel.task.Action;
-import org.maiwithu.maicraft.kernel.task.ActionStatus;
-import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 手上准备的生产实现：把要用的东西分刻换到主手，像真人一样先做界面搬运再选中快捷栏。
@@ -77,7 +74,8 @@ final class LiveHandPreparation implements UseSeams.PreparesHand {
         }
         for (int slot = 0; slot < Inventory.getSelectionSize(); slot++) {
             if (player.getInventory().getItem(slot).isEmpty()) {
-                return new UseSeams.HandPlan.Move(new SelectEmptySlot(slot));
+                // 像真人滚一下滚轮切到空着的那一格：经原生选中，等服务端确认。
+                return new UseSeams.HandPlan.Move(new HotbarSelection(slot));
             }
         }
         return new UseSeams.HandPlan.Cannot(Problem.of(Problem.Kind.NEED_ITEM,
@@ -112,30 +110,5 @@ final class LiveHandPreparation implements UseSeams.PreparesHand {
             return tagId != null && stack.is(TagKey.create(Registries.ITEM, tagId));
         }
         return BuiltInRegistries.ITEM.getKey(stack.getItem()).toString().equals(spec);
-    }
-
-    /** 切到空快捷栏格的动作：选中是本地的按键动作，下一刻同步到服务端；选中后再核一遍主手。 */
-    private record SelectEmptySlot(int slot) implements Action {
-        @Override
-        public ActionStatus tick(TickContext context) {
-            PlayerContext player = context.player();
-            if (player == null || player.localPlayer() == null) {
-                return ActionStatus.failed(Problem.of(Problem.Kind.WRONG_TIME,
-                        "这一刻还掌握不到角色，腾不出空手", null));
-            }
-            if (!BaritoneInternals.ensureHotbarSelected(player.localPlayer(), slot)) {
-                return ActionStatus.failed(Problem.of(Problem.Kind.STUCK,
-                        "选中快捷栏第 " + slot + " 格没成，腾不出空手", null));
-            }
-            return player.localPlayer().getMainHandItem().isEmpty()
-                    ? ActionStatus.done()
-                    : ActionStatus.failed(Problem.of(Problem.Kind.STUCK,
-                            "切到空格后主手却不是空的，腾不出空手", null));
-        }
-
-        @Override
-        public String describe() {
-            return "切到空的快捷栏格";
-        }
     }
 }

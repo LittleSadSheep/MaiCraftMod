@@ -248,7 +248,7 @@
           "name": "item",
           "type": "string",
           "required": false,
-          "doc": "要穿的物品 ID；身上候选唯一时可以不给"
+          "doc": "要穿的物品 ID 或标签；护甲栏候选唯一时可以不给，手上拿什么得点名"
         }
       ],
       "targets": [],

@@ -44,7 +44,7 @@ final class EquipTask extends PhasedTask<EquipTask.Phase> {
     private final List<String> unconfirmedSlots = new ArrayList<>();
     /** 确认完成了的栏位数。 */
     private int settled;
-    /** 动手了但没能确认结果的栏位名。 */    /** 当前动手的栏位，以及动手前栏位里是什么（卸下记账用）。 */
+    /** 当前动手的栏位，以及动手前栏位里是什么（卸下记账用）。 */
     private GearSlotName currentSlot;
     private String wornAtStart;
 

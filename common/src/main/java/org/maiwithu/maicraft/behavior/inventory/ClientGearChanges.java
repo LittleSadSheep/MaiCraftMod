@@ -25,7 +25,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 穿卸装备执行接缝的读端：穿上与卸下都是原生交互的编排——护甲先换到主手再对自己使用一次，
- * 副手是原生的副手交换，主手是选中；取下护甲经背包界面整堆搬出，取下副手是用一个空格交换。
+ * 副手是原生的副手交换，主手是选中；取下护甲经背包界面整堆搬出（搬完关上界面），取下副手是用一个空格交换，
+ * 取下主手是切到空着的快捷栏格，快捷栏没有空格才把手上这堆搬进背包。
  * 每步等游戏确认了才走下一步；现场做不了（身上没有、背包腾不出空格）时如实给空或以问题失败，
  * 不装作穿过或卸过。
  */
@@ -44,6 +45,9 @@ public final class ClientGearChanges implements GearChanges {
             default -> -1;
         };
     }
+
+    /** 快捷栏在背包界面里从第 36 格开始：选中的那一格就是主手。 */
+    private static final int HOTBAR_MENU_START = 36;
 
     /** 护甲四格在背包界面里的槽位号：头盔 5、胸甲 6、护腿 7、靴子 8。 */
     private static int armorMenuSlot(GearSlotName slot) {
@@ -79,11 +83,12 @@ public final class ClientGearChanges implements GearChanges {
     public Optional<Action> takeOff(GearSlotName slot) {
         PlayerContext context = contexts.get();
         if (context == null) return Optional.empty();
-        // 护甲经背包界面整堆搬出；副手与空背包格交换。主手取下（腾到背包）没有单一原生手势，做不了。
-        if (armorInventorySlot(slot) > 0 || slot == GearSlotName.OFFHAND) {
-            return Optional.of(new TakeOffAction(slot));
+        // 主手取下就是空出手来：快捷栏有空格就切过去（像真人滚一下滚轮），没有就把手上这堆搬进背包。
+        if (slot == GearSlotName.MAINHAND) {
+            int empty = firstEmptyHotbarSlot(context.localPlayer());
+            if (empty >= 0) return Optional.of(new HotbarSelection(empty));
         }
-        return Optional.empty();
+        return Optional.of(new TakeOffAction(slot));
     }
 
     /** 穿上：护甲 = 换到主手 + 对自己使用；副手 = 原生交换；主手 = 换到主手。 */
@@ -188,10 +193,11 @@ public final class ClientGearChanges implements GearChanges {
         }
     }
 
-    /** 取下：护甲经背包界面整堆搬出；副手与一个空背包格交换。 */
+    /** 取下：护甲与主手经背包界面整堆搬进背包，搬完把界面关上；副手与一个空背包格交换。 */
     private final class TakeOffAction implements Action {
         private final GearSlotName slot;
         private PendingMenuAction menuPending;
+        private PendingMenuAction closePending;
         private Problem failure;
 
         TakeOffAction(GearSlotName slot) {
@@ -202,7 +208,7 @@ public final class ClientGearChanges implements GearChanges {
         public ActionStatus tick(TickContext context) {
             if (failure != null) return ActionStatus.failed(failure);
             PlayerContext player = context.player();
-            return slot == GearSlotName.OFFHAND ? offhandTakeOff(player) : armorTakeOff(player);
+            return slot == GearSlotName.OFFHAND ? offhandTakeOff(player) : menuTakeOff(player);
         }
 
         // 副手取下：找一个空的背包格与副手交换，东西就进了背包。
@@ -225,10 +231,15 @@ public final class ClientGearChanges implements GearChanges {
             }
         }
 
-        // 护甲取下：打开背包界面，对护甲格做一次整堆搬出；栏位空了才算取下。
-        private ActionStatus armorTakeOff(PlayerContext player) {
+        // 护甲与主手取下：打开背包界面，对那一格做一次整堆搬出，栏位空了才算取下；
+        // 搬完（或没能确认）都把背包界面关上再收场，打开者负责关闭。
+        private ActionStatus menuTakeOff(PlayerContext player) {
             MenuActions actions = player.menuActions();
-            int menuSlot = armorMenuSlot(slot);
+            if (closePending != null) {
+                return closing(player);
+            }
+            int menuSlot = slot == GearSlotName.MAINHAND
+                    ? HOTBAR_MENU_START + player.localPlayer().getInventory().selected : armorMenuSlot(slot);
             if (menuPending == null) {
                 if (!actions.ensureVisible(player)) return ActionStatus.running();
                 menuPending = actions.click(player, menuSlot, 0,
@@ -240,9 +251,19 @@ public final class ClientGearChanges implements GearChanges {
                 menuPending = actions.poll(player, menuPending);
                 return ActionStatus.running();
             }
+            closePending = actions.close(player, STEP_TIMEOUT_TICKS);
+            return ActionStatus.running();
+        }
+
+        // 等背包界面关上：取下确认过才算成，没确认的按没能确认收场，背包满了搬不出去也是这样。
+        private ActionStatus closing(PlayerContext player) {
+            if (!closePending.terminal()) {
+                closePending = player.menuActions().poll(player, closePending);
+                return ActionStatus.running();
+            }
             return menuPending.status() == PendingMenuAction.Status.CONFIRMED_APPLIED
                     ? ActionStatus.done()
-                    : fail("护甲取下没能确认：" + menuPending.detail());
+                    : fail("取下 " + slot.paramName() + " 没能确认（背包可能放不下）：" + menuPending.detail());
         }
 
         // 确认条件：护甲格空了才算这一下搬出去了。
@@ -277,6 +298,15 @@ public final class ClientGearChanges implements GearChanges {
             var stack = inventory.getItem(slot);
             if (!stack.isEmpty() && BuiltInRegistries.ITEM
                     .getKey(stack.getItem()).equals(wanted)) return slot;
+        }
+        return -1;
+    }
+
+    /** 找第一个空的快捷栏格（0..8）；没有给 -1。 */
+    private static int firstEmptyHotbarSlot(LocalPlayer body) {
+        var inventory = body.getInventory();
+        for (int slot = 0; slot <= 8; slot++) {
+            if (inventory.getItem(slot).isEmpty()) return slot;
         }
         return -1;
     }

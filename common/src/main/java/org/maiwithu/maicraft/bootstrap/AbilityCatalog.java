@@ -187,7 +187,8 @@ public final class AbilityCatalog {
 
         // 装备：穿卸走背包界面的原生操作；腾背包的接缝还没有实现方，背包满了先按装不上说。
         registry.register(new EquipModule(deps.backpack(), deps.offhand(), deps.equipment(),
-                deps.gearFit(), Optional.empty(), Optional.of(new ClientGearChanges(deps.context(), toMainhand))));
+                deps.gearFit(), Optional.empty(), Optional.of(new ClientGearChanges(deps.context(), toMainhand)),
+                deps.itemTags()));
 
         // 丢弃：换手接上了；丢完朝旁边走两步，别让丢出的东西落回自己头上。
         // 落点登记与走开共用同一份避让：登记写进去，走开的每一步绕开它。

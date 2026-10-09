@@ -3,11 +3,13 @@ package org.maiwithu.maicraft.ability.equip;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
 import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
+import org.maiwithu.maicraft.behavior.acquire.ReadsItemTags;
 import org.maiwithu.maicraft.behavior.inventory.GearChanges;
 import org.maiwithu.maicraft.behavior.inventory.InventorySpace;
 import org.maiwithu.maicraft.game.player.BackpackView;
@@ -42,6 +44,7 @@ public final class EquipModule implements AbilityModule {
     private final ReadsGearFit fit;
     private final Optional<InventorySpace> space;
     private final Optional<GearChanges> gear;
+    private final ReadsItemTags tags;
 
     /**
      * @param backpack  背包视图：穿哪件的候选、卸下后多出来的东西都从这里看
@@ -50,15 +53,17 @@ public final class EquipModule implements AbilityModule {
      * @param fit       物品与栏位的匹配规则：头盔进不了胸甲栏
      * @param space     腾背包的模型：卸下要有地方放；没接上传 {@code Optional.empty()}
      * @param gear      穿卸装备的执行接缝；没接上传 {@code Optional.empty()}
+     * @param tags      物品挂着哪些标签：item 给标签时按它认身上的东西
      */
     public EquipModule(BackpackView backpack, OffhandContents offhand, ReadsEquipment equipment,
-            ReadsGearFit fit, Optional<InventorySpace> space, Optional<GearChanges> gear) {
+            ReadsGearFit fit, Optional<InventorySpace> space, Optional<GearChanges> gear, ReadsItemTags tags) {
         this.backpack = Objects.requireNonNull(backpack, "backpack");
         this.offhand = Objects.requireNonNull(offhand, "offhand");
         this.equipment = Objects.requireNonNull(equipment, "equipment");
         this.fit = Objects.requireNonNull(fit, "fit");
         this.space = Objects.requireNonNull(space, "space");
         this.gear = Objects.requireNonNull(gear, "gear");
+        this.tags = Objects.requireNonNull(tags, "tags");
     }
 
     @Override
@@ -72,7 +77,7 @@ public final class EquipModule implements AbilityModule {
                                 .choices("mainhand", "offhand", "head", "chest", "legs", "feet", "armor")
                                 .doc("目标栏位；armor 只配合 unequip，表示整套护甲卸下").build(),
                         Param.of("item", ParamType.ITEM_OR_TAG)
-                                .doc("要穿的物品 ID；身上候选唯一时可以不给").build()),
+                                .doc("要穿的物品 ID 或标签；护甲栏候选唯一时可以不给，手上拿什么得点名").build()),
                 Set.of(), ExecutionMode.CONTROLS_PLAYER, Set.of(), List.of(), Listing.LISTED);
     }
 
@@ -114,45 +119,53 @@ public final class EquipModule implements AbilityModule {
     }
 
     // 穿上：先定穿哪件，再核对栏位，最后看是不是已经穿着同一件。
+    // 手上（主手、副手）拿什么都行；护甲栏按游戏规则只收对应的护甲。标签表示其中任意一种。
     private StepDecision decideEquip(StepContext step, GearSlotName slot) {
-        String named = step.goal().params().has("item") ? step.goal().params().text("item") : null;
-        String itemId;
-        if (named != null) {
-            itemId = named;
-            if (!carriedContains(itemId)) {
-                return new StepDecision.Finish(TaskResult.failed("穿不上：身上没有 " + named,
-                        Problem.of(Problem.Kind.NEED_ITEM, "身上没有 " + named, null)));
+        String named = step.goal().params().has("item")
+                ? step.goal().params().text("item").toLowerCase(Locale.ROOT) : null;
+        boolean hand = slot == GearSlotName.MAINHAND || slot == GearSlotName.OFFHAND;
+        List<String> candidates;
+        if (named == null) {
+            candidates = GearCandidates.fitting(backpack, offhand, slot, fit);
+            if (candidates.isEmpty()) {
+                // 手上拿什么都行：没点名又没有天生放那里的东西（盾牌之于副手），说不清拿哪样。
+                return hand ? reject("没点名 item：" + slot.paramName() + " 上拿什么都行，要说清拿哪样")
+                        : new StepDecision.Finish(TaskResult.failed(
+                                "穿不上：身上没有能放进 " + slot.paramName() + " 的东西",
+                                Problem.of(Problem.Kind.NEED_ITEM, "身上没有能放进 " + slot.paramName() + " 的装备", null)));
             }
         } else {
-            List<String> candidates = GearCandidates.fitting(backpack, offhand, slot, fit);
+            candidates = GearCandidates.carriedMatching(backpack, offhand, named, tags).stream()
+                    .filter(itemId -> hand || fit.fits(itemId, slot))
+                    .toList();
             if (candidates.isEmpty()) {
-                return new StepDecision.Finish(TaskResult.failed(
-                        "穿不上：身上没有能放进 " + slot.paramName() + " 的东西",
-                        Problem.of(Problem.Kind.NEED_ITEM,
-                                "身上没有能放进 " + slot.paramName() + " 的装备", null)));
-            }
-            if (candidates.size() == 1) {
-                itemId = candidates.getFirst();
-            } else {
-                return chooseAmong(step, slot, candidates);
+                return missingNamed(named, slot, hand);
             }
         }
-        // 物品类型决定能放进哪个装备栏：提交前核对，头盔进不了胸甲栏。
-        if (!fit.fits(itemId, slot)) {
-            return new StepDecision.Finish(TaskResult.failed(
-                    itemId + " 放不进 " + slot.paramName() + "：物品类型和栏位不匹配",
-                    Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
-                            itemId + " 按游戏规则放不进 " + slot.paramName(), null)));
+        if (candidates.size() > 1) {
+            return chooseAmong(step, slot, candidates);
         }
+        String itemId = candidates.getFirst();
         // 目标栏位已经是同一件（按物品类型比，不看耐久与附魔）：直接完成。
         boolean worn = equipment.slot(slot)
                 .map(stack -> stack.itemId().equals(itemId))
                 .orElse(false);
         if (worn) {
             return new StepDecision.Finish(TaskResult.done(
-                    slot.paramName() + " 上已经戴着 " + itemId + "，不用再穿"));
+                    slot.paramName() + " 上已经是 " + itemId + "，不用再穿"));
         }
         return new StepDecision.Run(new EquipInput(false, slot, itemId));
+    }
+
+    // 点名的东西身上没有就是缺；身上有却放不进这个护甲栏，按游戏规则如实说放不进，不进游戏。
+    private StepDecision missingNamed(String named, GearSlotName slot, boolean hand) {
+        if (!hand && !GearCandidates.carriedMatching(backpack, offhand, named, tags).isEmpty()) {
+            return new StepDecision.Finish(TaskResult.failed(
+                    named + " 放不进 " + slot.paramName() + "：物品类型和栏位不匹配",
+                    Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, named + " 按游戏规则放不进 " + slot.paramName(), null)));
+        }
+        return new StepDecision.Finish(TaskResult.failed("穿不上：身上没有 " + named,
+                Problem.of(Problem.Kind.NEED_ITEM, "身上没有 " + named, null)));
     }
 
     // 候选是几种不同的物品：穿哪个后果不同，问 LLM 选一种；问过就按回答办。
@@ -180,15 +193,6 @@ public final class EquipModule implements AbilityModule {
         return new StepDecision.Ask(new Question(Question.Reason.CHOOSE_ONE,
                 "身上有好几样能放进 " + slot.paramName() + " 的东西，穿哪个？",
                 options));
-    }
-
-    private boolean carriedContains(String itemId) {
-        for (var stack : backpack.stacks()) {
-            if (stack.itemId().equals(itemId)) return true;
-        }
-        return offhand.heldInOffhand()
-                .map(stack -> stack.itemId().equals(itemId))
-                .orElse(false);
     }
 
     // 参数凑不到一起：不进游戏，一次说清哪里不对。
