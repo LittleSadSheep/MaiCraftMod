@@ -43,10 +43,14 @@ public final class ChatAbility implements AbilityModule {
 
     @Override
     public AbilitySpec spec() {
-        // 参数说明与能力说明都随实例而变：放开了就如实告知 LLM 命令会按命令发送，不放开时保持现行文案。
+        // 参数说明、能力说明与一句话用途都随实例而变：放开了就如实告知 LLM 命令会按命令发送，
+        // 全量列表也看得到这一点；不放开时保持现行文案。
         String messageDoc = allowGameCommands
                 ? "要发到游戏聊天或游戏命令栏的话，全体可见；以 / 开头的会作为游戏命令，以角色自己的权限执行"
                 : "要发到游戏聊天的话，全体玩家可见；以 / 开头的是游戏命令，角色不执行";
+        String summary = allowGameCommands
+                ? "向游戏聊天发一句话（对全体玩家可见；本实例允许执行游戏命令）"
+                : "向游戏聊天发一句话（对全体玩家可见）";
         AbilityDoc doc = AbilityDoc.forAbility("chat");
         if (allowGameCommands) {
             doc = doc.withExtraNote("本实例允许执行游戏命令：`message` 以 `/` 开头时不拒绝，"
@@ -56,7 +60,7 @@ public final class ChatAbility implements AbilityModule {
         }
         return new AbilitySpec(
                 "maicraft:chat",
-                "向游戏聊天发一句话（对全体玩家可见）",
+                summary,
                 doc,
                 ParamSpec.of(
                         Param.of("message", ParamType.TEXT).required()

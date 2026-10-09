@@ -107,6 +107,9 @@ class ChatAbilityTest {
         ChatAbility open = new ChatAbility(message -> {}, SILENT_ECHO, true);
         assertTrue(open.spec().doc().load().contains("本实例允许执行游戏命令"),
                 open.spec().doc().load());
+        // 放开说明要进全量列表：一句话用途里也带这一句，不能只藏在 lookup 详情里。
+        assertTrue(open.spec().summary().contains("本实例允许执行游戏命令"), open.spec().summary());
+        assertFalse(closed.spec().summary().contains("游戏命令"), closed.spec().summary());
     }
 
     @Test
