@@ -29,7 +29,9 @@ public enum ParamType {
     /** 多个方块 ID 或标签；只给一个字符串时按一项的列表处理。 */
     BLOCK_LIST("array", true),
     /** 多段非空文字；只给一个字符串时按一项的列表处理。 */
-    TEXT_LIST("array", true);
+    TEXT_LIST("array", true),
+    /** 多个实体类型 ID（不接受标签）；只给一个字符串时按一项的列表处理。 */
+    ENTITY_TYPE_LIST("array", true);
 
     private final String schemaType;
     private final boolean list;

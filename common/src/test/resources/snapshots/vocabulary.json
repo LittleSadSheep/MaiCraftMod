@@ -6,7 +6,7 @@
     "condition": "要等到的条件：elapsed / day / night / health_full / not_hungry",
     "count": "这次要多做多少：拿东西就是再多拿几件（不是背包里的总数），做动作就是做几次",
     "distance": "保持的距离，单位格，例如跟随时与目标相隔几格",
-    "entity": "实体类型 ID",
+    "entity": "实体类型 ID，可给一个或几种",
     "item": "物品 ID，或 # 开头的物品标签",
     "items": "多个物品 ID 或物品标签",
     "max_distance": "出行或搜索的最远距离，单位格",
@@ -16,6 +16,7 @@
     "operation": "一个能力内部的几种操作选哪一种，例如 enable、disable、status",
     "radius": "工作或搜索范围，单位格",
     "slot": "装备与卸下的目标栏位：mainhand / offhand / head / chest / legs / feet / armor（armor 只配合卸下）",
+    "structure": "要找的结构 ID（命名空间 id），例如 minecraft:village_plains",
     "text": "要发送或书写的文字",
     "via": "指定途径，例如拿东西时指定合成、烧炼或采掘"
   },

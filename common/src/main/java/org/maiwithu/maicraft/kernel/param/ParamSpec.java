@@ -67,7 +67,7 @@ public record ParamSpec(
             case NUMBER -> value instanceof Double;
             case BOOLEAN -> value instanceof Boolean;
             case TEXT, CHOICE, ITEM_OR_TAG, BLOCK_OR_TAG, ENTITY_TYPE -> value instanceof String;
-            case ITEM_LIST, BLOCK_LIST, TEXT_LIST -> value instanceof List<?>;
+            case ITEM_LIST, BLOCK_LIST, TEXT_LIST, ENTITY_TYPE_LIST -> value instanceof List<?>;
         };
     }
 

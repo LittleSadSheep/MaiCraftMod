@@ -103,6 +103,13 @@
         "mode": "controls_player"
       },
       {
+        "ability": "maicraft:find",
+        "summary": "在附近找某种方块、生物或结构，找到的每一样给一个观察编号，可以直接拿它下达别的指令",
+        "parameters": "block?: string, blocks?: array, entity?: array, structure?: string, count: integer = 1, radius?: integer",
+        "targets": [],
+        "mode": "controls_player"
+      },
+      {
         "ability": "maicraft:chat",
         "summary": "向游戏聊天发一句话（对全体玩家可见）",
         "parameters": "message: string",
@@ -527,6 +534,58 @@
       "required_mods": [],
       "knowledge": [],
       "doc_resource": "assets/maicraft/abilities/travel.md"
+    },
+    {
+      "ability": "maicraft:find",
+      "summary": "在附近找某种方块、生物或结构，找到的每一样给一个观察编号，可以直接拿它下达别的指令",
+      "parameters": [
+        {
+          "name": "block",
+          "type": "string",
+          "required": false,
+          "doc": "找哪种方块（ID 或 # 标签）；与 blocks、entity、structure 三选一"
+        },
+        {
+          "name": "blocks",
+          "type": "array",
+          "required": false,
+          "doc": "找哪几种方块（ID 或 # 标签）；与 block、entity、structure 三选一"
+        },
+        {
+          "name": "entity",
+          "type": "array",
+          "required": false,
+          "doc": "找哪种实体（类型 ID，可给几种）；与 block、blocks、structure 三选一"
+        },
+        {
+          "name": "structure",
+          "type": "string",
+          "required": false,
+          "doc": "找哪种结构（命名空间 ID）；按记过的产地线索找，到附近还要亲眼确认；与 block、blocks、entity 三选一"
+        },
+        {
+          "name": "count",
+          "type": "integer",
+          "required": false,
+          "doc": "要找到几个，找满即收工",
+          "default": 1,
+          "min": 1,
+          "max": 32
+        },
+        {
+          "name": "radius",
+          "type": "integer",
+          "required": false,
+          "doc": "扫描半径，单位格；方块默认 48，实体默认 64；只扫已加载区",
+          "min": 4,
+          "max": 128
+        }
+      ],
+      "targets": [],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/find.md"
     },
     {
       "ability": "maicraft:chat",

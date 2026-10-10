@@ -124,7 +124,7 @@ public final class ParamSpecs {
             case CHOICE -> choice(param, element, errors, notes);
             case ITEM_OR_TAG, BLOCK_OR_TAG -> resource(name, element, true, errors, notes);
             case ENTITY_TYPE -> resource(name, element, false, errors, notes);
-            case ITEM_LIST, BLOCK_LIST, TEXT_LIST -> list(param, element, errors, notes);
+            case ITEM_LIST, BLOCK_LIST, TEXT_LIST, ENTITY_TYPE_LIST -> list(param, element, errors, notes);
         };
     }
 
@@ -225,9 +225,12 @@ public final class ParamSpecs {
         Set<String> values = new LinkedHashSet<>();
         int before = errors.size();
         for (JsonElement item : items) {
-            Object value = param.type() == ParamType.TEXT_LIST
-                    ? text(param.name(), item, errors)
-                    : resource(param.name(), item, true, errors, notes);
+            // 列表项的写法各类型不同：文字按文字收，实体类型不接受标签，其余接受 # 标签。
+            Object value = switch (param.type()) {
+                case TEXT_LIST -> text(param.name(), item, errors);
+                case ENTITY_TYPE_LIST -> resource(param.name(), item, false, errors, notes);
+                default -> resource(param.name(), item, true, errors, notes);
+            };
             if (value != null) values.add((String) value);
         }
         if (errors.size() > before) return null;
@@ -267,6 +270,7 @@ public final class ParamSpecs {
             case ITEM_LIST -> "物品 ID 或标签的数组";
             case BLOCK_LIST -> "方块 ID 或标签的数组";
             case TEXT_LIST -> "文字数组";
+            case ENTITY_TYPE_LIST -> "实体类型 ID 的数组";
         };
     }
 

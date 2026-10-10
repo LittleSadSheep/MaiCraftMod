@@ -22,6 +22,7 @@ import org.maiwithu.maicraft.ability.fight.LiveSeenTargets;
 import org.maiwithu.maicraft.ability.follow.FollowModule;
 import org.maiwithu.maicraft.ability.follow.LiveFollowView;
 import org.maiwithu.maicraft.ability.gather.ApproachesTargets;
+import org.maiwithu.maicraft.ability.find.FindModule;
 import org.maiwithu.maicraft.ability.gather.GatherAbility;
 import org.maiwithu.maicraft.ability.gather.LiveSceneTargets;
 import org.maiwithu.maicraft.ability.gather.LiveSpotReads;
@@ -250,6 +251,10 @@ public final class AbilityCatalog {
         registry.register(new TravelAbility(deps.walks(),
                 new DestinationResolver(deps.travelWorld(), deps.memory(), new SceneSeenTargets(deps::scene)),
                 deps.walkInternals(), deps.travelProgress()));
+
+        // 寻找：方块与实体扫已加载区，结构查记过的产地线索；命中直接在场景的观察编号表上领编号。
+        registry.register(FindModule.live(deps.context(), deps.blockScans(), deps.creatures(),
+                deps.memory(), deps.scene()));
 
         // 聊天：发送与回显确认都走游戏聊天通道；是否放行游戏命令由所有者的实例配置决定。
         registry.register(chatModule(deps));
