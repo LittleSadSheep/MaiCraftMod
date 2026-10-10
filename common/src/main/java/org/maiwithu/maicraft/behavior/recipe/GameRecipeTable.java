@@ -146,10 +146,7 @@ public final class GameRecipeTable implements RecipeViewer {
 
     // 配方自己的序列化格式转成 JSON：加热要求、加工时间、带几率的副产物都在里面；转不出来就不给，不编。
     private static JsonObject definition(Recipe<?> recipe, GameRecipes table) {
-        return Recipe.CODEC.encodeStart(RegistryOps.create(JsonOps.INSTANCE, table.registries()), recipe).result()
-                .filter(JsonElement::isJsonObject)
-                .map(JsonElement::getAsJsonObject)
-                .orElse(null);
+        return RecipeDefinitions.of(recipe, table.registries());
     }
 
     private static ShownStack stack(ItemStack stack) {
