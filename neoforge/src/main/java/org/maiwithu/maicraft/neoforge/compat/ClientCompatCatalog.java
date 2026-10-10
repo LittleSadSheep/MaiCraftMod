@@ -8,10 +8,14 @@ import org.maiwithu.maicraft.compat.SupportedMod;
 import org.maiwithu.maicraft.compat.VerifiedVersions;
 import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
 import org.maiwithu.maicraft.compat.backpack.BackpackCompat;
+import org.maiwithu.maicraft.compat.emi.EmiCompat;
+import org.maiwithu.maicraft.compat.jei.JeiCompat;
 import org.maiwithu.maicraft.compat.ponder.PonderCompat;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsTerminalMenu;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsTerminals;
 import org.maiwithu.maicraft.neoforge.compat.backpack.SophisticatedBackpackItems;
+import org.maiwithu.maicraft.neoforge.compat.emi.EmiClientReads;
+import org.maiwithu.maicraft.neoforge.compat.jei.JeiClientReads;
 import org.maiwithu.maicraft.neoforge.compat.ponder.PonderClientReads;
 
 /**
@@ -38,6 +42,12 @@ public final class ClientCompatCatalog {
                 // 思索（Ponder）：随 Create 6.0.11 装的 1.0.82；装了 1.0.83 及以上不登记，实测通过后再放宽
                 // （读旁白要用它的几个非公开字段，换了版本可能改名）。
                 new SupportedMod<>(PonderCompat.MOD_ID, "思索（Ponder）", new VerifiedVersions("1.0.82", "1.0.83"),
-                        () -> new PonderCompat(new PonderClientReads())));
+                        () -> new PonderCompat(new PonderClientReads())),
+                // EMI：实测过 1.1.24；装了 1.1.25 及以上不登记，实测通过后再放宽。
+                new SupportedMod<>(EmiCompat.MOD_ID, "EMI", new VerifiedVersions("1.1.24", "1.1.25"),
+                        () -> new EmiCompat(new EmiClientReads())),
+                // JEI：实测过 19.38.0.366；装了 19.39 及以上不登记，实测通过后再放宽。
+                new SupportedMod<>(JeiCompat.MOD_ID, "JEI", new VerifiedVersions("19.38.0.366", "19.39"),
+                        () -> new JeiCompat(new JeiClientReads())));
     }
 }
