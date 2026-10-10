@@ -82,6 +82,11 @@ public final class ThrowsItems implements Action {
         return hadConfirmationOwner;
     }
 
+    /** 此刻是不是有一次投掷提交了、还在等游戏确认：这时停下，那一下丢没丢出去说不清。 */
+    public boolean awaitingConfirmation() {
+        return pending != null && !pending.terminal();
+    }
+
     @Override
     public ActionStatus tick(TickContext context) {
         PlayerContext player = context.player();

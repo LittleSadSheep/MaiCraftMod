@@ -31,6 +31,7 @@ import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
 import org.maiwithu.maicraft.behavior.acquire.ReadsCharacterPosition;
 import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
 import org.maiwithu.maicraft.behavior.inventory.DropAvoidance;
+import org.maiwithu.maicraft.behavior.inventory.DropsItems;
 import org.maiwithu.maicraft.behavior.inventory.MovesToMainhand;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.interaction.InteractionSender;
@@ -213,7 +214,7 @@ class DropTaskTest {
 
         DropTask task(int count) {
             return new DropTask(new DropInput(COBBLE, count), backpack, emptyOffhand(),
-                    atOrigin(), ignored -> scene, Optional.empty(), Optional.empty(), avoidance);
+                    new DropsItems.Parts(ignored -> scene, atOrigin(), Optional.empty(), Optional.empty(), avoidance));
         }
 
         TickResult run(DropTask task, int ticks) {
@@ -304,8 +305,8 @@ class DropTaskTest {
 
             @Override public String describe() { return "换下一堆到主手"; }
         });
-        DropTask task = new DropTask(new DropInput(COBBLE, 40), rig.backpack, emptyOffhand(), atOrigin(),
-                ignored -> rig.scene, Optional.of(moves), Optional.empty(), rig.avoidance);
+        DropTask task = new DropTask(new DropInput(COBBLE, 40), rig.backpack, emptyOffhand(),
+                new DropsItems.Parts(ignored -> rig.scene, atOrigin(), Optional.of(moves), Optional.empty(), rig.avoidance));
         TickResult result = rig.run(task, 80);
         TaskResult done = result instanceof TickResult.Finished finished ? finished.result() : null;
         assertTrue(done != null && done.status() == TaskResult.Status.DONE,

@@ -71,6 +71,7 @@ import org.maiwithu.maicraft.behavior.construction.ShowsPreview;
 import org.maiwithu.maicraft.behavior.interaction.ClientGameRefusals;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
+import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
 import org.maiwithu.maicraft.behavior.inventory.ClientGearChanges;
 import org.maiwithu.maicraft.behavior.inventory.ClientDropPickup;
 import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
@@ -79,6 +80,7 @@ import org.maiwithu.maicraft.behavior.inventory.ClientStackMerger;
 import org.maiwithu.maicraft.behavior.inventory.ClientContainerDeposits;
 import org.maiwithu.maicraft.behavior.inventory.ClientItemDropper;
 import org.maiwithu.maicraft.behavior.inventory.DropAvoidance;
+import org.maiwithu.maicraft.behavior.inventory.DropsItems;
 import org.maiwithu.maicraft.behavior.inventory.InventorySpace;
 import org.maiwithu.maicraft.behavior.inventory.RememberedContainers;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
@@ -220,10 +222,8 @@ public final class AbilityCatalog {
                 Optional.of(new ClientGearChanges(deps.context(), shared.toMainhand())), deps.itemTags()));
 
         // 丢弃：换手接上了；丢完朝旁边走两步，别让丢出的东西落回自己头上。
-        // 落点登记与走开共用同一份避让：登记写进去，走开的每一步绕开它。
-        registry.register(new DropModule(deps.backpack(), deps.offhand(), deps.itemTags(),
-                deps.characterPosition(), shared.dropAvoidance(), Optional.of(shared.toMainhand()),
-                Optional.of(shared.stepsAside())));
+        // 丢东西的现场部件与腾地方共用一份：落点登记写进同一本避让账，走开的每一步绕开它。
+        registry.register(new DropModule(deps.backpack(), deps.offhand(), deps.itemTags(), shared.dropping()));
 
         // 拿到物品：身上的不算来源（引擎开场就清点），已实现的途径都登记，见 obtainModule。
         registry.register(obtainModule(deps, shared.playerServices(), shared.bringClose(), shared.toMainhand(),
@@ -255,12 +255,12 @@ public final class AbilityCatalog {
 
     /**
      * 清单里好几处共用的现场部件：靠近与换手、挖一格与捡掉落物、拿到物品的内需入口、
-     * 游戏拒绝读端、许可检查点、联动能用的那份玩家行为、丢弃避让与走开，以及腾地方。
+     * 游戏拒绝读端、许可检查点、联动能用的那份玩家行为、丢东西的现场部件，以及腾地方。
      */
     private record Shared(LiveApproaches bringClose, ClientMovesToMainhand toMainhand, LiveBlockDigging digging,
             ClientDropPickup drops, ClientCollectsBlocks collects, DeferredInnerNeeds innerNeeds,
             ClientGameRefusals refusals, PermissionCheck permission, PlayerServices playerServices,
-            DropAvoidance dropAvoidance, ClientStepsAside stepsAside, InventorySpace space) {
+            DropsItems.Parts dropping, InventorySpace space) {
     }
 
     /** 把共用的现场部件一次建好：世界记忆之外的每刻现场都从这里出。 */
@@ -291,6 +291,8 @@ public final class AbilityCatalog {
         // 谁丢的都登记进同一本账，走路时一并绕开，不把刚丢出去的又吸回来。
         DropAvoidance dropAvoidance = new DropAvoidance();
         ClientStepsAside stepsAside = new ClientStepsAside(deps.inputs(), dropAvoidance);
+        DropsItems.Parts dropping = new DropsItems.Parts(FirstPersonScene::of, deps.characterPosition(),
+                Optional.of(toMainhand), Optional.of(stepsAside), dropAvoidance);
         // 腾地方：合并散堆、记得的容器、存进容器、丢出去四条路都接上了；
         // 装备与拿东西在背包要满时先按它腾，不再直接说装不上。随身背包的接缝留给随身背包的联动模组。
         InventorySpace space = new InventorySpace(deps.backpack(),
@@ -302,7 +304,7 @@ public final class AbilityCatalog {
                 Optional.of(new ClientItemDropper(toMainhand, dropAvoidance, Optional.of(stepsAside),
                         deps.characterPosition(), deps.context())));
         return new Shared(bringsClose, toMainhand, digging, drops, collects, innerNeeds, refusals,
-                permission, playerServices, dropAvoidance, stepsAside, space);
+                permission, playerServices, dropping, space);
     }
 
     /**
