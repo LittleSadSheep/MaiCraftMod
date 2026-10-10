@@ -29,6 +29,7 @@ import org.maiwithu.maicraft.ability.gather.LiveSpotReads;
 import org.maiwithu.maicraft.ability.obtain.ObtainAbility;
 import org.maiwithu.maicraft.ability.remember.RememberAbility;
 import org.maiwithu.maicraft.ability.sequence.SequenceModule;
+import org.maiwithu.maicraft.ability.sleep.SleepModule;
 import org.maiwithu.maicraft.ability.travel.TravelAbility;
 import org.maiwithu.maicraft.ability.use.UseModule;
 import org.maiwithu.maicraft.ability.wait.WaitModule;
@@ -147,7 +148,9 @@ public final class AbilityCatalog {
             Protection protection,
             FurnaceFuels furnaceFuels,
             CompatRegistry compat,
-            FacilityKinds facilities) {
+            FacilityKinds facilities,
+            /** 夜晚生存需求与睡觉能力之间的晚接桥；进世界登记睡觉能力后接上真实现。 */
+            NightRestWiring nightWiring) {
 
         public Deps {
             Objects.requireNonNull(context, "context");
@@ -192,9 +195,13 @@ public final class AbilityCatalog {
         // 引擎在登记拿到物品时建好再接上。
         DeferredInnerNeeds innerNeeds = new DeferredInnerNeeds();
 
+        // 游戏拒绝读端：用东西与睡觉共一份（动作栏提示语同出一个来源）。
+        ClientGameRefusals refusals = new ClientGameRefusals(new OverlayMessages(),
+                () -> deps.session().confirmations().recent(), deps.clientTicks());
+
         // 用东西：读世界、组装交互、靠近、备手、去拿缺的东西、观察编号、附近搜索、动作栏提示语、
         // 走到没加载的坐标、捡掉出的东西、看点开的界面都接上了。
-        registry.register(useModule(deps, bringsClose, toMainhand, innerNeeds));
+        registry.register(useModule(deps, bringsClose, toMainhand, innerNeeds, refusals));
 
         // 进食：把食物换到主手走背包界面的原生搬运；手上不是食物时能换手了。
         registry.register(new EatModule(deps.backpack(), deps.offhand(), deps.hunger(), deps.foods(),
@@ -221,6 +228,16 @@ public final class AbilityCatalog {
 
         // 存东西：找容器把现场扫描与世界记忆并起来，打开容器、逐笔搬运与挖盖子都接上了。
         registry.register(depositModule(deps, bringsClose, collects));
+
+        // 睡觉：选床、放自带床、现做一张、白天备床与夜间自动休息都从这里接；
+        // 夜晚这项生存需求的"今晚有没有床"与"找空当去睡"接上同一份判断与任务。
+        SleepModule sleepModule = new SleepModule(deps.context(), deps.blockScans(), deps.protection(),
+                deps.backpack(), deps.offhand(), deps.interactions(), bringsClose, collects,
+                deps.memory(), new DestinationResolver(deps.travelWorld(), deps.memory(),
+                        new SceneSeenTargets(deps::scene)),
+                innerNeeds, refusals::latestMessage);
+        registry.register(sleepModule);
+        deps.nightWiring().attach(sleepModule.bedAvailability(), sleepModule);
 
         // 采集：观察编号从场景查，现场从世界读，靠近用站位与走到，挖用原生挖掘；
         // 收完把身上的种子补种回原格，没有种子就不补，不额外去找。
@@ -279,11 +296,9 @@ public final class AbilityCatalog {
         return new ChatAbility(chat::send, echo, deps.allowGameCommands());
     }
 
-    /** 用东西能力的一份：游戏拒绝读端看动作栏与服务端确认流，刻号从所在世界取。 */
+    /** 用东西能力的一份：游戏拒绝读端看动作栏与服务端确认流，与睡觉能力共用一份。 */
     private static UseModule useModule(Deps deps, LiveApproaches bringsClose, ClientMovesToMainhand toMainhand,
-            ItemNeeds needs) {
-        ClientGameRefusals refusals = new ClientGameRefusals(new OverlayMessages(),
-                () -> deps.session().confirmations().recent(), deps.clientTicks());
+            ItemNeeds needs, ClientGameRefusals refusals) {
         return UseModule.live(deps.context(), deps.interactions(), bringsClose, toMainhand, needs,
                 deps::scene, deps.blockScans(), refusals, deps.walks(), deps.memory(), deps::protection,
                 deps.creatures());

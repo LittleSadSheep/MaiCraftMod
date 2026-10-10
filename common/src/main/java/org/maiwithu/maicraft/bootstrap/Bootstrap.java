@@ -203,12 +203,14 @@ public final class Bootstrap {
      * 控制循环的生存需求清单：按急迫程度登记，必须立刻处理的先登记，同样急时先插进来。
      * 战斗感观由外面递进来，与战斗能力共用一份；走到已接上，撤离与绕行用真的走路完成；
      * 饿了的临时任务吃随身食物：先换到主手，再原生按住吃完一口；有预算地弄吃的还没接。
+     * 夜晚的"今晚有没有床"与夜间休息由睡觉能力进世界时接上桥，接上前按弄不到床对待。
      */
     private static ControlLoop withSurvivalNeeds(
             TaskEventSink events, DeathDecisionHost deathDecisions,
             InteractionSender interactionSender, MenuActions menuActions, Interactions interactions,
             CombatSenses combatSenses, WalkTo walks,
-            EatSoonTask.FoodMoves foodMoves, ReadsFoodValues foods, LiveBurrow burrow, LiveCeilingDigs ceilings) {
+            EatSoonTask.FoodMoves foodMoves, ReadsFoodValues foods, LiveBurrow burrow, LiveCeilingDigs ceilings,
+            NightRestWiring nightWiring) {
         // 角色死亡这类循环自身的处境变化也从同一条事件流出去；死亡决策从挂载口交给目标运行表。
         return new ControlLoop(List.of(
                 new DigOutNeed(new SurvivalSituation.FromPlayer(),
@@ -219,7 +221,7 @@ public final class Bootstrap {
                 new SelfDefenseNeed(combatSenses, new LiveCombatMoves(walks), events),
                 new HungerNeed(new LiveHungerView(foods), foodMoves, events),
                 new NightfallNeed(new LiveNightView(combatSenses),
-                        LiveNightAndEdgeMoves.burrow(burrow, events)),
+                        LiveNightAndEdgeMoves.burrow(burrow, events), nightWiring, nightWiring),
                 new EdgeProximityNeed(new LiveEdgeView(),
                         LiveNightAndEdgeMoves.retreat(walks, events))), events, deathDecisions);
     }
@@ -281,6 +283,8 @@ public final class Bootstrap {
         private DefaultMenuActions menuActions;
         private DefaultInteractionSender interactionSender;
         private CombatSenses combatSenses;
+        /** 夜晚生存需求与睡觉能力之间的晚接：能力进世界登记后接上真实现。 */
+        private final NightRestWiring nightWiring = new NightRestWiring();
         private Interactions interactions;
         private ToolDispatcher tools;
         private GoalRunTable goals;
@@ -420,7 +424,8 @@ public final class Bootstrap {
             LiveBurrow burrow = new LiveBurrow(now, diggings, interactions, new ClientMovesToMainhand(now), walks,
                     protection);
             controlLoop = withSurvivalNeeds(taskEvents, deathDecisions, interactionSender, menuActions, interactions,
-                    combatSenses, walks, foodMoves, foods, burrow, new LiveCeilingDigs(diggings, protection));
+                    combatSenses, walks, foodMoves, foods, burrow, new LiveCeilingDigs(diggings, protection),
+                    nightWiring);
         }
 
         /**
@@ -503,7 +508,7 @@ public final class Bootstrap {
                 WorldScope scope = new WorldScope(minecraft, playerControl, blockScans, session,
                         subtitles, interactions, useKeyProjection, walks, combatSenses,
                         abilities, interactionSender, menuActions, instanceConfig, furnaceFuels,
-                        compat);
+                        compat, nightWiring);
                 worldScope[0] = scope;
                 // 换了世界，任务事件流换一条新的，宿主手里的旧游标如实作废；再把这个世界上次没做完的目标
                 // 读回来，全部恢复为暂停，等 LLM 决定接不接着做。读回时的暂停事件进的是新的这条流。

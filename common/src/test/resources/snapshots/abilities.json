@@ -54,6 +54,18 @@
         "mode": "controls_player"
       },
       {
+        "ability": "maicraft:sleep",
+        "summary": "找一张床躺下睡觉，白天会先备好今晚的床再报告睡不了",
+        "parameters": "",
+        "targets": [
+          "here",
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
         "ability": "maicraft:gather",
         "summary": "采掉、收获、捡起世界里指定的东西",
         "parameters": "block?: string, item?: string",
@@ -383,6 +395,21 @@
       "required_mods": [],
       "knowledge": [],
       "doc_resource": "assets/maicraft/abilities/deposit.md"
+    },
+    {
+      "ability": "maicraft:sleep",
+      "summary": "找一张床躺下睡觉，白天会先备好今晚的床再报告睡不了",
+      "parameters": [],
+      "targets": [
+        "here",
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/sleep.md"
     },
     {
       "ability": "maicraft:gather",

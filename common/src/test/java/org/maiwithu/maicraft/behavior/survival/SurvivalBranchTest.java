@@ -35,21 +35,20 @@ class SurvivalBranchTest {
     @Test
     void nightBranching() {
         // 不在可睡时段：不插。
-        assertNull(NightfallNeed.branch(new NightfallNeed.Facts(false, false, true,
-                ThreatAssessment.Verdict.WINNABLE, 20, 15)));
-        // 能弄到床：找空当去睡（入睡归睡觉规格）。
-        // 有床：夜间休息接上之前接着干活，不封坑熬夜。
-        assertNull(NightfallNeed.branch(new NightfallNeed.Facts(true, false, true,
-                ThreatAssessment.Verdict.WINNABLE, 20, 15)));
-        // 安全处（矿道、屋里、照明充足）：接着干。
-        assertNull(NightfallNeed.branch(new NightfallNeed.Facts(true, true, false,
-                ThreatAssessment.Verdict.OUTMATCHED, 20, 15)));
-        // 露天但打得过：接着干。
-        assertNull(NightfallNeed.branch(new NightfallNeed.Facts(true, false, false,
-                ThreatAssessment.Verdict.WINNABLE, 20, 15)));
-        // 露天又打不过：极端自保。
-        assertEquals(Urgency.SOON, NightfallNeed.branch(new NightfallNeed.Facts(true, false, false,
-                ThreatAssessment.Verdict.OUTMATCHED, 20, 15)));
+        assertNull(NightfallNeed.branch(new NightfallNeed.Facts(false, false,
+                ThreatAssessment.Verdict.WINNABLE, 20, 15), true));
+        // 能弄到床：找空当去睡（夜间休息），只在两个动作之间插进来。
+        assertEquals(Urgency.LATER, NightfallNeed.branch(new NightfallNeed.Facts(true, false,
+                ThreatAssessment.Verdict.WINNABLE, 20, 15), true));
+        // 弄不到床、安全处（矿道、屋里、照明充足）：接着干。
+        assertNull(NightfallNeed.branch(new NightfallNeed.Facts(true, true,
+                ThreatAssessment.Verdict.OUTMATCHED, 20, 15), false));
+        // 弄不到床、露天但打得过：接着干。
+        assertNull(NightfallNeed.branch(new NightfallNeed.Facts(true, false,
+                ThreatAssessment.Verdict.WINNABLE, 20, 15), false));
+        // 弄不到床、露天又打不过：极端自保。
+        assertEquals(Urgency.SOON, NightfallNeed.branch(new NightfallNeed.Facts(true, false,
+                ThreatAssessment.Verdict.OUTMATCHED, 20, 15), false));
     }
 
     @Test

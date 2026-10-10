@@ -46,7 +46,7 @@ public final class LiveNightView implements NightfallNeed.ReadsNight {
         var mine = new ThreatAssessment.MySide(self.getHealth(), self.getArmorValue(),
                 profile.weapon().map(picked -> WeaponChoice.scoreOf(picked.weapon())).orElse(0), profile.foodCount(), true);
         ThreatAssessment.Verdict verdict = ThreatAssessment.assess(mine, foes).verdict();
-        // 床的寻找与选床归睡觉规格；这一轨没合进来时先按"弄不到床"分流，事件里会说明。
-        return new NightfallNeed.Facts(sleepTime, inShelter, false, verdict, self.getHealth(), self.getArmorValue());
+        // 今晚有没有床由睡觉能力的找床读端回答，NightfallNeed 把两份处境合起来分流。
+        return new NightfallNeed.Facts(sleepTime, inShelter, verdict, self.getHealth(), self.getArmorValue());
     }
 }
