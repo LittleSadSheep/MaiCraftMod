@@ -33,6 +33,8 @@ public final class ClientDropPickup implements PicksUpDrops {
 
     /** 只认近处的：挖下、剪下的东西就落在动手的地方附近，走远了的不算这一下带出来的。 */
     private static final double NEARBY_BLOCKS = 8.0;
+    /** 走到离掉落物这么近就停：原版拾取范围比角色身体每边宽一格，挨着站就吸得进来。 */
+    private static final double PICKUP_REACH_BLOCKS = 1.0;
     /** 动手后等新掉落物冒出来的耐心（刻）；过了还没有就是这一下没掉东西。 */
     private static final int APPEAR_TICKS = 10;
     /** 每件东西的耐心；到点没捡到就放弃这一件，不在一件东西上耗着。 */
@@ -138,7 +140,9 @@ public final class ClientDropPickup implements PicksUpDrops {
             if (walk == null || !cell.equals(walkingTo)) {
                 stopWalking();
                 walkingTo = cell;
-                walk = walks.start(GoalCompiler.standOn(cell), TerrainPermit.WALK_ONLY);
+                // 走到它旁边一格以内就够原版吸进包，不必站进那一格：挖进墙里的那一格头顶常是实心的，
+                // 站不进去会被当成走不过去，东西明明挨着却放弃不捡。
+                walk = walks.start(GoalCompiler.near(cell, PICKUP_REACH_BLOCKS), TerrainPermit.WALK_ONLY);
             }
             if (walk.tick(tick) instanceof ActionStatus.Failed) {
                 // 走不过去就别指望它自己吸过来了：放弃这一件，挑下一件。
