@@ -14,6 +14,7 @@ MaiCraft 按版本记录玩家和 Agent 能感受到的变化。版本号即 `gr
 
 - 施工（`build`）认结构文件了：`file` 给 `schematics/` 里的文件名，原版 `.nbt` / `.snbt`、Litematica `.litematic`、Sponge `.schem` 和 `design` 导出的 `.json` 都认，文件原点落在锚点、`rotation` 照转；展示框、盔甲架、画这些摆设实体不装，结果里 `fixtures_skipped` 写明有几个，箱子里的东西、告示牌的字不搬。
 - 施工预览画出来了：`design` 的 `preview` 投到世界里的蓝图会显示在世界里——半透明白是要放的方块、红是要清空的格、蓝是要倒桶的格，外加蓝线包围盒，只画镜头附近的格；F9+B 开关，默认开着，存在 `config/maicraft-debug.properties`，退世界清掉。
+- 知识库多了建筑这一组，`lookup(topic=knowledge, id=building/design)` 读得到图纸格式（字段、坐标与尺寸、材料表、十二种图元、组件与阵列、开孔、空心、面与棱、图案，每节带能直接交的例子），`building/roofs` 讲 ROOF 对象的九种 shape 和参数，`building/house`、`building/styles`、`building/example-cottage` 讲怎么设计、几种风格和一栋完整的小屋；`design` 的能力说明改成能直接照抄的 lookup 写法。
 - 联动模组能接两种拆方块的办法了：挖掘加速（FTB Ultimine 这类连锁挖）与拆卸工具（Create 扳手这类整块拆下）。施工清障时，连锁挖只在整批都是本来要清的格、每格都过许可时才用；模组认领的方块用它的工具拆。两种目前都还没有模组接上。
 - 能按机器蓝图建机器了（`machine_build`）：`blueprint` 或 `design_id` 落到 target——逐格施工缺料自己拿，传送带这类安装段与线缆上的部件由机器类型用模组自己的方式装，装后设置逐条读回核对；建成后记进机器档案，`target` 指档案名就是修改（补丁合并进整机），`operation=remove` 拆档案里的整台。没装联动时方块照放，安装段与部件如实记下没装成。
 - 能看机器接没接上网了（`machine_connect`）：核对 target 与来源两端在不在同一张网、接上了转不转得动，读数（应力、频道、能量）原样带出；已经接着就不再动一根轴，接上了但转速为零、过载也照实分开说。`network` 指接哪种网（取值由装了的联动自报），`source` 不给就在范围内找挂着这种网的格子；两端还没接上时如实说差哪一段——铺线路要哪种方块、怎么铺由各网络的联动给，现在没有登记的途径能给出，接线路这一步动不了手，不会猜着铺。

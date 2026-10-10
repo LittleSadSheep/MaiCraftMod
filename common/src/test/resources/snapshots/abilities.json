@@ -556,7 +556,7 @@
           "name": "drawing",
           "type": "object",
           "required": false,
-          "doc": "create 用：图纸正文，格式看 lookup 的 building/design"
+          "doc": "create 用：图纸正文，格式看 lookup(topic=knowledge, id=building/design)，屋顶看 lookup(topic=knowledge, id=building/roofs)"
         },
         {
           "name": "design_id",

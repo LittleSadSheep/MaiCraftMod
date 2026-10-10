@@ -29,6 +29,7 @@ import org.maiwithu.maicraft.kernel.knowledge.KnowledgeSource;
 public final class KnowledgeLibrary {
     public static final String INDEX = "maicraft://knowledge/index";
     public static final String GAME_MECHANICS_PREFIX = "maicraft://knowledge/game_mechanics/";
+    public static final String BUILDING_PREFIX = "maicraft://knowledge/building/";
     private static final int PAGE_SIZE = 16;
 
     /**
@@ -60,6 +61,20 @@ public final class KnowledgeLibrary {
                     "lighting torch 火把 照明 光照 亮 刷怪 spawn 黑暗 洞穴 地下 煤 木炭 木棍 灯笼 萤石"},
     };
 
+    /** 建筑资料条目：模型学写图纸的唯一来源，design 能力说明指向它们；格式同上。 */
+    static final String[][] BUILDING = {
+            {"design", "建筑图纸格式", "design 的 drawing 怎么写：顶层字段、坐标与尺寸、材料表与混色、三种对象、十二种图元、组件与实例、阵列镜像旋转、布尔开孔、空心、面与棱、图案",
+                    "design drawing 图纸 格式 schema json 材料 materials mix 图元 primitive cube panel wedge cylinder cone 组件 component instance 阵列 array mirror rotation 开孔 boolean cutter hollow pattern 面 棱 face edge 建筑 建造 盖房"},
+            {"roofs", "参数化屋顶", "ROOF 对象的字段与九种 shape：悬山、庑殿、歇山、攒尖、单坡；曲坡直坡、出檐、翘角、山墙、脊、檐口、底衬、有多高",
+                    "roof 屋顶 屋面 坡顶 悬山 gable 庑殿 hip 歇山 half_hip 攒尖 pyramid 单坡 shed 出檐 overhang 翘角 corner_lift 山墙 脊 ridge 檐口 eave 底衬 soffit 中式 瓦"},
+            {"house", "怎么设计一栋房子", "从要求到图纸的方法：纲要、尺寸怎么算、三种尺度、变化轴、材料分角色、房间骨架、交付前检查",
+                    "house 房子 住宅 设计 方法 纲要 尺寸 净高 净宽 门洞 楼梯 阁楼 材料 配色 角色 骨架 room 房间 通行 入口 窗 变化"},
+            {"styles", "几种风格怎么起手", "欧式木构、欧式石造、东亚院落、现代、工业各自的体量路线、材料和一个局部模块例子",
+                    "style 风格 欧式 木构 timber 石造 stone 城堡 东亚 中式 日式 院落 courtyard 回廊 现代 modern 极简 工业 industrial 厂房 工坊 拱门 深窗 高窗"},
+            {"example-cottage", "完整例子：带门廊的木构小屋", "从委托到一张完整图纸：7×7 主屋、门、窗、柱梁、ROOF 屋顶、门廊，以及怎么改成别的房子",
+                    "example 例子 小屋 cottage 木构 门廊 porch 完整 图纸 房子 住宅 范例 模板"},
+    };
+
     private final List<KnowledgeSource> sources;
     private final Map<String, KnowledgeDocument> builtins;
     // 内置资料的目录条目：比正文多一份检索词，目录与搜索都用它。
@@ -79,12 +94,8 @@ public final class KnowledgeLibrary {
         KnowledgeDocument index = load("index", "知识索引", "按需发现游戏机制常识、已登记的资料来源和检索方式。");
         docs.put(INDEX, index);
         entries.put(INDEX, index.entry());
-        for (String[] row : GAME_MECHANICS) {
-            KnowledgeDocument document = load("game_mechanics/" + row[0], row[1], row[2]);
-            docs.put(document.uri(), document);
-            entries.put(document.uri(), new KnowledgeDocument.Entry(
-                    document.uri(), document.name(), document.title(), document.description(), row[3]));
-        }
+        for (String[] row : GAME_MECHANICS) register(docs, entries, "game_mechanics/" + row[0], row);
+        for (String[] row : BUILDING) register(docs, entries, "building/" + row[0], row);
         builtins = Map.copyOf(docs);
         builtinEntries = Map.copyOf(entries);
     }
@@ -335,6 +346,14 @@ public final class KnowledgeLibrary {
         } catch (NoSuchAlgorithmException impossible) {
             throw new IllegalStateException(impossible);
         }
+    }
+
+    // 一篇内置资料：正文随包读出来，目录条目多一份检索词。
+    private static void register(Map<String, KnowledgeDocument> docs, Map<String, KnowledgeDocument.Entry> entries, String path, String[] row) {
+        KnowledgeDocument document = load(path, row[1], row[2]);
+        docs.put(document.uri(), document);
+        entries.put(document.uri(), new KnowledgeDocument.Entry(
+                document.uri(), document.name(), document.title(), document.description(), row[3]));
     }
 
     private static KnowledgeDocument load(String path, String title, String description) {

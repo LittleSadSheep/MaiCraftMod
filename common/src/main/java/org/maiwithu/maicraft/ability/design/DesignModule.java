@@ -51,7 +51,7 @@ public final class DesignModule implements AbilityModule {
             ParamSpecs.of(
                     ParamSpec.of("operation", ParamType.CHOICE).required().choices("create", "update", "inspect", "preview", "export")
                             .doc("create 新建；update 按名合并修改成新的一版；inspect 看；preview 投到 target 预览；export 导出").build(),
-                    ParamSpec.of("drawing", ParamType.JSON_OBJECT).doc("create 用：图纸正文，格式看 lookup 的 building/design").build(),
+                    ParamSpec.of("drawing", ParamType.JSON_OBJECT).doc("create 用：图纸正文，格式看 lookup(topic=knowledge, id=building/design)，屋顶看 lookup(topic=knowledge, id=building/roofs)").build(),
                     ParamSpec.of("design_id", ParamType.TEXT).doc("update / inspect / preview / export 用：设计编号").build(),
                     ParamSpec.of("edits", ParamType.JSON_OBJECT)
                             .doc("update 用：按名合并的修改，字段 objects、materials、components、remove_objects、remove_components、block_state_axes、overlap_policy、name").build(),

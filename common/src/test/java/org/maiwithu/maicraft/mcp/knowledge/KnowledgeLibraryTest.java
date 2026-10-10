@@ -24,6 +24,12 @@ class KnowledgeLibraryTest {
             assertEquals(entry[1], document.title());
             assertTrue(document.text().contains("#"), "每篇常识都有正文");
         }
+        for (String[] entry : KnowledgeLibrary.BUILDING) {
+            KnowledgeDocument document = library.read(KnowledgeLibrary.BUILDING_PREFIX + entry[0]);
+            assertEquals(entry[1], document.title());
+            assertTrue(document.text().contains("#"), "每篇建筑资料都有正文");
+        }
+        assertTrue(library.find("building/design").isPresent(), "lookup 给 building/design 这种末段写法要找得到");
         assertThrows(KnowledgeException.class, () -> library.read("maicraft://knowledge/no-such-page"));
     }
 
@@ -32,7 +38,9 @@ class KnowledgeLibraryTest {
         KnowledgeLibrary library = KnowledgeLibrary.offline();
         JsonObject firstPage = library.request(request("list", null));
         assertTrue(firstPage.getAsJsonArray("resources").size() > 0);
-        int total = firstPage.getAsJsonArray("resources").size();
+        // 目录里还有索引那一篇，所以总数比 listing 多一；翻到第二页时剩下的都在那一页。
+        int total = library.listing().size() + 1;
+        assertEquals(Math.min(total, KnowledgeLibraryPage.PAGE_SIZE), firstPage.getAsJsonArray("resources").size());
         if (!firstPage.has("nextCursor")) return;
         JsonObject secondPage = library.request(request("list", firstPage.get("nextCursor").getAsString()));
         assertEquals(Math.min(total - KnowledgeLibraryPage.PAGE_SIZE, KnowledgeLibraryPage.PAGE_SIZE),

@@ -1,4 +1,4 @@
-画一张建筑图纸、改它、看它、把它投影到世界里看效果，或导出成结构文件。图纸不绑地点，盖在哪由 build 决定。图纸用对象（盒子、板、楔形、棱柱、圆柱、圆锥、凸多面体、屋顶）、组件与实例、阵列、镜像、直角旋转、布尔开孔、空心与壁厚、面和棱的材质、平面图案来描述，一单位一格；格式与例子看 lookup 的 building/design 和 building/roofs。create 和 update 会告诉你这张图纸展开后有多少格、每种材料几件、哪里重叠；不会替你改图，也不检查地形。当场返回，不控制角色。
+画一张建筑图纸、改它、看它、把它投影到世界里看效果，或导出成结构文件。图纸不绑地点，盖在哪由 build 决定。图纸用对象（盒子、板、楔形、棱柱、圆柱、圆锥、凸多面体、屋顶）、组件与实例、阵列、镜像、直角旋转、布尔开孔、空心与壁厚、面和棱的材质、平面图案来描述，一单位一格；图纸格式看 lookup(topic=knowledge, id=building/design)，屋顶看 lookup(topic=knowledge, id=building/roofs)，怎么设计一栋房子看 lookup(topic=knowledge, id=building/house)，风格和完整例子看 lookup(topic=knowledge, id=building/styles) 与 lookup(topic=knowledge, id=building/example-cottage)。create 和 update 会告诉你这张图纸展开后有多少格、每种材料几件、哪里重叠；不会替你改图，也不检查地形。当场返回，不控制角色。
 
 ## 怎么用
 
