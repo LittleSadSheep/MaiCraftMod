@@ -5,6 +5,7 @@ import java.util.Objects;
 import java.util.Set;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
@@ -37,7 +38,7 @@ public record PlannedCell(BlockPos pos, CellKind kind, BlockState state, Item it
         placedBy = placedBy == null ? PlacedBy.BUILDER : placedBy;
         for (String name : required) {
             if (state.getBlock().getStateDefinition().getProperty(name) == null) {
-                throw new IllegalArgumentException(state.getBlock().getName().getString() + " 没有属性 " + name);
+                throw new IllegalArgumentException(BuiltInRegistries.BLOCK.getKey(state.getBlock()) + " 没有属性 " + name);
             }
         }
         if (kind == CellKind.AIR && !state.isAir()) throw new IllegalArgumentException("清空的格状态必须是空气");
@@ -78,14 +79,9 @@ public record PlannedCell(BlockPos pos, CellKind kind, BlockState state, Item it
         return kind == CellKind.BLOCK ? BlockStateRules.materialCount(state) : kind == CellKind.FLUID_SOURCE ? 1 : 0;
     }
 
-    /** 蓝图落到锚点：偏移绕原点转过去再加锚点，有朝向的方块状态一起转。 */
+    /** 蓝图落到锚点：偏移按原版的方块坐标旋转绕原点转过去再加锚点，有朝向的方块状态一起转。 */
     PlannedCell placedAt(BlockPos anchor, Rotation turn) {
-        BlockPos turned = switch (turn) {
-            case NONE -> pos;
-            case CLOCKWISE_90 -> new BlockPos(-pos.getZ(), pos.getY(), pos.getX());
-            case CLOCKWISE_180 -> new BlockPos(-pos.getX(), pos.getY(), -pos.getZ());
-            case COUNTERCLOCKWISE_90 -> new BlockPos(pos.getZ(), pos.getY(), -pos.getX());
-        };
+        BlockPos turned = turn == Rotation.NONE ? pos : pos.rotate(turn);
         BlockState turnedState = turn == Rotation.NONE ? state : state.rotate(turn);
         return new PlannedCell(anchor.offset(turned), kind, turnedState, item, required, placedBy);
     }

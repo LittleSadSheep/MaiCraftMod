@@ -72,7 +72,10 @@ public final class BlueprintCheck {
         return new Result(states, counts, complete);
     }
 
-    /** 范围内没声明的格里有东西的位置，只作信息；没加载的格不列。 */
+    /**
+     * 范围内没声明的格里有东西的位置，只作信息；没加载的格不列。
+     * 要走遍整个包围盒，一栋大房子有十几万格：施工开始与结束各跑一次就够，不要每刻全量跑。
+     */
     public static List<BlockPos> extras(Blueprint blueprint, ReadsBlocks world) {
         Blueprint.Bounds bounds = blueprint.bounds();
         List<BlockPos> out = new ArrayList<>();

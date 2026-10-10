@@ -16,24 +16,32 @@ import net.minecraft.world.level.block.Rotation;
  * 朝向才成为蓝图；逐格给的、结构文件导入的、单格的，也都走同一个入口。
  *
  * <p>蓝图没写的格子不是"必须为空"；要清空的格子写 {@link CellKind#AIR}。
- *
- * @param dimension 维度 ID，例如 minecraft:overworld
- * @param anchor    锚点：设计原点落在的格
- * @param cells     全部计划格，位置是绝对坐标，同一格只出现一次
+ * 构造时按位置建一份表，按位置找格是常数时间；一栋十几万格的房子核对时不会在客户端线程上卡住。
  */
-public record Blueprint(String dimension, BlockPos anchor, List<PlannedCell> cells) {
+public final class Blueprint {
 
-    public Blueprint {
-        Objects.requireNonNull(dimension, "dimension");
-        anchor = Objects.requireNonNull(anchor, "anchor").immutable();
-        cells = List.copyOf(cells);
-        if (cells.isEmpty()) throw new IllegalArgumentException("蓝图至少要有一格");
-        Map<BlockPos, PlannedCell> seen = new LinkedHashMap<>();
-        for (PlannedCell cell : cells) {
-            if (seen.put(cell.pos(), cell) != null) {
+    private final String dimension;
+    private final BlockPos anchor;
+    private final List<PlannedCell> cells;
+    private final Map<BlockPos, PlannedCell> byPosition;
+
+    /**
+     * @param dimension 维度 ID，例如 minecraft:overworld
+     * @param anchor    锚点：设计原点落在的格
+     * @param cells     全部计划格，位置是绝对坐标，同一格只出现一次
+     */
+    public Blueprint(String dimension, BlockPos anchor, List<PlannedCell> cells) {
+        this.dimension = Objects.requireNonNull(dimension, "dimension");
+        this.anchor = Objects.requireNonNull(anchor, "anchor").immutable();
+        this.cells = List.copyOf(cells);
+        if (this.cells.isEmpty()) throw new IllegalArgumentException("蓝图至少要有一格");
+        Map<BlockPos, PlannedCell> index = new LinkedHashMap<>();
+        for (PlannedCell cell : this.cells) {
+            if (index.put(cell.pos(), cell) != null) {
                 throw new IllegalArgumentException("蓝图里同一格写了两次：" + cell.pos().toShortString());
             }
         }
+        byPosition = Map.copyOf(index);
     }
 
     /**
@@ -49,9 +57,21 @@ public record Blueprint(String dimension, BlockPos anchor, List<PlannedCell> cel
         return new Blueprint(dimension, cell.pos(), List.of(cell));
     }
 
+    public String dimension() {
+        return dimension;
+    }
+
+    public BlockPos anchor() {
+        return anchor;
+    }
+
+    public List<PlannedCell> cells() {
+        return cells;
+    }
+
     /** 按位置找计划格。 */
     public Optional<PlannedCell> cellAt(BlockPos pos) {
-        return cells.stream().filter(cell -> cell.pos().equals(pos)).findFirst();
+        return Optional.ofNullable(byPosition.get(pos));
     }
 
     /** 包围盒：最小角与最大角都在计划格上。 */
@@ -85,6 +105,21 @@ public record Blueprint(String dimension, BlockPos anchor, List<PlannedCell> cel
             if (count > 0) out.merge(BuiltInRegistries.ITEM.getKey(cell.item()).toString(), count, Integer::sum);
         }
         return Map.copyOf(out);
+    }
+
+    @Override
+    public boolean equals(Object other) {
+        return other instanceof Blueprint that && dimension.equals(that.dimension) && anchor.equals(that.anchor) && cells.equals(that.cells);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(dimension, anchor, cells);
+    }
+
+    @Override
+    public String toString() {
+        return "Blueprint[" + dimension + " @" + anchor.toShortString() + ", " + cells.size() + " 格]";
     }
 
     /** 包围盒的两个角，都包含在内。 */
