@@ -162,7 +162,7 @@ public final class WorldScope {
                 furnaceFuels,
                 compat,
                 kinds,
-                nightWiring, configDirectory, preview), abilities);
+                nightWiring, configDirectory, preview, documents, identity.key()), abilities);
     }
 
     /**

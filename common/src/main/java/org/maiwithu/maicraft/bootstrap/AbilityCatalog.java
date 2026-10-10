@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
@@ -66,7 +67,15 @@ import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.approach.LiveApproachWorld;
 import org.maiwithu.maicraft.behavior.approach.LiveApproaches;
 import org.maiwithu.maicraft.behavior.construction.AnchorResolver;
+import org.maiwithu.maicraft.behavior.construction.ConstructionServices;
+import org.maiwithu.maicraft.behavior.construction.LiveClicks;
 import org.maiwithu.maicraft.behavior.construction.LiveGroundHeights;
+import org.maiwithu.maicraft.behavior.construction.LiveHolds;
+import org.maiwithu.maicraft.behavior.construction.LivePlacements;
+import org.maiwithu.maicraft.behavior.construction.LiveSite;
+import org.maiwithu.maicraft.behavior.construction.LiveTravels;
+import org.maiwithu.maicraft.behavior.construction.MemoryLedger;
+import org.maiwithu.maicraft.behavior.construction.PermissionGuards;
 import org.maiwithu.maicraft.behavior.construction.ShowsPreview;
 import org.maiwithu.maicraft.behavior.interaction.ClientGameRefusals;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
@@ -123,6 +132,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.compat.CompatRegistry;
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
+import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 
 /**
  * 能力清单：启动时按这份明确的清单创建并登记能力，新增能力在清单里加一行，不做类路径扫描。
@@ -175,7 +185,11 @@ public final class AbilityCatalog {
             /** 这个游戏实例的配置目录：设计库放在这里，导出写到实例的 schematics 目录。 */
             Path configDirectory,
             /** 施工预览：design 投影的蓝图交给它画；没有画面的清单传 {@link ShowsPreview#NONE}。 */
-            ShowsPreview preview) {
+            ShowsPreview preview,
+            /** 这个世界的文档库：机器档案按世界存在它自己的范围里。 */
+            DocumentStore worldDocuments,
+            /** 这个世界的身份编号：机器档案按它分开存。 */
+            String worldKey) {
 
         public Deps {
             Objects.requireNonNull(context, "context");
@@ -190,6 +204,8 @@ public final class AbilityCatalog {
             Objects.requireNonNull(facilities, "facilities");
             Objects.requireNonNull(configDirectory, "configDirectory");
             Objects.requireNonNull(preview, "preview");
+            Objects.requireNonNull(worldDocuments, "worldDocuments");
+            Objects.requireNonNull(worldKey, "worldKey");
         }
     }
 
@@ -323,7 +339,9 @@ public final class AbilityCatalog {
                 deps.compat().machineTypes(shared.playerServices()),
                 deps.compat().networkReaders(shared.playerServices()),
                 recipes, shared.innerNeeds(), shared.bringClose(), deps.interactions(),
-                new SceneSeenTargets(deps::scene), deps.memory(), Optional.of(designs))) {
+                new SceneSeenTargets(deps::scene), deps.memory(), deps.memory(),
+                deps.worldDocuments(), deps.worldKey(),
+                machineAnchors(deps), Optional.of(designs), machineConstruction(deps, shared))) {
             registry.register(module);
         }
     }
@@ -348,8 +366,7 @@ public final class AbilityCatalog {
      */
     private static void registerConstruction(AbilityRegistry registry, Deps deps, DesignStore designs,
             Shared shared) {
-        AnchorResolver anchors = new AnchorResolver(new SceneSeenTargets(deps::scene), deps.memory(),
-                deps.characterPosition(), new LiveGroundHeights(deps.context()));
+        AnchorResolver anchors = machineAnchors(deps);
         // design 导出与 build 导入用同一个 schematics 目录：导出的文件名直接当 file 参数喂回去。
         Path schematics = deps.configDirectory().resolveSibling("schematics");
         registry.register(new DesignModule(designs, anchors, deps.preview(), schematics));
@@ -359,6 +376,27 @@ public final class AbilityCatalog {
                 // 联动的连锁挖与扳手拆机器件进世界时带着同一份玩家行为建；没装就是空表，清障逐格挖。
                 deps.compat().breakAccelerators(shared.playerServices()),
                 deps.compat().dismantleTools(shared.playerServices())));
+    }
+
+    /** 锚点解析：观察编号查场景、地标查世界记忆、脚下与坐标直接用，省 y 取地表；建造与机器施工共用。 */
+    private static AnchorResolver machineAnchors(Deps deps) {
+        return new AnchorResolver(new SceneSeenTargets(deps::scene), deps.memory(),
+                deps.characterPosition(), new LiveGroundHeights(deps.context()));
+    }
+
+    /** 施工服务按每次任务的许可拼一份：现场、靠近、放置、点击、挖掘、内需、备手、许可、记账、走到，
+     * 联动的连锁挖与扳手拆机器件也在内；与建造的施工同一套。 */
+    private static Function<Permissions, ConstructionServices> machineConstruction(Deps deps, Shared shared) {
+        return permissions -> {
+            LiveSite site = new LiveSite(deps.context());
+            return new ConstructionServices(site, shared.bringClose(), new LivePlacements(deps.context()),
+                    new LiveClicks(deps.interactions(), deps.inputs(), deps.context()),
+                    shared.digging(), shared.innerNeeds(), new LiveHolds(shared.toMainhand(), deps.context()),
+                    new PermissionGuards(() -> shared.permission(), permissions, site::dimension),
+                    new MemoryLedger(deps.memory(), site::dimension), new LiveTravels(deps.walks()),
+                    deps.compat().breakAccelerators(shared.playerServices()),
+                    deps.compat().dismantleTools(shared.playerServices()));
+        };
     }
 
     /** 不和别的能力共用现场部件的那些能力：战斗、跟随、等待、出行、聊天、记地点、按顺序做事、任务书。 */

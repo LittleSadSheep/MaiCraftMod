@@ -113,6 +113,14 @@ final class MachineTestDoubles {
         Supplier<MachineState> state = () -> MachineState.unknown("读不到");
         Predicate<Installation> installationOk = installation -> false;
         Predicate<PartCell> partOk = part -> false;
+        /** 这段现在装成了没有、这个部件装上没有：测试在动作效果里翻转。 */
+        Predicate<Installation> installedOk = installation -> false;
+        Predicate<PartCell> mountedOk = part -> false;
+        /** 装安装段与装部件的动作脚本：每次调用弹一个；空了给空，按"这种机器不给装"对待。 */
+        final Deque<Action> installActions = new ArrayDeque<>();
+        final Deque<Action> mountActions = new ArrayDeque<>();
+        /** 动手顺序的流水：施工、装段、装部件、改设置谁先谁后从这里看。 */
+        final List<String> touched = new ArrayList<>();
         List<ExchangePoint> ports = List.of();
 
         FakeMachineType(String id, String name, MachineRole role, Predicate<BlockState> covers) {
@@ -160,19 +168,21 @@ final class MachineTestDoubles {
         }
 
         @Override public Optional<Action> install(Installation installation, Permissions permissions) {
-            return Optional.empty();
+            touched.add("install:" + installation.kind());
+            return Optional.ofNullable(installActions.poll());
         }
 
         @Override public boolean installed(Installation installation) {
-            return false;
+            return installedOk.test(installation);
         }
 
         @Override public Optional<Action> mount(PartCell part, Permissions permissions) {
-            return Optional.empty();
+            touched.add("mount:" + part.itemId());
+            return Optional.ofNullable(mountActions.poll());
         }
 
         @Override public boolean mounted(PartCell part) {
-            return false;
+            return mountedOk.test(part);
         }
 
         @Override public List<MachineSetting> settings(BlockPos at) {
@@ -187,6 +197,7 @@ final class MachineTestDoubles {
             if (effect == null) {
                 return Optional.empty();
             }
+            touched.add("change:" + key);
             return Optional.of(new Scripted(1, effect));
         }
 

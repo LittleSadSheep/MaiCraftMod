@@ -118,6 +118,8 @@ final class OfflineCatalog {
                 // 睡觉能力在离线清单里没有登记方，夜晚生存需求按弄不到床对待即可。
                 new NightRestWiring(),
                 tempDir.resolve("config"),
-                ShowsPreview.NONE);
+                ShowsPreview.NONE,
+                new DocumentStore(tempDir.resolve("state.sqlite")),
+                WORLD_KEY);
     }
 }

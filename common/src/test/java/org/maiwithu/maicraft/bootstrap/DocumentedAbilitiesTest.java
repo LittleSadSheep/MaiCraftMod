@@ -15,6 +15,9 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import net.minecraft.SharedConstants;
+import net.minecraft.server.Bootstrap;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -24,6 +27,14 @@ import org.junit.jupiter.api.io.TempDir;
  * 能力改名或删掉时，这里会列出所有还在提它的资料，让资料跟着改。
  */
 class DocumentedAbilitiesTest {
+
+    @BeforeAll
+    static void bootMinecraft() {
+        // 清单总装要建带方块状态的替身：注册表引导过才能碰，单独跑这个类也一样。
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+    }
+
 
     /** 测试进程的工作目录是 common 模块；资料是打进包里的资源文件。 */
     private static final Path ASSETS = Path.of("src", "main", "resources", "assets", "maicraft");

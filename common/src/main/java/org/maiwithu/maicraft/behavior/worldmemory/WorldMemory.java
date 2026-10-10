@@ -117,12 +117,16 @@ public final class WorldMemory implements RemembersPlaces, RemembersRegions, Rem
         upsert(new MemoryRecord(MemoryKind.SITE, position, null, roughlyThere, MemoryOrigin.SEEN, when));
     }
 
-    /**
-     * 记下一块自己垫的临时方块：放下并确认后记，收回后用 forget 抹掉。内容只有一项，是垫它的用途（例如"施工"），
+    /** 记下一块自己垫的临时方块：放下并确认后记，收回后用 forget 抹掉。内容只有一项，是垫它的用途（例如"施工"），
      * 任务结束、失败、取消都按这本账收；重启后也从这里读回还没收的。
      */
     public void rememberTemporaryBlock(WorldPosition position, String blockType, String purpose, Instant when) {
         upsert(new MemoryRecord(MemoryKind.TEMPORARY_BLOCK, position, blockType, List.of(purpose), MemoryOrigin.USED, when));
+    }
+
+    /** 记一台自己建起的机器：锚点与档案名，机器施工建档或改档时写入，observe 的记忆清单里看得到。 */
+    public void rememberMachine(WorldPosition position, String archiveName, Instant when) {
+        upsert(new MemoryRecord(MemoryKind.MACHINE, position, archiveName, null, MemoryOrigin.USED, when));
     }
 
     /** 还没收回的临时方块，记录时刻新的在前。 */

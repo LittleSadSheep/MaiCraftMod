@@ -143,6 +143,18 @@
         "mode": "controls_player"
       },
       {
+        "ability": "maicraft:machine_build",
+        "summary": "按机器蓝图在 target 处建一台机器：逐格施工、装安装段与部件、改装后设置，建成入档；target 指已有档案就是修改，operation=remove 拆档案里的整台",
+        "parameters": "blueprint?: object, design_id?: string, name?: string, operation: string = build",
+        "targets": [
+          "here",
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
         "ability": "maicraft:fight",
         "summary": "打指定的目标，或清掉附近一片区域的敌对生物；打得过才打，血见底会先撤",
         "parameters": "entity?: string, radius: integer = 32, count?: integer",
@@ -764,6 +776,47 @@
       "required_mods": [],
       "knowledge": [],
       "doc_resource": "assets/maicraft/abilities/machine_run.md"
+    },
+    {
+      "ability": "maicraft:machine_build",
+      "summary": "按机器蓝图在 target 处建一台机器：逐格施工、装安装段与部件、改装后设置，建成入档；target 指已有档案就是修改，operation=remove 拆档案里的整台",
+      "parameters": [
+        {
+          "name": "blueprint",
+          "type": "object",
+          "required": false,
+          "doc": "机器蓝图的正文（JSON 对象）：cells 逐格、parts 部件、installations 安装段、settings 装后设置；和 design_id 二选一，operation=remove 时不给"
+        },
+        {
+          "name": "design_id",
+          "type": "string",
+          "required": false,
+          "doc": "已保存的设计编号：按它存的方块清单建（没有机器附加条目）"
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "doc": "新机器的档案名；不给就按锚点起名。修改已有档案时不用给"
+        },
+        {
+          "name": "operation",
+          "type": "string",
+          "required": false,
+          "doc": "build 建或改（默认）/ remove 拆档案里的整台（target 指档案名）",
+          "default": "build"
+        }
+      ],
+      "targets": [
+        "here",
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/machine_build.md"
     },
     {
       "ability": "maicraft:fight",

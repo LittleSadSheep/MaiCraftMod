@@ -11,6 +11,9 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
+import net.minecraft.SharedConstants;
+import net.minecraft.server.Bootstrap;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -31,6 +34,14 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  */
 class AssemblyTest {
 
+    @BeforeAll
+    static void bootMinecraft() {
+        // 清单总装要建带方块状态的替身：注册表引导过才能碰，单独跑这个类也一样。
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+    }
+
+
     @TempDir
     Path tempDir;
 
@@ -45,9 +56,10 @@ class AssemblyTest {
         // 存东西与记地点能力接上了：找容器、界面读数、整堆搬运与挖盖子都有实现方；记地点只改记忆。
         // 画图与施工也接上了：图纸存在按实例的设计库里，施工把蓝图落到锚点交给施工任务。
         // 任务书也接上了：离线清单当作 FTB 任务装着，操作来自登记表（空登记表时它如实说用不了）。
-        // 机器的四个能力也接上了：机器类型与网络读取器由登记表按装了的模组建，离线一份没有也照常登记。
+        // 机器的五个能力也接上了：机器类型与网络读取器由登记表按装了的模组建，离线一份没有也照常登记，
+        // 施工只认这两样接口，放方块不需要认识机器。
         assertEquals(Set.of("use", "eat", "equip", "drop", "obtain", "gather", "deposit", "sleep", "design", "build",
-                "machine_inspect", "machine_review", "machine_configure", "machine_run",
+                "machine_inspect", "machine_review", "machine_configure", "machine_run", "machine_build",
                 "fight", "follow", "wait", "travel", "find", "chat", "remember", "sequence", "quest"), registered,
                 "清单里的能力要一个不少地登记上");
     }

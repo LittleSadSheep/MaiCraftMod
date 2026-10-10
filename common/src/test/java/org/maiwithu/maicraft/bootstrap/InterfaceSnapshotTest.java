@@ -17,6 +17,9 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import net.minecraft.SharedConstants;
+import net.minecraft.server.Bootstrap;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.maiwithu.maicraft.game.ReceivedChat;
@@ -61,6 +64,13 @@ class InterfaceSnapshotTest {
 
     @TempDir
     Path tempDir;
+
+    @BeforeAll
+    static void bootMinecraft() {
+        // 清单总装要建带方块状态的替身：注册表引导过才能碰，别的测试类先跑也一样。
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+    }
 
     @Test
     void theToolsMatchTheSnapshot() throws IOException {
