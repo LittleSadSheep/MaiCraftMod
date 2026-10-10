@@ -54,6 +54,16 @@ repositories {
         }
         filter { includeGroup 'maven.modrinth' }
     }
+    // Ponder（Create 的思索）从 Create 团队的官方 maven 取，免登录；只放行 Ponder 这个组。
+    exclusiveContent {
+        forRepository {
+            maven {
+                name = 'Create'
+                url = 'https://maven.createmod.net'
+            }
+        }
+        filter { includeGroup 'net.createmod.ponder' }
+    }
 }
 
 // SQLite 驱动与 HTML 解析器用 JarJar 打进 Mod 的 Jar 里，并加进开发运行的类路径。
@@ -67,6 +77,8 @@ dependencies {
     compileOnly "maven.modrinth:sophisticated-core:${sophisticatedcore_version}"
     // AE2 只要它自己的类，不带它的运行依赖（GuideME 等）：读写端用不到，开发客户端里自己放 jar。
     compileOnly("org.appliedenergistics:appliedenergistics2:${ae2_version}") { transitive = false }
+    // Ponder 只要它自己的类：读写端只读场景注册表、在演示世界里放场景，不碰 Flywheel 的渲染。
+    compileOnly("net.createmod.ponder:ponder-neoforge:${ponder_version}") { transitive = false }
     jarJar(implementation('org.xerial:sqlite-jdbc')) {
         version { strictly "[${sqlite_jdbc_version},4.0)"; prefer sqlite_jdbc_version }
     }
