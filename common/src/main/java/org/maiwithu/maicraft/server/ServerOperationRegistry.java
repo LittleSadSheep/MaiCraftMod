@@ -31,6 +31,11 @@ public final class ServerOperationRegistry {
             throw new IllegalStateException("Operation already registered: " + operationId);
     }
 
+    /** 这个操作名已经登记过没有；联动入口交接前先核对，免得登记到一半撞名。 */
+    public boolean registered(String operationId) {
+        return operations.containsKey(operationId);
+    }
+
     /** 服务器所有者策略：返回 false 的操作不参与协商，已协商的也会在执行前被拒绝。 */
     public void setPolicy(BiPredicate<ServerPlayer, String> next) {
         policy = Objects.requireNonNull(next);

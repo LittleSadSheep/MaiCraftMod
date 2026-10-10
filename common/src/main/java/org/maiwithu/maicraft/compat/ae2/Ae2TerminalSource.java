@@ -22,7 +22,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.AcquisitionCost;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
-import org.maiwithu.maicraft.behavior.acquire.spi.SourceServices;
+import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -48,12 +48,12 @@ public final class Ae2TerminalSource implements ItemSource {
     private static final int ACTIONS_PER_VISIT = 4;
 
     private final Ae2Compat compat;
-    private final SourceServices services;
+    private final PlayerServices services;
     private final TerminalTakes takes;
     private final SeenNetworkStock seen;
     private final Supplier<Instant> clock;
 
-    public Ae2TerminalSource(Ae2Compat compat, SourceServices services, TerminalTakes takes, SeenNetworkStock seen,
+    public Ae2TerminalSource(Ae2Compat compat, PlayerServices services, TerminalTakes takes, SeenNetworkStock seen,
             Supplier<Instant> clock) {
         this.compat = Objects.requireNonNull(compat, "compat");
         this.services = Objects.requireNonNull(services, "services");

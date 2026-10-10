@@ -97,7 +97,7 @@ import org.maiwithu.maicraft.kernel.task.TaskFactories;
 import org.maiwithu.maicraft.game.world.FurnaceFuels;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
-import org.maiwithu.maicraft.behavior.acquire.spi.SourceServices;
+import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.compat.CompatRegistry;
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 
@@ -318,9 +318,10 @@ public final class AbilityCatalog {
                         new MenuContainerTakes(bringsClose, deps.interactions(), deps.itemTags(),
                                 deps.memory(), deps.context(), deps.compat().menuLayouts())),
                 craftSource, smeltSource, miningSource, harvestSource, new TradeSource()));
-        sources.addAll(deps.compat().itemSources(new SourceServices(deps.context(), bringsClose,
-                deps.interactions(), deps.protection(), deps.itemTags(), deps.compat().menuLayouts(),
-                deps.blockScans())));
+        // 联动来源进世界时带着这一份玩家行为建：缺东西去拿也回到同一个引擎（内需入口），许可原样传下去。
+        sources.addAll(deps.compat().itemSources(new PlayerServices(deps.context(), bringsClose,
+                deps.interactions(), toMainhand, innerNeeds, deps.protection(), deps.itemTags(),
+                deps.compat().menuLayouts(), deps.blockScans())));
         ItemAcquisition acquisition = new ItemAcquisition(sources,
                 deps.backpack(), deps.offhand(), deps.itemTags(),
                 deps.characterPosition(), Optional.empty(), ItemAcquisition.DEFAULT_MAX_DEPTH);

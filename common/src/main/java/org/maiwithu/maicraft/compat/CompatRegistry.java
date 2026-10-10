@@ -5,13 +5,18 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 
+import org.maiwithu.maicraft.ability.machine.spi.MachineType;
+import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
+import org.maiwithu.maicraft.ability.quest.spi.QuestBookOperations;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
-import org.maiwithu.maicraft.behavior.acquire.spi.SourceServices;
 import org.maiwithu.maicraft.behavior.inventory.spi.CarriedBackpack;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
 import org.maiwithu.maicraft.behavior.menu.spi.MenuLayoutProof;
+import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.loader.LoaderEnvironment;
 import org.maiwithu.maicraft.kernel.knowledge.KnowledgeSource;
 import org.slf4j.Logger;
@@ -19,9 +24,11 @@ import org.slf4j.LoggerFactory;
 
 /**
  * 联动登记表：启动时按联动清单逐行检查，收集登记了的联动入口交来的 spi 接口实现，
- * 再由启动交给玩家行为层与能力（拿到物品的来源列表、腾背包的随身背包、查资料的知识来源、认得出的模组界面）。
- * 物品来源要用进了世界才有的玩家行为（走过去、点开、保护判断），所以存的是建法，进世界时再建。
- * 不是 Minecraft 的注册表。
+ * 再由启动交给玩家行为层与能力（拿到物品的来源、机器类型、网络读取器、任务书操作、腾背包的随身背包、
+ * 查资料的知识来源、认得出的模组界面）。不是 Minecraft 的注册表。
+ *
+ * <p>要用进了世界才有的玩家行为（走过去、点开、保护判断）的，存的是建法，进世界时带着联动能用的玩家行为再建；
+ * 建出来的都包一层：模组停用、碰到模组接口对不上时如实回答"用不了"，不让它变成任务的内部错误。
  *
  * <p>逐行检查的规矩：没装的跳过；装的版本不在验证过的范围内，不登记；创建或交接时出错，不登记并撤掉它交了一半的东西。
  * 每种情况写一行日志说明原因，一个模组出问题不影响别的模组。确认装了、版本对了之后才调创建，
@@ -31,10 +38,16 @@ public final class CompatRegistry {
     private static final Logger LOG = LoggerFactory.getLogger(CompatRegistry.class);
 
     private final List<CompatModule> modules = new ArrayList<>();
-    private final List<SourceToBuild> itemSources = new ArrayList<>();
+    private final List<ToBuild<ItemSource>> itemSources = new ArrayList<>();
+    private final List<ToBuild<MachineType>> machineTypes = new ArrayList<>();
+    private final List<ToBuild<NetworkReader>> networkReaders = new ArrayList<>();
+    private final List<ToBuild<QuestBookOperations>> questBooks = new ArrayList<>();
     private final List<MenuLayoutProof> menuLayouts = new ArrayList<>();
     private final List<CarriedBackpack> carriedBackpacks = new ArrayList<>();
     private final List<KnowledgeSource> knowledgeSources = new ArrayList<>();
+    /** 全部的槽：一个模组交接到一半出错时，按交接前的长度一起撤回。新加槽时把它的列表加进来。 */
+    private final List<List<?>> slots = List.of(itemSources, machineTypes, networkReaders, questBooks,
+            menuLayouts, carriedBackpacks, knowledgeSources);
     private final List<String> decisions = new ArrayList<>();
 
     private CompatRegistry() {}
@@ -45,55 +58,51 @@ public final class CompatRegistry {
     }
 
     /** 从联动清单建登记表：逐行检查，登记通过的，每行的结论写进日志。 */
-    public static CompatRegistry load(List<SupportedMod> catalog, LoaderEnvironment loader) {
+    public static CompatRegistry load(List<SupportedMod<CompatModule>> catalog, LoaderEnvironment loader) {
         Objects.requireNonNull(loader, "loader");
         CompatRegistry registry = new CompatRegistry();
-        for (SupportedMod mod : catalog) {
+        for (SupportedMod<CompatModule> mod : catalog) {
             registry.check(mod, loader);
         }
         return registry;
     }
 
-    private void check(SupportedMod mod, LoaderEnvironment loader) {
-        if (!loader.isModLoaded(mod.modId())) {
-            decide(mod, "没装，跳过");
-            return;
-        }
-        String version = loader.modVersion(mod.modId()).orElse("");
-        if (!mod.verified().contains(version)) {
-            decide(mod, "装的是 " + (version.isBlank() ? "不明版本" : version) + "，验证过的范围是 "
-                    + mod.verified().describe() + "，不登记");
+    private void check(SupportedMod<CompatModule> mod, LoaderEnvironment loader) {
+        Optional<String> skip = mod.skipReason(loader);
+        if (skip.isPresent()) {
+            decide(mod, skip.get());
             return;
         }
         // 创建与交接可能抛 LinkageError（读写端一碰模组类就对不上），也一并当作这一行出错，不让它炸掉启动。
-        int sources = itemSources.size();
-        int backpacks = carriedBackpacks.size();
-        int knowledge = knowledgeSources.size();
-        int layouts = menuLayouts.size();
+        int[] before = slots.stream().mapToInt(List::size).toArray();
         CompatModule module;
         try {
             module = Objects.requireNonNull(mod.create().get(), "创建返回了 null");
             module.contribute(this);
         } catch (RuntimeException | LinkageError failure) {
-            itemSources.subList(sources, itemSources.size()).clear();
-            carriedBackpacks.subList(backpacks, carriedBackpacks.size()).clear();
-            knowledgeSources.subList(knowledge, knowledgeSources.size()).clear();
-            menuLayouts.subList(layouts, menuLayouts.size()).clear();
+            for (int i = 0; i < slots.size(); i++) {
+                slots.get(i).subList(before[i], slots.get(i).size()).clear();
+            }
             decide(mod, "创建时出错，不登记：" + failure);
             return;
         }
         modules.add(module);
-        decide(mod, "已登记，版本 " + version);
+        decide(mod, "已登记，版本 " + mod.installedVersion(loader));
     }
 
-    private void decide(SupportedMod mod, String conclusion) {
+    private void decide(SupportedMod<CompatModule> mod, String conclusion) {
         String line = mod.name() + "（" + mod.modId() + "）：" + conclusion;
         decisions.add(line);
         LOG.info("联动 {}", line);
     }
 
-    /** 一个物品来源的建法，带上交它的联动入口：建的时候出错算这个模组的，不连累别的来源。 */
-    private record SourceToBuild(CompatModule module, Function<SourceServices, ItemSource> build) {}
+    /** 一样东西的建法，带上交它的联动入口：建的时候出错算这个模组的，不连累别的。 */
+    private record ToBuild<T>(CompatModule module, Function<PlayerServices, T> build) {
+        ToBuild {
+            Objects.requireNonNull(module, "module");
+            Objects.requireNonNull(build, "build");
+        }
+    }
 
     /** 联动入口交一个不用玩家行为的物品来源：带上自己，登记表包一层，模组停用后这个来源问价回答不支持。 */
     public void itemSource(CompatModule module, ItemSource source) {
@@ -105,9 +114,23 @@ public final class CompatRegistry {
      * 联动入口交一个物品来源的建法：进世界时带着这一份玩家行为建出来源（走过去、点开、搬东西都和自带来源一样做）。
      * 建出来的来源由登记表包一层，模组停用后问价回答不支持。
      */
-    public void itemSource(CompatModule module, Function<SourceServices, ItemSource> build) {
-        itemSources.add(new SourceToBuild(Objects.requireNonNull(module, "module"),
-                Objects.requireNonNull(build, "build")));
+    public void itemSource(CompatModule module, Function<PlayerServices, ItemSource> build) {
+        itemSources.add(new ToBuild<>(module, build));
+    }
+
+    /** 联动入口交一种机器的建法：进世界时建，包一层后交给机器能力；模组停用后不再认领方块。 */
+    public void machineType(CompatModule module, Function<PlayerServices, MachineType> build) {
+        machineTypes.add(new ToBuild<>(module, build));
+    }
+
+    /** 联动入口交一种网络读取器的建法：进世界时建，包一层后交给机器能力；模组停用后汇总如实说读不到。 */
+    public void networkReader(CompatModule module, Function<PlayerServices, NetworkReader> build) {
+        networkReaders.add(new ToBuild<>(module, build));
+    }
+
+    /** 联动入口交任务书操作的建法：进世界时建，包一层后交给 quest 能力；模组停用后任务书说用不了。 */
+    public void questBook(CompatModule module, Function<PlayerServices, QuestBookOperations> build) {
+        questBooks.add(new ToBuild<>(module, build));
     }
 
     /**
@@ -141,16 +164,37 @@ public final class CompatRegistry {
      *
      * @param services 这个世界里的玩家行为；不用它的来源不会碰它
      */
-    public List<ItemSource> itemSources(SourceServices services) {
-        List<ItemSource> built = new ArrayList<>();
-        for (SourceToBuild pending : itemSources) {
-            CompatModule module = pending.module();
+    public List<ItemSource> itemSources(PlayerServices services) {
+        return build(itemSources, services, "物品来源", CompatItemSource::new);
+    }
+
+    /** 进世界时建联动模组的机器类型；规矩同物品来源。 */
+    public List<MachineType> machineTypes(PlayerServices services) {
+        return build(machineTypes, services, "机器类型", CompatMachineType::new);
+    }
+
+    /** 进世界时建联动模组的网络读取器；规矩同物品来源。 */
+    public List<NetworkReader> networkReaders(PlayerServices services) {
+        return build(networkReaders, services, "网络读取器", CompatNetworkReader::new);
+    }
+
+    /** 进世界时建联动模组的任务书操作；规矩同物品来源。 */
+    public List<QuestBookOperations> questBooks(PlayerServices services) {
+        return build(questBooks, services, "任务书操作", CompatQuestBookOperations::new);
+    }
+
+    // 逐个建：停用了的跳过；建法碰到 LinkageError 由联动入口停用模组，别的错只少这一个，写一行日志。
+    private <T> List<T> build(List<ToBuild<T>> pending, PlayerServices services, String what,
+            BiFunction<CompatModule, T, T> wrap) {
+        List<T> built = new ArrayList<>();
+        for (ToBuild<T> recipe : pending) {
+            CompatModule module = recipe.module();
             if (!module.active()) continue;
             try {
-                ItemSource source = module.call("建物品来源", () -> pending.build().apply(services));
-                built.add(new CompatItemSource(module, Objects.requireNonNull(source, "建法返回了 null")));
+                T made = module.call("建" + what, () -> recipe.build().apply(services));
+                built.add(wrap.apply(module, Objects.requireNonNull(made, "建法返回了 null")));
             } catch (RuntimeException failure) {
-                LOG.error("联动 {}（{}）的物品来源建不出来，这次进世界少这一个来源", module.name(), module.modId(), failure);
+                LOG.error("联动 {}（{}）的{}建不出来，这次进世界少这一个", module.name(), module.modId(), what, failure);
             }
         }
         return Collections.unmodifiableList(built);

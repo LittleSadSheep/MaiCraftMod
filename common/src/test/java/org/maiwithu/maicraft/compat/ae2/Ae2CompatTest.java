@@ -20,6 +20,7 @@ import net.minecraft.world.phys.AABB;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.compat.CompatRegistry;
 import org.maiwithu.maicraft.compat.ModApiMismatch;
+import org.maiwithu.maicraft.compat.CompatModule;
 import org.maiwithu.maicraft.compat.SupportedMod;
 import org.maiwithu.maicraft.compat.VerifiedVersions;
 import org.maiwithu.maicraft.game.loader.LoaderEnvironment;
@@ -102,7 +103,7 @@ class Ae2CompatTest {
 
     @Test
     void 装了且版本在范围内才登记() {
-        SupportedMod supported = new SupportedMod(Ae2Compat.MOD_ID, "应用能源2", new VerifiedVersions("19.2.17", "19.3"),
+        SupportedMod<CompatModule> supported = new SupportedMod<>(Ae2Compat.MOD_ID, "应用能源2", new VerifiedVersions("19.2.17", "19.3"),
                 () -> new Ae2Compat(ONE_TERMINAL, new RecordingMenu()));
 
         CompatRegistry installed = CompatRegistry.load(List.of(supported), loaderWith("19.2.17"));

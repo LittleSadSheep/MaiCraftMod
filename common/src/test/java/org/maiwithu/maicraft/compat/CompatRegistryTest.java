@@ -18,7 +18,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
-import org.maiwithu.maicraft.behavior.acquire.spi.SourceServices;
+import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.behavior.menu.MenuLayout;
 import org.maiwithu.maicraft.behavior.menu.MenuSlots;
 import org.maiwithu.maicraft.behavior.menu.spi.MenuLayoutProof;
@@ -30,7 +30,7 @@ class CompatRegistryTest {
     private static final VerifiedVersions TESTED = new VerifiedVersions("3.25.69", "3.26");
     private static final AcquireVia MOD_ROUTE = new AcquireVia("mod_route", "测试模组的途径");
     /** 这里的来源建法都不碰玩家行为：登记表只把它原样交给建法。 */
-    private static final SourceServices NO_SERVICES = null;
+    private static final PlayerServices NO_SERVICES = null;
 
     /** 交一个物品来源（或什么都不交）的联动入口替身。 */
     private static final class CountedModule extends CompatModule {
@@ -63,8 +63,8 @@ class CompatRegistryTest {
     }
 
     /** 清单的一行，顺便数创建被调用了几次：没装、版本不对时创建不该被调用。 */
-    private static SupportedMod supported(String modId, AtomicInteger created, ItemSource source) {
-        return new SupportedMod(modId, "测试模组 " + modId, TESTED, () -> {
+    private static SupportedMod<CompatModule> supported(String modId, AtomicInteger created, ItemSource source) {
+        return new SupportedMod<>(modId, "测试模组 " + modId, TESTED, () -> {
             created.incrementAndGet();
             return new CountedModule(modId, source);
         });
@@ -109,10 +109,10 @@ class CompatRegistryTest {
     @Test
     void 创建出错的不登记别的模组照常登记() {
         AtomicInteger created = new AtomicInteger();
-        SupportedMod broken = new SupportedMod("broken", "坏模组", TESTED, () -> {
+        SupportedMod<CompatModule> broken = new SupportedMod<>("broken", "坏模组", TESTED, () -> {
             throw new IllegalStateException("读写端建不起来");
         });
-        SupportedMod linkage = new SupportedMod("linkage", "类对不上的模组", TESTED, () -> {
+        SupportedMod<CompatModule> linkage = new SupportedMod<>("linkage", "类对不上的模组", TESTED, () -> {
             throw new NoSuchMethodError("SomeMod.someMethod");
         });
         CompatRegistry registry = CompatRegistry.load(List.of(broken, linkage, supported("backpack", created, source("背包"))),
@@ -125,7 +125,7 @@ class CompatRegistryTest {
 
     @Test
     void 交接到一半出错不留下半个模组() {
-        SupportedMod halfway = new SupportedMod("halfway", "交到一半的模组", TESTED, () -> new CompatModule("halfway", "交到一半的模组") {
+        SupportedMod<CompatModule> halfway = new SupportedMod<>("halfway", "交到一半的模组", TESTED, () -> new CompatModule("halfway", "交到一半的模组") {
             @Override public void contribute(CompatRegistry registry) {
                 registry.itemSource(this, source("先交的来源"));
                 throw new IllegalStateException("第二个接口建不起来");
@@ -154,7 +154,7 @@ class CompatRegistryTest {
     }
 
     private static CompatRegistry loadOne(String modId, CompatModule module) {
-        return CompatRegistry.load(List.of(new SupportedMod(modId, "测试模组 " + modId, TESTED, () -> module)),
+        return CompatRegistry.load(List.of(new SupportedMod<CompatModule>(modId, "测试模组 " + modId, TESTED, () -> module)),
                 new FakeLoader().with(modId, "3.25.69"));
     }
 

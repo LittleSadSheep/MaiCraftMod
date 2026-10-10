@@ -12,6 +12,7 @@ import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.compat.CompatRegistry;
+import org.maiwithu.maicraft.compat.CompatModule;
 import org.maiwithu.maicraft.compat.SupportedMod;
 import org.maiwithu.maicraft.compat.ModApiMismatch;
 import org.maiwithu.maicraft.compat.VerifiedVersions;
@@ -55,7 +56,7 @@ class BackpackCompatTest {
 
     @Test
     void 装了且版本在范围内才登记() {
-        SupportedMod supported = new SupportedMod(BackpackCompat.MOD_ID, "精妙背包", new VerifiedVersions("3.25.69", "3.26"),
+        SupportedMod<CompatModule> supported = new SupportedMod<>(BackpackCompat.MOD_ID, "精妙背包", new VerifiedVersions("3.25.69", "3.26"),
                 () -> new BackpackCompat(itemId -> false));
         CompatRegistry installed = CompatRegistry.load(List.of(supported), loaderWith("3.25.69"));
         assertEquals(List.of(BackpackCompat.MOD_ID), installed.modules().stream().map(module -> module.modId()).toList());
