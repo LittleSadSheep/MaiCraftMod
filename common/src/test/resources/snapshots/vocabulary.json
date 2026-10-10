@@ -22,6 +22,7 @@
     "max_seconds": "最多花多少秒",
     "message": "要发到游戏聊天的一句话，对全体玩家可见",
     "name": "名字，例如要记住的地点名",
+    "network": "接哪种网络：取值由已登记的网络读取器自报，例如 kinetic / me / energy",
     "operation": "一个能力内部的几种操作选哪一种，例如 enable、disable、status",
     "page": "分页看结果时的页码，从 0 起",
     "properties": "只放一格时要求的方块状态属性（JSON 对象），例如 {\"facing\":\"north\"}",
@@ -32,6 +33,7 @@
     "rotation": "蓝图落地时绕锚点转多少度：0 / 90 / 180 / 270",
     "settings": "要改成的设置（JSON 对象）：键是这台机器认的设置项，值写字符串",
     "slot": "装备与卸下的目标栏位：mainhand / offhand / head / chest / legs / feet / armor（armor 只配合卸下）",
+    "source": "接到哪：另一台机器或那张网里任一格的位置，写法与 target 相同",
     "structure": "要找的结构 ID（命名空间 id），例如 minecraft:village_plains",
     "text": "要发送或书写的文字",
     "via": "指定途径，例如拿东西时指定合成、烧炼或采掘"

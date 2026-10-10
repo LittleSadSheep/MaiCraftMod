@@ -48,7 +48,9 @@ public final class ParamNames {
             Map.entry("choice", "领选择奖励时选哪个候选（能力提问时列出的候选编号）"),
             Map.entry("blueprint", "机器蓝图（JSON 对象）：cells 逐格、parts 部件、installations 安装段、settings 装后设置、processes 声明工序"),
             Map.entry("settings", "要改成的设置（JSON 对象）：键是这台机器认的设置项，值写字符串"),
-            Map.entry("collect", "做完要不要把出口的东西拿进背包"));
+            Map.entry("collect", "做完要不要把出口的东西拿进背包"),
+            Map.entry("network", "接哪种网络：取值由已登记的网络读取器自报，例如 kinetic / me / energy"),
+            Map.entry("source", "接到哪：另一台机器或那张网里任一格的位置，写法与 target 相同"));
 
     private ParamNames() {}
 

@@ -25,7 +25,7 @@ import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 
 /**
- * 机器能力的入口：机器能力（看机器、审蓝图、改设置、用机器做东西、按蓝图施工）
+ * 机器能力的入口：六个机器能力（看机器、审蓝图、改设置、用机器做东西、按蓝图施工、接网络）
  * 从这一处建出来登记。机器类型与网络读取器由联动登记表在进世界时建好交来；一个实例没装任何联动时
  * 照样登记，机器能力认不出任何一台机器就如实说不支持，施工放方块不需要认识它。
  */
@@ -63,6 +63,7 @@ public final class MachineAbilities {
         MachineArchives archives = new MachineArchives(worldDocuments, worldKey);
         return List.of(new MachineInspectModule(services), new MachineReviewModule(services, designs),
                 new MachineConfigureModule(services), new MachineRunModule(services),
-                new MachineBuildModule(services, archives, anchors, designs, memory, construction));
+                new MachineBuildModule(services, archives, anchors, designs, memory, construction),
+                new MachineConnectModule(services, archives));
     }
 }

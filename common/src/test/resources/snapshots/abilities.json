@@ -155,6 +155,18 @@
         "mode": "controls_player"
       },
       {
+        "ability": "maicraft:machine_connect",
+        "summary": "把 target 那台机器接进一张网络（应力、ME、能量……按已装的联动），核对两端同网与运行读数；已经接着就不动，没接上时如实说差哪一段",
+        "parameters": "network: string, source?: string, radius: integer = 32",
+        "targets": [
+          "here",
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
         "ability": "maicraft:fight",
         "summary": "打指定的目标，或清掉附近一片区域的敌对生物；打得过才打，血见底会先撤",
         "parameters": "entity?: string, radius: integer = 32, count?: integer",
@@ -817,6 +829,41 @@
       "required_mods": [],
       "knowledge": [],
       "doc_resource": "assets/maicraft/abilities/machine_build.md"
+    },
+    {
+      "ability": "maicraft:machine_connect",
+      "summary": "把 target 那台机器接进一张网络（应力、ME、能量……按已装的联动），核对两端同网与运行读数；已经接着就不动，没接上时如实说差哪一段",
+      "parameters": [
+        {
+          "name": "network",
+          "type": "string",
+          "required": true,
+          "doc": "接哪种网：取值由已登记的网络读取器自报，例如 kinetic（应力）、me、energy"
+        },
+        {
+          "name": "source",
+          "type": "string",
+          "required": false,
+          "doc": "接到哪：写法与 target 相同（观察编号、[x,y,z] 坐标、名字）；不给就在 radius 内找"
+        },
+        {
+          "name": "radius",
+          "type": "integer",
+          "required": false,
+          "doc": "没给 source 时找来源的范围，单位格",
+          "default": 32
+        }
+      ],
+      "targets": [
+        "here",
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/machine_connect.md"
     },
     {
       "ability": "maicraft:fight",
