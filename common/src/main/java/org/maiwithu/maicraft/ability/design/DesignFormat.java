@@ -268,7 +268,8 @@ public final class DesignFormat {
         }
     }
 
-    private static void validateMaterials(JsonObject materials) {
+    /** 核对材料表：每项是一种方块状态，或一组按权重混用的 mix。 */
+    static void validateMaterials(JsonObject materials) {
         if (materials.isEmpty() || materials.size() > DesignLimits.MAX_OBJECTS) throw bad("materials 至少一项，最多 " + DesignLimits.MAX_OBJECTS + " 项");
         for (var entry : materials.entrySet()) {
             if (entry.getKey().isBlank() || entry.getKey().length() > 64) throw bad("材料名不合法：" + entry.getKey());
