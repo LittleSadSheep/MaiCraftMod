@@ -24,4 +24,17 @@ Minecraft 1.21.1；NeoForge 21.1.233；Fabric Loader 0.18.1、Fabric API 0.116.7
 
 ## 许可证
 
-GPL-3.0-only，见 `LICENSE`。
+MaiCraft 作为整体以 [GNU General Public License v3.0 only](LICENSE) 发布（SPDX：`GPL-3.0-only`）。本项目是经过修改的作品，自 2026 年 7 月 30 日起由 LittleSadSheep 修改和维护。
+
+仓库包含以下第三方来源：
+
+- 内嵌寻路代码来自 [Baritone](https://github.com/cabaletta/baritone)，基于上游提交 `5f259b7f` 修改。与 Numen 派生代码相同，本仓库依照 GNU GPLv3 第 7 条移除该副本的 LGPLv3 额外许可及非许可性附加条款，并按 `GPL-3.0-only` 分发；来源和修改说明见 [`third_party/baritone/`](third_party/baritone/)。
+- 使用 [MultiLoader-Template](https://github.com/jaredlll08/MultiLoader-Template) 提供的多加载器项目结构。
+- 发布包内置 [SQLite JDBC](https://github.com/xerial/sqlite-jdbc) 驱动，嵌套 JAR 保留上游许可证、NOTICE 和平台原生库。
+
+## 鸣谢
+
+- Minecraft 与 Mojang Studios
+- [Baritone](https://github.com/cabaletta/baritone)
+- [MultiLoader-Template](https://github.com/jaredlll08/MultiLoader-Template)
+- [minecraft-numen](https://github.com/Dwinovo/minecraft-numen)
