@@ -13,7 +13,8 @@ import org.maiwithu.maicraft.game.ModIdentity;
  * 这里接住，交给 JEI 的读写端读配方。
  *
  * <p>JEI 按注解扫描、自己 new 这个类，我们拿不到它的实例，只能经一个静态字段交接：这是所有者批准的例外，
- * 全仓只此一处，别处仍然不加可变的静态字段。没装 JEI 时这个类不会被加载。
+ * 全仓只此一处，别处仍然不加可变的静态字段。没装 JEI 时这个类不会被加载；装的 JEI 版本不在验证过的范围内时，
+ * JEI 照样会加载它、交运行时进来，但联动没登记，读写端不会被创建，没人来读。
  */
 @JeiPlugin
 public final class JeiRuntimeHandoff implements IModPlugin {
