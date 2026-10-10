@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.neoforge.compat;
 import java.util.List;
 
 import org.maiwithu.maicraft.compat.SupportedMod;
+import org.maiwithu.maicraft.server.compat.ServerCompatModule;
 
 /**
  * 服务端一侧的联动清单：只有客户端读不到的模组数据（机器状态、网络库存）才需要在服务端接；
@@ -15,8 +16,8 @@ public final class ServerCompatCatalog {
 
     private ServerCompatCatalog() {}
 
-    /** 清单里支持的全部模组。现在还没有需要服务端读数据的模组。 */
-    public static List<SupportedMod> mods() {
+    /** 清单里支持的全部模组：每行创建一个服务端联动入口。现在还没有需要服务端读数据的模组。 */
+    public static List<SupportedMod<ServerCompatModule>> mods() {
         return List.of();
     }
 }

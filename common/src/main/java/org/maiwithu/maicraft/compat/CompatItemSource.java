@@ -50,7 +50,8 @@ public final class CompatItemSource implements ItemSource {
             return Optional.empty();
         }
         try {
-            return source.begin(request, offer, context);
+            // 交出的动作也包一层：推进到一半模组停用时按不支持收场，不当成内部错误。
+            return source.begin(request, offer, context).map(action -> new CompatAction(module, action));
         } catch (ModApiMismatch broken) {
             return Optional.empty();
         }

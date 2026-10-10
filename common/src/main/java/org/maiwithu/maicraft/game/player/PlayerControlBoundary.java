@@ -124,6 +124,10 @@ public final class PlayerControlBoundary {
                 tickRevision,
                 ownedAfter && mutationClaimedTick != tickRevision);
         activeContext = context;
+        // 新任务之前先推进上一个任务留下的收尾：挂着的停挖、请游戏关的界面。原任务对象已经没了，
+        // 没有这一步，关界面推迟到下一刻后就再没人推进，界面一直开着、光标上的东西一直挂着，后面的界面操作也被挡住。
+        if (interactionSender != null) interactionSender.advance(context);
+        if (menuActions != null) menuActions.advance(context);
         return Optional.of(context);
     }
 

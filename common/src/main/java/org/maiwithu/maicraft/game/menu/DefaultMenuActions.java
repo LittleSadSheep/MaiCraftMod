@@ -466,7 +466,8 @@ public final class DefaultMenuActions implements MenuActions {
     }
 
     /** 每刻推进一次：即使原任务对象已经结束，动作入口仍继续完成挂着的关闭。 */
-    void advance(PlayerContext context) {
+    @Override
+    public void advance(PlayerContext context) {
         PendingMenuAction pending = active;
         if (pending != null && !pending.terminal()) {
             poll(context, pending);

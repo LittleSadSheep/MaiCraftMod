@@ -24,7 +24,7 @@ import org.maiwithu.maicraft.behavior.acquire.WantedItem;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
-import org.maiwithu.maicraft.behavior.acquire.spi.SourceServices;
+import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.menu.MenuLayout;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
@@ -32,6 +32,7 @@ import org.maiwithu.maicraft.behavior.menu.MenuSlots;
 import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.compat.CompatRegistry;
+import org.maiwithu.maicraft.compat.CompatModule;
 import org.maiwithu.maicraft.compat.SupportedMod;
 import org.maiwithu.maicraft.compat.VerifiedVersions;
 import org.maiwithu.maicraft.game.loader.LoaderEnvironment;
@@ -53,10 +54,11 @@ class Ae2TerminalSourceTest {
     }
 
     /** 不在世界里的玩家行为：角色为空，靠近与交互都碰不到；只够建出来源、回答"不在世界里"。 */
-    private static SourceServices offlineServices() {
+    private static PlayerServices offlineServices() {
         Protection nobodyOwns = new Protection((dimension, x, y, z) -> Optional.empty(), List::of,
                 name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self");
-        return new SourceServices(() -> null, (target, permissions) -> null, new Interactions(null), nobodyOwns,
+        return new PlayerServices(() -> null, (target, permissions) -> null, new Interactions(null),
+                itemId -> Optional.empty(), (request, permissions) -> null, nobodyOwns,
                 itemId -> Set.of(), MenuLayouts.VANILLA, new BlockScanService());
     }
 
@@ -101,7 +103,7 @@ class Ae2TerminalSourceTest {
 
     @Test
     void 联动入口交出终端界面的布局证明与途径为ae2的来源() {
-        SupportedMod supported = new SupportedMod(Ae2Compat.MOD_ID, "应用能源2", new VerifiedVersions("19.2.17", "19.3"),
+        SupportedMod<CompatModule> supported = new SupportedMod<>(Ae2Compat.MOD_ID, "应用能源2", new VerifiedVersions("19.2.17", "19.3"),
                 Ae2TerminalSourceTest::compat);
         CompatRegistry registry = CompatRegistry.load(List.of(supported), loaderWith("19.2.17"));
 

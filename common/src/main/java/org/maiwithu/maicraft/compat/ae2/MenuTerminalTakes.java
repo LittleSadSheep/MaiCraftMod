@@ -15,7 +15,7 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
 
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
-import org.maiwithu.maicraft.behavior.acquire.spi.SourceServices;
+import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuOpening;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.MoveConfirmation;
@@ -53,11 +53,11 @@ public final class MenuTerminalTakes implements TerminalTakes {
     private static final int PUT_DOWN_SETTLE_TICKS = 5;
 
     private final Ae2Compat compat;
-    private final SourceServices services;
+    private final PlayerServices services;
     private final SeenNetworkStock seen;
     private final Supplier<Instant> clock;
 
-    public MenuTerminalTakes(Ae2Compat compat, SourceServices services, SeenNetworkStock seen,
+    public MenuTerminalTakes(Ae2Compat compat, PlayerServices services, SeenNetworkStock seen,
             Supplier<Instant> clock) {
         this.compat = Objects.requireNonNull(compat, "compat");
         this.services = Objects.requireNonNull(services, "services");

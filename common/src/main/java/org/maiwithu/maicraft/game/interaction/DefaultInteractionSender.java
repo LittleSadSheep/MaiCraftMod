@@ -692,7 +692,8 @@ public final class DefaultInteractionSender implements InteractionSender {
     }
 
     /** 每刻推进一次：先结算副手与挂起的取消，再处理停挖请求和持用收尾。 */
-    void advance(PlayerContext context) {
+    @Override
+    public void advance(PlayerContext context) {
         // 副手仅做只读确认；即使主任务已经开始下一块矿，也不能重新提交旧火把。
         if (auxiliary != null && !auxiliary.terminal()) poll(context, auxiliary);
         if (advanceMainHandCancellation(context)) return;

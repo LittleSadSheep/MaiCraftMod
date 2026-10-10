@@ -105,9 +105,12 @@ import org.maiwithu.maicraft.server.ServerConfirmations;
 import org.maiwithu.maicraft.server.ServerLinkNetwork;
 import org.maiwithu.maicraft.server.ServerLinkServices;
 import org.maiwithu.maicraft.server.ServerOperationRegistry;
+import org.maiwithu.maicraft.server.compat.ServerCompatModule;
+import org.maiwithu.maicraft.server.compat.ServerCompatRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.maiwithu.maicraft.game.world.FurnaceFuels;
+import org.maiwithu.maicraft.compat.CompatModule;
 import org.maiwithu.maicraft.compat.CompatRegistry;
 import org.maiwithu.maicraft.compat.SupportedMod;
 
@@ -146,15 +149,14 @@ public final class Bootstrap {
      * @param compatCatalog 这个加载器服务端一侧的联动清单；没有联动的加载器传空列表
      */
     public static ServerLifecycle startOnBothSides(LoaderEnvironment loader, ServerConfirmations.Push push,
-                                              List<SupportedMod> compatCatalog) {
+                                              List<SupportedMod<ServerCompatModule>> compatCatalog) {
         LOG.info("{} 通用部分启动（加载器：{}）", ModIdentity.NAME, loader.loaderName());
-        // 服务端一侧的联动清单同样逐行检查并写日志。服务端还没有可登记的槽（读模组数据的服务端操作
-        // 等第一个需要它的模组再加），所以现在只核对装没装、版本对不对。
-        CompatRegistry.load(compatCatalog, loader);
         ServerOperationRegistry operations = new ServerOperationRegistry();
         ServerLinkNetwork network = new ServerLinkNetwork(operations);
         // 客户端可查询的只读操作：一个区块里哪些格是谁放的。归属记录按服务器实例在第一个刻结束时从存档读回并登记。
         operations.register(OwnershipQuery.OPERATION, 1, false, new OwnershipQuery());
+        // 服务端一侧的联动清单逐行检查并写日志：通过的联动入口把客户端读不到的模组读数登记成只读操作，握手时协商。
+        ServerCompatLoading.load(compatCatalog, loader, new ServerCompatRegistry(operations));
         return new ServerLifecycle() {
             @Override public void tickEnd(MinecraftServer server) {
                 // 首刻从存档读回本服务器的归属记录并登记确认通道；之后每五分钟把改动存一次盘，停服时再存一次。
@@ -230,7 +232,7 @@ public final class Bootstrap {
      *                      清单在客户端启动完成时才逐行检查，那时所有模组都构造完了
      */
     public static ClientLifecycle startClient(LoaderEnvironment loader, LinkTransport transport,
-                                              List<SupportedMod> compatCatalog) {
+                                              List<SupportedMod<CompatModule>> compatCatalog) {
         LOG.info("{} 客户端部分启动（加载器：{}，开发环境：{}）",
                 ModIdentity.NAME, loader.loaderName(), loader.isDevelopment());
         ClientEntry entry = new ClientEntry(loader, compatCatalog);
@@ -251,7 +253,7 @@ public final class Bootstrap {
         // 能力需要的模组装没装由加载器回答，没装的能力不登记。
         private final AbilityRegistry abilities;
         /** 这个加载器的联动清单；客户端启动完成时逐行检查成登记表。 */
-        private final List<SupportedMod> compatCatalog;
+        private final List<SupportedMod<CompatModule>> compatCatalog;
         /** 联动登记表：启动完成前是空的，之后是按清单检查过的那份；进世界建能力清单时把登记的来源交进去。 */
         private CompatRegistry compat = CompatRegistry.empty();
         // MCP 请求线程排工作、客户端刻里做：下达、暂停、回答与控制循环推进在同一个线程上。
@@ -290,7 +292,7 @@ public final class Bootstrap {
         /** 上一刻自动化是否拿着角色；变了就记一行日志，排查"下了目标却不动"时先看这里。 */
         private boolean automationOwned;
 
-        ClientEntry(LoaderEnvironment loader, List<SupportedMod> compatCatalog) {
+        ClientEntry(LoaderEnvironment loader, List<SupportedMod<CompatModule>> compatCatalog) {
             this.abilities = new AbilityRegistry(new TaskFactories(), loader::isModLoaded);
             this.compatCatalog = List.copyOf(compatCatalog);
         }
