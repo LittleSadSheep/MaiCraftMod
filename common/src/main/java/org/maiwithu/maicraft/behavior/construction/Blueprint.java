@@ -56,6 +56,12 @@ public record Blueprint(String dimension, BlockPos anchor, List<PlannedCell> cel
 
     /** 包围盒：最小角与最大角都在计划格上。 */
     public Bounds bounds() {
+        return boundsOf(cells);
+    }
+
+    /** 一组计划格（可以是相对格）的包围盒。 */
+    public static Bounds boundsOf(List<PlannedCell> cells) {
+        if (cells.isEmpty()) throw new IllegalArgumentException("没有格就没有包围盒");
         int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
         int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
         for (PlannedCell cell : cells) {
@@ -68,6 +74,11 @@ public record Blueprint(String dimension, BlockPos anchor, List<PlannedCell> cel
 
     /** 从空地建起整份蓝图要每种物品几件；已经对了的格不在这里扣，那是核对之后的事。 */
     public Map<String, Integer> materials() {
+        return materialsOf(cells);
+    }
+
+    /** 一组计划格（可以是相对格）从空地建起要每种物品几件。 */
+    public static Map<String, Integer> materialsOf(List<PlannedCell> cells) {
         Map<String, Integer> out = new LinkedHashMap<>();
         for (PlannedCell cell : cells) {
             int count = cell.materialCount();
