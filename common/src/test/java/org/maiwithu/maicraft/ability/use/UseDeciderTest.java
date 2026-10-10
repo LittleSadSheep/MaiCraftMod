@@ -85,8 +85,15 @@ class UseDeciderTest {
     }
 
     @Test
-    void brushIsRejectedHonestly() {
-        // 刷子要一直按住刷完，这种按法还没接上：计划阶段如实拒绝，不点一下冒充刷过。
-        assertTrue(UseDecider.rejectedItem("minecraft:brush").isPresent());
+    void brushNeedsATargetButIsOtherwiseAccepted() {
+        // 刷子没有对着空气的使用方式：只给 item 不给目标，计划阶段说清要对着一格刷。
+        List<String> withoutTarget = UseDecider.invalidCombinations(false, "minecraft:brush", null, null, List.of());
+        assertEquals(1, withoutTarget.size());
+        assertTrue(withoutTarget.getFirst().contains("刷子"));
+        // 点名了目标就正常接：刷子不再被计划阶段拒绝，按住刷写在交互动作里。
+        assertTrue(UseDecider.invalidCombinations(true, "minecraft:brush", null, null, List.of()).isEmpty());
+        assertTrue(UseDecider.invalidCombinations(false, "minecraft:brush", "minecraft:suspicious_sand", null, List.of())
+                .isEmpty());
+        assertTrue(UseDecider.rejectedItem("minecraft:brush").isEmpty());
     }
 }

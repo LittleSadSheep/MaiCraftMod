@@ -41,6 +41,8 @@ final class InteractionTestFakes {
         long tick;
         boolean current = true;
         boolean canInteract = true;
+        /** 按住使用中的开关：测对格按住时用它模拟原版的使用状态（替身没有真实玩家对象）。 */
+        boolean using;
         InteractionSender sender;
         final FakeInput input = new FakeInput();
         final LocalPlayer player = null;
@@ -65,6 +67,7 @@ final class InteractionTestFakes {
         @Override public boolean isCurrent() { return current; }
         @Override public boolean canInteractThisTick() { return canInteract; }
         @Override public boolean tryClaimInteraction() { return canInteractThisTick(); }
+        @Override public boolean usingItem() { return using; }
 
         TickContext asTickContext() {
             return new TickContext() {

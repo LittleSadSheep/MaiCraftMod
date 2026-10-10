@@ -97,25 +97,25 @@ public final class EquipModule implements AbilityModule {
             if (operation.equals("equip")) {
                 return reject("equip 永远一次一件：slot 不能是 armor，请指明具体的护甲栏位");
             }
-            return new StepDecision.Run(new EquipInput(true, null, null));
+            return new StepDecision.Run(new EquipInput(true, null, null, step.goal().permissions()));
         }
         GearSlotName slot = GearSlotName.fromParam(slotText);
         if (slot == null) {
             return reject("slot 取值不对：" + slotText);
         }
         if (operation.equals("unequip")) {
-            return decideUnequip(slot);
+            return decideUnequip(step, slot);
         }
         return decideEquip(step, slot);
     }
 
     // 卸下：栏位本来就是空的就直接完成；armor 整套卸在任务里逐格来。
-    private StepDecision decideUnequip(GearSlotName slot) {
+    private StepDecision decideUnequip(StepContext step, GearSlotName slot) {
         if (equipment.slot(slot).isEmpty()) {
             return new StepDecision.Finish(TaskResult.done(
                     "开始时 " + slot.paramName() + " 就是空的，已经卸下了"));
         }
-        return new StepDecision.Run(new EquipInput(true, slot, null));
+        return new StepDecision.Run(new EquipInput(true, slot, null, step.goal().permissions()));
     }
 
     // 穿上：先定穿哪件，再核对栏位，最后看是不是已经穿着同一件。
@@ -154,7 +154,7 @@ public final class EquipModule implements AbilityModule {
             return new StepDecision.Finish(TaskResult.done(
                     slot.paramName() + " 上已经是 " + itemId + "，不用再穿"));
         }
-        return new StepDecision.Run(new EquipInput(false, slot, itemId));
+        return new StepDecision.Run(new EquipInput(false, slot, itemId, step.goal().permissions()));
     }
 
     // 点名的东西身上没有就是缺；身上有却放不进这个护甲栏，按游戏规则如实说放不进，不进游戏。
@@ -188,7 +188,7 @@ public final class EquipModule implements AbilityModule {
                 return new StepDecision.Finish(TaskResult.cancelled(
                         "没有从候选里选出一个：" + answer + "，这次不换了"));
             }
-            return new StepDecision.Run(new EquipInput(false, slot, candidates.get(picked)));
+            return new StepDecision.Run(new EquipInput(false, slot, candidates.get(picked), step.goal().permissions()));
         }
         return new StepDecision.Ask(new Question(Question.Reason.CHOOSE_ONE,
                 "身上有好几样能放进 " + slot.paramName() + " 的东西，穿哪个？",

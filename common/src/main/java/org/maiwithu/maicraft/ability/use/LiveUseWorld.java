@@ -16,6 +16,7 @@ import net.minecraft.tags.TagKey;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.SignBlock;
 import net.minecraft.world.level.block.entity.SignBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.Heightmap;
@@ -135,11 +136,21 @@ final class LiveUseWorld implements UseSeams.ReadsWorld {
     }
 
     // 实体会走动：靠近时取它这一刻的包围盒，不用落实目标时记下的位置。
-    @Override public Optional<ApproachTarget> approachTarget(ResolvedTarget target) {
-        if (!target.isEntity()) {
+    // 写告示牌默认写正面：从哪一面点就编辑哪一面，站位只挑正面那一侧，站到背面会把字写到背面去。
+    // 正面朝哪边按原版告示牌自己的水平朝向角回答，立式、挂墙、悬挂、挂墙悬挂四种告示牌原版都会答；
+    // 那一格不是告示牌了给空，任务按目标没了收场。
+    @Override public Optional<ApproachTarget> approachTarget(ResolvedTarget target, boolean writesSign) {
+        if (target.isEntity()) {
+            return entityById(target.entityId()).map(entity -> ApproachTarget.ofEntity(entity.getBoundingBox()));
+        }
+        if (!writesSign) {
             return Optional.of(ApproachTarget.ofBlock(target.cell()));
         }
-        return entityById(target.entityId()).map(entity -> ApproachTarget.ofEntity(entity.getBoundingBox()));
+        ClientLevel level = level();
+        if (level == null || !level.hasChunkAt(target.cell())) return Optional.empty();
+        BlockState state = level.getBlockState(target.cell());
+        if (!(state.getBlock() instanceof SignBlock sign)) return Optional.empty();
+        return Optional.of(ApproachTarget.onFrontSideOf(target.cell(), sign.getYRotationDegrees(state)));
     }
 
     private Optional<BlockState> state(BlockPos cell) {

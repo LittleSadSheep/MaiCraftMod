@@ -124,8 +124,24 @@ public final class ParamSpecs {
             case CHOICE -> choice(param, element, errors, notes);
             case ITEM_OR_TAG, BLOCK_OR_TAG -> resource(name, element, true, errors, notes);
             case ENTITY_TYPE -> resource(name, element, false, errors, notes);
-            case ITEM_LIST, BLOCK_LIST, TEXT_LIST -> list(param, element, errors, notes);
+            case ITEM_LIST, BLOCK_LIST, TEXT_LIST, ENTITY_TYPE_LIST -> list(param, element, errors, notes);
+            case JSON_OBJECT -> jsonObject(name, element, errors);
+            case JSON_ARRAY -> jsonArray(name, element, errors);
         };
+    }
+
+    // 结构化正文只认形状：对象或数组原样交给能力，字符串、数字这类不收。
+    // 结构化正文只认形状：对象与数组各是一种类型，说明里报的类型名与收的形状一致，严格按类型校验的客户端不会把对的拒掉。
+    private static JsonElement jsonObject(String name, JsonElement element, List<ParamError> errors) {
+        if (element.isJsonObject()) return element.deepCopy();
+        errors.add(new ParamError(name, name + " 必须是 JSON 对象", "JSON 对象"));
+        return null;
+    }
+
+    private static JsonElement jsonArray(String name, JsonElement element, List<ParamError> errors) {
+        if (element.isJsonArray()) return element.deepCopy();
+        errors.add(new ParamError(name, name + " 必须是 JSON 数组", "JSON 数组"));
+        return null;
     }
 
     private static Long integer(ParamSpec param, JsonElement element, List<ParamError> errors, List<String> notes) {
@@ -225,9 +241,12 @@ public final class ParamSpecs {
         Set<String> values = new LinkedHashSet<>();
         int before = errors.size();
         for (JsonElement item : items) {
-            Object value = param.type() == ParamType.TEXT_LIST
-                    ? text(param.name(), item, errors)
-                    : resource(param.name(), item, true, errors, notes);
+            // 列表项的写法各类型不同：文字按文字收，实体类型不接受标签，其余接受 # 标签。
+            Object value = switch (param.type()) {
+                case TEXT_LIST -> text(param.name(), item, errors);
+                case ENTITY_TYPE_LIST -> resource(param.name(), item, false, errors, notes);
+                default -> resource(param.name(), item, true, errors, notes);
+            };
             if (value != null) values.add((String) value);
         }
         if (errors.size() > before) return null;
@@ -267,6 +286,9 @@ public final class ParamSpecs {
             case ITEM_LIST -> "物品 ID 或标签的数组";
             case BLOCK_LIST -> "方块 ID 或标签的数组";
             case TEXT_LIST -> "文字数组";
+            case ENTITY_TYPE_LIST -> "实体类型 ID 的数组";
+            case JSON_OBJECT -> "JSON 对象";
+            case JSON_ARRAY -> "JSON 数组";
         };
     }
 
@@ -280,6 +302,7 @@ public final class ParamSpecs {
                 list.forEach(item -> array.add(String.valueOf(item)));
                 yield array;
             }
+            case JsonElement element -> element.deepCopy();
             default -> new JsonPrimitive(String.valueOf(value));
         };
     }

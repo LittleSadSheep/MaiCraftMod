@@ -54,6 +54,46 @@ repositories {
         }
         filter { includeGroup 'maven.modrinth' }
     }
+    // Ponder（Create 的思索）从 Create 团队的官方 maven 取，免登录；只放行 Ponder 这个组。
+    exclusiveContent {
+        forRepository {
+            maven {
+                name = 'Create'
+                url = 'https://maven.createmod.net'
+            }
+        }
+        filter { includeGroup 'net.createmod.ponder' }
+    }
+    // EMI 从它的官方 maven 取（TerraformersMC，会转到 repo.sleeping.town），免登录。
+    exclusiveContent {
+        forRepository {
+            maven {
+                name = 'TerraformersMC'
+                url = 'https://maven.terraformersmc.com/releases'
+            }
+        }
+        filter { includeGroup 'dev.emi' }
+    }
+    // JEI 从它的官方 maven 取（BlameJared），免登录。
+    exclusiveContent {
+        forRepository {
+            maven {
+                name = 'BlameJared'
+                url = 'https://maven.blamejared.com'
+            }
+        }
+        filter { includeGroup 'mezz.jei' }
+    }
+    // FTB 任务与 FTB Library 从 FTB 的官方 maven 取，免登录。
+    exclusiveContent {
+        forRepository {
+            maven {
+                name = 'FTB'
+                url = 'https://maven.ftb.dev/releases'
+            }
+        }
+        filter { includeGroup 'dev.ftb.mods' }
+    }
 }
 
 // SQLite 驱动与 HTML 解析器用 JarJar 打进 Mod 的 Jar 里，并加进开发运行的类路径。
@@ -67,6 +107,15 @@ dependencies {
     compileOnly "maven.modrinth:sophisticated-core:${sophisticatedcore_version}"
     // AE2 只要它自己的类，不带它的运行依赖（GuideME 等）：读写端用不到，开发客户端里自己放 jar。
     compileOnly("org.appliedenergistics:appliedenergistics2:${ae2_version}") { transitive = false }
+    // Ponder 只要它自己的类：读写端只读场景注册表、在演示世界里放场景，不碰 Flywheel 的渲染。
+    compileOnly("net.createmod.ponder:ponder-neoforge:${ponder_version}") { transitive = false }
+    // EMI 要整个 jar：加载完没有要看 runtime 包里的 EmiReloadManager。JEI 只要两份公开接口。
+    compileOnly("dev.emi:emi-neoforge:${emi_version}") { transitive = false }
+    compileOnly("mezz.jei:jei-${minecraft_version}-common-api:${jei_version}") { transitive = false }
+    compileOnly("mezz.jei:jei-${minecraft_version}-neoforge-api:${jei_version}") { transitive = false }
+    // FTB 任务的类里用到 FTB Library 的类型（三态开关等），编译时两者都要在。
+    compileOnly("dev.ftb.mods:ftb-quests-neoforge:${ftbquests_version}") { transitive = false }
+    compileOnly("dev.ftb.mods:ftb-library-neoforge:${ftblibrary_version}") { transitive = false }
     jarJar(implementation('org.xerial:sqlite-jdbc')) {
         version { strictly "[${sqlite_jdbc_version},4.0)"; prefer sqlite_jdbc_version }
     }

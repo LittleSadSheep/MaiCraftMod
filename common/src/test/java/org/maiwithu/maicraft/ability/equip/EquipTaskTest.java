@@ -122,7 +122,7 @@ class EquipTaskTest {
 
     @Test
     void 栏位本来就是空的_卸下直接完成() {
-        TickResult result = run(new EquipTask(new EquipInput(true, GearSlotName.HEAD, null),
+        TickResult result = run(new EquipTask(new EquipInput(true, GearSlotName.HEAD, null, null),
                 new FakeEquipment(), Optional.empty(), Optional.empty()), 5);
         assertTrue(result instanceof TickResult.Finished finished
                 && finished.result().status() == TaskResult.Status.DONE);
@@ -134,7 +134,7 @@ class EquipTaskTest {
         FakeEquipment equipment = new FakeEquipment();
         equipment.put(GearSlotName.HEAD, HELMET);
         StubGearChanges gear = new StubGearChanges(equipment);
-        TickResult result = run(new EquipTask(new EquipInput(true, GearSlotName.HEAD, null),
+        TickResult result = run(new EquipTask(new EquipInput(true, GearSlotName.HEAD, null, null),
                 equipment, Optional.empty(), Optional.of(gear)), 10);
         assertTrue(result instanceof TickResult.Finished finished
                 && finished.result().status() == TaskResult.Status.DONE);
@@ -150,7 +150,7 @@ class EquipTaskTest {
         StubGearChanges gear = new StubGearChanges(equipment);
         gear.takeOffSucceeds = false;
         // 手工让头的卸下成功：动作做完后头空了，胸甲栏保留。
-        TickResult result = run(new EquipTask(new EquipInput(true, null, null),
+        TickResult result = run(new EquipTask(new EquipInput(true, null, null, null),
                 equipment, Optional.empty(), Optional.of(gear)), 10);
         assertTrue(result instanceof TickResult.Finished finished
                 && finished.result().status() == TaskResult.Status.PARTIAL);
@@ -165,7 +165,7 @@ class EquipTaskTest {
         FakeEquipment equipment = new FakeEquipment();
         StubGearChanges gear = new StubGearChanges(equipment);
         gear.wearSucceeds = false;
-        TickResult result = run(new EquipTask(new EquipInput(false, GearSlotName.HEAD, HELMET),
+        TickResult result = run(new EquipTask(new EquipInput(false, GearSlotName.HEAD, HELMET, null),
                 equipment, Optional.empty(), Optional.of(gear)), 10);
         assertTrue(result instanceof TickResult.Finished finished
                 && finished.result().status() == TaskResult.Status.PARTIAL);
@@ -179,7 +179,7 @@ class EquipTaskTest {
         // 背包只剩一格且装着贵重品：腾挪动贵重品要先问，任务把"腾不动"按背包满带回。
         InventorySpace space = new InventorySpace(new FullBackpack(1, 1),
                 Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
-        TickResult result = run(new EquipTask(new EquipInput(true, GearSlotName.HEAD, null),
+        TickResult result = run(new EquipTask(new EquipInput(true, GearSlotName.HEAD, null, null),
                 equipment, Optional.of(space), Optional.of(new StubGearChanges(equipment))), 10);
         assertTrue(result instanceof TickResult.Finished finished
                 && finished.result().status() == TaskResult.Status.FAILED);

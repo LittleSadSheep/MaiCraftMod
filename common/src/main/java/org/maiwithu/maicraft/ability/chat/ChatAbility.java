@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.chat;
 
+import org.maiwithu.maicraft.game.interaction.ChatDraftScreen;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilitySpec;
@@ -16,6 +17,7 @@ import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -32,12 +34,14 @@ public final class ChatAbility implements AbilityModule {
 
     private final SendsChatMessage sender;
     private final ReadsChatEcho echo;
+    private final ChatDraftScreen drafts;
     /** 本实例是否允许执行游戏命令；来自所有者的实例配置，任何工具参数都改不了它。 */
     private final boolean allowGameCommands;
 
-    public ChatAbility(SendsChatMessage sender, ReadsChatEcho echo, boolean allowGameCommands) {
+    public ChatAbility(SendsChatMessage sender, ReadsChatEcho echo, ChatDraftScreen drafts, boolean allowGameCommands) {
         this.sender = sender;
         this.echo = echo;
+        this.drafts = Objects.requireNonNull(drafts, "drafts");
         this.allowGameCommands = allowGameCommands;
     }
 
@@ -89,8 +93,8 @@ public final class ChatAbility implements AbilityModule {
     @Override
     public void registerTasks(TaskFactories factories) {
         factories.register(ChatInput.class, input -> {
-            // 每次运行新建发话任务；发送入口与回显通过闭包交给任务，不经全局单例。
-            return new ChatTask(input.message(), sender, echo);
+            // 每次运行新建发话任务；聊天框、发送入口与回显通过闭包交给任务，不经全局单例。
+            return new ChatTask(input.message(), sender, echo, drafts);
         });
     }
 }

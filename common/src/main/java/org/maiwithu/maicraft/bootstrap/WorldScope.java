@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.bootstrap;
 
 import java.time.Instant;
 import java.util.LinkedHashSet;
+import java.nio.file.Path;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -97,7 +98,8 @@ public final class WorldScope {
             ServerLinkSession session, SubtitleFeed subtitles, Interactions interactions,
             UseKeyProjection useKeyProjection, BaritoneInternals walks, CombatSenses senses,
             AbilityRegistry abilities, InteractionSender interactionSender, MenuActions menuActions,
-            InstanceConfig instanceConfig, FurnaceFuels furnaceFuels, CompatRegistry compat) {
+            InstanceConfig instanceConfig, FurnaceFuels furnaceFuels, CompatRegistry compat,
+            NightRestWiring nightWiring, Path configDirectory) {
         // 游戏接口层认出是哪个存档或服务器，内核的世界身份只拿编号与目录。
         SaveIdentity save = SaveIdentity.current(minecraft)
                 .orElseThrow(() -> new IllegalStateException("进了世界却识别不出世界身份，记忆无处安放"));
@@ -158,7 +160,8 @@ public final class WorldScope {
                 protection,
                 furnaceFuels,
                 compat,
-                kinds), abilities);
+                kinds,
+                nightWiring, configDirectory), abilities);
     }
 
     /**

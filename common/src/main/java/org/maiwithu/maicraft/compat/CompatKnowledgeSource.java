@@ -66,6 +66,17 @@ public final class CompatKnowledgeSource implements KnowledgeSource {
         }
     }
 
+    @Override public List<KnowledgeDocument.Entry> entriesAbout(String registryId) {
+        if (!module.active()) {
+            return List.of();
+        }
+        try {
+            return source.entriesAbout(registryId);
+        } catch (ModApiMismatch broken) {
+            return List.of();
+        }
+    }
+
     @Override public JsonArray templates() {
         if (!module.active()) {
             return new JsonArray();
@@ -79,7 +90,7 @@ public final class CompatKnowledgeSource implements KnowledgeSource {
 
     @Override public String status() {
         if (!module.active()) {
-            return "disabled: " + module.disabledReason().orElse("");
+            return module.name() + "：联动已停用（" + module.disabledReason().orElse("") + "）";
         }
         return source.status();
     }

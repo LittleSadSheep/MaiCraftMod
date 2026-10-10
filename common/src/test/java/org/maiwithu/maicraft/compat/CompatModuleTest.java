@@ -24,6 +24,8 @@ import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.knowledge.KnowledgeDocument;
 import org.maiwithu.maicraft.kernel.knowledge.KnowledgeSource;
+import org.maiwithu.maicraft.behavior.recipe.RecipeViewer;
+import org.maiwithu.maicraft.behavior.recipe.ShownRecipe;
 import org.maiwithu.maicraft.kernel.task.Action;
 
 /** 联动入口给读写端的调用包的那一层：模组接口对不上就停用，停用后登记的来源如实回答不支持。 */
@@ -126,15 +128,43 @@ class CompatModuleTest {
             @Override public KnowledgeDocument read(String uri) {
                 return new KnowledgeDocument(uri, "x", "条目", "说明", "正文");
             }
+            @Override public List<KnowledgeDocument.Entry> entriesAbout(String registryId) {
+                return entries();
+            }
             @Override public String status() { return "available"; }
         };
         CompatKnowledgeSource wrapped = new CompatKnowledgeSource(module, inner);
         assertEquals(1, wrapped.entries().size());
+        assertEquals(1, wrapped.entriesAbout("create:mechanical_mixer").size());
         assertEquals("available", wrapped.status());
         assertThrows(ModApiMismatch.class, () -> module.run("读任务书", () -> { throw new NoSuchMethodError("quests"); }));
         assertTrue(wrapped.entries().isEmpty());
         assertNull(wrapped.read("maicraft://knowledge/x"));
-        assertTrue(wrapped.status().startsWith("disabled: "), wrapped.status());
+        assertTrue(wrapped.entriesAbout("create:mechanical_mixer").isEmpty(), "停用后物品资料页也不再列它的条目");
+        assertTrue(wrapped.status().contains("联动已停用"), wrapped.status());
+    }
+
+    @Test
+    void 停用后登记的配方查看器回答用不了并写明原因() {
+        BareModule module = new BareModule();
+        RecipeViewer inner = new RecipeViewer() {
+            @Override public String name() { return "emi"; }
+            @Override public boolean importsOtherViewers() { return true; }
+            @Override public Readiness readiness() { return Readiness.yes(); }
+            @Override public List<ShownRecipe> making(String itemId) {
+                return module.call("查配方", () -> { throw new NoSuchMethodError("getRecipesByOutput"); });
+            }
+            @Override public List<ShownRecipe> using(String itemId) { return List.of(); }
+            @Override public List<ShownRecipe> atWorkstation(String itemId) { return List.of(); }
+        };
+        CompatRecipeViewer wrapped = new CompatRecipeViewer(module, inner);
+        assertTrue(wrapped.readiness().ready());
+        assertTrue(wrapped.importsOtherViewers());
+
+        assertThrows(ModApiMismatch.class, () -> wrapped.making("minecraft:torch"), "模组接口对不上转成普通异常，配方查询换下一个");
+        assertFalse(wrapped.readiness().ready());
+        assertTrue(wrapped.readiness().reason().contains("联动已停用"), wrapped.readiness().reason());
+        assertTrue(wrapped.making("minecraft:torch").isEmpty());
     }
 
     /** 每次问价都报能给 2 件的来源，顺便数被问了几次。 */

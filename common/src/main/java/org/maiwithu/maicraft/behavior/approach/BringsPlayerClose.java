@@ -14,4 +14,12 @@ public interface BringsPlayerClose {
 
     /** 生成一个靠近动作：走到够得着、看得见这个目标的位置。 */
     Action toward(ApproachTarget target, Permissions permissions);
+
+    /**
+     * 同上，但这些格不许当站位：放方块时脚下或头顶不能是要放的那一格，放下去会把自己卡在里面。
+     * 默认实现不理会这些格；生产实现把它们并进受保护格判断。
+     */
+    default Action toward(ApproachTarget target, Permissions permissions, ProtectedCells avoid) {
+        return toward(target, permissions);
+    }
 }

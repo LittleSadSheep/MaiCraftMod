@@ -138,6 +138,41 @@ class ItemAcquisitionTest {
     }
 
     @Test
+    void 来源点出去没能确认的交互_一句一条交回给发起的一方() {
+        // 箱子那边点出去了、游戏一直没回音：货一件没进包，引擎照旧认输换路、以缺东西结束，
+        // 点出去没确认的事实不再拼进失败原因，单独交回给发起拿东西的一方。
+        ScriptedSource chest = new ScriptedSource("记得的箱子", backpack)
+                .answer(new SourceQuote.Offer("记得的箱子", 8, new AcquisitionCost(5, 4), null))
+                .onBegin(ScriptedSource.Ending.UNCONFIRMED);
+        List<String> reported = new ArrayList<>();
+        ActionStatus status = runToSettlement(engine(chest).need(
+                new ItemRequest(WantedItem.ofItem("minecraft:coal"), 3, "火把"), PERMISSIONS,
+                ItemAcquisition.Scope.ALL, null, reported::add));
+        assertInstanceOf(ActionStatus.Failed.class, status);
+        assertEquals(List.of("记得的箱子里拿minecraft:coal：点出去了但没能确认结果"), reported);
+    }
+
+    @Test
+    void 备料的嵌套请求_接住外层的交回路() {
+        // 外层要木板、来源备料时回引擎要原木（嵌套一次）：箱子里点原木没能确认的事实要交到最外层的发起方。
+        ScriptedSource chest = new ScriptedSource("记得的箱子", backpack)
+                .answer(new SourceQuote.Offer("记得的箱子", 8, new AcquisitionCost(5, 4), null))
+                .onBegin(ScriptedSource.Ending.UNCONFIRMED);
+        ItemAcquisition acquisition = engine(chest);
+        List<String> reported = new ArrayList<>();
+        Action outer = acquisition.need(
+                new ItemRequest(WantedItem.ofItem("minecraft:oak_planks"), 4, "施工备料"), PERMISSIONS,
+                ItemAcquisition.Scope.ALL, null, reported::add);
+        // 外层挂上链后备料：嵌套的拿原木回到同一台引擎，交回路从外层接过来。
+        Action wood = acquisition.actionFor(
+                new ItemRequest(WantedItem.ofItem("minecraft:oak_log"), 1, "做木板的原木"), PERMISSIONS);
+        runToSettlement(wood);
+        assertTrue(reported.stream().anyMatch(fact -> fact.contains("minecraft:oak_log")
+                && fact.contains("没能确认")), "嵌套里没能确认的事实交回了外层发起的一方");
+        outer.close();
+    }
+
+    @Test
     void 谁也给不了_问题里带上各家给不了的原因() {
         ScriptedSource none = new ScriptedSource("记得的箱子", backpack)
                 .answer(new SourceQuote.Unavailable("记得的箱子", "没装着这个"));

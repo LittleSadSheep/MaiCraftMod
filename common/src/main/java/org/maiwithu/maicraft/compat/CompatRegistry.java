@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.inventory.spi.CarriedBackpack;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
 import org.maiwithu.maicraft.behavior.menu.spi.MenuLayoutProof;
+import org.maiwithu.maicraft.behavior.recipe.RecipeViewer;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.loader.LoaderEnvironment;
 import org.maiwithu.maicraft.kernel.knowledge.KnowledgeSource;
@@ -25,7 +26,7 @@ import org.slf4j.LoggerFactory;
 /**
  * 联动登记表：启动时按联动清单逐行检查，收集登记了的联动入口交来的 spi 接口实现，
  * 再由启动交给玩家行为层与能力（拿到物品的来源、机器类型、网络读取器、任务书操作、腾背包的随身背包、
- * 查资料的知识来源、认得出的模组界面）。不是 Minecraft 的注册表。
+ * 查资料的知识来源、查配方的配方查看器、认得出的模组界面）。不是 Minecraft 的注册表。
  *
  * <p>要用进了世界才有的玩家行为（走过去、点开、保护判断）的，存的是建法，进世界时带着联动能用的玩家行为再建；
  * 建出来的都包一层：模组停用、碰到模组接口对不上时如实回答"用不了"，不让它变成任务的内部错误。
@@ -45,9 +46,10 @@ public final class CompatRegistry {
     private final List<MenuLayoutProof> menuLayouts = new ArrayList<>();
     private final List<CarriedBackpack> carriedBackpacks = new ArrayList<>();
     private final List<KnowledgeSource> knowledgeSources = new ArrayList<>();
+    private final List<RecipeViewer> recipeViewers = new ArrayList<>();
     /** 全部的槽：一个模组交接到一半出错时，按交接前的长度一起撤回。新加槽时把它的列表加进来。 */
     private final List<List<?>> slots = List.of(itemSources, machineTypes, networkReaders, questBooks,
-            menuLayouts, carriedBackpacks, knowledgeSources);
+            menuLayouts, carriedBackpacks, knowledgeSources, recipeViewers);
     private final List<String> decisions = new ArrayList<>();
 
     private CompatRegistry() {}
@@ -148,6 +150,14 @@ public final class CompatRegistry {
         knowledgeSources.add(new CompatKnowledgeSource(module, source));
     }
 
+    /**
+     * 联动入口交一个配方查看器（EMI、JEI 这类）：带上自己，登记表包一层，模组停用后回答"用不了"，配方查询就去问下一个。
+     * 和知识来源一样不用玩家行为，启动时就交给查资料与查配方；只在客户端线程上读。
+     */
+    public void recipeViewer(CompatModule module, RecipeViewer viewer) {
+        recipeViewers.add(new CompatRecipeViewer(module, viewer));
+    }
+
     /** 联动入口交一个随身背包。腾背包还没有接上调用方，接上时要像物品来源一样包一层，停用后回答放不下。 */
     public void carriedBackpack(CarriedBackpack backpack) {
         carriedBackpacks.add(Objects.requireNonNull(backpack, "backpack"));
@@ -213,6 +223,11 @@ public final class CompatRegistry {
     /** 联动模组提供的知识来源。 */
     public List<KnowledgeSource> knowledgeSources() {
         return Collections.unmodifiableList(knowledgeSources);
+    }
+
+    /** 联动模组提供的配方查看器，按联动清单的顺序；配方查询自己决定先问谁。 */
+    public List<RecipeViewer> recipeViewers() {
+        return Collections.unmodifiableList(recipeViewers);
     }
 
     /** 清单每一行的结论，和日志里写的一样；调试面板与测试看它。 */

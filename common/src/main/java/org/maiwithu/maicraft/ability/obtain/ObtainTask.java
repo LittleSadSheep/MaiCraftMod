@@ -60,10 +60,16 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
 
     @Override protected Action enter(Phase phase) {
         // 清点是只读判断，不需要动作；引擎的动作在进入 ACQUIRE 时才发起，许可随输入一起带过来。
+        // 来源动作里点了但没能确认结果的交互，经引擎一句一条交回，记进结果的 unconfirmed。
         return phase == Phase.ACQUIRE
                 ? acquisition.need(new ItemRequest(input.wanted(), input.count(), input.purpose()),
-                        input.permissions(), input.scope(), obtainedVia::add)
+                        input.permissions(), input.scope(), obtainedVia::add, this::recordTakeUnconfirmed)
                 : null;
+    }
+
+    // 一笔没能确认的取货进结果：这些交互不能盲目重做，与已确认拿到的分开记。
+    private void recordTakeUnconfirmed(String fact) {
+        recordUnconfirmed(new Change(Change.Kind.OTHER, "取货", 1, fact));
     }
 
     @Override protected Next<Phase> tick(Phase phase, TickContext context) {

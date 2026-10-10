@@ -64,6 +64,15 @@ public interface PlayerContext {
     boolean tryClaimInteraction();
 
     /**
+     * 角色此刻是否正处于"按住使用"中（吃东西、拉弓、刷子刷可疑方块这类持续使用）。
+     * 持续使用动作靠它认出按住被原版松开了：视线离开方块、使用到期或按住投影断掉时原版自己松手。
+     */
+    default boolean usingItem() {
+        LocalPlayer player = localPlayer();
+        return player != null && player.isUsingItem();
+    }
+
+    /**
      * 本刻的角色是否已经死了或在死亡流程里（血量见底、死亡界面）。
      * 控制循环每刻推进前先看这里：死了就不再插生存需求的临时任务、不推进任务，等重生。
      */

@@ -47,6 +47,18 @@ class SpacePlannerTest {
     }
 
     @Test
+    void 合并做不到的格子不计进计划() {
+        // 三堆各 40 个：两两都并不进一格（40+40 超过上限），纯合并腾不出格子；
+        // 计划不该指望合并，直接安排动能动的堆（垃圾级的圆石丢掉）。
+        SpacePlanner.Plan plan = SpacePlanner.plan(scene(
+                List.of(junk("minecraft:cobblestone", 40), junk("minecraft:cobblestone", 40),
+                        junk("minecraft:cobblestone", 40)),
+                0, 1, false, List.of()));
+        assertTrue(plan.moves().stream().noneMatch(move -> move instanceof SpaceMove.MergeStacks));
+        assertTrue(plan.moves().getFirst() instanceof SpaceMove.DropStack);
+    }
+
+    @Test
     void 有随身背包先往里塞() {
         SpacePlanner.Plan plan = SpacePlanner.plan(scene(
                 List.of(stack("minecraft:bone", 3)), 0, 1, true, List.of()));

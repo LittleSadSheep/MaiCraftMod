@@ -94,7 +94,36 @@ public final class WorldTime {
         return !isVanillaDay(fixedTime, timeOfDayFraction, rainLevel, thunderLevel);
     }
 
-    /** Level.isDay 的逐刻镜像：客户端 Level 的 skyDarken 字段只在世界加载与服务器 tick 内刷新，
+/** 探一步一百刻：够给出"约几分钟"的答案，也留出窗口边界的余量。 */
+    private static final long PROBE_STEP_TICKS = 100;
+    /** 最多探一整天：晴朗世界里可睡窗口一天一开，探过一整天还没有就是时间规则本身坏了。 */
+    private static final long MAX_PROBE_TICKS = 24_000L;
+
+    /**
+     * 现在起还要等多少刻才能睡；现在就能睡返回 0。按原版可睡窗口逐百刻往前探，
+     * 探不到一整天就当作随时能睡（固定时间的维度由维度检查另管，不在这里等）。
+     */
+    public static long ticksUntilSleepable(long dayTime, boolean fixedTime, float rainLevel, float thunderLevel) {
+        long ticks = 0;
+        while (ticks <= MAX_PROBE_TICKS) {
+            if (canSleepAt(fixedTime, timeOfDayFraction(dayTime + ticks), rainLevel, thunderLevel)) {
+                return ticks;
+            }
+            ticks += PROBE_STEP_TICKS;
+        }
+        return 0;
+    }
+
+    /** 维度时刻比例的镜像：原版 DimensionType.timeOfDay 把一天的刻数折成天空公式的比例，
+     * 晴朗世界的可睡窗口（约 12542 起）按这个比例判。探等待时间必须与判定用同一个折算。 */
+    private static float timeOfDayFraction(long dayTime) {
+        double dayFraction = Math.floorMod(dayTime, 24_000L) / 24_000.0 - 0.25;
+        dayFraction -= Math.floor(dayFraction);
+        double curve = 0.5 - Math.cos(dayFraction * Math.PI) / 2.0;
+        return (float) ((dayFraction * 2.0 + curve) / 3.0);
+    }
+
+        /** Level.isDay 的逐刻镜像：客户端 Level 的 skyDarken 字段只在世界加载与服务器 tick 内刷新，
      * 客户端逐刻读 level.isDay() 会拿到加载时的旧值（真夜被判白天），所以按原版
      * updateSkyBrightness 公式从同步的 dayTime、雨量与雷量现算同一个变暗值再比较。 */
     // Level.isDay 的逐刻镜像：客户端 Level 的 skyDarken 字段只在世界加载与服务器 tick 内刷新，

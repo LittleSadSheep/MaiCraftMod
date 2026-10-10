@@ -87,7 +87,8 @@ final class SpacePlanner {
         return belowPreciousNotEnough(scene, slotsFreed);
     }
 
-    // 散堆合并：同一种物品散在几格里，合成 ceil(总数/上限) 个整堆，多出来的格子就腾出来了。
+    // 散堆合并：只数"真能并出来"的格子——数量小的并进装得下它的最大堆，并到没有一堆装得下另一堆为止。
+    // 不能按"总数除以堆上限"的理想装袋数：那种数法会把需要拆堆才能达到的格子也算进来，合并的执行做不到。
     private static int addMergeMoves(Scene scene, List<SpaceMove> moves) {
         if (!scene.stackMergerAvailable()) {
             return 0;
@@ -97,20 +98,41 @@ final class SpacePlanner {
             byItem.computeIfAbsent(stack.itemId(), ignored -> new ArrayList<>()).add(stack);
         }
         int freed = 0;
-        for (Map.Entry<String, List<BackpackStack>> group : byItem.entrySet()) {
-            List<BackpackStack> stacks = group.getValue();
+        for (List<BackpackStack> stacks : byItem.values()) {
             if (stacks.size() < 2) {
                 continue;
             }
-            int total = stacks.stream().mapToInt(BackpackStack::count).sum();
-            int wholeStacks = (int) Math.ceil((double) total / stacks.getFirst().maxStackSize());
-            int slotsSaved = stacks.size() - wholeStacks;
-            if (slotsSaved > 0) {
-                freed += slotsSaved;
-                moves.add(new SpaceMove.MergeStacks(group.getKey(), slotsSaved));
+            List<Integer> counts = stacks.stream().map(BackpackStack::count).toList();
+            int saved = achievableMerges(counts, stacks.getFirst().maxStackSize());
+            if (saved > 0) {
+                freed += saved;
+                moves.add(new SpaceMove.MergeStacks(stacks.getFirst().itemId(), saved));
             }
         }
         return freed;
+    }
+
+    // 模拟合并的执行，数能省出几格：每次挑最小的一堆，并进装得下它的最大一堆；并不动了就停。
+    // 模拟按同一种物品算（执行读端还比对物品组件，组件不同的散堆并不了，实际会比这里少并）。
+    private static int achievableMerges(List<Integer> counts, int maxStackSize) {
+        List<Integer> piles = new ArrayList<>(counts);
+        int saved = 0;
+        while (true) {
+            piles.sort(Integer::compare);
+            boolean merged = false;
+            for (int small = 0; small < piles.size() && !merged; small++) {
+                for (int big = piles.size() - 1; big > small; big--) {
+                    if (piles.get(small) + piles.get(big) <= maxStackSize) {
+                        piles.set(big, piles.get(small) + piles.get(big));
+                        piles.remove(small);
+                        saved++;
+                        merged = true;
+                        break;
+                    }
+                }
+            }
+            if (!merged) return saved;
+        }
     }
 
     // 能自动挪的堆：贵重、装备与任务留用的都不动；从垃圾排起，同级的保持背包里的格子顺序。

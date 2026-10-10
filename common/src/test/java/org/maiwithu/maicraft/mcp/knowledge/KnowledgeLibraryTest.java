@@ -69,6 +69,53 @@ class KnowledgeLibraryTest {
         assertEquals("registered", hits.get("provider_status").getAsString());
     }
 
+    @Test
+    void catalogListsSourceIndexesWhileSearchCoversEveryEntry() {
+        KnowledgeLibrary library = new KnowledgeLibrary(new IndexedSource());
+
+        List<String> catalog = library.listing().stream().map(KnowledgeDocument.Entry::uri).toList();
+        assertTrue(catalog.contains(IndexedSource.INDEX), "目录里有来源的索引");
+        assertFalse(catalog.contains(IndexedSource.SCENE), "场景不进目录");
+        assertEquals(List.of(IndexedSource.SCENE),
+                library.matching("搅拌器").stream().map(KnowledgeDocument.Entry::uri).toList(), "搜索找得到场景");
+    }
+
+    @Test
+    void relatedEntriesAndStatusesAreGatheredPerSource() {
+        KnowledgeLibrary library = new KnowledgeLibrary(List.of(new IndexedSource(), new SingleEntrySource()));
+
+        assertEquals(List.of(IndexedSource.SCENE),
+                library.about("create:mechanical_mixer").stream().map(KnowledgeDocument.Entry::uri).toList());
+        assertTrue(library.about("minecraft:stone").isEmpty());
+        assertEquals(List.of("思索：可用，1 个场景", "registered"), library.sourceStatuses());
+    }
+
+    /** 目录只交一行索引、搜索与相关资料才给出场景的来源，像思索那样。 */
+    private static final class IndexedSource implements KnowledgeSource {
+        static final String INDEX = "maicraft://knowledge/ponder/index";
+        static final String SCENE = "maicraft://knowledge/ponder/create/mechanical_mixer/1";
+        private static final KnowledgeDocument.Entry SCENE_ENTRY = new KnowledgeDocument.Entry(SCENE, "scene",
+                "动力搅拌器 · 场景 1", "思索场景", "create:mechanical_mixer 动力搅拌器 搅拌器");
+
+        @Override public List<KnowledgeDocument.Entry> entries() {
+            return List.of(new KnowledgeDocument.Entry(INDEX, "index", "思索索引", "全部有思索的物品", "思索 ponder"));
+        }
+
+        @Override public List<KnowledgeDocument.Entry> searchCandidates(String query) {
+            return List.of(SCENE_ENTRY);
+        }
+
+        @Override public List<KnowledgeDocument.Entry> entriesAbout(String registryId) {
+            return registryId.equals("create:mechanical_mixer") ? List.of(SCENE_ENTRY) : List.of();
+        }
+
+        @Override public KnowledgeDocument read(String uri) {
+            return null;
+        }
+
+        @Override public String status() { return "思索：可用，1 个场景"; }
+    }
+
     private static JsonObject request(String action, String value) {
         JsonObject request = new JsonObject();
         request.addProperty("action", action);

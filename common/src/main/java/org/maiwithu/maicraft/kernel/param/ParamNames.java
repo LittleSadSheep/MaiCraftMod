@@ -18,7 +18,8 @@ public final class ParamNames {
             Map.entry("items", "多个物品 ID 或物品标签"),
             Map.entry("block", "方块 ID，或 # 开头的方块标签"),
             Map.entry("blocks", "多个方块 ID 或方块标签"),
-            Map.entry("entity", "实体类型 ID"),
+            Map.entry("entity", "实体类型 ID，可给一个或几种"),
+            Map.entry("structure", "要找的结构 ID（命名空间 id），例如 minecraft:village_plains"),
             Map.entry("count", "这次要多做多少：拿东西就是再多拿几件（不是背包里的总数），做动作就是做几次"),
             Map.entry("radius", "工作或搜索范围，单位格"),
             Map.entry("max_distance", "出行或搜索的最远距离，单位格"),
@@ -31,7 +32,23 @@ public final class ParamNames {
             Map.entry("distance", "保持的距离，单位格，例如跟随时与目标相隔几格"),
             Map.entry("condition", "要等到的条件：elapsed / day / night / health_full / not_hungry"),
             Map.entry("after_seconds", "先至少经过多少秒，再开始做检查"),
-            Map.entry("slot", "装备与卸下的目标栏位：mainhand / offhand / head / chest / legs / feet / armor（armor 只配合卸下）"));
+            Map.entry("slot", "装备与卸下的目标栏位：mainhand / offhand / head / chest / legs / feet / armor（armor 只配合卸下）"),
+            Map.entry("drawing", "建筑图纸的正文（JSON 对象）：材料表、对象、组件"),
+            Map.entry("design_id", "设计编号：design 创建或修改图纸后返回的 UUID"),
+            Map.entry("edits", "对图纸按名合并的修改（JSON 对象）：objects、materials、components、remove_objects、remove_components、block_state_axes、overlap_policy、name"),
+            Map.entry("page", "分页看结果时的页码，从 0 起"),
+            Map.entry("format", "导出文件的格式：json / nbt"),
+            Map.entry("rotation", "蓝图落地时绕锚点转多少度：0 / 90 / 180 / 270"),
+            Map.entry("cells", "逐格蓝图（JSON 数组）：每项 offset [x,y,z]、block、可选 properties；block 为 minecraft:air 表示清空"),
+            Map.entry("file", "schematics 目录下的结构文件名"),
+            Map.entry("properties", "只放一格时要求的方块状态属性（JSON 对象），例如 {\"facing\":\"north\"}"),
+            Map.entry("quest", "任务书里任务的编号（16 位十六进制，FTB 任务）"),
+            Map.entry("requirement", "任务里一条要求的编号（任务书资料的条目页里给的）"),
+            Map.entry("reward", "一个任务自己的根奖励编号；奖池里的子奖励不是能单独领的奖励"),
+            Map.entry("choice", "领选择奖励时选哪个候选（能力提问时列出的候选编号）"),
+            Map.entry("blueprint", "机器蓝图（JSON 对象）：cells 逐格、parts 部件、installations 安装段、settings 装后设置、processes 声明工序"),
+            Map.entry("settings", "要改成的设置（JSON 对象）：键是这台机器认的设置项，值写字符串"),
+            Map.entry("collect", "做完要不要把出口的东西拿进背包"));
 
     private ParamNames() {}
 

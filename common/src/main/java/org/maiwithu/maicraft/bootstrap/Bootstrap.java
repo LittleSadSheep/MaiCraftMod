@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import java.io.IOException;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -88,6 +89,13 @@ import org.maiwithu.maicraft.kernel.goal.InMemoryGoalRunStore;
 import org.maiwithu.maicraft.kernel.goal.PlayerControlHandover;
 import org.maiwithu.maicraft.kernel.goal.RemembersPlaces;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
+import org.maiwithu.maicraft.behavior.recipe.GameRecipeTable;
+import org.maiwithu.maicraft.behavior.recipe.GameRecipes;
+import org.maiwithu.maicraft.behavior.recipe.RecipeLookup;
+import org.maiwithu.maicraft.game.world.ClientItemDescriptions;
+import org.maiwithu.maicraft.game.world.ReadsItemDescriptions;
+import org.maiwithu.maicraft.kernel.knowledge.KnowledgeSource;
+import org.maiwithu.maicraft.mcp.knowledge.ItemPages;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
 import org.maiwithu.maicraft.mcp.tool.EventsTool;
 import org.maiwithu.maicraft.mcp.tool.ExecuteTool;
@@ -203,12 +211,14 @@ public final class Bootstrap {
      * 控制循环的生存需求清单：按急迫程度登记，必须立刻处理的先登记，同样急时先插进来。
      * 战斗感观由外面递进来，与战斗能力共用一份；走到已接上，撤离与绕行用真的走路完成；
      * 饿了的临时任务吃随身食物：先换到主手，再原生按住吃完一口；有预算地弄吃的还没接。
+     * 夜晚的"今晚有没有床"与夜间休息由睡觉能力进世界时接上桥，接上前按弄不到床对待。
      */
     private static ControlLoop withSurvivalNeeds(
             TaskEventSink events, DeathDecisionHost deathDecisions,
             InteractionSender interactionSender, MenuActions menuActions, Interactions interactions,
             CombatSenses combatSenses, WalkTo walks,
-            EatSoonTask.FoodMoves foodMoves, ReadsFoodValues foods, LiveBurrow burrow, LiveCeilingDigs ceilings) {
+            EatSoonTask.FoodMoves foodMoves, ReadsFoodValues foods, LiveBurrow burrow, LiveCeilingDigs ceilings,
+            NightRestWiring nightWiring) {
         // 角色死亡这类循环自身的处境变化也从同一条事件流出去；死亡决策从挂载口交给目标运行表。
         return new ControlLoop(List.of(
                 new DigOutNeed(new SurvivalSituation.FromPlayer(),
@@ -219,7 +229,7 @@ public final class Bootstrap {
                 new SelfDefenseNeed(combatSenses, new LiveCombatMoves(walks), events),
                 new HungerNeed(new LiveHungerView(foods), foodMoves, events),
                 new NightfallNeed(new LiveNightView(combatSenses),
-                        LiveNightAndEdgeMoves.burrow(burrow, events)),
+                        LiveNightAndEdgeMoves.burrow(burrow, events), nightWiring, nightWiring),
                 new EdgeProximityNeed(new LiveEdgeView(),
                         LiveNightAndEdgeMoves.retreat(walks, events))), events, deathDecisions);
     }
@@ -281,6 +291,8 @@ public final class Bootstrap {
         private DefaultMenuActions menuActions;
         private DefaultInteractionSender interactionSender;
         private CombatSenses combatSenses;
+        /** 夜晚生存需求与睡觉能力之间的晚接：能力进世界登记后接上真实现。 */
+        private final NightRestWiring nightWiring = new NightRestWiring();
         private Interactions interactions;
         private ToolDispatcher tools;
         private GoalRunTable goals;
@@ -420,7 +432,8 @@ public final class Bootstrap {
             LiveBurrow burrow = new LiveBurrow(now, diggings, interactions, new ClientMovesToMainhand(now), walks,
                     protection);
             controlLoop = withSurvivalNeeds(taskEvents, deathDecisions, interactionSender, menuActions, interactions,
-                    combatSenses, walks, foodMoves, foods, burrow, new LiveCeilingDigs(diggings, protection));
+                    combatSenses, walks, foodMoves, foods, burrow, new LiveCeilingDigs(diggings, protection),
+                    nightWiring);
         }
 
         /**
@@ -440,6 +453,19 @@ public final class Bootstrap {
             }).orElse(false);
         }
 
+        // 查资料与查配方：配方先问联动登记的配方查看器，都答不了退到游戏配方表；
+        // 知识库 = 物品资料页（总入口）+ 联动模组登记的资料来源，物品资料页列各来源跟这件物品有关的条目。
+        private LookupTool lookupTool() {
+            Supplier<PlayerContext> now = () -> playerControl.activeContext().orElse(null);
+            RecipeLookup recipes = new RecipeLookup(compat.recipeViewers(), new GameRecipeTable(GameRecipes.fromPlayer(now)));
+            ReadsItemDescriptions items = new ClientItemDescriptions(now);
+            List<KnowledgeSource> modSources = compat.knowledgeSources();
+            List<KnowledgeSource> sources = new ArrayList<>();
+            sources.add(new ItemPages(items, recipes, modSources));
+            sources.addAll(modSources);
+            return new LookupTool(abilities, new KnowledgeLibrary(sources), recipes, items, clientWork);
+        }
+
         /** 建与服务端的会话，并在入服前登记客户端知道的操作清单。 */
         void connectSession(LinkTransport transport) {
             session = new ServerLinkSession(transport);
@@ -452,7 +478,7 @@ public final class Bootstrap {
             // 登记上来的物品来源进能力清单（进世界时建），知识来源现在就接进知识库。
             compat = CompatRegistry.load(compatCatalog, loader);
             tools = goalTools(abilities, goals, clientWork, taskEvents, chatEvents, () -> worldScope[0], recentCalls,
-                    new KnowledgeLibrary(compat.knowledgeSources()));
+                    lookupTool());
             try {
                 mcp = EmbeddedMcpService.startWithFallback(mcpConfig, 2, tools);
                 LOG.info("{} MCP 服务已启动（端口 {}；五个工具都已接上）",
@@ -503,7 +529,7 @@ public final class Bootstrap {
                 WorldScope scope = new WorldScope(minecraft, playerControl, blockScans, session,
                         subtitles, interactions, useKeyProjection, walks, combatSenses,
                         abilities, interactionSender, menuActions, instanceConfig, furnaceFuels,
-                        compat);
+                        compat, nightWiring, loader.configDirectory());
                 worldScope[0] = scope;
                 // 换了世界，任务事件流换一条新的，宿主手里的旧游标如实作废；再把这个世界上次没做完的目标
                 // 读回来，全部恢复为暂停，等 LLM 决定接不接着做。读回时的暂停事件进的是新的这条流。
@@ -606,12 +632,12 @@ public final class Bootstrap {
     private static ToolDispatcher goalTools(AbilityRegistry abilities, GoalRunTable goals,
                                             ClientTickWork clientWork, TaskEventLog taskEvents,
                                             ChatEventLog chatEvents, Supplier<WorldScope> worldScope,
-                                            RecentToolCalls recentCalls, KnowledgeLibrary knowledge) {
+                                            RecentToolCalls recentCalls, LookupTool lookup) {
         return new ToolDispatcher(List.of(
                 new ObserveTool(() -> worldScope.get() == null ? null : worldScope.get().scene(),
                         () -> worldScope.get() == null ? null : worldScope.get().memory(), goals, clientWork),
-                // 查资料接随包的游戏机制常识与联动模组登记的资料来源；联网的资料来源还没登记。
-                new LookupTool(abilities, knowledge),
+                // 查资料接随包的机制常识、物品资料页、联动模组登记的资料来源与配方；联网的资料来源还没登记。
+                lookup,
                 new ExecuteTool(abilities, goals, clientWork),
                 new GoalTool(goals, clientWork),
                 new EventsTool(taskEvents, chatEvents, goals, clientWork)), recentCalls);

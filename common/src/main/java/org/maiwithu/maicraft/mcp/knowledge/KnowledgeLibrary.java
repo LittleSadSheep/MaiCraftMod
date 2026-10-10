@@ -138,12 +138,16 @@ public final class KnowledgeLibrary {
     }
 
     /**
-     * 按 lookup 的 id 找一篇：给完整地址就按地址读；只给末段名（例如 food）时找末段对得上的那一篇，
-     * 和查能力时可以省掉 maicraft: 前缀一样。找不到、或末段名对上不止一篇时返回空，不拿相近的顶替。
+     * 按 lookup 的 id 找一篇：给完整地址就按地址读；给物品或方块的注册 ID（例如 create:mechanical_mixer）读它的物品资料页；
+     * 只给末段名（例如 food）时找末段对得上的那一篇，和查能力时可以省掉 maicraft: 前缀一样。
+     * 找不到、或末段名对上不止一篇时返回空，不拿相近的顶替。
      */
     public Optional<KnowledgeDocument> find(String id) {
         String wanted = id.strip();
-        if (!wanted.contains("://")) {
+        if (ItemPages.looksLikeItemId(wanted.toLowerCase(Locale.ROOT))) {
+            // LLM 手里常常只有物品 ID：直接读这件物品的资料页。
+            wanted = ItemPages.uri(wanted.toLowerCase(Locale.ROOT));
+        } else if (!wanted.contains("://")) {
             String suffix = "/" + wanted.toLowerCase(Locale.ROOT);
             List<String> uris = catalog().stream().map(KnowledgeDocument.Entry::uri)
                     .filter(uri -> uri.toLowerCase(Locale.ROOT).endsWith(suffix)).toList();
@@ -158,7 +162,25 @@ public final class KnowledgeLibrary {
     }
 
     /**
+     * 各登记来源此刻的现状，一个来源一句（例如"Create 思索：可用，312 个场景"）；资料目录最后附上，
+     * 让 LLM 知道这个实例能查到什么、为什么查不到。没登记的来源不出现：没列出来的就是这个实例没有。
+     */
+    public List<String> sourceStatuses() {
+        return sources.stream().map(KnowledgeSource::status).filter(status -> status != null && !status.isBlank()).toList();
+    }
+
+    /** 各来源里跟这件物品或方块有关的条目，按来源先后、同一地址只出一次；物品资料页的"相关资料"就是它。 */
+    public List<KnowledgeDocument.Entry> about(String registryId) {
+        Map<String, KnowledgeDocument.Entry> entries = new LinkedHashMap<>();
+        for (KnowledgeSource source : sources) {
+            source.entriesAbout(registryId).forEach(entry -> entries.putIfAbsent(entry.uri(), entry));
+        }
+        return List.copyOf(entries.values());
+    }
+
+    /**
      * 给 lookup 的关键词搜索，只比较目录元数据（标题、一句话说明、检索词），不读正文。
+     * 搜的是内置常识加各来源的全部搜索候选，不只是目录那几行：思索场景、任务书条目都在这里找得到。
      * LLM 常把关键词写成一句不带空格的话（"钻石在哪一层"），所以两头都比：问句里的词出现在条目里，
      * 或条目的标题、检索词出现在问句里，都算命中；命中越多排得越前，同分按地址排。
      */
@@ -166,7 +188,7 @@ public final class KnowledgeLibrary {
         String asked = query.strip().toLowerCase(Locale.ROOT);
         List<String> terms = Arrays.stream(asked.split("[\\s,，、;；。?？!！]+")).filter(term -> !term.isEmpty()).toList();
         Map<KnowledgeDocument.Entry, Integer> scores = new LinkedHashMap<>();
-        for (KnowledgeDocument.Entry entry : listing()) {
+        for (KnowledgeDocument.Entry entry : searchable(asked)) {
             String searchable = entry.searchable();
             int score = 0;
             for (String term : terms) {
@@ -182,6 +204,18 @@ public final class KnowledgeLibrary {
                         .thenComparing(hit -> hit.getKey().uri()))
                 .map(Map.Entry::getKey)
                 .toList();
+    }
+
+    // 搜索候选：内置常识（索引那一篇除外）加各来源按查询词给出的候选，同一地址只算一次。
+    private List<KnowledgeDocument.Entry> searchable(String query) {
+        Map<String, KnowledgeDocument.Entry> entries = new LinkedHashMap<>();
+        builtinEntries.values().stream().filter(entry -> !entry.uri().equals(INDEX))
+                .sorted(Comparator.comparing(KnowledgeDocument.Entry::uri))
+                .forEach(entry -> entries.putIfAbsent(entry.uri(), entry));
+        for (KnowledgeSource source : sources) {
+            source.searchCandidates(query).forEach(entry -> entries.putIfAbsent(entry.uri(), entry));
+        }
+        return List.copyOf(entries.values());
     }
 
     /** 各登记来源的状态并成一句；一个来源都没有时如实说不可用，空结果不冒充"没有这回事"。 */

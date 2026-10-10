@@ -79,3 +79,5 @@ allow mcp.transport.EmbeddedMcpService.handlePost 动词：处理 POST 请求
 allow mcp.transport.EmbeddedMcpService.handleDelete 动词：处理 DELETE 请求
 allow mcp.transport.EmbeddedMcpService.handleInitialize 动词：处理 MCP 的 initialize 请求
 allow behavior.navigation.baritone.BaritoneWalkRun.handleStall 动词：处理卡住
+
+term 打字机 比喻叫法；这个行为说「逐字打字」，动作类型是 TypeChatDraft

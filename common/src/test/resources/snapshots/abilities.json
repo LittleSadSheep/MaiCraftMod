@@ -54,10 +54,89 @@
         "mode": "controls_player"
       },
       {
+        "ability": "maicraft:sleep",
+        "summary": "找一张床躺下睡觉，白天会先备好今晚的床再报告睡不了",
+        "parameters": "",
+        "targets": [
+          "here",
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
         "ability": "maicraft:gather",
         "summary": "采掉、收获、捡起世界里指定的东西",
         "parameters": "block?: string, item?: string",
         "targets": [
+          "position",
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:design",
+        "summary": "画一张建筑图纸、改它、看它、投影到世界里预览，或导出成结构文件；图纸不绑地点",
+        "parameters": "operation: string, drawing?: object, design_id?: string, edits?: object, name?: string, page: integer = 0, rotation: integer = 0, format: string = json",
+        "targets": [
+          "here",
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "memory_only"
+      },
+      {
+        "ability": "maicraft:build",
+        "summary": "按图纸、逐格清单或单格在 target 处施工：缺料自己拿、挡着的挖掉、从底往上砌、够不着就垫临时方块再收走",
+        "parameters": "design_id?: string, cells?: array, block?: string, properties?: object, file?: string, rotation: integer = 0",
+        "targets": [
+          "here",
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:machine_inspect",
+        "summary": "看一台机器或一片机器区：组成、运行状态、进出口、挂在哪些网络上（只读）",
+        "parameters": "radius: integer = 16",
+        "targets": [
+          "here",
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "read_only"
+      },
+      {
+        "ability": "maicraft:machine_review",
+        "summary": "审阅一份机器蓝图：能建吗、工序做得了吗、要哪些材料、身上缺什么（只读）",
+        "parameters": "blueprint?: object, design_id?: string",
+        "targets": [],
+        "mode": "read_only"
+      },
+      {
+        "ability": "maicraft:machine_configure",
+        "summary": "改一台机器的设置：侧面、过滤、模式、样板（按已装模组的机器类型）",
+        "parameters": "settings: object",
+        "targets": [
+          "here",
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:machine_run",
+        "summary": "用一台机器做东西：备料、投料、开机、等产物、收产物",
+        "parameters": "item?: string, count: integer = 1, collect: boolean = true, max_seconds: integer = 300",
+        "targets": [
+          "here",
+          "landmark",
           "position",
           "seen"
         ],
@@ -103,6 +182,13 @@
         "mode": "controls_player"
       },
       {
+        "ability": "maicraft:find",
+        "summary": "在附近找某种方块、生物或结构，找到的每一样给一个观察编号，可以直接拿它下达别的指令",
+        "parameters": "block?: string, blocks?: array, entity?: array, structure?: string, count: integer = 1, radius?: integer",
+        "targets": [],
+        "mode": "controls_player"
+      },
+      {
         "ability": "maicraft:chat",
         "summary": "向游戏聊天发一句话（对全体玩家可见）",
         "parameters": "message: string",
@@ -125,6 +211,13 @@
         "ability": "maicraft:sequence",
         "summary": "按顺序做几件事：steps 里每一步是一个完整的目标",
         "parameters": "",
+        "targets": [],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:quest",
+        "summary": "对 FTB 任务书里的一个条目做一次动作：交物品、勾选、领奖",
+        "parameters": "operation: string, quest: string, requirement?: string, reward?: string, choice?: string",
         "targets": [],
         "mode": "controls_player"
       }
@@ -378,6 +471,21 @@
       "doc_resource": "assets/maicraft/abilities/deposit.md"
     },
     {
+      "ability": "maicraft:sleep",
+      "summary": "找一张床躺下睡觉，白天会先备好今晚的床再报告睡不了",
+      "parameters": [],
+      "targets": [
+        "here",
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/sleep.md"
+    },
+    {
       "ability": "maicraft:gather",
       "summary": "采掉、收获、捡起世界里指定的东西",
       "parameters": [
@@ -402,6 +510,260 @@
       "required_mods": [],
       "knowledge": [],
       "doc_resource": "assets/maicraft/abilities/gather.md"
+    },
+    {
+      "ability": "maicraft:design",
+      "summary": "画一张建筑图纸、改它、看它、投影到世界里预览，或导出成结构文件；图纸不绑地点",
+      "parameters": [
+        {
+          "name": "operation",
+          "type": "string",
+          "required": true,
+          "doc": "create 新建；update 按名合并修改成新的一版；inspect 看；preview 投到 target 预览；export 导出",
+          "choices": [
+            "create",
+            "update",
+            "inspect",
+            "preview",
+            "export"
+          ]
+        },
+        {
+          "name": "drawing",
+          "type": "object",
+          "required": false,
+          "doc": "create 用：图纸正文，格式看 lookup 的 building/design"
+        },
+        {
+          "name": "design_id",
+          "type": "string",
+          "required": false,
+          "doc": "update / inspect / preview / export 用：设计编号"
+        },
+        {
+          "name": "edits",
+          "type": "object",
+          "required": false,
+          "doc": "update 用：按名合并的修改，字段 objects、materials、components、remove_objects、remove_components、block_state_axes、overlap_policy、name"
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "doc": "inspect 用：看某个对象（展开路径也行）；看组件在名字前加 component:"
+        },
+        {
+          "name": "page",
+          "type": "integer",
+          "required": false,
+          "doc": "inspect 的页码，从 0 起；结果带 next_page 才有下一页",
+          "default": 0,
+          "min": 0,
+          "max": 1000000
+        },
+        {
+          "name": "rotation",
+          "type": "integer",
+          "required": false,
+          "doc": "preview 用：绕锚点转 0 / 90 / 180 / 270 度",
+          "default": 0,
+          "min": 0,
+          "max": 270
+        },
+        {
+          "name": "format",
+          "type": "string",
+          "required": false,
+          "doc": "export 用：写成 json（与 build 的 cells 同格式）或原版 nbt",
+          "default": "json",
+          "choices": [
+            "json",
+            "nbt"
+          ]
+        }
+      ],
+      "targets": [
+        "here",
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "memory_only",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/design.md"
+    },
+    {
+      "ability": "maicraft:build",
+      "summary": "按图纸、逐格清单或单格在 target 处施工：缺料自己拿、挡着的挖掉、从底往上砌、够不着就垫临时方块再收走",
+      "parameters": [
+        {
+          "name": "design_id",
+          "type": "string",
+          "required": false,
+          "doc": "按 design 存的图纸施工（三选一）"
+        },
+        {
+          "name": "cells",
+          "type": "array",
+          "required": false,
+          "doc": "逐格蓝图（三选一）：[{\"offset\":[x,y,z],\"block\":\"minecraft:stone\",\"properties\":{...}}]，block 为 minecraft:air 表示清空，水源、岩浆源表示倒桶"
+        },
+        {
+          "name": "block",
+          "type": "string",
+          "required": false,
+          "doc": "只放一格（三选一）：放在 target 那一格"
+        },
+        {
+          "name": "properties",
+          "type": "object",
+          "required": false,
+          "doc": "配 block：要求的方块状态属性，例如 {\"facing\":\"north\"}"
+        },
+        {
+          "name": "file",
+          "type": "string",
+          "required": false,
+          "doc": "schematics 目录下的结构文件名；还没接上"
+        },
+        {
+          "name": "rotation",
+          "type": "integer",
+          "required": false,
+          "doc": "绕锚点转 0 / 90 / 180 / 270 度；只配 design_id",
+          "default": 0,
+          "min": 0,
+          "max": 270
+        }
+      ],
+      "targets": [
+        "here",
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/build.md"
+    },
+    {
+      "ability": "maicraft:machine_inspect",
+      "summary": "看一台机器或一片机器区：组成、运行状态、进出口、挂在哪些网络上（只读）",
+      "parameters": [
+        {
+          "name": "radius",
+          "type": "integer",
+          "required": false,
+          "doc": "看多大范围，单位格；给了目标就是以它为中心，没给以角色为中心",
+          "default": 16,
+          "min": 1,
+          "max": 32
+        }
+      ],
+      "targets": [
+        "here",
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "read_only",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/machine_inspect.md"
+    },
+    {
+      "ability": "maicraft:machine_review",
+      "summary": "审阅一份机器蓝图：能建吗、工序做得了吗、要哪些材料、身上缺什么（只读）",
+      "parameters": [
+        {
+          "name": "blueprint",
+          "type": "object",
+          "required": false,
+          "doc": "机器蓝图的正文（JSON 对象）：cells 逐格、parts 部件、installations 安装段、settings 装后设置、processes 声明工序；和 design_id 二选一"
+        },
+        {
+          "name": "design_id",
+          "type": "string",
+          "required": false,
+          "doc": "已保存的设计编号：按它存的方块清单审（没有机器附加条目）"
+        }
+      ],
+      "targets": [],
+      "mode": "read_only",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/machine_review.md"
+    },
+    {
+      "ability": "maicraft:machine_configure",
+      "summary": "改一台机器的设置：侧面、过滤、模式、样板（按已装模组的机器类型）",
+      "parameters": [
+        {
+          "name": "settings",
+          "type": "object",
+          "required": true,
+          "doc": "要改成什么：键是这台机器认的设置项，值写字符串，例如 {\"side.north\": \"output:items\"}；能设哪些项先 lookup 查这台机器"
+        }
+      ],
+      "targets": [
+        "here",
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/machine_configure.md"
+    },
+    {
+      "ability": "maicraft:machine_run",
+      "summary": "用一台机器做东西：备料、投料、开机、等产物、收产物",
+      "parameters": [
+        {
+          "name": "item",
+          "type": "string",
+          "required": false,
+          "doc": "要做出什么；不给就只开机"
+        },
+        {
+          "name": "count",
+          "type": "integer",
+          "required": false,
+          "doc": "要做几件",
+          "default": 1,
+          "min": 1,
+          "max": 64
+        },
+        {
+          "name": "collect",
+          "type": "boolean",
+          "required": false,
+          "doc": "做完要不要把出口的东西拿进背包；不要就留在出口",
+          "default": true
+        },
+        {
+          "name": "max_seconds",
+          "type": "integer",
+          "required": false,
+          "doc": "最多等产物多久；到点没出够按部分完成收场",
+          "default": 300,
+          "min": 1,
+          "max": 3600
+        }
+      ],
+      "targets": [
+        "here",
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/machine_run.md"
     },
     {
       "ability": "maicraft:fight",
@@ -529,6 +891,58 @@
       "doc_resource": "assets/maicraft/abilities/travel.md"
     },
     {
+      "ability": "maicraft:find",
+      "summary": "在附近找某种方块、生物或结构，找到的每一样给一个观察编号，可以直接拿它下达别的指令",
+      "parameters": [
+        {
+          "name": "block",
+          "type": "string",
+          "required": false,
+          "doc": "找哪种方块（ID 或 # 标签）；与 blocks、entity、structure 三选一"
+        },
+        {
+          "name": "blocks",
+          "type": "array",
+          "required": false,
+          "doc": "找哪几种方块（ID 或 # 标签）；与 block、entity、structure 三选一"
+        },
+        {
+          "name": "entity",
+          "type": "array",
+          "required": false,
+          "doc": "找哪种实体（类型 ID，可给几种）；与 block、blocks、structure 三选一"
+        },
+        {
+          "name": "structure",
+          "type": "string",
+          "required": false,
+          "doc": "找哪种结构（命名空间 ID）；按记过的产地线索找，到附近还要亲眼确认；与 block、blocks、entity 三选一"
+        },
+        {
+          "name": "count",
+          "type": "integer",
+          "required": false,
+          "doc": "要找到几个，找满即收工",
+          "default": 1,
+          "min": 1,
+          "max": 32
+        },
+        {
+          "name": "radius",
+          "type": "integer",
+          "required": false,
+          "doc": "扫描半径，单位格；方块默认 48，实体默认 64；只扫已加载区",
+          "min": 4,
+          "max": 128
+        }
+      ],
+      "targets": [],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/find.md"
+    },
+    {
       "ability": "maicraft:chat",
       "summary": "向游戏聊天发一句话（对全体玩家可见）",
       "parameters": [
@@ -587,6 +1001,54 @@
       "required_mods": [],
       "knowledge": [],
       "doc_resource": "assets/maicraft/abilities/sequence.md"
+    },
+    {
+      "ability": "maicraft:quest",
+      "summary": "对 FTB 任务书里的一个条目做一次动作：交物品、勾选、领奖",
+      "parameters": [
+        {
+          "name": "operation",
+          "type": "string",
+          "required": true,
+          "doc": "submit 交物品 / confirm 手动勾选 / claim 领奖",
+          "choices": [
+            "submit",
+            "confirm",
+            "claim"
+          ]
+        },
+        {
+          "name": "quest",
+          "type": "string",
+          "required": true,
+          "doc": "任务书里任务的编号（16 位十六进制，lookup 的任务书资料里给的）"
+        },
+        {
+          "name": "requirement",
+          "type": "string",
+          "required": false,
+          "doc": "任务里那条要求的编号；submit、confirm 必填"
+        },
+        {
+          "name": "reward",
+          "type": "string",
+          "required": false,
+          "doc": "本任务的根奖励编号；claim 必填"
+        },
+        {
+          "name": "choice",
+          "type": "string",
+          "required": false,
+          "doc": "领选择奖励时选哪个候选（Mod 提问时列出的候选编号）"
+        }
+      ],
+      "targets": [],
+      "mode": "controls_player",
+      "required_mods": [
+        "ftbquests"
+      ],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/quest.md"
     }
   ]
 }
