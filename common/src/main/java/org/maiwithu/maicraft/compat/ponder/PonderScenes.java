@@ -125,7 +125,8 @@ final class PonderScenes implements KnowledgeSource {
         StringBuilder text = new StringBuilder("# 思索（Ponder）\n\n");
         text.append("共 ").append(counts.size()).append(" 件物品有思索场景，")
                 .append(counts.values().stream().mapToInt(Integer::intValue).sum()).append(" 个场景。")
-                .append("读一个场景：lookup(topic=\"knowledge\", id=\"").append(PREFIX).append("<命名空间>/<路径>/<序号>\")；")
+                .append("读一个场景：lookup(topic=\"knowledge\", id=\"").append(PREFIX).append("<命名空间>/<路径>/<序号>\")，")
+                .append("序号按注册顺序编，和思索界面里的先后不一定一致；")
                 .append("也可以先读物品资料页（id 给物品 ID），那里列着它的场景。\n");
         String namespace = "";
         for (Map.Entry<String, Integer> row : counts.entrySet()) {
@@ -182,6 +183,8 @@ final class PonderScenes implements KnowledgeSource {
         static String of(String uri, RegisteredScene scene, String where, SceneRecorder recorder) {
             StringBuilder text = new StringBuilder("# ").append(recorder.title()).append("（").append(where).append("）\n\n");
             text.append("演示结构：").append(scene.schematic()).append("；场景 ID：").append(recorder.sceneId()).append('\n');
+            // 序号按注册顺序编，思索界面会再按作者给的先后排：说清楚，免得拿界面上的第几个来对。
+            text.append("序号按注册顺序编，和思索界面里的先后不一定一致。\n");
             text.append("读法：思索里的创造马达、创造物品栏代表外部的动力与材料输入，不是要照搬的建材；")
                     .append("演示里的等待刻数是动画节奏，不是加工速度。\n");
             if (recorder.cutShort()) {
