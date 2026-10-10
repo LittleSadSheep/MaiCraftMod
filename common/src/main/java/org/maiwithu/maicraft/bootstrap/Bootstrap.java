@@ -457,7 +457,7 @@ public final class Bootstrap {
         // 知识库 = 物品资料页（总入口）+ 联动模组登记的资料来源，物品资料页列各来源跟这件物品有关的条目。
         private LookupTool lookupTool() {
             Supplier<PlayerContext> now = () -> playerControl.activeContext().orElse(null);
-            RecipeLookup recipes = new RecipeLookup(List.of(), new GameRecipeTable(GameRecipes.fromPlayer(now)));
+            RecipeLookup recipes = new RecipeLookup(compat.recipeViewers(), new GameRecipeTable(GameRecipes.fromPlayer(now)));
             ReadsItemDescriptions items = new ClientItemDescriptions(now);
             List<KnowledgeSource> modSources = compat.knowledgeSources();
             List<KnowledgeSource> sources = new ArrayList<>();
