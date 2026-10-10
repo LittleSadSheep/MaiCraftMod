@@ -17,6 +17,8 @@ import org.maiwithu.maicraft.ability.chat.ChatAbility;
 import org.maiwithu.maicraft.ability.design.DesignModule;
 import org.maiwithu.maicraft.ability.design.api.DesignStore;
 import org.maiwithu.maicraft.ability.chat.ReadsChatEcho;
+import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
+import org.maiwithu.maicraft.behavior.interaction.spi.DismantleTool;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.ability.deposit.DepositModule;
 import org.maiwithu.maicraft.ability.drop.DropModule;
@@ -262,9 +264,11 @@ public final class AbilityCatalog {
 
         // 建筑设计与施工：画图不控制角色，施工经玩家行为层的施工引擎，见 registerConstruction。
         DesignStore designs = new DesignStore(DesignStore.fileIn(deps.configDirectory()));
-        registerConstruction(registry, deps, designs, shared);
+        // 施工服务只拼一份：建造按图施工与机器施工走同一个施工引擎、同一套现场部件。
+        Function<Permissions, ConstructionServices> construction = constructionServices(deps, shared);
+        registerConstruction(registry, deps, designs, construction);
 
-        registerMachineAbilities(registry, deps, designs, shared);
+        registerMachineAbilities(registry, deps, designs, shared, construction);
 
         registerStandalone(registry, deps, shared.permission(), shared.playerServices());
         return registry;
@@ -332,7 +336,7 @@ public final class AbilityCatalog {
      * 没装联动也照常登记，认不出机器时如实说；配方查询与查资料是同一份顺序（EMI、JEI、游戏配方表）。
      */
     private static void registerMachineAbilities(AbilityRegistry registry, Deps deps, DesignStore designs,
-            Shared shared) {
+            Shared shared, Function<Permissions, ConstructionServices> construction) {
         RecipeLookup recipes = new RecipeLookup(deps.compat().recipeViewers(),
                 new GameRecipeTable(GameRecipes.fromPlayer(deps.context())));
         for (AbilityModule module : MachineAbilities.all(deps.context(),
@@ -341,7 +345,7 @@ public final class AbilityCatalog {
                 recipes, shared.innerNeeds(), shared.bringClose(), deps.interactions(),
                 new SceneSeenTargets(deps::scene), deps.memory(), deps.memory(),
                 deps.worldDocuments(), deps.worldKey(),
-                machineAnchors(deps), Optional.of(designs), machineConstruction(deps, shared))) {
+                anchors(deps), Optional.of(designs), construction)) {
             registry.register(module);
         }
     }
@@ -365,28 +369,28 @@ public final class AbilityCatalog {
      * 施工的许可按这次任务的来，缺料回到拿到物品的内需入口，挖与捡共用采集那一套。
      */
     private static void registerConstruction(AbilityRegistry registry, Deps deps, DesignStore designs,
-            Shared shared) {
-        AnchorResolver anchors = machineAnchors(deps);
+            Function<Permissions, ConstructionServices> construction) {
+        AnchorResolver anchors = anchors(deps);
         // design 导出与 build 导入用同一个 schematics 目录：导出的文件名直接当 file 参数喂回去。
         Path schematics = deps.configDirectory().resolveSibling("schematics");
         registry.register(new DesignModule(designs, anchors, deps.preview(), schematics));
-        registry.register(BuildModule.live(designs, anchors, schematics, deps.context(), deps.interactions(), deps.inputs(),
-                shared.bringClose(), shared.toMainhand(), shared.digging(), shared.innerNeeds(),
-                shared.permission(), deps.memory(), deps.walks(),
-                // 联动的连锁挖与扳手拆机器件进世界时带着同一份玩家行为建；没装就是空表，清障逐格挖。
-                deps.compat().breakAccelerators(shared.playerServices()),
-                deps.compat().dismantleTools(shared.playerServices())));
+        registry.register(new BuildModule(designs, anchors, schematics, construction));
     }
 
     /** 锚点解析：观察编号查场景、地标查世界记忆、脚下与坐标直接用，省 y 取地表；建造与机器施工共用。 */
-    private static AnchorResolver machineAnchors(Deps deps) {
+    private static AnchorResolver anchors(Deps deps) {
         return new AnchorResolver(new SceneSeenTargets(deps::scene), deps.memory(),
                 deps.characterPosition(), new LiveGroundHeights(deps.context()));
     }
 
-    /** 施工服务按每次任务的许可拼一份：现场、靠近、放置、点击、挖掘、内需、备手、许可、记账、走到，
-     * 联动的连锁挖与扳手拆机器件也在内；与建造的施工同一套。 */
-    private static Function<Permissions, ConstructionServices> machineConstruction(Deps deps, Shared shared) {
+    /**
+     * 施工服务按每次任务的许可拼一份：现场、靠近、放置、点击、挖掘、内需、备手、许可、记账、走到，
+     * 联动的连锁挖与扳手拆机器件也在内；建造与机器施工都用这一个。联动的两样进世界时建一次，
+     * 每次施工共用，没装就是空表、清障逐格挖。
+     */
+    private static Function<Permissions, ConstructionServices> constructionServices(Deps deps, Shared shared) {
+        List<BreakAccelerator> accelerators = deps.compat().breakAccelerators(shared.playerServices());
+        List<DismantleTool> dismantlers = deps.compat().dismantleTools(shared.playerServices());
         return permissions -> {
             LiveSite site = new LiveSite(deps.context());
             return new ConstructionServices(site, shared.bringClose(), new LivePlacements(deps.context()),
@@ -394,8 +398,7 @@ public final class AbilityCatalog {
                     shared.digging(), shared.innerNeeds(), new LiveHolds(shared.toMainhand(), deps.context()),
                     new PermissionGuards(() -> shared.permission(), permissions, site::dimension),
                     new MemoryLedger(deps.memory(), site::dimension), new LiveTravels(deps.walks()),
-                    deps.compat().breakAccelerators(shared.playerServices()),
-                    deps.compat().dismantleTools(shared.playerServices()));
+                    accelerators, dismantlers);
         };
     }
 

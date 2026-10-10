@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.build;
 
-import org.maiwithu.maicraft.behavior.interaction.spi.DismantleTool;
-import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import java.io.IOException;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
@@ -10,37 +8,19 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
-import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.Rotation;
 import org.maiwithu.maicraft.ability.design.api.BuildingDesign;
 import org.maiwithu.maicraft.ability.design.api.DesignCompiler;
 import org.maiwithu.maicraft.ability.design.api.DesignStore;
-import org.maiwithu.maicraft.behavior.acquire.DigsBlocks;
-import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
-import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.construction.AnchorResolver;
 import org.maiwithu.maicraft.behavior.construction.Blueprint;
 import org.maiwithu.maicraft.behavior.construction.ConstructionInput;
 import org.maiwithu.maicraft.behavior.construction.ConstructionServices;
 import org.maiwithu.maicraft.behavior.construction.ConstructionTask;
-import org.maiwithu.maicraft.behavior.construction.LiveClicks;
-import org.maiwithu.maicraft.behavior.construction.LiveHolds;
-import org.maiwithu.maicraft.behavior.construction.LivePlacements;
-import org.maiwithu.maicraft.behavior.construction.LiveSite;
-import org.maiwithu.maicraft.behavior.construction.LiveTravels;
-import org.maiwithu.maicraft.behavior.construction.MemoryLedger;
-import org.maiwithu.maicraft.behavior.construction.PermissionGuards;
 import org.maiwithu.maicraft.behavior.construction.PlannedCell;
-import org.maiwithu.maicraft.behavior.interaction.Interactions;
-import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
-import org.maiwithu.maicraft.behavior.navigation.WalkTo;
-import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
-import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.ModIdentity;
-import org.maiwithu.maicraft.game.player.InputDriver;
-import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilitySpec;
@@ -99,19 +79,6 @@ public final class BuildModule implements AbilityModule {
         this.anchors = Objects.requireNonNull(anchors, "anchors");
         this.schematics = Objects.requireNonNull(schematics, "schematics");
         this.services = Objects.requireNonNull(services, "services");
-    }
-
-    /** 生产用：把角色上下文与各玩家行为模型拼成施工服务，许可按每次任务的来。 */
-    public static BuildModule live(DesignStore designs, AnchorResolver anchors, Path schematics, Supplier<PlayerContext> context,
-            Interactions interactions, InputDriver inputs, BringsPlayerClose close, ClientMovesToMainhand toMainhand,
-            DigsBlocks digs, ItemNeeds needs, PermissionCheck permission, WorldMemory memory, WalkTo walks,
-            List<BreakAccelerator> accelerators, List<DismantleTool> dismantlers) {
-        return new BuildModule(designs, anchors, schematics, permissions -> {
-            LiveSite site = new LiveSite(context);
-            return new ConstructionServices(site, close, new LivePlacements(context), new LiveClicks(interactions, inputs, context),
-                    digs, needs, new LiveHolds(toMainhand, context), new PermissionGuards(() -> permission, permissions, site::dimension),
-                    new MemoryLedger(memory, site::dimension), new LiveTravels(walks), accelerators, dismantlers);
-        });
     }
 
     @Override public AbilitySpec spec() {
