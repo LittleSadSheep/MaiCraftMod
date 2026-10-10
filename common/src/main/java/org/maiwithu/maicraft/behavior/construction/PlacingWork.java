@@ -22,6 +22,7 @@ import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -46,7 +47,7 @@ final class PlacingWork extends ConstructionWork {
     private int consumed;
     private boolean progressThisRound;
 
-    PlacingWork(ConstructionServices services, ConstructionSite site, Records records, Permissions permissions, String purpose,
+    PlacingWork(ConstructionServices services, ConstructionSite site, TaskRecords records, Permissions permissions, String purpose,
                 List<PlannedCell> cells) {
         super(services, site, records);
         this.permissions = permissions;

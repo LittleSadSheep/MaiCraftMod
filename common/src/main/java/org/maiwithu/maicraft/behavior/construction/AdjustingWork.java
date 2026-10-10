@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -32,7 +33,7 @@ final class AdjustingWork extends ConstructionWork {
     private Step step;
     private ConstructionSeams.Clicks.Click click;
 
-    AdjustingWork(ConstructionServices services, ConstructionSite site, Records records, Permissions permissions, List<PlannedCell> doors) {
+    AdjustingWork(ConstructionServices services, ConstructionSite site, TaskRecords records, Permissions permissions, List<PlannedCell> doors) {
         super(services, site, records);
         this.permissions = permissions;
         this.queue = new ArrayDeque<>(doors);

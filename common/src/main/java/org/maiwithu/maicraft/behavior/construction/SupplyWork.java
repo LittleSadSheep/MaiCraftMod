@@ -9,6 +9,7 @@ import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.WantedItem;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -22,7 +23,7 @@ final class SupplyWork extends ConstructionWork {
     private final Deque<Map.Entry<String, Integer>> wanted;
     private Map.Entry<String, Integer> fetching;
 
-    SupplyWork(ConstructionServices services, ConstructionSite site, Records records, Permissions permissions, String purpose,
+    SupplyWork(ConstructionServices services, ConstructionSite site, TaskRecords records, Permissions permissions, String purpose,
                Map<String, Integer> missing) {
         super(services, site, records);
         this.permissions = permissions;

@@ -10,7 +10,6 @@ import java.util.Set;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
-import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.ResultDetails;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
@@ -35,19 +34,6 @@ public final class ConstructionTask extends PhasedTask<ConstructionTask.Phase> {
     private final ConstructionInput input;
     private final ConstructionServices services;
     private final ConstructionSite site;
-    private final ConstructionWork.Records records = new ConstructionWork.Records() {
-        @Override public void change(Change change) {
-            recordChange(change);
-        }
-
-        @Override public void unconfirmed(Change change) {
-            recordUnconfirmed(change);
-        }
-
-        @Override public void attempt(String tried, String whatHappened) {
-            recordAttempt(tried, whatHappened);
-        }
-    };
     private Action prepared;
     private boolean started;
     private boolean travelled;
@@ -112,21 +98,21 @@ public final class ConstructionTask extends PhasedTask<ConstructionTask.Phase> {
     private Next<Phase> toSupply() {
         Map<String, Integer> missing = site.missingMaterials(services.site());
         if (missing.isEmpty() || services.needs() == null) return toClear();
-        prepared = new SupplyWork(services, site, records, input.permissions(), input.purpose(), missing);
+        prepared = new SupplyWork(services, site, records(), input.permissions(), input.purpose(), missing);
         return Next.go(Phase.SUPPLY, "缺 " + missing.size() + " 种料，先去拿");
     }
 
     private Next<Phase> toClear() {
         List<PlannedCell> cells = site.pendingClear(services.site());
         if (cells.isEmpty()) return toPlace();
-        prepared = new ClearingWork(services, site, records, input.permissions(), cells);
+        prepared = new ClearingWork(services, site, records(), input.permissions(), cells);
         return Next.go(Phase.CLEAR, "有 " + cells.size() + " 格挡着，先清掉");
     }
 
     private Next<Phase> toPlace() {
         List<PlannedCell> cells = site.pendingPlace();
         if (cells.isEmpty()) return toPour();
-        prepared = new PlacingWork(services, site, records, input.permissions(), input.purpose(), cells);
+        prepared = new PlacingWork(services, site, records(), input.permissions(), input.purpose(), cells);
         return Next.go(Phase.PLACE, "开始砌，还有 " + cells.size() + " 格");
     }
 
@@ -134,7 +120,7 @@ public final class ConstructionTask extends PhasedTask<ConstructionTask.Phase> {
         List<BlockPos> strays = site.straySources(services.site());
         List<PlannedCell> pours = site.pendingPour();
         if (strays.isEmpty() && pours.isEmpty()) return toVerify();
-        prepared = new PouringWork(services, site, records, input.permissions(), strays, pours);
+        prepared = new PouringWork(services, site, records(), input.permissions(), strays, pours);
         return Next.go(Phase.POUR, "实心格砌完了，处理流体");
     }
 
@@ -154,7 +140,7 @@ public final class ConstructionTask extends PhasedTask<ConstructionTask.Phase> {
         }
         if (!doors.isEmpty() && repairRounds < MAX_REPAIR_ROUNDS) {
             repairRounds++;
-            prepared = new AdjustingWork(services, site, records, input.permissions(), doors);
+            prepared = new AdjustingWork(services, site, records(), input.permissions(), doors);
             return Next.go(Phase.VERIFY, "有 " + doors.size() + " 扇门开关不对，去按一下");
         }
         if (!needing.isEmpty() && repairRounds < MAX_REPAIR_ROUNDS && !needing.equals(lastNeedingWork)) {
@@ -178,7 +164,7 @@ public final class ConstructionTask extends PhasedTask<ConstructionTask.Phase> {
 
     private Next<Phase> toCleanup() {
         if (services.ledger().temporaries().isEmpty()) return Next.go(Phase.CLEANUP, "没有临时方块要收");
-        cleanup = new CleanupWork(services, site, records, input.permissions());
+        cleanup = new CleanupWork(services, site, records(), input.permissions());
         prepared = cleanup;
         return Next.go(Phase.CLEANUP, "收回临时方块");
     }

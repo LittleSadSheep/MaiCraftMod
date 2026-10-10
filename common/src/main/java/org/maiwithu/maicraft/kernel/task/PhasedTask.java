@@ -47,6 +47,20 @@ public abstract class PhasedTask<P extends Enum<P>> implements Task {
     private final List<Change> changes = new ArrayList<>();
     private final List<Change> unconfirmed = new ArrayList<>();
     private final List<Attempt> attempts = new ArrayList<>();
+    /** 交给动作的记账口：动作记的和任务自己记的进同一份结果。 */
+    private final TaskRecords records = new TaskRecords() {
+        @Override public void change(Change change) {
+            recordChange(change);
+        }
+
+        @Override public void unconfirmed(Change change) {
+            recordUnconfirmed(change);
+        }
+
+        @Override public void attempt(String tried, String whatHappened) {
+            recordAttempt(tried, whatHappened);
+        }
+    };
     /** 最近几次换阶段，先发生的在前；只给面板看，不参与判断。 */
     private final Deque<TaskProgress.PhaseChange> recentPhases = new ArrayDeque<>();
     private P phase;
@@ -142,6 +156,14 @@ public abstract class PhasedTask<P extends Enum<P>> implements Task {
     /** 记下一次试过的办法及结果，结束时进入结果的 attempts。 */
     protected final void recordAttempt(String tried, String whatHappened) {
         attempts.add(new Attempt(tried, whatHappened));
+    }
+
+    /**
+     * 本任务的记账口，交给它组合的动作：动作途中确认的变化、没能确认的交互、试过的办法，
+     * 和任务自己记的一样进这次的结果。例如拿东西途中腾地方丢了什么，记在发起拿东西的任务里。
+     */
+    protected final TaskRecords records() {
+        return records;
     }
 
     @Override

@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -38,7 +39,7 @@ final class CleanupWork extends ConstructionWork {
     private Step step;
     private long lastRemovalTick = Long.MIN_VALUE;
 
-    CleanupWork(ConstructionServices services, ConstructionSite site, Records records, Permissions permissions) {
+    CleanupWork(ConstructionServices services, ConstructionSite site, TaskRecords records, Permissions permissions) {
         super(services, site, records);
         this.permissions = permissions;
     }

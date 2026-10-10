@@ -15,6 +15,7 @@ import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -36,7 +37,7 @@ final class PouringWork extends ConstructionWork {
     private BlockState before;
     private ConstructionSeams.Clicks.Click click;
 
-    PouringWork(ConstructionServices services, ConstructionSite site, Records records, Permissions permissions,
+    PouringWork(ConstructionServices services, ConstructionSite site, TaskRecords records, Permissions permissions,
                 List<BlockPos> strays, List<PlannedCell> pours) {
         super(services, site, records);
         this.permissions = permissions;

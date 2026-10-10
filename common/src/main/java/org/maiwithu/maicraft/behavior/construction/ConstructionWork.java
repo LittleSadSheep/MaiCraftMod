@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.construction;
 
-import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -13,22 +13,14 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  */
 abstract class ConstructionWork implements Action {
 
-    /** 任务给的记账口：确认发生的变化、没能确认的交互、试过的办法。 */
-    interface Records {
-        void change(Change change);
-
-        void unconfirmed(Change change);
-
-        void attempt(String tried, String whatHappened);
-    }
-
     protected final ConstructionServices services;
     protected final ConstructionSite site;
-    protected final Records records;
+    /** 任务给的记账口：确认发生的变化、没能确认的交互、试过的办法。 */
+    protected final TaskRecords records;
     private Action current;
     private String doing = "准备";
 
-    ConstructionWork(ConstructionServices services, ConstructionSite site, Records records) {
+    ConstructionWork(ConstructionServices services, ConstructionSite site, TaskRecords records) {
         this.services = services;
         this.site = site;
         this.records = records;

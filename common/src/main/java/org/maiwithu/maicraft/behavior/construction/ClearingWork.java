@@ -20,6 +20,7 @@ import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -39,7 +40,7 @@ final class ClearingWork extends ConstructionWork {
     /** 连锁挖这一批会一起挖的格和挖之前各自是什么；松键后逐格复查用。 */
     private Map<BlockPos, String> batch = Map.of();
 
-    ClearingWork(ConstructionServices services, ConstructionSite site, Records records, Permissions permissions, List<PlannedCell> cells) {
+    ClearingWork(ConstructionServices services, ConstructionSite site, TaskRecords records, Permissions permissions, List<PlannedCell> cells) {
         super(services, site, records);
         this.permissions = permissions;
         this.queue = new ArrayDeque<>(cells);
