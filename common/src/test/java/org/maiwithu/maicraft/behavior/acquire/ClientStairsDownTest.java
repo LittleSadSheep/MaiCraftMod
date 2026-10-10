@@ -223,6 +223,18 @@ class ClientStairsDownTest {
     }
 
     @Test
+    void 挖到一半被打断_回来按此刻站的位置重新看下一级() {
+        // 夜里被叫去睡觉、躲怪，回来时人不在原来那一级上：不对着原来那几格接着挖。
+        Action action = stairs().digDown(type -> type.equals("minecraft:stone"), 1, Permissions.DEFAULT);
+        for (long t = 0; digs.dug.isEmpty(); t++) action.tick(new Tick(t));
+        action.pause();
+        world.feet = new BlockPos(10, 64, 0);
+        for (long t = 100; digs.dug.size() < 2; t++) action.tick(new Tick(t));
+
+        assertEquals(new BlockPos(10, 63, -1), digs.dug.get(1));
+    }
+
+    @Test
     void 一直挖不到石头_挖到上限如实失败() {
         // 地下全是沙子（恶地、沙漠那种）：挖了上限级数还没见到石头。
         for (int y = 0; y < 64; y++) {

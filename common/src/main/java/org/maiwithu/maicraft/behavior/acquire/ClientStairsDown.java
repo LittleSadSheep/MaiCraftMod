@@ -147,6 +147,8 @@ public final class ClientStairsDown implements DigsStairsDown {
         private int steps;
         private Set<Integer> dropsBefore = Set.of();
         private ActionStatus ended;
+        /** 被打断过（夜里去睡觉、躲怪）：回来时人可能已经不在原来那一级上。 */
+        private boolean paused;
 
         Digging(Predicate<String> yields, int wantedCells, Permissions permissions) {
             this.yields = yields;
@@ -156,6 +158,13 @@ public final class ClientStairsDown implements DigsStairsDown {
 
         @Override public ActionStatus tick(TickContext context) {
             if (ended != null) return ended;
+            // 被打断后回来：手上挖到一半、走到一半的都收掉，按此刻站的位置重新看下一级，
+            // 不对着原来那几格接着挖（人可能被带走了，够不着也看不见）。
+            if (paused) {
+                paused = false;
+                closeStep();
+                stage = Stage.LOOK;
+            }
             if (step != null) {
                 ActionStatus status = step.tick(context);
                 if (status instanceof ActionStatus.Running) return status;
@@ -316,6 +325,7 @@ public final class ClientStairsDown implements DigsStairsDown {
 
         @Override public void pause() {
             if (step != null) step.pause();
+            paused = true;
         }
 
         @Override public void close() {
