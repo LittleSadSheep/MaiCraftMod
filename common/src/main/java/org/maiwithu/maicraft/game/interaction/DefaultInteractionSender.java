@@ -101,9 +101,14 @@ public final class DefaultInteractionSender implements InteractionSender {
     @Override public boolean hasPendingMenuTransaction() { return activeProtocolUsesMenu && active != null && !active.terminal(); }
 
     // 持用按键只能绑定仍是本端口当前动作的确认；新动作接管后，旧吃饭任务不能继续按住或松开。
+    // 刷子这类由右键方块开始的持用也算：右键确认生效后，这次按住仍归提交方，直到别的动作接管。
     public boolean ownsItemUse(PendingInteraction pending) {
-        return pending != null && pending == active && pending.kind() == PendingInteraction.Kind.USE_ITEM
-                && (!pending.terminal() || pending.status() == PendingInteraction.Status.CONFIRMED_APPLIED);
+        if (pending == null || pending != active) return false;
+        if (pending.kind() == PendingInteraction.Kind.USE_ITEM) {
+            return !pending.terminal() || pending.status() == PendingInteraction.Status.CONFIRMED_APPLIED;
+        }
+        return pending.kind() == PendingInteraction.Kind.USE_BLOCK
+                && pending.status() == PendingInteraction.Status.CONFIRMED_APPLIED;
     }
 
     @Override
@@ -266,8 +271,13 @@ public final class DefaultInteractionSender implements InteractionSender {
     @Override
     public PendingInteraction releaseUsingItem(PlayerContext context, PendingInteraction pending) {
         // 持续吃东西、拉弓等需要实际松开使用；新的“已停止使用”确认接替原来的使用确认。
+        // 松开认两种起点：直接按住手中物品，或右键方块开始的按住（刷子刷可疑的沙子、沙砾）。
         claimSubmission(context);
-        requireActive(pending, PendingInteraction.Kind.USE_ITEM);
+        if (pending == null || pending != active && pending != auxiliary
+                || pending.kind() != PendingInteraction.Kind.USE_ITEM
+                        && pending.kind() != PendingInteraction.Kind.USE_BLOCK) {
+            throw new IllegalArgumentException("the pending interaction is not the active native action");
+        }
         PendingInteraction release = oneShot(
                 PendingInteraction.Kind.RELEASE_ITEM,
                 context,

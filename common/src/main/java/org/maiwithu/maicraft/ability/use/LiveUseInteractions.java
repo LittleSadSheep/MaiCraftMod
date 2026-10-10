@@ -45,6 +45,10 @@ import org.maiwithu.maicraft.kernel.result.Problem;
  */
 final class LiveUseInteractions implements UseSeams.BuildsInteraction {
 
+    /** 对格按住刷的按住上限。F 游戏事实：一次连续按住约 100 刻就能刷完（十下、每十刻一下），
+     * 上限是"反复被打断还刷不完"的卡住兜底，不是计时猜刷没刷完——做成以方块状态变化为准。 */
+    private static final int BRUSH_HOLD_LIMIT_TICKS = 600;
+
     private final Interactions interactions;
     private final Supplier<PlayerContext> context;
 
@@ -66,6 +70,11 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
         int menuBefore = player.containerMenu.containerId;
         if (target == null) {
             // 只对手上的东西用（喝药水、吹山羊角）：按住到物品自己用完，手上的东西变了就算生效。
+            // 刷子没有对着空气的使用方式，不给目标没法刷。
+            if (gesture == ItemUseAim.Gesture.BRUSH) {
+                return new UseSeams.Built.CannotAim(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+                        "刷子要对着方块刷（可疑的沙子、沙砾），不给目标没法刷", null));
+            }
             SustainedUse use = interactions.useHeldItem(InteractionHand.MAIN_HAND,
                     InteractionConfirmation.heldItemChanged(InteractionHand.MAIN_HAND, handBefore), 0);
             return new UseSeams.Built.Ready(use, use::result, gesture, held, menuBefore, null);
@@ -102,6 +111,13 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
         if (writesSign) {
             AimAndInteract use = interactions.useBlock(cell, InteractionConfirmation.signEditorScreenOpened());
             return new UseSeams.Built.Ready(use, use::result, gesture, held, menuBefore, null);
+        }
+        // 刷子：右键一下只是开始，之后一直按住直到那一格变回普通方块（原版把可疑方块整格换掉）。
+        // 做成以方块状态变化为准，不靠计时猜；刷出的东西由任务的捡起阶段收回背包。
+        if (gesture == ItemUseAim.Gesture.BRUSH) {
+            SustainedUse brush = interactions.useBlockSustained(cell,
+                    InteractionConfirmation.blockChangedNotAir(cell, state), BRUSH_HOLD_LIMIT_TICKS);
+            return new UseSeams.Built.Ready(brush, brush::result, gesture, held, menuBefore, null);
         }
         Optional<ItemUseAim.Aim> planned = ItemUseAim.aim(gesture, cell, natureOf(state),
                 aroundOf(level, player, cell, state));

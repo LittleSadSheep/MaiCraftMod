@@ -137,16 +137,18 @@ public final class ItemUseAim {
         return new Aim(source, source, Confirmation.HAND_BECOMES_FULL_BUCKET, "舀流体源格 " + source.toShortString());
     }
 
-    /**
-     * 按手势和目标格的样子给出瞄准决定；给不出时为空，调用方换站位或换目标。
+    /** 按手势和目标格的样子给出瞄准决定；给不出时为空，调用方换站位或换目标。
      *
      * <p>给不出有了几类原因：空桶对着的既不是源格也不需要找源格；锄和锹要的上方敞开不满足；
      * 倒流体、点火的每个可能落格都会落到自己身上——这最后一种由靠近换站位解决，不在这里硬点。
      */
     public static Optional<Aim> aim(Gesture gesture, BlockPos target, CellNature nature, Around around) {
         return switch (gesture) {
-            case EMPTY_HAND, USE_TARGET, BRUSH ->
+            // 刷子点目标本身，按住直到刷完；做成以那一格变回普通方块为准。
+            case EMPTY_HAND, USE_TARGET ->
                 Optional.of(new Aim(target, target, Confirmation.TARGET_OR_HAND_CHANGES, "对目标本身用"));
+            case BRUSH ->
+                Optional.of(new Aim(target, target, Confirmation.BLOCK_TURNS_INTO, "点目标本身，按住直到刷完"));
             case SCOOP -> aimScoop(nature, target);
             case POUR -> aimEffect(gesture, target, nature, around, Confirmation.HAND_EMPTIES_OR_FLUID_APPEARS);
             case IGNITE -> around.ignitesItself()

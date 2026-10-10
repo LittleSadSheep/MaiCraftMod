@@ -73,6 +73,22 @@ public interface InteractionConfirmation {
                 : context.level().getBlockState(frozen).equals(before) ? Verdict.PENDING : Verdict.APPLIED;
     }
 
+    /**
+     * 可疑的沙子、沙砾刷完的判据：那一格的方块变了样，且不是变成空气。
+     * 原版刷完时把可疑方块整格替换成普通的沙子、沙砾，刷出的东西掉在旁边；
+     * 被人挖掉是变成空气，不算刷完，一直等不到的结局由按住动作按目标消失收场。
+     */
+    public static InteractionConfirmation blockChangedNotAir(BlockPos target, BlockState before) {
+        BlockPos frozen = target.immutable();
+        return context -> !context.level().isLoaded(frozen) ? Verdict.PENDING
+                : brushedRevealVerdict(before, context.level().getBlockState(frozen));
+    }
+
+    /** 刷完判定的判定表（离线可测）：变了且不是变成空气才算刷完。 */
+    static Verdict brushedRevealVerdict(BlockState before, BlockState live) {
+        return live.equals(before) || live.isAir() ? Verdict.PENDING : Verdict.APPLIED;
+    }
+
     public static InteractionConfirmation menuChanged(int beforeContainerId) {
         return context -> context.localPlayer().containerMenu.containerId == beforeContainerId
                 ? Verdict.PENDING : Verdict.APPLIED;

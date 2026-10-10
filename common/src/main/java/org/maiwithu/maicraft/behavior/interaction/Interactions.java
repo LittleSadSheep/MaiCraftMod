@@ -70,4 +70,18 @@ public final class Interactions {
     public SustainedUse useHeldItem(InteractionHand hand, InteractionConfirmation done, int maxHoldTicks) {
         return new SustainedUse(hand, done, heldProjection, maxHoldTicks, FirstPersonScene::of);
     }
+
+    /**
+     * 对着一格方块按住使用：刷子刷可疑的沙子、沙砾这类对着方块一直按住的手势。
+     * 动作自己完成瞄准与开始确认；按住期间保持对准，被原版松开就重新瞄准再点，
+     * 做成与否按给定的确认条件核对（刷子：那一格变回普通方块）。
+     *
+     * @param cell         要对着按住的那一格
+     * @param done         什么时候算做成
+     * @param maxHoldTicks 最多按住多少刻（含重新接上的按住）；到期按没能做成如实收场
+     */
+    public SustainedUse useBlockSustained(BlockPos cell, InteractionConfirmation done, int maxHoldTicks) {
+        return new SustainedUse(InteractionHand.MAIN_HAND, done, heldProjection, maxHoldTicks,
+                FirstPersonScene::of, cell);
+    }
 }

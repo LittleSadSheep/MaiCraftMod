@@ -33,6 +33,11 @@ final class UseDecider {
         if (!hasTarget && block == null && entity == null && item == null) {
             problems.add("target、block、entity、item 一个都没给：不知道要对什么用");
         }
+        // 刷子没有对着空气的使用方式（原版只对可疑的沙子、沙砾起作用）：
+        // 只给 item 不给目标时不知道对着哪里刷，计划阶段一次说清。
+        if ("minecraft:brush".equals(lower(item)) && !hasTarget && block == null && entity == null) {
+            problems.add("刷子要对着方块刷（可疑的沙子、沙砾），只给 item 不知道对着哪里刷");
+        }
         return problems;
     }
 
@@ -44,23 +49,16 @@ final class UseDecider {
     /** 计划阶段的一次拒绝：参数怎么改能继续。 */
     record Rejection(String message, String suggestion) {}
 
-    /**
-     * 给了不接的物品时在计划阶段拒绝：凭时机松手的指向对应的专门能力；
-     * 刷子要对着方块一直按住，这一路的按住还没接上，如实说做不了，不点一下就冒充刷过。
-     */
+    /** 给了不接的物品时在计划阶段拒绝：凭时机松手的指向对应的专门能力。刷子是对格按住的手势，正常接。 */
     static Optional<Rejection> rejectedItem(String item) {
         if (item == null) {
             return Optional.empty();
         }
-        String id = item.toLowerCase(Locale.ROOT);
+        String id = lower(item);
         if (TIMED_RELEASE_ITEMS.contains(id)) {
             return Optional.of(new Rejection(
                     item + " 要凭时机松手（弓、弩、三叉戟、盾牌、望远镜、钓竿），use 不接受",
                     id.endsWith("fishing_rod") ? "钓鱼用 fish" : "打怪用 fight"));
-        }
-        if (id.equals("minecraft:brush")) {
-            return Optional.of(new Rejection("刷子要对着方块一直按住直到刷完，use 还接不了这种按法",
-                    "可疑的沙子、沙砾先别用 use 刷"));
         }
         return Optional.empty();
     }
@@ -93,6 +91,10 @@ final class UseDecider {
             case "minecraft:overworld" -> "主世界";
             default -> dimension;
         };
+    }
+
+    private static String lower(String id) {
+        return id == null ? null : id.toLowerCase(Locale.ROOT);
     }
 
     /** 交互结论结算后的走向。 */

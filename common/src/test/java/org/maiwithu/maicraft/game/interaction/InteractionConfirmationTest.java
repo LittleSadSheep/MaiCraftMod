@@ -4,6 +4,11 @@ package org.maiwithu.maicraft.game.interaction;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import net.minecraft.SharedConstants;
+import net.minecraft.server.Bootstrap;
+import net.minecraft.world.level.block.Blocks;
+
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Assertions;
 
@@ -13,6 +18,27 @@ import org.junit.jupiter.api.Assertions;
  * 挖掉含水方块留下原液体的替换判定表依赖注册的原版方块，放到带离线引导的实机验收里核。
  */
 class InteractionConfirmationTest {
+
+    @BeforeAll
+    static void bootMinecraft() {
+        // 刷完判定表要比较真实方块状态，先把原版注册表备好。
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+    }
+
+    @Test
+    void brushedRevealWaitsForTheSuspiciousLookAndPassesOnThePlainBlock() {
+        // 还是可疑的沙子：接着刷，不算做成。
+        var suspicious = Blocks.SUSPICIOUS_SAND.defaultBlockState();
+        assertEquals(InteractionConfirmation.Verdict.PENDING,
+                InteractionConfirmation.brushedRevealVerdict(suspicious, suspicious));
+        // 刷完：整格换成普通沙子，算做成。
+        assertEquals(InteractionConfirmation.Verdict.APPLIED,
+                InteractionConfirmation.brushedRevealVerdict(suspicious, Blocks.SAND.defaultBlockState()));
+        // 被人挖掉变成空气：不算刷完，等不到的结局由按住动作按目标消失收场。
+        assertEquals(InteractionConfirmation.Verdict.PENDING,
+                InteractionConfirmation.brushedRevealVerdict(suspicious, Blocks.AIR.defaultBlockState()));
+    }
 
     @Test
     void anyOfPassesOnTheFirstAppliedAndWaitsWhileAnythingIsPending() {
