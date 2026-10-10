@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import java.io.IOException;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -88,6 +89,13 @@ import org.maiwithu.maicraft.kernel.goal.InMemoryGoalRunStore;
 import org.maiwithu.maicraft.kernel.goal.PlayerControlHandover;
 import org.maiwithu.maicraft.kernel.goal.RemembersPlaces;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
+import org.maiwithu.maicraft.behavior.recipe.GameRecipeTable;
+import org.maiwithu.maicraft.behavior.recipe.GameRecipes;
+import org.maiwithu.maicraft.behavior.recipe.RecipeLookup;
+import org.maiwithu.maicraft.game.world.ClientItemDescriptions;
+import org.maiwithu.maicraft.game.world.ReadsItemDescriptions;
+import org.maiwithu.maicraft.kernel.knowledge.KnowledgeSource;
+import org.maiwithu.maicraft.mcp.knowledge.ItemPages;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
 import org.maiwithu.maicraft.mcp.tool.EventsTool;
 import org.maiwithu.maicraft.mcp.tool.ExecuteTool;
@@ -445,6 +453,19 @@ public final class Bootstrap {
             }).orElse(false);
         }
 
+        // 查资料与查配方：配方先问联动登记的配方查看器，都答不了退到游戏配方表；
+        // 知识库 = 物品资料页（总入口）+ 联动模组登记的资料来源，物品资料页列各来源跟这件物品有关的条目。
+        private LookupTool lookupTool() {
+            Supplier<PlayerContext> now = () -> playerControl.activeContext().orElse(null);
+            RecipeLookup recipes = new RecipeLookup(List.of(), new GameRecipeTable(GameRecipes.fromPlayer(now)));
+            ReadsItemDescriptions items = new ClientItemDescriptions(now);
+            List<KnowledgeSource> modSources = compat.knowledgeSources();
+            List<KnowledgeSource> sources = new ArrayList<>();
+            sources.add(new ItemPages(items, recipes, modSources));
+            sources.addAll(modSources);
+            return new LookupTool(abilities, new KnowledgeLibrary(sources), recipes, items, clientWork);
+        }
+
         /** 建与服务端的会话，并在入服前登记客户端知道的操作清单。 */
         void connectSession(LinkTransport transport) {
             session = new ServerLinkSession(transport);
@@ -457,7 +478,7 @@ public final class Bootstrap {
             // 登记上来的物品来源进能力清单（进世界时建），知识来源现在就接进知识库。
             compat = CompatRegistry.load(compatCatalog, loader);
             tools = goalTools(abilities, goals, clientWork, taskEvents, chatEvents, () -> worldScope[0], recentCalls,
-                    new KnowledgeLibrary(compat.knowledgeSources()));
+                    lookupTool());
             try {
                 mcp = EmbeddedMcpService.startWithFallback(mcpConfig, 2, tools);
                 LOG.info("{} MCP 服务已启动（端口 {}；五个工具都已接上）",
@@ -611,12 +632,12 @@ public final class Bootstrap {
     private static ToolDispatcher goalTools(AbilityRegistry abilities, GoalRunTable goals,
                                             ClientTickWork clientWork, TaskEventLog taskEvents,
                                             ChatEventLog chatEvents, Supplier<WorldScope> worldScope,
-                                            RecentToolCalls recentCalls, KnowledgeLibrary knowledge) {
+                                            RecentToolCalls recentCalls, LookupTool lookup) {
         return new ToolDispatcher(List.of(
                 new ObserveTool(() -> worldScope.get() == null ? null : worldScope.get().scene(),
                         () -> worldScope.get() == null ? null : worldScope.get().memory(), goals, clientWork),
-                // 查资料接随包的游戏机制常识与联动模组登记的资料来源；联网的资料来源还没登记。
-                new LookupTool(abilities, knowledge),
+                // 查资料接随包的机制常识、物品资料页、联动模组登记的资料来源与配方；联网的资料来源还没登记。
+                lookup,
                 new ExecuteTool(abilities, goals, clientWork),
                 new GoalTool(goals, clientWork),
                 new EventsTool(taskEvents, chatEvents, goals, clientWork)), recentCalls);
