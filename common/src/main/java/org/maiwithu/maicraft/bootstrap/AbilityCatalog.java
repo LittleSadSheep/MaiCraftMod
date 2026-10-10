@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.bootstrap;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -9,7 +10,11 @@ import java.util.Optional;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
+import org.maiwithu.maicraft.ability.build.BuildModule;
 import org.maiwithu.maicraft.ability.chat.ChatAbility;
+import org.maiwithu.maicraft.ability.design.DesignModule;
+import org.maiwithu.maicraft.ability.design.ShowsPreview;
+import org.maiwithu.maicraft.ability.design.api.DesignStore;
 import org.maiwithu.maicraft.ability.chat.ReadsChatEcho;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.ability.deposit.DepositModule;
@@ -59,6 +64,8 @@ import org.maiwithu.maicraft.behavior.acquire.TradeSource;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.approach.LiveApproachWorld;
 import org.maiwithu.maicraft.behavior.approach.LiveApproaches;
+import org.maiwithu.maicraft.behavior.construction.AnchorResolver;
+import org.maiwithu.maicraft.behavior.construction.LiveGroundHeights;
 import org.maiwithu.maicraft.behavior.interaction.ClientGameRefusals;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
@@ -150,7 +157,9 @@ public final class AbilityCatalog {
             CompatRegistry compat,
             FacilityKinds facilities,
             /** 夜晚生存需求与睡觉能力之间的晚接桥；进世界登记睡觉能力后接上真实现。 */
-            NightRestWiring nightWiring) {
+            NightRestWiring nightWiring,
+            /** 这个游戏实例的配置目录：设计库放在这里，导出写到实例的 schematics 目录。 */
+            Path configDirectory) {
 
         public Deps {
             Objects.requireNonNull(context, "context");
@@ -163,6 +172,7 @@ public final class AbilityCatalog {
             Objects.requireNonNull(blockScans, "blockScans");
             Objects.requireNonNull(compat, "compat");
             Objects.requireNonNull(facilities, "facilities");
+            Objects.requireNonNull(configDirectory, "configDirectory");
         }
     }
 
@@ -247,8 +257,26 @@ public final class AbilityCatalog {
                 new ClientCropReplanting(toMainhand, deps.interactions(), deps.context()),
                 drops, permission, deps.backpack(), deps.offhand()));
 
+        // 建筑设计与施工：画图不控制角色，施工经玩家行为层的施工引擎，见 registerConstruction。
+        registerConstruction(registry, deps, bringsClose, toMainhand, digging, innerNeeds, permission);
+
         registerStandalone(registry, deps, permission);
         return registry;
+    }
+
+    /**
+     * 建筑设计与施工：图纸按实例存在 config/maicraft/designs.sqlite，锚点从角色、坐标、记得的地点与观察编号落实；
+     * 施工的许可按这次任务的来，缺料回到拿到物品的内需入口，挖与捡共用采集那一套。
+     */
+    private static void registerConstruction(AbilityRegistry registry, Deps deps, LiveApproaches bringsClose,
+            ClientMovesToMainhand toMainhand, LiveBlockDigging digging, DeferredInnerNeeds innerNeeds, PermissionCheck permission) {
+        AnchorResolver anchors = new AnchorResolver(new SceneSeenTargets(deps::scene), deps.memory(),
+                deps.characterPosition(), new LiveGroundHeights(deps.context()));
+        DesignStore designs = new DesignStore(DesignStore.fileIn(deps.configDirectory()));
+        registry.register(new DesignModule(designs, anchors, ShowsPreview.NONE,
+                deps.configDirectory().resolveSibling("schematics")));
+        registry.register(BuildModule.live(designs, anchors, deps.context(), deps.interactions(), deps.inputs(),
+                bringsClose, toMainhand, digging, innerNeeds, permission, deps.memory(), deps.walks()));
     }
 
     /** 不和别的能力共用现场部件的那些能力：战斗、跟随、等待、出行、聊天、记地点、按顺序做事。 */

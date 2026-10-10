@@ -43,7 +43,8 @@ class AssemblyTest {
             registered.add(module.spec().name());
         }
         // 存东西与记地点能力接上了：找容器、界面读数、整堆搬运与挖盖子都有实现方；记地点只改记忆。
-        assertEquals(Set.of("use", "eat", "equip", "drop", "obtain", "gather", "deposit", "sleep",
+        // 画图与施工也接上了：图纸存在按实例的设计库里，施工把蓝图落到锚点交给施工任务。
+        assertEquals(Set.of("use", "eat", "equip", "drop", "obtain", "gather", "deposit", "sleep", "design", "build",
                 "fight", "follow", "wait", "travel", "find", "chat", "remember", "sequence"), registered,
                 "清单里的能力要一个不少地登记上");
     }

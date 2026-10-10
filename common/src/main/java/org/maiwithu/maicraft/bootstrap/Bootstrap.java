@@ -508,7 +508,7 @@ public final class Bootstrap {
                 WorldScope scope = new WorldScope(minecraft, playerControl, blockScans, session,
                         subtitles, interactions, useKeyProjection, walks, combatSenses,
                         abilities, interactionSender, menuActions, instanceConfig, furnaceFuels,
-                        compat, nightWiring);
+                        compat, nightWiring, loader.configDirectory());
                 worldScope[0] = scope;
                 // 换了世界，任务事件流换一条新的，宿主手里的旧游标如实作废；再把这个世界上次没做完的目标
                 // 读回来，全部恢复为暂停，等 LLM 决定接不接着做。读回时的暂停事件进的是新的这条流。
