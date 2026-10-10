@@ -82,6 +82,16 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         this.maxDepth = maxDepth;
     }
 
+    /**
+     * 此刻正在拿的那一串请求，外层在前：路上垫脚不先动它们（拿石镐途中爬坡，不把要做镐的圆石垫掉）。
+     * 走路是在来源动作里推进的，那一刻整串都在链上；只在客户端线程读。
+     */
+    public List<ItemRequest> inProgress() {
+        List<ItemRequest> chain = new ArrayList<>();
+        advancing.descendingIterator().forEachRemaining(run -> chain.add(run.request));
+        return List.copyOf(chain);
+    }
+
     /** 这次要拿东西的动作：逐刻推进，把东西弄进背包算做完，弄不到以问题失败。途径、距离、半径都不限。 */
     public Action need(ItemRequest request, Permissions permissions) {
         return need(request, permissions, Scope.ALL, null, null);

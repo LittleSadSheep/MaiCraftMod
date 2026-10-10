@@ -10,14 +10,21 @@ import baritone.api.event.events.type.EventState;
 import baritone.api.event.listener.AbstractGameEventListener;
 import baritone.behavior.PathingBehavior;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.behavior.navigation.ScaffoldBlocks;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
@@ -51,6 +58,18 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
     private BaritoneWalkRun queued;
     /** 上一次运行垫上的方块；运行交出身体后，结算方还要读得到它。 */
     private List<BlockPos> lastPlacements = List.of();
+    /** 正要用的东西每种留几件：垫脚只用多出来的。 */
+    private final ScaffoldBlocks.Keeps keeps;
+
+    /** 不知道什么正要用（离线清单、测试）：垃圾方块照先后垫，什么都不留。 */
+    public BaritoneInternals() {
+        this(ScaffoldBlocks.Keeps.NOTHING);
+    }
+
+    /** @param keeps 正要用的东西每种留几件：上一个目标刚拿到的、手上这件事正在拿的 */
+    public BaritoneInternals(ScaffoldBlocks.Keeps keeps) {
+        this.keeps = keeps;
+    }
 
     @Override
     public WalkRun start(GoalCompiler.Compiled target, TerrainPermit permit) {
@@ -71,6 +90,7 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
             active.yieldPlayer(context);
         }
         if (active == null && queued == run) {
+            chooseScaffold(context);
             activate(run, context);
         }
         if (active != run) {
@@ -78,6 +98,7 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
             return;
         }
         engineWorld(engine, context.level());
+        chooseScaffold(context);
         beginTick(context);
         try {
             run.drivePlayer(context);
@@ -187,6 +208,25 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
         settings.freeLook.value = false;
         settings.randomLooking.value = 0D;
         settings.randomLooking113.value = 0D;
+    }
+
+    // 垫脚挑料每刻按身上现有的重挑：垃圾方块按先后垫，正要用的留够数；
+    // 多出来的那几块垫完了，下一下就换别的料，一块都不剩就不靠垫方块走。
+    private void chooseScaffold(PlayerContext context) {
+        LocalPlayer self = context.localPlayer();
+        if (self == null) return;
+        Map<String, Integer> carried = new HashMap<>();
+        List<ItemStack> stacks = new ArrayList<>(self.getInventory().items);
+        stacks.addAll(self.getInventory().offhand);
+        for (ItemStack stack : stacks) {
+            if (stack.isEmpty()) continue;
+            carried.merge(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(), stack.getCount(), Integer::sum);
+        }
+        List<Item> usable = new ArrayList<>();
+        for (String itemId : ScaffoldBlocks.usable(itemId -> carried.getOrDefault(itemId, 0), keeps)) {
+            usable.add(BuiltInRegistries.ITEM.get(ResourceLocation.parse(itemId)));
+        }
+        BaritoneAPI.getSettings().acceptableThrowawayItems.value = usable;
     }
 
     private void engineWorld(IBaritone baritone, ClientLevel current) {

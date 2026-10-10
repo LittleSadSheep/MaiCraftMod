@@ -28,6 +28,8 @@ import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyHoldProjection;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
+import org.maiwithu.maicraft.behavior.acquire.ItemsInUse;
+import org.maiwithu.maicraft.behavior.acquire.LiveCarryReads;
 import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.survival.BreathNeed;
@@ -256,7 +258,9 @@ public final class Bootstrap {
     private static final class ClientEntry implements ClientLifecycle {
         private final PlayerControlBoundary playerControl = new PlayerControlBoundary();
         private final BlockScanService blockScans = new BlockScanService();
-        private final BaritoneInternals walks = new BaritoneInternals();
+        // 正要用的东西一份：上一个目标拿到的、拿东西的引擎正在拿的；走路垫脚按它留够数，只垫多出来的。
+        private final ItemsInUse itemsInUse = new ItemsInUse(LiveCarryReads.itemTags());
+        private final BaritoneInternals walks = new BaritoneInternals(itemsInUse);
         private final UseKeyHold useKeyHold = new UseKeyHold();
         private final SubtitleFeed subtitles = new SubtitleFeed();
         private final McpConfig mcpConfig = McpConfig.localForProcess(8766);
@@ -343,7 +347,8 @@ public final class Bootstrap {
             // 目标执行与 MCP 工具：LLM 用 execute 下达的目标经目标运行表成为控制循环的主任务；
             // 目标处境与生存需求的事件都进同一条任务事件流，宿主用 events 读。
             // 没进世界时的占位存储：进世界时换成那个世界的存盘（见 enterWorld），不在世界里也下达不了目标。
-            GoalRunStore goalRuns = new EventPublishingGoalRunStore(new InMemoryGoalRunStore(), taskEvents);
+            GoalRunStore goalRuns = new EventPublishingGoalRunStore(
+                    new NotesGoalGains(new InMemoryGoalRunStore(), itemsInUse), taskEvents);
             // 记地点交给当前世界的世界记忆；不在世界里时如实以程序错误收场，不悄悄丢掉。
             RemembersPlaces places = (name, position) -> {
                 WorldScope scope = worldScope[0];
@@ -532,12 +537,13 @@ public final class Bootstrap {
                 WorldScope scope = new WorldScope(minecraft, playerControl, blockScans, session,
                         subtitles, interactions, useKeyProjection, walks, combatSenses,
                         abilities, interactionSender, menuActions, instanceConfig, furnaceFuels,
-                        compat, nightWiring, loader.configDirectory(), blueprintOverlay);
+                        compat, nightWiring, loader.configDirectory(), blueprintOverlay, itemsInUse);
                 worldScope[0] = scope;
                 // 换了世界，任务事件流换一条新的，宿主手里的旧游标如实作废；再把这个世界上次没做完的目标
                 // 读回来，全部恢复为暂停，等 LLM 决定接不接着做。读回时的暂停事件进的是新的这条流。
                 taskEvents.restart();
-                goals.enterWorld(scope.memory(), new EventPublishingGoalRunStore(scope.goalRuns(), taskEvents));
+                goals.enterWorld(scope.memory(), new EventPublishingGoalRunStore(
+                        new NotesGoalGains(scope.goalRuns(), itemsInUse), taskEvents));
                 // 开关开启时，这次进世界要逐刻请求控制权直到拿到；还没有目标时也守得住角色。
                 startupAutomationPending = automationOnJoin;
             } else if (minecraft.level == null) {

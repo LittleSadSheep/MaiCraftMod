@@ -52,6 +52,7 @@ import org.maiwithu.maicraft.behavior.acquire.ClientYieldScans;
 import org.maiwithu.maicraft.behavior.acquire.ContainerSource;
 import org.maiwithu.maicraft.behavior.acquire.HarvestSource;
 import org.maiwithu.maicraft.behavior.acquire.ItemAcquisition;
+import org.maiwithu.maicraft.behavior.acquire.ItemsInUse;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.MenuContainerTakes;
@@ -194,7 +195,9 @@ public final class AbilityCatalog {
             /** 这个世界的文档库：机器档案按世界存在它自己的范围里。 */
             DocumentStore worldDocuments,
             /** 这个世界的身份编号：机器档案按它分开存。 */
-            String worldKey) {
+            String worldKey,
+            /** 正要用的东西：拿东西的引擎建好后接上，走路垫脚按它留够数。 */
+            ItemsInUse itemsInUse) {
 
         public Deps {
             Objects.requireNonNull(context, "context");
@@ -211,6 +214,7 @@ public final class AbilityCatalog {
             Objects.requireNonNull(preview, "preview");
             Objects.requireNonNull(worldDocuments, "worldDocuments");
             Objects.requireNonNull(worldKey, "worldKey");
+            Objects.requireNonNull(itemsInUse, "itemsInUse");
         }
     }
 
@@ -506,6 +510,8 @@ public final class AbilityCatalog {
                 deps.backpack(), deps.offhand(), deps.itemTags(),
                 deps.characterPosition(), Optional.of(space), ItemAcquisition.DEFAULT_MAX_DEPTH);
         innerNeeds.attach(acquisition);
+        // 拿东西途中走路垫脚，不把正在拿的东西垫掉：引擎此刻在推进的那一串就是正要用的。
+        deps.itemsInUse().watch(acquisition::inProgress);
         // via 的可选值就是这些来源自报的途径：来源列表变了，能力说明里的参数表跟着变。
         return new ObtainAbility(acquisition, viasOf(sources),
                 deps.itemRegistry(), deps.backpack(), deps.offhand(), deps.itemTags());

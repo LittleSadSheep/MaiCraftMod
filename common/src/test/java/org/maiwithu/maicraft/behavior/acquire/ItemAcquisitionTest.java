@@ -52,6 +52,43 @@ class ItemAcquisitionTest {
     }
 
     @Test
+    void 来源动手那一刻_正在拿的这一串看得见_做完就空了() {
+        // 路上垫脚要知道正在拿什么：来源动作里走路时，拿东西的这一串都在链上。
+        List<List<ItemRequest>> seen = new ArrayList<>();
+        ItemAcquisition[] engine = new ItemAcquisition[1];
+        ItemSource peeking = new ItemSource() {
+            @Override public String describe() {
+                return "挖";
+            }
+            @Override public AcquireVia via() {
+                return AcquireVia.MINE;
+            }
+            @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
+                return new SourceQuote.Offer("挖", request.count(), new AcquisitionCost(1, 1), null);
+            }
+            @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
+                return Optional.of(new Action() {
+                    @Override public ActionStatus tick(TickContext tick) {
+                        seen.add(engine[0].inProgress());
+                        backpack.add("minecraft:cobblestone", request.count());
+                        return ActionStatus.done();
+                    }
+                    @Override public String describe() {
+                        return "挖圆石";
+                    }
+                });
+            }
+        };
+        engine[0] = engine(peeking);
+        ActionStatus status = runToSettlement(engine[0].need(
+                new ItemRequest(WantedItem.ofItem("minecraft:cobblestone"), 3, "石镐"), PERMISSIONS));
+
+        assertEquals(ActionStatus.done(), status);
+        assertEquals("minecraft:cobblestone", seen.getFirst().getFirst().wanted().itemId());
+        assertTrue(engine[0].inProgress().isEmpty(), "做完就不在链上了");
+    }
+
+    @Test
     void 要的是再多几件_身上原有的不算() {
         // 身上已有 3 根原木，再要 3 根：照样去问来源，拿完身上是 6 根。
         backpack.add("minecraft:oak_log", 3);
