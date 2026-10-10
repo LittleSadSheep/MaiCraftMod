@@ -17,6 +17,7 @@ import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsTerminals;
 import org.maiwithu.maicraft.neoforge.compat.backpack.SophisticatedBackpackItems;
 import org.maiwithu.maicraft.neoforge.compat.emi.EmiClientReads;
 import org.maiwithu.maicraft.neoforge.compat.ftbquests.FtbQuestsClientReads;
+import org.maiwithu.maicraft.neoforge.compat.ftbquests.FtbQuestsClientSends;
 import org.maiwithu.maicraft.neoforge.compat.jei.JeiClientReads;
 import org.maiwithu.maicraft.neoforge.compat.ponder.PonderClientReads;
 
@@ -52,7 +53,8 @@ public final class ClientCompatCatalog {
                 new SupportedMod<>(JeiCompat.MOD_ID, "JEI", new VerifiedVersions("19.38.0.366", "19.39"),
                         () -> new JeiCompat(new JeiClientReads())),
                 // FTB 任务：按 2101.1.36 编译，实测实例还没装、没有实测过；装了 2101.2 及以上不登记。
+                // 读端翻任务书的样子，发端把提交、勾选、领取翻成 FTB 自己的网络包。
                 new SupportedMod<>(FtbQuestsCompat.MOD_ID, "FTB 任务", new VerifiedVersions("2101.1.36", "2101.2"),
-                        () -> new FtbQuestsCompat(new FtbQuestsClientReads()::read)));
+                        () -> new FtbQuestsCompat(new FtbQuestsClientReads()::read, new FtbQuestsClientSends())));
     }
 }

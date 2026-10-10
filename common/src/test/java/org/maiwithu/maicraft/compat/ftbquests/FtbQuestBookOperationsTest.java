@@ -2,8 +2,17 @@
 package org.maiwithu.maicraft.compat.ftbquests;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.maiwithu.maicraft.ability.quest.spi.QuestBookOperations;
 import org.maiwithu.maicraft.ability.quest.spi.QuestView;
+import org.maiwithu.maicraft.behavior.acquire.LiveCarryReads;
+import org.maiwithu.maicraft.behavior.interaction.Interactions;
+import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
+import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
+import org.maiwithu.maicraft.behavior.permission.Protection;
+import org.maiwithu.maicraft.behavior.spi.PlayerServices;
+import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
+import org.maiwithu.maicraft.compat.CompatRegistry;
 import org.maiwithu.maicraft.compat.ftbquests.QuestBook.Access;
 import org.maiwithu.maicraft.compat.ftbquests.QuestBook.Chapter;
 import org.maiwithu.maicraft.compat.ftbquests.QuestBook.Quest;
@@ -15,10 +24,13 @@ import org.maiwithu.maicraft.game.interaction.InteractionSender;
 import org.maiwithu.maicraft.game.menu.MenuActions;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
+import org.maiwithu.maicraft.game.world.BlockScanService;
+import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.player.LocalPlayer;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -27,7 +39,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** FTB 任务书操作的联动实现：看得见的才给、候选按界面顺序从 1 编号、发包前占本刻的交互机会。 */
+/** FTB 任务书操作的联动实现与它的接线：看得见的才给、候选按界面顺序从 1 编号、发包前占本刻的交互机会。 */
 class FtbQuestBookOperationsTest {
 
     private static final String QUEST = "1234567890ABCDEF";
@@ -38,6 +50,7 @@ class FtbQuestBookOperationsTest {
     private static final String PLAIN_REWARD = "1122334455667788";
     private static final String CHOICE_REWARD = "9988776655443322";
     private static final String HIDDEN_REWARD = "1212121234343434";
+    private static final String MEMORY_KEY = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
     /** 任务书读取替身：一次快照由测试摆。 */
     private static final class StubBook implements QuestBook {
@@ -160,7 +173,7 @@ class FtbQuestBookOperationsTest {
     private final StubActions actions = new StubActions();
     private final StubPlayer player = new StubPlayer();
     private final QuestBookOperations operations =
-            new FtbQuestBookOperations(new FtbQuestsCompat(book), book, actions, () -> player);
+            new FtbQuestBookOperations(new FtbQuestsCompat(book, actions), book, actions, () -> player);
 
     @Test
     void statusSaysWhyWhenUnreadable() {
@@ -275,5 +288,48 @@ class FtbQuestBookOperationsTest {
 
         player.nextTick();
         assertFalse(operations.claim(QUEST, PLAIN_REWARD, "不是编号"), "候选编号不是数字就发不出去");
+    }
+
+    @TempDir
+    Path tempDir;
+
+    @Test
+    void theCompatModuleHandsTheQuestBookToTheRegistry() {
+        // 联动入口把任务书操作交上登记表：进世界带着玩家行为建出来，建出的操作走同一份读与发。
+        CompatRegistry registry = CompatRegistry.empty();
+        new FtbQuestsCompat(book, actions).contribute(registry);
+
+        List<QuestBookOperations> built = registry.questBooks(services());
+        assertEquals(1, built.size(), "任务书操作要登记上，不然 quest 能力只能说联动没接上");
+        book.snapshot = readableBook();
+        assertTrue(built.getFirst().quest(QUEST).isPresent());
+        assertTrue(built.getFirst().submit(QUEST, ITEM_REQUIREMENT));
+        assertEquals(1, player.claims, "发请求前占本刻的交互机会");
+    }
+
+    /** 一份只够建任务书操作用的玩家行为：只有角色上下文会被真正用到。 */
+    private PlayerServices services() {
+        return new PlayerServices(() -> player,
+                (target, permissions) -> {
+                    throw new UnsupportedOperationException("接线测试不走近");
+                },
+                new Interactions(null),
+                itemId -> {
+                    throw new UnsupportedOperationException("接线测试不换手");
+                },
+                (request, permissions) -> {
+                    throw new UnsupportedOperationException("接线测试不拿东西");
+                },
+                protection(),
+                LiveCarryReads.itemTags(),
+                new MenuLayouts(List.of()),
+                new BlockScanService());
+    }
+
+    /** 这个世界的保护判断：归属问不到、没有记住的区域，保护判断按"谁的东西都不碰"收窄。 */
+    private Protection protection() {
+        WorldMemory memory = new WorldMemory(new DocumentStore(tempDir.resolve("state.sqlite")), MEMORY_KEY);
+        return new Protection((dimension, x, y, z) -> Optional.empty(), memory, memory,
+                GuessesPlayerMade.NOTHING, "00000000-0000-0000-0000-000000000000");
     }
 }
