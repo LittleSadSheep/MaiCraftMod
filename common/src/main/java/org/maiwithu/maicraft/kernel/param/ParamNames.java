@@ -32,7 +32,16 @@ public final class ParamNames {
             Map.entry("distance", "保持的距离，单位格，例如跟随时与目标相隔几格"),
             Map.entry("condition", "要等到的条件：elapsed / day / night / health_full / not_hungry"),
             Map.entry("after_seconds", "先至少经过多少秒，再开始做检查"),
-            Map.entry("slot", "装备与卸下的目标栏位：mainhand / offhand / head / chest / legs / feet / armor（armor 只配合卸下）"));
+            Map.entry("slot", "装备与卸下的目标栏位：mainhand / offhand / head / chest / legs / feet / armor（armor 只配合卸下）"),
+            Map.entry("drawing", "建筑图纸的正文（JSON 对象）：材料表、对象、组件"),
+            Map.entry("design_id", "设计编号：design 创建或修改图纸后返回的 UUID"),
+            Map.entry("edits", "对图纸按名合并的修改（JSON 对象）：objects、materials、components、remove_objects、remove_components、block_state_axes、overlap_policy、name"),
+            Map.entry("page", "分页看结果时的页码，从 0 起"),
+            Map.entry("format", "导出文件的格式：json / nbt"),
+            Map.entry("rotation", "蓝图落地时绕锚点转多少度：0 / 90 / 180 / 270"),
+            Map.entry("cells", "逐格蓝图（JSON 数组）：每项 offset [x,y,z]、block、可选 properties；block 为 minecraft:air 表示清空"),
+            Map.entry("file", "schematics 目录下的结构文件名"),
+            Map.entry("properties", "只放一格时要求的方块状态属性（JSON 对象），例如 {\"facing\":\"north\"}"));
 
     private ParamNames() {}
 

@@ -4,6 +4,8 @@ package org.maiwithu.maicraft.kernel.param;
 import java.util.List;
 import java.util.Objects;
 
+import com.google.gson.JsonElement;
+
 /**
  * 一个参数的完整定义：名字、类型、是否必填、默认值、范围或选项、说明。
  * 能力说明里的参数表、MCP 入口的校验与规范化、能力拿到的带类型取值，都由这一份定义生成。
@@ -68,6 +70,7 @@ public record ParamSpec(
             case BOOLEAN -> value instanceof Boolean;
             case TEXT, CHOICE, ITEM_OR_TAG, BLOCK_OR_TAG, ENTITY_TYPE -> value instanceof String;
             case ITEM_LIST, BLOCK_LIST, TEXT_LIST, ENTITY_TYPE_LIST -> value instanceof List<?>;
+            case JSON -> value instanceof JsonElement;
         };
     }
 

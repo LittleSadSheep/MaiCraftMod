@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.kernel.param;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
 import java.util.Collections;
@@ -12,7 +13,7 @@ import java.util.Map;
 /**
  * 解析、校验并规范化之后的参数取值。能力和任务只通过它读参数，不再自己解析 JSON。
  *
- * <p>取值类型：整数为 long、数字为 double、布尔为 boolean、文字与资源 ID 为 String、列表为 {@code List<String>}。
+ * <p>取值类型：整数为 long、数字为 double、布尔为 boolean、文字与资源 ID 为 String、列表为 {@code List<String>}、结构化正文为 JsonElement。
  * 没有给出且没有默认值的可选参数不在其中，读取前用 {@link #has} 判断。
  */
 public final class ParamValues {
@@ -51,6 +52,11 @@ public final class ParamValues {
         return (List<String>) require(name);
     }
 
+    /** 原样的 JSON 对象或数组（副本，改它不影响存起来的参数）。 */
+    public JsonElement json(String name) {
+        return ((JsonElement) require(name)).deepCopy();
+    }
+
     /** 写回 JSON，用于存盘，以及在结果里展示 Mod 实际采用的参数。 */
     public JsonObject toJson() {
         JsonObject json = new JsonObject();
@@ -65,6 +71,7 @@ public final class ParamValues {
                     list.forEach(item -> array.add(String.valueOf(item)));
                     json.add(name, array);
                 }
+                case JsonElement element -> json.add(name, element.deepCopy());
                 default -> throw new IllegalStateException("参数 " + name + " 的取值类型不受支持：" + value.getClass());
             }
         });

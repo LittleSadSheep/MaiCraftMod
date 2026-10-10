@@ -81,6 +81,23 @@ class ParamSpecsTest {
     }
 
     @Test
+    void jsonKeepsObjectsAndArraysAsTheyAre() {
+        // 图纸、修改、逐格清单这类正文原样带过：入口只认对象或数组的形状，内容由能力自己校验；读出来的是副本。
+        ParamSpecs spec = ParamSpecs.of(ParamSpec.of("drawing", ParamType.JSON).required().doc("图纸正文").build());
+        ParseResult object = spec.parse(JsonParser.parseString("{\"drawing\":{\"objects\":[1,2]}}").getAsJsonObject());
+        ParseResult array = spec.parse(JsonParser.parseString("{\"drawing\":[{\"offset\":[0,0,0]}]}").getAsJsonObject());
+
+        assertTrue(object.ok() && array.ok());
+        assertEquals(2, object.params().json("drawing").getAsJsonObject().getAsJsonArray("objects").size());
+        assertEquals(1, array.params().json("drawing").getAsJsonArray().size());
+        object.params().json("drawing").getAsJsonObject().remove("objects");
+        assertTrue(object.params().json("drawing").getAsJsonObject().has("objects"), "改副本不影响存着的参数");
+        assertEquals("drawing", object.params().toJson().entrySet().iterator().next().getKey());
+        assertFalse(spec.parse(JsonParser.parseString("{\"drawing\":\"text\"}").getAsJsonObject()).ok(), "字符串不是 JSON 正文");
+        assertFalse(spec.parse(JsonParser.parseString("{\"drawing\":3}").getAsJsonObject()).ok());
+    }
+
+    @Test
     void describesFieldsFromTheSameDefinition() {
         var fields = OBTAIN.describe();
 
