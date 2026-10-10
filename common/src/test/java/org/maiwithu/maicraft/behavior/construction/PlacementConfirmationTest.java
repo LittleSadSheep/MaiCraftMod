@@ -30,9 +30,10 @@ class PlacementConfirmationTest {
     static void bootMinecraft() {
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
+        AIR = Blocks.AIR.defaultBlockState();
     }
 
-    private static final BlockState AIR = Blocks.AIR.defaultBlockState();
+    private static BlockState AIR;
 
     @Test
     void 单格方块的四种结论() {
