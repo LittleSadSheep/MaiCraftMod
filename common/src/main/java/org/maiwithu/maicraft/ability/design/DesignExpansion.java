@@ -109,27 +109,36 @@ public final class DesignExpansion {
         var localCutters = new HashSet<String>();
         siblings.values().forEach(node -> localCutters.addAll(rawCuts(node)));
         for (var node : siblings.values()) {
-            String type = node.get("type").getAsString();
-            // 没摆出来的图元也先验证几何和直角变换，组件库里不能悄悄存着开放或退化的凸体。
-            DesignTransform.local(node, blender, Vec3.ZERO);
-            if (type.equals("MESH")) {
-                PanelPattern.validatePanel(node, DesignTransform.dimensions(node, blender));
-                var shape = shapeCache.computeIfAbsent(node, ignored -> createShape(node, DesignTransform.dimensions(node, blender)));
-                MaterialRules.validate(drawing.getAsJsonObject("materials"), node, shape,
-                        localCutters.contains(node.get("name").getAsString()) || node.has("role") && node.get("role").getAsString().equals("cutter"));
-            } else if (type.equals("ROOF")) {
-                Roof.checkMaterials(drawing.getAsJsonObject("materials"), node);
-            } else if (!components.has(node.get("component").getAsString())) {
-                throw bad("没有这个组件：" + node.get("component").getAsString());
+            try {
+                inspectNode(node, siblings, localCutters);
+            } catch (IllegalArgumentException invalid) {
+                // 材质引用、组件引用、几何这类错报出来时带上对象名，作者才知道改哪一个。
+                throw bad("对象「" + node.get("name").getAsString() + "」：" + invalid.getMessage());
             }
-            if (node.has("material_map")) {
-                for (var mapping : node.getAsJsonObject("material_map").entrySet()) {
-                    material(mapping.getKey());
-                    material(mapping.getValue().getAsString());
-                }
-            }
-            checkCuts(node, siblings);
         }
+    }
+
+    private void inspectNode(JsonObject node, Map<String, JsonObject> siblings, Set<String> localCutters) {
+        String type = node.get("type").getAsString();
+        // 没摆出来的图元也先验证几何和直角变换，组件库里不能悄悄存着开放或退化的凸体。
+        DesignTransform.local(node, blender, Vec3.ZERO);
+        if (type.equals("MESH")) {
+            PanelPattern.validatePanel(node, DesignTransform.dimensions(node, blender));
+            var shape = shapeCache.computeIfAbsent(node, ignored -> createShape(node, DesignTransform.dimensions(node, blender)));
+            MaterialRules.validate(drawing.getAsJsonObject("materials"), node, shape,
+                    localCutters.contains(node.get("name").getAsString()) || node.has("role") && node.get("role").getAsString().equals("cutter"));
+        } else if (type.equals("ROOF")) {
+            Roof.checkMaterials(drawing.getAsJsonObject("materials"), node);
+        } else if (!components.has(node.get("component").getAsString())) {
+            throw bad("没有这个组件：" + node.get("component").getAsString());
+        }
+        if (node.has("material_map")) {
+            for (var mapping : node.getAsJsonObject("material_map").entrySet()) {
+                material(mapping.getKey());
+                material(mapping.getValue().getAsString());
+            }
+        }
+        checkCuts(node, siblings);
     }
 
     private void checkCuts(JsonObject node, Map<String, JsonObject> siblings) {

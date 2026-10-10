@@ -55,7 +55,13 @@ public final class DesignSampling {
                 work = add(work, leaf.bounds().volume());
                 continue;
             }
-            Paint paint = new Paint(model, leaf, cache);
+            Paint paint;
+            try {
+                paint = new Paint(model, leaf, cache);
+            } catch (IllegalArgumentException invalid) {
+                // 材质引用、面名这类错在展开后的对象上才查得出来，报错带上展开路径，作者才知道改哪个对象。
+                throw bad(leaf.name() + "：" + invalid.getMessage());
+            }
             if (model.cutterLeaves.contains(leaf.name())) continue;
             // 图元内部判定也逐面比，和空腔、涂装、切割一起计费，大空心模型的第一轮检查不能漏算。
             var cutters = model.cutters(leaf);
