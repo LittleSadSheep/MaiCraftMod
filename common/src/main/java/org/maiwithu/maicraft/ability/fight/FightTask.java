@@ -12,6 +12,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
 
+import org.maiwithu.maicraft.behavior.survival.BlastAvoidance;
 import org.maiwithu.maicraft.behavior.survival.CombatSenses;
 import org.maiwithu.maicraft.behavior.survival.ThreatAssessment;
 import org.maiwithu.maicraft.behavior.survival.WeaponChoice;
@@ -167,6 +168,19 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     }
 
     private Next<Phase> fight(TickContext context) {
+        // 点着引信的苦力怕还在 7 格内：先躲到 9 格外等它熄了，压过点名目标和血线——不管它是不是要打的那只。
+        Optional<CombatSenses.Threat> bomb = BlastAvoidance.armedWithinFuseRange(
+                senses.threats(context, ThreatAssessment.VIGILANCE_RADIUS));
+        if (bomb.isPresent()) {
+            CombatSenses.Threat fuse = bomb.get();
+            keep("躲爆炸 " + fuse.entityId(), () -> {
+                double[] self = moves.selfPosition(context);
+                double[] away = BlastAvoidance.evadePoint(self[0], self[2], fuse.x(), fuse.z());
+                return moves.walkTo(away[0], self[1], away[1]);
+            });
+            stepCurrent(context, "躲开点着引信的 " + fuse.type());
+            return Next.stay();
+        }
         // 血线破了先撤：护甲折算后的有效血量跌破拒战线，继续打就是送死。
         if (ThreatAssessment.belowRetreatLine(mySide(context))) {
             dropCurrent();
@@ -184,6 +198,12 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         }
         engaged = target;
         double distance = target.distance;
+        // 点着引信但在 7 格外的会炸物：不凑上去（凑近它接着膨胀），原地等它熄了再打。
+        if (armedExplosive(context, target.entityId)) {
+            dropCurrent();
+            recordProgress("等 " + target.type + " 的引信熄了再上");
+            return Next.stay();
+        }
         if (distance > STRIKE_RANGE) {
             // 逼近：目标没跑开就沿用这一趟走到，跑开三格以上再重新规划。
             if (Math.hypot(target.x - approachGoal[0], target.z - approachGoal[2]) > REAPPROACH_AFTER) {
@@ -367,7 +387,9 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         List<CombatSenses.Threat> ordered = new ArrayList<>();
         for (CombatSenses.Threat threat : senses.threats(currentContext, input.radius())) {
             boolean comingAtMe = attackers.contains(threat.uuid()) || threat.armed();
-            if (batch.contains(threat.entityId()) && wantedType(threat) || comingAtMe) {
+            // 点着引信的会炸物不当近战目标：近了躲（fight 开头），远了等它熄；没点的照常打。
+            if ((batch.contains(threat.entityId()) && wantedType(threat) || comingAtMe)
+                    && BlastAvoidance.meleeTarget(threat.kind(), threat.armed())) {
                 ordered.add(threat);
             }
         }
@@ -379,6 +401,16 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         }
         CombatSenses.Threat first = ordered.getFirst();
         return new Tracked(first.entityId(), first.type(), first.x(), first.y(), first.z(), first.distance());
+    }
+
+    // 这只此刻是不是点着引信的会炸物：按实体编号在感观里找回它的引信状态。
+    private boolean armedExplosive(TickContext context, int entityId) {
+        for (CombatSenses.Threat threat : senses.threats(context, ThreatAssessment.VIGILANCE_RADIUS)) {
+            if (threat.entityId() == entityId) {
+                return !BlastAvoidance.meleeTarget(threat.kind(), threat.armed());
+            }
+        }
+        return false;
     }
 
     // 给了生物类型就只清这一种；冲着角色来的不管什么类型都处理。

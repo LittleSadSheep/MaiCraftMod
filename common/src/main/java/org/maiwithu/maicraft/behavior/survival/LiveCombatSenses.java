@@ -111,8 +111,10 @@ public final class LiveCombatSenses implements CombatSenses {
     }
 
     private static boolean armed(Entity entity) {
-        // 引信已点的判定：苦力怕正在膨胀或已经闪白（isIgnited）。未退回仍按引信处理由膨胀状态天然覆盖。
-        return entity instanceof Creeper creeper && (creeper.isIgnited() || creeper.getSwellDir() > 0);
+        // 引信已点的判定：苦力怕正在膨胀、已经闪白（isIgnited），或膨胀还没完全退回——
+        // 刚开始缩回就贴上去，它会接着上次的膨胀续上引信，所以退回到零之前都按点着算。
+        return entity instanceof Creeper creeper
+                && (creeper.isIgnited() || creeper.getSwellDir() > 0 || creeper.getSwelling(1.0F) > 0.0F);
     }
 
     private static String typeId(Entity entity) {

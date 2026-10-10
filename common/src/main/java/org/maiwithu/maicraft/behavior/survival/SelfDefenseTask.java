@@ -85,8 +85,8 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
     /** 追击动作出发时目标在哪：目标跑开超过几格才重新规划，不每刻重新寻路。 */
     private final double[] chaseGoal = new double[3];
 
-    /** 当前动作的做法：出手打，或追过去。 */
-    private enum Mode { STRIKE, CHASE }
+    /** 当前动作的做法：出手打、追过去，或躲开点着引信的会炸物。 */
+    private enum Mode { STRIKE, CHASE, EVADE }
 
     /** 目标离追击出发时的位置超过这么远（格）才重新规划追击路线。 */
     private static final double RECHASE_AFTER = 3.0;
@@ -138,6 +138,31 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
             events.publish(TaskEvent.Kind.TEMPORARY_TASK_STARTED,
                     "被威胁，插入自卫：打点在 " + Math.round(self[0]) + ", " + Math.round(self[1]) + ", " + Math.round(self[2]));
         }
+        // 点着引信的苦力怕还在 7 格内：先躲，压过旧目标、血线和别的一切——原版引信在目标离开 7 格后才熄，
+        // 退到 9 格外等它熄了再回来打；它追上来就再退一段。
+        Tracked bomb = null;
+        for (Tracked foe : situation.foes()) {
+            if (foe.foe().kind() == ThreatAssessment.Kind.EXPLOSIVE && foe.foe().armed()
+                    && foe.distance() <= BlastAvoidance.DEFUSE_DISTANCE
+                    && (bomb == null || foe.distance() < bomb.distance())) {
+                bomb = foe;
+            }
+        }
+        if (bomb != null) {
+            if (current != null && currentMode != Mode.EVADE) dropCurrent();
+            if (current == null) {
+                double[] self = moves.selfPosition(context);
+                double[] away = BlastAvoidance.evadePoint(self[0], self[2], bomb.x(), bomb.z());
+                current = moves.walkTo(away[0], self[1], away[1]);
+                currentMode = Mode.EVADE;
+                currentTarget = bomb.entityId();
+            }
+            if (stepCurrent(context, "躲开点着引信的 " + bomb.type())) {
+                ticksSinceProgress = 0;
+                need.noteAttackProgress();
+            }
+            return Next.stay();
+        }
         // 血快见底：本能优先，先撤离再说，不拿剩下的两颗心去换"再打一下"。
         // 退无可退时血线不再触发撤离——没有地方可撤，就地迎战（背水一战）。
         if (!cornered && ThreatAssessment.belowRetreatLine(situation.mine())) {
@@ -149,13 +174,14 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
             ticksSinceProgress = 0;
             return Next.go(Phase.WATCH, "威胁暂时消失，观察一阵");
         }
-        // 自卫只会近战：没点引信的会炸的不凑上去打，一拳可能把它点着；躲它归撤离与避险。
+        // 自卫只会近战：没点引信的苦力怕照常当一只怪打（打一下它开始膨胀，上面那段会退开让引信熄了再上）；
+        // 点着引信但已经在 7 格外的不去凑——凑近只会让它接着膨胀，等它熄了再打。
         Tracked target = situation.foes().stream()
-                .filter(foe -> !(foe.foe().kind() == ThreatAssessment.Kind.EXPLOSIVE && !foe.foe().armed()))
+                .filter(foe -> BlastAvoidance.meleeTarget(foe.foe().kind(), foe.foe().armed()))
                 .findFirst().orElse(null);
         if (target == null) {
             dropCurrent();
-            recordProgress("只剩没点引信的会炸的，不凑上去打，守在原地");
+            recordProgress("只剩点着引信、离得远的会炸的，不凑上去，等它熄了再打");
             return Next.stay();
         }
         // 追击上限只比水平距离：出打点 16 格的敌人不再追，守在打点附近迎击。

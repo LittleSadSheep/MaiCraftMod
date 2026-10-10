@@ -13,6 +13,7 @@ import java.util.UUID;
 import net.minecraft.world.entity.Entity;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.survival.CombatSenses;
+import org.maiwithu.maicraft.behavior.survival.ThreatAssessment;
 import org.maiwithu.maicraft.behavior.survival.WeaponChoice;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -111,6 +112,31 @@ class FightTaskTest {
             }
         }
         return null;
+    }
+
+    @Test
+    void litCreeperNearbyIsEvadedBeforeApproachingTheNamedTarget() {
+        // 点名打僵尸，旁边一只点着引信的苦力怕离 4 格：先退到 9 格外，不朝僵尸走。
+        CombatSenses withCreeper = new CombatSenses() {
+            @Override public List<Threat> threats(TickContext context, double radius) {
+                return List.of(new Threat(9, new UUID(0, 9), "minecraft:creeper", 4, 64, 0, 4,
+                        ThreatAssessment.Kind.EXPLOSIVE, true, true, true));
+            }
+            @Override public List<Attacker> recentAttackers(TickContext context) { return List.of(); }
+            @Override public CombatProfile profile(TickContext context) {
+                return new CombatProfile(20, 10,
+                        Optional.of(new WeaponChoice.Picked("minecraft:iron_sword", WeaponChoice.Weapon.SWORD_OR_AXE)), 4);
+            }
+            @Override public Entity entityById(TickContext context, int entityId) { return null; }
+        };
+        FightTask fight = new FightTask(
+                new FightInput(List.of("e1"), null, FightInput.DEFAULT_RADIUS, null, Permissions.DEFAULT),
+                withCreeper, targets, moves, (target, permissions) -> refusal);
+        targets.now = new SeenTargets.Observed(12, 64, 5, 13, false);
+        fight.start(new Tick(0));
+        for (long t = 0; t < 10; t++) fight.tick(new Tick(t));
+
+        assertEquals(List.of("走向 -9.0,0.0"), moves.started);
     }
 
     @Test

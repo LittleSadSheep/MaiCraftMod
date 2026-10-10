@@ -16,7 +16,7 @@ import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
-/** 自卫临时任务：出手与追击沿用进行中的动作，换做法才收尾旧的；没点引信的会炸的不凑上去打。 */
+/** 自卫临时任务：出手与追击沿用进行中的动作，换做法才收尾旧的；点着引信的苦力怕先躲，没点的照常打。 */
 class SelfDefenseTaskTest {
 
     /** 刻号替身：自卫任务只经感观与走位替身读现场，不碰角色对象。 */
@@ -101,10 +101,38 @@ class SelfDefenseTaskTest {
     }
 
     @Test
-    void unlitCreeperIsNotPunched() {
-        // 没点引信的苦力怕贴在身边：一拳可能把它点着，不凑上去打。
+    void unlitCreeperIsStruckLikeAnyFoe() {
+        // 实机：没点引信的苦力怕走过来，角色"守在原地"等它贴脸点着炸了。没点引信的就是一只普通怪，打一下再退。
         Senses senses = new Senses();
         senses.threats = List.of(foe(ThreatAssessment.Kind.EXPLOSIVE, 2, 2, false));
+        Moves moves = new Moves();
+        SelfDefenseNeed need = new SelfDefenseNeed(senses, moves, TaskEventSink.NONE);
+        SelfDefenseTask task = new SelfDefenseTask(senses, moves, TaskEventSink.NONE, need);
+        task.start(new Tick(0));
+        for (long t = 0; t < 5; t++) task.tick(new Tick(t));
+
+        assertEquals(List.of("打 7"), moves.started);
+    }
+
+    @Test
+    void litCreeperWithinFuseRangeIsEvadedNotStruck() {
+        // 点着引信、离 5 格：先退到 9 格外等它熄，不出手也不追。
+        Senses senses = new Senses();
+        senses.threats = List.of(foe(ThreatAssessment.Kind.EXPLOSIVE, 5, 5, true));
+        Moves moves = new Moves();
+        SelfDefenseNeed need = new SelfDefenseNeed(senses, moves, TaskEventSink.NONE);
+        SelfDefenseTask task = new SelfDefenseTask(senses, moves, TaskEventSink.NONE, need);
+        task.start(new Tick(0));
+        for (long t = 0; t < 5; t++) task.tick(new Tick(t));
+
+        assertEquals(List.of("走向 -9.0,0.0"), moves.started);
+    }
+
+    @Test
+    void litCreeperBeyondFuseRangeIsLeftToDefuse() {
+        // 点着引信但已经在 8 格外：凑近它只会接着膨胀，原地等它熄了再打。
+        Senses senses = new Senses();
+        senses.threats = List.of(foe(ThreatAssessment.Kind.EXPLOSIVE, 8, 8, true));
         Moves moves = new Moves();
         SelfDefenseNeed need = new SelfDefenseNeed(senses, moves, TaskEventSink.NONE);
         SelfDefenseTask task = new SelfDefenseTask(senses, moves, TaskEventSink.NONE, need);
