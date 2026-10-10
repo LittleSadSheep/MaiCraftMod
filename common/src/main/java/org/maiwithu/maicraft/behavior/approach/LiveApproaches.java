@@ -36,10 +36,15 @@ public final class LiveApproaches implements BringsPlayerClose {
 
     @Override
     public Action toward(ApproachTarget target, Permissions permissions) {
+        return toward(target, permissions, at -> false);
+    }
+
+    @Override
+    public Action toward(ApproachTarget target, Permissions permissions, ProtectedCells avoid) {
         // 每个靠近动作各走各的一份：路上能动多少地形按这次任务的许可来，暂停与收尾互不牵连。
-        // 站位补救与保护格在此留空：受保护格不放行挖垫，能不能挖某一格由走到实现方的方块通行判断把关。
+        // 站位补救留空；调用方不许踩的格（放方块时的目标格）并进受保护格判断，能不能挖某一格由走到实现方把关。
         return new Approach(target, reachNow(), world, LiveApproaches::straightCost,
-                at -> false, new LiveSpotWalks(walks, TerrainPermit.of(permissions)), null, permissions);
+                avoid, new LiveSpotWalks(walks, TerrainPermit.of(permissions)), null, permissions);
     }
 
     /** 当刻的距离数值：交互距离读角色属性，眼高按当时姿态取。 */
