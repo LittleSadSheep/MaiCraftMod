@@ -144,6 +144,11 @@ public final class RecipeSource implements ItemSource {
                 timesNeeded(recipe, request.count()), context));
     }
 
+    // 这件东西是不是这条配方要的原料：烧炼时不把要烧的东西当燃料。
+    private boolean isIngredientOf(WorkstationRecipe recipe, String itemId) {
+        return recipe.ingredients().stream().anyMatch(ingredient -> ingredient.item().matches(itemId, tags.tagsOf(itemId)));
+    }
+
     // 这条配方的原料里有没有一样本身就满足这次要的东西：有的话做它不会让要的东西变多。
     private boolean consumesWhatIsWanted(WorkstationRecipe recipe, WantedItem wanted) {
         for (WorkstationRecipe.IngredientStack ingredient : recipe.ingredients()) {
@@ -288,11 +293,14 @@ public final class RecipeSource implements ItemSource {
     // 烧炼要的燃料：身上有烧得着的就用身上的（挑烧得最久的），一件都没有才去弄煤。
     private List<Action> fuelSteps(WorkstationRecipe recipe, int times, Permissions permissions) {
         int smeltTicks = times * SMELT_TICKS_PER_ITEM;
-        int bestBurn = 0;
+        // 身上能烧的加起来够不够：十块木板能烤好几块肉，不能只看最耐烧的一件就说要去弄煤。
+        // 工具、武器这类一格一件的不算燃料，这次要烧的原料也不算。
+        long burnable = 0;
         for (var stack : backpack.stacks()) {
-            bestBurn = Math.max(bestBurn, fuels.burnTicks(stack.itemId()));
+            if (stack.maxStackSize() <= 1 || isIngredientOf(recipe, stack.itemId())) continue;
+            burnable += (long) stack.count() * fuels.burnTicks(stack.itemId());
         }
-        if (bestBurn >= smeltTicks) {
+        if (burnable >= smeltTicks) {
             return List.of();
         }
         int coalNeeded = Math.max(1, (int) Math.ceil((double) smeltTicks / PLANNED_COAL_BURN_TICKS));

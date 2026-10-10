@@ -285,6 +285,25 @@ class RecipeSourceTest {
     }
 
     @Test
+    void 身上的木板加起来够烧_不去弄煤() {
+        // 烤 4 块牛肉要 800 刻，一块木板只烧 300 刻，十块加起来够：不能因为最耐烧的一件不够就去找煤。
+        WorldMemory memory = memory();
+        memory.rememberWorkstationUsed(TABLE_AT, "minecraft:furnace", NOW);
+        backpack.add("minecraft:oak_planks", 10);
+        WorkstationRecipe cooking = new WorkstationRecipe("minecraft:cooked_beef", WorkstationRecipe.Kind.SMELTING,
+                WantedItem.ofItem("minecraft:cooked_beef"), 1,
+                List.of(new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:beef"), 1)));
+        CapturingNeeds needs = new CapturingNeeds();
+        RecipeSource recipeSource = new RecipeSource(wanted -> List.of(cooking), memory,
+                itemId -> itemId.equals("minecraft:oak_planks") ? 300 : 0,
+                FakeRuns.READY, backpack, offhand, tags, needs);
+        ItemRequest beef = new ItemRequest(WantedItem.ofItem("minecraft:cooked_beef"), 4, "吃");
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, recipeSource.quote(beef, CONTEXT));
+        recipeSource.begin(beef, offer, CONTEXT).orElseThrow();
+        assertTrue(needs.asked.stream().noneMatch(asked -> asked.purpose().contains("燃料")), needs.asked.toString());
+    }
+
+    @Test
     void 身上有烧得久的燃料_不再去弄() {
         WorldMemory memory = memory();
         memory.rememberWorkstationUsed(TABLE_AT, "minecraft:furnace", NOW);

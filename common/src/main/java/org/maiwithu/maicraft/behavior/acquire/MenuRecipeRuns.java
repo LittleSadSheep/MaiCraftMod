@@ -372,7 +372,8 @@ public final class MenuRecipeRuns implements RecipeRuns {
             int bestBurn = 0;
             for (int i = 0; i < open.playerSnapshots().size(); i++) {
                 SlotSnapshot stack = open.playerSnapshots().get(i);
-                if (stack.isEmpty() || isIngredient(stack.stack())) continue;
+                // 工具、武器这类一格一件的不拿去烧：木镐也是燃料，可烧了就没得用了。
+                if (stack.isEmpty() || isIngredient(stack.stack()) || stack.stack().getMaxStackSize() <= 1) continue;
                 int burn = fuels.burnTicks(itemId(stack.stack()));
                 if (burn > bestBurn) {
                     best = i;
