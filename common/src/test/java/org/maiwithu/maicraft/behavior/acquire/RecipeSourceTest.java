@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.ArrayList;
 
 import org.junit.jupiter.api.Test;
@@ -194,6 +195,24 @@ class RecipeSourceTest {
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, recipeSource.quote(
                 new ItemRequest(WantedItem.ofTag("minecraft:planks"), 4, "做工作台"), CONTEXT));
         assertEquals("minecraft:spruce_planks", offer.hint());
+    }
+
+    @Test
+    void 记得的工作台在几十格外_能就地摆就不跑过去() {
+        // 做石镐要工作台：记得的那张在 40 格外的崖底，就地摆一张（四块木板）比走回去省事，也不用一路搭路。
+        WorldMemory memory = memory();
+        memory.rememberWorkstationUsed(new WorldPosition(40, 64, 0, null), "minecraft:crafting_table", NOW);
+        WorkstationRecipe pickaxe = new WorkstationRecipe("minecraft:stone_pickaxe", WorkstationRecipe.Kind.CRAFTING,
+                WantedItem.ofItem("minecraft:stone_pickaxe"), 1,
+                List.of(new WorkstationRecipe.IngredientStack(WantedItem.ofTag("minecraft:stone_tool_materials"), 3),
+                        new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:stick"), 2)));
+        RecipeSource recipeSource = new RecipeSource(Set.of(WorkstationRecipe.Kind.CRAFTING), wanted -> List.of(pickaxe),
+                memory, itemId -> 0, FakeRuns.READY, backpack, offhand, tags, new CapturingNeeds(),
+                blockType -> Optional.empty(), null);
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, recipeSource.quote(
+                new ItemRequest(WantedItem.ofItem("minecraft:stone_pickaxe"), 1, "开局"), CONTEXT));
+        assertTrue(offer.risk().contains("放一个"), offer.risk());
+        assertEquals(0, offer.cost().distanceBlocks(), "就地摆，不走去 40 格外");
     }
 
     @Test

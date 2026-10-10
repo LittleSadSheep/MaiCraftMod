@@ -34,6 +34,11 @@ public final class RecipeSource implements ItemSource {
 
     /** 找工作站的半径：再远就不算顺手，宁可去采原料。 */
     public static final int SEARCH_RADIUS_BLOCKS = 64;
+    /**
+     * 记得的工作台比这远就不跑过去了：一张工作台只要四块木板，玩家会就地再摆一张，
+     * 不会为做一把镐子走回几十格外的老地方（路上还要搭路、绕悬崖）。熔炉、石切台造价高，照旧走过去用。
+     */
+    public static final int HANDY_CRAFTING_TABLE_BLOCKS = 16;
 
     /** 烧炼一件东西要烧多少刻：原版熔炉的固定速度。 */
     private static final int SMELT_TICKS_PER_ITEM = 200;
@@ -109,7 +114,7 @@ public final class RecipeSource implements ItemSource {
                     new AcquisitionCost(0, 4 + recipe.ingredients().size()),
                     "在背包的合成格里做，不用工作台", recipe.id());
         }
-        Optional<MemoryRecord> station = findStation(recipe.kind(), context);
+        Optional<MemoryRecord> station = handyStation(recipe.kind(), context);
         if (station.isEmpty()) {
             return placementQuote(recipe, request.count(), context);
         }
@@ -131,7 +136,7 @@ public final class RecipeSource implements ItemSource {
         if (inInventory(recipe)) {
             return Optional.of(assembleInInventory(recipe, timesNeeded(recipe, request.count()), context));
         }
-        Optional<MemoryRecord> station = findStation(recipe.kind(), context);
+        Optional<MemoryRecord> station = handyStation(recipe.kind(), context);
         return Optional.of(assemble(recipe,
                 station.map(MemoryRecord::position).orElse(null),
                 timesNeeded(recipe, request.count()), context));
@@ -297,12 +302,24 @@ public final class RecipeSource implements ItemSource {
         return (int) Math.ceil((double) count / recipe.resultCount());
     }
 
+    // 这次用哪台记得的设施：工作台离得远、又能就地摆一张时不用它，报价与动手看的是同一个结论。
+    private Optional<MemoryRecord> handyStation(WorkstationRecipe.Kind kind, SourceContext context) {
+        Optional<MemoryRecord> station = findStation(kind, context);
+        boolean mayPlace = placer != null && context.permissions().changeBlocks() != Permissions.BlockChanges.NONE;
+        if (station.isPresent() && kind == WorkstationRecipe.Kind.CRAFTING && mayPlace
+                && distance(station.get(), context) > HANDY_CRAFTING_TABLE_BLOCKS) {
+            return Optional.empty();
+        }
+        return station;
+    }
+
     private Optional<MemoryRecord> findStation(WorkstationRecipe.Kind kind, SourceContext context) {
         String blockType = workstationBlockType(kind);
+        // 记得好几台时挑离得最近的那台：世界记忆按记下的先后排，最新记的不一定最近。
         return memory.recordsNear(context.characterAt(), SEARCH_RADIUS_BLOCKS).stream()
                 .filter(record -> record.kind() == MemoryKind.WORKSTATION)
                 .filter(record -> blockType.equals(record.blockType()))
-                .findFirst();
+                .min(Comparator.comparingDouble(record -> distance(record, context)));
     }
 
     private String riskNote(WorkstationRecipe recipe, int times, SourceContext context) {
