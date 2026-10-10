@@ -23,6 +23,16 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 public record MemoryRecord(MemoryKind kind, WorldPosition position, String blockType,
         List<String> contents, MemoryOrigin origin, Instant recordedAt) {
 
+    /**
+     * 两个位置是不是同一格：坐标一样，维度一样或有一边没写。没写维度的位置是"当时所在的维度"——
+     * 看见一只箱子时记的位置不带维度，开箱后记的带维度，说的是同一只箱子，不能当成两只。
+     */
+    public static boolean sameSpot(WorldPosition first, WorldPosition second) {
+        return first.x() == second.x() && first.y() == second.y() && first.z() == second.z()
+                && (first.dimension() == null || second.dimension() == null
+                        || first.dimension().equals(second.dimension()));
+    }
+
     public MemoryRecord {
         if (kind == null || position == null || origin == null || recordedAt == null) {
             throw new IllegalArgumentException("记忆记录缺不了种类、位置、来源和记录时刻");
@@ -53,10 +63,12 @@ public record MemoryRecord(MemoryKind kind, WorldPosition position, String block
      * 路过又看了一眼不算打开过，不能把当初开箱看到的清单抹掉。
      */
     public MemoryRecord mergedWith(MemoryRecord newer) {
-        if (kind != newer.kind || !position.equals(newer.position)) {
+        if (kind != newer.kind || !sameSpot(position, newer.position)) {
             throw new IllegalArgumentException("只有同一个位置、同一个种类的记忆才能合并");
         }
-        return new MemoryRecord(kind, position,
+        // 两条里有一条没写维度时，合并后留下写了维度的那个说法。
+        WorldPosition spot = newer.position.dimension() != null ? newer.position : position;
+        return new MemoryRecord(kind, spot,
                 newer.blockType != null ? newer.blockType : blockType,
                 newer.contents != null ? newer.contents : contents,
                 MemoryOrigin.stronger(origin, newer.origin),

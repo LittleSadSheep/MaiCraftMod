@@ -67,8 +67,9 @@ public final class LiveCarryReads {
                 return null;
             }
             var player = current.localPlayer();
-            return WorldPosition.here(
-                    player.getBlockX(), player.getBlockY(), player.getBlockZ());
+            // 带上此刻所在的维度：施工锚点、记地点、找设施都按它判断是不是同一个维度。
+            return new WorldPosition(player.getBlockX(), player.getBlockY(), player.getBlockZ(),
+                    player.level().dimension().location().toString());
         };
     }
 

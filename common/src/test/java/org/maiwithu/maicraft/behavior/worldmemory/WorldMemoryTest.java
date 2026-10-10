@@ -37,6 +37,20 @@ class WorldMemoryTest {
     }
 
     @Test
+    void 看见时没写维度_开箱后写了维度_说的是同一只箱子(@TempDir Path temp) {
+        // 实机：感知记的箱子位置不带维度，开箱记的带维度，记成了两只；按角色位置（带维度）查附近只找得到
+        // 没开过的那条，拿东西每次都绕去翻同一只箱子。
+        var memory = memory(temp);
+        memory.containerSeen(WorldPosition.here(100, 64, -30), "minecraft:chest", NOW);
+        memory.rememberContainerOpened(CHEST, "minecraft:chest", List.of("minecraft:oak_log"), NOW.plusSeconds(5));
+        var near = memory.recordsNear(new WorldPosition(98, 64, -30, "minecraft:overworld"), 8).stream()
+                .filter(record -> record.kind() == MemoryKind.CONTAINER).toList();
+        assertEquals(1, near.size(), "合成一条");
+        assertTrue(near.getFirst().openedBefore(), "记的是开过的样子");
+        assertEquals("minecraft:overworld", near.getFirst().position().dimension(), "留下写了维度的说法");
+    }
+
+    @Test
     void 感知写来的看见记录与直接写入走同一条规矩(@TempDir Path temp) {
         var memory = memory(temp);
         // 感知只报"亲眼看到"：工作台看见就是看见，来源不冒充亲手用过。

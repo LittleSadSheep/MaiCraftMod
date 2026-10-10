@@ -34,7 +34,7 @@ record MemoryBook(List<MemoryRecord> records, Map<String, WorldPosition> places,
         MemoryRecord merged = incoming;
         for (MemoryRecord existing : records) {
             boolean sameThing = existing.kind() == incoming.kind()
-                    && existing.position().equals(incoming.position());
+                    && MemoryRecord.sameSpot(existing.position(), incoming.position());
             if (sameThing) {
                 merged = existing.mergedWith(incoming);
             } else {
@@ -62,7 +62,7 @@ record MemoryBook(List<MemoryRecord> records, Map<String, WorldPosition> places,
     /** 忘掉一条记忆：那个东西搬走了、不见了，留着只会误导。其他记忆不动。 */
     MemoryBook without(MemoryKind kind, WorldPosition position) {
         List<MemoryRecord> next = records.stream()
-                .filter(record -> record.kind() != kind || !record.position().equals(position))
+                .filter(record -> record.kind() != kind || !MemoryRecord.sameSpot(record.position(), position))
                 .toList();
         return new MemoryBook(next, places, regions);
     }

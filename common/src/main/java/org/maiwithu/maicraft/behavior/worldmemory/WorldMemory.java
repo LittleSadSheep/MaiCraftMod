@@ -179,7 +179,7 @@ public final class WorldMemory implements RemembersPlaces, RemembersRegions, Rem
     /** 查某个位置某类东西的记忆；没有就给空。 */
     public Optional<MemoryRecord> recordAt(MemoryKind kind, WorldPosition position) {
         return readBook().records().stream()
-                .filter(record -> record.kind() == kind && record.position().equals(position))
+                .filter(record -> record.kind() == kind && MemoryRecord.sameSpot(record.position(), position))
                 .findFirst();
     }
 
@@ -250,10 +250,12 @@ public final class WorldMemory implements RemembersPlaces, RemembersRegions, Rem
         return book;
     }
 
+    // 没写维度的位置是"当时所在的维度"：与任何维度都算同一个，和地盘、丢弃落点的认法一致。
+    // 原来要求两边都不写或写得一样，感知记的箱子（不带维度）与按角色位置（带维度）查附近对不上，
+    // 开过的箱子查不到、没开过的那条一直留着，拿东西每次都绕去翻同一只箱子。
     private static boolean sameDimension(WorldPosition first, WorldPosition second) {
-        return first.dimension() == null
-                ? second.dimension() == null
-                : first.dimension().equals(second.dimension());
+        return first.dimension() == null || second.dimension() == null
+                || first.dimension().equals(second.dimension());
     }
 
     private static double distance(WorldPosition first, WorldPosition second) {
