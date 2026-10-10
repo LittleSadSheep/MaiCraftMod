@@ -14,10 +14,12 @@ import org.maiwithu.maicraft.kernel.ability.Listing;
 import org.maiwithu.maicraft.kernel.ability.RequiredMod;
 import org.maiwithu.maicraft.kernel.param.ParamSpec;
 import org.maiwithu.maicraft.kernel.knowledge.KnowledgeDocument;
+import org.maiwithu.maicraft.kernel.knowledge.KnowledgeNotReady;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
 import org.maiwithu.maicraft.mcp.knowledge.RecipePages;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -40,6 +42,8 @@ import java.util.function.Function;
  */
 public final class LookupTool implements McpTool {
     private static final List<String> TOPICS = List.of("abilities", "knowledge", "wiki", "recipe");
+    /** 一篇资料一刻准备不完时最多等多久；客户端每刻接着准备一点。 */
+    private static final Duration PREPARE_WAIT = Duration.ofSeconds(10);
 
     private final AbilityRegistry registry;
     private final KnowledgeLibrary knowledge;
@@ -141,9 +145,23 @@ public final class LookupTool implements McpTool {
         return ToolReply.ok(data, check.notes(), null);
     }
 
-    // 查资料在客户端线程上做：物品资料页与模组的资料都读游戏现场。角色不在世界里时退到只有随包常识的那份，
-    // 并如实说这一次查不到物品与模组的资料；客户端迟迟轮不到就回答 busy。
+    // 查资料在客户端线程上做：物品资料页与模组的资料都读游戏现场。一篇资料一刻准备不完（思索场景要在演示世界里放一遍）
+    // 就下一刻接着读同一篇，等到准备好或超时；超时如实说还在准备，不拿半截冒充完整的。
+    // 角色不在世界里时退到只有随包常识的那份，并如实说这一次查不到物品与模组的资料；客户端迟迟轮不到就回答 busy。
     private JsonObject knowledgeNow(String id, String query, RequestCheck check) {
+        long deadline = System.nanoTime() + PREPARE_WAIT.toNanos();
+        while (true) {
+            try {
+                return knowledgeOnce(id, query, check);
+            } catch (KnowledgeNotReady preparing) {
+                if (System.nanoTime() > deadline) {
+                    return ToolReply.error(ErrorCode.BUSY, "这篇资料还在准备：" + preparing.getMessage() + "；过一会儿再读同一篇");
+                }
+            }
+        }
+    }
+
+    private JsonObject knowledgeOnce(String id, String query, RequestCheck check) {
         try {
             return clientThread.call(context -> knowledge(knowledge, id, query, new ArrayList<>(check.notes())));
         } catch (ClientThread.NotInWorld absent) {

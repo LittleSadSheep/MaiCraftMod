@@ -20,6 +20,7 @@ import org.maiwithu.maicraft.behavior.recipe.ShownStack;
 import org.maiwithu.maicraft.game.world.ReadsItemDescriptions;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.knowledge.KnowledgeDocument;
+import org.maiwithu.maicraft.kernel.knowledge.KnowledgeNotReady;
 import org.maiwithu.maicraft.kernel.knowledge.KnowledgeSource;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -102,6 +103,32 @@ class LookupRecipeTest {
 
         assertEquals(List.of("思索：可用，1 个场景"),
                 data.getAsJsonArray("sources").asList().stream().map(element -> element.getAsString()).toList());
+    }
+
+    @Test
+    void 资料一刻准备不完时下一刻接着读同一篇() {
+        int[] reads = {0};
+        KnowledgeSource slow = new KnowledgeSource() {
+            @Override public List<KnowledgeDocument.Entry> entries() { return List.of(); }
+            @Override public KnowledgeDocument read(String uri) {
+                if (!uri.equals("maicraft://knowledge/ponder/create/mechanical_mixer/1")) return null;
+                if (++reads[0] < 3) throw new KnowledgeNotReady("还在回放，已到第 " + reads[0] * 100 + " 刻");
+                return new KnowledgeDocument(uri, "scene", "场景", "思索场景", "正文");
+            }
+            @Override public String status() { return ""; }
+        };
+        ClientThread thread = new ClientThread() {
+            @Override public <T> T call(Function<TickContext, T> work) {
+                return work.apply(null);
+            }
+        };
+        LookupTool lookup = new LookupTool(new AbilityRegistry(new TaskFactories(), modId -> false), new KnowledgeLibrary(List.of(slow)),
+                new RecipeLookup(List.of(), new MixingViewer()), new Items(), thread);
+
+        JsonObject data = ok(lookup.call(args("knowledge", "maicraft://knowledge/ponder/create/mechanical_mixer/1", null, null)));
+
+        assertEquals("正文", data.get("text").getAsString());
+        assertEquals(3, reads[0], "读了三次：前两次还在准备");
     }
 
     private static JsonObject ok(JsonObject reply) {
