@@ -121,6 +121,64 @@ class RecipeSourceTest {
         assertTrue(offer.risk().contains("×1"), "做一次要一根木头");
     }
 
+    /** 替身：会在背包合成格里做的现场动作，记下有没有走背包这条路。 */
+    private static final class InventoryRuns implements RecipeRuns {
+        int inInventory;
+        int atStation;
+
+        @Override public Optional<Action> run(WorkstationRecipe recipe, WorldPosition station, int times,
+                Permissions permissions) {
+            atStation++;
+            return Optional.of(done("在工作台上做"));
+        }
+
+        @Override public boolean craftsInInventory() {
+            return true;
+        }
+
+        @Override public Optional<Action> runInInventory(WorkstationRecipe recipe, int times) {
+            inInventory++;
+            return Optional.of(done("在背包里做"));
+        }
+
+        private static Action done(String what) {
+            return new Action() {
+                @Override public ActionStatus tick(TickContext context) {
+                    return ActionStatus.done();
+                }
+                @Override public String describe() {
+                    return what;
+                }
+            };
+        }
+    }
+
+    private WorkstationRecipe smallPlankRecipe() {
+        return new WorkstationRecipe("minecraft:oak_planks", WorkstationRecipe.Kind.CRAFTING,
+                WantedItem.ofItem("minecraft:oak_planks"), 4,
+                List.of(new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:oak_log"), 1)), true);
+    }
+
+    @Test
+    void 摆得进两格乘两格的合成_没有工作台也能报价_在背包合成格里做() {
+        // 新世界开局：附近没有工作台、身上也没有，做木板不能卡在"先要一张工作台"上。
+        InventoryRuns runs = new InventoryRuns();
+        CapturingNeeds needs = new CapturingNeeds();
+        RecipeSource recipeSource = new RecipeSource(recipes -> List.of(smallPlankRecipe()), memory(),
+                itemId -> 0, runs, backpack, offhand, tags, needs);
+        ItemRequest planks = new ItemRequest(WantedItem.ofItem("minecraft:oak_planks"), 4, "做工作台");
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, recipeSource.quote(planks, CONTEXT));
+        assertEquals(0, offer.cost().distanceBlocks(), "在背包里做，不用走去哪");
+        assertTrue(offer.risk().contains("背包"), offer.risk());
+
+        recipeSource.begin(planks, offer, CONTEXT).orElseThrow();
+        assertEquals(1, runs.inInventory, "走背包合成格这条路");
+        assertEquals(0, runs.atStation);
+        assertEquals(1, needs.asked.size(), "原料照样回引擎去弄");
+        assertTrue(needs.asked.stream().noneMatch(ask -> ask.wanted().specifier().equals("minecraft:crafting_table")),
+                "不去弄工作台");
+    }
+
     @Test
     void 动手时缺的原料按用途标签递归回引擎() {
         WorldMemory memory = memory();

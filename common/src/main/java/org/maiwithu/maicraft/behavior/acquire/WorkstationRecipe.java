@@ -12,9 +12,16 @@ import java.util.List;
  * @param result       做出来的东西
  * @param resultCount  做一次出几件
  * @param ingredients  做一次要的原料；烧炼与石切台只有一条
+ * @param fitsInInventory 合成配方摆得进背包的 2×2 合成格（木板、木棍、工作台这类）：不用工作台，打开背包就能做
  */
 public record WorkstationRecipe(String id, Kind kind, WantedItem result, int resultCount,
-        List<IngredientStack> ingredients) {
+        List<IngredientStack> ingredients, boolean fitsInInventory) {
+
+    /** 不看摆不摆得进背包合成格的配方：烧炼、石切台，以及只能在工作台上做的合成。 */
+    public WorkstationRecipe(String id, Kind kind, WantedItem result, int resultCount,
+            List<IngredientStack> ingredients) {
+        this(id, kind, result, resultCount, ingredients, false);
+    }
 
     public WorkstationRecipe {
         if (id == null || id.isBlank()) throw new IllegalArgumentException("配方必须有注册 ID");
@@ -23,11 +30,14 @@ public record WorkstationRecipe(String id, Kind kind, WantedItem result, int res
         if (resultCount < 1) throw new IllegalArgumentException("配方的产出数量至少为 1：" + resultCount);
         ingredients = List.copyOf(ingredients);
         if (ingredients.isEmpty()) throw new IllegalArgumentException("配方至少要有一种原料：" + id);
+        if (fitsInInventory && kind != Kind.CRAFTING) {
+            throw new IllegalArgumentException("只有合成配方能在背包的合成格里做：" + id);
+        }
     }
 
     /** 做这条配方的设施。 */
     public enum Kind {
-        /** 合成台上的合成（两格两格以内的合成也按工作台算，不单独走随身格）。 */
+        /** 合成：摆得进 2×2 的在背包合成格里做，摆不进的上工作台（见 fitsInInventory）。 */
         CRAFTING,
         /** 熔炉烧炼；除了原料还要燃料。 */
         SMELTING,

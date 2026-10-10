@@ -99,6 +99,12 @@ public final class RecipeSource implements ItemSource {
         WorkstationRecipe recipe = candidates.stream()
                 .sorted((a, b) -> Integer.compare(a.ingredients().size(), b.ingredients().size()))
                 .toList().getFirst();
+        // 摆得进 2×2 的合成在背包合成格里做：不用找工作台，也不用先摆一个，新世界开局做木板、工作台就靠它。
+        if (inInventory(recipe)) {
+            return new SourceQuote.Offer(describe(), request.count(),
+                    new AcquisitionCost(0, 4 + recipe.ingredients().size()),
+                    "在背包的合成格里做，不用工作台", recipe.id());
+        }
         Optional<MemoryRecord> station = findStation(recipe.kind(), context);
         if (station.isEmpty()) {
             return placementQuote(recipe, request.count(), context);
@@ -118,15 +124,34 @@ public final class RecipeSource implements ItemSource {
             // 报价时还在、动手时查不到了：交回空，由引擎换路。
             return Optional.empty();
         }
+        if (inInventory(recipe)) {
+            return Optional.of(assembleInInventory(recipe, timesNeeded(recipe, request.count()), context));
+        }
         Optional<MemoryRecord> station = findStation(recipe.kind(), context);
         return Optional.of(assemble(recipe,
                 station.map(MemoryRecord::position).orElse(null),
                 timesNeeded(recipe, request.count()), context));
     }
 
-    // 备料的一整串：缺的原料逐项去弄，烧炼再备燃料，没有设施就先摆一个，最后到设施上做。
-    private Action assemble(WorkstationRecipe recipe, WorldPosition station, int times, SourceContext context) {
-        Permissions permissions = context.permissions();
+    // 这条配方在不在背包合成格里做：合成配方摆得进 2×2，且动手的那一层做得了背包合成。
+    private boolean inInventory(WorkstationRecipe recipe) {
+        return recipe.kind() == WorkstationRecipe.Kind.CRAFTING && recipe.fitsInInventory() && runs.craftsInInventory();
+    }
+
+    // 背包合成的一整串：缺的原料逐项去弄，然后打开背包在合成格里做，不走工作台。
+    private Action assembleInInventory(WorkstationRecipe recipe, int times, SourceContext context) {
+        List<Action> steps = ingredientSteps(recipe, times, context.permissions());
+        Optional<Action> run = runs.runInInventory(recipe, times);
+        if (run.isEmpty()) {
+            return steps.isEmpty() ? nothingToDo(recipe)
+                    : new StepwiseActions("为「做" + recipe.result().describe() + "」备原料", steps.toArray(Action[]::new));
+        }
+        steps.add(run.get());
+        return new StepwiseActions("备齐原料后在背包里做" + recipe.result().describe(), steps.toArray(Action[]::new));
+    }
+
+    // 缺的原料逐项回引擎去弄：身上已有的不再要，用途写清是为谁备的。
+    private List<Action> ingredientSteps(WorkstationRecipe recipe, int times, Permissions permissions) {
         List<Action> steps = new ArrayList<>();
         for (WorkstationRecipe.IngredientStack ingredient : recipe.ingredients()) {
             int needed = ingredient.count() * times;
@@ -136,6 +161,13 @@ public final class RecipeSource implements ItemSource {
                         "为「做" + recipe.result().describe() + "」备原料"), permissions));
             }
         }
+        return steps;
+    }
+
+    // 备料的一整串：缺的原料逐项去弄，烧炼再备燃料，没有设施就先摆一个，最后到设施上做。
+    private Action assemble(WorkstationRecipe recipe, WorldPosition station, int times, SourceContext context) {
+        Permissions permissions = context.permissions();
+        List<Action> steps = ingredientSteps(recipe, times, permissions);
         if (recipe.kind() == WorkstationRecipe.Kind.SMELTING) {
             steps.addAll(fuelSteps(recipe, times, permissions));
         }

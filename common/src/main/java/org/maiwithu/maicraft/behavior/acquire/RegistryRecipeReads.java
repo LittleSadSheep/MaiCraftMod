@@ -78,8 +78,12 @@ public final class RegistryRecipeReads implements ReadsRecipes, ReadsFuels {
             if (!wanted.matches(resultId, tags.tagsOf(resultId))) {
                 continue;
             }
+            // 合成配方按游戏自己的判断看摆不摆得进 2×2：摆得进的在背包合成格里做，不用先有工作台。
+            boolean fitsInInventory = kind == WorkstationRecipe.Kind.CRAFTING
+                    && holder.value().canCraftInDimensions(2, 2);
             views.add(new WorkstationRecipe(holder.id().toString(), kind,
-                    WantedItem.ofItem(resultId), result.getCount(), ingredients(holder.value().getIngredients())));
+                    WantedItem.ofItem(resultId), result.getCount(), ingredients(holder.value().getIngredients()),
+                    fitsInInventory));
         }
     }
 

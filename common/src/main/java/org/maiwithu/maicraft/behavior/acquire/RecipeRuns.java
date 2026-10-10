@@ -32,4 +32,17 @@ public interface RecipeRuns {
     default Optional<Action> runAtRememberedStation(WorkstationRecipe recipe, int times, Permissions permissions) {
         return Optional.empty();
     }
+
+    /** 能不能在背包的 2×2 合成格里做：能的话摆得进 2×2 的合成配方不用工作台。 */
+    default boolean craftsInInventory() {
+        return false;
+    }
+
+    /**
+     * 在背包的 2×2 合成格里做一条摆得进去的合成配方：打开背包界面、经配方簿摆料、取走产出，做够了关上。
+     * 做完时做好的东西已在背包里（做出来几件以重新清点为准）；做不了时返回 empty。
+     */
+    default Optional<Action> runInInventory(WorkstationRecipe recipe, int times) {
+        return Optional.empty();
+    }
 }

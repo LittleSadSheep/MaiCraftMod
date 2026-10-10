@@ -45,6 +45,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  *
  * <p>三种设施的用法不同，都按原版界面真实的规矩来：
  * <ul>
+ *   <li>背包合成格：摆得进 2×2 的合成不用工作台，打开背包照工作台的做法做（见 {@link InventoryCrafting}）；</li>
  *   <li>工作台：经配方簿一次摆一份原料，取走产出再摆下一份；</li>
  *   <li>熔炉：经配方簿一次摆一件原料；配方簿不管燃料，没在烧又没燃料时把身上烧得最久的燃料
  *       拿起来放进燃料槽；做完把剩下的燃料收回背包（熔炉不会自己把东西还回来）；</li>
@@ -105,6 +106,23 @@ public final class MenuRecipeRuns implements RecipeRuns {
         }
         return level.getRecipeManager().byKey(id)
                 .map(holder -> new WorkAction(holder, recipe, station, times, permissions));
+    }
+
+    @Override
+    public boolean craftsInInventory() {
+        return true;
+    }
+
+    // 摆得进 2×2 的合成在背包合成格里做：按注册 ID 认回游戏自己的配方对象，配方簿只认它。
+    @Override
+    public Optional<Action> runInInventory(WorkstationRecipe recipe, int times) {
+        PlayerContext current = context.get();
+        ClientLevel level = current == null ? null : current.level();
+        ResourceLocation id = ResourceLocation.tryParse(recipe.id());
+        if (level == null || id == null || !recipe.fitsInInventory()) {
+            return Optional.empty();
+        }
+        return level.getRecipeManager().byKey(id).map(holder -> new InventoryCrafting(holder, recipe, times, context));
     }
 
     @Override
