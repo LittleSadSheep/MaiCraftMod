@@ -41,6 +41,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** 用东西的任务：找目标、备手、靠近、出手、结论怎么变成结果，都对着离线替身跑。 */
@@ -270,6 +271,27 @@ class UseTaskTest {
     }
 
     @Test
+    void 写告示牌_靠近目标只带正面那一侧_普通用法不带() {
+        // 面朝西的告示牌（正面水平朝向角 90）：写字路径给靠近的目标带上正面那一侧，站位因此只挑西边；
+        // 不写字的普通用法不带这个约束，站位不受正背限制。
+        Rig rig = new Rig();
+        rig.world.blocks.put(LEVER, "minecraft:oak_sign");
+        rig.world.signs.put(LEVER, UseSeams.ReadsWorld.Sign.WRITABLE);
+        rig.world.signFronts.put(LEVER, 90.0);
+        rig.interactions.applied("编辑界面开了");
+        TaskResult result = rig.run(new UseInput(position(LEVER), null, null, null, 1, 32,
+                List.of("你好"), Permissions.DEFAULT));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(90.0, rig.close.lastTarget.frontYaw());
+        Rig plain = new Rig();
+        plain.world.blocks.put(LEVER, "minecraft:lever");
+        plain.interactions.applied("拉杆扳动了");
+        TaskResult plainResult = plain.run(plain.input(position(LEVER), null, "minecraft:lever", null, 1));
+        assertEquals(TaskResult.Status.DONE, plainResult.status());
+        assertNull(plain.close.lastTarget.frontYaw());
+    }
+
+    @Test
     void 上过蜡的告示牌_不点按游戏拒绝() {
         Rig rig = new Rig();
         rig.world.blocks.put(LEVER, "minecraft:oak_sign");
@@ -435,6 +457,8 @@ class UseTaskTest {
         final Map<BlockPos, Fluid> fluids = new HashMap<>();
         final Map<BlockPos, BlockPos> sources = new HashMap<>();
         final Map<BlockPos, Sign> signs = new HashMap<>();
+        /** 还能写的告示牌正面的水平朝向角（原版旋转角，南为 0）；没记的面朝南算。 */
+        final Map<BlockPos, Double> signFronts = new HashMap<>();
         final Map<Integer, SeenEntity> entities = new HashMap<>();
         Integer ridingId;
         Held held;
@@ -457,9 +481,17 @@ class UseTaskTest {
         @Override public Optional<SeenEntity> entity(int entityId) { return Optional.ofNullable(entities.get(entityId)); }
         @Override public boolean riding(int entityId) { return ridingId != null && ridingId == entityId; }
         @Override public Optional<Held> heldItem() { return Optional.ofNullable(held); }
-        @Override public Optional<ApproachTarget> approachTarget(ResolvedTarget target) {
-            return Optional.of(target.isEntity() ? ApproachTarget.ofEntity(new AABB(target.cell()))
-                    : ApproachTarget.ofBlock(target.cell()));
+        // 与生产一致：写字的目标得是还能写的告示牌才带"只站正面那一侧"，不是告示牌给空，任务按目标没了收场；
+        // 不写字的普通用法不带这个约束。
+        @Override public Optional<ApproachTarget> approachTarget(ResolvedTarget target, boolean writesSign) {
+            if (target.isEntity()) {
+                return Optional.of(ApproachTarget.ofEntity(new AABB(target.cell())));
+            }
+            Double front = signs.getOrDefault(target.cell(), Sign.NOT_A_SIGN) == Sign.WRITABLE
+                    ? signFronts.getOrDefault(target.cell(), 0.0) : null;
+            if (writesSign && front == null) return Optional.empty();
+            return Optional.of(front == null ? ApproachTarget.ofBlock(target.cell())
+                    : ApproachTarget.onFrontSideOf(target.cell(), front));
         }
     }
 

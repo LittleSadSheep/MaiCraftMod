@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.approach;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.util.Mth;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
@@ -12,6 +13,7 @@ import java.util.OptionalDouble;
 
 /**
  * 站位判断：围着目标找能落脚的格子，按能到、够得着、看得见、站得稳四项筛，再按走过去的代价排好序。
+ * 只站正面那一侧的目标（写告示牌）先按正背筛，背面那一侧的候选不进排序。
  * 纯函数：所有世界事实都从只读视图问，所有距离数值都从够得着规则拿，这里只做计算，不动角色。
  *
  * <p>候选不过四项时不丢掉事实：每个被拒的位置带着败在哪一项记进结果，
@@ -73,6 +75,9 @@ public final class StandSpots {
                                                 ApproachWorldView world, ProtectedCells guarded) {
         BlockPos feet = world.currentFeet();
         if (!world.onGround()) return Optional.of("还没落地");
+        // 写告示牌这类只站正面的目标，人已经站在背面时先报背面：在这里点下去编辑的是背面那一面。
+        String behind = sideFailure(feet, target);
+        if (behind != null) return Optional.of(behind);
         String reachFailure = reachFailure(target, reach, feet, world.currentEye());
         if (reachFailure != null) return Optional.of(reachFailure);
         if (!world.visibleFrom(world.currentEye(), target)) return Optional.of("看不见");
@@ -87,6 +92,12 @@ public final class StandSpots {
         String steady = steadyFailure(feet, world, guarded);
         if (steady != null) {
             rejected.add(new RejectedSpot(feet, steady));
+            return;
+        }
+        // 只站正面的目标（写告示牌）先按正背筛：背面那一侧的位置连距离与视线都不用看。
+        String behind = sideFailure(feet, target);
+        if (behind != null) {
+            rejected.add(new RejectedSpot(feet, behind));
             return;
         }
         Vec3 eye = new Vec3(feet.getX() + 0.5, feet.getY() + reach.eyeHeight(), feet.getZ() + 0.5);
@@ -117,6 +128,19 @@ public final class StandSpots {
         if (world.inFluid(feet)) return "泡在液体里";
         if (world.lavaBeside(feet)) return "旁边有岩浆";
         return null;
+    }
+
+    /**
+     * 只站正面那一侧的目标（写告示牌）：站位不在正面那一侧时拒为"背面"，没有这个约束的目标都算正面。
+     * 判断和原版决定"这次编辑正面还是背面"用同一个式子：站位中心相对告示牌中心的水平方位角，
+     * 与正面朝向角相差不超过直角算正面，站到另一半平面点下去会落在告示牌背面。
+     */
+    private static String sideFailure(BlockPos feet, ApproachTarget target) {
+        if (target.frontYaw() == null) return null;
+        double offsetX = feet.getX() + 0.5 - (target.block().getX() + 0.5);
+        double offsetZ = feet.getZ() + 0.5 - (target.block().getZ() + 0.5);
+        float angleFromSign = (float) (Mth.atan2(offsetZ, offsetX) * 180.0F / Math.PI) - 90.0F;
+        return Mth.degreesDifferenceAbs(target.frontYaw().floatValue(), angleFromSign) > 90.0F ? "背面" : null;
     }
 
     /** 够得着检查：按交互种类取距离规则，返回失败项，够得着返回 null。 */

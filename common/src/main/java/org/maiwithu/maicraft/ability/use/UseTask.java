@@ -235,8 +235,9 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     }
 
     // 靠近：方块按格子、实体按它此刻的包围盒；实体已经不在了就是目标没了。
+    // 写告示牌时目标带上"只站正面那一侧"，站位候选由站位判断按它筛，不再站到背面去写。
     private Next<Phase> approach() {
-        Optional<ApproachTarget> shape = services.world().approachTarget(target);
+        Optional<ApproachTarget> shape = services.world().approachTarget(target, input.writesText());
         if (shape.isEmpty()) {
             return stop(Problem.of(Problem.Kind.TARGET_GONE, target.describe() + " 已经不在了", "重新 observe"));
         }

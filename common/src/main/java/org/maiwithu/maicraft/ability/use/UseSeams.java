@@ -84,8 +84,12 @@ final class UseSeams {
         /** 角色主手上拿着什么；空手为空。 */
         Optional<Held> heldItem();
 
-        /** 靠近目标的形态：方块用格子，实体用它此刻的包围盒；实体不在了为空。 */
-        Optional<ApproachTarget> approachTarget(ResolvedTarget target);
+        /**
+         * 靠近目标的形态：方块用格子，实体用它此刻的包围盒；实体不在了为空。
+         * writesSign 为真（写告示牌）时方块目标只站正面那一侧：从哪一面点就编辑哪一面，
+         * 那一格不是告示牌了给空，任务按目标没了收场。
+         */
+        Optional<ApproachTarget> approachTarget(ResolvedTarget target, boolean writesSign);
 
         /** 流体格的三种样子。 */
         enum Fluid { NONE, SOURCE, FLOWING }

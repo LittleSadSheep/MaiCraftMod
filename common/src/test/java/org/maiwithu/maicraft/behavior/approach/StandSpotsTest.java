@@ -115,6 +115,22 @@ class StandSpotsTest {
     }
 
     @Test
+    void 写告示牌时正面那一侧的候选留下背面的记为背面() {
+        // 面朝南的告示牌（原版水平朝向角 0，南边是正面）：正面的候选留下，正对背面的按"背面"拒掉。
+        ApproachTarget sign = ApproachTarget.onFrontSideOf(new BlockPos(3, 64, 0), 0.0);
+        StandSpots.Ranking ranking = find(sign);
+        assertTrue(ranking.spots().stream().anyMatch(spot -> spot.feet().equals(new BlockPos(3, 64, 1))));
+        assertEquals("背面", failureAt(ranking, new BlockPos(3, 64, -1)));
+        // 斜着放的告示牌按原版同一个方位角式子判：朝向角 45 时西南是正面，东北那一侧是背面。
+        StandSpots.Ranking tilted = find(ApproachTarget.onFrontSideOf(new BlockPos(3, 64, 0), 45.0));
+        assertTrue(tilted.spots().stream().anyMatch(spot -> spot.feet().equals(new BlockPos(4, 64, 4))));
+        assertEquals("背面", failureAt(tilted, new BlockPos(1, 64, -3)));
+        // 人已经站在背面时到点核对也不过：报"背面"，由靠近动作换到正面那一侧的站位。
+        world.feet = new BlockPos(3, 64, -1);
+        assertEquals(Optional.of("背面"), StandSpots.checkArrival(sign, REACH, world, guarded));
+    }
+
+    @Test
     void 寻路回答走不过去的格子记为到不了() {
         walking.unreachable.add(new BlockPos(2, 64, 0));
         StandSpots.Ranking ranking = find(ApproachTarget.ofBlock(new BlockPos(3, 64, 0)));
