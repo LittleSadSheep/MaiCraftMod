@@ -52,6 +52,17 @@ public final class Blueprint {
         return new Blueprint(dimension, anchor, relativeCells.stream().map(cell -> cell.placedAt(anchor, turn)).toList());
     }
 
+    /** 落地时转多少度对应的旋转；不是 0、90、180、270 之一返回 null。 */
+    public static Rotation turnOf(long degrees) {
+        return switch ((int) degrees) {
+            case 0 -> Rotation.NONE;
+            case 90 -> Rotation.CLOCKWISE_90;
+            case 180 -> Rotation.CLOCKWISE_180;
+            case 270 -> Rotation.COUNTERCLOCKWISE_90;
+            default -> null;
+        };
+    }
+
     /** 只有一格的蓝图：锚点就是那一格。 */
     public static Blueprint single(String dimension, PlannedCell cell) {
         return new Blueprint(dimension, cell.pos(), List.of(cell));
