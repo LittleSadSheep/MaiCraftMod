@@ -34,7 +34,7 @@ import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
-/** 开箱取货：界面刚刷新那一刻点不出去时下一刻再点，不把没点出去当成背包放不下而提前关箱。 */
+/** 开箱取货按量拿：整堆够用整堆拿，尾数按件拿够就停；点不出去时下一刻再点，不当成背包放不下。 */
 class MenuContainerTakesTest {
 
     @TempDir Path temp;
@@ -49,6 +49,8 @@ class MenuContainerTakesTest {
     private static final class FakeBox implements OpenedMenu {
         final List<ItemStack> box = new ArrayList<>();
         final List<ItemStack> player = new ArrayList<>();
+        /** 光标上拿着的东西；普通点击拿起、放下的都在这里周转。 */
+        private ItemStack cursor = ItemStack.EMPTY;
         int notReadyMoves;
         int sentMoves;
         boolean closed;
@@ -81,7 +83,7 @@ class MenuContainerTakesTest {
         }
 
         @Override public boolean busy() { return false; }
-        @Override public boolean cursorEmpty() { return true; }
+        @Override public boolean cursorEmpty() { return cursor.isEmpty(); }
 
         // 快速移动：本刻发不出去就什么都不做；发出去了把箱子里这一格整堆挪进角色背包的第一个空格。
         @Override public boolean quickMove(int slotId) {
@@ -101,7 +103,47 @@ class MenuContainerTakesTest {
             return true;
         }
 
-        @Override public boolean click(int slotId, int button) { return true; }
+        // 普通点击按原版规矩结算：空光标左键整份拿起、右键拿半堆；拿着东西左键整份放进（同种并堆，
+        // 别的交换）、右键放一个，放不进就不动。
+        @Override public boolean click(int slotId, int button) {
+            List<ItemStack> side = slotId < 27 ? box : player;
+            int index = slotId < 27 ? slotId : slotId - 27;
+            ItemStack slot = side.get(index);
+            if (cursor.isEmpty()) {
+                if (slot.isEmpty()) return true;
+                if (button == 0) {
+                    cursor = slot;
+                    side.set(index, ItemStack.EMPTY);
+                } else {
+                    int taken = (slot.getCount() + 1) / 2;
+                    cursor = slot.copyWithCount(taken);
+                    side.set(index, slot.copyWithCount(slot.getCount() - taken));
+                }
+            } else if (button == 0) {
+                if (slot.isEmpty()) {
+                    side.set(index, cursor);
+                    cursor = ItemStack.EMPTY;
+                } else if (ItemStack.isSameItemSameComponents(slot, cursor)) {
+                    int fitting = Math.min(cursor.getCount(), slot.getMaxStackSize() - slot.getCount());
+                    slot.grow(fitting);
+                    cursor.shrink(fitting);
+                } else {
+                    side.set(index, cursor);
+                    cursor = slot;
+                }
+            } else if (slot.isEmpty() || ItemStack.isSameItemSameComponents(slot, cursor)
+                    && slot.getCount() < slot.getMaxStackSize()) {
+                if (slot.isEmpty()) {
+                    side.set(index, cursor.copyWithCount(1));
+                } else {
+                    slot.grow(1);
+                }
+                cursor.shrink(1);
+            }
+            if (cursor.isEmpty()) cursor = ItemStack.EMPTY;
+            return true;
+        }
+
         @Override public void noteCursorTakenFrom(int slotId) {}
 
         @Override public Action closing() {
@@ -166,23 +208,109 @@ class MenuContainerTakesTest {
         box.box.set(9, new ItemStack(Items.IRON_INGOT, 3));
         // 前三下都撞上"本刻发不出去"，比搬运结清后等同步的宽限还多：照旧的做法会当成背包放不下关箱。
         box.notReadyMoves = 3;
-        WorldMemory memory = new WorldMemory(new DocumentStore(temp.resolve("state.sqlite")), "world-1");
-        MenuContainerTakes takes = new MenuContainerTakes(itemId -> Set.of(), memory, () -> null,
-                (at, permissions) -> new OpenAtOnce(box));
-        ItemRequest request = new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), 8, "工具准备");
-        Action take = takes.take(new KnownContainer("家门口的箱子", 10, 64, 5), request, Permissions.DEFAULT)
-                .orElseThrow();
+        Action take = takes(box, 8);
+        ActionStatus status = runToFinish(take);
 
-        Ticks ticks = new Ticks();
-        ActionStatus status = ActionStatus.running();
-        for (int i = 0; i < 200 && !(status instanceof ActionStatus.Done) && !(status instanceof ActionStatus.Failed); i++) {
-            status = take.tick(ticks);
-            ticks.advance();
-        }
         assertInstanceOf(ActionStatus.Done.class, status);
         assertEquals(8, box.carried(new ItemStack(Items.IRON_INGOT)), "两格铁锭都取到了");
         assertEquals(2, box.sentMoves, "发不出去的那几下不算点过，真正发出去的只有两下");
         assertEquals(0, box.notReadyMoves);
         assertTrue(box.closed, "取完关上箱子");
+    }
+
+    @Test
+    void 箱子里有六十四个只拿要的五个_背包里只多五个() {
+        FakeBox box = new FakeBox();
+        box.box.set(4, new ItemStack(Items.IRON_INGOT, 64));
+        ActionStatus status = runToFinish(takes(box, 5));
+
+        assertInstanceOf(ActionStatus.Done.class, status);
+        assertEquals(5, box.carried(new ItemStack(Items.IRON_INGOT)), "只多拿要的 5 个");
+        assertEquals(59, box.box.get(4).getCount(), "箱子里剩下的还是 59 个");
+        assertTrue(box.closed, "拿够就关上箱子");
+    }
+
+    @Test
+    void 拿够就停_后面的格子不再碰() {
+        FakeBox box = new FakeBox();
+        box.box.set(4, new ItemStack(Items.IRON_INGOT, 64));
+        box.box.set(9, new ItemStack(Items.IRON_INGOT, 30));
+        ActionStatus status = runToFinish(takes(box, 5));
+
+        assertInstanceOf(ActionStatus.Done.class, status);
+        assertEquals(5, box.carried(new ItemStack(Items.IRON_INGOT)));
+        assertEquals(30, box.box.get(9).getCount(), "够了的量不再去动后面的格子");
+    }
+
+    @Test
+    void 多格凑量_前面的格子整堆拿_最后一格拿尾数() {
+        FakeBox box = new FakeBox();
+        box.box.set(2, new ItemStack(Items.IRON_INGOT, 3));
+        box.box.set(9, new ItemStack(Items.IRON_INGOT, 4));
+        ActionStatus status = runToFinish(takes(box, 5));
+
+        assertInstanceOf(ActionStatus.Done.class, status);
+        assertEquals(5, box.carried(new ItemStack(Items.IRON_INGOT)), "3 个整堆加 2 个尾数凑够 5 个");
+        assertTrue(box.box.get(2).isEmpty(), "3 个那格整堆拿走");
+        assertEquals(2, box.box.get(9).getCount(), "4 个那格只拿走要的 2 个");
+    }
+
+    @Test
+    void 整堆刚好够用_一笔快速移动整堆拿走() {
+        FakeBox box = new FakeBox();
+        box.box.set(4, new ItemStack(Items.IRON_INGOT, 64));
+        ActionStatus status = runToFinish(takes(box, 64));
+
+        assertInstanceOf(ActionStatus.Done.class, status);
+        assertEquals(64, box.carried(new ItemStack(Items.IRON_INGOT)));
+        assertTrue(box.box.get(4).isEmpty());
+        assertEquals(1, box.sentMoves, "刚好够用整堆走快速移动，不拆堆");
+    }
+
+    @Test
+    void 箱里的不够要的_有多少拿多少然后照常收场() {
+        FakeBox box = new FakeBox();
+        box.box.set(4, new ItemStack(Items.IRON_INGOT, 64));
+        box.box.set(9, new ItemStack(Items.IRON_INGOT, 30));
+        ActionStatus status = runToFinish(takes(box, 100));
+
+        assertInstanceOf(ActionStatus.Done.class, status);
+        assertEquals(94, box.carried(new ItemStack(Items.IRON_INGOT)), "只有 94 个就全拿走，差多少引擎清点后再说");
+        assertTrue(box.closed);
+    }
+
+    @Test
+    void 背包放不下尾数时不硬点_照常收场交回清点() {
+        FakeBox box = new FakeBox();
+        box.box.set(4, new ItemStack(Items.IRON_INGOT, 64));
+        for (int i = 0; i < 36; i++) box.player.set(i, new ItemStack(Items.GOLD_BLOCK, 64));
+        ActionStatus status = runToFinish(takes(box, 5));
+
+        assertInstanceOf(ActionStatus.Done.class, status);
+        assertEquals(0, box.carried(new ItemStack(Items.IRON_INGOT)), "拆不出 5 个放的位置就一个不拿");
+        assertEquals(64, box.box.get(4).getCount(), "箱子原封不动，不硬点整堆把整组搬走");
+        assertEquals(0, box.sentMoves);
+        assertTrue(box.closed);
+    }
+
+    /** 开好一只替身箱子、要 iron_ingot 这么几件的开箱取货动作。 */
+    private Action takes(FakeBox box, int count) {
+        WorldMemory memory = new WorldMemory(new DocumentStore(temp.resolve("state.sqlite")), "world-1");
+        MenuContainerTakes takes = new MenuContainerTakes(itemId -> Set.of(), memory, () -> null,
+                (at, permissions) -> new OpenAtOnce(box));
+        return takes.take(new KnownContainer("家门口的箱子", 10, 64, 5),
+                new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), count, "工具准备"),
+                Permissions.DEFAULT).orElseThrow();
+    }
+
+    /** 推进到动作结束为止：给足刻数，开箱取货几十刻内该收场。 */
+    private static ActionStatus runToFinish(Action take) {
+        Ticks ticks = new Ticks();
+        ActionStatus status = ActionStatus.running();
+        for (int i = 0; i < 400 && status instanceof ActionStatus.Running; i++) {
+            status = take.tick(ticks);
+            ticks.advance();
+        }
+        return status;
     }
 }

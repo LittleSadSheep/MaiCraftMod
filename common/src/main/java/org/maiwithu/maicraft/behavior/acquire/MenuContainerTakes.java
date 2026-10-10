@@ -2,6 +2,8 @@
 package org.maiwithu.maicraft.behavior.acquire;
 
 import java.time.Instant;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,15 +32,17 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
- * 开箱取货的生产实现：走到记得的箱子跟前、点开、认下界面，把装着想要东西的槽位
- * 一格一格整堆搬进背包，拿够、搬完或背包放不下了就关上。
+ * 开箱取货的生产实现：走到记得的箱子跟前、点开、认下界面，按要的量把装着想要东西的槽位
+ * 搬进背包（整堆够用整堆拿，尾数按件拿，拿够就停），搬完、拿够或背包放不下了就关上。
  *
  * <p>点开、认领界面与等同步走玩家行为层共用的打开容器动作（每次点开都新建读端）。
- * 拿走多少以重新清点为准：引擎在动作结束后按身上的数量结算，这里只保证每一笔都等游戏确认过、
- * 界面关上了。记得的箱子到现场可能已经不在：点不开、界面一直没同步，都如实失败，引擎换别的路。
+ * 每一笔拿几件、点哪几下由取货计划给出，这里只按计划逐刻点、等游戏确认；
+ * 拿走多少以重新清点为准：引擎在动作结束后按身上的数量结算，这里保证每一笔都等确认过、界面关上了。
+ * 记得的箱子到现场可能已经不在：点不开、界面一直没同步，都如实失败，引擎换别的路。
  */
 public final class MenuContainerTakes implements ContainerTakes {
 
@@ -97,8 +101,10 @@ public final class MenuContainerTakes implements ContainerTakes {
         private int waited;
         /** 刚打开时容器那一侧装着想要的东西的总件数：拿走多少按它与当刻的差算。 */
         private int startTotal = -1;
-        /** 正在等结算的那一笔点下去之前，容器那一侧想要的东西有几件；没有在等的为 -1。 */
+        /** 正在点的那一笔动手之前，容器那一侧想要的东西有几件；没有在点的为 -1。 */
         private int beforeMove = -1;
+        /** 正在点的那一笔还剩哪几下没点；一笔的点击逐刻发，光标上的东西等放进背包才撒手。 */
+        private final Deque<ContainerTakePlan.Click> pressing = new ArrayDeque<>();
         private int quietTicks;
 
         TakeAction(KnownContainer container, ItemRequest request, Permissions permissions) {
@@ -131,7 +137,8 @@ public final class MenuContainerTakes implements ContainerTakes {
             return ActionStatus.progressed();
         }
 
-        // 逐格整堆搬：上一笔还在等确认就本刻不动手；拿够、没有可搬的或背包放不下了就去关界面。
+        // 按量搬：整堆够用整堆拿，尾数按件拿，拿够就停；上一笔没结清就本刻不动手，
+        // 拿够、没有可拿的或背包放不下尾数了就去关界面。
         private ActionStatus transfer() {
             Optional<MenuContent.Reading> reading = menu.reading();
             if (reading.isEmpty()) {
@@ -144,23 +151,41 @@ public final class MenuContainerTakes implements ContainerTakes {
                 startTotal = matchedTotal(open);
             }
             if (menu.busy()) return ActionStatus.running();
-            int now = matchedTotal(open);
-            if (beforeMove >= 0) {
-                if (now == beforeMove && ++quietTicks <= SETTLE_TICKS) return ActionStatus.running();
-                // 点了容器那侧纹丝不动：背包放不下了，不再硬点。
-                boolean stuck = now == beforeMove;
-                beforeMove = -1;
+            if (beforeMove < 0) {
+                // 上一笔已结清：按还缺的件数盘下一笔要点的几下，冻结动手前容器那侧的总数再动手。
+                int now = matchedTotal(open);
+                int remaining = request.count() - (startTotal - now);
+                Optional<ContainerTakePlan.Move> next = ContainerTakePlan.next(open, this::matches, remaining);
+                if (next.isEmpty()) return toClose(open);
+                beforeMove = now;
                 quietTicks = 0;
-                if (stuck) return toClose(open);
+                pressing.addAll(next.get().clicks());
             }
-            Integer next = nextMatchedSlot(open);
-            if (startTotal - now >= request.count() || next == null) {
-                return toClose(open);
+            if (!pressing.isEmpty()) {
+                // 本刻发不出去（界面刚刷新还没画好、没有交互机会）就下一刻再点：没发出去不是背包放不下。
+                if (!press(pressing.peek())) return ActionStatus.running();
+                pressing.poll();
+                return ActionStatus.progressed();
             }
-            // 本刻发不出去（界面刚刷新还没画好、没有交互机会）就下一刻再点：没发出去不是背包放不下。
-            if (!menu.quickMove(next)) return ActionStatus.running();
-            beforeMove = now;
+            // 一笔的几下都点完了：等两侧内容同步过来再结算这一笔。
+            int now = matchedTotal(open);
+            if ((now == beforeMove || !menu.cursorEmpty()) && ++quietTicks <= SETTLE_TICKS) {
+                return ActionStatus.running();
+            }
+            // 点了容器那侧纹丝不动：背包放不下了，不再硬点。
+            boolean stuck = now == beforeMove;
+            beforeMove = -1;
+            quietTicks = 0;
+            if (stuck) return toClose(open);
             return ActionStatus.progressed();
+        }
+
+        // 点这一笔的下一下：快速移动整堆；普通点击先把要从的格子登记给界面会话（中途关界面时
+        // 光标上的东西放回这一格），再发左右键。
+        private boolean press(ContainerTakePlan.Click click) {
+            if (click.quickMove()) return menu.quickMove(click.slotId());
+            if (click.takesToCursor()) menu.noteCursorTakenFrom(click.slotId());
+            return menu.click(click.slotId(), click.button());
         }
 
         // 去关之前把这只箱子此刻有什么记进世界记忆：位置带维度，种类按现场的方块读。
@@ -188,16 +213,6 @@ public final class MenuContainerTakes implements ContainerTakes {
             return total;
         }
 
-        // 下一格装着想要东西的容器侧槽位；没有给 null。
-        private Integer nextMatchedSlot(MenuContent.Reading reading) {
-            List<Integer> slotIds = reading.containerSlotIds();
-            List<SlotSnapshot> snapshots = reading.containerSnapshots();
-            for (int i = 0; i < slotIds.size(); i++) {
-                if (matches(snapshots.get(i))) return slotIds.get(i);
-            }
-            return null;
-        }
-
         private boolean matches(SlotSnapshot snapshot) {
             if (snapshot.isEmpty()) return false;
             String itemId = BuiltInRegistries.ITEM.getKey(snapshot.stack().getItem()).toString();
@@ -219,6 +234,13 @@ public final class MenuContainerTakes implements ContainerTakes {
                     level.dimension().location().toString());
             String blockType = BuiltInRegistries.BLOCK.getKey(level.getBlockState(at).getBlock()).toString();
             memory.rememberContainerOpened(position, blockType, List.copyOf(contents.keySet()), Instant.now());
+        }
+
+        // 光标上拿着东西的那几下停不得：半途撒手会把拆出来的尾数交给关界面的流程，先等它放进背包。
+        @Override
+        public Interruptibility interruptibility() {
+            return !pressing.isEmpty() && !menu.cursorEmpty()
+                    ? Interruptibility.UNSAFE_TO_STOP : Interruptibility.WORKING;
         }
 
         // 被生存需求打断：正在走、正在点的先停住；界面开着就请游戏关上，回来时引擎按身上的清点再决定。
