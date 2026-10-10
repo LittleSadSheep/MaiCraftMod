@@ -30,6 +30,8 @@ public final class DefaultMenuActions implements MenuActions {
     private PendingMenuAction active;
     private final MenuVisibility visibility;
     private AbstractContainerMenu closingMenu;
+    /** 关界面前已经把光标上的东西点进背包的哪一格；没点过为 -1。每次关界面只放一次，放不下就照常关。 */
+    private int stowedSlot = -1;
     private GuiPreparation worldPreparation;
 
     /** @param screens 界面真正画出来的记录：渲染从 Mixin 进来，点击前要等改变后的界面画过一帧 */
@@ -219,6 +221,7 @@ public final class DefaultMenuActions implements MenuActions {
         PendingMenuAction pending = create(PendingMenuAction.Kind.CLOSE, context, menu, -1, timeoutTicks, true,
                 MenuConfirmation.closedToInventory());
         closingMenu = menu;
+        stowedSlot = -1;
         advanceClose(context, pending);
         return pending;
     }
@@ -292,6 +295,22 @@ public final class DefaultMenuActions implements MenuActions {
             return;
         }
         context.tryClaimInteraction();
+        // 关之前光标上还挂着东西：先放进背包里能整个装下的一格，下一刻界面重新画好再关；
+        // 一格都装不下才交给原版的关闭流程去还（背包满时它会丢在脚下）。正常关、中途撒手、任务收尾都走这里。
+        if (stowedSlot < 0 && !closingMenu.getCarried().isEmpty()) {
+            int slot = CursorStowing.slotFor(closingMenu, closingMenu.getCarried());
+            if (slot >= 0) {
+                stowedSlot = slot;
+                try {
+                    gameMode(context).handleInventoryMouseClick(closingMenu.containerId, slot, 0, ClickType.PICKUP,
+                            context.localPlayer());
+                    visibility.changed(context);
+                    return;
+                } catch (RuntimeException failure) {
+                    LOG.debug("stowing the cursor before closing failed; closing anyway", failure);
+                }
+            }
+        }
         try {
             context.localPlayer().closeContainer();
             closingMenu = null;

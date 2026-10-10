@@ -14,7 +14,8 @@ import org.maiwithu.maicraft.kernel.result.Problem;
  * 界面对象与编号绑定——通道核对的是认领时的那份菜单，复用同一编号的另一只箱不算。
  *
  * <p>收尾（取消、失败、任务结束都走这里）：鼠标上拿着自己拿起的物品，先放回源格再关；
- * 不是自己拿的不回退，如实关掉，让原版把物品还给背包；失败先保留最早的原因。
+ * 不是自己拿的交给菜单入口关界面那一步：先放进背包里装得下的一格再关，装不下才由原版的关闭流程还；
+ * 失败先保留最早的原因。
  */
 public final class MenuSession {
 
@@ -117,7 +118,7 @@ public final class MenuSession {
         // 光标上还有自己拿起的物品：先放回源格；一次只点一下，等同步把光标清空再往下走。
         if (channel.cursorCarrying()) {
             if (cursorSourceSlot < 0) {
-                // 不是自己拿的：不回退，原样关掉，物品由原版的关闭流程还给背包。
+                // 不是自己拿的：不回退到别处，请游戏关；关界面那一步会先把它放进背包装得下的一格。
                 return requestCloseOnce(channel, tick);
             }
             if (tick >= closeDeadline) {
