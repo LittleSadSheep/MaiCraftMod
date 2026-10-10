@@ -18,8 +18,8 @@ import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.TargetKind;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
-import org.maiwithu.maicraft.kernel.param.Param;
 import org.maiwithu.maicraft.kernel.param.ParamSpec;
+import org.maiwithu.maicraft.kernel.param.ParamSpecs;
 import org.maiwithu.maicraft.kernel.param.ParamType;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
@@ -53,10 +53,10 @@ public final class RememberAbility implements AbilityModule {
                 "maicraft:remember",
                 "记住或忘掉一个按名字叫的地点",
                 AbilityDoc.forAbility("remember"),
-                ParamSpec.of(
-                        Param.of("name", ParamType.TEXT).required()
+                ParamSpecs.of(
+                        ParamSpec.of("name", ParamType.TEXT).required()
                                 .doc("地点名；首尾空白去掉后原样比较，不改大小写").build(),
-                        Param.of("operation", ParamType.CHOICE).defaultValue("remember")
+                        ParamSpec.of("operation", ParamType.CHOICE).defaultValue("remember")
                                 .choices("remember", "forget")
                                 .doc("remember 记住（默认，同名覆盖），forget 忘掉").build()),
                 Set.of(TargetKind.HERE, TargetKind.SEEN, TargetKind.LANDMARK, TargetKind.POSITION),

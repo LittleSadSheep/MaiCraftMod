@@ -8,7 +8,7 @@ import java.util.Set;
 import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
-import org.maiwithu.maicraft.behavior.approach.InteractionTarget;
+import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.inventory.PicksUpDrops;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -78,7 +78,7 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
         // 这一步要做的动作：靠近按任务许可；挖之前记下脚边原有的掉落物；捡只捡这一下新冒出来的。
         private Optional<Action> begin() {
             return switch (stage) {
-                case APPROACH -> Optional.of(close.toward(InteractionTarget.ofBlock(cell), permissions));
+                case APPROACH -> Optional.of(close.toward(ApproachTarget.ofBlock(cell), permissions));
                 case DIG -> {
                     dropsBefore = drops.nearby();
                     yield digs.dig(cell);

@@ -14,14 +14,14 @@ final class ServerRequestLedger {
     static final int MAX_REQUESTS = 512;
     static final int RECENT_READ_RESULTS = 8;
     private static final int MAX_MUTATION_CHARS = 524288;
-    private record Entry(String fingerprint, JsonObject receipt, boolean readOnly) {}
+    private record Entry(String fingerprint, JsonObject response, boolean readOnly) {}
     private final Map<String, Entry> entries = new LinkedHashMap<>();
     private final Map<String, Boolean> recentReads = new LinkedHashMap<>();
     private int mutationChars;
 
     JsonObject lookup(String requestId) {
         Entry entry = entries.get(requestId);
-        return entry == null ? null : entry.receipt().deepCopy();
+        return entry == null ? null : entry.response().deepCopy();
     }
 
     boolean matches(String requestId, String fingerprint) {
@@ -42,22 +42,22 @@ final class ServerRequestLedger {
     boolean readOnlyHistory() { return entries.values().stream().allMatch(Entry::readOnly); }
     int remainingRequests() { return Math.max(0, MAX_REQUESTS - entries.size()); }
 
-    void store(String requestId, String fingerprint, JsonObject receipt) {
-        store(requestId, fingerprint, receipt, false);
+    void store(String requestId, String fingerprint, JsonObject response) {
+        store(requestId, fingerprint, response, false);
     }
 
-    void store(String requestId, String fingerprint, JsonObject receipt, boolean readOnly) {
-        JsonObject copy = receipt.deepCopy();
+    void store(String requestId, String fingerprint, JsonObject response, boolean readOnly) {
+        JsonObject copy = response.deepCopy();
         int size = ProtocolJson.encode(copy).length();
         Entry previous = entries.put(requestId, new Entry(fingerprint, copy, readOnly));
-        if (previous != null && !previous.readOnly()) mutationChars -= previous.receipt().toString().length();
+        if (previous != null && !previous.readOnly()) mutationChars -= previous.response().toString().length();
         if (!readOnly) mutationChars += size;
         if (readOnly && copy.has("result")) recentReads.put(requestId, true);
         while (recentReads.size() > RECENT_READ_RESULTS) {
             String oldest = recentReads.keySet().iterator().next();
             recentReads.remove(oldest);
             Entry entry = entries.get(oldest);
-            JsonObject expired = entry.receipt().deepCopy();
+            JsonObject expired = entry.response().deepCopy();
             expired.remove("result");
             expired.addProperty("status", "failed");
             expired.addProperty("effect", "not_applied");

@@ -63,7 +63,7 @@ class ObtainAbilityTest {
     }
 
     private StepDecision decide(JsonObject params) {
-        ParseResult parsed = ability().spec().params().parse(params);
+        ParseResult parsed = ability().spec().paramSpecs().parse(params);
         if (parsed.params() == null) {
             throw new IllegalArgumentException("测试参数没过参数规格：" + parsed.errors());
         }
@@ -125,7 +125,7 @@ class ObtainAbilityTest {
         JsonObject params = new JsonObject();
         params.addProperty("item", "minecraft:torch");
         params.addProperty("radius", 500);
-        assertNull(ability().spec().params().parse(params).params(), "超出上限的半径不该通过校验");
+        assertNull(ability().spec().paramSpecs().parse(params).params(), "超出上限的半径不该通过校验");
     }
 
     private static BackpackView emptyBackpack() {

@@ -116,10 +116,10 @@ public final class SubmergedWaterTravelPolicy {
     public boolean managesAir() {
         // 水面本身畅通仍不够，身体到水面的整段上浮通道也必须可穿过，否则交给能绕行的换气链。
         return active() && breathingEscapeKnown && BreathingRoute.ascent(BreathingRoute.observed(context.player(),
-                NavigationProtection.snapshot().forbiddenBodyCells()), context.player().position()) != null;
+                NavigationProtection.snapshot().noEntryCells()), context.player().position()) != null;
     }
     public boolean sprinting() { return control.sprinting(); }
-    public int verticalIntent() { return control.verticalIntent(); }
+    public int desiredVertical() { return control.desiredVertical(); }
     public float cameraPitch() { return control.cameraPitch(); }
 
     private double safeDeepRunDistance(int start, int surfaceY, double enoughDistance) {
@@ -178,8 +178,8 @@ public final class SubmergedWaterTravelPolicy {
     private boolean safeSurfaceColumn(BlockPos surface) {
         if (!context.world().isLoaded(surface)) return false;
         return safeSurfaceColumn(context.world(), surface)
-                && !NavigationProtection.forbidsBody(surface)
-                && !NavigationProtection.forbidsBody(surface.below());
+                && !NavigationProtection.forbidsEntry(surface)
+                && !NavigationProtection.forbidsEntry(surface.below());
     }
 
     // 这里只查水面附近两格能否游动、上方能否呼吸及脚下危险物；更深处到水面的碰撞不在检查范围内。

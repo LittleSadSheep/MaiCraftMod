@@ -31,7 +31,7 @@ import org.maiwithu.maicraft.kernel.goal.Question;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.TargetKind;
 import org.maiwithu.maicraft.kernel.param.ParamNames;
-import org.maiwithu.maicraft.kernel.param.Params;
+import org.maiwithu.maicraft.kernel.param.ParamValues;
 import org.maiwithu.maicraft.kernel.result.Attempt;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -146,7 +146,7 @@ class InterfaceSnapshotTest {
                 .build();
         Question question = new Question(Question.Reason.CHOOSE_ONE, "动哪个箱子？",
                 List.of(new Question.Option("b5", "门口那个"), new Question.Option("b6", "屋里那个")));
-        GoalRun asking = GoalRun.fromSaved(12, Goal.of("maicraft:obtain", new Target.Here(), Params.EMPTY),
+        GoalRun asking = GoalRun.fromSaved(12, Goal.of("maicraft:obtain", new Target.Here(), ParamValues.EMPTY),
                 GoalRun.NO_PARENT, -1, GoalRunState.AWAITING_ANSWER, 0, question, List.of(), List.of(), 100);
         JsonObject shapes = new JsonObject();
         shapes.add("ok", ToolReply.ok(new JsonObject(), List.of("count：\"6\" 按 6 处理"),

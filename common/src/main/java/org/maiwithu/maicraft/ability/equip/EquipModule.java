@@ -24,8 +24,8 @@ import org.maiwithu.maicraft.kernel.ability.Listing;
 import org.maiwithu.maicraft.kernel.goal.Question;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
-import org.maiwithu.maicraft.kernel.param.Param;
 import org.maiwithu.maicraft.kernel.param.ParamSpec;
+import org.maiwithu.maicraft.kernel.param.ParamSpecs;
 import org.maiwithu.maicraft.kernel.param.ParamType;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
@@ -70,13 +70,13 @@ public final class EquipModule implements AbilityModule {
     public AbilitySpec spec() {
         return new AbilitySpec("maicraft:equip", "穿装备或卸装备",
                 AbilityDoc.forAbility("equip"),
-                ParamSpec.of(
-                        Param.of("operation", ParamType.CHOICE).required().choices("equip", "unequip")
+                ParamSpecs.of(
+                        ParamSpec.of("operation", ParamType.CHOICE).required().choices("equip", "unequip")
                                 .doc("equip 穿上 / unequip 卸下").build(),
-                        Param.of("slot", ParamType.CHOICE)
+                        ParamSpec.of("slot", ParamType.CHOICE)
                                 .choices("mainhand", "offhand", "head", "chest", "legs", "feet", "armor")
                                 .doc("目标栏位；armor 只配合 unequip，表示整套护甲卸下").build(),
-                        Param.of("item", ParamType.ITEM_OR_TAG)
+                        ParamSpec.of("item", ParamType.ITEM_OR_TAG)
                                 .doc("要穿的物品 ID 或标签；护甲栏候选唯一时可以不给，手上拿什么得点名").build()),
                 Set.of(), ExecutionMode.CONTROLS_PLAYER, Set.of(), List.of(), Listing.LISTED);
     }

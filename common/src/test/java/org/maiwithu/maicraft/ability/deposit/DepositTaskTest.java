@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
@@ -271,7 +272,7 @@ class DepositTaskTest {
             DepositServices services = new DepositServices(spots, (at, permissions) -> {
                 opens++;
                 return new FakeOpening(chests.get(WorldPosition.here(at.getX(), at.getY(), at.getZ())));
-            }, places, null, (itemId, tag) -> itemId.equals("minecraft:oak_log") && tag.equals("minecraft:logs"),
+            }, places, null, itemId -> itemId.equals("minecraft:oak_log") ? Set.of("minecraft:logs") : Set.of(),
                     null);
             DepositTask task = new DepositTask(input, services, backpack());
             task.start(tick());

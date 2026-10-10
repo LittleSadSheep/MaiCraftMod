@@ -6,7 +6,7 @@ import org.maiwithu.maicraft.game.player.DeathFacts;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.event.TaskEventLog;
 import org.maiwithu.maicraft.kernel.interrupt.ControlLoop;
-import org.maiwithu.maicraft.kernel.param.Params;
+import org.maiwithu.maicraft.kernel.param.ParamValues;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class GoalRunTableTest {
 
     private static final String ABILITY = "maicraft:test";
-    private static final Goal GOAL = Goal.of(ABILITY, null, Params.EMPTY);
+    private static final Goal GOAL = Goal.of(ABILITY, null, ParamValues.EMPTY);
     private static final Question QUESTION = new Question(Question.Reason.CHOOSE_ONE, "动哪个箱子？",
             List.of(new Question.Option("b5", "门口那个"), new Question.Option("b6", "屋里那个")));
 
@@ -237,7 +237,7 @@ class GoalRunTableTest {
         // survival_needs=off 的目标（寻死这类）对控制循环声明关掉生存需求；默认许可不关。
         Permissions off = Permissions.DEFAULT.mergedWith(null, null, null, null,
                 Permissions.SurvivalNeeds.OFF, null);
-        Goal suicide = new Goal(ABILITY, null, null, Params.EMPTY, off, List.of(), Goal.OnFailure.STOP);
+        Goal suicide = new Goal(ABILITY, null, null, ParamValues.EMPTY, off, List.of(), Goal.OnFailure.STOP);
 
         assertTrue(table.launch(suicide, null).runner().survivalNeedsOff());
         assertFalse(table.launch(GOAL, null).runner().survivalNeedsOff());

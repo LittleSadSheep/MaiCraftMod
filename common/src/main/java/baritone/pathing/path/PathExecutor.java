@@ -838,7 +838,7 @@ public class PathExecutor implements IPathExecutor, Helper {
      */
     public int waterVerticalIntent() {
         if (waterTravel.active()) {
-            return waterTravel.verticalIntent();
+            return waterTravel.desiredVertical();
         }
         if (pathPosition < 0 || pathPosition >= path.movements().size()
                 || ctx.player() == null || !ctx.player().isInWater()) {

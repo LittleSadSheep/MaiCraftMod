@@ -108,7 +108,7 @@ final class BaritoneWalkRun implements WalkRun {
     }
 
     /** 身体不许进的格子：这一趟卡住两次被列为障碍的面前格。 */
-    LongSet forbiddenBodyCells() {
+    LongSet noEntryCells() {
         return stalls.obstacles();
     }
 
@@ -161,7 +161,7 @@ final class BaritoneWalkRun implements WalkRun {
      * 把身体让给排队的运行：按"已停下"结算，松开引擎。被暂停的任务恢复后读到"已停下"，
      * 会像打断后那样从原地重新上路；没人再管的运行就此结束，不再挡住后面所有的走到。
      */
-    void yieldBody() {
+    void yieldPlayer() {
         clicks.stop(lastContext);
         progress.stopWhereLastSeen();
         owner.release(this);
@@ -209,7 +209,7 @@ final class BaritoneWalkRun implements WalkRun {
         };
     }
 
-    void driveBody(PlayerContext context) {
+    void drivePlayer(PlayerContext context) {
         lastContext = context;
         LocalPlayer player = context.localPlayer();
         var pathing = owner.pathing();
@@ -336,7 +336,7 @@ final class BaritoneWalkRun implements WalkRun {
             case OBSTACLE -> {
                 LOG.warn("[maicraft-path] 在 {} 前卡住了 {} 次，列为障碍重算绕行；{}",
                         front.toShortString(), NavigationStallMemory.ATTEMPTS, facts);
-                NavigationProtection.install(sacredCells(), forbiddenBodyCells(), Integer.MIN_VALUE);
+                NavigationProtection.install(sacredCells(), noEntryCells(), Integer.MIN_VALUE);
                 replanWhenSafe = true;
             }
             case EXHAUSTED -> progress.fail(Problem.of(Problem.Kind.STUCK,

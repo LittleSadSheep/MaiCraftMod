@@ -21,7 +21,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.material.FluidState;
 
-import org.maiwithu.maicraft.behavior.approach.InteractionTarget;
+import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /**
@@ -135,11 +135,11 @@ final class LiveUseWorld implements UseSeams.ReadsWorld {
     }
 
     // 实体会走动：靠近时取它这一刻的包围盒，不用落实目标时记下的位置。
-    @Override public Optional<InteractionTarget> approachTarget(ResolvedTarget target) {
+    @Override public Optional<ApproachTarget> approachTarget(ResolvedTarget target) {
         if (!target.isEntity()) {
-            return Optional.of(InteractionTarget.ofBlock(target.cell()));
+            return Optional.of(ApproachTarget.ofBlock(target.cell()));
         }
-        return entityById(target.entityId()).map(entity -> InteractionTarget.ofEntity(entity.getBoundingBox()));
+        return entityById(target.entityId()).map(entity -> ApproachTarget.ofEntity(entity.getBoundingBox()));
     }
 
     private Optional<BlockState> state(BlockPos cell) {

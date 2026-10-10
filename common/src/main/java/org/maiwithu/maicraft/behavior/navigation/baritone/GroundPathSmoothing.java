@@ -35,7 +35,7 @@ public final class GroundPathSmoothing extends PathBase {
         if (player == null || !player.onGround() || player.isInWater() || player.isPassenger()) return path;
         var corridor = new GroundCorridor(ctx.world(), pos -> ctx.world().isLoaded(pos)
                 && ctx.world().getWorldBorder().isWithinBounds(pos), player.getBbWidth(), player.getBbHeight(),
-                NavigationProtection.snapshot().forbiddenBodyCells(), PhysicalObstacleSnapshot.EMPTY);
+                NavigationProtection.snapshot().noEntryCells(), PhysicalObstacleSnapshot.EMPTY);
         return smooth(baritone, path, corridor, ctx.playerFeet(), player.position());
     }
 

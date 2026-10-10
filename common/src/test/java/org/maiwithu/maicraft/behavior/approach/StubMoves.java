@@ -37,7 +37,7 @@ final class StubMoves implements WalksToSpot {
         heading = feet;
     }
 
-    @Override public ActionStatus step(TickContext context) {
+    @Override public ActionStatus tick(TickContext context) {
         ActionStatus status = script.isEmpty() ? ActionStatus.done() : script.poll();
         if (status instanceof ActionStatus.Done && heading != null) {
             world.feet = heading;

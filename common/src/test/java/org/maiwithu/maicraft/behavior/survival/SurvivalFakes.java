@@ -137,11 +137,11 @@ final class SurvivalFakes {
         /** 输入替身：只记录，不写进任何玩家。 */
         final class FakeInput implements PlayerInput {
             @Override public boolean automationOwnsControls() { return true; }
-            @Override public void applyMovement(PlayerInput.Movement movement, long leaseTickRevision) {
+            @Override public void applyMovement(PlayerInput.Movement movement, long requestTick) {
                 movements++;
                 applied.add(movement);
             }
-            @Override public void requestLook(float yaw, float pitch, long leaseTickRevision) {
+            @Override public void requestLook(float yaw, float pitch, long requestTick) {
                 looks.add(new float[]{yaw, pitch});
             }
             @Override public void clearLook() {}

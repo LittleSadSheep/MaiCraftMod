@@ -118,8 +118,9 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
     // 存什么在开工时按身上的东西算一次：之后背包只会变少；标签经标签接缝判断。
     private void plan() {
         planned = true;
+        // 标签判断直接用玩家行为层的读法：物品挂着的标签里有没有这一个；没接上时什么标签都不挂。
         BiPredicate<String, String> taggedIn = services.tags() == null
-                ? (itemId, tagId) -> false : services.tags()::taggedIn;
+                ? (itemId, tagId) -> false : (itemId, tagId) -> services.tags().tagsOf(itemId).contains(tagId);
         for (DepositDecider.ToDeposit item : DepositDecider.choose(backpack.stacks(), input.itemIds(),
                 input.count(), taggedIn)) {
             wanted.merge(item.stack().itemId(), item.amount(), Integer::sum);

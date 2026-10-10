@@ -28,7 +28,7 @@ class ApproachTest {
     private final StubGuarded guarded = new StubGuarded();
 
     private Approach approach(StubMoves moves, StandOpener opener, Permissions permissions) {
-        return new Approach(InteractionTarget.ofBlock(目标), REACH, world, walking, guarded,
+        return new Approach(ApproachTarget.ofBlock(目标), REACH, world, walking, guarded,
                 moves, opener, permissions);
     }
 

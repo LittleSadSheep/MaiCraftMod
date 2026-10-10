@@ -121,7 +121,7 @@ public final class Interaction {
     private int held;                 // 右键空气时，物品已持续使用的游戏刻数。
     private boolean hardFail;         // 一次点击遇到不可恢复错误时阻止后续操作。
     private String failReason = "interaction failed";
-    private String lastUseOutcome = "not fired";
+    private String lastUseResult = "not fired";
     /** 仅在单次实体交互实例中保留并平滑瞄准点。 */
     private Vec3 trackedEntityAim;
 
@@ -555,7 +555,7 @@ public final class Interaction {
         lastUsePending = pending;
         pending = null;
         if (status == PendingInteraction.Status.CONFIRMED_APPLIED) {
-            lastUseOutcome = "confirmed (" + action + ")";
+            lastUseResult = "confirmed (" + action + ")";
             fallingThrough = false;
             return true;
         }
@@ -616,8 +616,8 @@ public final class Interaction {
      * 最近一次使用动作的简短说明。目前成功时只写 confirmed，未出手时为 not fired，
      * 不包含原版每只手的 PASS／FAIL 返回值，也不能拿这段文字代替成品检查。
      */
-    public String lastUseOutcome() {
-        return lastUseOutcome;
+    public String lastUseResult() {
+        return lastUseResult;
     }
     public BlockHitResult submittedBlockHit() { return submittedBlockHit; }
 

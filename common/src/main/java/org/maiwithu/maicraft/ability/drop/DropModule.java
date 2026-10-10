@@ -27,8 +27,8 @@ import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
 import org.maiwithu.maicraft.kernel.ability.Listing;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
-import org.maiwithu.maicraft.kernel.param.Param;
 import org.maiwithu.maicraft.kernel.param.ParamSpec;
+import org.maiwithu.maicraft.kernel.param.ParamSpecs;
 import org.maiwithu.maicraft.kernel.param.ParamType;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
@@ -75,10 +75,10 @@ public final class DropModule implements AbilityModule {
     public AbilitySpec spec() {
         return new AbilitySpec("maicraft:drop", "把身上带的东西丢出去",
                 AbilityDoc.forAbility("drop"),
-                ParamSpec.of(
-                        Param.of("item", ParamType.ITEM_OR_TAG).required()
+                ParamSpecs.of(
+                        ParamSpec.of("item", ParamType.ITEM_OR_TAG).required()
                                 .doc("要丢的物品 ID").build(),
-                        Param.of("count", ParamType.INTEGER).required().range(1, 999)
+                        ParamSpec.of("count", ParamType.INTEGER).required().range(1, 999)
                                 .doc("要丢几件；超过实际持有时会按实际持有的丢").build()),
                 Set.of(), ExecutionMode.CONTROLS_PLAYER, Set.of(), List.of(), Listing.LISTED);
     }

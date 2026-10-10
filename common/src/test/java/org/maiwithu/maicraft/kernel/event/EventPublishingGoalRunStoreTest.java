@@ -6,7 +6,7 @@ import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.GoalRun;
 import org.maiwithu.maicraft.kernel.goal.InMemoryGoalRunStore;
 import org.maiwithu.maicraft.kernel.goal.Question;
-import org.maiwithu.maicraft.kernel.param.Params;
+import org.maiwithu.maicraft.kernel.param.ParamValues;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 
@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 /** 目标运行的处境变化变成任务事件；sequence 的步骤记在整个 sequence 的编号上。 */
 class EventPublishingGoalRunStoreTest {
 
-    private static final Goal GOAL = Goal.of("maicraft:test", null, Params.EMPTY);
+    private static final Goal GOAL = Goal.of("maicraft:test", null, ParamValues.EMPTY);
     private static final Question QUESTION = new Question(Question.Reason.NEED_APPROVAL, "要拆这面墙吗？",
             List.of(new Question.Option("yes", "拆"), new Question.Option("no", "不拆")));
 

@@ -9,7 +9,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
-import org.maiwithu.maicraft.behavior.approach.InteractionTarget;
+import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -95,8 +95,8 @@ public final class ClientMenuOpening implements MenuOpening {
     // 走到够得着、看得见容器的地方；走不到如实失败，不隔空点开。
     private ActionStatus approach(TickContext tick) {
         if (step == null) {
-            InteractionTarget target = part == null ? InteractionTarget.ofBlock(at)
-                    : InteractionTarget.ofBlockPart(at, part);
+            ApproachTarget target = part == null ? ApproachTarget.ofBlock(at)
+                    : ApproachTarget.ofBlockPart(at, part);
             step = close.toward(target, permissions);
         }
         ActionStatus status = step.tick(tick);

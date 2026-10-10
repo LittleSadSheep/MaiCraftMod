@@ -44,7 +44,7 @@ final class DepositDecider {
         for (BackpackStack stack : stacks) {
             if (budget <= 0) break;
             if (!named) {
-                if (staysOnBody(stack)) continue;
+                if (staysOnPlayer(stack)) continue;
                 // 第一组整块建材留在身上当垫脚，往外的组都存。
                 if (stack.buildingMaterial()) {
                     if (!footBlockKept) {
@@ -63,7 +63,7 @@ final class DepositDecider {
     }
 
     // 不点名时留在身上的：盾牌与火把按 ID，装备与食物按背包快照的分类标记。
-    private static boolean staysOnBody(BackpackStack stack) {
+    private static boolean staysOnPlayer(BackpackStack stack) {
         if (KEEP_BY_ID.contains(stack.itemId())) return true;
         return stack.gear() || stack.food();
     }

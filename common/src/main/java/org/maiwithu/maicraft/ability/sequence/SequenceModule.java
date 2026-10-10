@@ -8,7 +8,7 @@ import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
 import org.maiwithu.maicraft.kernel.ability.Listing;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
-import org.maiwithu.maicraft.kernel.param.ParamSpec;
+import org.maiwithu.maicraft.kernel.param.ParamSpecs;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 
@@ -29,7 +29,7 @@ public final class SequenceModule implements AbilityModule {
                 "maicraft:sequence",
                 "按顺序做几件事：steps 里每一步是一个完整的目标",
                 AbilityDoc.forAbility("sequence"),
-                ParamSpec.of(),
+                ParamSpecs.of(),
                 Set.of(),
                 ExecutionMode.CONTROLS_PLAYER,
                 Set.of(),

@@ -107,7 +107,7 @@ public final class LiveApproachWorld implements ApproachWorldView {
     }
 
     @Override
-    public boolean visibleFrom(Vec3 eye, InteractionTarget target) {
+    public boolean visibleFrom(Vec3 eye, ApproachTarget target) {
         Level level = level();
         PlayerContext current = context.get();
         if (level == null || current == null || current.localPlayer() == null) {

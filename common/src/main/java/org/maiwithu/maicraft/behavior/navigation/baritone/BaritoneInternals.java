@@ -68,7 +68,7 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
         // 拥有身体的运行已经没人推进（主任务被生存需求暂停、或调用方丢下没收尾）：它交不出身体，
         // 排队的新运行就永远上不了路。按"已停下"结算它并交出身体，再让排队的这个上路。
         if (active != null && active != run && queued == run && active.idleAt(now)) {
-            active.yieldBody();
+            active.yieldPlayer();
         }
         if (active == null && queued == run) {
             activate(run, context);
@@ -80,7 +80,7 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
         engineWorld(engine, context.level());
         beginTick(context);
         try {
-            run.driveBody(context);
+            run.drivePlayer(context);
         } finally {
             endTick();
         }
@@ -155,7 +155,7 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
             });
         }
         ATTACHED.set(this);
-        NavigationProtection.install(run.sacredCells(), run.forbiddenBodyCells(), Integer.MIN_VALUE);
+        NavigationProtection.install(run.sacredCells(), run.noEntryCells(), Integer.MIN_VALUE);
         configureTerrain(BaritoneAPI.getSettings(), run.permit());
         queued = null;
         active = run;

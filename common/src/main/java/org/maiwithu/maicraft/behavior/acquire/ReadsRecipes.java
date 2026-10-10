@@ -10,5 +10,5 @@ import java.util.List;
 public interface ReadsRecipes {
 
     /** 能做出想要的东西的全部配方；游戏里没有做法时给空列表。 */
-    List<RecipeView> recipesProducing(WantedItem wanted);
+    List<WorkstationRecipe> recipesProducing(WantedItem wanted);
 }

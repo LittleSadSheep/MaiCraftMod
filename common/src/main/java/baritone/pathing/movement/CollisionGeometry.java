@@ -24,7 +24,7 @@ public final class CollisionGeometry {
     private final Vec3 initialPosition;
     private final BlockPos initialCell;
     private final Supplier<PhysicalObstacleSnapshot> physical;
-    private final double bodyWidth, bodyHeight;
+    private final double bodyWidth, playerHeight;
     private final Long2ObjectOpenHashMap<List<AABB>> protrusions = new Long2ObjectOpenHashMap<>();
 
     public CollisionGeometry(BlockGetter view, boolean frozen, Vec3 initialPosition, BlockPos initialCell) {
@@ -34,13 +34,13 @@ public final class CollisionGeometry {
 
     public CollisionGeometry(BlockGetter view, boolean frozen, Vec3 initialPosition, BlockPos initialCell,
             Supplier<PhysicalObstacleSnapshot> physical,
-            double bodyWidth, double bodyHeight) {
+            double bodyWidth, double playerHeight) {
         this.view = view;
         this.frozen = frozen;
         this.initialPosition = initialPosition;
         this.initialCell = initialCell;
         this.physical = frozen ? constant(physical.get()) : physical;
-        this.bodyWidth = bodyWidth; this.bodyHeight = bodyHeight;
+        this.bodyWidth = bodyWidth; this.playerHeight = playerHeight;
     }
 
     private static Supplier<PhysicalObstacleSnapshot> constant(
@@ -78,7 +78,7 @@ public final class CollisionGeometry {
     }
 
     private boolean clearSegment(Vec3 from, Vec3 to) {
-        if (!physical.get().clearSegment(from, to, bodyWidth, bodyHeight)) return false;
+        if (!physical.get().clearSegment(from, to, bodyWidth, playerHeight)) return false;
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         // The same one-cell owner margin used by vanilla block collision lookup; no entities.
         for (int x = Mth.floor(Math.min(from.x, to.x) - 0.3) - 1; x <= Mth.floor(Math.max(from.x, to.x) + 0.3) + 1; x++) {

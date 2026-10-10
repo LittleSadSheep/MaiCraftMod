@@ -13,5 +13,5 @@ import org.maiwithu.maicraft.kernel.task.Action;
 public interface BringsPlayerClose {
 
     /** 生成一个靠近动作：走到够得着、看得见这个目标的位置。 */
-    Action toward(InteractionTarget target, Permissions permissions);
+    Action toward(ApproachTarget target, Permissions permissions);
 }

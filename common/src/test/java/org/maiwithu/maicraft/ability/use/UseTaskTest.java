@@ -21,7 +21,7 @@ import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
-import org.maiwithu.maicraft.behavior.approach.InteractionTarget;
+import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
 import org.maiwithu.maicraft.behavior.interaction.InteractionVerdict;
 import org.maiwithu.maicraft.behavior.interaction.ItemUseAim;
@@ -457,9 +457,9 @@ class UseTaskTest {
         @Override public Optional<SeenEntity> entity(int entityId) { return Optional.ofNullable(entities.get(entityId)); }
         @Override public boolean riding(int entityId) { return ridingId != null && ridingId == entityId; }
         @Override public Optional<Held> heldItem() { return Optional.ofNullable(held); }
-        @Override public Optional<InteractionTarget> approachTarget(ResolvedTarget target) {
-            return Optional.of(target.isEntity() ? InteractionTarget.ofEntity(new AABB(target.cell()))
-                    : InteractionTarget.ofBlock(target.cell()));
+        @Override public Optional<ApproachTarget> approachTarget(ResolvedTarget target) {
+            return Optional.of(target.isEntity() ? ApproachTarget.ofEntity(new AABB(target.cell()))
+                    : ApproachTarget.ofBlock(target.cell()));
         }
     }
 
@@ -507,9 +507,9 @@ class UseTaskTest {
 
     private static final class FakeClose implements BringsPlayerClose {
         int calls;
-        InteractionTarget lastTarget;
+        ApproachTarget lastTarget;
 
-        @Override public Action toward(InteractionTarget target, Permissions permissions) {
+        @Override public Action toward(ApproachTarget target, Permissions permissions) {
             calls++;
             lastTarget = target;
             return new Scripted(1, ActionStatus.done(), () -> { });

@@ -50,7 +50,7 @@ public final class SwimTravelControl {
                 waterSurface - eyeHeight - (phase == Phase.DIVING ? 0.15 : 0.60));
     }
 
-    int verticalIntent() {
+    int desiredVertical() {
         if (phase == Phase.OFF) return 0;
         if (phase == Phase.SURFACING || phase == Phase.REFILL) return 1;
         if (feetY > targetY + DEPTH_DEADBAND) return -1;
@@ -61,7 +61,7 @@ public final class SwimTravelControl {
     float cameraPitch() {
         if (phase == Phase.DIVING) return 28.0F;
         if (phase == Phase.SURFACING || phase == Phase.REFILL) return -24.0F;
-        return phase == Phase.CRUISING ? verticalIntent() * -8.0F : 0.0F;
+        return phase == Phase.CRUISING ? desiredVertical() * -8.0F : 0.0F;
     }
 
     boolean active() { return phase != Phase.OFF; }

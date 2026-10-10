@@ -13,12 +13,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** 参数规格：参数名必须登记、宽松写法统一规范化、严格校验、错误一次报全。 */
-class ParamSpecTest {
+class ParamSpecsTest {
     // 模拟"让背包里某样东西再多几件"的参数：物品必填，数量 1..256 默认 1，途径可选。
-    private static final ParamSpec OBTAIN = ParamSpec.of(
-            Param.of("item", ParamType.ITEM_OR_TAG).required().doc("要多拿的物品或标签").build(),
-            Param.of("count", ParamType.INTEGER).range(1, 256).defaultValue(1).doc("要再多几件").build(),
-            Param.of("via", ParamType.CHOICE).choices("any", "craft", "smelt", "mine").defaultValue("any")
+    private static final ParamSpecs OBTAIN = ParamSpecs.of(
+            ParamSpec.of("item", ParamType.ITEM_OR_TAG).required().doc("要多拿的物品或标签").build(),
+            ParamSpec.of("count", ParamType.INTEGER).range(1, 256).defaultValue(1).doc("要再多几件").build(),
+            ParamSpec.of("via", ParamType.CHOICE).choices("any", "craft", "smelt", "mine").defaultValue("any")
                     .doc("指定途径").build());
 
     private static ParseResult parse(String json) {
@@ -29,7 +29,7 @@ class ParamSpecTest {
     void namesMustBeRegistered() {
         // "search_radius" 与已登记的 radius 是同一个意思：没在参数名表里登记的名字一律拒绝。
         assertThrows(IllegalArgumentException.class,
-                () -> Param.of("search_radius", ParamType.INTEGER).doc("搜索范围").build());
+                () -> ParamSpec.of("search_radius", ParamType.INTEGER).doc("搜索范围").build());
     }
 
     @Test
@@ -65,7 +65,7 @@ class ParamSpecTest {
 
     @Test
     void entityTypesDoNotAcceptTags() {
-        ParamSpec spec = ParamSpec.of(Param.of("entity", ParamType.ENTITY_TYPE).required().doc("要找的生物").build());
+        ParamSpecs spec = ParamSpecs.of(ParamSpec.of("entity", ParamType.ENTITY_TYPE).required().doc("要找的生物").build());
 
         assertTrue(spec.parse(JsonParser.parseString("{\"entity\":\"minecraft:sheep\"}").getAsJsonObject()).ok());
         assertFalse(spec.parse(JsonParser.parseString("{\"entity\":\"#minecraft:raiders\"}").getAsJsonObject()).ok());
@@ -73,7 +73,7 @@ class ParamSpecTest {
 
     @Test
     void wrapsSingleValueIntoList() {
-        ParamSpec spec = ParamSpec.of(Param.of("items", ParamType.ITEM_LIST).required().doc("要存进去的物品").build());
+        ParamSpecs spec = ParamSpecs.of(ParamSpec.of("items", ParamType.ITEM_LIST).required().doc("要存进去的物品").build());
         ParseResult result = spec.parse(JsonParser.parseString("{\"items\":\"minecraft:cobblestone\"}").getAsJsonObject());
 
         assertTrue(result.ok());

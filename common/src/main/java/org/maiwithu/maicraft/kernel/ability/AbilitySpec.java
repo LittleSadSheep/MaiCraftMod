@@ -3,7 +3,7 @@ package org.maiwithu.maicraft.kernel.ability;
 
 import org.maiwithu.maicraft.game.ModIdentity;
 import org.maiwithu.maicraft.kernel.goal.TargetKind;
-import org.maiwithu.maicraft.kernel.param.ParamSpec;
+import org.maiwithu.maicraft.kernel.param.ParamSpecs;
 
 import java.util.List;
 import java.util.Objects;
@@ -19,7 +19,7 @@ import java.util.regex.Pattern;
  * @param id            能力 ID，形如 maicraft:sleep
  * @param summary       能力列表里的一句话用途
  * @param doc           能力说明：写给 LLM 看的用法
- * @param params        参数规格：参数只在这里定义一次
+ * @param paramSpecs    全部参数规格：参数只在这里定义一次
  * @param targets       接受哪些种类的目标对象；不接受目标对象时为空
  * @param mode          执行方式
  * @param requiredMods  需要的联动模组；全部装了才可用
@@ -30,7 +30,7 @@ public record AbilitySpec(
         String id,
         String summary,
         AbilityDoc doc,
-        ParamSpec params,
+        ParamSpecs paramSpecs,
         Set<TargetKind> targets,
         ExecutionMode mode,
         Set<RequiredMod> requiredMods,
@@ -43,7 +43,7 @@ public record AbilitySpec(
         Objects.requireNonNull(id, "id");
         Objects.requireNonNull(summary, "summary");
         Objects.requireNonNull(doc, "doc");
-        Objects.requireNonNull(params, "params");
+        Objects.requireNonNull(paramSpecs, "paramSpecs");
         Objects.requireNonNull(mode, "mode");
         Objects.requireNonNull(listing, "listing");
         if (!ID.matcher(id).matches()) {

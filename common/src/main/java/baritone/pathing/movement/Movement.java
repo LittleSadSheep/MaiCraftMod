@@ -184,7 +184,7 @@ public abstract class Movement implements IMovement, MovementHelper {
     private boolean entersLiveForbiddenBodyCell() {
         BetterBlockPos occupied = ctx.playerFeet();
         for (BetterBlockPos candidate : getValidPositions()) {
-            if (!candidate.equals(occupied) && NavigationProtection.forbidsBody(candidate)) {
+            if (!candidate.equals(occupied) && NavigationProtection.forbidsEntry(candidate)) {
                 return true;
             }
         }

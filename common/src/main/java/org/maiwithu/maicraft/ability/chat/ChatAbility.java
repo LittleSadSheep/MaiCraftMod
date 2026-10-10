@@ -8,8 +8,8 @@ import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
 import org.maiwithu.maicraft.kernel.ability.Listing;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
-import org.maiwithu.maicraft.kernel.param.Param;
 import org.maiwithu.maicraft.kernel.param.ParamSpec;
+import org.maiwithu.maicraft.kernel.param.ParamSpecs;
 import org.maiwithu.maicraft.kernel.param.ParamType;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
@@ -63,8 +63,8 @@ public final class ChatAbility implements AbilityModule {
                 "maicraft:chat",
                 summary,
                 doc,
-                ParamSpec.of(
-                        Param.of("message", ParamType.TEXT).required()
+                ParamSpecs.of(
+                        ParamSpec.of("message", ParamType.TEXT).required()
                                 .doc(messageDoc).build()),
                 Set.of(),
                 ExecutionMode.CONTROLS_PLAYER,

@@ -18,8 +18,8 @@ import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.TargetKind;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
-import org.maiwithu.maicraft.kernel.param.Param;
 import org.maiwithu.maicraft.kernel.param.ParamSpec;
+import org.maiwithu.maicraft.kernel.param.ParamSpecs;
 import org.maiwithu.maicraft.kernel.param.ParamType;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 
@@ -50,16 +50,16 @@ public final class FightModule implements AbilityModule {
             "maicraft:fight",
             "打指定的目标，或清掉附近一片区域的敌对生物；打得过才打，血见底会先撤",
             AbilityDoc.forAbility("fight"),
-            ParamSpec.of(
-                    Param.of("entity", ParamType.ENTITY_TYPE)
+            ParamSpecs.of(
+                    ParamSpec.of("entity", ParamType.ENTITY_TYPE)
                             .doc("区域清扫时只清这种实体类型；省略即全部敌对生物")
                             .build(),
-                    Param.of("radius", ParamType.INTEGER)
+                    ParamSpec.of("radius", ParamType.INTEGER)
                             .range(1, 64)
                             .defaultValue(FightInput.DEFAULT_RADIUS)
                             .doc("区域清扫的范围，单位格")
                             .build(),
-                    Param.of("count", ParamType.INTEGER)
+                    ParamSpec.of("count", ParamType.INTEGER)
                             .range(1, 64)
                             .doc("区域清扫时最多处理几只；省略即开打那一刻看得见的这一批")
                             .build()),

@@ -23,7 +23,7 @@ final class StubOpener implements StandOpener {
         this.willing = willing;
     }
 
-    @Override public Optional<Action> rescue(RejectedSpot blocked, InteractionTarget target) {
+    @Override public Optional<Action> rescue(RejectedSpot blocked, ApproachTarget target) {
         asked.add(blocked);
         return willing ? Optional.of(new Action() {
             @Override public ActionStatus tick(TickContext context) {

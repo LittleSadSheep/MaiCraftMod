@@ -13,7 +13,7 @@ import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.WantedItem;
-import org.maiwithu.maicraft.behavior.approach.InteractionTarget;
+import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
 import org.maiwithu.maicraft.behavior.interaction.ItemUseAim;
 import org.maiwithu.maicraft.behavior.interaction.SignEditor;
@@ -236,7 +236,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
 
     // 靠近：方块按格子、实体按它此刻的包围盒；实体已经不在了就是目标没了。
     private Next<Phase> approach() {
-        Optional<InteractionTarget> shape = services.world().approachTarget(target);
+        Optional<ApproachTarget> shape = services.world().approachTarget(target);
         if (shape.isEmpty()) {
             return stop(Problem.of(Problem.Kind.TARGET_GONE, target.describe() + " 已经不在了", "重新 observe"));
         }

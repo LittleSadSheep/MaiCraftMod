@@ -105,7 +105,7 @@ class EatModuleTest {
     }
 
     private static Goal unnamed() {
-        ParseResult parsed = module().spec().params().parse(new JsonObject());
+        ParseResult parsed = module().spec().paramSpecs().parse(new JsonObject());
         assertTrue(parsed.ok(), "不给参数也能解析：" + parsed.errors());
         return new Goal("maicraft:eat", null, null, parsed.params(), null, List.of(), null);
     }

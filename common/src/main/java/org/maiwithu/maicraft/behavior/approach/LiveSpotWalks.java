@@ -45,7 +45,7 @@ public final class LiveSpotWalks implements WalksToSpot {
     }
 
     @Override
-    public ActionStatus step(TickContext context) {
+    public ActionStatus tick(TickContext context) {
         // 站进目标格并落地是做完，还在走是进行中，这条路走不了是失败——三种情况都出自走到情况。
         if (walk == null) return ActionStatus.running();
         ActionStatus status = walk.tick(context);

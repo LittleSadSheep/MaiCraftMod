@@ -16,7 +16,7 @@ import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
-import org.maiwithu.maicraft.kernel.param.Params;
+import org.maiwithu.maicraft.kernel.param.ParamValues;
 import org.maiwithu.maicraft.kernel.param.ParseResult;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
@@ -88,8 +88,8 @@ class RememberAbilityTest {
                         : Optional.empty());
     }
 
-    private Params params(String json) {
-        ParseResult result = ability.spec().params()
+    private ParamValues params(String json) {
+        ParseResult result = ability.spec().paramSpecs()
                 .parse(JsonParser.parseString(json).getAsJsonObject());
         assertTrue(result.ok(), "参数应能解析：" + result.errors());
         return result.params();
@@ -113,7 +113,7 @@ class RememberAbilityTest {
     void specIsMemoryOnlyAndNeedsAName() {
         assertEquals("maicraft:remember", ability.spec().id());
         assertEquals(ExecutionMode.MEMORY_ONLY, ability.spec().mode());
-        assertFalse(ability.spec().params().parse(new JsonObject()).ok(), "缺 name 应报错");
+        assertFalse(ability.spec().paramSpecs().parse(new JsonObject()).ok(), "缺 name 应报错");
     }
 
     @Test

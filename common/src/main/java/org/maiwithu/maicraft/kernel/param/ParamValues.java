@@ -15,13 +15,13 @@ import java.util.Map;
  * <p>取值类型：整数为 long、数字为 double、布尔为 boolean、文字与资源 ID 为 String、列表为 {@code List<String>}。
  * 没有给出且没有默认值的可选参数不在其中，读取前用 {@link #has} 判断。
  */
-public final class Params {
+public final class ParamValues {
     /** 没有任何参数。 */
-    public static final Params EMPTY = new Params(Map.of());
+    public static final ParamValues EMPTY = new ParamValues(Map.of());
 
     private final Map<String, Object> values;
 
-    Params(Map<String, Object> values) {
+    ParamValues(Map<String, Object> values) {
         this.values = Collections.unmodifiableMap(new LinkedHashMap<>(values));
     }
 

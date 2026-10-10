@@ -41,5 +41,5 @@ public interface ApproachWorldView {
      * 从给定眼睛位置看向目标，射线是否先命中目标本身；中途撞到别的方块就是看不见。
      * 透光方块（玻璃、树叶）不挡视线，与角色平时的观察一致。
      */
-    boolean visibleFrom(Vec3 eye, InteractionTarget target);
+    boolean visibleFrom(Vec3 eye, ApproachTarget target);
 }

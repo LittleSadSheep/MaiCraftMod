@@ -28,11 +28,6 @@ final class DepositSeams {
         Optional<Action> dig(BlockPos lidCell, Permissions permissions);
     }
 
-    /** 背包物品标签判断：一个物品 ID 在不在一个标签里；接缝没接上时永远为假。 */
-    interface ReadsItemTags {
-        boolean taggedIn(String itemId, String tagId);
-    }
-
     /** 目标对象落在哪：观察编号此刻的位置、记得的地点、角色脚下。 */
     interface FindsPlaces {
         /** 观察编号对应的东西此刻在哪；编号失效给空。 */

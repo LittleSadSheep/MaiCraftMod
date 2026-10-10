@@ -4,7 +4,7 @@ package org.maiwithu.maicraft.kernel.goal;
 import org.maiwithu.maicraft.game.player.DeathFacts;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.kernel.event.TaskEventLog;
-import org.maiwithu.maicraft.kernel.param.Params;
+import org.maiwithu.maicraft.kernel.param.ParamValues;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 
 import java.util.ArrayList;
@@ -196,6 +196,6 @@ public final class DeathRecovery {
     // 决策记录要挂一个目标：这里只借它的名字与说明给查询端看，不会有人推进它。
     private static Goal goal() {
         return new Goal(DECISION_NAME, "死亡恢复：重生、观战或取消目标", null,
-                Params.EMPTY, null, List.of(), null);
+                ParamValues.EMPTY, null, List.of(), null);
     }
 }

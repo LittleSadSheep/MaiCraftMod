@@ -10,7 +10,7 @@ final class TravelJumpPhysics {
     private TravelJumpPhysics() {}
 
     record Launch(double gravity, double jumpSpeed, double forwardSpeed,
-                  double groundAcceleration, double groundDrag, double bodyHeight) {}
+                  double groundAcceleration, double groundDrag, double playerHeight) {}
     record JumpProjection(double forwardDistance, double airDragSum, double apexHeight, int airborneTicks) {}
 
     static Launch capture(LocalPlayer player, Vec3 heading) {
@@ -28,10 +28,10 @@ final class TravelJumpPhysics {
 
     static JumpProjection project(Launch launch, boolean headHit) {
         if (!Double.isFinite(launch.gravity + launch.jumpSpeed + launch.forwardSpeed
-                + launch.groundAcceleration + launch.groundDrag + launch.bodyHeight)
+                + launch.groundAcceleration + launch.groundDrag + launch.playerHeight)
                 || launch.gravity <= 0 || launch.jumpSpeed <= 0 || launch.forwardSpeed < 0
                 || launch.groundAcceleration < 0 || launch.groundDrag <= 0 || launch.groundDrag > 1
-                || launch.bodyHeight <= 0 || headHit && launch.bodyHeight >= 2) return null;
+                || launch.playerHeight <= 0 || headHit && launch.playerHeight >= 2) return null;
         double height = 0, apex = 0, distance = 0, dragSum = 0, drag = 1;
         double vertical = launch.jumpSpeed, forward = launch.forwardSpeed;
         for (int tick = 1; tick <= 40; tick++) {
@@ -43,8 +43,8 @@ final class TravelJumpPhysics {
             forward *= friction;
             drag *= friction;
             height += vertical;
-            if (headHit && height > 2 - launch.bodyHeight) {
-                height = 2 - launch.bodyHeight;
+            if (headHit && height > 2 - launch.playerHeight) {
+                height = 2 - launch.playerHeight;
                 vertical = 0;
             }
             apex = Math.max(apex, height);

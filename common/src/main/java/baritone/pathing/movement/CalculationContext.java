@@ -349,13 +349,13 @@ public class CalculationContext {
 
     /** A semantic parent may forbid occupying exact body cells without changing block costs. */
     public boolean isBodyCellForbidden(int x, int y, int z) {
-        return maicraftPolicy.forbidsBody(x, y, z);
+        return maicraftPolicy.forbidsEntry(x, y, z);
     }
 
     /** Height-only policies also need the movement-lattice check even without explicit body cells. */
     public boolean hasForbiddenBodyCells() {
         return maicraftPolicy.minimumFeetY() != Integer.MIN_VALUE
-                || !maicraftPolicy.forbiddenBodyCells().isEmpty();
+                || !maicraftPolicy.noEntryCells().isEmpty();
     }
 
     /**

@@ -50,7 +50,7 @@ final class ItemWorth {
         if (stack.buildingMaterial()) {
             return Worth.BUILDING_MATERIAL;
         }
-        return Worth.COMMON_LOOT;
+        return Worth.ORDINARY_LOOT;
     }
 
     // 垃圾的账要算背包里的总数：圆石攒了三组，第三组往外的才是垃圾；一组以内还能搭桥垫脚。

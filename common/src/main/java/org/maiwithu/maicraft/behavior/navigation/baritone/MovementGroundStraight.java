@@ -55,7 +55,7 @@ public final class MovementGroundStraight extends Movement {
     private GroundCorridor corridor() {
         return new GroundCorridor(ctx.world(), pos -> ctx.world().isLoaded(pos)
                 && ctx.world().getWorldBorder().isWithinBounds(pos), ctx.player().getBbWidth(), ctx.player().getBbHeight(),
-                NavigationProtection.snapshot().forbiddenBodyCells(), PhysicalObstacleSnapshot.EMPTY);
+                NavigationProtection.snapshot().noEntryCells(), PhysicalObstacleSnapshot.EMPTY);
     }
 
     // 允许角色在直线附近少量偏移，避免不是恰好踩在格心就算离开路线；这份容许位置集合不替代实时碰撞检查。

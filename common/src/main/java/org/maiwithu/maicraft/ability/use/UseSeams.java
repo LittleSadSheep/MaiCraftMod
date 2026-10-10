@@ -8,7 +8,7 @@ import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
 
-import org.maiwithu.maicraft.behavior.approach.InteractionTarget;
+import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
 import org.maiwithu.maicraft.behavior.interaction.ItemUseAim;
 import org.maiwithu.maicraft.behavior.interaction.SignEditor;
@@ -85,7 +85,7 @@ final class UseSeams {
         Optional<Held> heldItem();
 
         /** 靠近目标的形态：方块用格子，实体用它此刻的包围盒；实体不在了为空。 */
-        Optional<InteractionTarget> approachTarget(ResolvedTarget target);
+        Optional<ApproachTarget> approachTarget(ResolvedTarget target);
 
         /** 流体格的三种样子。 */
         enum Fluid { NONE, SOURCE, FLOWING }

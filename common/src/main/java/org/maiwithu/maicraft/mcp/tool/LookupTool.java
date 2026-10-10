@@ -9,7 +9,7 @@ import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.ability.AbilitySpec;
 import org.maiwithu.maicraft.kernel.ability.Listing;
 import org.maiwithu.maicraft.kernel.ability.RequiredMod;
-import org.maiwithu.maicraft.kernel.param.Param;
+import org.maiwithu.maicraft.kernel.param.ParamSpec;
 import org.maiwithu.maicraft.kernel.knowledge.KnowledgeDocument;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
 
@@ -138,7 +138,7 @@ public final class LookupTool implements McpTool {
         }
         AbilitySpec spec = module.spec();
         JsonObject data = signature(spec);
-        data.add("parameters", spec.params().describe());
+        data.add("parameters", spec.paramSpecs().describe());
         JsonArray mods = new JsonArray();
         spec.requiredMods().stream().map(RequiredMod::modId).sorted().forEach(mods::add);
         data.add("required_mods", mods);
@@ -160,7 +160,7 @@ public final class LookupTool implements McpTool {
         json.addProperty("ability", spec.id());
         json.addProperty("summary", spec.summary());
         List<String> params = new ArrayList<>();
-        for (Param param : spec.params().params()) {
+        for (ParamSpec param : spec.paramSpecs().all()) {
             String type = param.type().schemaType();
             if (param.required()) {
                 params.add(param.name() + ": " + type);

@@ -22,10 +22,10 @@ import org.maiwithu.maicraft.kernel.ability.Listing;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
-import org.maiwithu.maicraft.kernel.param.Param;
 import org.maiwithu.maicraft.kernel.param.ParamSpec;
+import org.maiwithu.maicraft.kernel.param.ParamSpecs;
 import org.maiwithu.maicraft.kernel.param.ParamType;
-import org.maiwithu.maicraft.kernel.param.Params;
+import org.maiwithu.maicraft.kernel.param.ParamValues;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
@@ -68,24 +68,24 @@ public final class ObtainAbility implements AbilityModule {
         return new AbilitySpec("maicraft:obtain",
                 "让背包里某样东西再多几件；可用 via 指定途径",
                 AbilityDoc.forAbility("obtain"),
-                ParamSpec.of(
-                        Param.of("item", ParamType.ITEM_OR_TAG).required()
+                ParamSpecs.of(
+                        ParamSpec.of("item", ParamType.ITEM_OR_TAG).required()
                                 .doc("要多拿的物品 ID，或 # 开头的标签").build(),
-                        Param.of("count", ParamType.INTEGER).defaultValue(1L).range(1, Integer.MAX_VALUE)
+                        ParamSpec.of("count", ParamType.INTEGER).defaultValue(1L).range(1, Integer.MAX_VALUE)
                                 .doc("再多拿几件（不是背包里的总数）").build(),
-                        Param.of("via", ParamType.CHOICE)
+                        ParamSpec.of("via", ParamType.CHOICE)
                                 .choices(vias.stream().map(AcquireVia::name).toArray(String[]::new))
                                 .doc("只走指定途径，不给就按总代价自己挑：" + describeVias()).build(),
-                        Param.of("radius", ParamType.INTEGER).range(1, MAX_RADIUS)
+                        ParamSpec.of("radius", ParamType.INTEGER).range(1, MAX_RADIUS)
                                 .doc("容器与采掘的搜索范围（格）；给了就冻结在这个范围里").build(),
-                        Param.of("max_distance", ParamType.INTEGER).range(1, Integer.MAX_VALUE)
+                        ParamSpec.of("max_distance", ParamType.INTEGER).range(1, Integer.MAX_VALUE)
                                 .doc("愿意为此走多远（格）").build()),
                 Set.of(), ExecutionMode.CONTROLS_PLAYER, Set.of(), List.of(), Listing.LISTED);
     }
 
     @Override public StepDecision decide(StepContext step) {
         Goal goal = step.goal();
-        Params params = goal.params();
+        ParamValues params = goal.params();
         List<String> invalid = new ArrayList<>();
         if (!params.has("item")) {
             invalid.add("缺少要拿的东西（item）");
@@ -135,7 +135,7 @@ public final class ObtainAbility implements AbilityModule {
                         String.join("；", problems), "改一下参数再试")).build());
     }
 
-    private int count(Params params) {
+    private int count(ParamValues params) {
         return params.has("count") ? (int) params.integer("count") : 1;
     }
 
@@ -144,7 +144,7 @@ public final class ObtainAbility implements AbilityModule {
     }
 
     /** 把 via、radius、max_distance 换成引擎认的限定；via 没给就是全部途径都参与。 */
-    private ItemAcquisition.Scope scope(Params params) {
+    private ItemAcquisition.Scope scope(ParamValues params) {
         Set<String> vias = params.has("via") ? Set.of(params.text("via")) : Set.of();
         Double maxDistance = params.has("max_distance") ? Double.valueOf(params.integer("max_distance")) : null;
         Integer radius = params.has("radius") ? Integer.valueOf((int) params.integer("radius")) : null;

@@ -22,13 +22,13 @@ class StandSpotsTest {
     private final StubWalkCost walking = new StubWalkCost();
     private final StubGuarded guarded = new StubGuarded();
 
-    private StandSpots.Ranking find(InteractionTarget target) {
+    private StandSpots.Ranking find(ApproachTarget target) {
         return StandSpots.find(target, REACH, world, walking, guarded);
     }
 
     @Test
     void 平地上围着目标找出一圈能用的站位并按代价排好序() {
-        StandSpots.Ranking ranking = find(InteractionTarget.ofBlock(new BlockPos(3, 64, 0)));
+        StandSpots.Ranking ranking = find(ApproachTarget.ofBlock(new BlockPos(3, 64, 0)));
         assertFalse(ranking.spots().isEmpty());
         // 排序：前面的代价不比后面的大，同代价的按格子位置排，保证顺序稳定。
         for (int i = 1; i < ranking.spots().size(); i++) {
@@ -42,7 +42,7 @@ class StandSpotsTest {
     void 脚下悬空和头顶没空间的格子被拒() {
         world.noFloor.add(new BlockPos(2, 64, 0));
         world.lowCeiling.add(new BlockPos(2, 64, 1));
-        StandSpots.Ranking ranking = find(InteractionTarget.ofBlock(new BlockPos(3, 64, 0)));
+        StandSpots.Ranking ranking = find(ApproachTarget.ofBlock(new BlockPos(3, 64, 0)));
         assertEquals("脚下悬空", failureAt(ranking, new BlockPos(2, 64, 0)));
         assertEquals("头顶没空间", failureAt(ranking, new BlockPos(2, 64, 1)));
     }
@@ -53,7 +53,7 @@ class StandSpotsTest {
         world.fluids.add(new BlockPos(2, 64, 1));
         world.lavas.add(new BlockPos(2, 64, -1));
         guarded.add(new BlockPos(2, 63, 0));
-        StandSpots.Ranking ranking = find(InteractionTarget.ofBlock(new BlockPos(3, 64, 0)));
+        StandSpots.Ranking ranking = find(ApproachTarget.ofBlock(new BlockPos(3, 64, 0)));
         assertEquals("落差太深", failureAt(ranking, new BlockPos(2, 64, 0)));
         assertEquals("泡在液体里", failureAt(ranking, new BlockPos(2, 64, 1)));
         assertEquals("旁边有岩浆", failureAt(ranking, new BlockPos(2, 64, -1)));
@@ -67,7 +67,7 @@ class StandSpotsTest {
         world.lowCeiling.add(new BlockPos(0, 63, 5));
         ReachRules 近视 = new ReachRules(0.3, 3.0, 3, 1.62);
         StandSpots.Ranking ranking = StandSpots.find(
-                InteractionTarget.ofBlock(new BlockPos(0, 64, 5)), 近视, world, walking, guarded);
+                ApproachTarget.ofBlock(new BlockPos(0, 64, 5)), 近视, world, walking, guarded);
         assertTrue(ranking.spots().isEmpty());
         assertFalse(ranking.rejected().isEmpty());
         assertEquals("够不着", failureAt(ranking, new BlockPos(0, 64, 4)));
@@ -75,7 +75,7 @@ class StandSpotsTest {
 
     @Test
     void 床按服务端距离分轴卡() {
-        InteractionTarget bed = InteractionTarget.ofBed(new BlockPos(0, 60, 0));
+        ApproachTarget bed = ApproachTarget.ofBed(new BlockPos(0, 60, 0));
         StandSpots.Ranking ranking = find(bed);
         // 横向差四格超出床距离档；横向差三格、高度差两格正好在服务端允许的边上。
         assertEquals("够不着", failureAt(ranking, new BlockPos(4, 60, 0)));
@@ -87,7 +87,7 @@ class StandSpotsTest {
 
     @Test
     void 实体按实体交互距离卡() {
-        InteractionTarget entity = InteractionTarget.ofEntity(new AABB(4, 64, 0, 5, 66, 1));
+        ApproachTarget entity = ApproachTarget.ofEntity(new AABB(4, 64, 0, 5, 66, 1));
         StandSpots.Ranking ranking = StandSpots.find(entity, REACH, world, walking, guarded);
         // 平地上围着实体的一圈都在三格实体距离内，找得到能用的站位，先走代价最小的。
         assertFalse(ranking.spots().isEmpty());
@@ -109,7 +109,7 @@ class StandSpotsTest {
     void 射线被挡住的格子记为看不见() {
         // 半边天被墙挡住：眼睛在挡板西侧的候选都看不见。
         world.hidden = (eye, target) -> eye.x() < 1.5;
-        StandSpots.Ranking ranking = find(InteractionTarget.ofBlock(new BlockPos(3, 64, 0)));
+        StandSpots.Ranking ranking = find(ApproachTarget.ofBlock(new BlockPos(3, 64, 0)));
         assertEquals("看不见", failureAt(ranking, new BlockPos(0, 64, 0)));
         assertTrue(ranking.spots().stream().allMatch(spot -> spot.feet().getX() >= 1));
     }
@@ -117,13 +117,13 @@ class StandSpotsTest {
     @Test
     void 寻路回答走不过去的格子记为到不了() {
         walking.unreachable.add(new BlockPos(2, 64, 0));
-        StandSpots.Ranking ranking = find(InteractionTarget.ofBlock(new BlockPos(3, 64, 0)));
+        StandSpots.Ranking ranking = find(ApproachTarget.ofBlock(new BlockPos(3, 64, 0)));
         assertEquals("到不了", failureAt(ranking, new BlockPos(2, 64, 0)));
     }
 
     @Test
     void 到了之后四下核对() {
-        InteractionTarget target = InteractionTarget.ofBlock(new BlockPos(3, 64, 0));
+        ApproachTarget target = ApproachTarget.ofBlock(new BlockPos(3, 64, 0));
         assertEquals(Optional.empty(), StandSpots.checkArrival(target, REACH, world, guarded));
         // 离目标太远：够不着。
         world.feet = new BlockPos(20, 64, 0);

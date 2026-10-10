@@ -10,10 +10,10 @@ import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.ability.AbilitySpec;
 import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
 import org.maiwithu.maicraft.kernel.ability.Listing;
-import org.maiwithu.maicraft.kernel.param.Param;
 import org.maiwithu.maicraft.kernel.param.ParamSpec;
+import org.maiwithu.maicraft.kernel.param.ParamSpecs;
 import org.maiwithu.maicraft.kernel.param.ParamType;
-import org.maiwithu.maicraft.kernel.param.Params;
+import org.maiwithu.maicraft.kernel.param.ParamValues;
 import org.maiwithu.maicraft.kernel.result.Attempt;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
@@ -46,11 +46,11 @@ class DocumentGoalRunStoreTest {
 
         @Override public AbilitySpec spec() {
             return new AbilitySpec(id, "带参数的替身", AbilityDoc.forAbility("test"),
-                    ParamSpec.of(
-                            Param.of("count", ParamType.INTEGER).doc("挖几格").build(),
-                            Param.of("radius", ParamType.NUMBER).doc("范围").build(),
-                            Param.of("message", ParamType.TEXT).doc("收尾时说的话").build(),
-                            Param.of("items", ParamType.TEXT_LIST).doc("要带的东西").build()),
+                    ParamSpecs.of(
+                            ParamSpec.of("count", ParamType.INTEGER).doc("挖几格").build(),
+                            ParamSpec.of("radius", ParamType.NUMBER).doc("范围").build(),
+                            ParamSpec.of("message", ParamType.TEXT).doc("收尾时说的话").build(),
+                            ParamSpec.of("items", ParamType.TEXT_LIST).doc("要带的东西").build()),
                     Set.of(), ExecutionMode.CONTROLS_PLAYER, Set.of(), List.of(), Listing.LISTED);
         }
 
@@ -69,8 +69,8 @@ class DocumentGoalRunStoreTest {
         return new DocumentGoalRunStore(new DocumentStore(temp.resolve("state.sqlite")), KEY, registry);
     }
 
-    private static Params params(AbilityRegistry registry, String json) {
-        return registry.find("maicraft:dig").orElseThrow().spec().params()
+    private static ParamValues params(AbilityRegistry registry, String json) {
+        return registry.find("maicraft:dig").orElseThrow().spec().paramSpecs()
                 .parse(JsonParser.parseString(json).getAsJsonObject()).params();
     }
 
@@ -85,9 +85,9 @@ class DocumentGoalRunStoreTest {
                 params(registry, "{\"count\": 3, \"radius\": 2.5, \"message\": \"到了\", \"items\": [\"a\", \"b\"]}"),
                 careful, List.of(), Goal.OnFailure.STOP);
         Goal second = new Goal("maicraft:dig", null, new Target.Direction(Target.Toward.NORTH, 20),
-                Params.EMPTY, null, List.of(), Goal.OnFailure.CONTINUE);
-        Goal third = Goal.of("maicraft:dig", new Target.Seen("b5"), Params.EMPTY);
-        Goal sequence = new Goal("maicraft:sequence", "挖矿洞", null, Params.EMPTY, careful,
+                ParamValues.EMPTY, null, List.of(), Goal.OnFailure.CONTINUE);
+        Goal third = Goal.of("maicraft:dig", new Target.Seen("b5"), ParamValues.EMPTY);
+        Goal sequence = new Goal("maicraft:sequence", "挖矿洞", null, ParamValues.EMPTY, careful,
                 List.of(first, second, third), null);
         Question question = new Question(Question.Reason.CHOOSE_ONE, "动哪个箱子？",
                 List.of(new Question.Option("b5", "门口那个"), new Question.Option("b6", "屋里那个")));
@@ -117,7 +117,7 @@ class DocumentGoalRunStoreTest {
         assertEquals(new Target.Direction(Target.Toward.NORTH, 20), goal.steps().get(1).target());
         assertEquals(Goal.OnFailure.CONTINUE, goal.steps().get(1).onFailure());
         assertEquals(new Target.Seen("b5"), goal.steps().get(2).target());
-        Params kept = goal.steps().get(0).params();
+        ParamValues kept = goal.steps().get(0).params();
         assertEquals(3, kept.integer("count"));
         assertEquals(2.5, kept.number("radius"));
         assertEquals("到了", kept.text("message"));
@@ -128,8 +128,8 @@ class DocumentGoalRunStoreTest {
     void idsKeepGrowingAcrossRestartsAndFinishedRunsLeaveTheSave() {
         AbilityRegistry registry = registry("maicraft:dig");
         DocumentGoalRunStore store = store(registry);
-        GoalRun done = new GoalRun(store.nextId(), Goal.of("maicraft:dig", new Target.Here(), Params.EMPTY));
-        GoalRun step = new GoalRun(store.nextId(), Goal.of("maicraft:dig", null, Params.EMPTY), done.id(), 0);
+        GoalRun done = new GoalRun(store.nextId(), Goal.of("maicraft:dig", new Target.Here(), ParamValues.EMPTY));
+        GoalRun step = new GoalRun(store.nextId(), Goal.of("maicraft:dig", null, ParamValues.EMPTY), done.id(), 0);
         store.save(done);
         store.save(step);
         done.finish(TaskResult.done("挖完了"), 200);
@@ -148,8 +148,8 @@ class DocumentGoalRunStoreTest {
     @Test
     void goalsWhoseAbilityIsGoneAreDroppedInsteadOfHalfRestored() {
         DocumentGoalRunStore before = store(registry("maicraft:dig", "maicraft:fly"));
-        before.save(new GoalRun(before.nextId(), Goal.of("maicraft:fly", null, Params.EMPTY)));
-        before.save(new GoalRun(before.nextId(), Goal.of("maicraft:dig", null, Params.EMPTY)));
+        before.save(new GoalRun(before.nextId(), Goal.of("maicraft:fly", null, ParamValues.EMPTY)));
+        before.save(new GoalRun(before.nextId(), Goal.of("maicraft:dig", null, ParamValues.EMPTY)));
 
         // 新版本里 fly 能力没了：它的目标读不回，不拿半份目标去推进，也从存盘里拿掉。
         DocumentGoalRunStore after = store(registry("maicraft:dig"));

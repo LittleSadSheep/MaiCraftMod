@@ -52,7 +52,7 @@ class ItemWorthTest {
     void 食物_普通掉落依次落级() {
         assertEquals(Worth.FOOD,
                 ItemWorth.of(stack("minecraft:cooked_beef", 16, false, true, false, false), Set.of(), Map.of()));
-        assertEquals(Worth.COMMON_LOOT,
+        assertEquals(Worth.ORDINARY_LOOT,
                 ItemWorth.of(stack("minecraft:bone", 2, false, false, false, false), Set.of(), Map.of()));
     }
 

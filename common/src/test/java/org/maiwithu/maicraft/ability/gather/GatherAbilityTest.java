@@ -90,7 +90,7 @@ class GatherAbilityTest {
     }
 
     private StepDecision decide(Target target, JsonObject params) {
-        ParseResult parsed = ability(null).spec().params().parse(params);
+        ParseResult parsed = ability(null).spec().paramSpecs().parse(params);
         if (parsed.params() == null) {
             throw new IllegalArgumentException("测试参数没过参数规格：" + parsed.errors());
         }
@@ -118,7 +118,7 @@ class GatherAbilityTest {
     void 缺目标一次说清() {
         StepDecision.Finish finish = assertInstanceOf(StepDecision.Finish.class,
                 decideWith(new Goal("maicraft:gather", null, null,
-                        ability(null).spec().params().parse(new JsonObject()).params(), null, List.of(), null)));
+                        ability(null).spec().paramSpecs().parse(new JsonObject()).params(), null, List.of(), null)));
         assertEquals(Problem.Kind.INVALID_PARAMETER, finish.result().problem().kind());
     }
 
@@ -134,7 +134,7 @@ class GatherAbilityTest {
         var seen = new FakeSeen(Map.of("b7",
                 new GatherAbility.SeesTargets.SeenTarget(WorldPosition.here(3, 64, 4), true)));
         Goal goal = new Goal("maicraft:gather", null, new Target.Seen("b7"),
-                ability(null).spec().params().parse(new JsonObject()).params(), null, List.of(), null);
+                ability(null).spec().paramSpecs().parse(new JsonObject()).params(), null, List.of(), null);
         StepDecision decision = ability(seen).decide(stepOf(goal));
         StepDecision.Run run = assertInstanceOf(StepDecision.Run.class, decision);
         GatherSpot spot = assertInstanceOf(GatherSpot.class, run.input());

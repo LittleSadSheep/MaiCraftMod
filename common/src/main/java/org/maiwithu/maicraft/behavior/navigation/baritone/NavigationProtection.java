@@ -36,8 +36,8 @@ public final class NavigationProtection {
     private NavigationProtection() {}
 
     /** 安装一份新的保护要求；内容与当前一致时不替换，返回是否发生了变化。 */
-    public static boolean install(LongSet sacred, LongSet forbiddenBodyCells, int minimumFeetY) {
-        Snapshot next = new Snapshot(copy(sacred), copy(forbiddenBodyCells), minimumFeetY);
+    public static boolean install(LongSet sacred, LongSet noEntryCells, int minimumFeetY) {
+        Snapshot next = new Snapshot(copy(sacred), copy(noEntryCells), minimumFeetY);
         boolean changed = !next.equals(CURRENT.get());
         CURRENT.set(next);
         return changed;
@@ -70,8 +70,8 @@ public final class NavigationProtection {
     }
 
     /** 这一刻的实时禁入检查：身体是否被允许站进这一格。 */
-    public static boolean forbidsBody(BlockPos pos) {
-        return pos != null && CURRENT.get().forbidsBody(pos.getX(), pos.getY(), pos.getZ());
+    public static boolean forbidsEntry(BlockPos pos) {
+        return pos != null && CURRENT.get().forbidsEntry(pos.getX(), pos.getY(), pos.getZ());
     }
 
     private static LongSet copy(LongSet cells) {
@@ -85,25 +85,25 @@ public final class NavigationProtection {
      * 一份不可变的保护要求：受保护格不得破坏或掩埋；禁入格与脚位下界约束身体可站的位置。
      * 只禁修改的格并不自动禁止身体进入，两个集合各管各的。
      */
-    public record Snapshot(LongSet protectedCells, LongSet forbiddenBodyCells, int minimumFeetY) {
+    public record Snapshot(LongSet protectedCells, LongSet noEntryCells, int minimumFeetY) {
         public static final Snapshot EMPTY = new Snapshot(LongSets.emptySet(), LongSets.emptySet(), Integer.MIN_VALUE);
 
         public Snapshot {
             protectedCells = LongSets.unmodifiable(new LongOpenHashSet(protectedCells));
-            forbiddenBodyCells = LongSets.unmodifiable(new LongOpenHashSet(forbiddenBodyCells));
+            noEntryCells = LongSets.unmodifiable(new LongOpenHashSet(noEntryCells));
         }
 
         public boolean protects(int x, int y, int z) {
             return protectedCells.contains(BlockPos.asLong(x, y, z));
         }
 
-        public boolean forbidsBody(int x, int y, int z) {
-            return y < minimumFeetY || forbiddenBodyCells.contains(BlockPos.asLong(x, y, z));
+        public boolean forbidsEntry(int x, int y, int z) {
+            return y < minimumFeetY || noEntryCells.contains(BlockPos.asLong(x, y, z));
         }
 
         /** 是否带身体侧的约束；没有时移动搜索可以跳过整圈站位核对。 */
-        public boolean hasBodyConstraints() {
-            return minimumFeetY != Integer.MIN_VALUE || !forbiddenBodyCells.isEmpty();
+        public boolean hasEntryConstraints() {
+            return minimumFeetY != Integer.MIN_VALUE || !noEntryCells.isEmpty();
         }
     }
 }
