@@ -2,12 +2,14 @@
 package org.maiwithu.maicraft.ability.sleep;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashSet;
 import java.util.Set;
 import java.util.List;
 import java.util.Optional;
@@ -16,10 +18,12 @@ import java.util.function.Supplier;
 import net.minecraft.core.BlockPos;
 
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.behavior.acquire.CollectsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
+import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -85,11 +89,17 @@ class SleepTaskTest {
 
     private static final class StubApproaches implements BringsPlayerClose {
         final List<BlockPos> targets = new ArrayList<>();
+        private final Deque<Action> script = new ArrayDeque<>();
+
+        void offer(Action action) {
+            script.add(action);
+        }
 
         @Override
         public Action toward(ApproachTarget target, Permissions permissions) {
             targets.add(target.anchorBlock());
-            return new Scripted(ActionStatus.done());
+            // 没脚本就一次成功：多数场景只关心"出发了、到了"。
+            return script.isEmpty() ? new Scripted(ActionStatus.done()) : script.remove();
         }
     }
 
@@ -181,8 +191,26 @@ class SleepTaskTest {
             StubApproaches approaches, StubUsesBeds usesBeds,
             Supplier<Optional<String>> refusals,
             Supplier<Optional<String>> carried) {
+        // 缺省可睡窗口全开、排除名单任务自持：多数场景不关心这两样。
+        return task(scanner, placer, obtain, approaches, usesBeds, refusals, carried,
+                moment -> true, new HashSet<>());
+    }
+
+    private static SleepTask task(FakeScanner scanner, StubPlacer placer, StubObtain obtain,
+            StubApproaches approaches, StubUsesBeds usesBeds,
+            Supplier<Optional<String>> refusals,
+            Supplier<Optional<String>> carried, SleepTask.ReadsSleepWindow sleepWindow,
+            Set<BlockPos> sharedExclusions) {
         return new SleepTask(new SleepInput(null), Permissions.DEFAULT, scanner, placer, obtain,
-                approaches, usesBeds, refusals::get, carried::get);
+                approaches, usesBeds, refusals::get, carried::get, sleepWindow, sharedExclusions);
+    }
+
+    private static NightRestTask nightRest(FakeScanner scanner, StubApproaches approaches,
+            StubUsesBeds usesBeds, SleepTask.ReadsSleepWindow sleepWindow, Set<BlockPos> sharedExclusions) {
+        return new NightRestTask(new SleepInput(null), Permissions.DEFAULT, scanner, new StubPlacer(),
+                new StubObtain(), approaches, usesBeds, Optional::empty, Optional::empty,
+                (cell, permissions) -> Optional.empty(), place -> Optional.empty(), moment -> false,
+                sleepWindow, sharedExclusions);
     }
 
     private static TaskResult runToCompletion(Task task) {
@@ -290,5 +318,87 @@ class SleepTaskTest {
         assertEquals(TaskResult.Status.FAILED, result.status());
         assertEquals(Problem.Kind.NEED_ITEM, result.problem().kind());
         assertTrue(result.problem().message().contains("羊毛"));
+    }
+
+    @Test
+    void nightRestKeepsWalkingWhileTheSleepWindowIsOpen() {
+        // 回归 201：夜里可睡窗口没关，夜休任务在靠近阶段必须继续走，不许自称"这一夜已经过去"收工。
+        FakeScanner scanner = new FakeScanner();
+        scanner.offer(new BedScanner.BedScan(
+                List.of(new BedCandidate(BED_A, false, false, false, 4)), true));
+        StubApproaches approaches = new StubApproaches();
+        approaches.offer(new Scripted(ActionStatus.running()));
+        NightRestTask rest = nightRest(scanner, approaches, new StubUsesBeds(),
+                moment -> true, new HashSet<>());
+        TickContext context = tick();
+        rest.start(context);
+        for (int i = 0; i < 5; i++) {
+            TickResult result = rest.tick(context);
+            assertFalse(result instanceof TickResult.Finished, "可睡窗口还开着，夜休要在路上");
+        }
+        assertEquals(List.of(BED_A), approaches.targets);
+    }
+
+    @Test
+    void nightRestEndsTheNightWhenTheSleepWindowCloses() {
+        FakeScanner scanner = new FakeScanner();
+        scanner.offer(new BedScanner.BedScan(
+                List.of(new BedCandidate(BED_A, false, false, false, 4)), true));
+        NightRestTask rest = nightRest(scanner, new StubApproaches(), new StubUsesBeds(),
+                moment -> false, new HashSet<>());
+        TaskResult result = runToCompletion(rest);
+        // 窗口关了（天亮、被别人睡过）按夜休语义结清：算度过这一夜，不是失败。
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertEquals("这一夜已经过去，不用睡了", result.summary());
+        SleepDetails details = assertInstanceOf(SleepDetails.class, result.details());
+        assertTrue(details.sleepCompletedExternally());
+    }
+
+    @Test
+    void approachFailureRepositionsBeforeSwitchingBeds() {
+        FakeScanner scanner = new FakeScanner();
+        scanner.offer(new BedScanner.BedScan(
+                List.of(new BedCandidate(BED_A, false, false, false, 4)), true));
+        StubApproaches approaches = new StubApproaches();
+        approaches.offer(new Scripted(ActionStatus.failed(
+                Problem.of(Problem.Kind.UNREACHABLE, "去床的路上走不通", null))));
+        StubUsesBeds usesBeds = new StubUsesBeds();
+        TaskResult result = runToCompletion(task(scanner, new StubPlacer(), new StubObtain(),
+                approaches, usesBeds, Optional::empty, Optional::empty));
+        // 靠近失败先换一次站位再点，第二次走近成功躺下；不把这张床一棍子排除。
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertEquals(List.of(BED_A, BED_A), approaches.targets);
+        assertEquals(List.of(BED_A), usesBeds.clicked);
+    }
+
+    @Test
+    void triedBedIsRememberedAcrossNightRestReinserts() {
+        // 夜休的需求会重插任务：睡不上的床写进跨任务黑名单，下一轮选床直接跳过它。
+        Set<BlockPos> shared = new HashSet<>();
+        FakeScanner scanner = new FakeScanner();
+        scanner.offer(new BedScanner.BedScan(
+                List.of(new BedCandidate(BED_A, false, false, false, 4)), true));
+        scanner.offer(new BedScanner.BedScan(
+                List.of(new BedCandidate(BED_B, false, false, false, 9)), true));
+        StubUsesBeds usesBeds = new StubUsesBeds();
+        usesBeds.offer(new Scripted(ActionStatus.failed(
+                Problem.of(Problem.Kind.REFUSED_BY_GAME, "对床头的交互没有生效", null))));
+        Supplier<Optional<String>> refusals = () -> Optional.of("这张床被占用");
+        TaskResult first = runToCompletion(task(scanner, new StubPlacer(), new StubObtain(),
+                new StubApproaches(), usesBeds, refusals, Optional::empty, moment -> true, shared));
+        assertEquals(TaskResult.Status.DONE, first.status());
+        assertTrue(shared.contains(BED_A), "睡不上的床写进跨任务黑名单");
+
+        // 重插出来的新任务（全新实例）选床时，看到的排除名单里带着 BED_A。
+        FakeScanner secondScanner = new FakeScanner();
+        secondScanner.offer(new BedScanner.BedScan(
+                List.of(new BedCandidate(BED_A, false, false, false, 4),
+                        new BedCandidate(BED_B, false, false, false, 9)), true));
+        NightRestTask second = nightRest(secondScanner, new StubApproaches(), new StubUsesBeds(),
+                moment -> true, shared);
+        TickContext context = tick();
+        second.start(context);
+        second.tick(context);
+        assertTrue(secondScanner.askedExclusions.getFirst().contains(BED_A), "重插的任务继承试过的床");
     }
 }

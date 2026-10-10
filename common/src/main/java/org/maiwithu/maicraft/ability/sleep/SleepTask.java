@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.sleep;
 
-import java.util.HashSet;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -33,14 +32,20 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 睡觉的任务：选床 → （没床就放自带的或现做一张）→ 走到床边 → 躺下。夜间自动休息沿用这份流程，
  * 躺下之后等醒、收床、回站位的收尾由子类接管；公开睡觉（公开能力）躺下即完成，不保证睡到天亮。
  *
- * <p>床的过滤与排序在选床的纯函数里；这里只把结论变成靠近与点击，并把游戏的拒绝按提示语分流：
- * 被占用、床边有怪就换一张床（试过的不再试，有次数上限）；不在可睡时间就带着"现在睡不了"结束；
- * 太远或被挡先退回换一次站位，再不行换床。
+ * <p>床的过滤与排序在选床的纯函数里；这里只把结论变成靠近与点击。可睡窗口关了（天亮、雷停）就不往床走了，
+ * 按各自的善后语义收口；游戏的拒绝按提示语分流：被占用、床边有怪就换一张床；靠近走不通先退回换一次站位，
+ * 再不行换床。睡不上的床记进排除名单，名单由调用方持有——夜休的需求会重插任务，名单要跨任务活着。
  */
 class SleepTask extends PhasedTask<SleepTask.Phase> {
 
     /** 任务的进度：选床 → 放床 → 拿床 → 走到床边 → 躺下 →（夜休接手：等醒 → 收床 → 回站位）。 */
     enum Phase { CHOOSE_BED, PLACE_BED, GET_BED, APPROACH, LIE_DOWN, WAIT_WAKE, COLLECT_BED, WALK_BACK }
+
+    /** 可睡窗口的读缝：现在还是不是能睡的时间。生产实现读本地玩家的世界，测试给固定值。 */
+    @FunctionalInterface
+    interface ReadsSleepWindow {
+        boolean open(TickContext context);
+    }
 
     /** 换床次数上限：接连几张都不行说明这片床区整体不行，如实结束，不无限换。玩家常识。 */
     private static final int MAX_BED_TRIES = 3;
@@ -60,18 +65,21 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
     private final Supplier<Optional<String>> refusalTexts;
     /** 身上带着的床：决定"没床"时走放床还是先弄一张。 */
     private final Supplier<Optional<String>> carriedBed;
+    /** 可睡窗口的读缝：去床途中每刻都要再看一眼，天亮了就不往床走了。 */
+    private final ReadsSleepWindow sleepWindow;
 
     // 流程的现场状态：选中的床、床的来源、试过不行的床、躺下后的细节。
     BlockPos chosenBed;
     private SleepDetails.BedSource bedSource = SleepDetails.BedSource.WORLD;
-    private final Set<BlockPos> excluded = new HashSet<>();
+    private final Set<BlockPos> excluded;
     private int bedTries;
     private boolean enteredSleep;
     private boolean nightSkippedBySleep;
 
     SleepTask(SleepInput input, Permissions permissions, BedScanner scanner, PlacesBed placer,
             ItemNeeds obtain, BringsPlayerClose approaches, UsesBeds usesBed,
-            Supplier<Optional<String>> refusalTexts, Supplier<Optional<String>> carriedBed) {
+            Supplier<Optional<String>> refusalTexts, Supplier<Optional<String>> carriedBed,
+            ReadsSleepWindow sleepWindow, Set<BlockPos> sharedExclusions) {
         super("睡觉", Phase.CHOOSE_BED, new ProgressTracker(STUCK_AFTER_TICKS, MAX_TICKS));
         this.input = input;
         this.permissions = Objects.requireNonNull(permissions, "permissions");
@@ -82,6 +90,9 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
         this.usesBed = usesBed;
         this.refusalTexts = refusalTexts;
         this.carriedBed = carriedBed;
+        this.sleepWindow = Objects.requireNonNull(sleepWindow, "sleepWindow");
+        // 排除名单由调用方持有：夜休的需求会重插任务，"试过的床"要跨任务活着；公开能力给一份自己的。
+        this.excluded = Objects.requireNonNull(sharedExclusions, "sharedExclusions");
     }
 
     @Override
@@ -112,11 +123,16 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
                 return Next.go(Phase.PLACE_BED, "拿到了床，放下再睡");
             });
             case APPROACH -> {
-                Next<Phase> skipped = onSleepTimePassed(context);
-                if (skipped != null) {
-                    yield skipped;
+                // 可睡窗口关了（天亮、雷停）就不往床走了，按各自的善后语义收口。
+                if (!sleepWindow.open(context)) {
+                    yield onNoLongerSleepTime();
                 }
-                yield runActionThen(context, () -> Next.go(Phase.LIE_DOWN, "到床边了"));
+                ActionStatus status = runAction(context);
+                yield switch (status) {
+                    case ActionStatus.Running running -> Next.stay();
+                    case ActionStatus.Done done -> Next.go(Phase.LIE_DOWN, "到床边了");
+                    case ActionStatus.Failed failed -> onApproachRefused(failed.problem());
+                };
             }
             case LIE_DOWN -> lieDown(context);
             case WAIT_WAKE -> tickWaitWake(context);
@@ -259,9 +275,12 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
                 .remaining("入睡").build());
     }
 
-    /** 去床途中可睡窗口关了的统一收口；夜休把它当"夜晚被别人睡过"。默认按时间不对结束。 */
-    protected Next<Phase> onSleepTimePassed(TickContext context) {
-        return null;
+    // 靠近失败与躺下被拒同一条分级路：够不着先换站位，换不动了换床，都有上限。
+    private Next<Phase> onApproachRefused(Problem problem) {
+        if (problem.kind() == Problem.Kind.UNREACHABLE) {
+            return repositionOrGiveUp(problem, "去这张床的路上走不通");
+        }
+        return onFail(problem);
     }
 
     /** 流程走不下去时的收口：公开能力如实失败；夜休先回站位再交代。 */

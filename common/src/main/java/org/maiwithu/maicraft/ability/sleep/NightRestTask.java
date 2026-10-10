@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
@@ -64,10 +65,12 @@ final class NightRestTask extends SleepTask {
     private TickContext now;
 
     NightRestTask(SleepInput input, Permissions permissions, BedScanner scanner, PlacesBed placer,
-            ItemNeeds obtain, BringsPlayerClose approaches, UsesBeds usesBed,
+            ItemNeeds obtain, BringsPlayerClose approaches, UsesBeds usesBeds,
             Supplier<Optional<String>> refusalTexts, Supplier<Optional<String>> carriedBed,
-            CollectsBlocks collects, ReadsRememberedPlaces rememberedPlaces, ReadsSleepState sleepState) {
-        super(input, permissions, scanner, placer, obtain, approaches, usesBed, refusalTexts, carriedBed);
+            CollectsBlocks collects, ReadsRememberedPlaces rememberedPlaces, ReadsSleepState sleepState,
+            SleepTask.ReadsSleepWindow sleepWindow, Set<BlockPos> sharedExclusions) {
+        super(input, permissions, scanner, placer, obtain, approaches, usesBeds, refusalTexts, carriedBed,
+                sleepWindow, sharedExclusions);
         this.collects = Objects.requireNonNull(collects, "collects");
         this.rememberedPlaces = Objects.requireNonNull(rememberedPlaces, "rememberedPlaces");
         this.sleepState = Objects.requireNonNull(sleepState, "sleepState");
@@ -96,9 +99,9 @@ final class NightRestTask extends SleepTask {
         return super.tick(phase, context);
     }
 
-    // 去床途中可睡窗口关了：多半是别人先睡过了这一夜，视为已经度过，直接结清回去干活。
+    // 可睡窗口关了：多半是别人先睡过了这一夜，视为已经度过，直接结清回去干活。
     @Override
-    protected Next<Phase> onSleepTimePassed(TickContext context) {
+    protected Next<Phase> onNoLongerSleepTime() {
         return Next.done(TaskResult.builder(TaskResult.Status.DONE, "这一夜已经过去，不用睡了")
                 .details(new SleepDetails(false, SleepDetails.BedSource.WORLD, null, false, true)).build());
     }

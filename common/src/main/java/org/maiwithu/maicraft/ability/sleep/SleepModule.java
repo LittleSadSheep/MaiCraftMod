@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.sleep;
 
+import java.util.HashSet;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
 
 import java.util.List;
+
+import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.behavior.acquire.CollectsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
@@ -61,6 +64,12 @@ public final class SleepModule implements AbilityModule, NightfallNeed.NightRest
     private final DestinationResolver destinations;
     private final Supplier<Optional<String>> refusalTexts;
     private final Interactions interactions;
+    /** 可睡窗口的读缝：生产实现读本地玩家的世界。 */
+    private final SleepTask.ReadsSleepWindow sleepWindow =
+            moment -> moment.player() != null && WorldTime.canAttemptSleep(moment.player().level());
+    /** 本夜试过且睡不上的床：夜休任务来来去去，黑名单跟夜晚走，跨天清空。 */
+    private final Set<BlockPos> nightTriedBeds = new HashSet<>();
+    private long nightTriedDayIndex = -1;
 
     public SleepModule(Supplier<PlayerContext> context, BlockScanService scans, Protection protection,
             BackpackView backpack, OffhandContents offhand,
@@ -107,10 +116,12 @@ public final class SleepModule implements AbilityModule, NightfallNeed.NightRest
             return decideForDaytime(step, current);
         }
         Optional<WorldPosition> area = bedArea(step.goal());
-        if (area.isEmpty()) {
+        if (area.isEmpty() && step.goal().target() != null) {
+            // 给了目标对象却解析不出（地标没记过、观察编号失效）：如实结束，换个说法重新下达。
             return finished(bedAreaUnclear(step));
         }
-        return new StepDecision.Run(new SleepInput(area.orElseThrow()));
+        // 没给目标对象就在全范围找：夜里附近有床就该去睡，不强迫说清床区。
+        return new StepDecision.Run(new SleepInput(area.orElse(null)));
     }
 
     // 白天的两步：先备床（跑一次备床任务），备好了或备不成，都以"现在睡不了"收场并交代床备好没有。
@@ -176,7 +187,8 @@ public final class SleepModule implements AbilityModule, NightfallNeed.NightRest
     public void registerTasks(TaskFactories factories) {
         factories.register(SleepInput.class, input ->
                 new SleepTask(input, currentPermissions(), beds, placer, obtain, approaches,
-                        interactions::useBlock, refusalTexts, beds::carriedBed));
+                        interactions::useBlock, refusalTexts, beds::carriedBed, sleepWindow,
+                        new HashSet<>()));
         factories.register(PrepareBedInput.class, input ->
                 new PrepareBedTask(obtain, currentPermissions(), beds::carriedBed));
     }
@@ -189,10 +201,19 @@ public final class SleepModule implements AbilityModule, NightfallNeed.NightRest
     /** 夜间自动休息怎么落地：读床、放床、拿床、收床与回站位都从这里组合。 */
     @Override
     public Task nightRest(TickContext tick) {
+        // 跨夜清黑名单：新的一夜，试过的床重新可试；日期读不出（角色不在）时保持原样。
+        if (tick.player() != null) {
+            long day = WorldTime.dayIndexOf(tick.player().level().getDayTime());
+            if (day != nightTriedDayIndex) {
+                nightTriedDayIndex = day;
+                nightTriedBeds.clear();
+            }
+        }
         return new NightRestTask(new SleepInput(null), currentPermissions(), beds, placer, obtain, approaches,
                 interactions::useBlock, refusalTexts, beds::carriedBed, collects, rememberedPlaces,
                 moment -> moment.player() != null && moment.player().localPlayer() != null
-                        && moment.player().localPlayer().isSleeping());
+                        && moment.player().localPlayer().isSleeping(),
+                sleepWindow, nightTriedBeds);
     }
 
     /** 夜晚这项生存需求读的"今晚有没有床"：附近有能用的床或身上带着床。 */
