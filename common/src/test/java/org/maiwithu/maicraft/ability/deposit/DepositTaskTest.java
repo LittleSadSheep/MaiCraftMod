@@ -88,6 +88,30 @@ class DepositTaskTest {
     }
 
     @Test
+    void 界面刚刷新那一刻点不出去_下一刻再点_照常存完不判成放不下() {
+        // 整堆的快速移动撞上一下"本刻发不出去"。
+        Rig whole = new Rig();
+        whole.carry(DIRT, 32);
+        FakeChest wholeChest = whole.chest(NEAR, false);
+        wholeChest.notReadyClicks = 1;
+        TaskResult first = whole.run(whole.input(null, List.of(DIRT), null));
+        assertEquals(TaskResult.Status.DONE, first.status(), first.summary());
+        assertEquals(32, wholeChest.total(DIRT));
+        assertEquals(0, wholeChest.notReadyClicks, "发不出去的那一下被下一刻补上了");
+
+        // 拆半堆的几下普通点击里，头两下撞上"本刻发不出去"：不跳过那几下，只存要的 10 件。
+        Rig part = new Rig();
+        part.carry(SAND, 32);
+        FakeChest partChest = part.chest(NEAR, false);
+        partChest.notReadyClicks = 2;
+        TaskResult second = part.run(part.input(null, List.of(SAND), 10));
+        assertEquals(TaskResult.Status.DONE, second.status(), second.summary());
+        assertEquals(10, partChest.total(SAND));
+        assertEquals(22, part.carried(SAND));
+        assertEquals(0, partChest.notReadyClicks);
+    }
+
+    @Test
     void 第一只装满了换第二只() {
         Rig rig = new Rig();
         rig.carry(DIRT, 32);
@@ -328,6 +352,10 @@ class DepositTaskTest {
         boolean locked;
         boolean open;
         boolean closed;
+        /** 接下来有几下点击本刻发不出去（界面刚刷新还没画好），什么都不做、回报假。 */
+        int notReadyClicks;
+        /** 实际发出去的点击（含快速移动）次数。 */
+        int sentClicks;
 
         FakeChest(Rig rig, WorldPosition at, boolean someoneElses) {
             this.rig = rig;
@@ -376,8 +404,19 @@ class DepositTaskTest {
         @Override public boolean busy() { return false; }
         @Override public boolean cursorEmpty() { return cursor.isEmpty(); }
 
+        // 本刻发不发得出去：还有"没准备好"的次数就先消耗一次，回报假。
+        private boolean sendable() {
+            if (notReadyClicks > 0) {
+                notReadyClicks--;
+                return false;
+            }
+            sentClicks++;
+            return true;
+        }
+
         // 快速移动：先并进同种的堆，再占空格，放不下的留在原格。
-        @Override public void quickMove(int slotId) {
+        @Override public boolean quickMove(int slotId) {
+            if (!sendable()) return false;
             ItemStack moving = rig.player.get(slotId);
             for (ItemStack slot : slots) {
                 if (!slot.isEmpty() && ItemStack.isSameItemSameComponents(slot, moving)) {
@@ -394,10 +433,12 @@ class DepositTaskTest {
                 }
             }
             if (moving.isEmpty()) rig.player.set(slotId, ItemStack.EMPTY);
+            return true;
         }
 
         // 左右键：空光标左键拿整份、右键拿半堆；拿着东西左键放整份、右键放一个。
-        @Override public void click(int slotId, int button) {
+        @Override public boolean click(int slotId, int button) {
+            if (!sendable()) return false;
             List<ItemStack> side = slotId < 36 ? rig.player : slots;
             int index = slotId < 36 ? slotId : slotId - 36;
             ItemStack slot = side.get(index);
@@ -405,7 +446,7 @@ class DepositTaskTest {
                 int take = button == 0 ? slot.getCount() : (slot.getCount() + 1) / 2;
                 cursor = slot.split(take);
                 if (slot.isEmpty()) side.set(index, ItemStack.EMPTY);
-                return;
+                return true;
             }
             int give = button == 0 ? cursor.getCount() : 1;
             if (slot.isEmpty()) {
@@ -416,6 +457,7 @@ class DepositTaskTest {
                 cursor.shrink(moved);
             }
             if (cursor.isEmpty()) cursor = ItemStack.EMPTY;
+            return true;
         }
 
         @Override public void noteCursorTakenFrom(int slotId) {}
@@ -464,7 +506,7 @@ class DepositTaskTest {
     private static final MenuChannel CHANNEL = new MenuChannel() {
         @Override public boolean stillOpen() { return true; }
         @Override public boolean cursorCarrying() { return false; }
-        @Override public void click(int slot, int button) {}
+        @Override public boolean click(int slot, int button) { return true; }
         @Override public void requestClose() {}
     };
 

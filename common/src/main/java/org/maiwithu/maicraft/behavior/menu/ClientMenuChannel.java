@@ -16,7 +16,7 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
  * 界面通道的读端：把认领时的那一份界面绑在对象与编号上，经由游戏接口层的菜单入口
  * 做放回物品的点击与关闭。
  *
- * <p>每刻最多做一件事：点击与关闭都先看菜单入口上有没有没结清的旧事务，有就等；
+ * <p>每刻最多做一件事：点击前先看本刻能不能动手（见 {@link #readyForAction}），关闭前看有没有没结清的旧事务，不行就等；
  * 界面对象与编号绑在一起核对，复用同一编号的另一只箱不算还开着。
  */
 public final class ClientMenuChannel implements MenuChannel {
@@ -78,14 +78,23 @@ public final class ClientMenuChannel implements MenuChannel {
     }
 
     @Override
-    public void click(int slot, int button) {
-        AbstractContainerMenu menu = currentIfStillClaimed();
-        if (menu == null) return;
+    public boolean click(int slot, int button) {
         PlayerContext context = contexts.get();
+        if (!readyForAction(context)) return false;
+        context.menuActions().click(context, slot, button, ClickType.PICKUP, MenuConfirmation.stateChanged(),
+                CLOSE_TIMEOUT_TICKS);
+        return true;
+    }
+
+    /**
+     * 本刻能不能对这份界面动手：界面还是认领的那一份、本刻还有交互机会、上一下已经结清、界面画过一帧。
+     * 点格子、快速移动、模组自己的操作都按这一条判断，规矩不分叉。每次操作后界面要再画一帧才算准备好，
+     * 确认来得快的操作（例如模组的取货）之后紧跟着点格子，本刻就会是假，下一刻再试。
+     */
+    boolean readyForAction(PlayerContext context) {
+        if (context == null || currentIfStillClaimed() == null || !context.canInteractThisTick()) return false;
         MenuActions actions = context.menuActions();
-        // 菜单入口上还有没结清的旧事务（包括上一次点击在等确认）时本刻不动手，等下一刻。
-        if (actions.hasPendingTransaction()) return;
-        actions.click(context, slot, button, ClickType.PICKUP, MenuConfirmation.stateChanged(), CLOSE_TIMEOUT_TICKS);
+        return !actions.hasPendingTransaction() && actions.ensureVisible(context);
     }
 
     @Override

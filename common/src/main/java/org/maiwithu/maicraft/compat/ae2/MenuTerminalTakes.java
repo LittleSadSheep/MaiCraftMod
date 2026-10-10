@@ -266,12 +266,14 @@ public final class MenuTerminalTakes implements TerminalTakes {
         }
 
         // 把光标上的东西放进那一格：普通点格子；之后按光标空了、那一格多了核对。
+        // 本刻点不出去（刚取过货、界面还没重新画好）就下一刻再点，不算点过。
         private ActionStatus putDown(int slotId, SlotSnapshot cursor, AbstractContainerMenu raw) {
+            SlotSnapshot slotBefore = SlotSnapshot.of(raw.getSlot(slotId).getItem());
+            if (!menu.click(slotId, 0)) return ActionStatus.running();
             putDownSlot = slotId;
             putDownCursorBefore = cursor;
-            putDownSlotBefore = SlotSnapshot.of(raw.getSlot(slotId).getItem());
+            putDownSlotBefore = slotBefore;
             putDownQuiet = 0;
-            menu.click(slotId, 0);
             return ActionStatus.progressed();
         }
 
@@ -289,7 +291,7 @@ public final class MenuTerminalTakes implements TerminalTakes {
                 }
                 case WAITING -> {
                     if (++putDownQuiet <= PUT_DOWN_SETTLE_TICKS) return ActionStatus.running();
-                    // 那一下可能没发出去（本刻没轮到）：回到计划，下一刻按现场重新决定放哪一格。
+                    // 点出去了却一直没动静：回到计划，下一刻按现场重新决定放哪一格。
                     putDownSlot = -1;
                     return ActionStatus.running();
                 }

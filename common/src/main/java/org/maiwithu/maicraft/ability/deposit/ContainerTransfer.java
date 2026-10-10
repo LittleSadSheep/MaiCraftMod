@@ -114,7 +114,7 @@ final class ContainerTransfer implements Action {
         }
         if (inFlight != null) {
             if (!inFlight.clicks().isEmpty()) {
-                press(inFlight.clicks().poll());
+                pressNext();
                 return ActionStatus.progressed();
             }
             return settle(reading.get());
@@ -138,7 +138,7 @@ final class ContainerTransfer implements Action {
             inFlight = new Move(itemId, total(reading.playerSnapshots(), itemId),
                     total(reading.containerSnapshots(), itemId), clicks.get(), false);
             quietTicks = 0;
-            press(inFlight.clicks().poll());
+            pressNext();
             return ActionStatus.progressed();
         }
         finished = true;
@@ -172,14 +172,19 @@ final class ContainerTransfer implements Action {
         return Optional.of(clicks);
     }
 
-    private void press(Click click) {
+    // 点这一笔的下一下：本刻发不出去（界面刚刷新还没画好、没有交互机会）就留在队头，下一刻再点，
+    // 不算点过——否则这一下会被当成"点了没动"，误判成容器放不下。
+    private void pressNext() {
+        if (press(inFlight.clicks().peek())) inFlight.clicks().poll();
+    }
+
+    private boolean press(Click click) {
         if (click.quickMove()) {
-            menu.quickMove(click.slotId());
-            return;
+            return menu.quickMove(click.slotId());
         }
         // 从源格拿起东西前先告诉界面会话：中途被打断关界面时，光标上的东西放回这一格。
         if (click.takesToCursor()) menu.noteCursorTakenFrom(click.slotId());
-        menu.click(click.slotId(), click.button());
+        return menu.click(click.slotId(), click.button());
     }
 
     // 结算这一笔：背包少的和容器多的对上才记账；点了没动是放不下；对不上记进未确认。

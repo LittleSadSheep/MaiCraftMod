@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.BiFunction;
 import java.util.function.Supplier;
 
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -46,22 +47,36 @@ public final class MenuContainerTakes implements ContainerTakes {
     /** 一笔搬运结清后，等两侧内容同步过来的宽限（刻）；过了容器那侧还纹丝不动就是背包放不下。 */
     private static final int SETTLE_TICKS = 5;
 
-    private final BringsPlayerClose close;
-    private final Interactions interactions;
     private final ReadsItemTags tags;
     private final WorldMemory memory;
     private final Supplier<PlayerContext> contexts;
-    /** 认得出哪些界面：原版加上联动模组证明过的（例如模组的箱子）。 */
-    private final MenuLayouts layouts;
+    /** 打开一只箱子的动作怎么建：按箱子位置与这次任务的许可。 */
+    private final BiFunction<BlockPos, Permissions, MenuOpening> openings;
 
+    /**
+     * @param layouts 认得出哪些界面：原版加上联动模组证明过的（例如模组的箱子）
+     */
     public MenuContainerTakes(BringsPlayerClose close, Interactions interactions, ReadsItemTags tags,
             WorldMemory memory, Supplier<PlayerContext> contexts, MenuLayouts layouts) {
-        this.close = Objects.requireNonNull(close, "close");
-        this.interactions = Objects.requireNonNull(interactions, "interactions");
+        this(tags, memory, contexts, clientOpenings(close, interactions, contexts, layouts));
+    }
+
+    /** 打开箱子的动作由调用方给：生产走靠近与右键点开，测试换成替身箱子。 */
+    MenuContainerTakes(ReadsItemTags tags, WorldMemory memory, Supplier<PlayerContext> contexts,
+            BiFunction<BlockPos, Permissions, MenuOpening> openings) {
         this.tags = Objects.requireNonNull(tags, "tags");
         this.memory = Objects.requireNonNull(memory, "memory");
         this.contexts = Objects.requireNonNull(contexts, "contexts");
-        this.layouts = Objects.requireNonNull(layouts, "layouts");
+        this.openings = Objects.requireNonNull(openings, "openings");
+    }
+
+    // 生产的打开方式：走到够得着的地方、右键点开、认领并等同步；走过去能动多少地形按这次任务的许可来。
+    private static BiFunction<BlockPos, Permissions, MenuOpening> clientOpenings(BringsPlayerClose close,
+            Interactions interactions, Supplier<PlayerContext> contexts, MenuLayouts layouts) {
+        Objects.requireNonNull(close, "close");
+        Objects.requireNonNull(interactions, "interactions");
+        Objects.requireNonNull(layouts, "layouts");
+        return (at, permissions) -> new ClientMenuOpening(at, permissions, layouts, close, interactions, contexts);
     }
 
     @Override
@@ -91,7 +106,7 @@ public final class MenuContainerTakes implements ContainerTakes {
             this.request = request;
             this.at = BlockPos.containing(container.x(), container.y(), container.z());
             // 走过去能动多少地形按这次任务的许可来，不另开一套默认档。
-            this.opening = new ClientMenuOpening(at, permissions, layouts, close, interactions, contexts);
+            this.opening = openings.apply(at, permissions);
         }
 
         @Override
@@ -142,8 +157,9 @@ public final class MenuContainerTakes implements ContainerTakes {
             if (startTotal - now >= request.count() || next == null) {
                 return toClose(open);
             }
+            // 本刻发不出去（界面刚刷新还没画好、没有交互机会）就下一刻再点：没发出去不是背包放不下。
+            if (!menu.quickMove(next)) return ActionStatus.running();
             beforeMove = now;
-            menu.quickMove(next);
             return ActionStatus.progressed();
         }
 

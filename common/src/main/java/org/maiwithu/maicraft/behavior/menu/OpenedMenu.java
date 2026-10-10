@@ -25,11 +25,15 @@ public interface OpenedMenu {
     /** 光标上是空的。 */
     boolean cursorEmpty();
 
-    /** 快速移动（潜行点击）：把这一格整堆送到另一侧，落在哪一格由游戏挑。 */
-    void quickMove(int slotId);
+    /**
+     * 快速移动（潜行点击）：把这一格整堆送到另一侧，落在哪一格由游戏挑。
+     * 本刻发出去了返回真；本刻发不了（没有交互机会、上一下没结清、界面刚刷新还没画好）返回假，
+     * 什么都没做——调用方下一刻再试，不能把没发出去当成"放不下"或"对面没动静"。
+     */
+    boolean quickMove(int slotId);
 
-    /** 普通点击：左键 button=0 拿起或放下整份，右键 button=1 拿半堆或放一个。 */
-    void click(int slotId, int button);
+    /** 普通点击：左键 button=0 拿起或放下整份，右键 button=1 拿半堆或放一个。发没发出去同 {@link #quickMove}。 */
+    boolean click(int slotId, int button);
 
     /**
      * 经模组自己的协议对这份界面做一次操作（例如 AE2 终端里取一件）：这份界面还开着、上一下已经结清、

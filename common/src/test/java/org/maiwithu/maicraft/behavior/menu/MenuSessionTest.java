@@ -26,7 +26,7 @@ class MenuSessionTest {
 
         @Override public boolean stillOpen() { return open; }
         @Override public boolean cursorCarrying() { return cursorCarrying; }
-        @Override public void click(int slot, int button) { clicks.add(slot + ":" + button); }
+        @Override public boolean click(int slot, int button) { clicks.add(slot + ":" + button); return true; }
         @Override public void requestClose() { closeRequests++; }
     }
 

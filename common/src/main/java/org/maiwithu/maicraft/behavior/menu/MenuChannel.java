@@ -17,8 +17,11 @@ public interface MenuChannel {
     /** 光标上是否拿着物品；光标为空才动手。 */
     boolean cursorCarrying();
 
-    /** 在一个槽位上点一下鼠标：button 0 是左键，1 是右键；收尾放回物品用。 */
-    void click(int slot, int button);
+    /**
+     * 在一个槽位上点一下鼠标：button 0 是左键，1 是右键；收尾放回物品用。
+     * 本刻点出去了返回真；本刻点不了（没有交互机会、上一下没结清、界面还没画好）返回假，什么都没做，下一刻再试。
+     */
+    boolean click(int slot, int button);
 
     /** 请游戏关闭这份界面；界面真的从画面上消失（{@link #stillOpen} 为假）才算关上。 */
     void requestClose();
