@@ -81,20 +81,27 @@ class ParamSpecsTest {
     }
 
     @Test
-    void jsonKeepsObjectsAndArraysAsTheyAre() {
-        // 图纸、修改、逐格清单这类正文原样带过：入口只认对象或数组的形状，内容由能力自己校验；读出来的是副本。
-        ParamSpecs spec = ParamSpecs.of(ParamSpec.of("drawing", ParamType.JSON).required().doc("图纸正文").build());
-        ParseResult object = spec.parse(JsonParser.parseString("{\"drawing\":{\"objects\":[1,2]}}").getAsJsonObject());
-        ParseResult array = spec.parse(JsonParser.parseString("{\"drawing\":[{\"offset\":[0,0,0]}]}").getAsJsonObject());
+    void jsonObjectsAndArraysAreKeptAsTheyAre() {
+        // 图纸、修改这类正文是对象，逐格清单是数组：入口只认声明的形状，内容由能力自己校验；读出来的是副本。
+        ParamSpecs spec = ParamSpecs.of(
+                ParamSpec.of("drawing", ParamType.JSON_OBJECT).required().doc("图纸正文").build(),
+                ParamSpec.of("cells", ParamType.JSON_ARRAY).doc("逐格清单").build());
+        ParseResult result = spec.parse(JsonParser.parseString(
+                "{\"drawing\":{\"objects\":[1,2]},\"cells\":[{\"offset\":[0,0,0]}]}").getAsJsonObject());
 
-        assertTrue(object.ok() && array.ok());
-        assertEquals(2, object.params().json("drawing").getAsJsonObject().getAsJsonArray("objects").size());
-        assertEquals(1, array.params().json("drawing").getAsJsonArray().size());
-        object.params().json("drawing").getAsJsonObject().remove("objects");
-        assertTrue(object.params().json("drawing").getAsJsonObject().has("objects"), "改副本不影响存着的参数");
-        assertEquals("drawing", object.params().toJson().entrySet().iterator().next().getKey());
-        assertFalse(spec.parse(JsonParser.parseString("{\"drawing\":\"text\"}").getAsJsonObject()).ok(), "字符串不是 JSON 正文");
+        assertTrue(result.ok(), () -> result.errors().toString());
+        assertEquals(2, result.params().json("drawing").getAsJsonObject().getAsJsonArray("objects").size());
+        assertEquals(1, result.params().json("cells").getAsJsonArray().size());
+        result.params().json("drawing").getAsJsonObject().remove("objects");
+        assertTrue(result.params().json("drawing").getAsJsonObject().has("objects"), "改副本不影响存着的参数");
+        assertEquals("drawing", result.params().toJson().entrySet().iterator().next().getKey());
+        // 形状对不上各报各的：对象参数不收数组，数组参数不收对象，字符串和数字都不是结构化正文。
+        assertFalse(spec.parse(JsonParser.parseString("{\"drawing\":[1]}").getAsJsonObject()).ok(), "对象参数不收数组");
+        assertFalse(spec.parse(JsonParser.parseString("{\"drawing\":{},\"cells\":{}}").getAsJsonObject()).ok(), "数组参数不收对象");
+        assertFalse(spec.parse(JsonParser.parseString("{\"drawing\":\"text\"}").getAsJsonObject()).ok());
         assertFalse(spec.parse(JsonParser.parseString("{\"drawing\":3}").getAsJsonObject()).ok());
+        assertEquals("object", ParamType.JSON_OBJECT.schemaType());
+        assertEquals("array", ParamType.JSON_ARRAY.schemaType());
     }
 
     @Test

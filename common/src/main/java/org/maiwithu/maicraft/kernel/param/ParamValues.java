@@ -52,7 +52,7 @@ public final class ParamValues {
         return (List<String>) require(name);
     }
 
-    /** 原样的 JSON 对象或数组（副本，改它不影响存起来的参数）。 */
+    /** 原样的 JSON 对象或数组（副本，改它不影响存起来的参数）；形状已按参数类型核过，能力按声明的类型直接取。 */
     public JsonElement json(String name) {
         return ((JsonElement) require(name)).deepCopy();
     }

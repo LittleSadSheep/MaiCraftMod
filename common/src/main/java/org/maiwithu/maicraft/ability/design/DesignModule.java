@@ -6,7 +6,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
-import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.Rotation;
@@ -51,9 +50,9 @@ public final class DesignModule implements AbilityModule {
             ParamSpecs.of(
                     ParamSpec.of("operation", ParamType.CHOICE).required().choices("create", "update", "inspect", "preview", "export")
                             .doc("create 新建；update 按名合并修改成新的一版；inspect 看；preview 投到 target 预览；export 导出").build(),
-                    ParamSpec.of("drawing", ParamType.JSON).doc("create 用：图纸正文，格式看 lookup 的 building/design").build(),
+                    ParamSpec.of("drawing", ParamType.JSON_OBJECT).doc("create 用：图纸正文，格式看 lookup 的 building/design").build(),
                     ParamSpec.of("design_id", ParamType.TEXT).doc("update / inspect / preview / export 用：设计编号").build(),
-                    ParamSpec.of("edits", ParamType.JSON)
+                    ParamSpec.of("edits", ParamType.JSON_OBJECT)
                             .doc("update 用：按名合并的修改，字段 objects、materials、components、remove_objects、remove_components、block_state_axes、overlap_policy、name").build(),
                     ParamSpec.of("name", ParamType.TEXT).doc("inspect 用：看某个对象（展开路径也行）；看组件在名字前加 component:").build(),
                     ParamSpec.of("page", ParamType.INTEGER).range(0, 1_000_000).defaultValue(0).doc("inspect 的页码，从 0 起；结果带 next_page 才有下一页").build(),
@@ -104,18 +103,15 @@ public final class DesignModule implements AbilityModule {
 
     private StepDecision create(ParamValues params) {
         if (!params.has("drawing")) return fail("create 要给 drawing", Problem.Kind.INVALID_PARAMETER, "把图纸正文放在 drawing 里");
-        JsonElement drawing = params.json("drawing");
-        if (!drawing.isJsonObject()) return fail("drawing 要是 JSON 对象", Problem.Kind.INVALID_PARAMETER, null);
-        BuildingDesign design = store.create(drawing.getAsJsonObject());
+        // 参数入口只核过是对象；图纸的内容在这里一次转成作者模型，之后不再传 JSON。
+        BuildingDesign design = store.create(params.json("drawing").getAsJsonObject());
         CompiledDesign compiled = DesignCompiler.compile(design.drawing());
         return done("图纸存好了：" + design.name() + "，" + compiled.cellCount() + " 格", DesignDetails.of(design.id(), null, compiled));
     }
 
     private StepDecision update(ParamValues params) {
         if (!params.has("design_id") || !params.has("edits")) return fail("update 要给 design_id 和 edits", Problem.Kind.INVALID_PARAMETER, null);
-        JsonElement edits = params.json("edits");
-        if (!edits.isJsonObject()) return fail("edits 要是 JSON 对象", Problem.Kind.INVALID_PARAMETER, null);
-        BuildingDesign design = store.update(params.text("design_id"), edits.getAsJsonObject());
+        BuildingDesign design = store.update(params.text("design_id"), params.json("edits").getAsJsonObject());
         CompiledDesign compiled = DesignCompiler.compile(design.drawing());
         return done("改好了，新的一版 " + design.id() + "，" + compiled.cellCount() + " 格", DesignDetails.of(design.id(), design.parentId(), compiled));
     }

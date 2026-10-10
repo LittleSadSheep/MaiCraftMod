@@ -32,8 +32,10 @@ public enum ParamType {
     TEXT_LIST("array", true),
     /** 多个实体类型 ID（不接受标签）；只给一个字符串时按一项的列表处理。 */
     ENTITY_TYPE_LIST("array", true),
-    /** 原样的 JSON 对象或数组：图纸、修改、逐格清单这类结构化正文；入口只认形状，内容由能力自己校验。 */
-    JSON("object", false);
+    /** 原样的 JSON 对象：图纸、修改、属性表这类结构化正文；入口只认形状，内容由能力自己校验。 */
+    JSON_OBJECT("object", false),
+    /** 原样的 JSON 数组：逐格清单这类一项一项的结构化正文；入口只认形状，内容由能力自己校验。 */
+    JSON_ARRAY("array", false);
 
     private final String schemaType;
     private final boolean list;

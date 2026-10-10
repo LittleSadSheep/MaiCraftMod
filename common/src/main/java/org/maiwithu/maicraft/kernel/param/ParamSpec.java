@@ -4,7 +4,8 @@ package org.maiwithu.maicraft.kernel.param;
 import java.util.List;
 import java.util.Objects;
 
-import com.google.gson.JsonElement;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 
 /**
  * 一个参数的完整定义：名字、类型、是否必填、默认值、范围或选项、说明。
@@ -70,7 +71,8 @@ public record ParamSpec(
             case BOOLEAN -> value instanceof Boolean;
             case TEXT, CHOICE, ITEM_OR_TAG, BLOCK_OR_TAG, ENTITY_TYPE -> value instanceof String;
             case ITEM_LIST, BLOCK_LIST, TEXT_LIST, ENTITY_TYPE_LIST -> value instanceof List<?>;
-            case JSON -> value instanceof JsonElement;
+            case JSON_OBJECT -> value instanceof JsonObject;
+            case JSON_ARRAY -> value instanceof JsonArray;
         };
     }
 

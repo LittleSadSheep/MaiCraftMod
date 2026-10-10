@@ -70,10 +70,10 @@ public final class BuildModule implements AbilityModule {
             AbilityDoc.forAbility("build"),
             ParamSpecs.of(
                     ParamSpec.of("design_id", ParamType.TEXT).doc("按 design 存的图纸施工（三选一）").build(),
-                    ParamSpec.of("cells", ParamType.JSON)
+                    ParamSpec.of("cells", ParamType.JSON_ARRAY)
                             .doc("逐格蓝图（三选一）：[{\"offset\":[x,y,z],\"block\":\"minecraft:stone\",\"properties\":{...}}]，block 为 minecraft:air 表示清空，水源、岩浆源表示倒桶").build(),
                     ParamSpec.of("block", ParamType.BLOCK_OR_TAG).doc("只放一格（三选一）：放在 target 那一格").build(),
-                    ParamSpec.of("properties", ParamType.JSON).doc("配 block：要求的方块状态属性，例如 {\"facing\":\"north\"}").build(),
+                    ParamSpec.of("properties", ParamType.JSON_OBJECT).doc("配 block：要求的方块状态属性，例如 {\"facing\":\"north\"}").build(),
                     ParamSpec.of("file", ParamType.TEXT).doc("schematics 目录下的结构文件名；还没接上").build(),
                     ParamSpec.of("rotation", ParamType.INTEGER).range(0, 270).defaultValue(0).doc("绕锚点转 0 / 90 / 180 / 270 度；只配 design_id").build()),
             Set.of(TargetKind.HERE, TargetKind.SEEN, TargetKind.LANDMARK, TargetKind.POSITION),

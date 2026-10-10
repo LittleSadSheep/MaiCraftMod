@@ -90,7 +90,7 @@
       {
         "ability": "maicraft:build",
         "summary": "按图纸、逐格清单或单格在 target 处施工：缺料自己拿、挡着的挖掉、从底往上砌、够不着就垫临时方块再收走",
-        "parameters": "design_id?: string, cells?: object, block?: string, properties?: object, file?: string, rotation: integer = 0",
+        "parameters": "design_id?: string, cells?: array, block?: string, properties?: object, file?: string, rotation: integer = 0",
         "targets": [
           "here",
           "landmark",
@@ -555,7 +555,7 @@
         },
         {
           "name": "cells",
-          "type": "object",
+          "type": "array",
           "required": false,
           "doc": "逐格蓝图（三选一）：[{\"offset\":[x,y,z],\"block\":\"minecraft:stone\",\"properties\":{...}}]，block 为 minecraft:air 表示清空，水源、岩浆源表示倒桶"
         },

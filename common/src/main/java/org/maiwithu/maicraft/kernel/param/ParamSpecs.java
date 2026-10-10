@@ -125,14 +125,22 @@ public final class ParamSpecs {
             case ITEM_OR_TAG, BLOCK_OR_TAG -> resource(name, element, true, errors, notes);
             case ENTITY_TYPE -> resource(name, element, false, errors, notes);
             case ITEM_LIST, BLOCK_LIST, TEXT_LIST, ENTITY_TYPE_LIST -> list(param, element, errors, notes);
-            case JSON -> json(name, element, errors);
+            case JSON_OBJECT -> jsonObject(name, element, errors);
+            case JSON_ARRAY -> jsonArray(name, element, errors);
         };
     }
 
     // 结构化正文只认形状：对象或数组原样交给能力，字符串、数字这类不收。
-    private static JsonElement json(String name, JsonElement element, List<ParamError> errors) {
-        if (element.isJsonObject() || element.isJsonArray()) return element.deepCopy();
-        errors.add(new ParamError(name, name + " 必须是 JSON 对象或数组", "JSON 对象或数组"));
+    // 结构化正文只认形状：对象与数组各是一种类型，说明里报的类型名与收的形状一致，严格按类型校验的客户端不会把对的拒掉。
+    private static JsonElement jsonObject(String name, JsonElement element, List<ParamError> errors) {
+        if (element.isJsonObject()) return element.deepCopy();
+        errors.add(new ParamError(name, name + " 必须是 JSON 对象", "JSON 对象"));
+        return null;
+    }
+
+    private static JsonElement jsonArray(String name, JsonElement element, List<ParamError> errors) {
+        if (element.isJsonArray()) return element.deepCopy();
+        errors.add(new ParamError(name, name + " 必须是 JSON 数组", "JSON 数组"));
         return null;
     }
 
@@ -279,7 +287,8 @@ public final class ParamSpecs {
             case BLOCK_LIST -> "方块 ID 或标签的数组";
             case TEXT_LIST -> "文字数组";
             case ENTITY_TYPE_LIST -> "实体类型 ID 的数组";
-            case JSON -> "JSON 对象或数组";
+            case JSON_OBJECT -> "JSON 对象";
+            case JSON_ARRAY -> "JSON 数组";
         };
     }
 
