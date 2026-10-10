@@ -88,6 +88,10 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     private boolean fled;
     private int carriedBeforeLoot = -1;
     private List<FightMoves.Drop> pendingDrops = List.of();
+    /** 走到掉落物跟前后等它被吸进包的刻数：原版拾取要一两刻，到了就结算会把捡得到的记成没捡到。 */
+    private int lootWaited;
+    /** 走到掉落物跟前最多等几刻。 */
+    private static final int LOOT_SETTLE_TICKS = 10;
 
     FightTask(FightInput input, CombatSenses senses, SeenTargets seenTargets, FightMoves moves,
             NamedTargetConsent consent) {
@@ -174,8 +178,9 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
                 // 区域清扫：这一批打完了，身边也没有在打我的。
                 return Next.go(Phase.LOOT, lastKillSpot == null ? "附近没有看得见的敌对生物" : "这一批清完了，就地捡一下");
             }
-            // 点名目标全部确认死亡：完成。
-            return Next.done(settled(context));
+            // 点名目标全部确认死亡：就地捡一下掉落物再收场（打羊要羊肉、打僵尸要腐肉都靠这一步）。
+            return lastKillSpot == null ? Next.done(settled(context))
+                    : Next.go(Phase.LOOT, "点名的都打倒了，就地捡一下");
         }
         engaged = target;
         double distance = target.distance;
@@ -265,7 +270,8 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
             return Next.done(settled(context));
         }
         if (pendingDrops.isEmpty()) {
-            pendingDrops = moves.dropsNear(context, lastKillSpot[0], lastKillSpot[1], lastKillSpot[2], 4.0);
+            // 抄一份自己逐件划掉，不改读端交来的清单。
+            pendingDrops = new ArrayList<>(moves.dropsNear(context, lastKillSpot[0], lastKillSpot[1], lastKillSpot[2], 4.0));
             carriedBeforeLoot = moves.carriedItemCount(context);
             if (pendingDrops.isEmpty()) {
                 recordProgress("身边没有掉落物可捡");
@@ -276,10 +282,15 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         SeenTargets.Observed observed = dropObservation(context, drop);
         double[] self = moves.selfPosition(context);
         double distance = Math.hypot(self[0] - drop.x(), self[2] - drop.z());
+        // 走到跟前了而它还在地上：等一两刻让原版吸进包，再看背包多没多。
+        if (observed != null && distance <= 1.2 && ++lootWaited <= LOOT_SETTLE_TICKS) {
+            return Next.stay();
+        }
         if (observed == null || distance <= 1.2) {
-            // 走到掉落物上或它消失了：背包多了就是捡到，没多就是被抢或没捡着。
+            // 它消失了或等够了：背包多了就是捡到，没多就是被抢或没捡着。
             settleOneDrop(drop, context);
             pendingDrops.remove(0);
+            lootWaited = 0;
             dropCurrent();
             return pendingDrops.isEmpty() ? Next.done(settled(context)) : Next.stay();
         }

@@ -62,6 +62,9 @@ class FightTaskTest {
     private static final class Moves implements FightMoves {
         final List<String> started = new ArrayList<>();
         int closed;
+        /** 地上的掉落物；测试摆，捡起时拿掉。 */
+        final List<Drop> drops = new ArrayList<>();
+        int carried;
 
         @Override public Action strike(TickContext context, int entityId) {
             return action("打 " + entityId, ActionStatus.done());
@@ -74,10 +77,10 @@ class FightTaskTest {
         @Override public double[] selfPosition(TickContext context) { return new double[] {0, 64, 0}; }
 
         @Override public List<Drop> dropsNear(TickContext context, double x, double y, double z, double radius) {
-            return List.of();
+            return drops.stream().filter(drop -> Math.hypot(drop.x() - x, drop.z() - z) <= radius).toList();
         }
 
-        @Override public int carriedItemCount(TickContext context) { return 0; }
+        @Override public int carriedItemCount(TickContext context) { return carried; }
 
         private Action action(String what, ActionStatus status) {
             started.add(what);
@@ -118,6 +121,31 @@ class FightTaskTest {
 
         assertEquals(List.of("走向 12.0,5.0"), moves.started);
         assertEquals(0, moves.closed);
+    }
+
+    @Test
+    void namedTargetDefeatedThenItsDropIsPickedUpRightThere() {
+        // 实机：点名打倒一只羊后结果写"没捡到掉落物"，羊肉留在地上——点名打完直接收场，没走拾荒这一步。
+        targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, false);
+        task.start(new Tick(0));
+        task.tick(new Tick(0));
+        task.tick(new Tick(1));
+        task.tick(new Tick(2));
+        targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, true);
+        moves.drops.add(new FightMoves.Drop(42, "minecraft:mutton", 0.5, 64, 0.5));
+        TaskResult result = null;
+        for (long t = 3; t < 40 && result == null; t++) {
+            // 走到跟前两刻后被原版吸进包：地上那件没了，背包多一件。
+            if (t == 6) {
+                moves.drops.clear();
+                moves.carried = 1;
+            }
+            if (task.tick(new Tick(t)) instanceof TickResult.Finished finished) result = finished.result();
+        }
+
+        assertNotNull(result);
+        FightTask.FightDetails details = (FightTask.FightDetails) result.details();
+        assertEquals(List.of("minecraft:mutton"), details.lootGained(), result.summary());
     }
 
     @Test
