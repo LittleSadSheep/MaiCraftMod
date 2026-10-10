@@ -128,4 +128,10 @@ public interface InteractionSender {
 
     /** 逐刻结算：先核对上下文仍是本刻、动作仍是本角色的，再运行只读确认条件。 */
     PendingInteraction poll(PlayerContext context, PendingInteraction pending);
+
+    /**
+     * 每刻开始时由控制权边界调一次：推进没人再管的收尾。任务结束时挂下的停挖、没确认完的副手动作，
+     * 原任务对象已经没了，只能由这里接着做完；新任务开始之前先结清，占掉本刻交互机会时新任务等下一刻。
+     */
+    default void advance(PlayerContext context) {}
 }

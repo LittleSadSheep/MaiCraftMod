@@ -64,4 +64,10 @@ public interface MenuActions {
             PlayerContext context, int timeoutTicks, String boundaryReason);
 
     PendingMenuAction poll(PlayerContext context, PendingMenuAction pending);
+
+    /**
+     * 每刻开始时由控制权边界调一次：推进没人再管的界面操作。任务结束或被收尾时请游戏关的界面，
+     * 原任务对象已经没了，关闭要靠这里一刻一刻推进到界面真的关上；新任务开始之前先结清。
+     */
+    default void advance(PlayerContext context) {}
 }
