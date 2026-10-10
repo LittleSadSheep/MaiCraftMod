@@ -44,6 +44,9 @@ import org.maiwithu.maicraft.ability.use.UseModule;
 import org.maiwithu.maicraft.ability.wait.WaitModule;
 import org.maiwithu.maicraft.behavior.acquire.ClientCropReplanting;
 import org.maiwithu.maicraft.behavior.acquire.ClientCollectsBlocks;
+import org.maiwithu.maicraft.behavior.acquire.ClientStairsDown;
+import org.maiwithu.maicraft.behavior.acquire.DigsStairsDown;
+import org.maiwithu.maicraft.behavior.acquire.LiveStairsSite;
 import org.maiwithu.maicraft.behavior.acquire.ClientWorkstationPlacer;
 import org.maiwithu.maicraft.behavior.acquire.ClientYieldScans;
 import org.maiwithu.maicraft.behavior.acquire.ContainerSource;
@@ -245,8 +248,11 @@ public final class AbilityCatalog {
         registry.register(new DropModule(deps.backpack(), deps.offhand(), deps.itemTags(), shared.dropping()));
 
         // 拿到物品：身上的不算来源（引擎开场就清点），已实现的途径都登记，见 obtainModule。
+        // 看不见石头时往下挖楼梯：挖一格、捡这一级掉的东西与采掘共用一套，走下一级只走不改地形。
+        ClientStairsDown stairs = new ClientStairsDown(new LiveStairsSite(deps.walks()), shared.digging(),
+                shared.drops(), shared.permission());
         registry.register(obtainModule(deps, shared.playerServices(), shared.bringClose(), shared.toMainhand(),
-                shared.permission(), shared.innerNeeds(), shared.collects(), shared.space()));
+                shared.permission(), shared.innerNeeds(), shared.collects(), stairs, shared.space()));
 
         // 存东西：找容器把现场扫描与世界记忆并起来，打开容器、逐笔搬运与挖盖子都接上了。
         registry.register(depositModule(deps, shared.storing(), shared.collects()));
@@ -468,7 +474,7 @@ public final class AbilityCatalog {
      */
     private static AbilityModule obtainModule(Deps deps, PlayerServices playerServices, LiveApproaches bringsClose,
             ClientMovesToMainhand toMainhand, PermissionCheck permission, DeferredInnerNeeds innerNeeds,
-            ClientCollectsBlocks collects, InventorySpace space) {
+            ClientCollectsBlocks collects, DigsStairsDown stairs, InventorySpace space) {
         RegistryRecipeReads recipeReads = new RegistryRecipeReads(deps.context(), deps.itemTags(), deps.furnaceFuels());
         // 在工作站上动手：熔炉添燃料时按同一份燃料表挑身上烧得最久的。
         RecipeRuns recipeRuns = new MenuRecipeRuns(bringsClose, deps.interactions(),
@@ -484,7 +490,7 @@ public final class AbilityCatalog {
                 Set.of(WorkstationRecipe.Kind.SMELTING),
                 recipeReads, deps.memory(), recipeReads, recipeRuns,
                 deps.backpack(), deps.offhand(), deps.itemTags(), innerNeeds, placer, permission);
-        MiningSource miningSource = new MiningSource(yieldScans, collects, deps.toolRequirements(),
+        MiningSource miningSource = new MiningSource(yieldScans, collects, stairs, deps.toolRequirements(),
                 permission, deps.backpack(), deps.offhand(), innerNeeds);
         HarvestSource harvestSource = new HarvestSource(yieldScans, collects, permission,
                 new ClientCropReplanting(toMainhand, deps.interactions(), deps.context()));

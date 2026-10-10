@@ -21,4 +21,10 @@ public interface ScansMinables {
 
     /** 世界上有没有任何方块直接掉出想要的东西；铁锭这类做出来的物品没有，只能合成或烧炼。 */
     boolean anyBlockDrops(WantedItem wanted);
+
+    /** 想要的东西是不是埋在脚下的石头掉的（圆石、石质工具的材料这类）：谁都知道往下挖几格就有，看不见也能去挖。 */
+    boolean buriedUnderfoot(WantedItem wanted);
+
+    /** 挖掉这种方块会不会掉想要的东西：往下挖楼梯时数挖到了几格用。 */
+    boolean dropsWanted(WantedItem wanted, String blockTypeId);
 }

@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Predicate;
 
 import net.minecraft.core.BlockPos;
 
@@ -58,15 +59,46 @@ class MiningSourceTest {
         }
     }
 
-    /** 替身：固定一批可挖的方块，或声明世界上根本没有方块直接掉它。 */
-    private record FakeMinables(List<MinableSpot> spots, boolean anyDrops) implements ScansMinables {
+    /** 替身：固定一批可挖的方块，或声明世界上根本没有方块直接掉它；buried 表示要的是埋在脚下的石头掉的。 */
+    private record FakeMinables(List<MinableSpot> spots, boolean anyDrops, boolean buried) implements ScansMinables {
+        FakeMinables(List<MinableSpot> spots, boolean anyDrops) {
+            this(spots, anyDrops, false);
+        }
         @Override public List<MinableSpot> minable(WantedItem wanted, WorldPosition center, int radiusBlocks) {
             return spots;
         }
         @Override public boolean anyBlockDrops(WantedItem wanted) {
             return anyDrops;
         }
+        @Override public boolean buriedUnderfoot(WantedItem wanted) {
+            return buried;
+        }
+        @Override public boolean dropsWanted(WantedItem wanted, String blockTypeId) {
+            return blockTypeId.equals("minecraft:stone");
+        }
     }
+
+    /** 替身：记下要往下挖几格、哪些方块算数，动作当场做完。 */
+    private static final class FakeStairs implements DigsStairsDown {
+        int wantedCells;
+        Predicate<String> yields;
+
+        @Override public Action digDown(Predicate<String> yields, int wantedCells,
+                Permissions permissions) {
+            this.yields = yields;
+            this.wantedCells = wantedCells;
+            return new Action() {
+                @Override public ActionStatus tick(TickContext context) {
+                    return ActionStatus.done();
+                }
+                @Override public String describe() {
+                    return "往下挖楼梯";
+                }
+            };
+        }
+    }
+
+    private final FakeStairs stairs = new FakeStairs();
 
     /** 替身：挖一格记一格，当场做完；接不上时返回 empty。 */
     private static final class FakeDigs implements CollectsBlocks {
@@ -92,13 +124,15 @@ class MiningSourceTest {
         }
     }
 
-    /** 替身许可：铁矿石要铁镐；钻石矿石需要钻石镐（等级不够也判不够格）。 */
+    /** 替身许可：矿石要铁镐，石头要木镐；带对了镐才算够格。 */
     private static final class FakeTools implements ReadsToolRequirements {
         @Override public Optional<String> toolRequired(String blockType) {
+            if (blockType.equals("minecraft:stone")) return Optional.of("minecraft:wooden_pickaxe");
             return blockType.endsWith("_ore") ? Optional.of("minecraft:iron_pickaxe") : Optional.empty();
         }
         @Override public boolean sufficient(String toolItemId, String blockType) {
-            return toolItemId.equals("minecraft:iron_pickaxe");
+            return blockType.equals("minecraft:stone") ? toolItemId.endsWith("_pickaxe")
+                    : toolItemId.equals("minecraft:iron_pickaxe");
         }
     }
 
@@ -116,7 +150,7 @@ class MiningSourceTest {
                         return Optional.empty();
                     }
                 });
-        return new MiningSource(minables, digs, new FakeTools(), check, backpack, offhand, needs);
+        return new MiningSource(minables, digs, stairs, new FakeTools(), check, backpack, offhand, needs);
     }
 
     @Test
@@ -189,5 +223,47 @@ class MiningSourceTest {
                         new SourceQuote.Offer("采掘", 4, new AcquisitionCost(3, 4), null), CONTEXT)
                 .orElseThrow();
         assertEquals(2, digs.dug.size());
+    }
+
+    @Test
+    void 看不见石头_要圆石时往下挖楼梯报价() {
+        // 实机：新世界地表全是土，obtain 圆石只回答"附近看得见的地方没有"。石头谁都知道埋在脚下。
+        SourceQuote quote = source(new FakeMinables(List.of(), true, true), new FakeDigs())
+                .quote(new ItemRequest(WantedItem.ofItem("minecraft:cobblestone"), 3, "石镐"), CONTEXT);
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, quote);
+        assertEquals(3, offer.obtainableCount());
+        assertTrue(offer.risk().contains("楼梯"), offer.risk());
+        assertTrue(offer.risk().contains("minecraft:wooden_pickaxe"), "没带镐要先说会去备：" + offer.risk());
+    }
+
+    @Test
+    void 看不见煤_照旧说附近没有_不往下挖() {
+        SourceQuote quote = source(new FakeMinables(List.of(), true, false), new FakeDigs())
+                .quote(new ItemRequest(WantedItem.ofItem("minecraft:coal"), 3, "火把"), CONTEXT);
+        assertInstanceOf(SourceQuote.Unavailable.class, quote);
+    }
+
+    @Test
+    void 不许挖天然方块_往下挖楼梯要许可() {
+        SourceContext onlyTemporary = new SourceContext(WorldPosition.here(0, 64, 0),
+                Permissions.DEFAULT.mergedWith(Permissions.BlockChanges.TEMPORARY, null, null, null, null, null));
+        SourceQuote quote = source(new FakeMinables(List.of(), true, true), new FakeDigs())
+                .quote(new ItemRequest(WantedItem.ofItem("minecraft:cobblestone"), 3, "石镐"), onlyTemporary);
+        SourceQuote.NeedsApproval approval = assertInstanceOf(SourceQuote.NeedsApproval.class, quote);
+        assertTrue(approval.problem().message().contains("change_blocks"), approval.problem().message());
+    }
+
+    @Test
+    void 往下挖楼梯_没镐先备木镐_挖够要的件数() {
+        Action action = source(new FakeMinables(List.of(), true, true), new FakeDigs())
+                .begin(new ItemRequest(WantedItem.ofItem("minecraft:cobblestone"), 3, "石镐"),
+                        new SourceQuote.Offer("采掘", 3, new AcquisitionCost(4, 7), null), CONTEXT)
+                .orElseThrow();
+        runAll(action);
+
+        assertEquals("minecraft:wooden_pickaxe", needs.asked.getFirst().wanted().itemId());
+        assertEquals(3, stairs.wantedCells);
+        assertTrue(stairs.yields.test("minecraft:stone"));
+        assertTrue(!stairs.yields.test("minecraft:dirt"), "挖开的土不算挖到圆石");
     }
 }

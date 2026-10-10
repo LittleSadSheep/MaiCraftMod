@@ -48,7 +48,18 @@ public final class VanillaBlockDrops {
             "minecraft:glass", "minecraft:ice", "minecraft:packed_ice", "minecraft:blue_ice",
             "minecraft:snow", "minecraft:snow_block");
 
+    /**
+     * 谁都知道埋在脚下的石头：地表往下挖几格就有，不用先看见。
+     * 只有它是例外，矿石（煤、铁、钻石）照旧要看得见才去挖。
+     */
+    private static final String BURIED_STONE = "minecraft:stone";
+
     private VanillaBlockDrops() {}
+
+    /** 这件东西是不是埋在脚下的石头掉的（圆石）：看不见石头时也能往下挖楼梯去找。 */
+    public static boolean buriedUnderfoot(String itemId) {
+        return blocksDropping(itemId).contains(BURIED_STONE);
+    }
 
     /** 挖掉会掉出这件东西的方块类型；对照里没有、也不掉自己的物品给空。 */
     public static List<String> blocksDropping(String itemId) {

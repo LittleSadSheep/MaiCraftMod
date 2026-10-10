@@ -103,6 +103,16 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
     }
 
     @Override
+    public boolean buriedUnderfoot(WantedItem wanted) {
+        return expand(wanted).stream().anyMatch(VanillaBlockDrops::buriedUnderfoot);
+    }
+
+    @Override
+    public boolean dropsWanted(WantedItem wanted, String blockTypeId) {
+        return expand(wanted).contains(VanillaBlockDrops.droppedBy(blockTypeId));
+    }
+
+    @Override
     public List<CropSpot> mature(WantedItem wanted, WorldPosition center, int radiusBlocks) {
         if (notInWorld()) {
             return List.of();
