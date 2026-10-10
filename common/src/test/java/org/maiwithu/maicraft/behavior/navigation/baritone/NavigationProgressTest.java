@@ -45,7 +45,7 @@ class NavigationProgressTest {
     }
 
     @Test
-    void 重新起算后_人操作过的那段不算没进展() {
+    void restartAfterHumanControlDoesNotCountAsStall() {
         // 人按 F8 收回角色操作了几百刻再交回：从交回那一刻起算，不把那段算成"长时间没进展"。
         NavigationProgress progress = new NavigationProgress();
         progress.observe(0, 64, 0, 10);

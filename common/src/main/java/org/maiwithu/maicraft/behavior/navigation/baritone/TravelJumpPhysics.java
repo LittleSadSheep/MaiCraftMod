@@ -11,7 +11,7 @@ final class TravelJumpPhysics {
 
     /** 起跳那一刻的身体参数：重力、起跳速度、沿走廊方向的前进速度、地面加速与摩擦、身高。 */
     record Launch(double gravity, double jumpSpeed, double forwardSpeed,
-                  double groundAcceleration, double groundDrag, double bodyHeight) {}
+                  double groundAcceleration, double groundDrag, double playerHeight) {}
 
     /** 一次跳的预测：落地前前进距离、空中阻力累计（算侧向漂移用）、最高点、空中刻数。 */
     record JumpProjection(double forwardDistance, double airDragSum, double apexHeight, int airborneTicks) {}
@@ -32,10 +32,10 @@ final class TravelJumpPhysics {
     /** 预测这一跳；参数不合理、飞不回地面（重力太小）或撞头却身高过 2 格时给 null。 */
     static JumpProjection project(Launch launch, boolean headHit) {
         if (!Double.isFinite(launch.gravity + launch.jumpSpeed + launch.forwardSpeed
-                + launch.groundAcceleration + launch.groundDrag + launch.bodyHeight)
+                + launch.groundAcceleration + launch.groundDrag + launch.playerHeight)
                 || launch.gravity <= 0 || launch.jumpSpeed <= 0 || launch.forwardSpeed < 0
                 || launch.groundAcceleration < 0 || launch.groundDrag <= 0 || launch.groundDrag > 1
-                || launch.bodyHeight <= 0 || headHit && launch.bodyHeight >= 2) return null;
+                || launch.playerHeight <= 0 || headHit && launch.playerHeight >= 2) return null;
         double height = 0, apex = 0, distance = 0, dragSum = 0, drag = 1;
         double vertical = launch.jumpSpeed, forward = launch.forwardSpeed;
         for (int tick = 1; tick <= 40; tick++) {
@@ -47,9 +47,9 @@ final class TravelJumpPhysics {
             forward *= friction;
             drag *= friction;
             height += vertical;
-            if (headHit && height > 2 - launch.bodyHeight) {
+            if (headHit && height > 2 - launch.playerHeight) {
                 // 顶棚只有两格高：头撞上去就不再上升，这一跳更矮更短——这就是低顶连跳比平地更密的原因。
-                height = 2 - launch.bodyHeight;
+                height = 2 - launch.playerHeight;
                 vertical = 0;
             }
             apex = Math.max(apex, height);

@@ -270,7 +270,7 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
      * 人按 F8 收回了角色：正在走的那一趟立刻撤掉路线、松开引擎按键，不让引擎自己的刻接着执行
      * （否则它每刻还在改走路朝向，人按 W 会朝旧路线走）。这一趟不结算；人交回后从当时的位置重新算路接着走。
      */
-    public void humanTookBody() {
+    public void humanTookPlayer() {
         BaritoneWalkRun current = active;
         if (current != null) current.dropRoute();
     }

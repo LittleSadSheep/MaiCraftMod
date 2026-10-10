@@ -138,31 +138,9 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
             events.publish(TaskEvent.Kind.TEMPORARY_TASK_STARTED,
                     "被威胁，插入自卫：打点在 " + Math.round(self[0]) + ", " + Math.round(self[1]) + ", " + Math.round(self[2]));
         }
-        // 点着引信的苦力怕还在 7 格内：先躲，压过旧目标、血线和别的一切——原版引信在目标离开 7 格后才熄，
-        // 退到 9 格外等它熄了再回来打；它追上来就再退一段。
-        Tracked bomb = null;
-        for (Tracked foe : situation.foes()) {
-            if (foe.foe().kind() == ThreatAssessment.Kind.EXPLOSIVE && foe.foe().armed()
-                    && foe.distance() <= BlastAvoidance.DEFUSE_DISTANCE
-                    && (bomb == null || foe.distance() < bomb.distance())) {
-                bomb = foe;
-            }
-        }
-        if (bomb != null) {
-            if (current != null && currentMode != Mode.EVADE) dropCurrent();
-            if (current == null) {
-                double[] self = moves.selfPosition(context);
-                double[] away = BlastAvoidance.evadePoint(self[0], self[2], bomb.x(), bomb.z());
-                current = moves.walkTo(away[0], self[1], away[1]);
-                currentMode = Mode.EVADE;
-                currentTarget = bomb.entityId();
-            }
-            if (stepCurrent(context, "躲开点着引信的 " + bomb.type())) {
-                ticksSinceProgress = 0;
-                need.noteAttackProgress();
-            }
-            return Next.stay();
-        }
+        // 点着引信的苦力怕还在 7 格内：先躲，压过旧目标、血线和别的一切。
+        Tracked bomb = nearestFuse(situation);
+        if (bomb != null) return evadeBlast(context, bomb);
         // 血快见底：本能优先，先撤离再说，不拿剩下的两颗心去换"再打一下"。
         // 退无可退时血线不再触发撤离——没有地方可撤，就地迎战（背水一战）。
         if (!cornered && ThreatAssessment.belowRetreatLine(situation.mine())) {
@@ -221,6 +199,36 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
             }
             ticksSinceProgress = 0;
             recordProgress("攻击空转了一轮，重新评估战场再试");
+        }
+        return Next.stay();
+    }
+
+    // 点着引信、离得近到还会炸的那只（最近的）；没有为 null。
+    private static Tracked nearestFuse(ThreatSituation situation) {
+        Tracked bomb = null;
+        for (Tracked foe : situation.foes()) {
+            if (foe.foe().kind() == ThreatAssessment.Kind.EXPLOSIVE && foe.foe().armed()
+                    && foe.distance() <= BlastAvoidance.DEFUSE_DISTANCE
+                    && (bomb == null || foe.distance() < bomb.distance())) {
+                bomb = foe;
+            }
+        }
+        return bomb;
+    }
+
+    // 躲爆炸：原版引信在目标离开 7 格后才熄，退到 9 格外等它熄了再回来打；它追上来就再退一段。
+    private Next<Phase> evadeBlast(TickContext context, Tracked bomb) {
+        if (current != null && currentMode != Mode.EVADE) dropCurrent();
+        if (current == null) {
+            double[] self = moves.selfPosition(context);
+            double[] away = BlastAvoidance.evadePoint(self[0], self[2], bomb.x(), bomb.z());
+            current = moves.walkTo(away[0], self[1], away[1]);
+            currentMode = Mode.EVADE;
+            currentTarget = bomb.entityId();
+        }
+        if (stepCurrent(context, "躲开点着引信的 " + bomb.type())) {
+            ticksSinceProgress = 0;
+            need.noteAttackProgress();
         }
         return Next.stay();
     }

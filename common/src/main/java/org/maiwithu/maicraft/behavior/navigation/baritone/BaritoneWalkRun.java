@@ -231,12 +231,7 @@ final class BaritoneWalkRun implements WalkRun {
         LocalPlayer player = context.localPlayer();
         var pathing = owner.pathing();
         IBaritone engine = owner.engine();
-        if (routeDropped) {
-            // 人交回了角色：从当时的位置重新算路；人操作的那段不算"长时间没进展"。
-            routeDropped = false;
-            displacement.restart(context.clientTick());
-            engine.getCustomGoalProcess().setGoalAndPath(engineGoal);
-        }
+        resumeAfterHuman(engine, context);
         boolean routePresent = pathing.getCurrent() != null;
         boolean calculating = pathing.getInProgress().isPresent();
 
@@ -415,6 +410,14 @@ final class BaritoneWalkRun implements WalkRun {
         float yaw = course.target(rawYaw, context.clientTick());
         float pitch = NavigationCameraCourse.pitch(submergedPitch, submerged);
         playerInput.requestNavigationLook(yaw, pitch, context.clientTick());
+    }
+
+    // 人交回了角色：从当时的位置重新算路；人操作的那段不算"长时间没进展"。
+    private void resumeAfterHuman(IBaritone engine, PlayerContext context) {
+        if (!routeDropped) return;
+        routeDropped = false;
+        displacement.restart(context.clientTick());
+        engine.getCustomGoalProcess().setGoalAndPath(engineGoal);
     }
 
     /**

@@ -291,7 +291,7 @@ class MiningSourceTest {
     }
 
     @Test
-    void 附近没有的回执写明半径() {
+    void 附近没有的回答写明半径() {
         SourceQuote quote = source(new FakeMinables(List.of(), true, false), new FakeDigs())
                 .quote(new ItemRequest(WantedItem.ofItem("minecraft:coal"), 3, "火把"), CONTEXT);
         SourceQuote.Unavailable unavailable = assertInstanceOf(SourceQuote.Unavailable.class, quote);

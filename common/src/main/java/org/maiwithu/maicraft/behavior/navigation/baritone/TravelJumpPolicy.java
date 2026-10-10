@@ -33,7 +33,7 @@ public final class TravelJumpPolicy {
     /**
      * 这一刻该不该按住跳。
      *
-     * @param verifiedRunway 决定跳时交出核过的走廊，调用方据此让执行器在空中仍按起跳高度判断进度
+     * @param verifiedRunway 决定跳时交出核过的走廊，调用方据此让路线推进在空中仍按起跳高度判断进度
      */
     public static boolean shouldTravelJump(Baritone baritone, List<IMovement> movements,
                                            int pathPosition, Consumer<List<IMovement>> verifiedRunway) {
@@ -77,7 +77,7 @@ public final class TravelJumpPolicy {
             if (verified.isEmpty()) continue;
             double drift = sideSpeed * flight.airDragSum();
             var corridor = new GroundCorridor(world, loaded, width + 2 * drift,
-                    launch.bodyHeight() + flight.apexHeight(), forbidden, physical);
+                    launch.playerHeight() + flight.apexHeight(), forbidden, physical);
             Vec3 end = runway.point(reach);
             // 树冠或顶棚存在缺口时，必须预留完整飞行空间，不能假设头部会提前撞上障碍。
             if (headHit && !corridor.hasContinuousCeiling(runway.start(), end, 2)) continue;

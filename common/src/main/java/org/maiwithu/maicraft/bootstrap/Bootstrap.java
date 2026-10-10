@@ -598,7 +598,7 @@ public final class Bootstrap {
                 LOG.info(owned ? "自动化拿到角色控制权，控制循环开始推进" : "角色控制权回到玩家手上，控制循环停下");
                 automationOwned = owned;
                 // 人收回角色：正在走的路线立刻撤掉，引擎不再改走路朝向，人按 W 就朝视角方向走；交回后接着走。
-                if (!owned) walks.humanTookBody();
+                if (!owned) walks.humanTookPlayer();
             }
             if (owned) {
                 controlLoop.tick(new ClientTickContext(gameTick, current));
