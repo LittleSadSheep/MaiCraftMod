@@ -62,10 +62,11 @@ public final class AnchorResolver {
     }
 
     // 坐标：没写维度按角色所在的算；省略 y 取那一列的地表，那一列没加载就说不清。
+    // 角色位置不带维度时就是"此刻所在的维度"，和坐标写的维度对不上才算跨维度。
     private Resolution position(Target.Position position) {
         String here = character.currentPosition().dimension();
         String dimension = position.dimension() == null ? here : position.dimension();
-        if (!dimension.equals(here)) {
+        if (here != null && dimension != null && !dimension.equals(here)) {
             return new Resolution.Failed(Problem.of(Problem.Kind.UNSUPPORTED, "锚点在另一个维度（" + dimension + "），跨维度施工还没有支持", null));
         }
         if (position.y() != null) return new Resolution.Ready(new WorldPosition(position.x(), position.y(), position.z(), dimension));

@@ -39,6 +39,15 @@ class AnchorResolverTest {
     }
 
     @Test
+    void 角色位置不带维度时_坐标写不写维度都按此刻所在的算() {
+        // 实机：角色位置读出来不带维度（就是此刻所在的维度），坐标不写维度曾空指针、写了又被当成跨维度。
+        AnchorResolver here = new AnchorResolver(id -> Optional.empty(), name -> Optional.empty(),
+                () -> WorldPosition.here(5, 64, 5), (x, z) -> Optional.empty());
+        assertInstanceOf(AnchorResolver.Resolution.Ready.class, here.resolve(new Target.Position(3, 60, 4, null)));
+        assertInstanceOf(AnchorResolver.Resolution.Ready.class, here.resolve(new Target.Position(3, 60, 4, DIM)));
+    }
+
+    @Test
     void 说不清的各有原因() {
         assertEquals(Problem.Kind.INVALID_PARAMETER, failed(null).kind());
         assertEquals(Problem.Kind.NOT_FOUND, failed(new Target.Landmark("矿洞")).kind());
