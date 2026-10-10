@@ -27,13 +27,14 @@ import org.slf4j.LoggerFactory;
  *
  * <p>按键：单按 F9 在关、简要、详细三档间循环（松开 F9 时才切，按住 F9 再按字母只算组合键）；
  * F9+H 在"此刻"和"最近的目标"之间切换，面板关着或在简要档时直接打开详细档的"最近的目标"；
- * F9+N 开关世界里的导航路线。和 F8 一样直接读窗口按键，容器界面打开时也能切。
+ * F9+N 开关世界里的导航路线；F9+B 开关施工预览（design 投影的蓝图）。和 F8 一样直接读窗口按键，容器界面打开时也能切。
  */
 public final class DebugPanel {
     private static final Logger LOG = LoggerFactory.getLogger(DebugPanel.class);
 
     private final StatusReader reader;
     private final Supplier<Optional<NavigationPathSnapshot>> currentPath;
+    private final BlueprintOverlay overlay;
     private final PanelSettings settings;
     private final PanelLayout layout;
     private final FirstSeenTimes times = new FirstSeenTimes();
@@ -48,12 +49,14 @@ public final class DebugPanel {
     /**
      * @param reader      取现状快照
      * @param currentPath 角色正在走的路线；没在走时为空
-     * @param settings    档位与路线开关
+     * @param overlay     施工预览：design 投来的蓝图
+     * @param settings    档位、路线开关与预览开关
      */
     public DebugPanel(StatusReader reader, Supplier<Optional<NavigationPathSnapshot>> currentPath,
-                      PanelSettings settings) {
+                      BlueprintOverlay overlay, PanelSettings settings) {
         this.reader = Objects.requireNonNull(reader, "reader");
         this.currentPath = Objects.requireNonNull(currentPath, "currentPath");
+        this.overlay = Objects.requireNonNull(overlay, "overlay");
         this.settings = Objects.requireNonNull(settings, "settings");
         // 量字宽用游戏的字体；排版只在客户端刻里做，那时字体早已加载好。
         this.layout = new PanelLayout(text -> Minecraft.getInstance().font.width(text), ZoneId.systemDefault());
@@ -89,11 +92,16 @@ public final class DebugPanel {
         PanelRenderer.draw(graphics, minecraft.font, lines, width);
     }
 
-    /** 世界画完后调用：路线开关开着时画出正在走的路线。 */
+    /** 世界画完后调用：路线开关开着时画正在走的路线；预览开关开着时画投到这个世界的蓝图。 */
     public void renderWorld(Camera camera, Matrix4f view, Matrix4f projection) {
         Minecraft minecraft = Minecraft.getInstance();
-        if (path == null || minecraft.level == null || minecraft.options.hideGui) return;
-        NavigationPathRenderer.render(camera, view, projection, path);
+        if (minecraft.level == null || minecraft.options.hideGui) return;
+        if (path != null) NavigationPathRenderer.render(camera, view, projection, path);
+        if (!settings.blueprintOverlay()) return;
+        // 蓝图带着维度：投在主世界的不画到下界里。
+        String dimension = minecraft.level.dimension().location().toString();
+        overlay.current().filter(blueprint -> blueprint.dimension().equals(dimension))
+                .ifPresent(blueprint -> BlueprintRenderer.render(camera, view, projection, blueprint));
     }
 
     // 面板宽度只随窗口与界面缩放变，不随内容变：简要档取三成宽，详细档取四成半，都有上下限。
@@ -110,12 +118,14 @@ public final class DebugPanel {
         List<PanelKeys.Press> presses = keys.poll(
                 GLFW.glfwGetKey(window, GLFW.GLFW_KEY_F9) == GLFW.GLFW_PRESS,
                 GLFW.glfwGetKey(window, GLFW.GLFW_KEY_H) == GLFW.GLFW_PRESS,
-                GLFW.glfwGetKey(window, GLFW.GLFW_KEY_N) == GLFW.GLFW_PRESS);
+                GLFW.glfwGetKey(window, GLFW.GLFW_KEY_N) == GLFW.GLFW_PRESS,
+                GLFW.glfwGetKey(window, GLFW.GLFW_KEY_B) == GLFW.GLFW_PRESS);
         for (PanelKeys.Press press : presses) {
             switch (press) {
                 case NEXT_LEVEL -> cycleLevel(minecraft);
                 case SWITCH_PAGE -> switchPage(minecraft);
                 case TOGGLE_PATH_LINES -> togglePathLines(minecraft);
+                case TOGGLE_BLUEPRINT -> toggleBlueprint(minecraft);
             }
         }
     }
@@ -150,6 +160,16 @@ public final class DebugPanel {
         } catch (IOException failure) {
             say(minecraft, "导航路线已" + (show ? "显示" : "隐藏") + "，但设置没存下：" + failure.getMessage(),
                     ChatFormatting.YELLOW);
+        }
+    }
+
+    private void toggleBlueprint(Minecraft minecraft) {
+        boolean show = !settings.blueprintOverlay();
+        try {
+            settings.blueprintOverlay(show);
+            say(minecraft, show ? "施工预览：显示（再按 F9+B 隐藏）" : "施工预览：隐藏", ChatFormatting.GREEN);
+        } catch (IOException failure) {
+            say(minecraft, "施工预览已" + (show ? "显示" : "隐藏") + "，但设置没存下：" + failure.getMessage(), ChatFormatting.YELLOW);
         }
     }
 

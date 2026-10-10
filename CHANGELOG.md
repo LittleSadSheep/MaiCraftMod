@@ -9,6 +9,7 @@ MaiCraft 按版本记录玩家和 Agent 能感受到的变化。版本号即 `gr
 ### 新增
 
 - 施工（`build`）认结构文件了：`file` 给 `schematics/` 里的文件名，原版 `.nbt` / `.snbt`、Litematica `.litematic`、Sponge `.schem` 和 `design` 导出的 `.json` 都认，文件原点落在锚点、`rotation` 照转；展示框、盔甲架、画这些摆设实体不装，结果里 `fixtures_skipped` 写明有几个，箱子里的东西、告示牌的字不搬。
+- 施工预览画出来了：`design` 的 `preview` 投到世界里的蓝图会显示在世界里——半透明白是要放的方块、红是要清空的格、蓝是要倒桶的格，外加蓝线包围盒，只画镜头附近的格；F9+B 开关，默认开着，存在 `config/maicraft-debug.properties`，退世界清掉。
 
 ## [1.0.0] - 2026-10-10
 

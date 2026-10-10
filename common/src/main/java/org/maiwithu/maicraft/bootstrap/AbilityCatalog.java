@@ -14,7 +14,6 @@ import org.maiwithu.maicraft.ability.build.BuildModule;
 import org.maiwithu.maicraft.ability.machine.MachineAbilities;
 import org.maiwithu.maicraft.ability.chat.ChatAbility;
 import org.maiwithu.maicraft.ability.design.DesignModule;
-import org.maiwithu.maicraft.ability.design.ShowsPreview;
 import org.maiwithu.maicraft.ability.design.api.DesignStore;
 import org.maiwithu.maicraft.ability.chat.ReadsChatEcho;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
@@ -68,6 +67,7 @@ import org.maiwithu.maicraft.behavior.approach.LiveApproachWorld;
 import org.maiwithu.maicraft.behavior.approach.LiveApproaches;
 import org.maiwithu.maicraft.behavior.construction.AnchorResolver;
 import org.maiwithu.maicraft.behavior.construction.LiveGroundHeights;
+import org.maiwithu.maicraft.behavior.construction.ShowsPreview;
 import org.maiwithu.maicraft.behavior.interaction.ClientGameRefusals;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
@@ -170,7 +170,9 @@ public final class AbilityCatalog {
             /** 夜晚生存需求与睡觉能力之间的晚接桥；进世界登记睡觉能力后接上真实现。 */
             NightRestWiring nightWiring,
             /** 这个游戏实例的配置目录：设计库放在这里，导出写到实例的 schematics 目录。 */
-            Path configDirectory) {
+            Path configDirectory,
+            /** 施工预览：design 投影的蓝图交给它画；没有画面的清单传 {@link ShowsPreview#NONE}。 */
+            ShowsPreview preview) {
 
         public Deps {
             Objects.requireNonNull(context, "context");
@@ -184,6 +186,7 @@ public final class AbilityCatalog {
             Objects.requireNonNull(compat, "compat");
             Objects.requireNonNull(facilities, "facilities");
             Objects.requireNonNull(configDirectory, "configDirectory");
+            Objects.requireNonNull(preview, "preview");
         }
     }
 
@@ -343,7 +346,7 @@ public final class AbilityCatalog {
                 deps.characterPosition(), new LiveGroundHeights(deps.context()));
         // design 导出与 build 导入用同一个 schematics 目录：导出的文件名直接当 file 参数喂回去。
         Path schematics = deps.configDirectory().resolveSibling("schematics");
-        registry.register(new DesignModule(designs, anchors, ShowsPreview.NONE, schematics));
+        registry.register(new DesignModule(designs, anchors, deps.preview(), schematics));
         registry.register(BuildModule.live(designs, anchors, schematics, deps.context(), deps.interactions(), deps.inputs(),
                 shared.bringClose(), shared.toMainhand(), shared.digging(), shared.innerNeeds(),
                 shared.permission(), deps.memory(), deps.walks()));

@@ -13,6 +13,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.Camera;
 import net.minecraft.client.gui.GuiGraphics;
 import org.joml.Matrix4f;
+import org.maiwithu.maicraft.debug.BlueprintOverlay;
 import org.maiwithu.maicraft.debug.DebugPanel;
 import org.maiwithu.maicraft.debug.PanelSettings;
 import org.maiwithu.maicraft.debug.StatusReader;
@@ -280,6 +281,8 @@ public final class Bootstrap {
         private final RecentToolCalls recentCalls = new RecentToolCalls();
         /** F9 调试面板：启动完成后建，只读各层现状。 */
         private DebugPanel debugPanel;
+        /** 施工预览：design 投影的蓝图留在这里，面板画它；进世界建能力清单时把它交给 design。 */
+        private final BlueprintOverlay blueprintOverlay = new BlueprintOverlay();
         /** 启动时拿到的加载器环境：调试面板的设置文件放在它的 config 目录下。 */
         private LoaderEnvironment loader;
         private ServerLinkSession session;
@@ -497,7 +500,7 @@ public final class Bootstrap {
         private void startDebugPanel() {
             StatusReader reader = new PanelStatusReader(() -> mcp, () -> mcpStartFailure, recentCalls, session,
                     playerControl, goals, controlLoop, taskEvents);
-            debugPanel = new DebugPanel(reader, walks::currentPath, new PanelSettings(loader.configDirectory()));
+            debugPanel = new DebugPanel(reader, walks::currentPath, blueprintOverlay, new PanelSettings(loader.configDirectory()));
         }
 
         @Override public void renderDebugPanel(GuiGraphics graphics) {
@@ -529,7 +532,7 @@ public final class Bootstrap {
                 WorldScope scope = new WorldScope(minecraft, playerControl, blockScans, session,
                         subtitles, interactions, useKeyProjection, walks, combatSenses,
                         abilities, interactionSender, menuActions, instanceConfig, furnaceFuels,
-                        compat, nightWiring, loader.configDirectory());
+                        compat, nightWiring, loader.configDirectory(), blueprintOverlay);
                 worldScope[0] = scope;
                 // 换了世界，任务事件流换一条新的，宿主手里的旧游标如实作废；再把这个世界上次没做完的目标
                 // 读回来，全部恢复为暂停，等 LLM 决定接不接着做。读回时的暂停事件进的是新的这条流。
@@ -554,6 +557,8 @@ public final class Bootstrap {
                 // 聊天流在离开时换新：下一个世界登录后最早几条消息（谁进来了）可能比现场建好还早到，进世界时再换会把它们冲掉。
                 chatEvents.restart();
             }
+            // 预览的蓝图属于刚离开的那个世界，不跟到下一个。
+            blueprintOverlay.hide();
             worldScope[0] = null;
         }
 

@@ -15,6 +15,7 @@ import org.maiwithu.maicraft.ability.design.api.DesignCompiler;
 import org.maiwithu.maicraft.ability.design.api.DesignStore;
 import org.maiwithu.maicraft.behavior.construction.AnchorResolver;
 import org.maiwithu.maicraft.behavior.construction.Blueprint;
+import org.maiwithu.maicraft.behavior.construction.ShowsPreview;
 import org.maiwithu.maicraft.game.ModIdentity;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;

@@ -12,7 +12,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * 面板的设置：开到哪一档、导航路线开没开。存在 config/maicraft-debug.properties，重启后照旧；
+ * 面板的设置：开到哪一档、导航路线开没开、施工预览开没开。存在 config/maicraft-debug.properties，重启后照旧；
  * 页不存，每次打开都从"此刻"开始。第一次装上默认是关，免得游戏画面里突然多出一块。
  */
 public final class PanelSettings {
@@ -22,6 +22,8 @@ public final class PanelSettings {
     private final Path file;
     private PanelLevel level = PanelLevel.OFF;
     private boolean pathLines;
+    /** 施工预览默认开着：投影本来就是给观众看的，关掉是例外。 */
+    private boolean blueprintOverlay = true;
 
     /** @param configDirectory 游戏的 config 目录 */
     public PanelSettings(Path configDirectory) {
@@ -51,6 +53,17 @@ public final class PanelSettings {
         save();
     }
 
+    /** 施工预览开没开。 */
+    public boolean blueprintOverlay() {
+        return blueprintOverlay;
+    }
+
+    /** 开关施工预览并存盘；存不下时这一次照样生效。 */
+    void blueprintOverlay(boolean value) throws IOException {
+        blueprintOverlay = value;
+        save();
+    }
+
     // 读不到或写坏了的文件按默认（关着、路线不画）处理，并记一行日志，不让面板设置挡住游戏启动。
     private void load() {
         if (!Files.exists(file)) return;
@@ -63,12 +76,14 @@ public final class PanelSettings {
         }
         level = PanelLevel.fromSetting(values.getProperty("level", "off"));
         pathLines = Boolean.parseBoolean(values.getProperty("path_lines", "false"));
+        blueprintOverlay = Boolean.parseBoolean(values.getProperty("blueprint_overlay", "true"));
     }
 
     private void save() throws IOException {
         Properties values = new Properties();
         values.setProperty("level", level.settingValue());
         values.setProperty("path_lines", Boolean.toString(pathLines));
+        values.setProperty("blueprint_overlay", Boolean.toString(blueprintOverlay));
         Files.createDirectories(file.getParent());
         try (Writer writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
             values.store(writer, "MaiCraft debug panel");

@@ -8,9 +8,7 @@ import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexBuffer;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import java.util.List;
-import java.util.OptionalDouble;
 import net.minecraft.client.Camera;
-import net.minecraft.client.renderer.RenderStateShard;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
@@ -41,7 +39,7 @@ public final class NavigationPathRenderer {
         marker(lines, route.steeringTarget(), cameraPosition, STEERING, 0.22);
         var mesh = lines.build();
         if (mesh == null) return;
-        Lines.INSTANCE.setupRenderState();
+        OverlayRenderTypes.LINES.setupRenderState();
         try {
             // 用原版的临时绘制缓冲区，这里不留跨帧的模型或世界引用。
             VertexBuffer buffer = DefaultVertexFormat.POSITION_COLOR_NORMAL.getImmediateDrawVertexBuffer();
@@ -50,7 +48,7 @@ public final class NavigationPathRenderer {
             buffer.drawWithShader(view, projection, RenderSystem.getShader());
         } finally {
             VertexBuffer.unbind();
-            Lines.INSTANCE.clearRenderState();
+            OverlayRenderTypes.LINES.clearRenderState();
         }
     }
 
@@ -76,20 +74,5 @@ public final class NavigationPathRenderer {
     private static void vertex(BufferBuilder lines, Vec3 point, Vec3 normal, int color) {
         lines.addVertex((float) point.x, (float) point.y, (float) point.z).setColor(color)
                 .setNormal((float) normal.x, (float) normal.y, (float) normal.z);
-    }
-
-    /** 路线的画法：暂时关掉深度比较、只写颜色，画完恢复，让线透过地形可见。 */
-    private static final class Lines extends RenderType {
-        static final RenderType INSTANCE = new Lines(List.of(RENDERTYPE_LINES_SHADER,
-                new RenderStateShard.LineStateShard(OptionalDouble.of(2.5)), TRANSLUCENT_TRANSPARENCY,
-                NO_CULL, COLOR_WRITE, new RenderStateShard("maicraft_route_no_depth",
-                        RenderSystem::disableDepthTest, RenderSystem::enableDepthTest) {}, MAIN_TARGET));
-
-        private Lines(List<RenderStateShard> states) {
-            super("maicraft_navigation_path", DefaultVertexFormat.POSITION_COLOR_NORMAL,
-                    VertexFormat.Mode.LINES, 32768, false, false,
-                    () -> states.forEach(RenderStateShard::setupRenderState),
-                    () -> states.forEach(RenderStateShard::clearRenderState));
-        }
     }
 }

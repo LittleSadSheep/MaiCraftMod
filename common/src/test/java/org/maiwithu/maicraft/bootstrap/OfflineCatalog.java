@@ -7,6 +7,7 @@ import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.acquire.LiveCarryReads;
+import org.maiwithu.maicraft.behavior.construction.ShowsPreview;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
 import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
@@ -116,6 +117,7 @@ final class OfflineCatalog {
                 facilities,
                 // 睡觉能力在离线清单里没有登记方，夜晚生存需求按弄不到床对待即可。
                 new NightRestWiring(),
-                tempDir.resolve("config"));
+                tempDir.resolve("config"),
+                ShowsPreview.NONE);
     }
 }
