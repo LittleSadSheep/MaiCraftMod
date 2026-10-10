@@ -126,15 +126,20 @@ class CompatModuleTest {
             @Override public KnowledgeDocument read(String uri) {
                 return new KnowledgeDocument(uri, "x", "条目", "说明", "正文");
             }
+            @Override public List<KnowledgeDocument.Entry> entriesAbout(String registryId) {
+                return entries();
+            }
             @Override public String status() { return "available"; }
         };
         CompatKnowledgeSource wrapped = new CompatKnowledgeSource(module, inner);
         assertEquals(1, wrapped.entries().size());
+        assertEquals(1, wrapped.entriesAbout("create:mechanical_mixer").size());
         assertEquals("available", wrapped.status());
         assertThrows(ModApiMismatch.class, () -> module.run("读任务书", () -> { throw new NoSuchMethodError("quests"); }));
         assertTrue(wrapped.entries().isEmpty());
         assertNull(wrapped.read("maicraft://knowledge/x"));
-        assertTrue(wrapped.status().startsWith("disabled: "), wrapped.status());
+        assertTrue(wrapped.entriesAbout("create:mechanical_mixer").isEmpty(), "停用后物品资料页也不再列它的条目");
+        assertTrue(wrapped.status().contains("联动已停用"), wrapped.status());
     }
 
     /** 每次问价都报能给 2 件的来源，顺便数被问了几次。 */
