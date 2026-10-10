@@ -32,7 +32,8 @@ import org.maiwithu.maicraft.kernel.task.Action;
  * ME 终端来源：从附近的 ME 终端取网络里已有的东西，途径 ae2。
  *
  * <p>报价时在角色周围已加载区块里找终端，问保护判断能不能取用（自己或自家人的才取用），
- * 按上次在终端里看到的网络存货挑一台：记得有货报明确数量，都没看过就去最近一台、报不知道有多少。
+ * 按上次在终端里看到的网络存货挑一台：记得有货报明确数量；没有记得有货的就去看一眼，报不知道有多少，
+ * 上次看不行（没连上网络、没有这样东西）的排在最后，旧记录只拿来排先后、不拿来拒绝。
  * 网络里的东西一直在变，记下的数只当线索，到了终端跟前以现场为准。
  * 动手前再核对终端还在、还能取用，然后交给从终端取货的动作。网络能合成但现货不够时不下单。
  */
@@ -106,7 +107,9 @@ public final class Ae2TerminalSource implements ItemSource {
                     hint(known.candidate().terminal()));
             case TerminalChooser.Unknown unknown -> new SourceQuote.Offer(source, SourceQuote.Offer.UNKNOWN_COUNT,
                     new AcquisitionCost(unknown.candidate().distance(), ACTIONS_PER_VISIT),
-                    "这台终端这次还没开过，不知道网络里有什么", hint(unknown.candidate().terminal()));
+                    unknown.lastTime().map(lastTime -> lastTime + "，不知道现在好了没有，去看一眼")
+                            .orElse("这台终端这次还没开过，不知道网络里有什么"),
+                    hint(unknown.candidate().terminal()));
             case TerminalChooser.None none -> new SourceQuote.Unavailable(source, none.reason());
         };
     }

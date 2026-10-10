@@ -145,11 +145,16 @@ class Ae2TerminalSourceTest {
     }
 
     @Test
-    void 没看过的终端报不知道有多少_都用不上就给不了() {
+    void 没看过或上次不行的终端报不知道有多少_都用不上就给不了() {
         TerminalChooser.Candidate candidate = new TerminalChooser.Candidate(TERMINAL, 5, true, Optional.empty());
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class,
-                Ae2TerminalSource.quoteFrom(new TerminalChooser.Unknown(candidate), torches(8), "ME 终端", NOW));
+                Ae2TerminalSource.quoteFrom(new TerminalChooser.Unknown(candidate, Optional.empty()), torches(8),
+                        "ME 终端", NOW));
         assertTrue(offer.countUnknown());
+        SourceQuote.Offer again = assertInstanceOf(SourceQuote.Offer.class, Ae2TerminalSource.quoteFrom(
+                new TerminalChooser.Unknown(candidate, Optional.of("上次看没连上网络（没电或没频道）")), torches(8),
+                "ME 终端", NOW));
+        assertTrue(again.risk().startsWith("上次看没连上网络"), again.risk());
 
         SourceQuote.Unavailable unavailable = assertInstanceOf(SourceQuote.Unavailable.class,
                 Ae2TerminalSource.quoteFrom(new TerminalChooser.None("附近 64 格内没有 ME 终端"), torches(8),

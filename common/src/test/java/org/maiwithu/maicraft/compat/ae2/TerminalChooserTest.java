@@ -23,7 +23,7 @@ import net.minecraft.world.phys.AABB;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-/** 挑终端：记得有货的去最近那台；都没看过去最近一台碰运气；别人的、断网的、看过没有的不去。上次看到的网络存货五分钟内算数。 */
+/** 挑终端：记得有货的去最近那台；没有就先看没看过的，再看上次不行的；别人的不去。上次看到的网络存货五分钟内算数。 */
 class TerminalChooserTest {
 
     @BeforeAll
@@ -69,16 +69,39 @@ class TerminalChooserTest {
     }
 
     @Test
-    void 别人的_断网的_看过没有的都不去_原因逐类写清() {
+    void 上次不行的照样去看_排在没看过的后面_别人的不去() {
         TerminalChooser.Choice choice = TerminalChooser.choose(List.of(
                 candidate(1, 2, false, null),
                 candidate(2, 4, true, seen(false, Map.of())),
+                candidate(3, 6, true, seen(true, Map.of("minecraft:cobblestone", 900L))),
+                candidate(4, 9, true, null)),
+                TORCH, "minecraft:torch", 64);
+        TerminalChooser.Unknown unknown = assertInstanceOf(TerminalChooser.Unknown.class, choice);
+        assertEquals(terminalAt(4), unknown.candidate().terminal(), "没看过的比上次不行的先去");
+        assertTrue(unknown.lastTime().isEmpty());
+    }
+
+    @Test
+    void 只剩上次不行的_去最近那台看一眼_写明上次看到的情况() {
+        TerminalChooser.Choice choice = TerminalChooser.choose(List.of(
+                candidate(2, 4, true, seen(false, Map.of())),
                 candidate(3, 6, true, seen(true, Map.of("minecraft:cobblestone", 900L)))),
                 TORCH, "minecraft:torch", 64);
-        TerminalChooser.None none = assertInstanceOf(TerminalChooser.None.class, choice);
-        assertTrue(none.reason().contains("1 台是别人的"), none.reason());
-        assertTrue(none.reason().contains("1 台上次看没连上网络"), none.reason());
-        assertTrue(none.reason().contains("1 台上次看网络里没有minecraft:torch"), none.reason());
+        TerminalChooser.Unknown unknown = assertInstanceOf(TerminalChooser.Unknown.class, choice);
+        assertEquals(terminalAt(2), unknown.candidate().terminal());
+        assertEquals(Optional.of("上次看没连上网络（没电或没频道）"), unknown.lastTime());
+
+        TerminalChooser.Unknown empty = assertInstanceOf(TerminalChooser.Unknown.class, TerminalChooser.choose(
+                List.of(candidate(3, 6, true, seen(true, Map.of("minecraft:cobblestone", 900L)))),
+                TORCH, "minecraft:torch", 64));
+        assertEquals(Optional.of("上次看网络里没有minecraft:torch"), empty.lastTime());
+    }
+
+    @Test
+    void 附近的终端都是别人的_不去() {
+        TerminalChooser.None none = assertInstanceOf(TerminalChooser.None.class, TerminalChooser.choose(
+                List.of(candidate(1, 2, false, null), candidate(2, 5, false, null)), TORCH, "minecraft:torch", 64));
+        assertTrue(none.reason().contains("都是别人的") && none.reason().contains("2 台"), none.reason());
     }
 
     @Test
