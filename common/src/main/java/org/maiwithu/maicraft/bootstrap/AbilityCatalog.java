@@ -76,6 +76,7 @@ import org.maiwithu.maicraft.behavior.inventory.ClientDropPickup;
 import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
 import org.maiwithu.maicraft.behavior.inventory.ClientStepsAside;
 import org.maiwithu.maicraft.behavior.inventory.DropAvoidance;
+import org.maiwithu.maicraft.game.interaction.ClientChatDraftScreen;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
@@ -374,7 +375,8 @@ public final class AbilityCatalog {
             @Override public long mark() { return chat.mark(); }
             @Override public List<String> shownSince(long mark) { return chat.shownSince(mark); }
         };
-        return new ChatAbility(chat::send, echo, deps.allowGameCommands());
+        // 逐字打字开的是真实聊天框，框里放的是草稿；提交仍走聊天通道。
+        return new ChatAbility(chat::send, echo, new ClientChatDraftScreen(), deps.allowGameCommands());
     }
 
     /** 用东西能力的一份：游戏拒绝读端看动作栏与服务端确认流，与睡觉能力共用一份。 */

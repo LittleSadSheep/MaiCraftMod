@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.ability.chat;
 
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.game.interaction.ChatDraftScreen;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
@@ -86,6 +87,41 @@ class ChatTaskTest {
         }
     }
 
+    /** 聊天框替身：记下放进框里的草稿与交还次数；可以摆成被别的界面占着。 */
+    private static final class StubDrafts implements ChatDraftScreen {
+        final List<String> shown = new ArrayList<>();
+        int closes;
+        /** true 时 show 交 false：模拟框被别的界面占着。 */
+        boolean occupied;
+        private boolean open;
+
+        @Override public boolean show(String draft) {
+            if (occupied) return false;
+            open = true;
+            shown.add(draft);
+            return true;
+        }
+
+        @Override public boolean showing() {
+            return open;
+        }
+
+        @Override public void close() {
+            closes++;
+            open = false;
+        }
+
+        /** 框里此刻的字：最后一次放进去的草稿；还没开过框为空串。 */
+        String current() {
+            return shown.isEmpty() ? "" : shown.get(shown.size() - 1);
+        }
+
+        /** 模拟框被换成了别的界面：自己那份不再显示。 */
+        void stealBox() {
+            open = false;
+        }
+    }
+
     /** 推进到出结果为止；每刻之间推进一刻刻号。 */
     private static TaskResult runToFinish(ChatTask task, TestTick tick) {
         task.start(tick);
@@ -104,7 +140,7 @@ class ChatTaskTest {
         StubSender sender = new StubSender();
         StubEcho echo = new StubEcho();
         TestTick tick = new TestTick();
-        ChatTask task = new ChatTask("大家好", sender, echo);
+        ChatTask task = new ChatTask("大家好", sender, echo, new StubDrafts());
         // 回显在第二刻出现：提交后立刻确认。
         echo.echo("大家好");
 
@@ -121,7 +157,7 @@ class ChatTaskTest {
         StubSender sender = new StubSender();
         StubEcho echo = new StubEcho();
         TestTick tick = new TestTick();
-        ChatTask task = new ChatTask("在吗", sender, echo);
+        ChatTask task = new ChatTask("在吗", sender, echo, new StubDrafts());
 
         TaskResult result = runToFinish(task, tick);
 
@@ -138,7 +174,7 @@ class ChatTaskTest {
         StubSender sender = new StubSender();
         StubEcho echo = new StubEcho();
         TestTick tick = new TestTick();
-        ChatTask task = new ChatTask("/time set day", sender, echo);
+        ChatTask task = new ChatTask("/time set day", sender, echo, new StubDrafts());
         // 命令没有自己那条回显；提交后聊天栏冒出反馈行就算发成。
         echo.feedbackLine();
 
@@ -157,7 +193,7 @@ class ChatTaskTest {
         StubSender sender = new StubSender();
         StubEcho echo = new StubEcho();
         echo.earlierLine("<Steve> 早上好");
-        TaskResult result = runToFinish(new ChatTask("/time set day", sender, echo), new TestTick());
+        TaskResult result = runToFinish(new ChatTask("/time set day", sender, echo, new StubDrafts()), new TestTick());
 
         assertEquals(1, result.unconfirmed().size());
         assertTrue(!result.summary().contains("早上好"), result.summary());
@@ -168,7 +204,7 @@ class ChatTaskTest {
         StubSender sender = new StubSender();
         StubEcho echo = new StubEcho();
         TestTick tick = new TestTick();
-        ChatTask task = new ChatTask("/give @s diamond", sender, echo);
+        ChatTask task = new ChatTask("/give @s diamond", sender, echo, new StubDrafts());
 
         TaskResult result = runToFinish(task, tick);
 
@@ -188,7 +224,7 @@ class ChatTaskTest {
         // 聊天通道没接上：话根本没交出去，当场如实收场，不等回显，也不说"已交给游戏执行"。
         StubSender sender = new StubSender();
         sender.connected = false;
-        TaskResult result = runToFinish(new ChatTask("/time set day", sender, new StubEcho()), new TestTick());
+        TaskResult result = runToFinish(new ChatTask("/time set day", sender, new StubEcho(), new StubDrafts()), new TestTick());
 
         assertEquals(TaskResult.Status.FAILED, result.status());
         assertTrue(sender.sent.isEmpty());
@@ -200,7 +236,64 @@ class ChatTaskTest {
     void inputDescribesWhatWillBeSaid() {
         ChatInput input = new ChatInput("直播开始了");
         assertTrue(input.describe().contains("直播开始了"));
-        ChatTask task = new ChatTask("直播开始了", new StubSender(), new StubEcho());
+        ChatTask task = new ChatTask("直播开始了", new StubSender(), new StubEcho(), new StubDrafts());
         assertTrue(task.describe().contains("说话"), task.describe());
+    }
+
+    @Test
+    void typesTheWholeDraftIntoTheBoxBeforeHandingItOver() {
+        // 话先进框、一个字一个字长出来，整句打完才提交；发完框交回去。
+        StubSender sender = new StubSender();
+        StubEcho echo = new StubEcho();
+        StubDrafts drafts = new StubDrafts();
+        echo.echo("大家好");
+
+        TaskResult result = runToFinish(new ChatTask("大家好", sender, echo, drafts), new TestTick());
+
+        assertEquals(List.of("大家好"), sender.sent);
+        assertEquals("大家好", drafts.current(), "整句草稿都进了框");
+        assertTrue(drafts.shown.size() >= 4, "话是逐字放进去的：空草稿加三个字");
+        assertTrue(drafts.closes >= 1, "发完框要交回去");
+        assertEquals(TaskResult.Status.DONE, result.status());
+    }
+
+    @Test
+    void pauseMidTypingClosesTheBoxAndResumesFromTheTypedPart() {
+        // 打到一半被生存需求打断：框交出去，进度留在任务里；回来从原字数接着打，话只交出去一次。
+        StubSender sender = new StubSender();
+        StubEcho echo = new StubEcho();
+        StubDrafts drafts = new StubDrafts();
+        TestTick tick = new TestTick();
+        echo.echo("大家好啊");
+        ChatTask task = new ChatTask("大家好啊", sender, echo, drafts);
+        task.start(tick);
+        for (int i = 0; i < 10 && !drafts.current().equals("大家"); i++) {
+            task.tick(tick);
+            tick.advance();
+        }
+        assertEquals("大家", drafts.current(), "打断时框里已经有两个字");
+
+        task.pause();
+        assertTrue(!drafts.showing(), "打断时框要交出去");
+        assertTrue(drafts.closes >= 1, "打断关了一次框");
+
+        TaskResult result = runToFinish(task, tick);
+        assertEquals(List.of("大家好啊"), sender.sent, "整句话只交出去一次");
+        assertEquals("大家好啊", drafts.current(), "剩下的字接着打进框");
+        assertEquals(TaskResult.Status.DONE, result.status());
+    }
+
+    @Test
+    void occupiedBoxEndsAsRefusedInsteadOfSending() {
+        // 框被别的界面占着等不到：按游戏的真实拒绝收场，话不交出去。
+        StubSender sender = new StubSender();
+        StubDrafts drafts = new StubDrafts();
+        drafts.occupied = true;
+
+        TaskResult result = runToFinish(new ChatTask("在吗", sender, new StubEcho(), drafts), new TestTick());
+
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertTrue(sender.sent.isEmpty(), "框没让出来，话不会交出去");
+        assertTrue(result.problem().message().contains("聊天框被别的界面占着"), result.problem().message());
     }
 }

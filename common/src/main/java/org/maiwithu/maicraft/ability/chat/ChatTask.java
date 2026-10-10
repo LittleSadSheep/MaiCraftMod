@@ -2,7 +2,10 @@
 package org.maiwithu.maicraft.ability.chat;
 
 import java.util.List;
+import java.util.Objects;
 
+import org.maiwithu.maicraft.game.interaction.ChatDraftScreen;
+import org.maiwithu.maicraft.behavior.interaction.TypeChatDraft;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -14,25 +17,27 @@ import org.maiwithu.maicraft.kernel.task.PhasedTask;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
- * 发话任务：把一句话交给聊天输入，再等聊天栏出现证据才算发成。
+ * 发话任务：把一句话逐字打进真实聊天框，再交给聊天输入，最后等聊天栏出现证据才算发成。
  * 普通聊天等自己那条（本地回显）；游戏命令没有"自己那条"的回显，等的是提交后
  * 聊天栏冒出的命令反馈行（原版命令会打结果反馈，如 Set the time to…）。
  * 证据等不到就按"已提交但没能确认"结束，记进结果的 unconfirmed，不盲目重发也不冒充成功。
  */
 public final class ChatTask extends PhasedTask<ChatTask.Phase> {
 
-    /** 发话的阶段：先提交，再等回显。 */
-    public enum Phase { SEND, CONFIRM }
+    /** 发话的阶段：先逐字打草稿，再提交，最后等回显。 */
+    public enum Phase { TYPING, SEND, CONFIRM }
 
     /** 提交后等回显多久：超过就按没能确认收场。 */
     private static final long CONFIRM_TICKS = 20L * 5;
 
-    // 卡住判定比确认窗口长：等回显等不到时由本任务自己按没能确认收场，轮不到卡住判定。
+    // 卡住判定是"多久没有真实进展"，不是"最多做多久"：等框最长 60 刻、等回显最长 100 刻，
+    // 打字每 2 刻就报一次进展，所以 120 刻没有进展才算卡住，轮得到等回显的自己收场。
     private static final long STUCK_AFTER_TICKS = CONFIRM_TICKS + 20L;
 
     private final String message;
     private final SendsChatMessage sender;
     private final ReadsChatEcho echo;
+    private final ChatDraftScreen drafts;
 
     /** 提交那一刻的游戏刻；算等回显等了多久用。 */
     private long sentTick;
@@ -43,11 +48,12 @@ public final class ChatTask extends PhasedTask<ChatTask.Phase> {
     /** 以 / 开头的是游戏命令：没有自己的回显，完成依据换成命令反馈行。 */
     private final boolean command;
 
-    public ChatTask(String message, SendsChatMessage sender, ReadsChatEcho echo) {
-        super("说话", Phase.SEND, new ProgressTracker(STUCK_AFTER_TICKS, Long.MAX_VALUE));
+    public ChatTask(String message, SendsChatMessage sender, ReadsChatEcho echo, ChatDraftScreen drafts) {
+        super("说话", Phase.TYPING, new ProgressTracker(STUCK_AFTER_TICKS, Long.MAX_VALUE));
         this.message = message;
         this.sender = sender;
         this.echo = echo;
+        this.drafts = Objects.requireNonNull(drafts, "drafts");
         this.command = message.startsWith("/");
     }
 
@@ -56,13 +62,17 @@ public final class ChatTask extends PhasedTask<ChatTask.Phase> {
 
     @Override
     protected Action enter(Phase phase) {
-        // 提交与等回显都是一刻内的小事，不需要动作。
-        return null;
+        // 打字要一段一段推进，是动作；提交与等回显都是一刻内的小事，不需要动作。
+        return phase == Phase.TYPING ? new TypeChatDraft(drafts, message) : null;
     }
 
     @Override
     protected Next<Phase> tick(Phase phase, TickContext context) {
         return switch (phase) {
+            case TYPING -> runActionThen(context, () -> {
+                recordProgress("草稿打完了");
+                return Next.go(Phase.SEND, "整句打进聊天框了，提交");
+            });
             case SEND -> tickSend(context);
             case CONFIRM -> tickConfirm(context);
         };
@@ -123,7 +133,10 @@ public final class ChatTask extends PhasedTask<ChatTask.Phase> {
 
     @Override
     protected String describePhase(Phase value) {
-        if (value == Phase.SEND) return "正在说话";
-        return command ? "等命令反馈行" : "等聊天栏回显";
+        return switch (value) {
+            case TYPING -> "逐字打字";
+            case SEND -> "正在说话";
+            case CONFIRM -> command ? "等命令反馈行" : "等聊天栏回显";
+        };
     }
 }
