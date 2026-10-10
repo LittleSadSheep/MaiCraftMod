@@ -26,9 +26,9 @@ public abstract class BlockItemPlaceBlockMixin {
     private void maicraft$recordPlacement(BlockPlaceContext context, BlockState state,
                                           CallbackInfoReturnable<Boolean> cir) {
         // 只在放置真正成功时记录；失败的放置什么都没改变，不能当作归属。
-        if (!cir.getReturnValueZ() || context.getPlayer() == null) return;
-        ServerPlayer player = (ServerPlayer) context.getPlayer();
-        if (player.level().isClientSide()) return;
+        if (!cir.getReturnValueZ()) return;
+        // 客户端预演放置时这里拿到的是客户端玩家，不是服务端玩家：先认清是服务端那一侧再记，不能先强转。
+        if (!(context.getPlayer() instanceof ServerPlayer player)) return;
         MinecraftServer server = player.serverLevel().getServer();
         BlockOwnershipRecord ownership = ServerLinkServices.ownership(server);
         if (ownership == null) return;
