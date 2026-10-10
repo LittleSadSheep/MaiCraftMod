@@ -48,10 +48,20 @@ final class WalkRunProgress {
         stopRequested = true;
     }
 
-    /** 交出身体时就地按"已停下"结算：停在最近一次看到的位置；已经有结论的不改。 */
-    void stopWhereLastSeen() {
+    /**
+     * 交出身体时就地按"已停下"结算：停在最近一次看到的位置；已经有结论的不改。
+     * 还在算路、一步没迈就交出身体时，最近一次看到的位置还没有，用交出时角色脚下的格子；
+     * 那也读不到就按"还没上路就让出了身体"失败收场——无论如何都要有结论，交出身体这一步不能卡住。
+     *
+     * @param feetNow 交出身体这一刻角色脚下的格子；读不到为 null
+     */
+    void stopWhereLastSeen(BlockPos feetNow) {
         if (done()) return;
-        report = WalkReport.stopped(report.feet(), crossedWater);
+        BlockPos feet = report.feet() != null ? report.feet() : feetNow;
+        report = feet != null
+                ? WalkReport.stopped(feet, crossedWater)
+                : WalkReport.failed(Problem.of(Problem.Kind.STUCK, "还在算路就让出了身体，这一趟没有上路", null),
+                        null, crossedWater);
     }
 
     boolean stopRequested() {

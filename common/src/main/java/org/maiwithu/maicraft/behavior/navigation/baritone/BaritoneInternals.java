@@ -68,7 +68,7 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
         // 拥有身体的运行已经没人推进（主任务被生存需求暂停、或调用方丢下没收尾）：它交不出身体，
         // 排队的新运行就永远上不了路。按"已停下"结算它并交出身体，再让排队的这个上路。
         if (active != null && active != run && queued == run && active.idleAt(now)) {
-            active.yieldPlayer();
+            active.yieldPlayer(context);
         }
         if (active == null && queued == run) {
             activate(run, context);

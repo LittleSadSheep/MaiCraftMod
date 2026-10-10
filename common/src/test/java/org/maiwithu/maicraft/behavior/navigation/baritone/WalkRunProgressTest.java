@@ -160,12 +160,26 @@ class WalkRunProgressTest {
         // 被暂停的走到交出身体：按"已停下"结算，恢复时任务会从原地重新上路；已经有结论的不改。
         var stopped = progressExact();
         stopped.observe(seen(ELSEWHERE, true, false, true, false));
-        stopped.stopWhereLastSeen();
+        stopped.stopWhereLastSeen(ELSEWHERE.north());
         assertEquals(WalkReport.State.STOPPED, stopped.report().state());
+        assertEquals(ELSEWHERE, stopped.report().feet(), "停在最近一次看到的位置");
 
         var failed = progressExact();
         failed.fail(Problem.of(Problem.Kind.STUCK, "走不动"), null);
-        failed.stopWhereLastSeen();
+        failed.stopWhereLastSeen(ELSEWHERE);
         assertEquals(WalkReport.State.FAILED, failed.report().state());
+    }
+
+    @Test
+    void stillPlanningWhenTheBodyIsYielded_settlesWithoutThrowing() {
+        // 实机：还在算路、一步没迈的运行被让出身体时，结算抛了异常，运行永远占着身体，之后所有走到都卡死。
+        var planning = progressExact();
+        planning.stopWhereLastSeen(ELSEWHERE);
+        assertEquals(WalkReport.State.STOPPED, planning.report().state());
+        assertEquals(ELSEWHERE, planning.report().feet(), "用交出时脚下的格子");
+
+        var unknown = progressExact();
+        unknown.stopWhereLastSeen(null);
+        assertEquals(WalkReport.State.FAILED, unknown.report().state(), "连脚下都读不到也要有结论");
     }
 }

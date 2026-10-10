@@ -160,12 +160,24 @@ final class BaritoneWalkRun implements WalkRun {
     /**
      * 把身体让给排队的运行：按"已停下"结算，松开引擎。被暂停的任务恢复后读到"已停下"，
      * 会像打断后那样从原地重新上路；没人再管的运行就此结束，不再挡住后面所有的走到。
+     * 交出身体放在 finally 里：结算出了岔子也必须交出去，否则这个运行永远占着身体，
+     * 之后每一次走到都会撞上同一个岔子、全部走不了，只能重启游戏。
+     *
+     * @param now 接手的那个运行这一刻的角色上下文：还没迈步的运行用它读交出时脚下的格子
      */
-    void yieldPlayer() {
-        clicks.stop(lastContext);
-        progress.stopWhereLastSeen();
-        owner.release(this);
-        finishEngineQuietly();
+    void yieldPlayer(PlayerContext now) {
+        try {
+            clicks.stop(lastContext != null ? lastContext : now);
+            progress.stopWhereLastSeen(feetOf(now));
+        } finally {
+            owner.release(this);
+            finishEngineQuietly();
+        }
+    }
+
+    // 角色此刻脚下的格子；不在世界里为 null。
+    private static BlockPos feetOf(PlayerContext context) {
+        return context == null || context.localPlayer() == null ? null : context.localPlayer().blockPosition();
     }
 
     /** 排队期间被更新的请求顶掉：结算自己，不再占队位。 */
