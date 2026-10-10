@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.acquire;
 
 import java.time.Instant;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -17,6 +18,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
+import org.maiwithu.maicraft.behavior.acquire.spi.ReportsUnconfirmed;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.inventory.KnownContainer;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuOpening;
@@ -42,7 +44,9 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * <p>点开、认领界面与等同步走玩家行为层共用的打开容器动作（每次点开都新建读端）。
  * 每一笔拿几件、点哪几下由取货计划给出，这里只按计划逐刻点、等游戏确认；
  * 拿走多少以重新清点为准：引擎在动作结束后按身上的数量结算，这里保证每一笔都等确认过、界面关上了。
- * 记得的箱子到现场可能已经不在：点不开、界面一直没同步，都如实失败，引擎换别的路。
+ * 点出去了却一直没等到结果的那几下（背包塞满点不进、界面中途被关）实现交回接缝，
+ * 原样交回给引擎转述，不与确认拿到的混在一起。记得的箱子到现场可能已经不在：
+ * 点不开、界面一直没同步，都如实失败，引擎换别的路。
  */
 public final class MenuContainerTakes implements ContainerTakes {
 
@@ -88,8 +92,8 @@ public final class MenuContainerTakes implements ContainerTakes {
         return Optional.of(new TakeAction(container, request, permissions));
     }
 
-    /** 开箱取货的动作：点开 → 逐格搬 → 关上，跨刻推进。 */
-    private final class TakeAction implements Action {
+    /** 开箱取货的动作：点开 → 逐格搬 → 关上，跨刻推进；没能确认的点击经交回接缝原样交回。 */
+    private final class TakeAction implements Action, ReportsUnconfirmed {
 
         private final KnownContainer container;
         private final ItemRequest request;
@@ -103,8 +107,13 @@ public final class MenuContainerTakes implements ContainerTakes {
         private int startTotal = -1;
         /** 正在点的那一笔动手之前，容器那一侧想要的东西有几件；没有在点的为 -1。 */
         private int beforeMove = -1;
+        /** 正在点的那一笔按计划要搬几件、要点哪几下：结算与交回"没能确认"时说得清。 */
+        private int moveAmount;
+        private int moveClicks;
         /** 正在点的那一笔还剩哪几下没点；一笔的点击逐刻发，光标上的东西等放进背包才撒手。 */
         private final Deque<ContainerTakePlan.Click> pressing = new ArrayDeque<>();
+        /** 点出去了却没能确认结果的交互，一句一笔，经交回接缝交给引擎。 */
+        private final List<String> unconfirmed = new ArrayList<>();
         private int quietTicks;
 
         TakeAction(KnownContainer container, ItemRequest request, Permissions permissions) {
@@ -118,6 +127,8 @@ public final class MenuContainerTakes implements ContainerTakes {
         @Override
         public ActionStatus tick(TickContext tick) {
             if (++waited > GIVE_UP_TICKS) {
+                // 总期限到了还在一笔上：点出去没等到结果的那几下照实交回，再以卡住收场。
+                noteUnsettledMove("总期限到了");
                 return ActionStatus.failed(Problem.of(Problem.Kind.STUCK, "开箱取货超时：" + container.name(), null));
             }
             return switch (stage) {
@@ -142,7 +153,8 @@ public final class MenuContainerTakes implements ContainerTakes {
         private ActionStatus transfer() {
             Optional<MenuContent.Reading> reading = menu.reading();
             if (reading.isEmpty()) {
-                // 界面被合上了（打断或服务端关的）：拿走多少由引擎清点，这里照常收场。
+                // 界面被合上了（打断或服务端关的）：没等到结果的那几下交回，拿走多少由引擎清点，这里照常收场。
+                noteUnsettledMove("界面关上时");
                 stage = Stage.DONE;
                 return ActionStatus.done();
             }
@@ -158,6 +170,8 @@ public final class MenuContainerTakes implements ContainerTakes {
                 Optional<ContainerTakePlan.Move> next = ContainerTakePlan.next(open, this::matches, remaining);
                 if (next.isEmpty()) return toClose(open);
                 beforeMove = now;
+                moveAmount = next.get().amount();
+                moveClicks = next.get().clicks().size();
                 quietTicks = 0;
                 pressing.addAll(next.get().clicks());
             }
@@ -172,11 +186,20 @@ public final class MenuContainerTakes implements ContainerTakes {
             if ((now == beforeMove || !menu.cursorEmpty()) && ++quietTicks <= SETTLE_TICKS) {
                 return ActionStatus.running();
             }
-            // 点了容器那侧纹丝不动：背包放不下了，不再硬点。
+            // 点了容器那侧纹丝不动：多半是背包放不下，不再硬点；但点出去是事实，结果没能确认照实交回。
             boolean stuck = now == beforeMove;
             beforeMove = -1;
             quietTicks = 0;
-            if (stuck) return toClose(open);
+            if (stuck) {
+                unconfirmed.add("从" + container.name() + "拿" + request.wanted().describe()
+                        + "：搬 " + moveAmount + " 件的那几下都点出去了，容器那侧一直没动，没能确认结果");
+                return toClose(open);
+            }
+            if (!menu.cursorEmpty()) {
+                // 容器那侧动了、光标上还拿着东西：这一笔到底搬走多少没能确认完，也交回一句。
+                unconfirmed.add("从" + container.name() + "拿" + request.wanted().describe()
+                        + "：点完了光标上还拿着东西，这一笔搬走多少没能确认");
+            }
             return ActionStatus.progressed();
         }
 
@@ -186,6 +209,18 @@ public final class MenuContainerTakes implements ContainerTakes {
             if (click.quickMove()) return menu.quickMove(click.slotId());
             if (click.takesToCursor()) menu.noteCursorTakenFrom(click.slotId());
             return menu.click(click.slotId(), click.button());
+        }
+
+        // 有一笔点出去了却没等到结算就停了（界面被关、总期限到、被收尾）：点出去的那几下
+        // 结果没能确认，一句交回；一下都没发出去的不算，那只是没点成。
+        private void noteUnsettledMove(String circumstance) {
+            if (beforeMove < 0) return;
+            int submitted = moveClicks - pressing.size();
+            if (submitted <= 0) return;
+            unconfirmed.add("从" + container.name() + "拿" + request.wanted().describe()
+                    + "：搬 " + moveAmount + " 件的这笔点了 " + submitted + " 下，"
+                    + circumstance + "没能等到结算结果");
+            beforeMove = -1;
         }
 
         // 去关之前把这只箱子此刻有什么记进世界记忆：位置带维度，种类按现场的方块读。
@@ -251,11 +286,20 @@ public final class MenuContainerTakes implements ContainerTakes {
         }
 
         // 收尾：打开动作一并收尾；界面还开着就请游戏关上，不让它悬着占着身体。
+        // 收尾时一笔还没结清的，点出去的那几下先交回没能确认，再关界面。
         @Override
         public void close() {
             opening.close();
             if (closing != null) closing.close();
-            if (menu != null && stage != Stage.DONE) menu.abandon();
+            if (menu != null && stage != Stage.DONE) {
+                noteUnsettledMove("收尾时");
+                menu.abandon();
+            }
+        }
+
+        @Override
+        public List<String> unconfirmedFacts() {
+            return List.copyOf(unconfirmed);
         }
 
         @Override

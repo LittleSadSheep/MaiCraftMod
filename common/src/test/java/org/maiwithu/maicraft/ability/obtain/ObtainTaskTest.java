@@ -65,16 +65,19 @@ class ObtainTaskTest {
         ItemRequest lastRequest;
         ItemAcquisition.Scope lastScope;
         Consumer<String> lastDelivered;
+        /** 引擎把"没能确认的交互"交回的口子：测试用它模拟来源点出去没等到结果的那几下。 */
+        Consumer<String> lastUnconfirmed;
         /** 每推进一步做的事：往背包放几件货、报哪条途径；null 表示以问题失败。 */
         Integer deliverPerTick;
         String deliveredVia;
         Problem failure;
 
         @Override public Action need(ItemRequest request, Permissions permissions,
-                ItemAcquisition.Scope scope, Consumer<String> onDelivered) {
+                ItemAcquisition.Scope scope, Consumer<String> onDelivered, Consumer<String> onUnconfirmed) {
             lastRequest = request;
             lastScope = scope;
             lastDelivered = onDelivered;
+            lastUnconfirmed = onUnconfirmed;
             return new Action() {
                 @Override public ActionStatus tick(TickContext context) {
                     // 先把这次动作能拿到的东西放进背包（真实引擎里来源做完才重新清点），
@@ -192,6 +195,30 @@ class ObtainTaskTest {
         TaskResult finished = runTask(task);
         assertEquals(TaskResult.Status.FAILED, finished.status());
         assertEquals(0, finished.changes().size());
+    }
+
+    @Test
+    void 来源没能确认的交互_一句一条写进结果的unconfirmed() {
+        FakeBackpack backpack = new FakeBackpack();
+        ScriptedAcquisition acquisition = new ScriptedAcquisition();
+        acquisition.backpack = backpack;
+        acquisition.failure = Problem.of(Problem.Kind.NEED_ITEM, "问过各来源都拿不到");
+        ObtainTask task = new ObtainTask(input(4, ItemAcquisition.Scope.ALL),
+                acquisition, backpack, null, itemId -> Set.of());
+        task.start(tick(0));
+        // 第一刻清点完走进 ACQUIRE，引擎动作才建出来，交回的口子跟着就位。
+        task.tick(tick(1));
+        // 动作在跑的时候引擎交回一句没能确认的取货：拿 64 件的那几下点出去了，游戏一直没回音。
+        acquisition.lastUnconfirmed.accept(
+                "从家门口的箱子拿 minecraft:torch：搬 64 件的那几下都点出去了，没能确认结果");
+        TaskResult finished = runTask(task);
+        assertEquals(TaskResult.Status.FAILED, finished.status());
+        assertEquals(1, finished.unconfirmed().size(), "没拿到货也不吞掉没能确认的事实");
+        Change unconfirmed = finished.unconfirmed().get(0);
+        assertEquals(Change.Kind.OTHER, unconfirmed.kind());
+        assertEquals("取货", unconfirmed.what());
+        assertEquals("从家门口的箱子拿 minecraft:torch：搬 64 件的那几下都点出去了，没能确认结果",
+                unconfirmed.note());
     }
 
     @Test

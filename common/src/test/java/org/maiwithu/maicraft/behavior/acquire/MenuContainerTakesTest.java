@@ -19,6 +19,7 @@ import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.maiwithu.maicraft.behavior.acquire.spi.ReportsUnconfirmed;
 import org.maiwithu.maicraft.behavior.inventory.KnownContainer;
 import org.maiwithu.maicraft.behavior.menu.MenuChannel;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
@@ -52,6 +53,8 @@ class MenuContainerTakesTest {
         /** 光标上拿着的东西；普通点击拿起、放下的都在这里周转。 */
         private ItemStack cursor = ItemStack.EMPTY;
         int notReadyMoves;
+        /** 点得出去但东西原地不动的那种：真实游戏里背包塞满、服务端收下点击却搬不动就是这样。 */
+        int jamMoves;
         int sentMoves;
         boolean closed;
 
@@ -85,11 +88,16 @@ class MenuContainerTakesTest {
         @Override public boolean busy() { return false; }
         @Override public boolean cursorEmpty() { return cursor.isEmpty(); }
 
-        // 快速移动：本刻发不出去就什么都不做；发出去了把箱子里这一格整堆挪进角色背包的第一个空格。
+        // 快速移动：本刻发不出去就什么都不做；点得出去但塞不下时收下点击、东西不动；
+        // 发得出去才把箱子里这一格整堆挪进角色背包的第一个空格。
         @Override public boolean quickMove(int slotId) {
             if (notReadyMoves > 0) {
                 notReadyMoves--;
                 return false;
+            }
+            if (jamMoves > 0) {
+                jamMoves--;
+                return true;
             }
             sentMoves++;
             ItemStack moving = box.get(slotId);
@@ -222,12 +230,14 @@ class MenuContainerTakesTest {
     void 箱子里有六十四个只拿要的五个_背包里只多五个() {
         FakeBox box = new FakeBox();
         box.box.set(4, new ItemStack(Items.IRON_INGOT, 64));
-        ActionStatus status = runToFinish(takes(box, 5));
+        Action take = takes(box, 5);
+        ActionStatus status = runToFinish(take);
 
         assertInstanceOf(ActionStatus.Done.class, status);
         assertEquals(5, box.carried(new ItemStack(Items.IRON_INGOT)), "只多拿要的 5 个");
         assertEquals(59, box.box.get(4).getCount(), "箱子里剩下的还是 59 个");
         assertTrue(box.closed, "拿够就关上箱子");
+        assertTrue(((ReportsUnconfirmed) take).unconfirmedFacts().isEmpty(), "点一下成一下，没有没能确认的");
     }
 
     @Test
@@ -284,13 +294,58 @@ class MenuContainerTakesTest {
         FakeBox box = new FakeBox();
         box.box.set(4, new ItemStack(Items.IRON_INGOT, 64));
         for (int i = 0; i < 36; i++) box.player.set(i, new ItemStack(Items.GOLD_BLOCK, 64));
-        ActionStatus status = runToFinish(takes(box, 5));
+        Action take = takes(box, 5);
+        ActionStatus status = runToFinish(take);
 
         assertInstanceOf(ActionStatus.Done.class, status);
         assertEquals(0, box.carried(new ItemStack(Items.IRON_INGOT)), "拆不出 5 个放的位置就一个不拿");
         assertEquals(64, box.box.get(4).getCount(), "箱子原封不动，不硬点整堆把整组搬走");
         assertEquals(0, box.sentMoves);
         assertTrue(box.closed);
+        assertTrue(((ReportsUnconfirmed) take).unconfirmedFacts().isEmpty(), "一下都没点出去，谈不上没能确认");
+    }
+
+    @Test
+    void 点出去了容器一直没动_照常收场_没能确认的那笔交回() {
+        // 背包塞满时服务端照样收下点击、东西却搬不动：点出去是事实，结果没能确认要如实交回，
+        // 不与"没点过"混在一起；箱子原封不动，拿走多少仍由引擎清点。
+        FakeBox box = new FakeBox();
+        box.box.set(4, new ItemStack(Items.IRON_INGOT, 64));
+        for (int i = 0; i < 36; i++) box.player.set(i, new ItemStack(Items.GOLD_BLOCK, 64));
+        box.jamMoves = 3;
+        Action take = takes(box, 64);
+        ActionStatus status = runToFinish(take);
+
+        assertInstanceOf(ActionStatus.Done.class, status);
+        assertEquals(64, box.box.get(4).getCount(), "箱子原封不动");
+        assertTrue(box.closed, "照常收场关上箱子");
+        List<String> facts = ((ReportsUnconfirmed) take).unconfirmedFacts();
+        assertEquals(1, facts.size(), "点出去没等到结果的只有这一笔");
+        assertTrue(facts.get(0).contains("搬 64 件"), "交回的事实写明要搬几件");
+        assertTrue(facts.get(0).contains("没能确认"));
+    }
+
+    @Test
+    void 搬到一半界面被关_点出去的那几下交回没能确认() {
+        FakeBox box = new FakeBox();
+        box.box.set(4, new ItemStack(Items.IRON_INGOT, 64));
+        box.jamMoves = Integer.MAX_VALUE;
+        Action take = takes(box, 64);
+        Ticks ticks = new Ticks();
+        take.tick(ticks);
+        ticks.advance();
+        take.tick(ticks);
+        ticks.advance();
+        // 第二刻那一下已经点出去了，随后界面被合上（被打断或服务端关的）。
+        box.closed = true;
+        ActionStatus status = runToFinish(take, ticks);
+
+        assertInstanceOf(ActionStatus.Done.class, status);
+        List<String> facts = ((ReportsUnconfirmed) take).unconfirmedFacts();
+        assertEquals(1, facts.size());
+        assertTrue(facts.get(0).contains("点了 1 下"), "点出去的一下如实交代");
+        assertTrue(facts.get(0).contains("界面关上"));
+        assertTrue(facts.get(0).contains("没能等到结算结果"));
     }
 
     /** 开好一只替身箱子、要 iron_ingot 这么几件的开箱取货动作。 */
@@ -305,7 +360,11 @@ class MenuContainerTakesTest {
 
     /** 推进到动作结束为止：给足刻数，开箱取货几十刻内该收场。 */
     private static ActionStatus runToFinish(Action take) {
-        Ticks ticks = new Ticks();
+        return runToFinish(take, new Ticks());
+    }
+
+    /** 从给了一半的刻度接着推进到动作结束。 */
+    private static ActionStatus runToFinish(Action take, Ticks ticks) {
         ActionStatus status = ActionStatus.running();
         for (int i = 0; i < 400 && status instanceof ActionStatus.Running; i++) {
             status = take.tick(ticks);

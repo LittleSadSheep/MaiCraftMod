@@ -3,9 +3,11 @@ package org.maiwithu.maicraft.behavior.acquire;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.List;
 import java.util.Optional;
 
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
+import org.maiwithu.maicraft.behavior.acquire.spi.ReportsUnconfirmed;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -33,7 +35,9 @@ final class ScriptedSource implements ItemSource {
         /** 第一刻就把报价认的数放进背包，再花几刻收尾（放好光标、关界面那样），收完才做完。 */
         DELIVER_THEN_TIDY,
         /** 第一刻把货放进背包，下一刻以问题失败（例如收尾时出了岔子）。 */
-        DELIVER_THEN_FAIL
+        DELIVER_THEN_FAIL,
+        /** 点出去了但没能确认结果：一句事实留在动作上，货一件不动，做完交回引擎清点。 */
+        UNCONFIRMED
     }
 
     final String name;
@@ -105,10 +109,27 @@ final class ScriptedSource implements ItemSource {
             case FAIL -> Optional.of(new Failing(name));
             case DELIVER_NOTHING -> Optional.of(new InstantlyDone(name));
             case UNAVAILABLE -> Optional.empty();
+            case UNCONFIRMED -> Optional.of(new UnconfirmedClicks(name + "里拿"
+                    + request.wanted().describe() + "：点出去了但没能确认结果"));
             case DELIVER_THEN_TIDY, DELIVER_THEN_FAIL -> Optional.of(new DeliverFirst(
                     request.wanted().specifier(), Math.max(1, offer.obtainableCount()),
                     ending == Ending.DELIVER_THEN_FAIL));
         };
+    }
+
+    /** 点出去了但没能确认结果的剧本动作：事实实现交回接缝留在动作上，货一件不动。 */
+    private record UnconfirmedClicks(String fact) implements Action, ReportsUnconfirmed {
+        @Override public ActionStatus tick(TickContext context) {
+            return ActionStatus.done();
+        }
+
+        @Override public List<String> unconfirmedFacts() {
+            return List.of(fact);
+        }
+
+        @Override public String describe() {
+            return fact;
+        }
     }
 
     /** 先把货放进背包，再收几刻尾：收尾跑完算做完，或者收尾时以问题失败。 */

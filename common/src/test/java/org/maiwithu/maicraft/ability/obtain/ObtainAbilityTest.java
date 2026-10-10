@@ -50,7 +50,7 @@ class ObtainAbilityTest {
     /** 替身：不该被调用的引擎；被调了就报错，说明校验没拦住。 */
     private record UselessAcquisition() implements StartsAcquisition {
         @Override public Action need(ItemRequest request, Permissions permissions,
-                ItemAcquisition.Scope scope, Consumer<String> onDelivered) {
+                ItemAcquisition.Scope scope, Consumer<String> onDelivered, Consumer<String> onUnconfirmed) {
             throw new IllegalStateException("参数校验该拦下的请求到了引擎手里");
         }
     }
