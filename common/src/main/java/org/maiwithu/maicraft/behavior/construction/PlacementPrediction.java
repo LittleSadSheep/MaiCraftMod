@@ -82,9 +82,14 @@ public final class PlacementPrediction {
         return List.of();
     }
 
-    /** 这一格放好了没有：按蓝图核对的口径，再要求数量类属性（层、根、个）到位。 */
+    /**
+     * 这一格放好了没有：按蓝图核对的口径，再要求数量类属性（层、根、个）到位。
+     * 门、活板门、栅栏门只差开关时也算放好了：开关是放好之后再按一下的事，不是放置的事。
+     */
     public static boolean complete(PlannedCell cell, BlockState live) {
-        if (BlueprintCheck.stateOf(cell, live) != CellState.MATCHES) return false;
+        CellState state = BlueprintCheck.stateOf(cell, live);
+        if (state == CellState.WRONG_STATE && onlyOpenDiffers(cell, live)) return true;
+        if (state != CellState.MATCHES) return false;
         for (var property : List.of(BlockStateProperties.LAYERS, BlockStateProperties.CANDLES,
                 BlockStateProperties.PICKLES, BlockStateProperties.EGGS)) {
             if (cell.state().hasProperty(property) && !live.getValue(property).equals(cell.state().getValue(property))) return false;
@@ -92,6 +97,19 @@ public final class PlacementPrediction {
         if (cell.state().hasProperty(BlockStateProperties.SLAB_TYPE) && cell.state().getValue(BlockStateProperties.SLAB_TYPE) == SlabType.DOUBLE
                 && live.getValue(BlockStateProperties.SLAB_TYPE) != SlabType.DOUBLE) {
             return false;
+        }
+        return true;
+    }
+
+    // 门类方块点名的属性里只有 open 对不上：其余点名属性都一致。
+    private static boolean onlyOpenDiffers(PlannedCell cell, BlockState live) {
+        var block = cell.state().getBlock();
+        if (!(block instanceof DoorBlock || block instanceof TrapDoorBlock || block instanceof FenceGateBlock)) return false;
+        if (!live.is(block) || !cell.required().contains("open")) return false;
+        for (String name : cell.required()) {
+            if (name.equals("open")) continue;
+            var property = block.getStateDefinition().getProperty(name);
+            if (property != null && !live.getValue(property).equals(cell.state().getValue(property))) return false;
         }
         return true;
     }
