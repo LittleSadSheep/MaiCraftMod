@@ -9,12 +9,14 @@ import org.maiwithu.maicraft.compat.VerifiedVersions;
 import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
 import org.maiwithu.maicraft.compat.backpack.BackpackCompat;
 import org.maiwithu.maicraft.compat.emi.EmiCompat;
+import org.maiwithu.maicraft.compat.ftbquests.FtbQuestsCompat;
 import org.maiwithu.maicraft.compat.jei.JeiCompat;
 import org.maiwithu.maicraft.compat.ponder.PonderCompat;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsTerminalMenu;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsTerminals;
 import org.maiwithu.maicraft.neoforge.compat.backpack.SophisticatedBackpackItems;
 import org.maiwithu.maicraft.neoforge.compat.emi.EmiClientReads;
+import org.maiwithu.maicraft.neoforge.compat.ftbquests.FtbQuestsClientReads;
 import org.maiwithu.maicraft.neoforge.compat.jei.JeiClientReads;
 import org.maiwithu.maicraft.neoforge.compat.ponder.PonderClientReads;
 
@@ -48,6 +50,9 @@ public final class ClientCompatCatalog {
                         () -> new EmiCompat(new EmiClientReads())),
                 // JEI：实测过 19.38.0.366；装了 19.39 及以上不登记，实测通过后再放宽。
                 new SupportedMod<>(JeiCompat.MOD_ID, "JEI", new VerifiedVersions("19.38.0.366", "19.39"),
-                        () -> new JeiCompat(new JeiClientReads())));
+                        () -> new JeiCompat(new JeiClientReads())),
+                // FTB 任务：按 2101.1.36 编译，实测实例还没装、没有实测过；装了 2101.2 及以上不登记。
+                new SupportedMod<>(FtbQuestsCompat.MOD_ID, "FTB 任务", new VerifiedVersions("2101.1.36", "2101.2"),
+                        () -> new FtbQuestsCompat(new FtbQuestsClientReads()::read)));
     }
 }

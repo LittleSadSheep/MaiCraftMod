@@ -84,6 +84,16 @@ repositories {
         }
         filter { includeGroup 'mezz.jei' }
     }
+    // FTB 任务与 FTB Library 从 FTB 的官方 maven 取，免登录。
+    exclusiveContent {
+        forRepository {
+            maven {
+                name = 'FTB'
+                url = 'https://maven.ftb.dev/releases'
+            }
+        }
+        filter { includeGroup 'dev.ftb.mods' }
+    }
 }
 
 // SQLite 驱动与 HTML 解析器用 JarJar 打进 Mod 的 Jar 里，并加进开发运行的类路径。
@@ -103,6 +113,9 @@ dependencies {
     compileOnly("dev.emi:emi-neoforge:${emi_version}") { transitive = false }
     compileOnly("mezz.jei:jei-${minecraft_version}-common-api:${jei_version}") { transitive = false }
     compileOnly("mezz.jei:jei-${minecraft_version}-neoforge-api:${jei_version}") { transitive = false }
+    // FTB 任务的类里用到 FTB Library 的类型（三态开关等），编译时两者都要在。
+    compileOnly("dev.ftb.mods:ftb-quests-neoforge:${ftbquests_version}") { transitive = false }
+    compileOnly("dev.ftb.mods:ftb-library-neoforge:${ftblibrary_version}") { transitive = false }
     jarJar(implementation('org.xerial:sqlite-jdbc')) {
         version { strictly "[${sqlite_jdbc_version},4.0)"; prefer sqlite_jdbc_version }
     }
