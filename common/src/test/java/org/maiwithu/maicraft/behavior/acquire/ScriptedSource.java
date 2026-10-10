@@ -29,7 +29,11 @@ final class ScriptedSource implements ItemSource {
         /** 做完了，但一件都没进背包（白跑一趟）。 */
         DELIVER_NOTHING,
         /** 接不上，返回 empty。 */
-        UNAVAILABLE
+        UNAVAILABLE,
+        /** 第一刻就把报价认的数放进背包，再花几刻收尾（放好光标、关界面那样），收完才做完。 */
+        DELIVER_THEN_TIDY,
+        /** 第一刻把货放进背包，下一刻以问题失败（例如收尾时出了岔子）。 */
+        DELIVER_THEN_FAIL
     }
 
     final String name;
@@ -41,6 +45,8 @@ final class ScriptedSource implements ItemSource {
     private Ending ending = Ending.DELIVER;
     private int asked;
     private int begun;
+    /** 先放货后收尾的那一种，收尾跑完了没有。 */
+    private boolean tidied;
 
     ScriptedSource(String name, FakeBackpack backpack) {
         this(name, AcquireVia.CARRIED, backpack);
@@ -71,6 +77,11 @@ final class ScriptedSource implements ItemSource {
         return begun;
     }
 
+    /** 先放货后收尾的那一种，收尾跑完了没有：引擎没等它做完就收工时为假。 */
+    boolean tidied() {
+        return tidied;
+    }
+
     @Override public String describe() {
         return name;
     }
@@ -94,7 +105,42 @@ final class ScriptedSource implements ItemSource {
             case FAIL -> Optional.of(new Failing(name));
             case DELIVER_NOTHING -> Optional.of(new InstantlyDone(name));
             case UNAVAILABLE -> Optional.empty();
+            case DELIVER_THEN_TIDY, DELIVER_THEN_FAIL -> Optional.of(new DeliverFirst(
+                    request.wanted().specifier(), Math.max(1, offer.obtainableCount()),
+                    ending == Ending.DELIVER_THEN_FAIL));
         };
+    }
+
+    /** 先把货放进背包，再收几刻尾：收尾跑完算做完，或者收尾时以问题失败。 */
+    private final class DeliverFirst implements Action {
+        private static final int TIDY_TICKS = 3;
+        private final String itemId;
+        private final int count;
+        private final boolean failsAfterDelivering;
+        private int ticks;
+
+        DeliverFirst(String itemId, int count, boolean failsAfterDelivering) {
+            this.itemId = itemId;
+            this.count = count;
+            this.failsAfterDelivering = failsAfterDelivering;
+        }
+
+        @Override public ActionStatus tick(TickContext context) {
+            if (ticks++ == 0) {
+                backpack.add(itemId, count);
+                return ActionStatus.progressed();
+            }
+            if (failsAfterDelivering) {
+                return ActionStatus.failed(Problem.of(Problem.Kind.STUCK, name + "收尾时出了岔子"));
+            }
+            if (ticks <= TIDY_TICKS) return ActionStatus.running();
+            tidied = true;
+            return ActionStatus.done();
+        }
+
+        @Override public String describe() {
+            return name + "先放货、再收尾";
+        }
     }
 
     /** 做完时往背包里放进几件想要的东西，让引擎的重新清点看得到。 */

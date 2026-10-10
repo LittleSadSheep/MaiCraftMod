@@ -5,10 +5,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquisitionCost;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
@@ -59,6 +61,38 @@ class ItemAcquisitionTest {
         assertEquals(ActionStatus.done(), status);
         assertEquals(1, chest.begunTimes());
         assertEquals(6, countOf("minecraft:oak_log"));
+    }
+
+    @Test
+    void 东西先进了背包_来源还在收尾_等它收完再清点_途径照记() {
+        // 从终端取货就是这样：最后几件进了背包，还要放好光标、关上界面才算做完。
+        AcquireVia ae2 = new AcquireVia("ae2", "从附近的 ME 终端取");
+        ScriptedSource terminal = new ScriptedSource("ME 终端", ae2, backpack)
+                .answer(new SourceQuote.Offer("ME 终端", 8, new AcquisitionCost(6, 4), null))
+                .onBegin(ScriptedSource.Ending.DELIVER_THEN_TIDY);
+        List<String> obtainedVia = new ArrayList<>();
+        ActionStatus status = runToSettlement(engine(terminal).need(
+                new ItemRequest(WantedItem.ofItem("minecraft:torch"), 8, "照明"), PERMISSIONS,
+                ItemAcquisition.Scope.ALL, obtainedVia::add));
+        assertEquals(ActionStatus.done(), status);
+        assertTrue(terminal.tidied(), "数够了也先让来源把收尾做完");
+        assertEquals(List.of("ae2"), obtainedVia);
+        assertEquals(8, countOf("minecraft:torch"));
+    }
+
+    @Test
+    void 东西进了背包后来源以问题收场_途径照记_不说成身上已有的() {
+        AcquireVia ae2 = new AcquireVia("ae2", "从附近的 ME 终端取");
+        ScriptedSource terminal = new ScriptedSource("ME 终端", ae2, backpack)
+                .answer(new SourceQuote.Offer("ME 终端", 8, new AcquisitionCost(6, 4), null))
+                .onBegin(ScriptedSource.Ending.DELIVER_THEN_FAIL);
+        List<String> obtainedVia = new ArrayList<>();
+        ActionStatus status = runToSettlement(engine(terminal).need(
+                new ItemRequest(WantedItem.ofItem("minecraft:torch"), 8, "照明"), PERMISSIONS,
+                ItemAcquisition.Scope.ALL, obtainedVia::add));
+        assertEquals(ActionStatus.done(), status);
+        assertEquals(List.of("ae2"), obtainedVia);
+        assertEquals(8, countOf("minecraft:torch"));
     }
 
     @Test

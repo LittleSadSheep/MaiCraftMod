@@ -175,6 +175,12 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                 // 请求的数量是"这次再多拿几件"：从第一次推进时身上原有的起算，原有的不算这次拿到的。
                 target = carried + request.count();
             }
+            // 正在用一个来源：东西进了背包也先让它把这一步做完（放好光标、关上界面这类收尾都在里面），
+            // 再回来清点、记下这次走的途径；"数够就收工"只在没在用来源时判断。来源各有自己的期限，
+            // 被打断、取消时照旧由 pause、close 立刻收尾，不在这里等。
+            if (stage == Stage.RUN) {
+                return runStep(tick);
+            }
             if (carried >= target) {
                 return leaveChain(ActionStatus.done());
             }
@@ -265,6 +271,11 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                 case ActionStatus.Failed failed -> {
                     excluded.add(stepSource);
                     deadEnds.add(stepSource + "（" + failed.problem().message() + "）");
+                    // 收尾时出了岔子，但这一步里东西确实进了背包：途径照记，不说成"身上已有的"。
+                    if (onDelivered != null
+                            && CarriedItems.matching(backpack, offhand, request, tags) > carriedAtStepStart) {
+                        onDelivered.accept(stepSourceVia);
+                    }
                     stage = Stage.CONSULT;
                     yield ActionStatus.progressed();
                 }
