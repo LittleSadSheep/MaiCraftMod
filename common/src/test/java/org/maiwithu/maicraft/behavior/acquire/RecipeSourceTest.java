@@ -180,6 +180,23 @@ class RecipeSourceTest {
     }
 
     @Test
+    void 按标签要东西_挑身上原料缺得最少的那条配方() {
+        // 要"任意木板"、背包里有云杉原木：做云杉木板，不去找竹子做竹板。
+        backpack.add("minecraft:spruce_log", 3);
+        WorkstationRecipe bamboo = new WorkstationRecipe("minecraft:bamboo_planks", WorkstationRecipe.Kind.CRAFTING,
+                WantedItem.ofItem("minecraft:bamboo_planks"), 2,
+                List.of(new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:bamboo_block"), 1)), true);
+        WorkstationRecipe spruce = new WorkstationRecipe("minecraft:spruce_planks", WorkstationRecipe.Kind.CRAFTING,
+                WantedItem.ofItem("minecraft:spruce_planks"), 4,
+                List.of(new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:spruce_log"), 1)), true);
+        RecipeSource recipeSource = new RecipeSource(wanted -> List.of(bamboo, spruce), memory(),
+                itemId -> 0, new InventoryRuns(), backpack, offhand, tags, new CapturingNeeds());
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, recipeSource.quote(
+                new ItemRequest(WantedItem.ofTag("minecraft:planks"), 4, "做工作台"), CONTEXT));
+        assertEquals("minecraft:spruce_planks", offer.hint());
+    }
+
+    @Test
     void 动手时缺的原料按用途标签递归回引擎() {
         WorldMemory memory = memory();
         memory.rememberWorkstationUsed(TABLE_AT, "minecraft:crafting_table", NOW);

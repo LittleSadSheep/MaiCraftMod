@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.acquire;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -95,9 +96,12 @@ public final class RecipeSource implements ItemSource {
             return new SourceQuote.Unavailable(describe(),
                     "游戏里没有做出" + request.wanted().describe() + "的配方");
         }
-        // 多种做法时挑原料种类最少的一种：备料越简单，路上出的岔子越少。
+        // 多种做法时像玩家一样先看手头：原料身上缺得最少的那种优先（要"任意木板"、背包里有云杉原木，
+        // 就做云杉木板，不去找竹子）；缺得一样多时，摆得进背包合成格的优先，再挑原料种类最少的。
         WorkstationRecipe recipe = candidates.stream()
-                .sorted((a, b) -> Integer.compare(a.ingredients().size(), b.ingredients().size()))
+                .sorted(Comparator.comparingInt((WorkstationRecipe candidate) -> missingFor(candidate, request.count()))
+                        .thenComparingInt(candidate -> inInventory(candidate) ? 0 : 1)
+                        .thenComparingInt(candidate -> candidate.ingredients().size()))
                 .toList().getFirst();
         // 摆得进 2×2 的合成在背包合成格里做：不用找工作台，也不用先摆一个，新世界开局做木板、工作台就靠它。
         if (inInventory(recipe)) {
@@ -131,6 +135,17 @@ public final class RecipeSource implements ItemSource {
         return Optional.of(assemble(recipe,
                 station.map(MemoryRecord::position).orElse(null),
                 timesNeeded(recipe, request.count()), context));
+    }
+
+    // 照这条配方做够要的件数，身上还缺几件原料（各种原料缺的加起来）。
+    private int missingFor(WorkstationRecipe recipe, int count) {
+        int times = timesNeeded(recipe, count);
+        int missing = 0;
+        for (WorkstationRecipe.IngredientStack ingredient : recipe.ingredients()) {
+            int carried = CarriedItems.matching(backpack, offhand, ingredient.item(), tags);
+            missing += Math.max(0, ingredient.count() * times - carried);
+        }
+        return missing;
     }
 
     // 这条配方在不在背包合成格里做：合成配方摆得进 2×2，且动手的那一层做得了背包合成。
