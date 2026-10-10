@@ -5,7 +5,10 @@ import java.util.List;
 
 import org.maiwithu.maicraft.compat.SupportedMod;
 import org.maiwithu.maicraft.compat.VerifiedVersions;
+import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
 import org.maiwithu.maicraft.compat.backpack.BackpackCompat;
+import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsTerminalMenu;
+import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsTerminals;
 import org.maiwithu.maicraft.neoforge.compat.backpack.SophisticatedBackpackItems;
 
 /**
@@ -25,6 +28,9 @@ public final class ClientCompatCatalog {
         return List.of(
                 // 精妙背包：实测过 3.25.69（精妙核心 1.4.72）；装了 3.26 及以上不登记，实测通过后再放宽。
                 new SupportedMod(BackpackCompat.MOD_ID, "精妙背包", new VerifiedVersions("3.25.69", "3.26"),
-                        () -> new BackpackCompat(new SophisticatedBackpackItems())));
+                        () -> new BackpackCompat(new SophisticatedBackpackItems())),
+                // 应用能源2：实测过 19.2.17；装了 19.3 及以上不登记，实测通过后再放宽。
+                new SupportedMod(Ae2Compat.MOD_ID, "应用能源2", new VerifiedVersions("19.2.17", "19.3"),
+                        () -> new Ae2Compat(new AppliedEnergisticsTerminals(), new AppliedEnergisticsTerminalMenu())));
     }
 }
