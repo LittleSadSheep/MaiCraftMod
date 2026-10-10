@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import java.util.HashSet;
 import java.util.function.Supplier;
 
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -63,6 +65,8 @@ public final class MenuRecipeRuns implements RecipeRuns {
     private static final int SMELT_TICKS_PER_ITEM = 200;
     /** 一下点击等游戏确认的期限（刻）。 */
     private static final int CLICK_TIMEOUT_TICKS = 100;
+    /** 站的位置看不到或够不着设施时，最多再换几个站位：换遍了才弃台。 */
+    private static final int MORE_SPOTS = 2;
 
     /** 合成台界面的类型注册 ID。 */
     private static final String CRAFTING_MENU = "minecraft:crafting";
@@ -161,6 +165,8 @@ public final class MenuRecipeRuns implements RecipeRuns {
         private Stage stage = Stage.APPROACH;
         private Action approaching;
         private AimAndInteract opening;
+        /** 点的时候看不到、够不着的站位：再靠近时不站这些格。 */
+        private final Set<BlockPos> poorSpots = new HashSet<>();
         /** 界面打开后才建的读端：绑的就是点开的那份界面。 */
         private MenuContent menus;
         /** 收尾关界面用的那一份会话：认领一次，之后每刻只推进它。 */
@@ -220,7 +226,8 @@ public final class MenuRecipeRuns implements RecipeRuns {
             if (approaching == null) {
                 BlockPos at = new BlockPos(station.x(), station.y(), station.z());
                 // 走过去能动多少地形按这次任务的许可来，不另开一套默认档。
-                approaching = close.toward(ApproachTarget.ofBlock(at), permissions);
+                approaching = poorSpots.isEmpty() ? close.toward(ApproachTarget.ofBlock(at), permissions)
+                        : close.toward(ApproachTarget.ofBlock(at), permissions, cell -> poorSpots.contains(cell));
             }
             ActionStatus status = approaching.tick(tick);
             if (status instanceof ActionStatus.Running) {
@@ -244,6 +251,17 @@ public final class MenuRecipeRuns implements RecipeRuns {
             ActionStatus status = opening.tick(tick);
             if (status instanceof ActionStatus.Running) {
                 return status;
+            }
+            // 站的位置看不到台面、或够不着：挪个站位再点，换遍了才弃台。
+            if (status instanceof ActionStatus.Failed failed && failed.problem().kind() == Problem.Kind.UNREACHABLE
+                    && poorSpots.size() < MORE_SPOTS) {
+                poorSpots.add(tick.player().localPlayer().blockPosition());
+                opening.close();
+                opening = null;
+                approaching.close();
+                approaching = null;
+                stage = Stage.APPROACH;
+                return ActionStatus.progressed();
             }
             if (status instanceof ActionStatus.Failed failed) {
                 return fail(Problem.Kind.REFUSED_BY_GAME, "点开工作站没成功，做不了" + recipe.result().describe()

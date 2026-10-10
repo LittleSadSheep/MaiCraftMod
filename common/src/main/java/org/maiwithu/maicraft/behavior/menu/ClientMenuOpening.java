@@ -3,6 +3,8 @@ package org.maiwithu.maicraft.behavior.menu;
 
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import java.util.HashSet;
 import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
@@ -33,6 +35,8 @@ public final class ClientMenuOpening implements MenuOpening {
 
     /** 等内容同步完的期限（刻）；等不到不把没同步的界面当成空的。 */
     static final int SYNC_WAIT_TICKS = 40;
+    /** 站的位置看不到或够不着容器时，最多再换几个站位：换遍了才算点不开。 */
+    static final int MORE_SPOTS = 2;
 
     private enum Stage { APPROACH, CLICK, SYNC, OPENED }
 
@@ -50,6 +54,8 @@ public final class ClientMenuOpening implements MenuOpening {
     private ClientMenuContent content;
     private int waited;
     private OpenedMenu opened;
+    /** 点的时候看不到、够不着的站位：再靠近时不站这些格。 */
+    private final Set<BlockPos> poorSpots = new HashSet<>();
 
     /**
      * 打开一只容器：整格方块。
@@ -97,7 +103,8 @@ public final class ClientMenuOpening implements MenuOpening {
         if (step == null) {
             ApproachTarget target = part == null ? ApproachTarget.ofBlock(at)
                     : ApproachTarget.ofBlockPart(at, part);
-            step = close.toward(target, permissions);
+            step = poorSpots.isEmpty() ? close.toward(target, permissions)
+                    : close.toward(target, permissions, cell -> poorSpots.contains(cell));
         }
         ActionStatus status = step.tick(tick);
         if (status instanceof ActionStatus.Failed failed) {
@@ -120,6 +127,14 @@ public final class ClientMenuOpening implements MenuOpening {
             step = part == null ? interactions.useBlock(at, opened) : interactions.useBlockPart(at, part, opened);
         }
         ActionStatus status = step.tick(tick);
+        // 站的位置看不到容器的任何一面、或够不着：像玩家一样挪个地方再点，换遍了才算点不开。
+        if (status instanceof ActionStatus.Failed failed && failed.problem().kind() == Problem.Kind.UNREACHABLE
+                && poorSpots.size() < MORE_SPOTS && tick.player().localPlayer() != null) {
+            poorSpots.add(tick.player().localPlayer().blockPosition());
+            finishStep();
+            stage = Stage.APPROACH;
+            return ActionStatus.progressed();
+        }
         if (status instanceof ActionStatus.Failed failed) {
             return ActionStatus.failed(Problem.of(Problem.Kind.REFUSED_BY_GAME,
                     "点开 " + at.toShortString() + " 的容器没打开界面（锁着、盖子被压住、上面坐着猫或被服务器拒绝）："
