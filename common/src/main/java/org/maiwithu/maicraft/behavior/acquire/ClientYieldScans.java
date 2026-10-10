@@ -3,7 +3,9 @@ package org.maiwithu.maicraft.behavior.acquire;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -52,6 +54,8 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
     private final Supplier<PlayerContext> context;
     /** 每次要找的方块都不一样（要煤找煤矿、要土豆找土豆地）：每次查询前按维度补登记。 */
     private final ScanTargets registered;
+    /** 最近一次查索引有没有把附近扫完；没扫完时空结果不等于没有。 */
+    private boolean lastScanComplete = true;
 
     public ClientYieldScans(BlockScanService scans, Supplier<PlayerContext> context) {
         this.scans = Objects.requireNonNull(scans, "scans");
@@ -74,10 +78,17 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
         List<BlockPos> hits = scan(targets, center, radiusBlocks, MINABLE_WANT);
         List<MinableSpot> spots = new ArrayList<>();
         PlayerContext current = context();
+        // 同一根树干在一次扫描里只看一次树冠：键是树干顶。
+        Map<BlockPos, Boolean> trunksChecked = new HashMap<>();
         for (BlockPos hit : hits) {
             // 不透视：埋在石头里、六面都被实心方块挡着的先筛掉（便宜），露出来的再按观察同一套遮挡判断
             // 从眼睛看一眼；看不见的不算候选，要先下矿洞、挖开或走近。
             if (!exposed(current.level(), hit) || !ObservationVisibility.block(current.localPlayer(), hit)) {
+                continue;
+            }
+            // 砍树只砍长着的树：没有树冠的原木是玩家搭的木屋、栅栏柱、横梁，不当候选。
+            if (NaturalTrees.isLog(current.level().getBlockState(hit))
+                    && !NaturalTrees.partOfNaturalTree(hit, current.level(), current.level()::hasChunkAt, trunksChecked)) {
                 continue;
             }
             String blockTypeId = blockTypeIdOf(current, hit);
@@ -100,6 +111,11 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
             }
         }
         return false;
+    }
+
+    @Override
+    public boolean scanComplete() {
+        return lastScanComplete;
     }
 
     @Override
@@ -146,6 +162,8 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
         BlockPos at = new BlockPos(center.x(), center.y(), center.z());
         var result = scans.query(level, at, targets, want,
                 Math.max(1, Math.min(MAX_CHUNK_RADIUS, radiusBlocks / 16 + 1)), BUILD_BUDGET);
+        // 没扫完时只拿到一部分：来源据此回答"再问"，不把没扫完当成没有。
+        lastScanComplete = result.complete();
         List<BlockPos> hits = new ArrayList<>(result.hits());
         // 索引给的是这一片的命中：超出这次愿意找的半径的不算数。
         hits.removeIf(hit -> Math.sqrt(hit.distSqr(at)) > radiusBlocks);

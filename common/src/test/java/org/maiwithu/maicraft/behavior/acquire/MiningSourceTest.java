@@ -59,10 +59,17 @@ class MiningSourceTest {
         }
     }
 
-    /** 替身：固定一批可挖的方块，或声明世界上根本没有方块直接掉它；buried 表示要的是埋在脚下的石头掉的。 */
-    private record FakeMinables(List<MinableSpot> spots, boolean anyDrops, boolean buried) implements ScansMinables {
+    /** 替身：固定一批可挖的方块，或声明世界上根本没有方块直接掉它；buried 表示要的是埋在脚下的石头掉的；complete 表示扫完了。 */
+    private record FakeMinables(List<MinableSpot> spots, boolean anyDrops, boolean buried, boolean complete)
+            implements ScansMinables {
         FakeMinables(List<MinableSpot> spots, boolean anyDrops) {
-            this(spots, anyDrops, false);
+            this(spots, anyDrops, false, true);
+        }
+        FakeMinables(List<MinableSpot> spots, boolean anyDrops, boolean buried) {
+            this(spots, anyDrops, buried, true);
+        }
+        @Override public boolean scanComplete() {
+            return complete;
         }
         @Override public List<MinableSpot> minable(WantedItem wanted, WorldPosition center, int radiusBlocks) {
             return spots;
@@ -111,14 +118,22 @@ class MiningSourceTest {
         }
 
         @Override public Optional<Action> collect(BlockPos target, Permissions permissions) {
+            return collectBatch(List.of(target), permissions);
+        }
+
+        /** 成批收：一批记一次，格子按先后记进 dug。 */
+        final List<List<BlockPos>> batches = new ArrayList<>();
+
+        @Override public Optional<Action> collectBatch(List<BlockPos> cells, Permissions permissions) {
             if (!wired) return Optional.empty();
-            dug.add(target);
+            dug.addAll(cells);
+            batches.add(List.copyOf(cells));
             return Optional.of(new Action() {
                 @Override public ActionStatus tick(TickContext context) {
                     return ActionStatus.done();
                 }
                 @Override public String describe() {
-                    return "挖一格";
+                    return "收 " + cells.size() + " 格";
                 }
             });
         }
@@ -265,5 +280,45 @@ class MiningSourceTest {
         assertEquals(3, stairs.wantedCells);
         assertTrue(stairs.yields.test("minecraft:stone"));
         assertTrue(!stairs.yields.test("minecraft:dirt"), "挖开的土不算挖到圆石");
+    }
+
+    @Test
+    void 附近还没扫完_回答再问_不说没有() {
+        // 实机：方块索引分刻建，刚进世界第一问常常只扫了一部分；不能把没扫完当成"附近没有"去挖楼梯或放弃。
+        SourceQuote quote = source(new FakeMinables(List.of(), true, true, false), new FakeDigs())
+                .quote(new ItemRequest(WantedItem.ofItem("minecraft:cobblestone"), 3, "石镐"), CONTEXT);
+        assertInstanceOf(SourceQuote.NotYet.class, quote);
+    }
+
+    @Test
+    void 附近没有的回执写明半径() {
+        SourceQuote quote = source(new FakeMinables(List.of(), true, false), new FakeDigs())
+                .quote(new ItemRequest(WantedItem.ofItem("minecraft:coal"), 3, "火把"), CONTEXT);
+        SourceQuote.Unavailable unavailable = assertInstanceOf(SourceQuote.Unavailable.class, quote);
+        assertTrue(unavailable.reason().startsWith("半径 48 格内"), unavailable.reason());
+    }
+
+    @Test
+    void 相邻的矿连成一批一次收_远处的不算() {
+        // 煤矿 (3,0)(4,0)(5,0) 连着，(20,0) 远远的一格：要 3 件就收连着的那 3 格，一批、一次捡。
+        FakeDigs digs = new FakeDigs();
+        backpack.add("minecraft:iron_pickaxe", 1);
+        source(new FakeMinables(List.of(coalAt(3, 0), coalAt(4, 0), coalAt(20, 0), coalAt(5, 0)), true), digs)
+                .begin(new ItemRequest(WantedItem.ofItem("minecraft:coal"), 3, "火把"),
+                        new SourceQuote.Offer("采掘", 4, new AcquisitionCost(3, 4), null), CONTEXT)
+                .orElseThrow();
+        assertEquals(1, digs.batches.size());
+        assertEquals(List.of(new BlockPos(3, 64, 0), new BlockPos(4, 64, 0), new BlockPos(5, 64, 0)), digs.batches.getFirst());
+    }
+
+    @Test
+    void 原木只沿树干竖向成批_旁边的横梁不算() {
+        // 砍树：树干 (0,64..66) 连成一批；旁边同高的一根 (1,64) 是横梁，不并进来。
+        MinableSpot trunk0 = new MinableSpot(new BlockPos(0, 64, 0), "minecraft:oak_log", "minecraft:oak_log");
+        MinableSpot trunk1 = new MinableSpot(new BlockPos(0, 65, 0), "minecraft:oak_log", "minecraft:oak_log");
+        MinableSpot trunk2 = new MinableSpot(new BlockPos(0, 66, 0), "minecraft:oak_log", "minecraft:oak_log");
+        MinableSpot beam = new MinableSpot(new BlockPos(1, 64, 0), "minecraft:oak_log", "minecraft:oak_log");
+        List<MinableSpot> batch = MiningSource.batchOf(List.of(trunk0, beam, trunk1, trunk2), 8);
+        assertEquals(List.of(trunk0, trunk1, trunk2), batch);
     }
 }

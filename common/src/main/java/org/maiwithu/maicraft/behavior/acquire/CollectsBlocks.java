@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.acquire;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 import net.minecraft.core.BlockPos;
@@ -23,4 +25,21 @@ public interface CollectsBlocks {
      * @return 收这一格的动作；接不上时为空，调用方按"这条路还没通"换路
      */
     Optional<Action> collect(BlockPos cell, Permissions permissions);
+
+    /**
+     * 把相邻的一批方块收进包：一格一格走到跟前挖掉，整批挖完再去捡掉出来的东西——像真人砍一棵树、挖一片矿，
+     * 不是挖一格捡一格。没有成批实现的接缝按一格一格收。
+     *
+     * @param cells 要收的格子，按先后
+     */
+    default Optional<Action> collectBatch(List<BlockPos> cells, Permissions permissions) {
+        List<Action> steps = new ArrayList<>();
+        for (BlockPos cell : cells) {
+            Optional<Action> one = collect(cell, permissions);
+            if (one.isEmpty()) return Optional.empty();
+            steps.add(one.get());
+        }
+        return steps.isEmpty() ? Optional.empty()
+                : Optional.of(new StepwiseActions("一格一格收 " + cells.size() + " 格", steps.toArray(Action[]::new)));
+    }
 }

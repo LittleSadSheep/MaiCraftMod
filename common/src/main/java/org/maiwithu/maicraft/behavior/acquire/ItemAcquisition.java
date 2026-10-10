@@ -38,6 +38,8 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
 
     /** 递归备料的深度上限：工具 → 锭 → 矿石，再往上多半是请求写岔了。 */
     public static final int DEFAULT_MAX_DEPTH = 4;
+    /** 来源还在看现场时最多等几刻再问：方块索引分刻建，几秒内扫得完附近；等太久按给不了收场。 */
+    static final int MAX_CONSULT_WAIT_TICKS = 100;
 
     private final List<ItemSource> sources;
     private final BackpackView backpack;
@@ -162,6 +164,8 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         private enum Stage { CONSULT, SPACE, RUN }
 
         private final ItemRequest request;
+        /** 问遍来源时已经为"还在看现场"的来源等了几刻。 */
+        private int consultWaits;
         private final Permissions permissions;
         private final Scope scope;
         private final Consumer<String> onDelivered;
@@ -262,6 +266,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                     : new SourceContext(position.currentPosition(), permissions, scope.radiusBlocks());
             List<Planned> offers = new ArrayList<>();
             List<SourceQuote> refusals = new ArrayList<>();
+            boolean stillLooking = false;
             for (ItemSource source : sources) {
                 if (excluded.contains(source.describe())) continue;
                 if (!scope.allows(source.via().name())) {
@@ -281,6 +286,10 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                     case SourceQuote.Unavailable unavailable -> refusals.add(unavailable);
                     case SourceQuote.NeedsApproval approval -> refusals.add(approval);
                     case SourceQuote.Unsupported unsupported -> refusals.add(unsupported);
+                    case SourceQuote.NotYet notYet -> {
+                        refusals.add(notYet);
+                        stillLooking = true;
+                    }
                 }
             }
             // 挑路只看报价本身；来源是谁在执行时用得上，一并记着。
@@ -290,8 +299,13 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                             .orElseThrow())
                     .toList();
             if (plan.isEmpty()) {
+                // 有来源还在看现场（方块扫描没扫完）：等一会儿再问遍，不把"还没看完"当成"没有"；等太久才如实收场。
+                if (stillLooking && ++consultWaits <= MAX_CONSULT_WAIT_TICKS) {
+                    return ActionStatus.running();
+                }
                 return ActionStatus.failed(noWayProblem(refusals, carried));
             }
+            consultWaits = 0;
             stage = Stage.SPACE;
             return ActionStatus.progressed();
         }
@@ -421,6 +435,8 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                         + approval.problem().message() + "）";
                 case SourceQuote.Unsupported unsupported -> refusal.source() + "：不支持（"
                         + unsupported.reason() + "）";
+                case SourceQuote.NotYet notYet -> refusal.source() + "：等了 " + MAX_CONSULT_WAIT_TICKS
+                        + " 刻还没看完现场（" + notYet.reason() + "）";
                 case SourceQuote.Offer offer -> refusal.source();
             };
         }

@@ -91,6 +91,19 @@ class ClientCollectsBlocksTest {
     }
 
     @Test
+    void 一批三格_逐格走过去挖掉_整批挖完只捡一次() {
+        // 砍一棵树：三根原木一根一根靠近、挖掉，挖完整根树干才去捡一次，不是砍一根捡一趟。
+        Action collect = collects(new Step("走", ActionStatus.done()), new Step("挖", ActionStatus.done()),
+                new Step("捡", ActionStatus.done()))
+                .collectBatch(List.of(ORE, ORE.above(), ORE.above(2)), Permissions.DEFAULT).orElseThrow();
+        while (!(collect.tick(null) instanceof ActionStatus.Done)) {
+            // 一步步推进到做完。
+        }
+        assertEquals(List.of("走", "记下脚边原有的", "挖", "走", "挖", "走", "挖", "捡"), log);
+        assertEquals(Set.of(7), askedSince, "只捡第一下动手之后新冒出来的");
+    }
+
+    @Test
     void 手上那一步跟着暂停与收尾() {
         Step dig = new Step("挖", ActionStatus.running());
         Action collect = collects(new Step("走", ActionStatus.done()), dig, new Step("捡", ActionStatus.done()))

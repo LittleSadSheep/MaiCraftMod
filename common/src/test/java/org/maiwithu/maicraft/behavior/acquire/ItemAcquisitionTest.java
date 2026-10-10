@@ -89,6 +89,20 @@ class ItemAcquisitionTest {
     }
 
     @Test
+    void 来源还在看现场_等它看完再问_不立刻说拿不到() {
+        // 方块索引分刻建：头两问采掘说"还没扫完"，第三问才报价；引擎该等它，不把没扫完当成没有。
+        ScriptedSource mine = new ScriptedSource("采掘", AcquireVia.MINE, backpack)
+                .answer(new SourceQuote.NotYet("采掘", "附近的方块还没扫完"))
+                .answer(new SourceQuote.NotYet("采掘", "附近的方块还没扫完"))
+                .answer(new SourceQuote.Offer("采掘", 3, new AcquisitionCost(5, 3), null));
+        ActionStatus status = runToSettlement(engine(mine).need(
+                new ItemRequest(WantedItem.ofItem("minecraft:cobblestone"), 3, "石镐"), PERMISSIONS));
+        assertEquals(ActionStatus.done(), status);
+        assertTrue(mine.askedTimes() >= 3, "等它扫完再问了几次：" + mine.askedTimes());
+        assertEquals(3, countOf("minecraft:cobblestone"));
+    }
+
+    @Test
     void 要的是再多几件_身上原有的不算() {
         // 身上已有 3 根原木，再要 3 根：照样去问来源，拿完身上是 6 根。
         backpack.add("minecraft:oak_log", 3);

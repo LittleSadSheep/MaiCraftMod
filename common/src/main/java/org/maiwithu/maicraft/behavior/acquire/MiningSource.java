@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.acquire;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import net.minecraft.core.BlockPos;
 
@@ -72,12 +76,17 @@ public final class MiningSource implements ItemSource {
                             + "——它是做出来的，去合成或烧炼");
         }
         List<MinableSpot> spots = minables.minable(request.wanted(), context.characterAt(), searchRadius(context));
+        if (spots.isEmpty() && !minables.scanComplete()) {
+            // 附近的方块还没扫完：说不准有没有，让引擎等一会儿再问，不把没扫完当成没有。
+            return new SourceQuote.NotYet(describe(), "附近的方块还没扫完，这一刻说不准有没有会掉出"
+                    + request.wanted().describe() + "的");
+        }
         if (spots.isEmpty() && minables.buriedUnderfoot(request.wanted())) {
             return stairsQuote(request, context);
         }
         if (spots.isEmpty()) {
             return new SourceQuote.Unavailable(describe(),
-                    "附近看得见的地方没有会掉出" + request.wanted().describe()
+                    "半径 " + searchRadius(context) + " 格内看得见的地方没有会掉出" + request.wanted().describe()
                             + "的方块；埋在石头里的看不见，要先下矿洞、挖开或换个地方看看");
         }
         PermittedSpots.Screen<MinableSpot> screened = PermittedSpots.screen(spots, MinableSpot::pos,
@@ -93,6 +102,10 @@ public final class MiningSource implements ItemSource {
     @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
         // 动手前重新扫一遍：问价到动手之间矿可能被挖走了，以现场为准。
         List<MinableSpot> spots = minables.minable(request.wanted(), context.characterAt(), searchRadius(context));
+        if (spots.isEmpty() && !minables.scanComplete()) {
+            // 还没扫完就不动手：交回空，引擎重新问价时会等它扫完。
+            return Optional.empty();
+        }
         if (spots.isEmpty() && minables.buriedUnderfoot(request.wanted())) {
             return Optional.of(digStairs(request, context.permissions()));
         }
@@ -103,24 +116,17 @@ public final class MiningSource implements ItemSource {
         }
         Permissions permissions = context.permissions();
         List<Action> steps = new ArrayList<>();
-        boolean toolArranged = false;
-        // 一格至少掉一件：要几件就挖几格，不把附近的矿一口气挖光；挖少了引擎清点后会再来。
-        for (MinableSpot spot : screened.allowed().stream().limit(request.count()).toList()) {
-            if (!toolArranged) {
-                Optional<Action> tool = toolStep(spot.blockType(), request, permissions);
-                if (tool.isPresent()) {
-                    steps.add(tool.get());
-                    toolArranged = true;
-                }
-            }
-            // 走过去、挖掉、捡起掉出来的东西：一格一格来，不隔空挖，也不把矿丢在地上。
-            Optional<Action> collect = collects.collect(spot.pos(), permissions);
-            if (collect.isEmpty()) {
-                // 收的入口接不上，一步都还没动：整串放弃，由引擎换别的路。
-                return Optional.empty();
-            }
-            steps.add(collect.get());
+        // 一批：从最近的一格起把相邻的同种方块连成一片，要几件挖几格（一格至少掉一件，不把附近的矿一口气挖光）；
+        // 原木只沿竖向连——像真人砍一棵树、挖一片矿，整批挖完再捡，不挖一格捡一格。挖少了引擎清点后会再来。
+        List<MinableSpot> batch = batchOf(screened.allowed(), request.count());
+        toolStep(batch.getFirst().blockType(), request, permissions).ifPresent(steps::add);
+        // 走过去、挖掉、整批挖完捡起掉出来的东西：不隔空挖，也不把矿丢在地上。
+        Optional<Action> collect = collects.collectBatch(batch.stream().map(MinableSpot::pos).toList(), permissions);
+        if (collect.isEmpty()) {
+            // 收的入口接不上，一步都还没动：整串放弃，由引擎换别的路。
+            return Optional.empty();
         }
+        steps.add(collect.get());
         return Optional.of(new StepwiseActions("挖出" + request.wanted().describe(), steps.toArray(Action[]::new)));
     }
 
@@ -161,6 +167,38 @@ public final class MiningSource implements ItemSource {
         WantedItem tool = new WantedItem(required.get());
         return Optional.of(needs.actionFor(new ItemRequest(tool, 1,
                 "采掘" + request.wanted().describe() + "要用的工具"), permissions));
+    }
+
+    /**
+     * 从最近的一格起连出一批：相邻（含斜）的同种方块；原木只沿上下连（不把横梁、邻树算进来）；最多要几件挖几格。
+     * 候选已经按由近及远排好。
+     */
+    static List<MinableSpot> batchOf(List<MinableSpot> spots, int count) {
+        List<MinableSpot> batch = new ArrayList<>();
+        if (spots.isEmpty() || count <= 0) return batch;
+        MinableSpot seed = spots.getFirst();
+        boolean upright = isLog(seed.blockType());
+        Deque<MinableSpot> pending = new ArrayDeque<>(List.of(seed));
+        Set<BlockPos> taken = new HashSet<>(Set.of(seed.pos()));
+        while (!pending.isEmpty() && batch.size() < count) {
+            MinableSpot current = pending.removeFirst();
+            batch.add(current);
+            for (MinableSpot other : spots) {
+                if (taken.contains(other.pos()) || !other.blockType().equals(seed.blockType())) continue;
+                int dx = Math.abs(other.pos().getX() - current.pos().getX());
+                int dy = Math.abs(other.pos().getY() - current.pos().getY());
+                int dz = Math.abs(other.pos().getZ() - current.pos().getZ());
+                boolean adjacent = upright ? dx == 0 && dz == 0 && dy == 1 : dx <= 1 && dy <= 1 && dz <= 1;
+                if (adjacent && taken.add(other.pos())) pending.addLast(other);
+            }
+        }
+        return batch;
+    }
+
+    // 原木、菌柄这类：一棵树的树干竖着连，批次只沿竖向。
+    private static boolean isLog(String blockType) {
+        return blockType.endsWith("_log") || blockType.endsWith("_stem")
+                || blockType.endsWith("_wood") || blockType.endsWith("_hyphae");
     }
 
     /** 这次挖多大范围：任务给了半径就在这个范围里找（给了就不越界），没给用来源自己的默认。 */

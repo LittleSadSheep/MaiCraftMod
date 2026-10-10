@@ -54,4 +54,11 @@ public sealed interface SourceQuote {
     /** 不支持：这类来源还没有实现或需要的模组没装；引擎不会在它身上空转。 */
     record Unsupported(String source, String reason) implements SourceQuote {
     }
+
+    /**
+     * 再问：来源还在看现场（附近的方块还没扫完），这一刻说不准有没有；
+     * 引擎等一会儿再问遍，不把"还没看完"当成"没有"，等太久才按给不了收场。
+     */
+    record NotYet(String source, String reason) implements SourceQuote {
+    }
 }
