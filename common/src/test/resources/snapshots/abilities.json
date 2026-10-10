@@ -100,6 +100,49 @@
         "mode": "controls_player"
       },
       {
+        "ability": "maicraft:machine_inspect",
+        "summary": "看一台机器或一片机器区：组成、运行状态、进出口、挂在哪些网络上（只读）",
+        "parameters": "radius: integer = 16",
+        "targets": [
+          "here",
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "read_only"
+      },
+      {
+        "ability": "maicraft:machine_review",
+        "summary": "审阅一份机器蓝图：能建吗、工序做得了吗、要哪些材料、身上缺什么（只读）",
+        "parameters": "blueprint?: object, design_id?: string",
+        "targets": [],
+        "mode": "read_only"
+      },
+      {
+        "ability": "maicraft:machine_configure",
+        "summary": "改一台机器的设置：侧面、过滤、模式、样板（按已装模组的机器类型）",
+        "parameters": "settings: object",
+        "targets": [
+          "here",
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:machine_run",
+        "summary": "用一台机器做东西：备料、投料、开机、等产物、收产物",
+        "parameters": "item?: string, count: integer = 1, collect: boolean = true, max_seconds: integer = 300",
+        "targets": [
+          "here",
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
         "ability": "maicraft:fight",
         "summary": "打指定的目标，或清掉附近一片区域的敌对生物；打得过才打，血见底会先撤",
         "parameters": "entity?: string, radius: integer = 32, count?: integer",
@@ -604,6 +647,123 @@
       "required_mods": [],
       "knowledge": [],
       "doc_resource": "assets/maicraft/abilities/build.md"
+    },
+    {
+      "ability": "maicraft:machine_inspect",
+      "summary": "看一台机器或一片机器区：组成、运行状态、进出口、挂在哪些网络上（只读）",
+      "parameters": [
+        {
+          "name": "radius",
+          "type": "integer",
+          "required": false,
+          "doc": "看多大范围，单位格；给了目标就是以它为中心，没给以角色为中心",
+          "default": 16,
+          "min": 1,
+          "max": 32
+        }
+      ],
+      "targets": [
+        "here",
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "read_only",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/machine_inspect.md"
+    },
+    {
+      "ability": "maicraft:machine_review",
+      "summary": "审阅一份机器蓝图：能建吗、工序做得了吗、要哪些材料、身上缺什么（只读）",
+      "parameters": [
+        {
+          "name": "blueprint",
+          "type": "object",
+          "required": false,
+          "doc": "机器蓝图的正文（JSON 对象）：cells 逐格、parts 部件、installations 安装段、settings 装后设置、processes 声明工序；和 design_id 二选一"
+        },
+        {
+          "name": "design_id",
+          "type": "string",
+          "required": false,
+          "doc": "已保存的设计编号：按它存的方块清单审（没有机器附加条目）"
+        }
+      ],
+      "targets": [],
+      "mode": "read_only",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/machine_review.md"
+    },
+    {
+      "ability": "maicraft:machine_configure",
+      "summary": "改一台机器的设置：侧面、过滤、模式、样板（按已装模组的机器类型）",
+      "parameters": [
+        {
+          "name": "settings",
+          "type": "object",
+          "required": true,
+          "doc": "要改成什么：键是这台机器认的设置项，值写字符串，例如 {\"side.north\": \"output:items\"}；能设哪些项先 lookup 查这台机器"
+        }
+      ],
+      "targets": [
+        "here",
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/machine_configure.md"
+    },
+    {
+      "ability": "maicraft:machine_run",
+      "summary": "用一台机器做东西：备料、投料、开机、等产物、收产物",
+      "parameters": [
+        {
+          "name": "item",
+          "type": "string",
+          "required": false,
+          "doc": "要做出什么；不给就只开机"
+        },
+        {
+          "name": "count",
+          "type": "integer",
+          "required": false,
+          "doc": "要做几件",
+          "default": 1,
+          "min": 1,
+          "max": 64
+        },
+        {
+          "name": "collect",
+          "type": "boolean",
+          "required": false,
+          "doc": "做完要不要把出口的东西拿进背包；不要就留在出口",
+          "default": true
+        },
+        {
+          "name": "max_seconds",
+          "type": "integer",
+          "required": false,
+          "doc": "最多等产物多久；到点没出够按部分完成收场",
+          "default": 300,
+          "min": 1,
+          "max": 3600
+        }
+      ],
+      "targets": [
+        "here",
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/machine_run.md"
     },
     {
       "ability": "maicraft:fight",

@@ -45,7 +45,10 @@ public final class ParamNames {
             Map.entry("quest", "任务书里任务的编号（16 位十六进制，FTB 任务）"),
             Map.entry("requirement", "任务里一条要求的编号（任务书资料的条目页里给的）"),
             Map.entry("reward", "一个任务自己的根奖励编号；奖池里的子奖励不是能单独领的奖励"),
-            Map.entry("choice", "领选择奖励时选哪个候选（能力提问时列出的候选编号）"));
+            Map.entry("choice", "领选择奖励时选哪个候选（能力提问时列出的候选编号）"),
+            Map.entry("blueprint", "机器蓝图（JSON 对象）：cells 逐格、parts 部件、installations 安装段、settings 装后设置、processes 声明工序"),
+            Map.entry("settings", "要改成的设置（JSON 对象）：键是这台机器认的设置项，值写字符串"),
+            Map.entry("collect", "做完要不要把出口的东西拿进背包"));
 
     private ParamNames() {}
 

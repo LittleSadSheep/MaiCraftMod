@@ -45,7 +45,9 @@ class AssemblyTest {
         // 存东西与记地点能力接上了：找容器、界面读数、整堆搬运与挖盖子都有实现方；记地点只改记忆。
         // 画图与施工也接上了：图纸存在按实例的设计库里，施工把蓝图落到锚点交给施工任务。
         // 任务书也接上了：离线清单当作 FTB 任务装着，操作来自登记表（空登记表时它如实说用不了）。
+        // 机器的四个能力也接上了：机器类型与网络读取器由登记表按装了的模组建，离线一份没有也照常登记。
         assertEquals(Set.of("use", "eat", "equip", "drop", "obtain", "gather", "deposit", "sleep", "design", "build",
+                "machine_inspect", "machine_review", "machine_configure", "machine_run",
                 "fight", "follow", "wait", "travel", "find", "chat", "remember", "sequence", "quest"), registered,
                 "清单里的能力要一个不少地登记上");
     }
