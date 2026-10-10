@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat;
 
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.Item;
+import org.maiwithu.maicraft.behavior.interaction.spi.DismantleTool;
+import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -171,6 +175,53 @@ class CompatSlotsTest {
         NetworkSummary summary = load(new Fragile()).networkReaders(NO_SERVICES).getFirst().summary("net-1");
         assertFalse(summary.readable());
         assertTrue(summary.note().contains("读应力网络"), summary.note());
+    }
+
+    @Test
+    void 拆方块的两个槽进世界才建_停用后给不出批也不认领方块() {
+        Contributing module = new Contributing() {
+            @Override public void contribute(CompatRegistry registry) {
+                registry.breakAccelerator(this, services -> new Chain());
+                registry.dismantleTool(this, services -> new Wrench());
+            }
+        };
+        CompatRegistry registry = load(module);
+        BreakAccelerator chain = registry.breakAccelerators(NO_SERVICES).getFirst();
+        DismantleTool wrench = registry.dismantleTools(NO_SERVICES).getFirst();
+        assertInstanceOf(CompatBreakAccelerator.class, chain);
+        assertInstanceOf(CompatDismantleTool.class, wrench);
+        assertEquals(2, chain.wouldBreakWith(AT).size(), "停用前照常给批");
+        assertEquals(Items.STICK, wrench.toolFor(null).orElseThrow());
+        Action batch = chain.breakBatch(AT).orElseThrow();
+        breakModule(module);
+        assertTrue(chain.wouldBreakWith(AT).isEmpty(), "停用后给不出批，清障退回逐格挖");
+        assertTrue(chain.breakBatch(AT).isEmpty());
+        assertTrue(wrench.toolFor(null).isEmpty(), "停用后不再认领方块");
+        assertTrue(wrench.dismantle(AT).isEmpty());
+        assertEquals(Problem.Kind.UNSUPPORTED, assertInstanceOf(ActionStatus.Failed.class, batch.tick(null)).problem().kind(),
+                "交出的动作推进到一半停用按不支持收场");
+    }
+
+    /** 连锁挖替身：触发格连着它东边一格一起挖。 */
+    private static class Chain implements BreakAccelerator {
+        @Override public List<BlockPos> wouldBreakWith(BlockPos trigger) { return List.of(trigger, trigger.east()); }
+        @Override public Optional<Action> breakBatch(BlockPos trigger) {
+            return Optional.of(new Action() {
+                @Override public ActionStatus tick(TickContext context) { return ActionStatus.done(); }
+                @Override public String describe() { return "连锁挖"; }
+            });
+        }
+    }
+
+    /** 扳手替身：什么都认领，拆给一个一刻就做完的动作。 */
+    private static class Wrench implements DismantleTool {
+        @Override public Optional<Item> toolFor(BlockState state) { return Optional.of(Items.STICK); }
+        @Override public Optional<Action> dismantle(BlockPos cell) {
+            return Optional.of(new Action() {
+                @Override public ActionStatus tick(TickContext context) { return ActionStatus.done(); }
+                @Override public String describe() { return "扳手拆"; }
+            });
+        }
     }
 
     /** 压机替身：什么都认领，投料给一个一刻就做完的动作。 */

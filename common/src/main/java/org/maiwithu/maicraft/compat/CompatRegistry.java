@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat;
 
+import org.maiwithu.maicraft.behavior.interaction.spi.DismantleTool;
+import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -43,13 +45,15 @@ public final class CompatRegistry {
     private final List<ToBuild<MachineType>> machineTypes = new ArrayList<>();
     private final List<ToBuild<NetworkReader>> networkReaders = new ArrayList<>();
     private final List<ToBuild<QuestBookOperations>> questBooks = new ArrayList<>();
+    private final List<ToBuild<BreakAccelerator>> breakAccelerators = new ArrayList<>();
+    private final List<ToBuild<DismantleTool>> dismantleTools = new ArrayList<>();
     private final List<MenuLayoutProof> menuLayouts = new ArrayList<>();
     private final List<CarriedBackpack> carriedBackpacks = new ArrayList<>();
     private final List<KnowledgeSource> knowledgeSources = new ArrayList<>();
     private final List<RecipeViewer> recipeViewers = new ArrayList<>();
     /** 全部的槽：一个模组交接到一半出错时，按交接前的长度一起撤回。新加槽时把它的列表加进来。 */
     private final List<List<?>> slots = List.of(itemSources, machineTypes, networkReaders, questBooks,
-            menuLayouts, carriedBackpacks, knowledgeSources, recipeViewers);
+            breakAccelerators, dismantleTools, menuLayouts, carriedBackpacks, knowledgeSources, recipeViewers);
     private final List<String> decisions = new ArrayList<>();
 
     private CompatRegistry() {}
@@ -135,6 +139,16 @@ public final class CompatRegistry {
         questBooks.add(new ToBuild<>(module, build));
     }
 
+    /** 联动入口交一个挖掘加速（连锁挖）的建法：进世界时建，包一层后交给施工的清障；模组停用后给不出批，退回逐格挖。 */
+    public void breakAccelerator(CompatModule module, Function<PlayerServices, BreakAccelerator> build) {
+        breakAccelerators.add(new ToBuild<>(module, build));
+    }
+
+    /** 联动入口交一个拆卸工具的建法：进世界时建，包一层后交给施工的清障；模组停用后不再认领方块，照原来的挖。 */
+    public void dismantleTool(CompatModule module, Function<PlayerServices, DismantleTool> build) {
+        dismantleTools.add(new ToBuild<>(module, build));
+    }
+
     /**
      * 联动入口交一份界面布局证明：证明过的模组界面能和原版界面一样读两侧、搬东西。
      * 同一种界面重复登记、或想改写原版界面时当场出错，这个模组不登记。
@@ -191,6 +205,16 @@ public final class CompatRegistry {
     /** 进世界时建联动模组的任务书操作；规矩同物品来源。 */
     public List<QuestBookOperations> questBooks(PlayerServices services) {
         return build(questBooks, services, "任务书操作", CompatQuestBookOperations::new);
+    }
+
+    /** 进世界时建联动模组的挖掘加速；规矩同物品来源。 */
+    public List<BreakAccelerator> breakAccelerators(PlayerServices services) {
+        return build(breakAccelerators, services, "挖掘加速", CompatBreakAccelerator::new);
+    }
+
+    /** 进世界时建联动模组的拆卸工具；规矩同物品来源。 */
+    public List<DismantleTool> dismantleTools(PlayerServices services) {
+        return build(dismantleTools, services, "拆卸工具", CompatDismantleTool::new);
     }
 
     // 逐个建：停用了的跳过；建法碰到 LinkageError 由联动入口停用模组，别的错只少这一个，写一行日志。

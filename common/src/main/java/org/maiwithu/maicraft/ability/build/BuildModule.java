@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.build;
 
+import org.maiwithu.maicraft.behavior.interaction.spi.DismantleTool;
+import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import java.io.IOException;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
@@ -102,12 +104,13 @@ public final class BuildModule implements AbilityModule {
     /** 生产用：把角色上下文与各玩家行为模型拼成施工服务，许可按每次任务的来。 */
     public static BuildModule live(DesignStore designs, AnchorResolver anchors, Path schematics, Supplier<PlayerContext> context,
             Interactions interactions, InputDriver inputs, BringsPlayerClose close, ClientMovesToMainhand toMainhand,
-            DigsBlocks digs, ItemNeeds needs, PermissionCheck permission, WorldMemory memory, WalkTo walks) {
+            DigsBlocks digs, ItemNeeds needs, PermissionCheck permission, WorldMemory memory, WalkTo walks,
+            List<BreakAccelerator> accelerators, List<DismantleTool> dismantlers) {
         return new BuildModule(designs, anchors, schematics, permissions -> {
             LiveSite site = new LiveSite(context);
             return new ConstructionServices(site, close, new LivePlacements(context), new LiveClicks(interactions, inputs, context),
                     digs, needs, new LiveHolds(toMainhand, context), new PermissionGuards(() -> permission, permissions, site::dimension),
-                    new MemoryLedger(memory, site::dimension), new LiveTravels(walks));
+                    new MemoryLedger(memory, site::dimension), new LiveTravels(walks), accelerators, dismantlers);
         });
     }
 

@@ -349,7 +349,10 @@ public final class AbilityCatalog {
         registry.register(new DesignModule(designs, anchors, deps.preview(), schematics));
         registry.register(BuildModule.live(designs, anchors, schematics, deps.context(), deps.interactions(), deps.inputs(),
                 shared.bringClose(), shared.toMainhand(), shared.digging(), shared.innerNeeds(),
-                shared.permission(), deps.memory(), deps.walks()));
+                shared.permission(), deps.memory(), deps.walks(),
+                // 联动的连锁挖与扳手拆机器件进世界时带着同一份玩家行为建；没装就是空表，清障逐格挖。
+                deps.compat().breakAccelerators(shared.playerServices()),
+                deps.compat().dismantleTools(shared.playerServices())));
     }
 
     /** 不和别的能力共用现场部件的那些能力：战斗、跟随、等待、出行、聊天、记地点、按顺序做事、任务书。 */

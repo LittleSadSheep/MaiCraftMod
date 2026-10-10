@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.construction;
 
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.Item;
+import org.maiwithu.maicraft.behavior.interaction.spi.DismantleTool;
+import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -66,6 +70,9 @@ class ConstructionTaskTest {
         final Set<String> unobtainable = new HashSet<>();
         final List<BlockPos> temporaries = new ArrayList<>();
         final List<String> siteNotes = new ArrayList<>();
+        final List<BreakAccelerator> accelerators = new ArrayList<>();
+        final List<DismantleTool> dismantlers = new ArrayList<>();
+        int digCalls;
         BlockPos feet = new BlockPos(5, 64, 5);
 
         Fake ground(int y) {
@@ -116,7 +123,10 @@ class ConstructionTaskTest {
             return new Click(new Immediate(effect), () -> InteractionResult.applied("替身确认"));
         }
 
-        @Override public Optional<Action> dig(BlockPos target) { return Optional.of(new Immediate(() -> world.put(target, AIR))); }
+        @Override public Optional<Action> dig(BlockPos target) {
+            digCalls++;
+            return Optional.of(new Immediate(() -> world.put(target, AIR)));
+        }
         @Override public Action actionFor(ItemRequest request, Permissions permissions) {
             String item = request.wanted().itemId();
             if (unobtainable.contains(item)) return new Failing("附近找不到 " + item);
@@ -133,7 +143,7 @@ class ConstructionTaskTest {
         @Override public Action toward(ApproachTarget target, Permissions permissions) { return new Immediate(() -> { }); }
 
         ConstructionServices services() {
-            return new ConstructionServices(this, this, this, this, this, this, this, this, this, null);
+            return new ConstructionServices(this, this, this, this, this, this, this, this, this, null, accelerators, dismantlers);
         }
     }
 
@@ -274,5 +284,74 @@ class ConstructionTaskTest {
         assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
         assertTrue(fake.state(new BlockPos(0, 64, 0)).getValue(BlockStateProperties.OPEN));
         assertEquals(1, count(result, Change.Kind.BLOCK_CHANGED), "按了一次开关");
+    }
+
+    /** 连锁挖替身：从触发格起往东连三格一起挖，只在触发格是 (0,64,0) 时连。 */
+    private static final class Chain implements BreakAccelerator {
+        final Fake fake;
+        int batches;
+        Chain(Fake fake) { this.fake = fake; }
+        @Override public List<BlockPos> wouldBreakWith(BlockPos trigger) {
+            return trigger.equals(new BlockPos(0, 64, 0)) ? List.of(trigger, trigger.east(), trigger.east(2)) : List.of();
+        }
+        @Override public Optional<Action> breakBatch(BlockPos trigger) {
+            return Optional.of(new Immediate(() -> {
+                batches++;
+                for (BlockPos pos : wouldBreakWith(trigger)) fake.world.put(pos, AIR);
+            }));
+        }
+    }
+
+    @Test
+    void 连锁挖_整批都是要清的格才用() {
+        Fake fake = new Fake().ground(63);
+        Chain chain = new Chain(fake);
+        fake.accelerators.add(chain);
+        for (int x = 0; x <= 2; x++) fake.world.put(new BlockPos(x, 64, 0), Blocks.DIRT.defaultBlockState());
+        fake.carried.put("minecraft:stone", 3);
+        TaskResult result = run(fake, wall(STONE, new BlockPos(0, 64, 0), new BlockPos(1, 64, 0), new BlockPos(2, 64, 0)));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(1, chain.batches, "三格都要清，一批挖掉");
+        assertEquals(0, fake.digCalls, "没有逐格挖");
+        assertEquals(3, count(result, Change.Kind.BLOCK_BROKEN));
+        assertEquals(3, count(result, Change.Kind.BLOCK_PLACED));
+    }
+
+    @Test
+    void 连锁挖的批里有一格不是要清的_整批不用() {
+        Fake fake = new Fake().ground(63);
+        Chain chain = new Chain(fake);
+        fake.accelerators.add(chain);
+        for (int x = 0; x <= 2; x++) fake.world.put(new BlockPos(x, 64, 0), Blocks.DIRT.defaultBlockState());
+        fake.carried.put("minecraft:stone", 2);
+        // 蓝图只要前两格，第三格的泥土不是要清的：模组按形状一起挖没法跳过它，所以整批不用。
+        TaskResult result = run(fake, wall(STONE, new BlockPos(0, 64, 0), new BlockPos(1, 64, 0)));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(0, chain.batches);
+        assertEquals(2, fake.digCalls, "退回逐格挖");
+        assertEquals(Blocks.DIRT, fake.state(new BlockPos(2, 64, 0)).getBlock(), "不该挖的格没动");
+    }
+
+    @Test
+    void 模组工具认领的方块整块拆下() {
+        Fake fake = new Fake().ground(63);
+        fake.world.put(new BlockPos(0, 64, 0), Blocks.DIRT.defaultBlockState());
+        fake.carried.put("minecraft:stone", 1);
+        fake.dismantlers.add(new DismantleTool() {
+            @Override public Optional<Item> toolFor(BlockState state) {
+                return state.is(Blocks.DIRT) ? Optional.of(Items.STICK) : Optional.empty();
+            }
+            @Override public Optional<Action> dismantle(BlockPos cell) {
+                return Optional.of(new Immediate(() -> {
+                    fake.world.put(cell, AIR);
+                    fake.carried.merge("minecraft:dirt", 1, Integer::sum);
+                }));
+            }
+        });
+        TaskResult result = run(fake, wall(STONE, new BlockPos(0, 64, 0)));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(0, fake.digCalls, "认领了就用工具拆，不挖");
+        assertEquals(1, count(result, Change.Kind.BLOCK_BROKEN));
+        assertEquals(1, fake.carried("minecraft:dirt"), "拆下的东西进了背包");
     }
 }
