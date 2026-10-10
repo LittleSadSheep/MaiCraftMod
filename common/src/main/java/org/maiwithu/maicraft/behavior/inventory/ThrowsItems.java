@@ -41,7 +41,6 @@ public final class ThrowsItems implements Action {
     private PendingInteraction pending;
     /** 这次提交时计划丢出的件数：整份抛是一格的数量，零头抛是 1。 */
     private int plannedThisThrow;
-    private boolean hadConfirmationOwner;
     private Problem failure;
 
     /**
@@ -75,11 +74,6 @@ public final class ThrowsItems implements Action {
     /** 收尾时的问题；动作以失败结束时非空。 */
     public Problem failure() {
         return failure;
-    }
-
-    /** 收尾时有没有还在等确认的投掷；有的话按没能确认的交互记账，不能当没发生。 */
-    public boolean hasThrowInFlight() {
-        return hadConfirmationOwner;
     }
 
     /** 此刻是不是有一次投掷提交了、还在等游戏确认：这时停下，那一下丢没丢出去说不清。 */
@@ -118,7 +112,6 @@ public final class ThrowsItems implements Action {
         pending = player.interactionSender().dropSelected(player, before, plannedThisThrow > 1,
                 InteractionConfirmation.heldItemChanged(InteractionHand.MAIN_HAND, before),
                 CONFIRM_TIMEOUT_TICKS);
-        hadConfirmationOwner = true;
         return ActionStatus.progressed();
     }
 

@@ -17,7 +17,6 @@ import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.inventory.InventorySpace;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
-import org.maiwithu.maicraft.kernel.goal.Question;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -49,6 +48,15 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
     private final int maxDepth;
     /** 正在办着的请求链，从外到内；防环与限深都看它。同一时刻只有一条链在被逐刻推进。 */
     private final List<String> activeRequests = new ArrayList<>();
+    /** 发起拿东西时没给记账口：腾地方照样做，途中的事实不进任何结果。 */
+    private static final TaskRecords NOT_RECORDED = new TaskRecords() {
+        @Override public void change(Change change) {}
+
+        @Override public void unconfirmed(Change change) {}
+
+        @Override public void attempt(String tried, String whatHappened) {}
+    };
+
     /** 每条链上发起任务的记账口：备料的嵌套请求从外层接过来，途中的变化与没能确认的交互记进同一个任务。 */
     private final Map<String, TaskRecords> chainRecords = new HashMap<>();
 
@@ -171,6 +179,8 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         private Stage stage = Stage.CONSULT;
         private List<Planned> plan = List.of();
         private Action step;
+        /** 正在腾地方的那个动作；没在腾为 null。 */
+        private Action room;
         private String stepSource;
         private String stepSourceVia;
         private int carriedAtStepStart;
@@ -212,6 +222,10 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             // 被打断、取消时照旧由 pause、close 立刻收尾，不在这里等。
             if (stage == Stage.RUN) {
                 return runStep(tick);
+            }
+            // 腾地方腾到一半（界面开着、投掷在等确认）也先让它做完，不半路撒手。
+            if (stage == Stage.SPACE && room != null) {
+                return makeRoom(tick);
             }
             if (carried >= target) {
                 return leaveChain(ActionStatus.done());
@@ -266,30 +280,34 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             return ActionStatus.progressed();
         }
 
-        // 拿东西前先腾一格；腾格子要动贵重品时把问题原样交上去，不自己丢东西。
-        // 腾挪过程中点出去了却没能确认结果的交互，照来源的同一条路交回给发起方。
+        // 拿东西前先腾一格：要拿的东西本身不往外挪；腾格子要动贵重品时把问题原样交上去，不自己丢东西。
+        // 腾的时候存了丢了什么、点了没能确认的，由腾地方的动作直接记进发起任务的结果。
         private ActionStatus makeRoom(TickContext tick) {
             if (space.isEmpty()) {
                 return startStep();
             }
-            InventorySpace.Result result = space.get().ensureFree(1, request.purpose(), permissions, tick);
-            forwardSpaceFacts(result);
-            return switch (result.state()) {
-                case FREE, PROGRESS -> {
-                    if (result.state() == InventorySpace.State.FREE) yield startStep();
-                    yield ActionStatus.progressed();
+            if (room == null) {
+                Set<String> keep = request.wanted().isTag() ? Set.of() : Set.of(request.wanted().itemId());
+                room = space.get().makeRoom(1, request.purpose(), keep, permissions,
+                        records != null ? records : NOT_RECORDED);
+            }
+            return switch (room.tick(tick)) {
+                case ActionStatus.Running running -> running;
+                case ActionStatus.Done done -> {
+                    room.close();
+                    room = null;
+                    yield startStep();
                 }
-                case NEED_ASK -> leaveChain(ActionStatus.failed(approvalFromQuestion(result.question())));
-                case IMPOSSIBLE -> leaveChain(ActionStatus.failed(Problem.of(Problem.Kind.INVENTORY_FULL,
-                        "背包腾不出来，装不下为「" + request.purpose() + "」要拿的东西")));
+                case ActionStatus.Failed failed -> {
+                    room.close();
+                    room = null;
+                    yield leaveChain(ActionStatus.failed(failed.problem().kind() == Problem.Kind.NEED_APPROVAL
+                            ? Problem.of(Problem.Kind.NEED_APPROVAL, "背包要满，得动贵重品才能腾出地方装「"
+                                    + request.purpose() + "」的东西：" + failed.problem().message(), "同意动贵重品，或少拿一些")
+                            : Problem.of(Problem.Kind.INVENTORY_FULL,
+                                    "背包腾不出来，装不下为「" + request.purpose() + "」要拿的东西：" + failed.problem().message())));
+                }
             };
-        }
-
-        // 腾地方存了丢了什么、点了没能确认的，记进发起任务的结果：拿东西途中动了背包里的东西要说得出来。
-        private void forwardSpaceFacts(InventorySpace.Result result) {
-            if (records == null) return;
-            result.changes().forEach(records::change);
-            result.unconfirmed().forEach(fact -> records.unconfirmed(new Change(Change.Kind.OTHER, "腾背包", 1, fact)));
         }
 
         // 推进当前来源一步；做完就回到清点，做砸了把这个来源划掉、换计划里的下一个。
@@ -391,12 +409,6 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             };
         }
 
-        private Problem approvalFromQuestion(Question question) {
-            return Problem.of(Problem.Kind.NEED_APPROVAL,
-                    "背包要满，得动贵重品才能腾出地方装「" + request.purpose() + "」的东西：" + question.text(),
-                    "同意动贵重品，或少拿一些");
-        }
-
         // 结束时把请求从链上摘下来：嵌套的备料结束后，外层的防环才不会误判。
         private ActionStatus leaveChain(ActionStatus terminal) {
             if (!leftChain) {
@@ -409,6 +421,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
 
         @Override public void pause() {
             if (step != null) step.pause();
+            if (room != null) room.pause();
         }
 
         @Override public void close() {
@@ -418,8 +431,11 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                 forwardUnconfirmed();
                 step = null;
             }
-            // 腾地方的一步可能还在半路上：撒手它，开着的界面请游戏关上，没等到确认的交互留在读端里。
-            space.ifPresent(InventorySpace::abandonStep);
+            // 腾地方可能还在半路上：收掉它，开着的界面请游戏关上，没等到确认的交互照实记进结果。
+            if (room != null) {
+                room.close();
+                room = null;
+            }
             leaveChain(ActionStatus.done());
         }
 
@@ -427,7 +443,8 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             return switch (stage) {
                 case CONSULT -> "在问各来源哪里能拿到" + request.wanted().describe()
                         + "（" + request.purpose() + "）";
-                case SPACE -> "在为装下" + request.wanted().describe() + "腾背包";
+                case SPACE -> "在为装下" + request.wanted().describe() + "腾背包"
+                        + (room == null ? "" : "：" + room.describe());
                 case RUN -> "正在用" + stepSource + "拿" + request.wanted().describe()
                         + "：" + step.describe();
             };

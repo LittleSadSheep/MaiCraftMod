@@ -61,7 +61,11 @@ final class EquipTask extends PhasedTask<EquipTask.Phase> {
 
     @Override
     protected Action enter(Phase phase) {
-        if (phase == Phase.FREE_SPACE) return null;
+        // 卸下前先腾一格：腾的时候存了丢了什么、点了没能确认的，由腾地方的动作直接记进本任务的结果。
+        if (phase == Phase.FREE_SPACE) {
+            return space.map(room -> room.makeRoom(1, "卸下装备", Set.of(), input.permissions(), records()))
+                    .orElse(null);
+        }
         currentSlot = nextUnprocessedSlot().orElse(null);
         if (currentSlot == null) return null;
         // 动手前抄下栏位里原来是什么，取下成功后变化记录有账可对。
@@ -99,26 +103,17 @@ final class EquipTask extends PhasedTask<EquipTask.Phase> {
         };
     }
 
-    // 卸下前先保证有一格空位放取下的东西；腾挪的每一步变化与没能确认的交互都如实记账。
+    // 卸下前先保证有一格空位放取下的东西；腾地方的模型没接上就直接试着取下，装不装得下由游戏自己结算。
     private Next<Phase> makeRoom(TickContext context) {
-        if (space.isEmpty()) {
-            // 腾地方的模型没接上：直接试着取下，装不装得下由游戏自己结算、由核对如实报告。
+        if (action() == null) {
             return Next.go(Phase.HANDLING, "没有腾背包的模型可用，直接试着取下");
         }
-        InventorySpace.Result result = space.get().ensureFree(1, "卸下装备", input.permissions(), context);
-        result.changes().forEach(this::recordChange);
-        result.unconfirmed().forEach(fact ->
-                recordUnconfirmed(new Change(Change.Kind.OTHER, "腾背包", 1, fact)));
-        return switch (result.state()) {
-            case FREE -> Next.go(Phase.HANDLING, "腾出地方了");
-            case PROGRESS -> {
-                recordProgress("在为卸下装备腾背包");
-                yield Next.stay();
-            }
+        return switch (runAction(context)) {
+            case ActionStatus.Running running -> Next.stay();
+            case ActionStatus.Done done -> Next.go(Phase.HANDLING, "腾出地方了");
             // 腾不动要动贵重品：把事实如实带回，不悄悄丢玩家的东西。
-            case NEED_ASK, IMPOSSIBLE -> Next.fail(new Problem(Problem.Kind.INVENTORY_FULL,
-                    "背包腾不出放卸下装备的地方：" + (result.problem() != null
-                            ? result.problem().message() : result.question().text()),
+            case ActionStatus.Failed failed -> Next.fail(new Problem(Problem.Kind.INVENTORY_FULL,
+                    "背包腾不出放卸下装备的地方：" + failed.problem().message(),
                     "同意动贵重品，或先整理背包"));
         };
     }

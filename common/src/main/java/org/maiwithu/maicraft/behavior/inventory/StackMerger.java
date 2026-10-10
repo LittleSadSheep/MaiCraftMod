@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.inventory;
 
-
-
-import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 
 /**
  * 合并接缝：把主背包里同一种物品的散堆并成整堆。合并不丢东西，只是把格子腾出来。
@@ -14,8 +13,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 public interface StackMerger {
 
     /**
-     * 做一步合并（一次点击搬运一堆）：合并完成并确认了是做成，点击还在等确认是还在做，
-     * 没有可合并的散堆是做不了。
+     * 并一对散堆的动作：挑对、拿起、并进去、关上界面。并进去并确认了算做完，
+     * 没有可合并的散堆、游戏不接受、等不到确认按问题失败；确认的变化与没能确认的交互记进 records。
      */
-    SpaceStepResult mergeOne(TickContext context);
+    Action mergeOne(TaskRecords records);
 }

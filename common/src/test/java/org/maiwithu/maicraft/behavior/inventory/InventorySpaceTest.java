@@ -1,25 +1,31 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.inventory;
 
-import org.junit.jupiter.api.Test;
-import org.maiwithu.maicraft.game.player.BackpackStack;
-import org.maiwithu.maicraft.game.player.BackpackView;
-import org.maiwithu.maicraft.kernel.goal.Permissions;
-import org.maiwithu.maicraft.kernel.goal.Question;
-import org.maiwithu.maicraft.game.player.PlayerContext;
-import org.maiwithu.maicraft.kernel.result.Change;
-import org.maiwithu.maicraft.kernel.task.ReportsUnconfirmed;
-import org.maiwithu.maicraft.kernel.task.TickContext;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.OptionalInt;
 import java.util.Optional;
+import java.util.OptionalInt;
+import java.util.Set;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.behavior.inventory.spi.CarriedBackpack;
+import org.maiwithu.maicraft.game.player.BackpackStack;
+import org.maiwithu.maicraft.game.player.BackpackView;
+import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.maiwithu.maicraft.kernel.result.Change;
+import org.maiwithu.maicraft.kernel.result.Problem;
+import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.CollectedRecords;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
+import org.maiwithu.maicraft.kernel.task.TickContext;
 
-/** 腾挪的执行：一步一刻，变化逐笔记账；要问的处境原样带问题，不自己丢贵重品。 */
+/** 腾地方：一步一个真实动作，做完重新看背包；做不成换下一步、不原地重试；要动贵重品就停下来问。 */
 class InventorySpaceTest {
 
     // 测试替身：背包就是一张可以改的格子表，腾挪动作直接改它，好核对下一步看到的现场。
@@ -32,58 +38,37 @@ class InventorySpaceTest {
             stacks.addAll(List.of(initial));
         }
 
-        @Override
-        public List<BackpackStack> stacks() {
+        @Override public List<BackpackStack> stacks() {
             return List.copyOf(stacks);
         }
 
-        @Override
-        public int usedSlots() {
+        @Override public int usedSlots() {
             return stacks.size();
         }
 
-        @Override
-        public int totalSlots() {
+        @Override public int totalSlots() {
             return capacity;
         }
 
-        @Override
-        public OptionalInt hotbarSlotOf(String itemId) {
+        @Override public OptionalInt hotbarSlotOf(String itemId) {
             return OptionalInt.empty();
         }
 
-        @Override
-        public int selectedHotbarSlot() {
+        @Override public int selectedHotbarSlot() {
             return 0;
         }
 
-        void clearAll() {
-            stacks.clear();
-        }
-
-        void remove(String itemId) {
-            stacks.removeIf(stack -> stack.itemId().equals(itemId));
-        }
-    }
-
-    private static final class FakeDropper implements ItemDropper, ReportsUnconfirmed {
-        final List<String> dropped = new ArrayList<>();
-        final List<String> facts = new ArrayList<>();
-
-        @Override
-        public SpaceStepResult drop(String itemId, int count, TickContext context) {
-            dropped.add(itemId);
-            facts.add("腾地方丢 " + itemId + "：抛出的 1 件没等到确认");
-            return SpaceStepResult.done(new Change(Change.Kind.ITEM_DROPPED, itemId, count, null));
-        }
-
-        @Override
-        public List<String> unconfirmedFacts() {
-            return List.copyOf(facts);
+        void removeOne(String itemId) {
+            for (BackpackStack stack : stacks) {
+                if (stack.itemId().equals(itemId)) {
+                    stacks.remove(stack);
+                    return;
+                }
+            }
         }
     }
 
-    /** 合并替身：一步并掉一格散堆，把背包里那种散着的物品拿掉一格。 */
+    /** 合并替身：并一对就把那种散着的物品拿掉一格，变化照真读端的样子记一笔。 */
     private static final class FakeMerger implements StackMerger {
         final List<String> merged = new ArrayList<>();
         private final FakeBackpack backpack;
@@ -92,34 +77,73 @@ class InventorySpaceTest {
             this.backpack = backpack;
         }
 
-        @Override
-        public SpaceStepResult mergeOne(TickContext context) {
-            String scattered = null;
-            for (BackpackStack stack : backpack.stacks()) {
-                long pilesOfSame = backpack.stacks().stream()
-                        .filter(other -> other.itemId().equals(stack.itemId())).count();
-                if (pilesOfSame > 1) {
-                    scattered = stack.itemId();
-                    break;
+        @Override public Action mergeOne(TaskRecords records) {
+            return oneTick(() -> {
+                for (BackpackStack stack : backpack.stacks()) {
+                    long piles = backpack.stacks().stream().filter(other -> other.itemId().equals(stack.itemId())).count();
+                    if (piles > 1) {
+                        merged.add(stack.itemId());
+                        backpack.removeOne(stack.itemId());
+                        records.change(new Change(Change.Kind.OTHER, stack.itemId(), stack.count(), "并成整堆"));
+                        return ActionStatus.done();
+                    }
                 }
-            }
-            if (scattered == null) return SpaceStepResult.cannotDo("没有可合并的散堆");
-            merged.add(scattered);
-            backpack.remove(scattered);
-            return SpaceStepResult.done(new Change(Change.Kind.OTHER, scattered, 1, "并成整堆"));
+                return ActionStatus.failed(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "没有能并成一堆的散堆"));
+            });
         }
+    }
+
+    /** 随身背包替身：放得进就把那一堆从背包里拿走；坏了就每次都放不进。 */
+    private static final class FakeCarried implements CarriedBackpack {
+        final List<String> stored = new ArrayList<>();
+        boolean broken;
+        int tried;
+        private final FakeBackpack backpack;
+
+        FakeCarried(FakeBackpack backpack) {
+            this.backpack = backpack;
+        }
+
+        @Override public int freeSlots() {
+            return 5;
+        }
+
+        @Override public Optional<Action> store(BackpackStack stack, TaskRecords records) {
+            return Optional.of(oneTick(() -> {
+                tried++;
+                if (broken) return ActionStatus.failed(Problem.of(Problem.Kind.REFUSED_BY_GAME, "随身背包打不开"));
+                stored.add(stack.itemId());
+                backpack.removeOne(stack.itemId());
+                records.change(new Change(Change.Kind.ITEM_STORED, stack.itemId(), stack.count(), "放进了随身背包"));
+                return ActionStatus.done();
+            }));
+        }
+    }
+
+    private interface Step {
+        ActionStatus run();
+    }
+
+    private static Action oneTick(Step step) {
+        return new Action() {
+            @Override public ActionStatus tick(TickContext context) {
+                return step.run();
+            }
+
+            @Override public String describe() {
+                return "替身的一步";
+            }
+        };
     }
 
     private static BackpackStack junk(String itemId, int count) {
         return new BackpackStack(itemId, count, 64, false, false, false, true);
     }
 
-    private static InventorySpace spaceWithDropper(FakeBackpack backpack, FakeDropper dropper) {
-        return new InventorySpace(backpack, Optional.empty(), Optional.empty(), Optional.empty(),
-                Optional.empty(), Optional.of(dropper));
+    private static BackpackStack pearl() {
+        return new BackpackStack("minecraft:ender_pearl", 2, 16, false, false, true, false);
     }
 
-    // 本刻的上下文替身：腾挪的一步就在这一刻里推进。
     private static final TickContext NOW = new TickContext() {
         @Override public long gameTick() {
             return 100;
@@ -130,95 +154,112 @@ class InventorySpaceTest {
         }
     };
 
-    private static InventorySpace.Result ensureFree(InventorySpace space, int slots) {
-        return space.ensureFree(slots, "捡起掉落的铁锭", Permissions.DEFAULT, NOW);
+    // 推进到收场；腾地方每做完一步回来看一次背包，几十刻足够。
+    private static ActionStatus run(Action action) {
+        for (int i = 0; i < 50; i++) {
+            ActionStatus status = action.tick(NOW);
+            if (!(status instanceof ActionStatus.Running)) return status;
+        }
+        throw new AssertionError("腾地方 50 刻还没收场：" + action.describe());
+    }
+
+    private static Action makeRoom(InventorySpace space, int slots, Set<String> keep, TaskRecords records) {
+        return space.makeRoom(slots, "捡起掉落的铁锭", keep, Permissions.DEFAULT, records);
     }
 
     @Test
     void 还有空格就什么都不做() {
-        InventorySpace.Result result = ensureFree(spaceWithDropper(new FakeBackpack(36), new FakeDropper()), 1);
-        assertEquals(InventorySpace.State.FREE, result.state());
-        assertTrue(result.changes().isEmpty());
+        CollectedRecords records = new CollectedRecords();
+        InventorySpace space = new InventorySpace(new FakeBackpack(36), Optional.empty(), Optional.empty(),
+                Optional.empty(), Optional.empty(), Optional.empty());
+        assertInstanceOf(ActionStatus.Done.class, run(makeRoom(space, 1, Set.of(), records)));
+        assertTrue(records.changes.isEmpty());
     }
 
     @Test
-    void 丢垃圾腾地方_一步一笔账() {
-        FakeBackpack backpack = new FakeBackpack(1, junk("minecraft:cobblestone", 64));
-        FakeDropper dropper = new FakeDropper();
-        InventorySpace space = spaceWithDropper(backpack, dropper);
-
-        InventorySpace.Result first = ensureFree(space, 1);
-        assertEquals(InventorySpace.State.PROGRESS, first.state());
-        // 丢出去的变化记进账：什么、多少、为什么丢。
-        assertEquals(1, first.changes().size());
-        assertEquals(Change.Kind.ITEM_DROPPED, first.changes().getFirst().kind());
-        assertEquals("minecraft:cobblestone", first.changes().getFirst().what());
-        assertEquals(64, first.changes().getFirst().count());
-        assertTrue(first.changes().getFirst().note().contains("捡起掉落的铁锭"));
-
-        // 世界真的变了：背包里少了一堆，下一次就腾够了。
-        backpack.clearAll();
-        InventorySpace.Result second = ensureFree(space, 1);
-        assertEquals(InventorySpace.State.FREE, second.state());
-    }
-
-    @Test
-    void 能合并的散堆先并_不先丢() {
+    void 能合并的散堆先并_不往外挪() {
         FakeBackpack backpack = new FakeBackpack(3,
-                junk("minecraft:cobblestone", 32), junk("minecraft:cobblestone", 32),
-                junk("minecraft:dirt", 64));
+                junk("minecraft:cobblestone", 32), junk("minecraft:cobblestone", 32), junk("minecraft:dirt", 64));
         FakeMerger merger = new FakeMerger(backpack);
-        FakeDropper dropper = new FakeDropper();
-        InventorySpace space = new InventorySpace(backpack, Optional.of(merger), Optional.empty(),
-                Optional.empty(), Optional.empty(), Optional.of(dropper));
+        FakeCarried carried = new FakeCarried(backpack);
+        InventorySpace space = new InventorySpace(backpack, Optional.of(merger), Optional.of(carried),
+                Optional.empty(), Optional.empty(), Optional.empty());
+        CollectedRecords records = new CollectedRecords();
 
-        // 背包满着要腾一格：先并圆石的散堆，泥土整格用不着丢。
-        InventorySpace.Result result = ensureFree(space, 1);
-        assertEquals(InventorySpace.State.PROGRESS, result.state());
+        assertInstanceOf(ActionStatus.Done.class, run(makeRoom(space, 1, Set.of(), records)));
         assertEquals(List.of("minecraft:cobblestone"), merger.merged);
-        assertTrue(dropper.dropped.isEmpty());
-        assertEquals(Change.Kind.OTHER, result.changes().getFirst().kind());
+        assertTrue(carried.stored.isEmpty(), "并出一格就够了，泥土不用挪");
+        assertEquals(1, records.changes.size());
     }
 
     @Test
-    void 只剩贵重品就停下来问_不自己丢() {
-        BackpackStack pearl = new BackpackStack("minecraft:ender_pearl", 2, 16, false, false, true, false);
-        FakeBackpack backpack = new FakeBackpack(1, pearl);
-        FakeDropper dropper = new FakeDropper();
+    void 挪最不值钱的那堆_变化记进发起任务的结果() {
+        FakeBackpack backpack = new FakeBackpack(1, junk("minecraft:cobblestone", 64));
+        FakeCarried carried = new FakeCarried(backpack);
+        InventorySpace space = new InventorySpace(backpack, Optional.empty(), Optional.of(carried),
+                Optional.empty(), Optional.empty(), Optional.empty());
+        CollectedRecords records = new CollectedRecords();
 
-        InventorySpace.Result result = ensureFree(spaceWithDropper(backpack, dropper), 1);
-
-        assertEquals(InventorySpace.State.NEED_ASK, result.state());
-        assertEquals(Question.Reason.NEED_APPROVAL, result.question().reason());
-        // 问了就没动手：背包没变，也没有丢弃的账。
-        assertTrue(dropper.dropped.isEmpty());
-        assertTrue(result.changes().isEmpty());
+        assertInstanceOf(ActionStatus.Done.class, run(makeRoom(space, 1, Set.of(), records)));
+        assertEquals(List.of("minecraft:cobblestone"), carried.stored);
+        assertEquals(Change.Kind.ITEM_STORED, records.changes.getFirst().kind());
+        assertEquals(64, records.changes.getFirst().count());
     }
 
     @Test
-    void 接缝全没接上_腾不出就如实说() {
-        BackpackStack pearl = new BackpackStack("minecraft:ender_pearl", 2, 16, false, false, true, false);
-        FakeBackpack backpack = new FakeBackpack(1, pearl);
-        InventorySpace space = new InventorySpace(backpack, Optional.empty(), Optional.empty(),
+    void 要留着的东西不往外挪() {
+        FakeBackpack backpack = new FakeBackpack(2, junk("minecraft:cobblestone", 64), junk("minecraft:dirt", 64));
+        FakeCarried carried = new FakeCarried(backpack);
+        InventorySpace space = new InventorySpace(backpack, Optional.empty(), Optional.of(carried),
                 Optional.empty(), Optional.empty(), Optional.empty());
 
-        InventorySpace.Result result = ensureFree(space, 2);
-        assertEquals(InventorySpace.State.IMPOSSIBLE, result.state());
-        assertTrue(result.problem().message().contains("腾不出 2 格"));
+        // 正要拿圆石：腾地方不把圆石挪走，挪的是泥土。
+        run(makeRoom(space, 1, Set.of("minecraft:cobblestone"), new CollectedRecords()));
+        assertEquals(List.of("minecraft:dirt"), carried.stored);
     }
 
     @Test
-    void 丢了却没能确认的交互随结果交回_不重复() {
+    void 一步做不成换下一步_不原地重试() {
         FakeBackpack backpack = new FakeBackpack(1, junk("minecraft:cobblestone", 64));
-        FakeDropper dropper = new FakeDropper();
-        InventorySpace space = spaceWithDropper(backpack, dropper);
+        FakeCarried carried = new FakeCarried(backpack);
+        carried.broken = true;
+        InventorySpace space = new InventorySpace(backpack, Optional.empty(), Optional.of(carried),
+                Optional.empty(), Optional.empty(), Optional.empty());
+        CollectedRecords records = new CollectedRecords();
 
-        InventorySpace.Result first = ensureFree(space, 1);
-        // 丢的这一步把没能确认的事实一句带了回来。
-        assertEquals(List.of("腾地方丢 minecraft:cobblestone：抛出的 1 件没等到确认"), first.unconfirmed());
-        // 下一刻再腾：接缝没有新交回的事实就不重复。
-        backpack.clearAll();
-        InventorySpace.Result second = ensureFree(space, 1);
-        assertTrue(second.unconfirmed().isEmpty());
+        // 随身背包打不开，丢东西的部件又没接上：试一次就如实说腾不出，不在随身背包上反复点。
+        ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class,
+                run(makeRoom(space, 1, Set.of(), records)));
+        assertEquals(1, carried.tried);
+        assertEquals(Problem.Kind.INVENTORY_FULL, failed.problem().kind());
+        assertTrue(records.attempts.stream().anyMatch(line -> line.contains("随身背包打不开")), records.attempts::toString);
+    }
+
+    @Test
+    void 只剩贵重品就停下来问_不自己挪() {
+        FakeBackpack backpack = new FakeBackpack(1, pearl());
+        FakeCarried carried = new FakeCarried(backpack);
+        InventorySpace space = new InventorySpace(backpack, Optional.empty(), Optional.of(carried),
+                Optional.empty(), Optional.empty(), Optional.empty());
+        CollectedRecords records = new CollectedRecords();
+
+        ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class,
+                run(makeRoom(space, 1, Set.of(), records)));
+        assertEquals(Problem.Kind.NEED_APPROVAL, failed.problem().kind());
+        assertTrue(failed.problem().message().contains("ender_pearl"), failed.problem().message());
+        // 问了就没动手：背包没变，也没有账。
+        assertTrue(carried.stored.isEmpty());
+        assertTrue(records.changes.isEmpty());
+    }
+
+    @Test
+    void 连贵重品都算上也不够_如实说腾不出() {
+        InventorySpace space = new InventorySpace(new FakeBackpack(1, pearl()), Optional.empty(), Optional.empty(),
+                Optional.empty(), Optional.empty(), Optional.empty());
+
+        ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class,
+                run(makeRoom(space, 2, Set.of(), new CollectedRecords())));
+        assertEquals(Problem.Kind.INVENTORY_FULL, failed.problem().kind());
+        assertTrue(failed.problem().message().contains("腾不出 2 格"), failed.problem().message());
     }
 }

@@ -77,8 +77,6 @@ import org.maiwithu.maicraft.behavior.inventory.ClientDropPickup;
 import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
 import org.maiwithu.maicraft.behavior.inventory.ClientStepsAside;
 import org.maiwithu.maicraft.behavior.inventory.ClientStackMerger;
-import org.maiwithu.maicraft.behavior.inventory.ClientContainerDeposits;
-import org.maiwithu.maicraft.behavior.inventory.ClientItemDropper;
 import org.maiwithu.maicraft.behavior.inventory.DropAvoidance;
 import org.maiwithu.maicraft.behavior.inventory.DropsItems;
 import org.maiwithu.maicraft.behavior.inventory.InventorySpace;
@@ -301,16 +299,14 @@ public final class AbilityCatalog {
                 (at, permissions) -> new ClientMenuOpening(at, permissions, deps.compat().menuLayouts(),
                         bringsClose, deps.interactions(), deps.context()),
                 deps.memory());
-        // 腾地方：合并散堆、记得的容器、存进容器、丢出去四条路都接上了；
-        // 装备与拿东西在背包要满时先按它腾，不再直接说装不上。随身背包的接缝留给随身背包的联动模组。
+        // 腾地方：合并散堆、记得的容器、存进容器、丢出去四条路都接上了，存进容器与丢出去用的是
+        // 存东西、丢弃能力同一份现场部件；装备与拿东西在背包要满时先按它腾。随身背包的接缝留给随身背包的联动模组。
         InventorySpace space = new InventorySpace(deps.backpack(),
                 Optional.of(new ClientStackMerger(deps.context())),
                 Optional.empty(),
                 Optional.of(new RememberedContainers(deps.memory(), deps.characterPosition(), deps.protection())),
-                Optional.of(new ClientContainerDeposits(bringsClose, deps.interactions(),
-                        deps.compat().menuLayouts(), deps.memory(), deps.context())),
-                Optional.of(new ClientItemDropper(toMainhand, dropAvoidance, Optional.of(stepsAside),
-                        deps.characterPosition(), deps.context())));
+                Optional.of(storing),
+                Optional.of(dropping));
         return new Shared(bringsClose, toMainhand, digging, drops, collects, innerNeeds, refusals,
                 permission, playerServices, dropping, storing, space);
     }
