@@ -20,6 +20,7 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.Mth;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
@@ -60,6 +61,12 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
     private List<BlockPos> lastPlacements = List.of();
     /** 正要用的东西每种留几件：垫脚只用多出来的。 */
     private final ScaffoldBlocks.Keeps keeps;
+    /** 镜头离引擎要的精确瞄点差这么多度以内算转到位：平滑镜头收敛到 0.3° 吸附，留点余量。 */
+    private static final float AIM_SETTLED_DEGREES = 3.0f;
+    /** 本刻引擎要的精确瞄点（挖、放）；没要为 null。走到运行按它判断镜头转到位没有，没到位左右键不出手。 */
+    private Float precisionYaw;
+    private Float precisionPitch;
+    private long precisionTick = Long.MIN_VALUE;
 
     /** 不知道什么正要用（离线清单、测试）：垃圾方块照先后垫，什么都不留。 */
     public BaritoneInternals() {
@@ -236,18 +243,36 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
     }
 
     /**
-     * Baritone 为路线瞄准请求转头。普通走路走导航视角通道（背景镜头，不抢交互准星）；
-     * 挖掘与放置的精确方块瞄准走立即瞄准通道。没有本刻上下文时不转。
+     * Baritone 为路线瞄准请求转头。挖掘与放置的精确方块瞄准走本刻的交互瞄准通道：像真人一样平滑转过去，
+     * 转到位之前路上的左右键不出手（见 {@link #precisionAimSettled}）。普通走路的朝向不在这里转——
+     * 走到运行按路线航向自己转镜头（锁航向、真拐弯才转），引擎每刻给的方块中心瞄点只会让镜头逐格点头。
+     * 没有本刻上下文时不转。
      */
     public static void requestLook(float yaw, float pitch, boolean precisionAim) {
         BaritoneInternals internals = ATTACHED.get();
         PlayerContext context = internals == null ? null : internals.tickContext;
-        if (context == null) return;
-        if (precisionAim) {
-            context.input().requestImmediateLook(yaw, pitch, context.clientTick());
-        } else {
-            context.input().requestNavigationLook(yaw, pitch, context.clientTick());
-        }
+        if (context == null || !precisionAim) return;
+        internals.precisionYaw = Mth.wrapDegrees(yaw);
+        internals.precisionPitch = pitch;
+        internals.precisionTick = context.clientTick();
+        context.input().requestLook(yaw, pitch, context.clientTick());
+    }
+
+    /** 本刻引擎要的精确瞄点，镜头转到位了没有：本刻没要精确瞄准算到位。 */
+    boolean precisionAimSettled(LocalPlayer player, long tick) {
+        if (precisionTick != tick || precisionYaw == null || precisionPitch == null || player == null) return true;
+        float yawOff = Math.abs(Mth.wrapDegrees(player.getYRot() - precisionYaw));
+        float pitchOff = Math.abs(player.getXRot() - precisionPitch);
+        return yawOff <= AIM_SETTLED_DEGREES && pitchOff <= AIM_SETTLED_DEGREES;
+    }
+
+    /**
+     * 人按 F8 收回了角色：正在走的那一趟立刻撤掉路线、松开引擎按键，不让引擎自己的刻接着执行
+     * （否则它每刻还在改走路朝向，人按 W 会朝旧路线走）。这一趟不结算；人交回后从当时的位置重新算路接着走。
+     */
+    public void humanTookBody() {
+        BaritoneWalkRun current = active;
+        if (current != null) current.dropRoute();
     }
 
     private PlayerContext tickContext;

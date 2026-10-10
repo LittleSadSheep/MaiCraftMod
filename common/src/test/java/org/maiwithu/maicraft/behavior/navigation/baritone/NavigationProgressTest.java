@@ -43,4 +43,15 @@ class NavigationProgressTest {
         assertTrue(progress.recent(231, 2), "confirmed native changes must count");
         assertFalse(progress.recent(229, 20), "clock rollback cannot invent recent evidence");
     }
+
+    @Test
+    void 重新起算后_人操作过的那段不算没进展() {
+        // 人按 F8 收回角色操作了几百刻再交回：从交回那一刻起算，不把那段算成"长时间没进展"。
+        NavigationProgress progress = new NavigationProgress();
+        progress.observe(0, 64, 0, 10);
+        progress.observe(3, 64, 0, 20);
+        progress.restart(500);
+        assertEquals(0, progress.stalledTicks(500));
+        assertEquals(30, progress.stalledTicks(530));
+    }
 }

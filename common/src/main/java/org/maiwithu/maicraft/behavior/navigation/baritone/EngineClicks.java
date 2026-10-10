@@ -55,8 +55,9 @@ final class EngineClicks {
      *
      * @param left  引擎按着左键（挖）
      * @param right 引擎按着右键（垫块、开门）；和左键同时按时只挖
+     * @param aimed 镜头已经转到引擎要的瞄点：没到位时不开新的挖、不点右键，已经在挖的接着挖
      */
-    Doing tick(PlayerContext context, boolean left, boolean right) {
+    Doing tick(PlayerContext context, boolean left, boolean right, boolean aimed) {
         LocalPlayer player = context.localPlayer();
         if (digger == null || diggerPlayer != player) {
             digger = new BlockDigger(player, context.interactionSender(), context.menuActions(), context.input());
@@ -76,6 +77,11 @@ final class EngineClicks {
             };
         }
         if (left) {
+            // 镜头还在转：准星此刻路过的格不是引擎要挖的那一格，等转到位再下手；已经开挖的接着挖。
+            if (!aimed && digging == null) {
+                digger.tickCooldown();
+                return Doing.NOTHING;
+            }
             return dig(context, player);
         }
         // 引擎松开了左键（换段、撤路线或改成别的动作）：挖到一半的停手，不让它一直按着。
@@ -84,7 +90,7 @@ final class EngineClicks {
         } else {
             digger.tickCooldown();
         }
-        if (right && useCooldown == 0) {
+        if (right && useCooldown == 0 && aimed) {
             return startUse(context, player);
         }
         return Doing.NOTHING;

@@ -255,7 +255,9 @@ public final class LocalPlayerInput implements PlayerInput {
 
     @Override
     public void lookAt(LocalPlayer player, Vec3 point) {
-        // 镜头转向世界坐标里的一个点：按眼位换算偏航与俯仰，走本刻立即瞄准通道。
+        // 镜头转向世界坐标里的一个点：按眼位换算偏航与俯仰，走本刻的交互瞄准通道——像真人一样
+        // 平滑转过去，不闪现；调用方等真实视线到位（aimReady、AimCheck.settled）再出手。
+        // 瞬转只留给紧急情况（落地救援那类），另走 requestImmediateLook。
         // 载具相机的逆变换属于载具姿势补偿，归对应 compat 移植时再加，这里只处理步行眼位。
         if (!automationOwnsControls()) return;
         Vec3 eye = player.getEyePosition();
@@ -265,7 +267,7 @@ public final class LocalPlayerInput implements PlayerInput {
         double horizontal = Math.sqrt(dx * dx + dz * dz);
         float yaw = (float) (Mth.atan2(dz, dx) * (double) Mth.RAD_TO_DEG) - 90.0f;
         float pitch = (float) -(Mth.atan2(dy, horizontal) * (double) Mth.RAD_TO_DEG);
-        requestImmediateLook(yaw, pitch, activeTick);
+        requestLook(yaw, pitch, activeTick);
     }
 
     void beginTick(long tickRevision) {

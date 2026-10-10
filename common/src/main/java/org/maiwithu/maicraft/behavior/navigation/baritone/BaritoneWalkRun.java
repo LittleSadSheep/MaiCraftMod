@@ -9,6 +9,7 @@ import baritone.api.utils.IInputOverrideHandler;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import baritone.api.utils.input.Input;
 import baritone.behavior.PathingBehavior;
+import baritone.pathing.path.PathExecutor;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -70,6 +71,10 @@ final class BaritoneWalkRun implements WalkRun {
     private final List<BlockPos> placements = new ArrayList<>();
     /** 引擎在路上按下的左右键：挖开挡路的、垫方块、开门，都经它交给原生交互并等确认。 */
     private final EngineClicks clicks = new EngineClicks();
+    /** 走路镜头的航向：偏差大才转、小修正不动、每刻最多转几度，不逐格点头。 */
+    private final NavigationCameraCourse course = new NavigationCameraCourse();
+    /** 人按 F8 收回角色时路线被撤了：交回后第一刻重新算路、进展计时重新起算。 */
+    private boolean routeDropped;
     /** 最近一刻的角色上下文；暂停、放弃时用它停挖、交还没等到确认的右键。 */
     private PlayerContext lastContext;
     /** 这一趟在哪些面前格反复卡住：第一次先切途经的门，第二次列为障碍绕开，障碍用完才如实走不通。 */
@@ -226,6 +231,12 @@ final class BaritoneWalkRun implements WalkRun {
         LocalPlayer player = context.localPlayer();
         var pathing = owner.pathing();
         IBaritone engine = owner.engine();
+        if (routeDropped) {
+            // 人交回了角色：从当时的位置重新算路；人操作的那段不算"长时间没进展"。
+            routeDropped = false;
+            displacement.restart(context.clientTick());
+            engine.getCustomGoalProcess().setGoalAndPath(engineGoal);
+        }
         boolean routePresent = pathing.getCurrent() != null;
         boolean calculating = pathing.getInProgress().isPresent();
 
@@ -369,29 +380,54 @@ final class BaritoneWalkRun implements WalkRun {
     private void workBlocks(PlayerContext context, IInputOverrideHandler input) {
         boolean left = input.isInputForcedDown(Input.CLICK_LEFT);
         boolean right = input.isInputForcedDown(Input.CLICK_RIGHT);
-        EngineClicks.Doing doing = clicks.tick(context, left, right);
+        // 镜头还没转到引擎要的瞄点就不下手：准星路过的别的格不能挖、不能点。
+        boolean aimed = owner.precisionAimSettled(context.localPlayer(), context.clientTick());
+        EngineClicks.Doing doing = clicks.tick(context, left, right, aimed);
         clicks.takePlaced().ifPresent(this::recordPlaced);
         if (doing != EngineClicks.Doing.NOTHING) {
             displacement.confirm(context.clientTick());
         }
     }
 
-    // 普通走路用缓慢改变的路线朝向：镜头不追随引擎每刻的方块中心瞄准点，减少逐格点头。
+    // 普通走路的镜头锁在路线航向上：朝下一个路点算出航向，偏差超过二十五度才开始转、缩到十五度以内就停、
+    // 每刻最多转九度，路线里的小修正不转镜头；俯仰平地固定略向下，潜泳时跟着实际潜泳方向。
+    // 不追引擎每刻给的方块中心瞄点——那会压低视线、随靠近越来越陡、每段交接弹回，逐格点头。
     private void lookAlongRoute(IBaritone engine, PlayerInput playerInput,
                                 PlayerContext context, LocalPlayer player, boolean routePresent) {
         Vec3 anchor = null;
         var executor = engine.getPathingBehavior().getCurrent();
+        boolean submerged = false;
+        float submergedPitch = 0.0f;
         if (routePresent && executor != null) {
             var positions = executor.getPath().positions();
             if (!positions.isEmpty()) {
                 int index = Math.clamp(executor.getPosition() + 1, 0, positions.size() - 1);
                 anchor = Vec3.atBottomCenterOf(positions.get(index));
             }
+            if (executor instanceof PathExecutor pathExecutor && pathExecutor.submergedWaterTravelActive()) {
+                submerged = true;
+                submergedPitch = pathExecutor.submergedWaterCameraPitch();
+            }
         }
         if (anchor == null) return;
         Vec3 delta = anchor.subtract(player.getEyePosition());
-        float yaw = (float) (Math.atan2(delta.z, delta.x) * (180 / Math.PI)) - 90.0f;
-        playerInput.requestNavigationLook(yaw, 8.0f, context.clientTick());
+        float rawYaw = (float) (Math.atan2(delta.z, delta.x) * (180 / Math.PI)) - 90.0f;
+        float yaw = course.target(rawYaw, context.clientTick());
+        float pitch = NavigationCameraCourse.pitch(submergedPitch, submerged);
+        playerInput.requestNavigationLook(yaw, pitch, context.clientTick());
+    }
+
+    /**
+     * 人按 F8 收回了角色：立刻撤掉路线、松开引擎按键、停挖，不让引擎自己的刻接着执行；
+     * 这一趟不结算，人交回后从当时的位置重新算路接着走。
+     */
+    void dropRoute() {
+        var pathing = owner.pathing();
+        if (pathing != null) pathing.forceCancel();
+        owner.engine().getInputOverrideHandler().clearAllKeys();
+        clicks.stop(null);
+        course.reset();
+        routeDropped = true;
     }
 
     private void finishEngine(IBaritone engine, PathingBehavior pathing) {

@@ -25,6 +25,13 @@ final class NavigationProgress {
     }
 
     void confirm(long tick) { confirmed = tick; }
+
+    /** 从这一刻重新起算：人操作过的那段、暂停过的那段不算"长时间没进展"。 */
+    void restart(long tick) {
+        started = tick;
+        confirmed = Long.MIN_VALUE;
+        sampled = false;
+    }
     long confirmedTick() { return confirmed; }
 
     boolean recent(long tick, int grace) {
