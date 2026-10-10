@@ -77,7 +77,7 @@ final class EquipTask extends PhasedTask<EquipTask.Phase> {
     @Override
     protected Next<Phase> tick(Phase phase, TickContext context) {
         if (phase == Phase.FREE_SPACE) {
-            return makeRoom();
+            return makeRoom(context);
         }
         if (currentSlot == null) {
             return settle();
@@ -99,14 +99,16 @@ final class EquipTask extends PhasedTask<EquipTask.Phase> {
         };
     }
 
-    // 卸下前先保证有一格空位放取下的东西；腾挪的每一步变化都如实记账。
-    private Next<Phase> makeRoom() {
+    // 卸下前先保证有一格空位放取下的东西；腾挪的每一步变化与没能确认的交互都如实记账。
+    private Next<Phase> makeRoom(TickContext context) {
         if (space.isEmpty()) {
             // 腾地方的模型没接上：直接试着取下，装不装得下由游戏自己结算、由核对如实报告。
             return Next.go(Phase.HANDLING, "没有腾背包的模型可用，直接试着取下");
         }
-        InventorySpace.Result result = space.get().ensureFree(1, "卸下装备");
+        InventorySpace.Result result = space.get().ensureFree(1, "卸下装备", input.permissions(), context);
         result.changes().forEach(this::recordChange);
+        result.unconfirmed().forEach(fact ->
+                recordUnconfirmed(new Change(Change.Kind.OTHER, "腾背包", 1, fact)));
         return switch (result.state()) {
             case FREE -> Next.go(Phase.HANDLING, "腾出地方了");
             case PROGRESS -> {

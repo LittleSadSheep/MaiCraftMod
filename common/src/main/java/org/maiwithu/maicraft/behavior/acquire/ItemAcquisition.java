@@ -209,7 +209,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             return switch (stage) {
                 // 重新清点后还缺：问遍来源，世界可能已经变了，每一轮都重新问价。
                 case CONSULT -> consult(carried);
-                case SPACE -> makeRoom();
+                case SPACE -> makeRoom(tick);
                 case RUN -> runStep(tick);
             };
         }
@@ -257,11 +257,13 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         }
 
         // 拿东西前先腾一格；腾格子要动贵重品时把问题原样交上去，不自己丢东西。
-        private ActionStatus makeRoom() {
+        // 腾挪过程中点出去了却没能确认结果的交互，照来源的同一条路交回给发起方。
+        private ActionStatus makeRoom(TickContext tick) {
             if (space.isEmpty()) {
                 return startStep();
             }
-            InventorySpace.Result result = space.get().ensureFree(1, request.purpose());
+            InventorySpace.Result result = space.get().ensureFree(1, request.purpose(), permissions, tick);
+            forwardSpaceFacts(result);
             return switch (result.state()) {
                 case FREE, PROGRESS -> {
                     if (result.state() == InventorySpace.State.FREE) yield startStep();
@@ -271,6 +273,12 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                 case IMPOSSIBLE -> leaveChain(ActionStatus.failed(Problem.of(Problem.Kind.INVENTORY_FULL,
                         "背包腾不出来，装不下为「" + request.purpose() + "」要拿的东西")));
             };
+        }
+
+        // 腾地方交回的没能确认交互一句一条转给发起方；只转新记下的，再问一遍也不重复。
+        private void forwardSpaceFacts(InventorySpace.Result result) {
+            if (onUnconfirmed == null) return;
+            result.unconfirmed().forEach(onUnconfirmed);
         }
 
         // 推进当前来源一步；做完就回到清点，做砸了把这个来源划掉、换计划里的下一个。
@@ -399,6 +407,8 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                 forwardUnconfirmed();
                 step = null;
             }
+            // 腾地方的一步可能还在半路上：撒手它，开着的界面请游戏关上，没等到确认的交互留在读端里。
+            space.ifPresent(InventorySpace::abandonStep);
             leaveChain(ActionStatus.done());
         }
 

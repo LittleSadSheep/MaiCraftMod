@@ -75,8 +75,12 @@ import org.maiwithu.maicraft.behavior.inventory.ClientGearChanges;
 import org.maiwithu.maicraft.behavior.inventory.ClientDropPickup;
 import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
 import org.maiwithu.maicraft.behavior.inventory.ClientStepsAside;
+import org.maiwithu.maicraft.behavior.inventory.ClientStackMerger;
+import org.maiwithu.maicraft.behavior.inventory.ClientContainerDeposits;
+import org.maiwithu.maicraft.behavior.inventory.ClientItemDropper;
 import org.maiwithu.maicraft.behavior.inventory.DropAvoidance;
-import org.maiwithu.maicraft.game.interaction.ClientChatDraftScreen;
+import org.maiwithu.maicraft.behavior.inventory.InventorySpace;
+import org.maiwithu.maicraft.behavior.inventory.RememberedContainers;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
@@ -94,6 +98,7 @@ import org.maiwithu.maicraft.behavior.travel.TravelProgressListener;
 import org.maiwithu.maicraft.behavior.travel.TravelWorldView;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.ChatChannel;
+import org.maiwithu.maicraft.game.interaction.ClientChatDraftScreen;
 import org.maiwithu.maicraft.game.interaction.OverlayMessages;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.game.player.InputDriver;
@@ -206,21 +211,20 @@ public final class AbilityCatalog {
                 deps.equipment(), deps.effects(), deps.itemTags(), deps.useKeyProjection(),
                 Optional.of(shared.toMainhand())));
 
-        // 装备：穿卸走背包界面的原生操作；腾背包的接缝还没有实现方，背包满了先按装不上说。
+        // 装备：穿卸走背包界面的原生操作；卸下时背包满了先按腾地方腾一格，腾不动才如实说装不下。
         registry.register(new EquipModule(deps.backpack(), deps.offhand(), deps.equipment(),
-                deps.gearFit(), Optional.empty(),
+                deps.gearFit(), Optional.of(shared.space()),
                 Optional.of(new ClientGearChanges(deps.context(), shared.toMainhand())), deps.itemTags()));
 
         // 丢弃：换手接上了；丢完朝旁边走两步，别让丢出的东西落回自己头上。
         // 落点登记与走开共用同一份避让：登记写进去，走开的每一步绕开它。
-        DropAvoidance dropAvoidance = new DropAvoidance();
         registry.register(new DropModule(deps.backpack(), deps.offhand(), deps.itemTags(),
-                deps.characterPosition(), dropAvoidance, Optional.of(shared.toMainhand()),
-                Optional.of(new ClientStepsAside(deps.inputs(), dropAvoidance))));
+                deps.characterPosition(), shared.dropAvoidance(), Optional.of(shared.toMainhand()),
+                Optional.of(shared.stepsAside())));
 
         // 拿到物品：身上的不算来源（引擎开场就清点），已实现的途径都登记，见 obtainModule。
         registry.register(obtainModule(deps, shared.playerServices(), shared.bringClose(), shared.toMainhand(),
-                shared.permission(), shared.innerNeeds(), shared.collects()));
+                shared.permission(), shared.innerNeeds(), shared.collects(), shared.space()));
 
         // 存东西：找容器把现场扫描与世界记忆并起来，打开容器、逐笔搬运与挖盖子都接上了。
         registry.register(depositModule(deps, shared.bringClose(), shared.collects()));
@@ -248,11 +252,12 @@ public final class AbilityCatalog {
 
     /**
      * 清单里好几处共用的现场部件：靠近与换手、挖一格与捡掉落物、拿到物品的内需入口、
-     * 游戏拒绝读端、许可检查点，以及联动能用的那份玩家行为。
+     * 游戏拒绝读端、许可检查点、联动能用的那份玩家行为、丢弃避让与走开，以及腾地方。
      */
     private record Shared(LiveApproaches bringClose, ClientMovesToMainhand toMainhand, LiveBlockDigging digging,
             ClientDropPickup drops, ClientCollectsBlocks collects, DeferredInnerNeeds innerNeeds,
-            ClientGameRefusals refusals, PermissionCheck permission, PlayerServices playerServices) {
+            ClientGameRefusals refusals, PermissionCheck permission, PlayerServices playerServices,
+            DropAvoidance dropAvoidance, ClientStepsAside stepsAside, InventorySpace space) {
     }
 
     /** 把共用的现场部件一次建好：世界记忆之外的每刻现场都从这里出。 */
@@ -279,8 +284,22 @@ public final class AbilityCatalog {
         PlayerServices playerServices = new PlayerServices(deps.context(), bringsClose, deps.interactions(),
                 toMainhand, innerNeeds, deps.protection(), deps.itemTags(),
                 deps.compat().menuLayouts(), deps.blockScans());
+        // 丢弃落点避让与走开读端：丢弃能力与腾地方的丢弃共用同一份，
+        // 谁丢的都登记进同一本账，走路时一并绕开，不把刚丢出去的又吸回来。
+        DropAvoidance dropAvoidance = new DropAvoidance();
+        ClientStepsAside stepsAside = new ClientStepsAside(deps.inputs(), dropAvoidance);
+        // 腾地方：合并散堆、记得的容器、存进容器、丢出去四条路都接上了；
+        // 装备与拿东西在背包要满时先按它腾，不再直接说装不上。随身背包的接缝留给随身背包的联动模组。
+        InventorySpace space = new InventorySpace(deps.backpack(),
+                Optional.of(new ClientStackMerger(deps.context())),
+                Optional.empty(),
+                Optional.of(new RememberedContainers(deps.memory(), deps.characterPosition(), deps.protection())),
+                Optional.of(new ClientContainerDeposits(bringsClose, deps.interactions(),
+                        deps.compat().menuLayouts(), deps.memory(), deps.context())),
+                Optional.of(new ClientItemDropper(toMainhand, dropAvoidance, Optional.of(stepsAside),
+                        deps.characterPosition(), deps.context())));
         return new Shared(bringsClose, toMainhand, digging, drops, collects, innerNeeds, refusals,
-                permission, playerServices);
+                permission, playerServices, dropAvoidance, stepsAside, space);
     }
 
     /**
@@ -395,7 +414,7 @@ public final class AbilityCatalog {
      */
     private static AbilityModule obtainModule(Deps deps, PlayerServices playerServices, LiveApproaches bringsClose,
             ClientMovesToMainhand toMainhand, PermissionCheck permission, DeferredInnerNeeds innerNeeds,
-            ClientCollectsBlocks collects) {
+            ClientCollectsBlocks collects, InventorySpace space) {
         RegistryRecipeReads recipeReads = new RegistryRecipeReads(deps.context(), deps.itemTags(), deps.furnaceFuels());
         // 在工作站上动手：熔炉添燃料时按同一份燃料表挑身上烧得最久的。
         RecipeRuns recipeRuns = new MenuRecipeRuns(bringsClose, deps.interactions(),
@@ -425,7 +444,7 @@ public final class AbilityCatalog {
         sources.addAll(deps.compat().itemSources(playerServices));
         ItemAcquisition acquisition = new ItemAcquisition(sources,
                 deps.backpack(), deps.offhand(), deps.itemTags(),
-                deps.characterPosition(), Optional.empty(), ItemAcquisition.DEFAULT_MAX_DEPTH);
+                deps.characterPosition(), Optional.of(space), ItemAcquisition.DEFAULT_MAX_DEPTH);
         innerNeeds.attach(acquisition);
         // via 的可选值就是这些来源自报的途径：来源列表变了，能力说明里的参数表跟着变。
         return new ObtainAbility(acquisition, viasOf(sources),
