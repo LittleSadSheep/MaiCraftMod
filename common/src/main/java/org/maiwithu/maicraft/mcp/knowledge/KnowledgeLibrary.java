@@ -138,12 +138,16 @@ public final class KnowledgeLibrary {
     }
 
     /**
-     * 按 lookup 的 id 找一篇：给完整地址就按地址读；只给末段名（例如 food）时找末段对得上的那一篇，
-     * 和查能力时可以省掉 maicraft: 前缀一样。找不到、或末段名对上不止一篇时返回空，不拿相近的顶替。
+     * 按 lookup 的 id 找一篇：给完整地址就按地址读；给物品或方块的注册 ID（例如 create:mechanical_mixer）读它的物品资料页；
+     * 只给末段名（例如 food）时找末段对得上的那一篇，和查能力时可以省掉 maicraft: 前缀一样。
+     * 找不到、或末段名对上不止一篇时返回空，不拿相近的顶替。
      */
     public Optional<KnowledgeDocument> find(String id) {
         String wanted = id.strip();
-        if (!wanted.contains("://")) {
+        if (ItemPages.looksLikeItemId(wanted.toLowerCase(Locale.ROOT))) {
+            // LLM 手里常常只有物品 ID：直接读这件物品的资料页。
+            wanted = ItemPages.uri(wanted.toLowerCase(Locale.ROOT));
+        } else if (!wanted.contains("://")) {
             String suffix = "/" + wanted.toLowerCase(Locale.ROOT);
             List<String> uris = catalog().stream().map(KnowledgeDocument.Entry::uri)
                     .filter(uri -> uri.toLowerCase(Locale.ROOT).endsWith(suffix)).toList();
