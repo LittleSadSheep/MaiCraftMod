@@ -45,6 +45,7 @@ import static baritone.api.pathing.movement.MovementStatus.*;
 import org.maiwithu.maicraft.behavior.navigation.baritone.SubmergedWaterTravelPolicy;
 import org.maiwithu.maicraft.behavior.navigation.baritone.MovementStall;
 import org.maiwithu.maicraft.behavior.navigation.baritone.GroundJumpContinuation;
+import org.maiwithu.maicraft.behavior.navigation.baritone.TravelJumpPolicy;
 
 /**
  * Behavior to execute a precomputed path
@@ -479,7 +480,12 @@ public class PathExecutor implements IPathExecutor, Helper {
 
         // if the movement requested sprinting, then we're done
         if (requested) {
-            // 赶路跑跳（连续疾跑跳走廊）还没有接回：这里只保留普通的疾跑与跳跃按键。
+            // 赶路跑跳：已经决定疾跑，且跳跃可达走廊里任何落点都无摔伤（深洞、流体、立柱会否决这一跳），
+            // 按住跳跃把疾跑换成跑跳；顶头走廊自动获得更短的连跳节奏。
+            if (TravelJumpPolicy.shouldTravelJump(behavior.baritone, path.movements(), pathPosition,
+                    runway -> groundJump.launch(current.getSrc().getY(), ctx.player().getY(), runway))) {
+                behavior.baritone.getInputOverrideHandler().setInputForceState(Input.JUMP, true);
+            }
             return true;
         }
 
