@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.deposit;
 
-import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -14,7 +13,8 @@ import java.util.function.BiPredicate;
 import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.behavior.inventory.ContainerChooser;
-import org.maiwithu.maicraft.behavior.menu.MenuOpening;
+import org.maiwithu.maicraft.behavior.inventory.KnownContainer;
+import org.maiwithu.maicraft.behavior.inventory.StoresInContainer;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.Target;
@@ -31,19 +31,16 @@ import org.maiwithu.maicraft.kernel.task.PhasedTask;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
- * 存东西的任务：挑好容器、清开压住盖子的方块、走过去点开、把要存的东西一笔笔搬进去、关上；
- * 一只满了换下一只，都满了就带着还剩多少结束。
+ * 存东西的任务：挑好容器、清开压住盖子的方块，再交给玩家行为层的存放动作（走过去点开、一笔笔搬进去、
+ * 记下里面有什么、关上）；一只满了换下一只，都满了就带着还剩多少结束。
  *
- * <p>每一步的动作都交给基类持有：被打断时开着的界面先关上，恢复后重新点开接着存；被取消时界面也关上。
- * 只记确认过的量：每一笔按背包少了几件、容器多了几件对上才记账，对不上的进未确认，不凑数。
+ * <p>存放动作和腾地方存进记得的箱子是同一份：被打断时开着的界面先关上，恢复后重新点开接着存；
+ * 被取消时界面也关上。只记确认过的量：每一笔按背包少了几件、容器多了几件对上才记账，对不上的进未确认，不凑数。
  */
 final class DepositTask extends PhasedTask<DepositTask.Phase> {
 
-    /** 挑容器 → 清开盖子 → 走过去点开 → 搬 → 关上 → 换下一只。 */
-    enum Phase { CHOOSE, DIG, OPEN, TRANSFER, CLOSE, NEXT }
-
-    /** 一只容器搬到一半界面被关掉（被打断、被别人关）时，重新点开接着存的次数。 */
-    private static final int REOPEN_LIMIT = 2;
+    /** 挑容器 → 清开盖子 → 存进去（走过去点开、搬、关上）→ 换下一只。 */
+    enum Phase { CHOOSE, DIG, STORE, NEXT }
 
     private final DepositInput input;
     private final DepositServices services;
@@ -58,11 +55,7 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
     private boolean planned;
     private Action prepared;
     private ContainerChooser.Entry current;
-    private MenuOpening opening;
-    private ContainerTransfer transfer;
-    /** 界面被关掉时没结算的那一笔：重新点开同一只后补结算。 */
-    private ContainerTransfer.Unsettled carryOver;
-    private int reopened;
+    private StoresInContainer storing;
 
     DepositTask(DepositInput input, DepositServices services, BackpackView backpack) {
         super("存东西", Phase.CHOOSE, new ProgressTracker(200, 20L * 60 * 10));
@@ -81,9 +74,7 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
         return switch (phase) {
             case CHOOSE -> choose();
             case DIG -> dig(context);
-            case OPEN -> open(context);
-            case TRANSFER -> transfer(context);
-            case CLOSE -> closeMenu(context);
+            case STORE -> store(context);
             case NEXT -> nextContainer();
         };
     }
@@ -183,8 +174,6 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
         if (current == null) {
             return finish();
         }
-        reopened = 0;
-        carryOver = null;
         if (current.digLidFirst()) {
             Optional<Action> dig = services.digs() == null ? Optional.empty()
                     : services.digs().dig(lidCell(), input.permissions());
@@ -194,13 +183,13 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
             }
             return goWith(Phase.DIG, dig.get(), "先清开" + name() + "盖子上的方块");
         }
-        return openCurrent();
+        return storeInCurrent();
     }
 
     private Next<Phase> dig(TickContext context) {
         return switch (runAction(context)) {
             case ActionStatus.Running running -> Next.stay();
-            case ActionStatus.Done done -> openCurrent();
+            case ActionStatus.Done done -> storeInCurrent();
             case ActionStatus.Failed failed -> {
                 recordAttempt("清开" + name() + "盖子上的方块", failed.problem().message());
                 yield Next.go(Phase.NEXT, "这只的盖子清不开，换下一只");
@@ -208,88 +197,22 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
         };
     }
 
-    // 走过去点开；带着上一趟没结算的那一笔时，点开前就被收尾（被取消）也把它记进未确认，不悄悄丢掉。
-    private Next<Phase> openCurrent() {
-        opening = services.opens().open(containerPos(), input.permissions());
-        Action open = carryOver == null ? opening : new Action() {
-            @Override public ActionStatus tick(TickContext context) {
-                return opening.tick(context);
-            }
-
-            @Override public void pause() {
-                opening.pause();
-            }
-
-            @Override public void close() {
-                opening.close();
-                if (opening.opened().isEmpty()) dropCarryOver();
-            }
-
-            @Override public String describe() {
-                return opening.describe();
-            }
-        };
-        return goWith(Phase.OPEN, open, "走过去点开" + name());
+    // 交给存放动作：走过去点开、按存什么的顺序搬、记下里面有什么、关上；界面中途被关掉它自己重新点开。
+    private Next<Phase> storeInCurrent() {
+        ContainerChooser.Candidate candidate = current.candidate();
+        storing = new StoresInContainer(new KnownContainer(candidate.name(), candidate.at(), candidate.blockTypeId()),
+                List.copyOf(wanted.keySet()), ledger(), input.permissions(), services.storing());
+        return goWith(Phase.STORE, storing, "走过去点开" + name());
     }
 
-    // 上一趟没结算的那一笔补不上了：照实记进未确认。
-    private void dropCarryOver() {
-        if (carryOver == null) return;
-        recordUnconfirmed(new Change(Change.Kind.OTHER, "搬运", 1,
-                "往" + name() + "里搬 " + carryOver.itemId() + " 的那一下还没结算界面就被关掉了"));
-        carryOver = null;
-    }
-
-    // 点开并同步完就开始搬；开不了（锁着、坐着猫、被拒绝、界面认不出）记一笔换下一只。
-    private Next<Phase> open(TickContext context) {
+    // 这只存完了（放不下的已经记了一笔）就换下一只；开不了的原因留着，一件都没存进时拿它说明。
+    private Next<Phase> store(TickContext context) {
         return switch (runAction(context)) {
             case ActionStatus.Running running -> Next.stay();
-            case ActionStatus.Done done -> {
-                transfer = new ContainerTransfer(opening.opened().orElseThrow(), List.copyOf(wanted.keySet()),
-                        ledger(), carryOver);
-                carryOver = null;
-                yield goWith(Phase.TRANSFER, transfer, name() + "打开了，开始搬");
-            }
+            case ActionStatus.Done done -> Next.go(Phase.NEXT, name() + "存完了");
             case ActionStatus.Failed failed -> {
-                openFailures.add(failed.problem());
-                recordAttempt("打开" + name(), failed.problem().message());
-                yield Next.go(Phase.NEXT, "这只开不了，换下一只");
-            }
-        };
-    }
-
-    // 搬完就记下容器里现在有什么再关上；界面中途被关掉就重新点开接着存，次数用完换下一只。
-    private Next<Phase> transfer(TickContext context) {
-        return switch (runAction(context)) {
-            case ActionStatus.Running running -> Next.stay();
-            case ActionStatus.Done done -> {
-                transfer.contentsAfter().ifPresent(this::rememberContents);
-                if (!transfer.full().isEmpty()) {
-                    recordAttempt("往" + name() + "里存", "放不下了：" + String.join("、", transfer.full()));
-                }
-                yield goWith(Phase.CLOSE, opening.opened().orElseThrow().closing(), name() + "存完了，关上");
-            }
-            case ActionStatus.Failed failed -> {
-                carryOver = transfer.unsettled().orElse(null);
-                if (reopened < REOPEN_LIMIT) {
-                    reopened++;
-                    recordAttempt("往" + name() + "里存", failed.problem().message() + "；重新点开接着存");
-                    yield openCurrent();
-                }
-                recordAttempt("往" + name() + "里存", failed.problem().message() + "；换下一只");
-                dropCarryOver();
-                yield Next.go(Phase.NEXT, "换下一只容器");
-            }
-        };
-    }
-
-    private Next<Phase> closeMenu(TickContext context) {
-        return switch (runAction(context)) {
-            case ActionStatus.Running running -> Next.stay();
-            case ActionStatus.Done done -> Next.go(Phase.NEXT, name() + "关上了");
-            case ActionStatus.Failed failed -> {
-                recordAttempt("关上" + name() + "的界面", failed.problem().message());
-                yield Next.go(Phase.NEXT, "界面关不上，先继续");
+                storing.openFailure().ifPresent(openFailures::add);
+                yield Next.go(Phase.NEXT, "这只存不进去，换下一只");
             }
         };
     }
@@ -310,9 +233,9 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
                 "存进了 " + deposited + " 件，还有 " + (total - deposited) + " 件没存下").problem(why).build());
     }
 
-    // 搬运的账：确认一笔记一笔变化，对不上的进未确认。
-    private ContainerTransfer.Ledger ledger() {
-        return new ContainerTransfer.Ledger() {
+    // 存放的账：确认一笔记一笔变化，对不上的进未确认，试过的办法进 attempts。
+    private StoresInContainer.Ledger ledger() {
+        return new StoresInContainer.Ledger() {
             @Override public int left(String itemId) {
                 return wanted.getOrDefault(itemId, 0) - confirmed.getOrDefault(itemId, 0);
             }
@@ -326,14 +249,11 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
             @Override public void unconfirmed(String fact) {
                 recordUnconfirmed(new Change(Change.Kind.OTHER, "搬运", 1, fact));
             }
-        };
-    }
 
-    // 世界记忆按物品记"里面有什么"：取东西时按它找箱子。
-    private void rememberContents(Map<String, Integer> contents) {
-        if (services.memory() == null) return;
-        services.memory().rememberContainerOpened(current.candidate().at(), current.candidate().blockTypeId(),
-                List.copyOf(contents.keySet()), Instant.now());
+            @Override public void attempt(String tried, String whatHappened) {
+                recordAttempt(tried, whatHappened);
+            }
+        };
     }
 
     private boolean allStored() {
@@ -350,12 +270,8 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
         return current.candidate().name();
     }
 
-    private BlockPos containerPos() {
-        return cellOf(current.candidate().at());
-    }
-
     private BlockPos lidCell() {
-        return containerPos().above();
+        return cellOf(current.candidate().at()).above();
     }
 
     private static BlockPos cellOf(WorldPosition at) {
@@ -391,9 +307,7 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
         return switch (value) {
             case CHOOSE -> "挑容器";
             case DIG -> "清开盖子上的方块";
-            case OPEN -> "走过去点开容器";
-            case TRANSFER -> "把东西搬进去";
-            case CLOSE -> "关上界面";
+            case STORE -> "走过去点开容器、搬进去、关上";
             case NEXT -> "换下一只容器";
         };
     }

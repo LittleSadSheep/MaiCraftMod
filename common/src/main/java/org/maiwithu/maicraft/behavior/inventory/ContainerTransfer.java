@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.ability.deposit;
+package org.maiwithu.maicraft.behavior.inventory;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -28,25 +28,14 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * <p>整堆用快速移动；只存一部分时按搬运计划拆成半堆，明确放进一格（快速移动会把整堆多搬走）。
  * 先看容器里放不放得下再动手，不把东西拿在光标上再找地方放。背包少了几件、容器多了几件，
  * 两边对上才记账；点了没动是这只放不下了，换下一样或下一只；对不上的记进未确认，不凑数。
- * 被打断时请游戏关上界面（光标上的东西由原版还回背包），恢复后由任务重新点开接着存；
+ * 被打断时请游戏关上界面（光标上的东西由原版还回背包），恢复后由存放动作重新点开接着存；
  * 关界面前没来得及结算的那一笔交给重新点开后的这一趟，按同一只容器两侧的总数补结算。
+ * 只在 {@link StoresInContainer} 里用：走过去、点开、关上、重开都归它。
  */
 final class ContainerTransfer implements Action {
 
     /** 一下点击结清后，等两侧内容同步过来的宽限（刻）；过了还纹丝不动就是放不下。 */
     static final int SETTLE_TICKS = 5;
-
-    /** 搬运的账：还要存几件、确认存进了几件、哪一下对不上。 */
-    interface Ledger {
-        /** 这种东西还要存几件。 */
-        int left(String itemId);
-
-        /** 确认存进了这么多。 */
-        void stored(String itemId, int amount);
-
-        /** 点了但对不上账的一下，原样记下。 */
-        void unconfirmed(String fact);
-    }
 
     /** 一下原版鼠标操作：在哪一格、快速移动还是左右键。 */
     private record Click(int slotId, boolean quickMove, int button, boolean takesToCursor) {}
@@ -59,7 +48,7 @@ final class ContainerTransfer implements Action {
 
     private final OpenedMenu menu;
     private final List<String> order;
-    private final Ledger ledger;
+    private final StoresInContainer.Ledger ledger;
     /** 这只容器里放不下的东西：不再往这只里塞。 */
     private final Set<String> full = new HashSet<>();
     private Move inFlight;
@@ -75,7 +64,7 @@ final class ContainerTransfer implements Action {
      * @param ledger    搬运的账
      * @param carryOver 上一趟界面被关掉时没结算的那一笔；没有为 null
      */
-    ContainerTransfer(OpenedMenu menu, List<String> order, Ledger ledger, Unsettled carryOver) {
+    ContainerTransfer(OpenedMenu menu, List<String> order, StoresInContainer.Ledger ledger, Unsettled carryOver) {
         this.menu = menu;
         this.order = List.copyOf(order);
         this.ledger = ledger;
@@ -127,7 +116,7 @@ final class ContainerTransfer implements Action {
         for (String itemId : order) {
             int left = ledger.left(itemId);
             if (left <= 0 || full.contains(itemId)) continue;
-            int sourceIndex = firstOf(reading.playerSnapshots(), itemId);
+            int sourceIndex = sourceFor(reading.playerSnapshots(), itemId, left);
             if (sourceIndex < 0) continue;
             SlotSnapshot source = reading.playerSnapshots().get(sourceIndex);
             Optional<Deque<Click>> clicks = clicksFor(reading, reading.playerSlotIds().get(sourceIndex), source, left);
@@ -233,11 +222,18 @@ final class ContainerTransfer implements Action {
         return empty;
     }
 
-    private static int firstOf(List<SlotSnapshot> snapshots, String itemId) {
+    // 挑从哪一格搬：先挑整格都该存的（件数不超过还要存的，取最多的那格，存完正好腾出一整格）；
+    // 每一格都比还要存的多，才从第一格拆出要存的那几件。腾地方要存的正是背包里的一整格，靠这条才真腾得出来。
+    private static int sourceFor(List<SlotSnapshot> snapshots, String itemId, int left) {
+        int first = -1;
+        int whole = -1;
         for (int i = 0; i < snapshots.size(); i++) {
-            if (!snapshots.get(i).isEmpty() && idOf(snapshots.get(i)).equals(itemId)) return i;
+            SlotSnapshot snapshot = snapshots.get(i);
+            if (snapshot.isEmpty() || !idOf(snapshot).equals(itemId)) continue;
+            if (first < 0) first = i;
+            if (snapshot.count() <= left && (whole < 0 || snapshot.count() > snapshots.get(whole).count())) whole = i;
         }
-        return -1;
+        return whole >= 0 ? whole : first;
     }
 
     private static int total(List<SlotSnapshot> snapshots, String itemId) {

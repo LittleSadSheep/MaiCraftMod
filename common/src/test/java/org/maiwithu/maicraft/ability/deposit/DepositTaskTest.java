@@ -19,6 +19,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.inventory.ContainerChooser;
 import org.maiwithu.maicraft.behavior.inventory.SpotsContainers;
+import org.maiwithu.maicraft.behavior.inventory.StoresInContainer;
 import org.maiwithu.maicraft.behavior.menu.MenuChannel;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuOpening;
@@ -293,11 +294,10 @@ class DepositTaskTest {
                 @Override public Optional<WorldPosition> landmark(String name) { return Optional.empty(); }
                 @Override public BlockPos feet() { return BlockPos.ZERO; }
             };
-            DepositServices services = new DepositServices(spots, (at, permissions) -> {
+            DepositServices services = new DepositServices(spots, new StoresInContainer.Parts((at, permissions) -> {
                 opens++;
                 return new FakeOpening(chests.get(WorldPosition.here(at.getX(), at.getY(), at.getZ())));
-            }, places, null, itemId -> itemId.equals("minecraft:oak_log") ? Set.of("minecraft:logs") : Set.of(),
-                    null);
+            }, null), places, null, itemId -> itemId.equals("minecraft:oak_log") ? Set.of("minecraft:logs") : Set.of());
             DepositTask task = new DepositTask(input, services, backpack());
             task.start(tick());
             return task;

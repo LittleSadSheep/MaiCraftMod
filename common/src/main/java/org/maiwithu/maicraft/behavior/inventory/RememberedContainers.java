@@ -47,7 +47,7 @@ public final class RememberedContainers implements KnownContainers {
     }
 
     private static KnownContainer toKnown(MemoryRecord record) {
-        return new KnownContainer(describe(record), record.position().x(), record.position().y(), record.position().z());
+        return new KnownContainer(describe(record), record.position(), blockTypeOf(record));
     }
 
     // 容器的一句话说法与找容器读端一致：方块种类加坐标，例如"chest（120, 64, -8）"。

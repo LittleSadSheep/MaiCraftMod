@@ -123,7 +123,7 @@ public final class ClientContainerDeposits implements ContainerDeposits, Reports
     private void startAttempt(KnownContainer container, BackpackStack stack, Permissions permissions, long gameTick) {
         this.container = container;
         this.carrying = stack;
-        this.at = BlockPos.containing(container.x(), container.y(), container.z());
+        this.at = container.cell();
         // 走过去能动多少地形按这次任务的许可来，不另开一套默认档。
         this.opening = new ClientMenuOpening(at, permissions, layouts, close, interactions, contexts);
         this.attemptStartTick = gameTick;

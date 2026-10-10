@@ -65,8 +65,8 @@ class RememberedContainersTest {
 
         List<KnownContainer> nearby = containers.within(16);
         assertEquals(1, nearby.size());
-        assertEquals(10, nearby.getFirst().x());
-        assertEquals(-60, nearby.getFirst().y());
+        assertEquals(10, nearby.getFirst().at().x());
+        assertEquals(-60, nearby.getFirst().at().y());
         assertTrue(nearby.getFirst().name().contains("chest"));
     }
 
@@ -87,6 +87,6 @@ class RememberedContainersTest {
                 protectionOtherAt(10, -60, 12));
         List<KnownContainer> nearby = containers.within(64);
         assertEquals(1, nearby.size());
-        assertEquals(30, nearby.getFirst().x());
+        assertEquals(30, nearby.getFirst().at().x());
     }
 }

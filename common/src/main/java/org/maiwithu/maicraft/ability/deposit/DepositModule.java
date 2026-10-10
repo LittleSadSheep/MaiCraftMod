@@ -8,11 +8,8 @@ import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.behavior.acquire.CollectsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.ReadsItemTags;
-import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
-import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.inventory.ClientSpotsContainers;
-import org.maiwithu.maicraft.behavior.menu.ClientMenuOpening;
-import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
+import org.maiwithu.maicraft.behavior.inventory.StoresInContainer;
 import org.maiwithu.maicraft.behavior.perception.Scene;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
@@ -69,20 +66,20 @@ public final class DepositModule implements AbilityModule {
     }
 
     /**
-     * 生产用：把角色上下文与各读端交给本包，拼好找容器（归属与盖子按游戏事实读）、打开容器、
+     * 生产用：把角色上下文与各读端交给本包，拼好找容器（归属与盖子按游戏事实读）、
      * 找位置、挖盖子与标签判断的生产实现再建模块，启动清单只认这个入口。
+     * 存放（走过去点开、搬、关上）用和腾地方同一份现场部件。
      */
-    public static DepositModule live(Supplier<PlayerContext> contexts, BringsPlayerClose close,
-            Interactions interactions, CollectsBlocks digs, ReadsItemTags tags, WorldMemory memory,
+    public static DepositModule live(Supplier<PlayerContext> contexts, StoresInContainer.Parts storing,
+            CollectsBlocks digs, ReadsItemTags tags, WorldMemory memory,
             BackpackView backpack, BlockScanService scans, Protection protection, Supplier<Scene> scene,
-            FacilityKinds facilities, MenuLayouts layouts) {
+            FacilityKinds facilities) {
         return new DepositModule(new DepositServices(
                 new ClientSpotsContainers(scans, contexts, memory, protection, facilities),
-                (at, permissions) -> new ClientMenuOpening(at, permissions, layouts, close, interactions, contexts),
+                storing,
                 new LiveDepositPlaces(scene, memory, contexts),
                 new NativeLidDigging(digs),
-                tags,
-                memory), backpack);
+                tags), backpack);
     }
 
     @Override public AbilitySpec spec() {

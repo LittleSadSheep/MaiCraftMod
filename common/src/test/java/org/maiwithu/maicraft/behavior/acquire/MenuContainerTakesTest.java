@@ -29,6 +29,7 @@ import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -353,7 +354,7 @@ class MenuContainerTakesTest {
         WorldMemory memory = new WorldMemory(new DocumentStore(temp.resolve("state.sqlite")), "world-1");
         MenuContainerTakes takes = new MenuContainerTakes(itemId -> Set.of(), memory, () -> null,
                 (at, permissions) -> new OpenAtOnce(box));
-        return takes.take(new KnownContainer("家门口的箱子", 10, 64, 5),
+        return takes.take(new KnownContainer("家门口的箱子", WorldPosition.here(10, 64, 5), "minecraft:chest"),
                 new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), count, "工具准备"),
                 Permissions.DEFAULT).orElseThrow();
     }

@@ -5,7 +5,6 @@ import java.util.Optional;
 
 import net.minecraft.core.BlockPos;
 
-import org.maiwithu.maicraft.behavior.menu.MenuOpening;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -17,11 +16,6 @@ import org.maiwithu.maicraft.kernel.task.Action;
 final class DepositSeams {
 
     private DepositSeams() {}
-
-    /** 打开一只容器：走过去、点开、等内容同步完；之后的搬运与关闭经它交出的那一份界面。 */
-    interface OpensMenus {
-        MenuOpening open(BlockPos at, Permissions permissions);
-    }
 
     /** 挖开压住容器盖子的方块：走过去、挖掉、把掉出来的捡进包；挖不了时给空。 */
     interface DigsLid {

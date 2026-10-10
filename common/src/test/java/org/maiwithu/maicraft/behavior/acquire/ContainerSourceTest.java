@@ -145,9 +145,9 @@ class ContainerSourceTest {
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, source.quote(request(1), CONTEXT));
         Action action = source.begin(request(1), offer, CONTEXT).orElseThrow();
         assertEquals(ActionStatus.done(), action.tick(new StubTick(1)));
-        assertEquals(10, taken.get().x());
-        assertEquals(64, taken.get().y());
-        assertEquals(5, taken.get().z());
+        assertEquals(10, taken.get().at().x());
+        assertEquals(64, taken.get().at().y());
+        assertEquals(5, taken.get().at().z());
     }
 
     @Test

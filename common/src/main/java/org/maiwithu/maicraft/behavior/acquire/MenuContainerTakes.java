@@ -119,7 +119,7 @@ public final class MenuContainerTakes implements ContainerTakes {
         TakeAction(KnownContainer container, ItemRequest request, Permissions permissions) {
             this.container = container;
             this.request = request;
-            this.at = BlockPos.containing(container.x(), container.y(), container.z());
+            this.at = container.cell();
             // 走过去能动多少地形按这次任务的许可来，不另开一套默认档。
             this.opening = openings.apply(at, permissions);
         }

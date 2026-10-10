@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.inventory;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.kernel.goal.Question;
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
 
 import java.util.List;
@@ -16,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** 腾挪计划：合并最先，能存的存、该丢的从垃圾丢起，要动贵重品才停下来问。 */
 class SpacePlannerTest {
 
-    private static final KnownContainer 家门口的箱子 = new KnownContainer("家门口的箱子", 12.5, -60, 208.5);
+    private static final KnownContainer 家门口的箱子 = new KnownContainer("家门口的箱子", WorldPosition.here(12, -60, 208), "minecraft:chest");
 
     private static BackpackStack stack(String itemId, int count) {
         return new BackpackStack(itemId, count, 64, false, false, false, false);
@@ -130,7 +131,7 @@ class SpacePlannerTest {
         List<BackpackStack> stacks = List.of(junk("minecraft:dirt", 64), junk("minecraft:gravel", 64),
                 junk("minecraft:sand", 64));
         SpacePlanner.Scene scene = new SpacePlanner.Scene(stacks, 0, 3, Set.of(), false, 1,
-                List.of(new KnownContainer("门口的箱子", 1, 64, 1)));
+                List.of(new KnownContainer("门口的箱子", WorldPosition.here(1, 64, 1), "minecraft:chest")));
         List<SpaceMove> moves = SpacePlanner.plan(scene).moves();
         assertTrue(moves.get(0) instanceof SpaceMove.ToCarriedBackpack);
         assertTrue(moves.get(1) instanceof SpaceMove.ToKnownContainer);

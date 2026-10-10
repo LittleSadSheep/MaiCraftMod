@@ -83,11 +83,13 @@ import org.maiwithu.maicraft.behavior.inventory.DropAvoidance;
 import org.maiwithu.maicraft.behavior.inventory.DropsItems;
 import org.maiwithu.maicraft.behavior.inventory.InventorySpace;
 import org.maiwithu.maicraft.behavior.inventory.RememberedContainers;
+import org.maiwithu.maicraft.behavior.inventory.StoresInContainer;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
+import org.maiwithu.maicraft.behavior.menu.ClientMenuOpening;
 import org.maiwithu.maicraft.behavior.perception.Scene;
 import org.maiwithu.maicraft.behavior.recipe.GameRecipeTable;
 import org.maiwithu.maicraft.behavior.recipe.GameRecipes;
@@ -230,7 +232,7 @@ public final class AbilityCatalog {
                 shared.permission(), shared.innerNeeds(), shared.collects(), shared.space()));
 
         // 存东西：找容器把现场扫描与世界记忆并起来，打开容器、逐笔搬运与挖盖子都接上了。
-        registry.register(depositModule(deps, shared.bringClose(), shared.collects()));
+        registry.register(depositModule(deps, shared.storing(), shared.collects()));
 
         // 睡觉：选床、放自带床、现做一张、白天备床与夜间自动休息都从这里接，见 registerSleep。
         registerSleep(registry, deps, shared);
@@ -255,12 +257,12 @@ public final class AbilityCatalog {
 
     /**
      * 清单里好几处共用的现场部件：靠近与换手、挖一格与捡掉落物、拿到物品的内需入口、
-     * 游戏拒绝读端、许可检查点、联动能用的那份玩家行为、丢东西的现场部件，以及腾地方。
+     * 游戏拒绝读端、许可检查点、联动能用的那份玩家行为、丢东西与存放的现场部件，以及腾地方。
      */
     private record Shared(LiveApproaches bringClose, ClientMovesToMainhand toMainhand, LiveBlockDigging digging,
             ClientDropPickup drops, ClientCollectsBlocks collects, DeferredInnerNeeds innerNeeds,
             ClientGameRefusals refusals, PermissionCheck permission, PlayerServices playerServices,
-            DropsItems.Parts dropping, InventorySpace space) {
+            DropsItems.Parts dropping, StoresInContainer.Parts storing, InventorySpace space) {
     }
 
     /** 把共用的现场部件一次建好：世界记忆之外的每刻现场都从这里出。 */
@@ -293,6 +295,11 @@ public final class AbilityCatalog {
         ClientStepsAside stepsAside = new ClientStepsAside(deps.inputs(), dropAvoidance);
         DropsItems.Parts dropping = new DropsItems.Parts(FirstPersonScene::of, deps.characterPosition(),
                 Optional.of(toMainhand), Optional.of(stepsAside), dropAvoidance);
+        // 存放的现场部件：存东西能力与腾地方共用，走过去点开用共用的打开容器动作，存完记进世界记忆。
+        StoresInContainer.Parts storing = new StoresInContainer.Parts(
+                (at, permissions) -> new ClientMenuOpening(at, permissions, deps.compat().menuLayouts(),
+                        bringsClose, deps.interactions(), deps.context()),
+                deps.memory());
         // 腾地方：合并散堆、记得的容器、存进容器、丢出去四条路都接上了；
         // 装备与拿东西在背包要满时先按它腾，不再直接说装不上。随身背包的接缝留给随身背包的联动模组。
         InventorySpace space = new InventorySpace(deps.backpack(),
@@ -304,7 +311,7 @@ public final class AbilityCatalog {
                 Optional.of(new ClientItemDropper(toMainhand, dropAvoidance, Optional.of(stepsAside),
                         deps.characterPosition(), deps.context())));
         return new Shared(bringsClose, toMainhand, digging, drops, collects, innerNeeds, refusals,
-                permission, playerServices, dropping, space);
+                permission, playerServices, dropping, storing, space);
     }
 
     /**
@@ -466,10 +473,11 @@ public final class AbilityCatalog {
     }
 
     /** 存东西能力的一份：找容器把现场扫描与世界记忆并起来，归属与压住盖子的方块问这个世界的保护判断。 */
-    private static DepositModule depositModule(Deps deps, LiveApproaches bringsClose, ClientCollectsBlocks collects) {
-        return DepositModule.live(deps.context(), bringsClose, deps.interactions(), collects,
+    private static DepositModule depositModule(Deps deps, StoresInContainer.Parts storing,
+            ClientCollectsBlocks collects) {
+        return DepositModule.live(deps.context(), storing, collects,
                 deps.itemTags(), deps.memory(), deps.backpack(), deps.blockScans(), deps.protection(), deps::scene,
-                deps.facilities(), deps.compat().menuLayouts());
+                deps.facilities());
     }
 
     /**

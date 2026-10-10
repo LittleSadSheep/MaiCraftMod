@@ -101,8 +101,7 @@ public final class ContainerSource implements ItemSource {
             return Optional.empty();
         }
         KnownContainer known = new KnownContainer(
-                container.blockType() + " " + offer.hint(),
-                container.position().x(), container.position().y(), container.position().z());
+                container.blockType() + " " + offer.hint(), container.position(), container.blockType());
         return takes.take(known, request, context.permissions());
     }
 
