@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.acquire;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -46,8 +46,12 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
     private final ReadsCharacterPosition position;
     private final Optional<InventorySpace> space;
     private final int maxDepth;
-    /** 正在办着的请求链，从外到内；防环与限深都看它。同一时刻只有一条链在被逐刻推进。 */
-    private final List<String> activeRequests = new ArrayList<>();
+    /**
+     * 此刻正在推进的请求链，栈顶是最里层：外层的拿东西推进到来源、来源再回引擎要原料时一层层压进来，
+     * 这一刻推进完就弹出。防环、限深、接外层记账口都看它。只算正在推进的：建出来还没开始做的备料动作
+     * 不在链上，暂停着的另一件事也不在链上，免得它们挡住后来的请求。
+     */
+    private final Deque<Run> advancing = new ArrayDeque<>();
     /** 发起拿东西时没给记账口：腾地方照样做，途中的事实不进任何结果。 */
     private static final TaskRecords NOT_RECORDED = new TaskRecords() {
         @Override public void change(Change change) {}
@@ -56,9 +60,6 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
 
         @Override public void attempt(String tried, String whatHappened) {}
     };
-
-    /** 每条链上发起任务的记账口：备料的嵌套请求从外层接过来，途中的变化与没能确认的交互记进同一个任务。 */
-    private final Map<String, TaskRecords> chainRecords = new HashMap<>();
 
     /**
      * @param sources  已登记的物品来源，启动时明确登记
@@ -101,11 +102,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
      */
     @Override public Action need(ItemRequest request, Permissions permissions, Scope scope,
             Consumer<String> onDelivered, TaskRecords records) {
-        if (activeRequests.contains(request.wanted().specifier())) {
-            throw new IllegalArgumentException("同一个需求已经在外层办着，不能再发一次："
-                    + request.wanted().specifier());
-        }
-        return new Run(request, permissions, request.wanted().specifier(), scope, onDelivered, records);
+        return new Run(request, permissions, scope, onDelivered, records);
     }
 
     /**
@@ -142,23 +139,11 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
     }
 
     /**
-     * 内部需求：深度与防环在这里把守，转圈与过深的请求当场拒绝。
+     * 内部需求：深度与防环在动作第一次推进时把守，转圈与过深的请求当场失败。
      * 用东西缺了要拿的、施工缺料这些从任务直接发起的，带上任务的记账口；来源备料不带，接外层的。
      */
     @Override public Action actionFor(ItemRequest request, Permissions permissions, TaskRecords records) {
-        String key = request.wanted().specifier();
-        if (activeRequests.contains(key)) {
-            return new Settled(Problem.of(Problem.Kind.NEED_ITEM,
-                    "备料转了圈：" + request.purpose() + "需要" + request.wanted().describe()
-                            + "，而它又要回到自己头上，不再往下试"));
-        }
-        if (activeRequests.size() >= maxDepth) {
-            return new Settled(Problem.of(Problem.Kind.NEED_ITEM,
-                    "备料已经递归了 " + activeRequests.size() + " 层，还要为"
-                            + request.purpose() + "再去弄" + request.wanted().describe()
-                            + "，层数太深不再往下试"));
-        }
-        return new Run(request, permissions, key, Scope.ALL, null, records);
+        return new Run(request, permissions, Scope.ALL, null, records);
     }
 
     /** 一场获取的执行：清点 → 问价挑路 → 腾格子 → 用一个来源 → 再清点，直到够数或路都走完。 */
@@ -168,11 +153,12 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
 
         private final ItemRequest request;
         private final Permissions permissions;
-        private final String chainKey;
         private final Scope scope;
         private final Consumer<String> onDelivered;
-        /** 发起任务的记账口；null 表示这次拿东西没接，途中的事实不进任何结果。 */
-        private final TaskRecords records;
+        /** 发起任务的记账口；null 表示这次拿东西没接，途中的事实不进任何结果。备料的嵌套请求第一次推进时接外层的。 */
+        private TaskRecords records;
+        /** 第一次推进时核过防环与限深没有。 */
+        private boolean started;
         /** 这次办砸过或白跑过、不再回头的来源；报价再好也不选，免得在同一个地方撞两次。 */
         private final Set<String> excluded = new HashSet<>();
         private final List<String> deadEnds = new ArrayList<>();
@@ -188,30 +174,50 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         private int forwardedFacts;
         /** 拿够了是身上有几件：第一次推进时身上原有的加上这次要多拿的；还没推进过为 -1。 */
         private int target = -1;
-        private boolean leftChain;
 
-        private Run(ItemRequest request, Permissions permissions, String chainKey,
-                Scope scope, Consumer<String> onDelivered, TaskRecords records) {
+        private Run(ItemRequest request, Permissions permissions, Scope scope, Consumer<String> onDelivered,
+                TaskRecords records) {
             this.request = request;
             this.permissions = permissions;
-            this.chainKey = chainKey;
             this.scope = scope;
             this.onDelivered = onDelivered;
-            // 备料的嵌套请求接住外层的记账口：同一条链是同一个任务发起的，事实记进一处。
-            this.records = records != null ? records
-                    : (activeRequests.isEmpty() ? null : chainRecords.get(activeRequests.getLast()));
-            activeRequests.add(chainKey);
-            if (this.records != null) {
-                chainRecords.put(chainKey, this.records);
+            this.records = records;
+        }
+
+        // 推进一刻：先压进"正在推进"的链，来源在这一刻里回引擎要原料时才看得见外层；推进完不管成败都弹出。
+        @Override public ActionStatus tick(TickContext tick) {
+            if (!started) {
+                started = true;
+                Problem refused = refusedByChain();
+                if (refused != null) return ActionStatus.failed(refused);
+            }
+            advancing.push(this);
+            try {
+                return advance(tick);
+            } finally {
+                advancing.pop();
             }
         }
 
-        @Override public ActionStatus tick(TickContext tick) {
-            if (!leftChain && !activeRequests.contains(chainKey)) {
-                // 外层已经收尾并清了链：本动作不该再被推进，停下交给收尾。
-                return ActionStatus.failed(Problem.of(Problem.Kind.INTERNAL_ERROR,
-                        "获取动作在脱离请求链之后还在被推进"));
+        // 第一次推进时看外层：同一样东西已经在链上是转了圈，链已经到深度上限是层数太深，都当场失败；
+        // 来源备料没带记账口时接住外层的，同一条链是同一个任务发起的，事实记进一处。
+        private Problem refusedByChain() {
+            String key = request.wanted().specifier();
+            if (advancing.stream().anyMatch(outer -> outer.request.wanted().specifier().equals(key))) {
+                return Problem.of(Problem.Kind.NEED_ITEM, "备料转了圈：" + request.purpose() + "需要"
+                        + request.wanted().describe() + "，而它又要回到自己头上，不再往下试");
             }
+            if (advancing.size() >= maxDepth) {
+                return Problem.of(Problem.Kind.NEED_ITEM, "备料已经递归了 " + advancing.size() + " 层，还要为"
+                        + request.purpose() + "再去弄" + request.wanted().describe() + "，层数太深不再往下试");
+            }
+            if (records == null && !advancing.isEmpty()) {
+                records = advancing.peek().records;
+            }
+            return null;
+        }
+
+        private ActionStatus advance(TickContext tick) {
             int carried = CarriedItems.matching(backpack, offhand, request, tags);
             if (target < 0) {
                 // 请求的数量是"这次再多拿几件"：从第一次推进时身上原有的起算，原有的不算这次拿到的。
@@ -228,7 +234,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                 return makeRoom(tick);
             }
             if (carried >= target) {
-                return leaveChain(ActionStatus.done());
+                return ActionStatus.done();
             }
             return switch (stage) {
                 // 重新清点后还缺：问遍来源，世界可能已经变了，每一轮都重新问价。
@@ -274,7 +280,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                             .orElseThrow())
                     .toList();
             if (plan.isEmpty()) {
-                return leaveChain(ActionStatus.failed(noWayProblem(refusals, carried)));
+                return ActionStatus.failed(noWayProblem(refusals, carried));
             }
             stage = Stage.SPACE;
             return ActionStatus.progressed();
@@ -301,11 +307,11 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                 case ActionStatus.Failed failed -> {
                     room.close();
                     room = null;
-                    yield leaveChain(ActionStatus.failed(failed.problem().kind() == Problem.Kind.NEED_APPROVAL
+                    yield ActionStatus.failed(failed.problem().kind() == Problem.Kind.NEED_APPROVAL
                             ? Problem.of(Problem.Kind.NEED_APPROVAL, "背包要满，得动贵重品才能腾出地方装「"
                                     + request.purpose() + "」的东西：" + failed.problem().message(), "同意动贵重品，或少拿一些")
                             : Problem.of(Problem.Kind.INVENTORY_FULL,
-                                    "背包腾不出来，装不下为「" + request.purpose() + "」要拿的东西：" + failed.problem().message())));
+                                    "背包腾不出来，装不下为「" + request.purpose() + "」要拿的东西：" + failed.problem().message()));
                 }
             };
         }
@@ -409,16 +415,6 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             };
         }
 
-        // 结束时把请求从链上摘下来：嵌套的备料结束后，外层的防环才不会误判。
-        private ActionStatus leaveChain(ActionStatus terminal) {
-            if (!leftChain) {
-                leftChain = true;
-                activeRequests.remove(chainKey);
-                chainRecords.remove(chainKey);
-            }
-            return terminal;
-        }
-
         @Override public void pause() {
             if (step != null) step.pause();
             if (room != null) room.pause();
@@ -436,7 +432,6 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                 room.close();
                 room = null;
             }
-            leaveChain(ActionStatus.done());
         }
 
         @Override public String describe() {
@@ -453,14 +448,4 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
 
     /** 计划里的一项：报价连同报价的来源，执行时按它找动手的人。 */
     private record Planned(ItemSource source, SourceQuote.Offer offer) {}
-
-    /** 当场定局的动作：一推进一步就带着问题失败，用来表达被防环与限深挡下的内部需求。 */
-    private record Settled(Problem problem) implements Action {
-        @Override public ActionStatus tick(TickContext context) {
-            return ActionStatus.failed(problem);
-        }
-        @Override public String describe() {
-            return problem.message();
-        }
-    }
 }

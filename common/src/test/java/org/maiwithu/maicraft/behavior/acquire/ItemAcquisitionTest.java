@@ -22,6 +22,7 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.CollectedRecords;
+import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 拿到物品的引擎：身上够了直接算完；缺了问遍来源挑最省的路，用一个来源就重新清点；
@@ -155,23 +156,36 @@ class ItemAcquisitionTest {
     }
 
     @Test
-    void 备料的嵌套请求_接住外层的交回路() {
-        // 外层要木板、来源备料时回引擎要原木（嵌套一次）：箱子里点原木没能确认的事实要交到最外层的发起方。
+    void 备料的嵌套请求_接住外层的记账口() {
+        // 外层要木板，做木板的来源在推进时回引擎要原木（嵌套一次）：箱子里点原木没能确认的事实要记到最外层的发起方。
         ScriptedSource chest = new ScriptedSource("记得的箱子", backpack)
                 .answer(new SourceQuote.Offer("记得的箱子", 8, new AcquisitionCost(5, 4), null))
                 .onBegin(ScriptedSource.Ending.UNCONFIRMED);
-        ItemAcquisition acquisition = engine(chest);
+        NestingSource planks = new NestingSource("minecraft:oak_planks",
+                new ItemRequest(WantedItem.ofItem("minecraft:oak_log"), 1, "做木板的原木"));
+        ItemAcquisition acquisition = engine(planks, new OnlyFor("minecraft:oak_log", chest));
+        planks.engine = acquisition;
         CollectedRecords reported = new CollectedRecords();
-        Action outer = acquisition.need(
+        runToSettlement(acquisition.need(
                 new ItemRequest(WantedItem.ofItem("minecraft:oak_planks"), 4, "施工备料"), PERMISSIONS,
-                ItemAcquisition.Scope.ALL, null, reported);
-        // 外层挂上链后备料：嵌套的拿原木回到同一台引擎，交回路从外层接过来。
-        Action wood = acquisition.actionFor(
-                new ItemRequest(WantedItem.ofItem("minecraft:oak_log"), 1, "做木板的原木"), PERMISSIONS);
-        runToSettlement(wood);
+                ItemAcquisition.Scope.ALL, null, reported));
         assertTrue(reported.unconfirmedNotes().stream().anyMatch(fact -> fact.contains("minecraft:oak_log")
-                && fact.contains("没能确认")), "嵌套里没能确认的事实交回了外层发起的一方");
-        outer.close();
+                && fact.contains("没能确认")), "嵌套里没能确认的事实记到了外层发起的一方");
+    }
+
+    @Test
+    void 建出来没开始做的备料动作不占着链() {
+        // 来源一口气建好一串备料动作，前面一步失败了，后面的从没推进过：它们不能留在链上，
+        // 之后再要同一样东西照常去拿，不报"转了圈"。
+        ScriptedSource chest = new ScriptedSource("记得的箱子", backpack)
+                .answer(new SourceQuote.Offer("记得的箱子", 8, new AcquisitionCost(5, 4), null));
+        ItemAcquisition acquisition = engine(chest);
+        acquisition.actionFor(new ItemRequest(WantedItem.ofItem("minecraft:crafting_table"), 1, "就地摆放的工作站"),
+                PERMISSIONS);
+        ActionStatus status = runToSettlement(acquisition.need(
+                new ItemRequest(WantedItem.ofItem("minecraft:crafting_table"), 1, "开局"), PERMISSIONS));
+        assertInstanceOf(ActionStatus.Done.class, status);
+        assertTrue(countOf("minecraft:crafting_table") >= 1, "照常拿到了工作台");
     }
 
     @Test
@@ -217,35 +231,93 @@ class ItemAcquisitionTest {
 
     @Test
     void 备料转圈当场拒绝() {
-        // 来源动手时又回到引擎要同样的东西：引擎认出转圈，给一个当场失败的动作。
-        ScriptedSource iron = new ScriptedSource("记得的箱子", backpack)
-                .answer(new SourceQuote.Offer("记得的箱子", 8, new AcquisitionCost(5, 4), null));
+        // 来源推进时又回到引擎要同样的东西：引擎认出转圈，嵌套的那一下当场失败。
+        NestingSource iron = new NestingSource("minecraft:iron_ingot",
+                new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), 1, "工具准备"));
         ItemAcquisition acquisition = engine(iron);
-        Action first = acquisition.actionFor(
-                new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), 1, "工具准备"), PERMISSIONS);
-        ActionStatus loop = first.tick(new StubTick(1));
-        assertInstanceOf(ActionStatus.Running.class, loop);
-        Action looped = acquisition.actionFor(
-                new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), 1, "工具准备"), PERMISSIONS);
-        ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, looped.tick(new StubTick(2)));
+        iron.engine = acquisition;
+        runToSettlement(acquisition.actionFor(
+                new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), 1, "工具准备"), PERMISSIONS));
+        ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, iron.nestedEnding);
         assertTrue(failed.problem().message().contains("转了圈"));
-        first.close();
     }
 
     @Test
     void 备料超过深度上限当场拒绝() {
-        ScriptedSource ore = new ScriptedSource("采掘", backpack)
-                .answer(new SourceQuote.Offer("采掘", 8, new AcquisitionCost(5, 3), null));
+        NestingSource ore = new NestingSource("minecraft:raw_iron",
+                new ItemRequest(WantedItem.ofItem("minecraft:iron_ore"), 1, "备原料"));
         ItemAcquisition shallow = new ItemAcquisition(List.of(ore), backpack, offhand, tags,
                 new FixedSpot(0, 64, 0), Optional.empty(), 1);
-        Action first = shallow.actionFor(
-                new ItemRequest(WantedItem.ofItem("minecraft:raw_iron"), 1, "备原料"), PERMISSIONS);
-        assertInstanceOf(ActionStatus.Running.class, first.tick(new StubTick(1)));
-        Action second = shallow.actionFor(
-                new ItemRequest(WantedItem.ofItem("minecraft:iron_ore"), 1, "备原料"), PERMISSIONS);
-        ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, second.tick(new StubTick(2)));
+        ore.engine = shallow;
+        runToSettlement(shallow.actionFor(
+                new ItemRequest(WantedItem.ofItem("minecraft:raw_iron"), 1, "备原料"), PERMISSIONS));
+        ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, ore.nestedEnding);
         assertTrue(failed.problem().message().contains("层数太深"));
-        first.close();
+    }
+
+    /** 只答一样东西的来源：别的东西问它一律说没有，好让嵌套的请求落到指定的来源上。 */
+    private record OnlyFor(String itemId, ItemSource inner) implements ItemSource {
+        @Override public String describe() {
+            return inner.describe();
+        }
+
+        @Override public AcquireVia via() {
+            return inner.via();
+        }
+
+        @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
+            return request.wanted().specifier().equals(itemId) ? inner.quote(request, context)
+                    : new SourceQuote.Unavailable(inner.describe(), "只管 " + itemId);
+        }
+
+        @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
+            return inner.begin(request, offer, context);
+        }
+    }
+
+    /**
+     * 做东西的来源替身：只答一样东西，动手后在推进里回引擎要一样原料（像合成来源备料那样），
+     * 把那一下的结局记下来再收场。
+     */
+    private static final class NestingSource implements ItemSource {
+        private final String produces;
+        private final ItemRequest nested;
+        ItemAcquisition engine;
+        ActionStatus nestedEnding;
+
+        NestingSource(String produces, ItemRequest nested) {
+            this.produces = produces;
+            this.nested = nested;
+        }
+
+        @Override public String describe() {
+            return "自己做";
+        }
+
+        @Override public AcquireVia via() {
+            return AcquireVia.CRAFT;
+        }
+
+        @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
+            return request.wanted().specifier().equals(produces)
+                    ? new SourceQuote.Offer("自己做", request.count(), new AcquisitionCost(1, 1), null)
+                    : new SourceQuote.Unavailable("自己做", "只做 " + produces);
+        }
+
+        @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
+            Action fetching = engine.actionFor(nested, context.permissions());
+            return Optional.of(new Action() {
+                @Override public ActionStatus tick(TickContext tick) {
+                    ActionStatus status = fetching.tick(tick);
+                    if (!(status instanceof ActionStatus.Running)) nestedEnding = status;
+                    return status instanceof ActionStatus.Running ? status : ActionStatus.done();
+                }
+
+                @Override public String describe() {
+                    return "备料";
+                }
+            });
+        }
     }
 
     private long countOf(String itemId) {
