@@ -38,7 +38,7 @@ final class SupplyWork extends ConstructionWork {
         }
         if (wanted.isEmpty() || services.needs() == null) return ActionStatus.done();
         fetching = wanted.poll();
-        begin(services.needs().actionFor(new ItemRequest(WantedItem.ofItem(fetching.getKey()), fetching.getValue(), purpose), permissions),
+        begin(services.needs().actionFor(new ItemRequest(WantedItem.ofItem(fetching.getKey()), fetching.getValue(), purpose), permissions, records),
                 "去拿 " + fetching.getKey() + " ×" + fetching.getValue());
         return ActionStatus.progressed();
     }

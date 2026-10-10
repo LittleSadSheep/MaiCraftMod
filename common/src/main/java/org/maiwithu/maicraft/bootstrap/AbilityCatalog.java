@@ -118,6 +118,7 @@ import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.game.world.FurnaceFuels;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
@@ -498,6 +499,13 @@ public final class AbilityCatalog {
                 throw new IllegalStateException("拿到物品的引擎还没建好，内需没有可以回的地方");
             }
             return engine.actionFor(request, permissions);
+        }
+
+        @Override public Action actionFor(ItemRequest request, Permissions permissions, TaskRecords records) {
+            if (engine == null) {
+                throw new IllegalStateException("拿到物品的引擎还没建好，内需没有可以回的地方");
+            }
+            return engine.actionFor(request, permissions, records);
         }
     }
 

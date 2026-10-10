@@ -46,7 +46,8 @@ final class PrepareBedTask extends PhasedTask<PrepareBedTask.Phase> {
     @Override
     protected Action enter(Phase phase) {
         // 任何一种床都行：合成配方是三块同色羊毛加三块木板，引擎按途径自己挑。
-        return obtain.actionFor(new ItemRequest(WantedItem.ofTag("minecraft:beds"), 1, "备今晚的床"), permissions);
+        return obtain.actionFor(new ItemRequest(WantedItem.ofTag("minecraft:beds"), 1, "备今晚的床"), permissions,
+                records());
     }
 
     @Override

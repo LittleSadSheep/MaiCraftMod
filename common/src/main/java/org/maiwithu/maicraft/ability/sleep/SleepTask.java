@@ -92,7 +92,7 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
             case LIE_DOWN -> usesBed.use(chosenBed, lyingDownConfirmation());
             // 拿一张床回来：合成（3 块同色羊毛加 3 块木板）也在拿到物品引擎的途径里；弄不到如实失败。
             case GET_BED -> obtain.actionFor(
-                    new ItemRequest(WantedItem.ofTag("minecraft:beds"), 1, "睡觉"), permissions);
+                    new ItemRequest(WantedItem.ofTag("minecraft:beds"), 1, "睡觉"), permissions, records());
             // 身上放好床了再放：放床动作自己挑格、换手、点支撑面。
             case PLACE_BED -> placer.placeCarriedBed()
                     .map(placement -> (Action) placement)

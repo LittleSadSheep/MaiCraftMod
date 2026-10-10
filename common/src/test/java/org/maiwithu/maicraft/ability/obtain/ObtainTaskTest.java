@@ -27,6 +27,7 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -65,19 +66,19 @@ class ObtainTaskTest {
         ItemRequest lastRequest;
         ItemAcquisition.Scope lastScope;
         Consumer<String> lastDelivered;
-        /** 引擎把"没能确认的交互"交回的口子：测试用它模拟来源点出去没等到结果的那几下。 */
-        Consumer<String> lastUnconfirmed;
+        /** 发起任务交给引擎的记账口：测试用它模拟来源点出去没等到结果的那几下。 */
+        TaskRecords lastRecords;
         /** 每推进一步做的事：往背包放几件货、报哪条途径；null 表示以问题失败。 */
         Integer deliverPerTick;
         String deliveredVia;
         Problem failure;
 
         @Override public Action need(ItemRequest request, Permissions permissions,
-                ItemAcquisition.Scope scope, Consumer<String> onDelivered, Consumer<String> onUnconfirmed) {
+                ItemAcquisition.Scope scope, Consumer<String> onDelivered, TaskRecords records) {
             lastRequest = request;
             lastScope = scope;
             lastDelivered = onDelivered;
-            lastUnconfirmed = onUnconfirmed;
+            lastRecords = records;
             return new Action() {
                 @Override public ActionStatus tick(TickContext context) {
                     // 先把这次动作能拿到的东西放进背包（真实引擎里来源做完才重新清点），
@@ -209,8 +210,8 @@ class ObtainTaskTest {
         // 第一刻清点完走进 ACQUIRE，引擎动作才建出来，交回的口子跟着就位。
         task.tick(tick(1));
         // 动作在跑的时候引擎交回一句没能确认的取货：拿 64 件的那几下点出去了，游戏一直没回音。
-        acquisition.lastUnconfirmed.accept(
-                "从家门口的箱子拿 minecraft:torch：搬 64 件的那几下都点出去了，没能确认结果");
+        acquisition.lastRecords.unconfirmed(new Change(Change.Kind.OTHER, "取货", 1,
+                "从家门口的箱子拿 minecraft:torch：搬 64 件的那几下都点出去了，没能确认结果"));
         TaskResult finished = runTask(task);
         assertEquals(TaskResult.Status.FAILED, finished.status());
         assertEquals(1, finished.unconfirmed().size(), "没拿到货也不吞掉没能确认的事实");

@@ -18,10 +18,12 @@ import org.maiwithu.maicraft.behavior.inventory.InventorySpace;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.Question;
+import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.ReportsUnconfirmed;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -47,8 +49,8 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
     private final int maxDepth;
     /** 正在办着的请求链，从外到内；防环与限深都看它。同一时刻只有一条链在被逐刻推进。 */
     private final List<String> activeRequests = new ArrayList<>();
-    /** 每条链上正在用的"没能确认交互"交回路：备料的嵌套请求从外层接过来，事实交回给同一个发起方。 */
-    private final Map<String, Consumer<String>> unconfirmedSinks = new HashMap<>();
+    /** 每条链上发起任务的记账口：备料的嵌套请求从外层接过来，途中的变化与没能确认的交互记进同一个任务。 */
+    private final Map<String, TaskRecords> chainRecords = new HashMap<>();
 
     /**
      * @param sources  已登记的物品来源，启动时明确登记
@@ -76,7 +78,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         return need(request, permissions, Scope.ALL, null, null);
     }
 
-    /** 带限定的一次拿东西，不接"没能确认交互"的交回路：那些事实只出现在失败原因里。 */
+    /** 带限定的一次拿东西，不接发起任务的记账口：途中腾地方的变化、没能确认的交互都不进任何结果。 */
     public Action need(ItemRequest request, Permissions permissions, Scope scope, Consumer<String> onDelivered) {
         return need(request, permissions, scope, onDelivered, null);
     }
@@ -87,15 +89,15 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
      * 限定只管最外层这一次；来源备料（原料、工具、燃料）仍然问遍所有来源——
      * 指定了"烧炼"不等于烧之前连挖煤都不许。
      *
-     * @param onUnconfirmed 来源动作里点了但没能确认结果的交互，一句一条交给它，进任务结果的 unconfirmed
+     * @param records 发起任务的记账口：来源动作里点了没能确认的交互、途中腾地方存了丢了什么，都记进去
      */
     @Override public Action need(ItemRequest request, Permissions permissions, Scope scope,
-            Consumer<String> onDelivered, Consumer<String> onUnconfirmed) {
+            Consumer<String> onDelivered, TaskRecords records) {
         if (activeRequests.contains(request.wanted().specifier())) {
             throw new IllegalArgumentException("同一个需求已经在外层办着，不能再发一次："
                     + request.wanted().specifier());
         }
-        return new Run(request, permissions, request.wanted().specifier(), scope, onDelivered, onUnconfirmed);
+        return new Run(request, permissions, request.wanted().specifier(), scope, onDelivered, records);
     }
 
     /**
@@ -126,8 +128,16 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         return distance == Math.floor(distance) ? String.valueOf(distance.longValue()) : distance.toString();
     }
 
-    /** 来源备料时的内部需求：深度与防环在这里把守，转圈与过深的请求当场拒绝。 */
+    /** 来源备料时的内部需求：在一条链里时记账口从外层接过来。 */
     @Override public Action actionFor(ItemRequest request, Permissions permissions) {
+        return actionFor(request, permissions, null);
+    }
+
+    /**
+     * 内部需求：深度与防环在这里把守，转圈与过深的请求当场拒绝。
+     * 用东西缺了要拿的、施工缺料这些从任务直接发起的，带上任务的记账口；来源备料不带，接外层的。
+     */
+    @Override public Action actionFor(ItemRequest request, Permissions permissions, TaskRecords records) {
         String key = request.wanted().specifier();
         if (activeRequests.contains(key)) {
             return new Settled(Problem.of(Problem.Kind.NEED_ITEM,
@@ -140,7 +150,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                             + request.purpose() + "再去弄" + request.wanted().describe()
                             + "，层数太深不再往下试"));
         }
-        return new Run(request, permissions, key, Scope.ALL, null, null);
+        return new Run(request, permissions, key, Scope.ALL, null, records);
     }
 
     /** 一场获取的执行：清点 → 问价挑路 → 腾格子 → 用一个来源 → 再清点，直到够数或路都走完。 */
@@ -153,8 +163,8 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         private final String chainKey;
         private final Scope scope;
         private final Consumer<String> onDelivered;
-        /** 来源动作里没能确认的交互交给它，一句一条；null 表示这次拿东西没接交回路。 */
-        private final Consumer<String> onUnconfirmed;
+        /** 发起任务的记账口；null 表示这次拿东西没接，途中的事实不进任何结果。 */
+        private final TaskRecords records;
         /** 这次办砸过或白跑过、不再回头的来源；报价再好也不选，免得在同一个地方撞两次。 */
         private final Set<String> excluded = new HashSet<>();
         private final List<String> deadEnds = new ArrayList<>();
@@ -171,18 +181,18 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         private boolean leftChain;
 
         private Run(ItemRequest request, Permissions permissions, String chainKey,
-                Scope scope, Consumer<String> onDelivered, Consumer<String> onUnconfirmed) {
+                Scope scope, Consumer<String> onDelivered, TaskRecords records) {
             this.request = request;
             this.permissions = permissions;
             this.chainKey = chainKey;
             this.scope = scope;
             this.onDelivered = onDelivered;
-            // 备料的嵌套请求接住外层正在用的交回路：同一条链是同一个任务发起的，事实交回一处。
-            this.onUnconfirmed = onUnconfirmed != null ? onUnconfirmed
-                    : (activeRequests.isEmpty() ? null : unconfirmedSinks.get(activeRequests.getLast()));
+            // 备料的嵌套请求接住外层的记账口：同一条链是同一个任务发起的，事实记进一处。
+            this.records = records != null ? records
+                    : (activeRequests.isEmpty() ? null : chainRecords.get(activeRequests.getLast()));
             activeRequests.add(chainKey);
-            if (this.onUnconfirmed != null) {
-                unconfirmedSinks.put(chainKey, this.onUnconfirmed);
+            if (this.records != null) {
+                chainRecords.put(chainKey, this.records);
             }
         }
 
@@ -275,10 +285,11 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             };
         }
 
-        // 腾地方交回的没能确认交互一句一条转给发起方；只转新记下的，再问一遍也不重复。
+        // 腾地方存了丢了什么、点了没能确认的，记进发起任务的结果：拿东西途中动了背包里的东西要说得出来。
         private void forwardSpaceFacts(InventorySpace.Result result) {
-            if (onUnconfirmed == null) return;
-            result.unconfirmed().forEach(onUnconfirmed);
+            if (records == null) return;
+            result.changes().forEach(records::change);
+            result.unconfirmed().forEach(fact -> records.unconfirmed(new Change(Change.Kind.OTHER, "腾背包", 1, fact)));
         }
 
         // 推进当前来源一步；做完就回到清点，做砸了把这个来源划掉、换计划里的下一个。
@@ -315,12 +326,12 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             };
         }
 
-        // 来源动作里没能确认的交互一句一条交回给发起的一方；只交新记下的，收尾时再交一次也不重复。
+        // 来源动作里没能确认的交互一句一条记进发起任务的结果；只记新交回的，收尾时再问一次也不重复。
         private void forwardUnconfirmed() {
-            if (onUnconfirmed == null || !(step instanceof ReportsUnconfirmed reporting)) return;
+            if (records == null || !(step instanceof ReportsUnconfirmed reporting)) return;
             List<String> facts = reporting.unconfirmedFacts();
             while (forwardedFacts < facts.size()) {
-                onUnconfirmed.accept(facts.get(forwardedFacts++));
+                records.unconfirmed(new Change(Change.Kind.OTHER, "取货", 1, facts.get(forwardedFacts++)));
             }
         }
 
@@ -391,7 +402,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             if (!leftChain) {
                 leftChain = true;
                 activeRequests.remove(chainKey);
-                unconfirmedSinks.remove(chainKey);
+                chainRecords.remove(chainKey);
             }
             return terminal;
         }

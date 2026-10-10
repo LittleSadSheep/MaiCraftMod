@@ -184,7 +184,7 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
             return Next.go(Phase.FEED, "料备齐了");
         }
         prepared = services.needs().actionFor(new ItemRequest(new WantedItem(next.item()), next.count(),
-                "投进机器的料"), input.permissions());
+                "投进机器的料"), input.permissions(), records());
         return Next.go(Phase.GATHER, "去拿 " + next.item() + " ×" + next.count());
     }
 

@@ -193,7 +193,8 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
         }
         WantedItem wanted = input.item().startsWith("#")
                 ? WantedItem.ofTag(input.item().substring(1)) : WantedItem.ofItem(input.item());
-        Action fetch = services.needs().actionFor(new ItemRequest(wanted, 1, "用东西要拿在手上"), input.permissions());
+        Action fetch = services.needs().actionFor(new ItemRequest(wanted, 1, "用东西要拿在手上"), input.permissions(),
+                records());
         return goWith(Phase.FETCH, fetch, "身上没有 " + input.item() + "，先去拿一件");
     }
 

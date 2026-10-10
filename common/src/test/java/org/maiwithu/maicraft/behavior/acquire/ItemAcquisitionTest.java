@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.CollectedRecords;
 
 /**
  * 拿到物品的引擎：身上够了直接算完；缺了问遍来源挑最省的路，用一个来源就重新清点；
@@ -144,12 +145,13 @@ class ItemAcquisitionTest {
         ScriptedSource chest = new ScriptedSource("记得的箱子", backpack)
                 .answer(new SourceQuote.Offer("记得的箱子", 8, new AcquisitionCost(5, 4), null))
                 .onBegin(ScriptedSource.Ending.UNCONFIRMED);
-        List<String> reported = new ArrayList<>();
+        CollectedRecords reported = new CollectedRecords();
         ActionStatus status = runToSettlement(engine(chest).need(
                 new ItemRequest(WantedItem.ofItem("minecraft:coal"), 3, "火把"), PERMISSIONS,
-                ItemAcquisition.Scope.ALL, null, reported::add));
+                ItemAcquisition.Scope.ALL, null, reported));
         assertInstanceOf(ActionStatus.Failed.class, status);
-        assertEquals(List.of("记得的箱子里拿minecraft:coal：点出去了但没能确认结果"), reported);
+        assertEquals(List.of("记得的箱子里拿minecraft:coal：点出去了但没能确认结果"), reported.unconfirmedNotes());
+        assertEquals("取货", reported.unconfirmed.getFirst().what());
     }
 
     @Test
@@ -159,15 +161,15 @@ class ItemAcquisitionTest {
                 .answer(new SourceQuote.Offer("记得的箱子", 8, new AcquisitionCost(5, 4), null))
                 .onBegin(ScriptedSource.Ending.UNCONFIRMED);
         ItemAcquisition acquisition = engine(chest);
-        List<String> reported = new ArrayList<>();
+        CollectedRecords reported = new CollectedRecords();
         Action outer = acquisition.need(
                 new ItemRequest(WantedItem.ofItem("minecraft:oak_planks"), 4, "施工备料"), PERMISSIONS,
-                ItemAcquisition.Scope.ALL, null, reported::add);
+                ItemAcquisition.Scope.ALL, null, reported);
         // 外层挂上链后备料：嵌套的拿原木回到同一台引擎，交回路从外层接过来。
         Action wood = acquisition.actionFor(
                 new ItemRequest(WantedItem.ofItem("minecraft:oak_log"), 1, "做木板的原木"), PERMISSIONS);
         runToSettlement(wood);
-        assertTrue(reported.stream().anyMatch(fact -> fact.contains("minecraft:oak_log")
+        assertTrue(reported.unconfirmedNotes().stream().anyMatch(fact -> fact.contains("minecraft:oak_log")
                 && fact.contains("没能确认")), "嵌套里没能确认的事实交回了外层发起的一方");
         outer.close();
     }

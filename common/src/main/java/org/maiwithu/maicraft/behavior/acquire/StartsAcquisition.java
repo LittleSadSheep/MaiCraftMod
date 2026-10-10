@@ -5,6 +5,7 @@ import java.util.function.Consumer;
 
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 
 /**
  * 发起一次拿东西的入口：拿到物品的引擎以这个样子交给能力与任务，
@@ -15,9 +16,9 @@ public interface StartsAcquisition {
 
     /**
      * 带限定的一次拿东西：只走指定途径、只考虑愿意走的距离、只在给定的半径里找，
-     * 实际拿到东西时把途径报告给 onDelivered；来源动作里点了但没能确认结果的交互
-     * 一句一条交给 onUnconfirmed，进任务结果的 unconfirmed（这些不能盲目重做）。
+     * 实际拿到东西时把途径报告给 onDelivered；来源动作里点了但没能确认结果的交互、
+     * 途中腾地方存了丢了什么，都记进发起任务的记账口 records（没能确认的不能盲目重做）。
      */
     Action need(ItemRequest request, Permissions permissions,
-            ItemAcquisition.Scope scope, Consumer<String> onDelivered, Consumer<String> onUnconfirmed);
+            ItemAcquisition.Scope scope, Consumer<String> onDelivered, TaskRecords records);
 }
