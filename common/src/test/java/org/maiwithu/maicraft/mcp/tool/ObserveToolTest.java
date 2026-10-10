@@ -10,8 +10,10 @@ import org.junit.jupiter.api.io.TempDir;
 import org.maiwithu.maicraft.ability.remember.RememberAbility;
 import org.maiwithu.maicraft.behavior.perception.EntitySight;
 import org.maiwithu.maicraft.behavior.perception.NearbyBlocksSight;
+import org.maiwithu.maicraft.behavior.perception.OverheadGrid;
 import org.maiwithu.maicraft.behavior.perception.Scene;
 import org.maiwithu.maicraft.behavior.perception.SelfSight;
+import org.maiwithu.maicraft.behavior.perception.SubtitleEar;
 import org.maiwithu.maicraft.behavior.travel.SceneSeenTargets;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.interaction.InteractionSender;
@@ -35,6 +37,7 @@ import org.maiwithu.maicraft.behavior.perception.FakeBlockTags;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
 
 import java.nio.file.Path;
 import java.time.Instant;
@@ -225,6 +228,41 @@ class ObserveToolTest {
 
         data(execute("{\"ability\": \"remember\", \"parameters\": {\"name\": \"家\", \"operation\": \"forget\"}}"));
         assertEquals("unknown_id", errorCode(observe("{\"what\": \"detail\", \"id\": \"家\"}")));
+    }
+
+    @Test
+    void theSceneReportsHeardSoundsFeaturesAndTheGridWhenAsked() {
+        // 身后有脚步声、左前有一片树林、右侧有水：声音只有方位与远近，不给坐标。
+        scene.updateSounds(10, List.of(new SubtitleEar.Event("苦力怕嘶嘶声", WorldPosition.here(0, 64, 6))));
+        scene.updateGrid(new OverheadGrid.View(new BlockPos(0, 64, 0), 2, new char[][]{
+                        {'T', 'T', '.', '.'},
+                        {'T', 'T', '.', '~'},
+                        {'.', '.', '@', '~'},
+                        {'.', '.', '~', '~'}}),
+                10, Instant.ofEpochMilli(1000));
+
+        JsonObject view = data(observe("{\"grid\": true}"));
+
+        JsonObject sound = view.getAsJsonArray("heard").get(0).getAsJsonObject();
+        assertEquals("苦力怕嘶嘶声", sound.get("sound").getAsString());
+        assertEquals("后方", sound.get("direction").getAsString());
+        assertFalse(sound.has("position"), "听见的声音不给精确位置");
+        // 成片的地形特征各领一个 f# 编号，可以直接指着它下指令。
+        JsonArray features = view.getAsJsonArray("features");
+        assertTrue(features.size() >= 2, features::toString);
+        JsonObject forest = features.get(0).getAsJsonObject();
+        assertEquals("树林", forest.get("kind").getAsString());
+        assertTrue(forest.get("id").getAsString().matches("f[0-9]+"), forest::toString);
+        JsonObject water = features.get(1).getAsJsonObject();
+        assertEquals("水体", water.get("kind").getAsString());
+        // 俯视网格：第一行在北，一格一个字符，附图例。
+        JsonObject grid = view.getAsJsonObject("grid");
+        assertEquals(2, grid.get("radius").getAsInt());
+        assertEquals("TT..", grid.getAsJsonArray("rows").get(0).getAsString());
+        assertTrue(grid.get("legend").getAsString().contains("北朝上"));
+        // 不点 grid 就不带网格：地形特征照常给。
+        assertFalse(data(observe("{}")).has("grid"));
+        assertTrue(data(observe("{}")).getAsJsonArray("features").size() >= 2);
     }
 
     @Test
