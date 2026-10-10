@@ -89,7 +89,7 @@
       },
       {
         "ability": "maicraft:build",
-        "summary": "按图纸、逐格清单或单格在 target 处施工：缺料自己拿、挡着的挖掉、从底往上砌、够不着就垫临时方块再收走",
+        "summary": "按图纸、逐格清单、结构文件或单格在 target 处施工：缺料自己拿、挡着的挖掉、从底往上砌、够不着就垫临时方块再收走",
         "parameters": "design_id?: string, cells?: array, block?: string, properties?: object, file?: string, rotation: integer = 0",
         "targets": [
           "here",
@@ -595,7 +595,7 @@
     },
     {
       "ability": "maicraft:build",
-      "summary": "按图纸、逐格清单或单格在 target 处施工：缺料自己拿、挡着的挖掉、从底往上砌、够不着就垫临时方块再收走",
+      "summary": "按图纸、逐格清单、结构文件或单格在 target 处施工：缺料自己拿、挡着的挖掉、从底往上砌、够不着就垫临时方块再收走",
       "parameters": [
         {
           "name": "design_id",
@@ -625,13 +625,13 @@
           "name": "file",
           "type": "string",
           "required": false,
-          "doc": "schematics 目录下的结构文件名；还没接上"
+          "doc": "schematics 目录下的结构文件名（四选一）：.nbt / .snbt / .litematic / .schem，或 design 导出的 .json；摆设实体不装"
         },
         {
           "name": "rotation",
           "type": "integer",
           "required": false,
-          "doc": "绕锚点转 0 / 90 / 180 / 270 度；只配 design_id",
+          "doc": "绕锚点转 0 / 90 / 180 / 270 度；只配 design_id 或 file",
           "default": 0,
           "min": 0,
           "max": 270

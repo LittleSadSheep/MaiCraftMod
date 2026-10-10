@@ -217,11 +217,11 @@ final class ConstructionSite {
         return count;
     }
 
-    ConstructionDetails details(String dimension, List<BlockPos> temporariesLeft) {
+    ConstructionDetails details(String dimension, List<BlockPos> temporariesLeft, Integer fixturesSkipped) {
         Blueprint.Bounds bounds = blueprint.bounds();
         BlockPos anchor = blueprint.anchor();
         return new ConstructionDetails(new WorldPosition(anchor.getX(), anchor.getY(), anchor.getZ(), dimension),
-                bounds.min(), bounds.max(), counts(), problemGroups(), materialsUsed(), temporariesLeft);
+                bounds.min(), bounds.max(), counts(), problemGroups(), materialsUsed(), temporariesLeft, fixturesSkipped);
     }
 
     /** 蓝图里声明的全部格位置：垫临时方块时避开它们（那些格本来就要有方块或要空着）。 */

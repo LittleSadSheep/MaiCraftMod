@@ -228,7 +228,7 @@ public final class ConstructionTask extends PhasedTask<ConstructionTask.Phase> {
     }
 
     @Override protected ResultDetails details() {
-        return site.details(services.site().dimension(), temporariesLeft);
+        return site.details(services.site().dimension(), temporariesLeft, input.fixturesSkipped());
     }
 
     @Override protected List<String> remaining() {

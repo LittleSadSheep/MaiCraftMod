@@ -6,7 +6,9 @@ MaiCraft 按版本记录玩家和 Agent 能感受到的变化。版本号即 `gr
 
 ## [未发布]
 
-暂无。
+### 新增
+
+- 施工（`build`）认结构文件了：`file` 给 `schematics/` 里的文件名，原版 `.nbt` / `.snbt`、Litematica `.litematic`、Sponge `.schem` 和 `design` 导出的 `.json` 都认，文件原点落在锚点、`rotation` 照转；展示框、盔甲架、画这些摆设实体不装，结果里 `fixtures_skipped` 写明有几个，箱子里的东西、告示牌的字不搬。
 
 ## [1.0.0] - 2026-10-10
 

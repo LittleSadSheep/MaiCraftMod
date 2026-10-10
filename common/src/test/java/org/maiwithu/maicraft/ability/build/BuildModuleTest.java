@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -16,6 +17,7 @@ import com.google.gson.JsonParser;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.nbt.NbtIo;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.StairBlock;
@@ -34,7 +36,7 @@ import org.maiwithu.maicraft.kernel.param.ParamValues;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
-/** 施工能力：逐格清单与单格变成计划格，三选一与锚点在计划阶段核清，落到锚点后交给施工任务。 */
+/** 施工能力：逐格清单与单格变成计划格，四选一与锚点在计划阶段核清，落到锚点后交给施工任务。 */
 class BuildModuleTest {
 
     private static final String DIM = "minecraft:overworld";
@@ -50,10 +52,13 @@ class BuildModuleTest {
     }
 
     private static BuildModule module() throws Exception {
-        DesignStore store = new DesignStore(Files.createTempDirectory("build-module-").resolve("designs.sqlite"));
+        Path root = Files.createTempDirectory("build-module-");
+        DesignStore store = new DesignStore(root.resolve("designs.sqlite"));
+        Path schematics = Files.createDirectories(root.resolve("schematics"));
+        NbtIo.writeCompressed(StructureImportTest.vanilla(), schematics.resolve("house.nbt"));
         AnchorResolver anchors = new AnchorResolver(id -> Optional.empty(), name -> Optional.empty(),
                 () -> new WorldPosition(5, 64, 5, DIM), (x, z) -> Optional.of(70));
-        return new BuildModule(store, anchors, permissions -> {
+        return new BuildModule(store, anchors, schematics, permissions -> {
             throw new UnsupportedOperationException("计划阶段不拼服务");
         });
     }
@@ -66,6 +71,10 @@ class BuildModuleTest {
             @Override public int stepIndex() { return 0; }
             @Override public TickContext tick() { return null; }
         };
+    }
+
+    private static BuildInput run(BuildModule module, Target target, JsonObject raw) {
+        return assertInstanceOf(BuildInput.class, assertInstanceOf(StepDecision.Run.class, module.decide(step(module, target, raw))).input());
     }
 
     @Test
@@ -87,21 +96,32 @@ class BuildModuleTest {
     }
 
     @Test
-    void 三选一与锚点在计划阶段核清() throws Exception {
+    void 四选一与锚点在计划阶段核清() throws Exception {
         BuildModule module = module();
-        var decision = module.decide(step(module, new Target.Here(), json("{\"cells\":[{\"offset\":[0,1,0],\"block\":\"minecraft:stone\"}]}")));
-        BuildInput input = assertInstanceOf(BuildInput.class, assertInstanceOf(StepDecision.Run.class, decision).input());
+        BuildInput input = run(module, new Target.Here(), json("{\"cells\":[{\"offset\":[0,1,0],\"block\":\"minecraft:stone\"}]}"));
         assertEquals(new BlockPos(5, 65, 5), input.construction().blueprint().cells().getFirst().pos(), "offset 加在脚下的锚点上");
         assertEquals(DIM, input.construction().blueprint().dimension());
-        var rotated = module.decide(step(module, new Target.Position(0, null, 0, null), json("{\"block\":\"minecraft:stone\"}")));
-        assertEquals(new BlockPos(0, 70, 0), ((BuildInput) ((StepDecision.Run) rotated).input()).construction().blueprint().anchor(), "省略 y 取地表");
+        assertEquals(null, input.construction().fixturesSkipped(), "不是结构文件来的没有摆设实体这回事");
+        BuildInput single = run(module, new Target.Position(0, null, 0, null), json("{\"block\":\"minecraft:stone\"}"));
+        assertEquals(new BlockPos(0, 70, 0), single.construction().blueprint().anchor(), "省略 y 取地表");
         assertProblem(module.decide(step(module, new Target.Here(), json("{}"))), Problem.Kind.INVALID_PARAMETER);
         assertProblem(module.decide(step(module, new Target.Here(), json("{\"block\":\"minecraft:stone\",\"cells\":[]}"))), Problem.Kind.INVALID_PARAMETER);
-        assertProblem(module.decide(step(module, new Target.Here(), json("{\"file\":\"house.nbt\"}"))), Problem.Kind.UNSUPPORTED);
         assertProblem(module.decide(step(module, new Target.Here(), json("{\"block\":\"minecraft:stone\",\"rotation\":90}"))), Problem.Kind.INVALID_PARAMETER);
         assertProblem(module.decide(step(module, null, json("{\"block\":\"minecraft:stone\"}"))), Problem.Kind.INVALID_PARAMETER);
         assertProblem(module.decide(step(module, new Target.Landmark("家"), json("{\"block\":\"minecraft:stone\"}"))), Problem.Kind.NOT_FOUND);
         assertProblem(module.decide(step(module, new Target.Here(), json("{\"design_id\":\"00000000-0000-0000-0000-000000000000\"}"))), Problem.Kind.INVALID_PARAMETER);
+    }
+
+    @Test
+    void 结构文件落到锚点并带上没装的摆设数() throws Exception {
+        BuildModule module = module();
+        BuildInput input = run(module, new Target.Here(), json("{\"file\":\"house\",\"rotation\":90}"));
+        assertEquals(1, input.construction().fixturesSkipped());
+        assertTrue(input.what().contains("1 个摆设实体不装") && input.what().contains("1 格建不了跳过"), input.what());
+        // 文件里的格 (10,0,0) 绕锚点顺时针转 90 度落到 (5-0, 64, 5+10)。
+        assertTrue(input.construction().blueprint().cellAt(new BlockPos(5, 64, 15)).isPresent(), "rotation 配 file 有效");
+        assertProblem(module.decide(step(module, new Target.Here(), json("{\"file\":\"nothing\"}"))), Problem.Kind.NOT_FOUND);
+        assertProblem(module.decide(step(module, new Target.Here(), json("{\"file\":\"../house\"}"))), Problem.Kind.INVALID_PARAMETER);
     }
 
     private static void assertProblem(StepDecision decision, Problem.Kind kind) {

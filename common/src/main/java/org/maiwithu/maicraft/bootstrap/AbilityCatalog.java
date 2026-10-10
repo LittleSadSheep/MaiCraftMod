@@ -341,9 +341,10 @@ public final class AbilityCatalog {
             Shared shared) {
         AnchorResolver anchors = new AnchorResolver(new SceneSeenTargets(deps::scene), deps.memory(),
                 deps.characterPosition(), new LiveGroundHeights(deps.context()));
-        registry.register(new DesignModule(designs, anchors, ShowsPreview.NONE,
-                deps.configDirectory().resolveSibling("schematics")));
-        registry.register(BuildModule.live(designs, anchors, deps.context(), deps.interactions(), deps.inputs(),
+        // design 导出与 build 导入用同一个 schematics 目录：导出的文件名直接当 file 参数喂回去。
+        Path schematics = deps.configDirectory().resolveSibling("schematics");
+        registry.register(new DesignModule(designs, anchors, ShowsPreview.NONE, schematics));
+        registry.register(BuildModule.live(designs, anchors, schematics, deps.context(), deps.interactions(), deps.inputs(),
                 shared.bringClose(), shared.toMainhand(), shared.digging(), shared.innerNeeds(),
                 shared.permission(), deps.memory(), deps.walks()));
     }

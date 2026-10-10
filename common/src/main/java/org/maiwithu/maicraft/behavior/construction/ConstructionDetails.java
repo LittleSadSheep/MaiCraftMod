@@ -19,6 +19,7 @@ import org.maiwithu.maicraft.kernel.result.ResultDetails;
  * @param problems            没做成的格按原因分组
  * @param materialsUsed       用掉的材料（物品 → 件数）
  * @param temporaryBlocksLeft 没收回的临时方块
+ * @param fixturesSkipped     结构文件里没装的摆设实体数；不是从结构文件来的不写
  */
 public record ConstructionDetails(
         WorldPosition anchor,
@@ -27,7 +28,8 @@ public record ConstructionDetails(
         Map<String, Integer> cells,
         List<ProblemGroup> problems,
         Map<String, Integer> materialsUsed,
-        List<BlockPos> temporaryBlocksLeft) implements ResultDetails {
+        List<BlockPos> temporaryBlocksLeft,
+        Integer fixturesSkipped) implements ResultDetails {
 
     public ConstructionDetails {
         cells = Map.copyOf(cells);
