@@ -13,7 +13,7 @@ import org.slf4j.LoggerFactory;
 
 /**
  * 面板的设置：开到哪一档、导航路线开没开。存在 config/maicraft-debug.properties，重启后照旧；
- * 页不存，每次打开都从"此刻"开始。第一次装上默认是关，免得直播画面里突然多出一块。
+ * 页不存，每次打开都从"此刻"开始。第一次装上默认是关，免得游戏画面里突然多出一块。
  */
 public final class PanelSettings {
     private static final Logger LOG = LoggerFactory.getLogger(PanelSettings.class);

@@ -12,7 +12,7 @@ import java.util.Objects;
  * 交互成功不能冒充目标达成，已确认的消耗和世界变化也不能因为目标没达成就记成"不知道"。
  *
  * @param status      目标达成情况
- * @param summary     一句话结论，可以直接用于直播解说，例如"在家里的床上躺下了"
+ * @param summary     一句话结论，可以直接复述给人听，例如"在家里的床上躺下了"
  * @param changes     已确认发生的变化
  * @param remaining   没完成的部分，例如"入睡"
  * @param problem     卡在哪；失败时必有，部分完成时可以有，完成与取消时为 null

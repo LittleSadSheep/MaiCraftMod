@@ -8,7 +8,7 @@ import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.TaskProgress;
 
 /**
- * 简要档：给直播看的。目标、此刻两块常驻；一切正常时就这两块，出事时按要紧程度往下加提醒行。
+ * 简要档：给人看的。目标、此刻两块常驻；一切正常时就这两块，出事时按要紧程度往下加提醒行。
  * 连接、服务端、死亡、F8、在等回答五种总是显示，其余最多再显示三行，多出来的合成一行。
  */
 final class BriefRows {

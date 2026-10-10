@@ -58,7 +58,7 @@ public final class OverheadGrid {
     /** 一次俯视网格的结果：中心、边长与字符格；第 0 行在北，第 0 列在西。 */
     public record View(BlockPos center, int radius, char[][] cells) {
 
-        /** 图例：LLM 与直播解说读图时按这行解释每个符号。 */
+        /** 图例：读图时按这行解释每个符号。 */
         public String legend() {
             return "1 格 = 1 方块，@ 是你，北朝上（-Z），东朝右（+X） | "
                     + "." + " 平地 ^ 上台阶1 , 下台阶1-2 v 落差>=" + DROP_DEPTH

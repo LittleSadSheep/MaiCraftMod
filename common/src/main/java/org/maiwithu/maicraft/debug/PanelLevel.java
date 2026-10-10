@@ -3,7 +3,7 @@ package org.maiwithu.maicraft.debug;
 
 import java.util.Locale;
 
-/** 调试面板的档：关着、简要（给直播，正常时只有目标与此刻）、详细（给调试，各段全开）。按 F9 依次循环。 */
+/** 调试面板的档：关着、简要（给人看，正常时只有目标与此刻）、详细（给调试，各段全开）。按 F9 依次循环。 */
 public enum PanelLevel {
     /** 什么都不画。 */
     OFF("关"),
@@ -33,7 +33,7 @@ public enum PanelLevel {
         return name().toLowerCase(Locale.ROOT);
     }
 
-    /** 从设置文件读回；认不出的写法当作关，免得一个坏文件让面板一启动就挡在直播画面上。 */
+    /** 从设置文件读回；认不出的写法当作关，免得一个坏文件让面板一启动就挡在游戏画面上。 */
     static PanelLevel fromSetting(String value) {
         for (PanelLevel level : values()) {
             if (level.settingValue().equals(value)) return level;

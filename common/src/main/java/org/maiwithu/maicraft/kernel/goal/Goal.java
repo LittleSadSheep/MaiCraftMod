@@ -13,7 +13,7 @@ import java.util.Objects;
  * 能力不再自己解析 JSON。
  *
  * @param ability     能力 ID
- * @param purpose     一句话说明为什么要做这件事，只用于日志和直播解说，Mod 不据此行动；可以为 null
+ * @param purpose     一句话说明为什么要做这件事，只用于日志，Mod 不据此行动；可以为 null
  * @param target      目标对象：要去的地方或要处理的东西；能力不需要时为 null
  * @param params      解析后的参数
  * @param permissions 这次任务的许可，没给时用默认值

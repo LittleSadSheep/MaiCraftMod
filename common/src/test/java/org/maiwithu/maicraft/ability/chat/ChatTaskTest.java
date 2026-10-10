@@ -198,9 +198,9 @@ class ChatTaskTest {
 
     @Test
     void inputDescribesWhatWillBeSaid() {
-        ChatInput input = new ChatInput("直播开始了");
-        assertTrue(input.describe().contains("直播开始了"));
-        ChatTask task = new ChatTask("直播开始了", new StubSender(), new StubEcho());
+        ChatInput input = new ChatInput("该出发了");
+        assertTrue(input.describe().contains("该出发了"));
+        ChatTask task = new ChatTask("该出发了", new StubSender(), new StubEcho());
         assertTrue(task.describe().contains("说话"), task.describe());
     }
 }

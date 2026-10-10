@@ -64,9 +64,9 @@ class InstanceConfigTest {
     void trustedPlayersReadFromFile() throws IOException {
         // 名字两头的空白去掉、空条目跳过；名字和编号都收，交给保护判断去对人。
         Files.writeString(configDir.resolve("maicraft.json"),
-                "{\"trustedPlayers\": [\" LittleSadSheep \", \"\", \"0000002a-0000-0000-0000-000000000000\"]}",
+                "{\"trustedPlayers\": [\" 一起玩的朋友 \", \"\", \"0000002a-0000-0000-0000-000000000000\"]}",
                 StandardCharsets.UTF_8);
-        assertEquals(List.of("LittleSadSheep", "0000002a-0000-0000-0000-000000000000"),
+        assertEquals(List.of("一起玩的朋友", "0000002a-0000-0000-0000-000000000000"),
                 InstanceConfig.read(configDir).trustedPlayers());
 
         // 名单里混了不是字符串的：整份按坏文件收场，不放半份名单进去。

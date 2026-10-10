@@ -17,7 +17,7 @@ import org.maiwithu.maicraft.kernel.task.TaskProgress;
  * 现状的说法：同一件事在简要档和详细档里说成同一句话，标签只说"这一行说的是谁"，处境写成整句放在正文里。
  */
 final class StatusSentences {
-    /** 刚失败、处理不了的生存需求在简要档里提醒多久：一分钟够主播看到，又不会一直挂着旧事。 */
+    /** 刚失败、处理不了的生存需求在简要档里提醒多久：一分钟够人扫一眼看到，又不会一直挂着旧事。 */
     static final long RECENT_MILLIS = 60_000;
     /** 宿主多久没有任何调用、也没有挂着等事件，就算"没在听"：宿主等事件一次最多挂几十秒就会再来。 */
     static final long HOST_SILENT_MILLIS = 60_000;

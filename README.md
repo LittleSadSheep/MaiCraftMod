@@ -2,7 +2,7 @@
 
 让 LLM 以第一人称玩 Minecraft 的模组。LLM 通过内嵌的 MCP 服务说"要什么"（"去睡觉"、"做 8 支火把"、"把这片树砍了"），Mod 像一个正常玩家那样用游戏的正常交互把它做成，并如实报告结果。
 
-> **v1 正在建设中。** 这是 `v1` 分支：按 `docs/design/` 的设计从零重建。直播请继续使用 `dev` 分支的 v0，直到 v1 在对应里程碑达到切换标准。
+> **这是 `v1` 分支，按 `docs/design/` 的设计重建。** 已经发布过的版本在 `main`。
 
 ## 构建
 
@@ -24,7 +24,7 @@ Minecraft 1.21.1；NeoForge 21.1.233；Fabric Loader 0.18.1、Fabric API 0.116.7
 
 ## 许可证
 
-MaiCraft 作为整体以 [GNU General Public License v3.0 only](LICENSE) 发布（SPDX：`GPL-3.0-only`）。本项目是经过修改的作品，自 2026 年 7 月 30 日起由 LittleSadSheep 修改和维护。
+MaiCraft 作为整体以 [GNU General Public License v3.0 only](LICENSE) 发布（SPDX：`GPL-3.0-only`）。本项目是经过修改的作品，自 2026 年 7 月 30 日起由 MaiCraft 维护者修改和维护。
 
 仓库包含以下第三方来源：
 

@@ -509,7 +509,7 @@ public final class Bootstrap {
                 // 读回来，全部恢复为暂停，等 LLM 决定接不接着做。读回时的暂停事件进的是新的这条流。
                 taskEvents.restart();
                 goals.enterWorld(scope.memory(), new EventPublishingGoalRunStore(scope.goalRuns(), taskEvents));
-                // 开关开启时，这次进世界要逐刻请求控制权直到拿到；直播待机没有目标也守得住角色。
+                // 开关开启时，这次进世界要逐刻请求控制权直到拿到；还没有目标时也守得住角色。
                 startupAutomationPending = automationOnJoin;
             } else if (minecraft.level == null) {
                 leaveWorld();

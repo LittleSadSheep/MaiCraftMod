@@ -25,7 +25,7 @@ public record RemainingDistance(double horizontalBlocks, int verticalBlocks, Str
         return new RemainingDistance(horizontal, destination.getY() - from.getY(), OCTANTS[index]);
     }
 
-    /** 给结果与直播解说的一句话，例如"西北 12.3 格、高 3 格"。 */
+    /** 给结果与日志的一句话，例如"西北 12.3 格、高 3 格"。 */
     public String describe() {
         if (horizontalBlocks == 0 && verticalBlocks == 0) {
             return "已经站在目的地";
