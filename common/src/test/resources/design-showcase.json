@@ -1,5 +1,4 @@
 {
-  "schema_version": 2,
   "name": "快速图元与可复用窗饰示例",
   "coordinate_system": "minecraft_y_up",
   "overlap_policy": "error",
