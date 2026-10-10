@@ -36,6 +36,9 @@ public interface Ae2TerminalMenu {
     /** 向服务端发"取一件到光标上"：光标上已有同一种东西时再叠一件，满一组就不再加。 */
     void takeOne(AbstractContainerMenu menu, long serial);
 
+    /** 向服务端发"把光标上的东西放回网络"：等于在终端的网络格子空白处点一下；网络放不下的留在光标上。 */
+    void putBack(AbstractContainerMenu menu);
+
     /**
      * 网络存货的一条：一种东西（物品加组件）在网络里有多少。
      *

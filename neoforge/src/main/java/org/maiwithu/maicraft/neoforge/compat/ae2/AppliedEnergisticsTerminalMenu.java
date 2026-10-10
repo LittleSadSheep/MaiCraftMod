@@ -60,4 +60,9 @@ public final class AppliedEnergisticsTerminalMenu implements Ae2TerminalMenu {
     @Override public void takeOne(AbstractContainerMenu menu, long serial) {
         if (menu instanceof MEStorageMenu storage) storage.handleInteraction(serial, InventoryAction.PICKUP_SINGLE);
     }
+
+    // 编号 -1 指网络格子的空白处：光标上拿着东西时，左键这一下把它放回网络。
+    @Override public void putBack(AbstractContainerMenu menu) {
+        if (menu instanceof MEStorageMenu storage) storage.handleInteraction(-1, InventoryAction.PICKUP_OR_SET_DOWN);
+    }
 }

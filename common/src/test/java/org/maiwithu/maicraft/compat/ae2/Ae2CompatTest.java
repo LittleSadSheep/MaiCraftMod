@@ -67,6 +67,10 @@ class Ae2CompatTest {
         @Override public void takeOne(AbstractContainerMenu menu, long serial) {
             sent.add("一件 " + serial);
         }
+
+        @Override public void putBack(AbstractContainerMenu menu) {
+            sent.add("放回");
+        }
     }
 
     @Test
@@ -78,7 +82,8 @@ class Ae2CompatTest {
         assertFalse(compat.terminalStillThere(null, WALL_TERMINAL.block(), Direction.SOUTH));
         compat.takeStack(null, 7);
         compat.takeOne(null, 7);
-        assertEquals(List.of("整组 7", "一件 7"), menu.sent);
+        compat.putBack(null);
+        assertEquals(List.of("整组 7", "一件 7", "放回"), menu.sent);
         assertTrue(compat.active());
     }
 

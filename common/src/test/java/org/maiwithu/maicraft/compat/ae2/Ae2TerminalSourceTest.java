@@ -89,6 +89,8 @@ class Ae2TerminalSourceTest {
             @Override public void takeStack(AbstractContainerMenu menu, long serial) {}
 
             @Override public void takeOne(AbstractContainerMenu menu, long serial) {}
+
+            @Override public void putBack(AbstractContainerMenu menu) {}
         });
     }
 

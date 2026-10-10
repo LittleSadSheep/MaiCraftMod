@@ -84,6 +84,22 @@ public final class NetworkTakeConfirmation {
         return verdict == Verdict.CONFIRMED ? new Result(Verdict.CONFIRMED, amount) : new Result(verdict, 0);
     }
 
+    /**
+     * 把光标上的东西放回网络有没有算数：光标空了，或同一种东西少了几件（网络只放得下一部分），就算放回了这么多；
+     * 纹丝不动是回显还没到；光标上换成了别的东西是对不上。
+     *
+     * @param cursorBefore 放之前光标上的东西
+     * @param cursorNow    此刻光标上的东西
+     */
+    public static Result putBack(SlotSnapshot cursorBefore, SlotSnapshot cursorNow) {
+        if (cursorBefore.isEmpty()) throw new IllegalArgumentException("光标上没有东西，谈不上放回网络");
+        if (cursorNow.isEmpty()) return new Result(Verdict.CONFIRMED, cursorBefore.count());
+        if (!cursorNow.sameIdentity(cursorBefore)) return Result.diverged();
+        int returned = cursorBefore.count() - cursorNow.count();
+        if (returned == 0) return Result.waiting();
+        return returned > 0 ? new Result(Verdict.CONFIRMED, returned) : Result.diverged();
+    }
+
     // 角色那一侧这种东西一共几件：同一种物品同一副组件才算。
     private static int countOf(SlotSnapshot sample, List<SlotSnapshot> slots) {
         int total = 0;

@@ -75,6 +75,19 @@ class NetworkTakeConfirmationTest {
     }
 
     @Test
+    void 放回网络_光标空了或同一种少了几件才算() {
+        assertEquals(new NetworkTakeConfirmation.Result(Verdict.CONFIRMED, 5),
+                NetworkTakeConfirmation.putBack(cobble(5), empty()));
+        assertEquals(new NetworkTakeConfirmation.Result(Verdict.CONFIRMED, 3),
+                NetworkTakeConfirmation.putBack(cobble(5), cobble(2)));
+        assertEquals(Verdict.WAITING, NetworkTakeConfirmation.putBack(cobble(5), cobble(5)).verdict());
+        assertEquals(Verdict.DIVERGED, NetworkTakeConfirmation.putBack(cobble(5), cobble(7)).verdict());
+        assertEquals(Verdict.DIVERGED, NetworkTakeConfirmation.putBack(cobble(5),
+                SlotSnapshot.of(new ItemStack(Items.DIRT))).verdict());
+        assertThrows(IllegalArgumentException.class, () -> NetworkTakeConfirmation.putBack(empty(), empty()));
+    }
+
+    @Test
     void 放下光标_光标空掉且那一格恰好多了那么多件() {
         assertEquals(new NetworkTakeConfirmation.Result(Verdict.CONFIRMED, 5),
                 NetworkTakeConfirmation.putDown(cobble(5), cobble(30), empty(), cobble(35)));

@@ -38,6 +38,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * <p>每一笔都等游戏确认：整组取看背包里多了几件，取一件看光标上多了一件，放下看光标空了、那一格多了。
  * 只记确认过的量（搬运结算），没动静就不再硬点，对不上的如实记下不凑数。
  * 拿走多少最终以引擎在动作结束后按身上的重新清点为准。关之前把这次看到的网络存货记下，下次报价用。
+ * 收场时光标上还有东西，先放回背包（背包放不下就放回网络）再关界面，不留给关界面的流程去还——背包满了它会把东西丢在地上。
  */
 public final class MenuTerminalTakes implements TerminalTakes {
 
@@ -51,6 +52,8 @@ public final class MenuTerminalTakes implements TerminalTakes {
     private static final int TAKE_TIMEOUT_TICKS = 40;
     /** 放下光标那一下点完后，等两侧内容同步过来的宽限（刻）。 */
     private static final int PUT_DOWN_SETTLE_TICKS = 5;
+    /** 收场前放好光标的期限（刻）：到点还没放好就照常关界面，光标上的东西交给游戏的关闭流程。 */
+    private static final int CURSOR_TICKS = 40;
 
     private final Ae2Compat compat;
     private final PlayerServices services;
@@ -71,7 +74,7 @@ public final class MenuTerminalTakes implements TerminalTakes {
     }
 
     /** 从终端取货的先后顺序。 */
-    private enum Stage { OPEN, SYNC, TAKE, CLOSE, DONE }
+    private enum Stage { OPEN, SYNC, TAKE, CURSOR, CLOSE, DONE }
 
     /** 正在等确认的那一下是哪种取法。 */
     private enum Pending { STACK, ONE }
@@ -106,6 +109,10 @@ public final class MenuTerminalTakes implements TerminalTakes {
         private SlotSnapshot putDownSlotBefore;
         private int putDownQuiet;
 
+        // 收场前放好光标：已经等了几刻、正在等确认的"放回网络"那一下。
+        private int cursorWaited;
+        private PendingMenuAction putBackPending;
+
         TakeAction(Ae2Terminals.Terminal terminal, String dimension, ItemRequest request, Permissions permissions) {
             this.terminal = terminal;
             this.dimension = dimension;
@@ -116,13 +123,14 @@ public final class MenuTerminalTakes implements TerminalTakes {
         }
 
         @Override public ActionStatus tick(TickContext tick) {
-            if (++waited > GIVE_UP_TICKS && stage.ordinal() < Stage.CLOSE.ordinal()) {
+            if (++waited > GIVE_UP_TICKS && stage.ordinal() < Stage.CURSOR.ordinal()) {
                 stop(Problem.of(Problem.Kind.STUCK, "从 " + terminal.describe() + " 取货超时", null));
             }
             return switch (stage) {
                 case OPEN -> open(tick);
                 case SYNC -> sync(tick);
                 case TAKE -> take(tick);
+                case CURSOR -> clearCursor(tick);
                 case CLOSE -> closeMenu(tick);
                 case DONE -> result();
             };
@@ -298,12 +306,62 @@ public final class MenuTerminalTakes implements TerminalTakes {
                 default -> {
                     putDownSlot = -1;
                     settlement.unconfirmed("把光标上的" + item + "放进背包时两边对不上");
+                    // 已经在收场放光标时对不上：不再折腾，直接去关界面。
+                    if (stage == Stage.CURSOR) {
+                        stage = Stage.CLOSE;
+                        return ActionStatus.progressed();
+                    }
                     return stopNow(Problem.of(Problem.Kind.STUCK, "把光标上的" + item + "放进背包时两边对不上", null));
                 }
             }
         }
 
-        // 关界面：打开者负责关闭；光标上的东西由关闭流程放回。关不上不冒充没开过，照常收场让引擎清点。
+        // 收场前先把光标上的东西放回背包，再关界面：放进背包里能整个装下的一格，背包放不下就放回网络。
+        // 到期限还没放好（例如一直点不出去）就照常关界面，光标上的东西交给游戏的关闭流程。
+        private ActionStatus clearCursor(TickContext tick) {
+            AbstractContainerMenu raw = tick.player().localPlayer().containerMenu;
+            Optional<MenuContent.Reading> reading = menu.reading();
+            if (reading.isEmpty()) return finishWithout(null);
+            if (putBackPending != null) return awaitPutBack(tick.player());
+            if (putDownSlot >= 0) return awaitPutDown(raw);
+            SlotSnapshot cursor = SlotSnapshot.of(raw.getCarried());
+            if (cursor.isEmpty() || ++cursorWaited > CURSOR_TICKS) {
+                stage = Stage.CLOSE;
+                return ActionStatus.progressed();
+            }
+            if (menu.busy()) return ActionStatus.running();
+            Optional<Integer> slot = NetworkTakePlan.slotFor(cursor.stack(), cursor.count(),
+                    reading.get().playerSlotIds(), reading.get().playerSnapshots());
+            if (slot.isPresent()) return putDown(slot.get(), cursor, raw);
+            return putBack(cursor, raw);
+        }
+
+        // 背包里没有一格装得下：在终端的网络格子空白处点一下，把光标上的东西放回网络；本刻发不出去就下一刻再试。
+        private ActionStatus putBack(SlotSnapshot cursor, AbstractContainerMenu raw) {
+            MenuConfirmation confirmation = (context, ignored) -> menuVerdict(NetworkTakeConfirmation.putBack(cursor,
+                    SlotSnapshot.of(context.localPlayer().containerMenu.getCarried())).verdict());
+            Optional<PendingMenuAction> sent = menu.submitModAction("把光标上的东西放回 ME 网络",
+                    () -> compat.putBack(raw), confirmation, TAKE_TIMEOUT_TICKS);
+            if (sent.isEmpty()) return ActionStatus.running();
+            putBackPending = sent.get();
+            return ActionStatus.progressed();
+        }
+
+        // 等放回网络那一下的结论：没能确认就记下，去关界面；放回了一部分（网络满了）下一刻再看光标。
+        private ActionStatus awaitPutBack(PlayerContext player) {
+            putBackPending = player.menuActions().poll(player, putBackPending);
+            if (!putBackPending.terminal()) return ActionStatus.running();
+            PendingMenuAction settled = putBackPending;
+            putBackPending = null;
+            if (settled.status() != PendingMenuAction.Status.CONFIRMED_APPLIED) {
+                settlement.unconfirmed("把光标上的东西放回 " + terminal.describe() + " 的网络没能确认："
+                        + settled.detail());
+                stage = Stage.CLOSE;
+            }
+            return ActionStatus.progressed();
+        }
+
+        // 关界面：打开者负责关闭。关不上不冒充没开过，照常收场让引擎清点。
         private ActionStatus closeMenu(TickContext tick) {
             if (closing == null) closing = menu.closing();
             ActionStatus status = closing.tick(tick);
@@ -327,10 +385,15 @@ public final class MenuTerminalTakes implements TerminalTakes {
             return ActionStatus.progressed();
         }
 
+        // 收场：先记下网络存货，再放好光标、关界面。还没打开界面就收场（例如走过去超时）时没有界面要关，直接结束。
         private void stop(Problem reason) {
             if (stopReason == null) stopReason = reason;
+            if (menu == null) {
+                stage = Stage.DONE;
+                return;
+            }
             rememberStockNow();
-            stage = Stage.CLOSE;
+            stage = Stage.CURSOR;
         }
 
         // 界面已经不在了：不用关，直接收场。
