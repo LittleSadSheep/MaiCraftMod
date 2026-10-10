@@ -216,6 +216,31 @@ class RecipeSourceTest {
     }
 
     @Test
+    void 要任意床_不挑拿床换颜色的配方() {
+        // 实机：夜里备床挑了"白床加绿染料做绿床"，缺的件数看着最少，可做它先得有一张床，还去烧仙人掌弄染料。
+        tags.put("minecraft:white_bed", "minecraft:beds");
+        tags.put("minecraft:green_bed", "minecraft:beds");
+        WorkstationRecipe dyed = new WorkstationRecipe("minecraft:dye_green_bed", WorkstationRecipe.Kind.CRAFTING,
+                WantedItem.ofItem("minecraft:green_bed"), 1,
+                List.of(new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:white_bed"), 1),
+                        new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:green_dye"), 1)), true);
+        WorkstationRecipe white = new WorkstationRecipe("minecraft:white_bed", WorkstationRecipe.Kind.CRAFTING,
+                WantedItem.ofItem("minecraft:white_bed"), 1,
+                List.of(new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:white_wool"), 3),
+                        new WorkstationRecipe.IngredientStack(WantedItem.ofTag("minecraft:planks"), 3)));
+        RecipeSource recipeSource = new RecipeSource(wanted -> List.of(dyed, white), memory(),
+                itemId -> 0, new InventoryRuns(), backpack, offhand, tags, new CapturingNeeds());
+        SourceQuote quote = recipeSource.quote(new ItemRequest(WantedItem.ofTag("minecraft:beds"), 1, "睡觉"), CONTEXT);
+        // 白床要工作台、附近又没记得的：报价可以是"做不了"，但绝不能是绿床那条。
+        if (quote instanceof SourceQuote.Offer offer) {
+            assertEquals("minecraft:white_bed", offer.hint());
+        } else {
+            SourceQuote.Unavailable unavailable = assertInstanceOf(SourceQuote.Unavailable.class, quote);
+            assertTrue(unavailable.reason().contains("minecraft:white_bed"), unavailable.reason());
+        }
+    }
+
+    @Test
     void 动手时缺的原料按用途标签递归回引擎() {
         WorldMemory memory = memory();
         memory.rememberWorkstationUsed(TABLE_AT, "minecraft:crafting_table", NOW);

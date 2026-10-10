@@ -94,8 +94,10 @@ public final class RecipeSource implements ItemSource {
     }
 
     @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
+        // 拿要的东西本身当原料的配方不算做法：给床换个颜色、给羊毛染色，做完身上的床、羊毛一件没多。
         List<WorkstationRecipe> candidates = recipes.recipesProducing(request.wanted()).stream()
                 .filter(recipe -> kinds.contains(recipe.kind()))
+                .filter(recipe -> !consumesWhatIsWanted(recipe, request.wanted()))
                 .toList();
         if (candidates.isEmpty()) {
             return new SourceQuote.Unavailable(describe(),
@@ -140,6 +142,20 @@ public final class RecipeSource implements ItemSource {
         return Optional.of(assemble(recipe,
                 station.map(MemoryRecord::position).orElse(null),
                 timesNeeded(recipe, request.count()), context));
+    }
+
+    // 这条配方的原料里有没有一样本身就满足这次要的东西：有的话做它不会让要的东西变多。
+    private boolean consumesWhatIsWanted(WorkstationRecipe recipe, WantedItem wanted) {
+        for (WorkstationRecipe.IngredientStack ingredient : recipe.ingredients()) {
+            WantedItem item = ingredient.item();
+            if (!item.isTag()) {
+                if (wanted.matches(item.itemId(), tags.tagsOf(item.itemId()))) return true;
+            } else if (wanted.isTag() ? wanted.tagId().equals(item.tagId())
+                    : tags.tagsOf(wanted.itemId()).contains(item.tagId())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // 照这条配方做够要的件数，身上还缺几件原料（各种原料缺的加起来）。
