@@ -41,7 +41,11 @@ public final class ParamNames {
             Map.entry("rotation", "蓝图落地时绕锚点转多少度：0 / 90 / 180 / 270"),
             Map.entry("cells", "逐格蓝图（JSON 数组）：每项 offset [x,y,z]、block、可选 properties；block 为 minecraft:air 表示清空"),
             Map.entry("file", "schematics 目录下的结构文件名"),
-            Map.entry("properties", "只放一格时要求的方块状态属性（JSON 对象），例如 {\"facing\":\"north\"}"));
+            Map.entry("properties", "只放一格时要求的方块状态属性（JSON 对象），例如 {\"facing\":\"north\"}"),
+            Map.entry("quest", "任务书里任务的编号（16 位十六进制，FTB 任务）"),
+            Map.entry("requirement", "任务里一条要求的编号（任务书资料的条目页里给的）"),
+            Map.entry("reward", "一个任务自己的根奖励编号；奖池里的子奖励不是能单独领的奖励"),
+            Map.entry("choice", "领选择奖励时选哪个候选（能力提问时列出的候选编号）"));
 
     private ParamNames() {}
 

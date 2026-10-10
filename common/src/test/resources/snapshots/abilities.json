@@ -170,6 +170,13 @@
         "parameters": "",
         "targets": [],
         "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:quest",
+        "summary": "对 FTB 任务书里的一个条目做一次动作：交物品、勾选、领奖",
+        "parameters": "operation: string, quest: string, requirement?: string, reward?: string, choice?: string",
+        "targets": [],
+        "mode": "controls_player"
       }
     ]
   },
@@ -834,6 +841,54 @@
       "required_mods": [],
       "knowledge": [],
       "doc_resource": "assets/maicraft/abilities/sequence.md"
+    },
+    {
+      "ability": "maicraft:quest",
+      "summary": "对 FTB 任务书里的一个条目做一次动作：交物品、勾选、领奖",
+      "parameters": [
+        {
+          "name": "operation",
+          "type": "string",
+          "required": true,
+          "doc": "submit 交物品 / confirm 手动勾选 / claim 领奖",
+          "choices": [
+            "submit",
+            "confirm",
+            "claim"
+          ]
+        },
+        {
+          "name": "quest",
+          "type": "string",
+          "required": true,
+          "doc": "任务书里任务的编号（16 位十六进制，lookup 的任务书资料里给的）"
+        },
+        {
+          "name": "requirement",
+          "type": "string",
+          "required": false,
+          "doc": "任务里那条要求的编号；submit、confirm 必填"
+        },
+        {
+          "name": "reward",
+          "type": "string",
+          "required": false,
+          "doc": "本任务的根奖励编号；claim 必填"
+        },
+        {
+          "name": "choice",
+          "type": "string",
+          "required": false,
+          "doc": "领选择奖励时选哪个候选（Mod 提问时列出的候选编号）"
+        }
+      ],
+      "targets": [],
+      "mode": "controls_player",
+      "required_mods": [
+        "ftbquests"
+      ],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/quest.md"
     }
   ]
 }

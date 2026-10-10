@@ -32,6 +32,7 @@ import org.maiwithu.maicraft.ability.gather.GatherAbility;
 import org.maiwithu.maicraft.ability.gather.LiveSceneTargets;
 import org.maiwithu.maicraft.ability.gather.LiveSpotReads;
 import org.maiwithu.maicraft.ability.obtain.ObtainAbility;
+import org.maiwithu.maicraft.ability.quest.QuestModule;
 import org.maiwithu.maicraft.ability.remember.RememberAbility;
 import org.maiwithu.maicraft.ability.sequence.SequenceModule;
 import org.maiwithu.maicraft.ability.sleep.SleepModule;
@@ -209,6 +210,9 @@ public final class AbilityCatalog {
         ClientGameRefusals refusals = new ClientGameRefusals(new OverlayMessages(),
                 () -> deps.session().confirmations().recent(), deps.clientTicks());
 
+        // 联动能用的玩家行为：任务书操作这类联动实现进世界时拿这一份，走过去、点开和自带能力用同一套。
+        PlayerServices services = liveServices(deps, bringsClose, toMainhand, innerNeeds);
+
         // 用东西：读世界、组装交互、靠近、备手、去拿缺的东西、观察编号、附近搜索、动作栏提示语、
         // 走到没加载的坐标、捡掉出的东西、看点开的界面都接上了。
         registry.register(useModule(deps, bringsClose, toMainhand, innerNeeds, refusals));
@@ -234,20 +238,14 @@ public final class AbilityCatalog {
         PermissionCheck permission = new PermissionCheck(deps.protection(), deps.creatures());
 
         // 拿到物品：身上的不算来源（引擎开场就清点），已实现的途径都登记，见 obtainModule。
-        registry.register(obtainModule(deps, bringsClose, toMainhand, permission, innerNeeds, collects));
+        registry.register(obtainModule(deps, bringsClose, toMainhand, permission, innerNeeds, collects, services));
 
         // 存东西：找容器把现场扫描与世界记忆并起来，打开容器、逐笔搬运与挖盖子都接上了。
         registry.register(depositModule(deps, bringsClose, collects));
 
         // 睡觉：选床、放自带床、现做一张、白天备床与夜间自动休息都从这里接；
         // 夜晚这项生存需求的"今晚有没有床"与"找空当去睡"接上同一份判断与任务。
-        SleepModule sleepModule = new SleepModule(deps.context(), deps.blockScans(), deps.protection(),
-                deps.backpack(), deps.offhand(), deps.interactions(), bringsClose, collects,
-                deps.memory(), new DestinationResolver(deps.travelWorld(), deps.memory(),
-                        new SceneSeenTargets(deps::scene)),
-                innerNeeds, refusals::latestMessage);
-        registry.register(sleepModule);
-        deps.nightWiring().attach(sleepModule.bedAvailability(), sleepModule);
+        registerSleep(registry, deps, bringsClose, collects, innerNeeds, refusals);
 
         // 采集：观察编号从场景查，现场从世界读，靠近用站位与走到，挖用原生挖掘；
         // 收完把身上的种子补种回原格，没有种子就不补，不额外去找。
@@ -260,7 +258,7 @@ public final class AbilityCatalog {
         // 建筑设计与施工：画图不控制角色，施工经玩家行为层的施工引擎，见 registerConstruction。
         registerConstruction(registry, deps, bringsClose, toMainhand, digging, innerNeeds, permission);
 
-        registerStandalone(registry, deps, permission);
+        registerStandalone(registry, deps, permission, services);
         return registry;
     }
 
@@ -279,8 +277,9 @@ public final class AbilityCatalog {
                 bringsClose, toMainhand, digging, innerNeeds, permission, deps.memory(), deps.walks()));
     }
 
-    /** 不和别的能力共用现场部件的那些能力：战斗、跟随、等待、出行、聊天、记地点、按顺序做事。 */
-    private static void registerStandalone(AbilityRegistry registry, Deps deps, PermissionCheck permission) {
+    /** 不和别的能力共用现场部件的那些能力：战斗、跟随、等待、出行、聊天、记地点、按顺序做事、任务书。 */
+    private static void registerStandalone(AbilityRegistry registry, Deps deps, PermissionCheck permission,
+            PlayerServices services) {
         // 战斗：感观与生存需求共用一份，观察编号与动手都接在真实客户端上。
         registry.register(new FightModule(deps.senses(),
                 new LiveSeenTargets(deps.scene().seen()), new LiveFightMoves(deps.walks()), permission));
@@ -310,6 +309,9 @@ public final class AbilityCatalog {
 
         // 按顺序做事：逐步推进在目标推进里，这里只登记"接受步骤"的能力。
         registry.register(new SequenceModule());
+
+        // 任务书：提交、勾选、领奖经登记表交来的任务书操作做；FTB 任务没装时能力不登记。
+        registry.register(new QuestModule(deps.compat().questBooks(services)));
     }
 
     /** 聊天能力的一份：命令的完成依据（提交后聊天栏冒出的反馈行）与聊天回显同出一个聊天栏日志。 */
@@ -332,6 +334,25 @@ public final class AbilityCatalog {
                 deps.creatures());
     }
 
+    /** 联动能用的玩家行为：当刻的角色、靠近、交互、换手、缺东西去拿、保护判断、物品标签、认得出的界面、方块扫描。 */
+    private static PlayerServices liveServices(Deps deps, LiveApproaches bringsClose,
+            ClientMovesToMainhand toMainhand, DeferredInnerNeeds innerNeeds) {
+        return new PlayerServices(deps.context(), bringsClose, deps.interactions(), toMainhand,
+                innerNeeds, deps.protection(), deps.itemTags(), deps.compat().menuLayouts(), deps.blockScans());
+    }
+
+    /** 睡觉能力的一份：登记后把"今晚有没有床"与"找空当去睡"的接线交给夜晚这项生存需求。 */
+    private static void registerSleep(AbilityRegistry registry, Deps deps, LiveApproaches bringsClose,
+            ClientCollectsBlocks collects, DeferredInnerNeeds innerNeeds, ClientGameRefusals refusals) {
+        SleepModule sleepModule = new SleepModule(deps.context(), deps.blockScans(), deps.protection(),
+                deps.backpack(), deps.offhand(), deps.interactions(), bringsClose, collects,
+                deps.memory(), new DestinationResolver(deps.travelWorld(), deps.memory(),
+                        new SceneSeenTargets(deps::scene)),
+                innerNeeds, refusals::latestMessage);
+        registry.register(sleepModule);
+        deps.nightWiring().attach(sleepModule.bedAvailability(), sleepModule);
+    }
+
     /**
      * 拿到物品能力的一份：身上的不算来源（引擎开场就清点），登记的是身外的途径——
      * 记得的箱子与现场容器、合成（含石切台）、烧炼、挖矿、收熟作物；交易还没实现，
@@ -340,7 +361,7 @@ public final class AbilityCatalog {
      */
     private static AbilityModule obtainModule(Deps deps, LiveApproaches bringsClose,
             ClientMovesToMainhand toMainhand, PermissionCheck permission, DeferredInnerNeeds innerNeeds,
-            ClientCollectsBlocks collects) {
+            ClientCollectsBlocks collects, PlayerServices services) {
         RegistryRecipeReads recipeReads = new RegistryRecipeReads(deps.context(), deps.itemTags(), deps.furnaceFuels());
         // 在工作站上动手：熔炉添燃料时按同一份燃料表挑身上烧得最久的。
         RecipeRuns recipeRuns = new MenuRecipeRuns(bringsClose, deps.interactions(),
@@ -367,9 +388,7 @@ public final class AbilityCatalog {
                                 deps.memory(), deps.context(), deps.compat().menuLayouts())),
                 craftSource, smeltSource, miningSource, harvestSource, new TradeSource()));
         // 联动来源进世界时带着这一份玩家行为建：缺东西去拿也回到同一个引擎（内需入口），许可原样传下去。
-        sources.addAll(deps.compat().itemSources(new PlayerServices(deps.context(), bringsClose,
-                deps.interactions(), toMainhand, innerNeeds, deps.protection(), deps.itemTags(),
-                deps.compat().menuLayouts(), deps.blockScans())));
+        sources.addAll(deps.compat().itemSources(services));
         ItemAcquisition acquisition = new ItemAcquisition(sources,
                 deps.backpack(), deps.offhand(), deps.itemTags(),
                 deps.characterPosition(), Optional.empty(), ItemAcquisition.DEFAULT_MAX_DEPTH);
