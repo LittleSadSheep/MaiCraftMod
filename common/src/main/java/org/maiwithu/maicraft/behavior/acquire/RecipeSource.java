@@ -44,6 +44,11 @@ public final class RecipeSource implements ItemSource {
      */
     public static final int HANDY_CRAFTING_TABLE_BLOCKS = 16;
 
+    /** 缺得一样多的做法最多挨个试几种：木板十来种木头，再多也不一直试下去。 */
+    private static final int MAX_VARIANTS = 12;
+    /** 都没做成时说明里列几种做法的原因，再多的用省略号。 */
+    private static final int SHOWN_FAILURES = 4;
+
     /** 烧炼一件东西要烧多少刻：原版熔炉的固定速度。 */
     private static final int SMELT_TICKS_PER_ITEM = 200;
     /** 备燃料时的规划数字：一块煤烧 1600 刻，按它算要带几块，实际烧多久以燃料表为准。 */
@@ -98,22 +103,12 @@ public final class RecipeSource implements ItemSource {
     }
 
     @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
-        // 拿要的东西本身当原料的配方不算做法：给床换个颜色、给羊毛染色，做完身上的床、羊毛一件没多。
-        List<WorkstationRecipe> candidates = recipes.recipesProducing(request.wanted()).stream()
-                .filter(recipe -> kinds.contains(recipe.kind()))
-                .filter(recipe -> !consumesWhatIsWanted(recipe, request.wanted()))
-                .toList();
+        List<WorkstationRecipe> candidates = ranked(request);
         if (candidates.isEmpty()) {
             return new SourceQuote.Unavailable(describe(),
                     "游戏里没有做出" + request.wanted().describe() + "的配方");
         }
-        // 多种做法时像玩家一样先看手头：原料身上缺得最少的那种优先（要"任意木板"、背包里有云杉原木，
-        // 就做云杉木板，不去找竹子）；缺得一样多时，摆得进背包合成格的优先，再挑原料种类最少的。
-        WorkstationRecipe recipe = candidates.stream()
-                .sorted(Comparator.comparingInt((WorkstationRecipe candidate) -> missingFor(candidate, request.count()))
-                        .thenComparingInt(candidate -> inInventory(candidate) ? 0 : 1)
-                        .thenComparingInt(candidate -> candidate.ingredients().size()))
-                .toList().getFirst();
+        WorkstationRecipe recipe = candidates.getFirst();
         // 摆得进 2×2 的合成在背包合成格里做：不用找工作台，也不用先摆一个，新世界开局做木板、工作台就靠它。
         if (inInventory(recipe)) {
             return new SourceQuote.Offer(describe(), request.count(),
@@ -131,7 +126,8 @@ public final class RecipeSource implements ItemSource {
     }
 
     @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
-        WorkstationRecipe recipe = recipes.recipesProducing(request.wanted()).stream()
+        List<WorkstationRecipe> candidates = ranked(request);
+        WorkstationRecipe recipe = candidates.stream()
                 .filter(candidate -> candidate.id().equals(offer.hint()))
                 .findFirst()
                 .orElse(null);
@@ -139,13 +135,98 @@ public final class RecipeSource implements ItemSource {
             // 报价时还在、动手时查不到了：交回空，由引擎换路。
             return Optional.empty();
         }
+        // 缺得一样多的几种做法排在后面备着：要"任意木板"、身上一根原木都没有时，十来种木板缺的都是一根原木，
+        // 头一种一件都做不出来（附近没有樱桃原木）就换下一种，不在第一种上就把"自己做"整条划掉。
+        int missing = missingFor(recipe, request.count());
+        List<WorkstationRecipe> variants = new ArrayList<>(List.of(recipe));
+        for (WorkstationRecipe other : candidates) {
+            if (variants.size() >= MAX_VARIANTS) break;
+            if (other != recipe && missingFor(other, request.count()) == missing) variants.add(other);
+        }
+        return Optional.of(variants.size() == 1 ? attempt(recipe, request, context)
+                : new Variants(request, variants, context));
+    }
+
+    // 用拿得到的配方排个先后，像玩家一样先看手头：原料身上缺得最少的那种优先（要"任意木板"、背包里有云杉原木，
+    // 就做云杉木板，不去找竹子）；缺得一样多时，摆得进背包合成格的优先，再挑原料种类最少的。
+    // 拿要的东西本身当原料的配方不算做法：给床换个颜色、给羊毛染色，做完身上的床、羊毛一件没多。
+    private List<WorkstationRecipe> ranked(ItemRequest request) {
+        return recipes.recipesProducing(request.wanted()).stream()
+                .filter(recipe -> kinds.contains(recipe.kind()))
+                .filter(recipe -> !consumesWhatIsWanted(recipe, request.wanted()))
+                .sorted(Comparator.comparingInt((WorkstationRecipe candidate) -> missingFor(candidate, request.count()))
+                        .thenComparingInt(candidate -> inInventory(candidate) ? 0 : 1)
+                        .thenComparingInt(candidate -> candidate.ingredients().size()))
+                .toList();
+    }
+
+    // 照一种配方做的一整串：摆得进背包合成格的在背包里做，否则到设施上做（没有就先摆一个）。
+    private Action attempt(WorkstationRecipe recipe, ItemRequest request, SourceContext context) {
         if (inInventory(recipe)) {
-            return Optional.of(assembleInInventory(recipe, timesNeeded(recipe, request.count()), context));
+            return assembleInInventory(recipe, timesNeeded(recipe, request.count()), context);
         }
         Optional<MemoryRecord> station = handyStation(recipe.kind(), context);
-        return Optional.of(assemble(recipe,
-                station.map(MemoryRecord::position).orElse(null),
-                timesNeeded(recipe, request.count()), context));
+        return assemble(recipe, station.map(MemoryRecord::position).orElse(null),
+                timesNeeded(recipe, request.count()), context);
+    }
+
+    /**
+     * 几种一样缺料的做法挨个试：这一种做砸了、要的东西一件没多，就换下一种；做出过东西就照常收场，由引擎清点。
+     * 都不成时把试过的几种和原因一并交代。
+     */
+    private final class Variants implements Action {
+        private final ItemRequest request;
+        private final List<WorkstationRecipe> variants;
+        private final SourceContext context;
+        private final List<String> failures = new ArrayList<>();
+        private int index;
+        private Action current;
+        private int carriedBefore;
+
+        private Variants(ItemRequest request, List<WorkstationRecipe> variants, SourceContext context) {
+            this.request = request;
+            this.variants = variants;
+            this.context = context;
+        }
+
+        @Override public ActionStatus tick(TickContext tick) {
+            if (current == null) {
+                carriedBefore = CarriedItems.matching(backpack, offhand, request.wanted(), tags);
+                current = attempt(variants.get(index), request, context);
+            }
+            ActionStatus status = current.tick(tick);
+            if (!(status instanceof ActionStatus.Failed failed)) return status;
+            boolean delivered = CarriedItems.matching(backpack, offhand, request.wanted(), tags) > carriedBefore;
+            failures.add(variants.get(index).id() + "（" + failed.problem().message() + "）");
+            if (!delivered && index + 1 < variants.size()) {
+                current.close();
+                current = null;
+                index++;
+                return ActionStatus.progressed();
+            }
+            if (failures.size() == 1) return status;
+            List<String> shown = failures.subList(0, Math.min(SHOWN_FAILURES, failures.size()));
+            return ActionStatus.failed(Problem.of(failed.problem().kind(), "试了 " + failures.size() + " 种做法都没做成："
+                    + String.join("；", shown) + (failures.size() > shown.size() ? "……" : ""),
+                    failed.problem().suggestion()));
+        }
+
+        @Override public void pause() {
+            if (current != null) current.pause();
+        }
+
+        @Override public void close() {
+            if (current != null) current.close();
+        }
+
+        @Override public Interruptibility interruptibility() {
+            return current == null ? Interruptibility.WORKING : current.interruptibility();
+        }
+
+        @Override public String describe() {
+            return current == null ? "做" + request.wanted().describe()
+                    : current.describe() + "（第 " + (index + 1) + "/" + variants.size() + " 种做法）";
+        }
     }
 
     // 这件东西是不是这条配方要的原料：烧炼时不把要烧的东西当燃料。

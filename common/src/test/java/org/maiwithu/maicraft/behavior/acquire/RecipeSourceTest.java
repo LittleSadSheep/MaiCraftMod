@@ -291,6 +291,69 @@ class RecipeSourceTest {
         assertTrue(failed.problem().message().contains("附近没有橡木"), failed.problem().message());
     }
 
+    @Test
+    void 任意木板_头一种木头弄不来就换下一种() {
+        WorldMemory memory = memory();
+        WorkstationRecipe cherry = new WorkstationRecipe("minecraft:cherry_planks", WorkstationRecipe.Kind.CRAFTING,
+                WantedItem.ofItem("minecraft:cherry_planks"), 4,
+                List.of(new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:cherry_log"), 1)), true);
+        WorkstationRecipe spruce = new WorkstationRecipe("minecraft:spruce_planks", WorkstationRecipe.Kind.CRAFTING,
+                WantedItem.ofItem("minecraft:spruce_planks"), 4,
+                List.of(new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:spruce_log"), 1)), true);
+        List<String> asked = new ArrayList<>();
+        // 樱桃原木弄不来；云杉原木弄得来（替身把一根云杉原木放进背包）。
+        ItemNeeds needs = (request, permissions) -> new Action() {
+            @Override public ActionStatus tick(TickContext context) {
+                asked.add(request.wanted().specifier());
+                if (request.wanted().specifier().equals("minecraft:cherry_log")) {
+                    return ActionStatus.failed(Problem.of(Problem.Kind.NOT_FOUND, "附近没有樱桃原木"));
+                }
+                backpack.add("minecraft:spruce_log", 1);
+                return ActionStatus.done();
+            }
+            @Override public String describe() {
+                return "备" + request.wanted().describe();
+            }
+        };
+        RecipeSource recipeSource = new RecipeSource(wanted -> List.of(cherry, spruce), memory, itemId -> 0,
+                new MakesPlanks(backpack), backpack, offhand, tags, needs);
+        ItemRequest request = new ItemRequest(WantedItem.ofTag("minecraft:planks"), 4, "做木斧");
+        tags.put("minecraft:cherry_planks", "minecraft:planks");
+        tags.put("minecraft:spruce_planks", "minecraft:planks");
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, recipeSource.quote(request, CONTEXT));
+
+        assertInstanceOf(ActionStatus.Done.class, runToEnd(recipeSource.begin(request, offer, CONTEXT).orElseThrow()));
+        assertEquals(List.of("minecraft:cherry_log", "minecraft:spruce_log"), asked, "樱桃不成换云杉");
+    }
+
+    /** 替身：在背包里做木板——身上有哪种原木就扣一根、加四块那种木板，没有就说缺料。 */
+    private record MakesPlanks(FakeBackpack backpack) implements RecipeRuns {
+        @Override public Optional<Action> run(WorkstationRecipe recipe, WorldPosition station, int times,
+                Permissions permissions) {
+            return runInInventory(recipe, times);
+        }
+
+        @Override public boolean craftsInInventory() {
+            return true;
+        }
+
+        @Override public Optional<Action> runInInventory(WorkstationRecipe recipe, int times) {
+            return Optional.of(new Action() {
+                @Override public ActionStatus tick(TickContext context) {
+                    String log = recipe.ingredients().getFirst().item().itemId();
+                    if (!backpack.take(log, 1)) {
+                        return ActionStatus.failed(Problem.of(Problem.Kind.NEED_ITEM, "身上没有" + log));
+                    }
+                    backpack.add(recipe.result().itemId(), 4);
+                    return ActionStatus.done();
+                }
+                @Override public String describe() {
+                    return "做" + recipe.result().describe();
+                }
+            });
+        }
+    }
+
     private static ActionStatus runToEnd(Action action) {
         for (long t = 0; t < 100; t++) {
             ActionStatus status = action.tick(new StubTick(t));
