@@ -34,8 +34,15 @@ public record FindDetails(List<Found> found, int searchedRadius, boolean searchC
      * @param direction        相对角色朝向的方位说法
      * @param compass          东南西北方位
      * @param creatureProtected 是不是受保护的生物；照常报告，但能不能动归许可
-     * @param protectionReason 受保护的具体原因（有名字、被驯服、拴着绳、圈养着）
+     * @param protectionReason 受保护的具体原因（有名字、被驯服、拴着绳、圈养着、放在船或矿车里）
+     * @param traits           实体看得出来的特征（羊的毛色、幼年、手持物、盔甲）；方块与结构为空
      */
     public record Found(String id, String type, WorldPosition position, int distance, int dy,
-            String direction, String compass, boolean creatureProtected, String protectionReason) {}
+            String direction, String compass, boolean creatureProtected, String protectionReason,
+            Map<String, String> traits) {
+
+        public Found {
+            traits = traits == null ? Map.of() : Map.copyOf(traits);
+        }
+    }
 }

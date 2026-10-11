@@ -15,13 +15,15 @@ import net.minecraft.world.entity.Leashable;
 import net.minecraft.world.entity.OwnableEntity;
 import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.vehicle.AbstractMinecart;
+import net.minecraft.world.entity.vehicle.Boat;
 import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /**
  * 生物处境的读端：从客户端世界里把一只生物是玩家吗、敌对吗、有名字吗、被驯服了吗、
- * 拴着绳吗、在圈养设施里吗逐项读出来。
+ * 拴着绳吗、在圈养设施里吗、被放在船或矿车里吗逐项读出来。
  *
  * <p>"在围栏里"是客户端能看到的粗看法：生物四周与脚下的小范围里有没有栅栏、墙、
  * 栏门这类圈养方块（见 {@link #enclosedBy}）。它回答的是"这像是别人圈的牲畜"，
@@ -62,7 +64,9 @@ public final class ClientCreatureSituations implements ReadsCreatureSituation {
                 found.hasCustomName(),
                 found instanceof OwnableEntity ownable && ownable.getOwnerUUID() != null,
                 found instanceof Leashable leashable && leashable.isLeashed(),
-                enclosedBy(level::getBlockState, found.blockPosition())));
+                enclosedBy(level::getBlockState, found.blockPosition()),
+                // 坐在船里、矿车里的：多半是有人运着的牲口；骑在蜘蛛上的骷髅这类不算。
+                found.getVehicle() instanceof Boat || found.getVehicle() instanceof AbstractMinecart));
     }
 
     /**

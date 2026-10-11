@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.ability.find;
 
 import java.util.List;
+import java.util.Map;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 /**
@@ -46,11 +47,20 @@ public interface FindsAround {
      * @param protectionReason  受保护的具体原因；不受保护为 null
      */
     record Hit(FindInput.FindKind kind, String typeId, WorldPosition position,
-            int gameEntityId, boolean creatureProtected, String protectionReason) {
+            int gameEntityId, boolean creatureProtected, String protectionReason, Map<String, String> traits) {
+
+        public Hit {
+            traits = traits == null ? Map.of() : Map.copyOf(traits);
+        }
+
+        public Hit(FindInput.FindKind kind, String typeId, WorldPosition position,
+                   int gameEntityId, boolean creatureProtected, String protectionReason) {
+            this(kind, typeId, position, gameEntityId, creatureProtected, protectionReason, Map.of());
+        }
 
         /** 方块与结构线索的命中：没有游戏实体编号，也没有保护事实。 */
         public static Hit place(FindInput.FindKind kind, String typeId, WorldPosition position) {
-            return new Hit(kind, typeId, position, -1, false, null);
+            return new Hit(kind, typeId, position, -1, false, null, Map.of());
         }
     }
 }

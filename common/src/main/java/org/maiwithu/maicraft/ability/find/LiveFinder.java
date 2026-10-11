@@ -17,6 +17,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.boss.EnderDragonPart;
 import net.minecraft.world.level.block.Block;
+import org.maiwithu.maicraft.behavior.perception.ClientEntitySight;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
@@ -164,10 +165,11 @@ final class LiveFinder implements FindsAround {
                 creatureProtected = true;
                 reason = protectionWord(situation.get());
             }
+            // 看得出的特征一并交出去：羊是什么毛色、是不是幼崽，LLM 才挑得出要打要剪的是哪一只。
             hits.add(new Hit(FindInput.FindKind.ENTITY,
                     EntityType.getKey(entity.getType()).toString(),
                     WorldPosition.here(entity.getBlockX(), entity.getBlockY(), entity.getBlockZ()),
-                    entity.getId(), creatureProtected, reason));
+                    entity.getId(), creatureProtected, reason, ClientEntitySight.traits(entity)));
         }
         // 实体清单一刻读得完：这轮就是全部，如实报扫完。
         return new Round(List.copyOf(hits), true, false);
@@ -180,6 +182,7 @@ final class LiveFinder implements FindsAround {
         if (situation.tamed()) reasons.add("被驯服");
         if (situation.leashed()) reasons.add("拴着绳");
         if (situation.inEnclosure()) reasons.add("圈养着");
+        if (situation.inVehicle()) reasons.add("放在船或矿车里");
         return String.join("、", reasons);
     }
 

@@ -26,11 +26,19 @@ public interface ReadsCreatureSituation {
      * @param inEnclosure 在不在围栏、栏圈这类圈养设施里（围栏里的牲畜是别人的）
      */
     record CreatureSituation(boolean player, boolean hostileMob,
-            boolean named, boolean tamed, boolean leashed, boolean inEnclosure) {
+            boolean named, boolean tamed, boolean leashed, boolean inEnclosure, boolean inVehicle) {
 
-        /** 有没有哪条占着"这是别人的"的理由：有名字、被驯服、拴着绳、圈养着，占上一条就不碰。 */
+        public CreatureSituation(boolean player, boolean hostileMob, boolean named, boolean tamed, boolean leashed,
+                                 boolean inEnclosure) {
+            this(player, hostileMob, named, tamed, leashed, inEnclosure, false);
+        }
+
+        /**
+         * 有没有哪条占着"这是别人的"的理由：有名字、被驯服、拴着绳、圈养着、被放在船或矿车里（玩家运牲口才这么放），
+         * 占上一条就不碰。
+         */
         public boolean bondedToSomeone() {
-            return named || tamed || leashed || inEnclosure;
+            return named || tamed || leashed || inEnclosure || inVehicle;
         }
     }
 }

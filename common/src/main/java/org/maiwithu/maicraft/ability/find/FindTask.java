@@ -130,7 +130,7 @@ final class FindTask extends PhasedTask<FindTask.Phase> {
                 dy,
                 DirectionWords.relative(dx, dz, self.facingYaw()),
                 DirectionWords.compassOf(dx, dz),
-                hit.creatureProtected(), hit.protectionReason());
+                hit.creatureProtected(), hit.protectionReason(), hit.traits());
     }
 
     private String directionOf(WorldPosition position, SceneSelf self) {

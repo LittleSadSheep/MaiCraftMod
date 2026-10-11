@@ -71,8 +71,8 @@ public final class ClientEntitySight implements EntitySight {
         return entity instanceof Mob mob && mob.getTarget() == player;
     }
 
-    // 看得出来的特征：着火、幼年、羊的毛与剪毛、手持物、身上穿的盔甲。看不出来就不写。
-    private static Map<String, String> traits(Entity entity) {
+    /** 看得出来的特征：着火、幼年、羊的毛与剪毛、手持物、身上穿的盔甲。看不出来就不写。观察与找东西共用这一份。 */
+    public static Map<String, String> traits(Entity entity) {
         Map<String, String> traits = new LinkedHashMap<>();
         if (entity.isOnFire()) {
             traits.put("着火", "是");
