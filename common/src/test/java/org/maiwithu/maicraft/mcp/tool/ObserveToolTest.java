@@ -170,6 +170,19 @@ class ObserveToolTest {
     }
 
     @Test
+    void selfShowsGearBarsOnlyWhenSomethingDrawsOne() {
+        assertFalse(data(observe("{\"what\": \"self\"}")).has("gear_bars"), "没有画条的东西就不列");
+        // 背罐画着罐里的气、镐画着耐久：都按物品自己画的那条换成百分比。
+        scene.updateSelf(new SelfSight.Facts(0.5, 64, 0.5, 180f, 20, 18, 300, 300, "minecraft:stone_pickaxe",
+                List.of(), List.of(), true, false, List.of(new SelfSight.GearBar("chest", "create:copper_backtank", 85),
+                        new SelfSight.GearBar("mainhand", "minecraft:stone_pickaxe", 40))));
+        JsonObject bar = data(observe("{\"what\": \"self\"}")).getAsJsonArray("gear_bars").get(0).getAsJsonObject();
+        assertEquals("chest", bar.get("slot").getAsString());
+        assertEquals("create:copper_backtank", bar.get("item").getAsString());
+        assertEquals(85, bar.get("bar_percent").getAsInt());
+    }
+
+    @Test
     void selfCarriesTheRemindersWithEvidenceAndSuggestions() {
         // 提醒的证据只在 observe(self) 里给全：事件只是叫醒 LLM，数值与阈值在这里。
         reminders = List.of(new Reminder("drowning_imminent", "正在水下憋气，氧气已不到一半", 10, 12,

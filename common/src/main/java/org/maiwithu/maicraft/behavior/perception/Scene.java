@@ -54,7 +54,7 @@ public final class Scene {
         self = new SceneSelf(facts.x(), facts.y(), facts.z(), facts.facingYaw(), facingWord,
                 facts.health(), facts.food(), facts.air(), facts.maxAir(),
                 facts.heldItem(), facts.armor(), facts.effects(),
-                facts.onGround(), facts.inWater());
+                facts.onGround(), facts.inWater(), facts.gearBars());
     }
 
     /** 更新环境观察：时间、天气、光照、生物群系。 */

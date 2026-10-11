@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.mcp.view;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import org.maiwithu.maicraft.behavior.perception.SceneSelf;
+import org.maiwithu.maicraft.behavior.perception.SelfSight;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.kernel.goal.GoalRun;
@@ -51,6 +52,18 @@ public final class SelfView {
         JsonArray effects = new JsonArray();
         self.effects().forEach(effects::add);
         json.add("effects", effects);
+        // 装备与手里东西自己画的那条：耐久、背罐的气、电量，物品不画条的不列。
+        if (!self.gearBars().isEmpty()) {
+            JsonArray bars = new JsonArray();
+            for (SelfSight.GearBar bar : self.gearBars()) {
+                JsonObject entry = new JsonObject();
+                entry.addProperty("slot", bar.slot());
+                entry.addProperty("item", bar.item());
+                entry.addProperty("bar_percent", bar.percent());
+                bars.add(entry);
+            }
+            json.add("gear_bars", bars);
+        }
         if (backpack != null) {
             json.add("inventory", inventory(backpack));
             json.addProperty("free_slots", backpack.freeSlots());

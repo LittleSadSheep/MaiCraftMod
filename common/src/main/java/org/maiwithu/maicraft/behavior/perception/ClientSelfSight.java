@@ -7,6 +7,7 @@ import java.util.Objects;
 import java.util.function.Supplier;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.client.player.LocalPlayer;
 
@@ -14,12 +15,15 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /**
  * 角色自身观察的读端：每刻从当刻的角色上下文里读一次位置、视角、生命、饥饿、氧气、
- * 手持、护甲、状态效果、落地与入水，交给感知的场景整理。
+ * 手持、护甲、状态效果、落地与入水，以及装备与手里东西自己画的那条，交给感知的场景整理。
  *
  * <p>只在控制循环的刻内调用（上下文只在当刻有效）；没有角色上下文时返回 null，
  * 调用方这一刻跳过自身观察，等其他观察有基准后再整理。
  */
 public final class ClientSelfSight implements SelfSight {
+
+    /** 物品条画满是 13 像素（原版 ItemStack.getBarWidth 的上限）。 */
+    private static final float FULL_BAR = 13f;
 
     private final Supplier<PlayerContext> context;
 
@@ -50,7 +54,20 @@ public final class ClientSelfSight implements SelfSight {
                 (int) player.getHealth(), player.getFoodData().getFoodLevel(),
                 player.getAirSupply(), player.getMaxAirSupply(),
                 heldItem(player), armor, effects,
-                player.onGround(), player.isInWater());
+                player.onGround(), player.isInWater(), gearBars(player));
+    }
+
+    // 六处装备格里画着条的东西：物品自己说画不画（isBarVisible）、画多长（满长 13），换成百分比，
+    // 耐久、背罐的气、电量一视同仁，不认是哪种。
+    private static List<SelfSight.GearBar> gearBars(LocalPlayer player) {
+        List<SelfSight.GearBar> bars = new ArrayList<>();
+        for (EquipmentSlot slot : EquipmentSlot.values()) {
+            if (slot.getType() != EquipmentSlot.Type.HAND && slot.getType() != EquipmentSlot.Type.HUMANOID_ARMOR) continue;
+            ItemStack stack = player.getItemBySlot(slot);
+            if (stack.isEmpty() || !stack.isBarVisible()) continue;
+            bars.add(new SelfSight.GearBar(slot.getName(), itemTypeId(stack), Math.round(stack.getBarWidth() * 100f / FULL_BAR)));
+        }
+        return bars;
     }
 
     // 主手优先，主手空着看副手；两手都空是"没拿东西"而不是读不到。
