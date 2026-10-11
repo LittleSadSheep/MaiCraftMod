@@ -144,7 +144,7 @@
       {
         "ability": "maicraft:machine_run",
         "summary": "用一台机器做东西：备料、投料、开机、等产物、收产物",
-        "parameters": "item?: string, count: integer = 1, collect: boolean = true, max_seconds: integer = 300",
+        "parameters": "item?: string, count: integer = 1, collect: boolean = true, max_seconds: integer = 300, file?: string, anchor?: object, rotation: integer = 0",
         "targets": [
           "here",
           "landmark",
@@ -854,6 +854,27 @@
           "default": 300,
           "min": 1,
           "max": 3600
+        },
+        {
+          "name": "file",
+          "type": "string",
+          "required": false,
+          "doc": "蓝图桌、蓝图加农炮用：schematics 目录下的 .nbt 蓝图文件名（和 build 的 file 同一个目录）"
+        },
+        {
+          "name": "anchor",
+          "type": "object",
+          "required": false,
+          "doc": "蓝图加农炮用：蓝图原点落在哪一格 {\"x\":..,\"y\":..,\"z\":..}；配 file"
+        },
+        {
+          "name": "rotation",
+          "type": "integer",
+          "required": false,
+          "doc": "蓝图加农炮用：蓝图绕原点转 0 / 90 / 180 / 270 度；配 anchor",
+          "default": 0,
+          "min": 0,
+          "max": 270
         }
       ],
       "targets": [

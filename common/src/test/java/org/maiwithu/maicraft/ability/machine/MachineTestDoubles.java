@@ -17,6 +17,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
+import org.maiwithu.maicraft.ability.machine.spi.FullRun;
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
@@ -27,6 +28,7 @@ import org.maiwithu.maicraft.ability.machine.spi.NetworkLoad;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkSummary;
 import org.maiwithu.maicraft.ability.machine.spi.PartCell;
+import org.maiwithu.maicraft.ability.machine.spi.RunRequest;
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
@@ -128,6 +130,8 @@ final class MachineTestDoubles {
         List<ExchangePoint> ports = List.of();
         /** 这种机器在它那种网上吃多少、给多少：审阅估算用；默认没有。 */
         Function<BlockState, Optional<NetworkLoad>> load = state -> Optional.empty();
+        /** 机器自己从头做到尾的做法：默认没有，按配方那一套走。 */
+        Function<RunRequest, Optional<FullRun>> fullRun = request -> Optional.empty();
 
         FakeMachineType(String id, String name, MachineRole role, Predicate<BlockState> covers) {
             this.id = id;
@@ -227,6 +231,10 @@ final class MachineTestDoubles {
 
         @Override public Optional<Action> take(BlockPos at, String itemId, int count, Permissions permissions) {
             return Optional.ofNullable(takeActions.poll());
+        }
+
+        @Override public Optional<FullRun> fullRun(BlockPos at, RunRequest request, Permissions permissions) {
+            return fullRun.apply(request);
         }
     }
 

@@ -96,4 +96,12 @@ public interface MachineType {
 
     /** 从出口把东西拿进背包；出口没有这种东西或这种机器不出东西时给空。 */
     Optional<Action> take(BlockPos at, String itemId, int count, Permissions permissions);
+
+    /**
+     * 这台机器自己从头做到尾的一套做法（蓝图桌写蓝图、蓝图加农炮照蓝图施工）：不按配方投料，整段交给机器类型。
+     * 不是这种机器、或这次的请求不归它管给空，machine_run 照配方那一套走。
+     */
+    default Optional<FullRun> fullRun(BlockPos at, RunRequest request, Permissions permissions) {
+        return Optional.empty();
+    }
 }

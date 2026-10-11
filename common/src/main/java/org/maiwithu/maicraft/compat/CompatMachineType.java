@@ -13,7 +13,9 @@ import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
+import org.maiwithu.maicraft.ability.machine.spi.FullRun;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
+import org.maiwithu.maicraft.ability.machine.spi.RunRequest;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkLoad;
 import org.maiwithu.maicraft.ability.machine.spi.PartCell;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -109,6 +111,11 @@ public final class CompatMachineType implements MachineType {
 
     @Override public Optional<Action> take(BlockPos at, String itemId, int count, Permissions permissions) {
         return act(() -> type.take(at, itemId, count, permissions));
+    }
+
+    @Override public Optional<FullRun> fullRun(BlockPos at, RunRequest request, Permissions permissions) {
+        return ask(() -> type.fullRun(at, request, permissions), Optional.<FullRun>empty())
+                .map(run -> CompatAction.fullRun(module, run));
     }
 
     // 读一样东西：停用了或对不上时给"用不了"时的那个答案。

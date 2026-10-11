@@ -12,9 +12,11 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.ability.machine.spi.FeedReport;
+import org.maiwithu.maicraft.ability.machine.spi.FullRun;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
+import org.maiwithu.maicraft.ability.machine.spi.RunRequest;
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.WantedItem;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
@@ -44,8 +46,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  */
 final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
 
-    /** 认机器 → 选工序 → 备料 → 投料 → 开机 → 等产物 → 收产物。 */
-    enum Phase { RESOLVE, RECIPE, GATHER, FEED, SWITCH, WAIT, COLLECT }
+    /** 认机器 → 选工序 → 备料 → 投料 → 开机 → 等产物 → 收产物；机器自己从头做到尾的（蓝图桌、蓝图加农炮）认完直接交给它。 */
+    enum Phase { RESOLVE, RECIPE, GATHER, FEED, SWITCH, WAIT, COLLECT, FULL }
 
     /** 等产物时多久看一眼出口。 */
     private static final int POLL_INTERVAL_TICKS = 20;
@@ -74,6 +76,8 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
     private Action prepared;
     /** 正在投的这一样料交得出实情时（扔进去这类不一定件件都进的投法）留着它，做完按实情记账。 */
     private FeedReport feeding;
+    /** 机器自己从头做到尾的那一次（蓝图桌写蓝图、蓝图加农炮施工）；按配方做的为 null。 */
+    private FullRun fullRun;
 
     MachineRunTask(MachineRunInput input, MachineServices services) {
         super("用机器做东西", Phase.RESOLVE,
@@ -98,6 +102,7 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
             case SWITCH -> flipSwitch(context);
             case WAIT -> waitForOutput(context);
             case COLLECT -> collect(context);
+            case FULL -> full(context);
         };
     }
 
@@ -120,6 +125,19 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
         watch.baseline = outputCount(input.item());
         recordProgress("认出了" + describeMachine() + "；出口里现在有 " + watch.baseline + " 件"
                 + (input.item() == null ? "" : " " + input.item()));
+        // 蓝图桌写蓝图、蓝图加农炮照蓝图施工：不按配方投料，整段交给机器类型；给了蓝图却不是这种机器就当场说。
+        Optional<FullRun> whole = type.fullRun(cell, new RunRequest(input.item(), input.count(), input.file(),
+                input.anchor(), input.rotation(), input.maxSeconds()), input.permissions());
+        if (whole.isPresent()) {
+            fullRun = whole.get();
+            prepared = fullRun;
+            return Next.go(Phase.FULL, describeMachine() + "从头做到尾");
+        }
+        if (input.file() != null) {
+            return Next.fail(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+                    describeMachine() + "不收蓝图：file、anchor 只给蓝图桌（写蓝图）和蓝图加农炮（照蓝图施工）",
+                    "去掉 file、anchor 按配方做，或换成蓝图桌、蓝图加农炮"));
+        }
         return input.item() == null
                 ? Next.go(Phase.SWITCH, "没说要做什么，只开机")
                 : Next.go(Phase.RECIPE, "查这台机器做 " + input.item() + " 的配方");
@@ -345,6 +363,37 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
                 });
     }
 
+    // 机器自己从头做到尾：动作跑完按它交回的件数、做全没有与说明结算；半路失败时做出过的照实算数。
+    private Next<Phase> full(TickContext context) {
+        if (action() == null) {
+            return finishFull(null);
+        }
+        return switch (runAction(context)) {
+            case ActionStatus.Running running -> Next.stay();
+            case ActionStatus.Done done -> finishFull(null);
+            case ActionStatus.Failed failed -> finishFull(failed.problem());
+        };
+    }
+
+    private Next<Phase> finishFull(Problem problem) {
+        watch.produced = fullRun.produced();
+        notes.addAll(fullRun.notes());
+        if (input.item() != null && watch.produced > 0) {
+            watch.collected = watch.produced;
+            recordChange(Change.of(Change.Kind.ITEM_GAINED, input.item(), watch.produced));
+        }
+        String made = describeMachine() + "做出了 " + watch.produced + (input.item() == null ? " 格" : " 件 " + input.item());
+        if (problem != null) {
+            return watch.produced == 0 ? Next.fail(problem)
+                    : Next.done(TaskResult.builder(TaskResult.Status.PARTIAL, made + "，没做完").problem(problem).build());
+        }
+        if (fullRun.complete()) {
+            return Next.done(TaskResult.done(made));
+        }
+        return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL, made + "，没做完")
+                .problem(Problem.of(Problem.Kind.STUCK, "没做完；机器读数：" + describeState(type.state(cell)))).build());
+    }
+
     // 收尾：出了要的量算完成，差一点按部分完成，机器读数与网络读数一起给。
     // 出口读不到（东西在机器里、或掉在别处）：投料开机到此为止，不对着读不到的出口干等，也不说做好了；
     // 做没做好交给 LLM 之后打开界面看、或到出口那边找。
@@ -494,6 +543,7 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
             case SWITCH -> "开机";
             case WAIT -> "等产物";
             case COLLECT -> "收产物";
+            case FULL -> "机器自己做";
         };
     }
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.machine;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -13,8 +14,10 @@ import net.minecraft.world.level.block.Blocks;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.ability.machine.spi.FeedReport;
+import org.maiwithu.maicraft.ability.machine.spi.FullRun;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
+import org.maiwithu.maicraft.ability.machine.spi.RunRequest;
 import org.maiwithu.maicraft.behavior.recipe.GameRecipeTable;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.behavior.recipe.RecipeLookup;
@@ -198,6 +201,56 @@ class MachineRunTaskTest {
         assertEquals(2, details.fed().get(0).count(), "料照样投进去了");
         assertEquals(0, details.collected(), "看不见的出口不去收");
         assertTrue(details.notes().stream().anyMatch(note -> note.contains("use 打开")));
+    }
+
+    /** 机器自己从头做到尾的替身：一刻做完，报做出几件、做全没有与说明。 */
+    private record WholeRun(int produced, boolean complete, List<String> notes) implements FullRun {
+        @Override public ActionStatus tick(TickContext context) {
+            return ActionStatus.done();
+        }
+
+        @Override public String describe() {
+            return "整段替身";
+        }
+    }
+
+    @Test
+    void 机器自己从头做到尾_按它交回的件数结算() {
+        Rig rig = new Rig();
+        List<RunRequest> asked = new ArrayList<>();
+        rig.type.fullRun = request -> {
+            asked.add(request);
+            return Optional.of(new WholeRun(1, true, List.of("上传完了")));
+        };
+        TaskResult result = rig.run(new MachineRunInput(positionOf(CELL), "create:schematic", 1, true, 5,
+                Permissions.DEFAULT, "house.nbt", null, 0));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals("house.nbt", asked.getFirst().file());
+        MachineRunDetails details = (MachineRunDetails) result.details();
+        assertEquals(1, details.produced());
+        assertTrue(details.notes().contains("上传完了"));
+        assertTrue(result.changes().stream().anyMatch(change -> change.kind() == Change.Kind.ITEM_GAINED
+                && "create:schematic".equals(change.what())));
+    }
+
+    @Test
+    void 机器自己做到一半_按部分完成收场() {
+        Rig rig = new Rig();
+        rig.type.fullRun = request -> Optional.of(new WholeRun(5, false, List.of("缺 minecraft:stone")));
+        TaskResult result = rig.run(new MachineRunInput(positionOf(CELL), null, 1, true, 5,
+                Permissions.DEFAULT, "house.nbt", new BlockPos(10, 64, 10), 90));
+        assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
+        assertEquals(Problem.Kind.STUCK, result.problem().kind());
+        assertEquals(5, ((MachineRunDetails) result.details()).produced());
+    }
+
+    @Test
+    void 给了蓝图却不是收蓝图的机器_当场说() {
+        Rig rig = new Rig();
+        TaskResult result = rig.run(new MachineRunInput(positionOf(CELL), null, 1, true, 5,
+                Permissions.DEFAULT, "house.nbt", null, 0));
+        assertEquals(TaskResult.Status.FAILED, result.status(), result.summary());
+        assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, result.problem().kind());
     }
 
     /** 交得出实情的投料动作替身：一刻做完，报进去几件与说明。 */

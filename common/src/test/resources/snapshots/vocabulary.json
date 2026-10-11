@@ -1,6 +1,7 @@
 {
   "parameter_names": {
     "after_seconds": "先至少经过多少秒，再开始做检查",
+    "anchor": "蓝图原点落在哪一格 {x,y,z}：target 指的是别的东西（例如蓝图加农炮）时另给",
     "angle_degrees": "扇形开口角（度），1..360；配 direction 使用，有方向默认 90",
     "block": "方块 ID，或 # 开头的方块标签",
     "blocks": "多个方块 ID 或方块标签",

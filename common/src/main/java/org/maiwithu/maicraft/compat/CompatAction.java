@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Objects;
 
 import org.maiwithu.maicraft.ability.machine.spi.FeedReport;
+import org.maiwithu.maicraft.ability.machine.spi.FullRun;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -29,6 +30,34 @@ class CompatAction implements Action {
     static CompatAction of(CompatModule module, Action action) {
         return action instanceof FeedReport report ? new Reporting(module, action, report)
                 : new CompatAction(module, action);
+    }
+
+    /** 机器从头做到尾的一次运行包一层：做出几件、做全没有、说明照转。 */
+    static FullRun fullRun(CompatModule module, FullRun run) {
+        return new WholeRun(module, run);
+    }
+
+    /** 机器自己做到底的一次运行：读结论只读动作自己记下的件数与说明，不碰模组。 */
+    private static final class WholeRun extends CompatAction implements FullRun {
+
+        private final FullRun run;
+
+        WholeRun(CompatModule module, FullRun run) {
+            super(module, run);
+            this.run = run;
+        }
+
+        @Override public int produced() {
+            return run.produced();
+        }
+
+        @Override public boolean complete() {
+            return run.complete();
+        }
+
+        @Override public List<String> notes() {
+            return run.notes();
+        }
     }
 
     /** 带投料实情的动作：实情照转；读实情只读动作自己记下的件数与说明，不碰模组。 */
