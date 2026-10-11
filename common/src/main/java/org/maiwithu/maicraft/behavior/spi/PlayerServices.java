@@ -14,6 +14,7 @@ import org.maiwithu.maicraft.behavior.inventory.MovesToMainhand;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.serverlink.ServerReads;
 import org.maiwithu.maicraft.game.world.BlockScanService;
 
 /**
@@ -32,11 +33,12 @@ import org.maiwithu.maicraft.game.world.BlockScanService;
  * @param itemTags     物品带哪些标签
  * @param menuLayouts  认得出哪些界面：原版加上联动模组证明过的
  * @param blockScans   在已加载的区块里按方块找东西
+ * @param serverReads  向服务端问只读操作：客户端读不到的网络汇总（ME 网络的控制器、频道、能量）经它问
  */
 public record PlayerServices(Supplier<PlayerContext> context, BringsPlayerClose approach,
                              Interactions interactions, MovesToMainhand toMainhand, GearChanges gear,
                              HoldsSneak sneak, ItemNeeds needs, Protection protection, ReadsItemTags itemTags,
-                             MenuLayouts menuLayouts, BlockScanService blockScans) {
+                             MenuLayouts menuLayouts, BlockScanService blockScans, ServerReads serverReads) {
 
     public PlayerServices {
         Objects.requireNonNull(context, "context");
@@ -50,5 +52,6 @@ public record PlayerServices(Supplier<PlayerContext> context, BringsPlayerClose 
         Objects.requireNonNull(itemTags, "itemTags");
         Objects.requireNonNull(menuLayouts, "menuLayouts");
         Objects.requireNonNull(blockScans, "blockScans");
+        Objects.requireNonNull(serverReads, "serverReads");
     }
 }

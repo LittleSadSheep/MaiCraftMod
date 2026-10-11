@@ -47,6 +47,15 @@ public final class CompatNetworkReader implements NetworkReader {
         }
     }
 
+    @Override public boolean summaryPending(String networkId) {
+        if (!module.active()) return false;
+        try {
+            return reader.summaryPending(networkId);
+        } catch (ModApiMismatch broken) {
+            return false;
+        }
+    }
+
     @Override public NetworkSummary summary(String networkId) {
         if (!module.active()) {
             return NetworkSummary.unreadable(networkId,

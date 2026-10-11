@@ -40,6 +40,9 @@ final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
     /** 分刻读格子 → 分台 → 交付。 */
     enum Phase { SCAN, DELIVER }
 
+    /** 网络读数要问服务端时最多等多久（刻）：等不到就照实交"读不到"，不卡在这里。 */
+    private static final int SUMMARY_WAIT_TICKS = 60;
+
     /** 一个方块 ID 的没认领格先列几个位置当例子；总数照实给，不悄悄截断。 */
     private static final int SAMPLE_POSITIONS = 8;
 
@@ -61,6 +64,8 @@ final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
     private ArchiveCheck.Result archiveCheck;
     /** 这次读多大范围：给了档案按档案的大小，否则按参数。 */
     private int radius;
+    /** 交付前等网络读数等了几刻。 */
+    private int deliverWaits;
 
     MachineInspectTask(MachineInspectInput input, MachineServices services) {
         super("看机器", Phase.SCAN, new ProgressTracker(400, 2400));
@@ -155,14 +160,20 @@ final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
         }
     }
 
-    // 交付：分组、读组成与状态、挂网，一次给全。
+    // 交付：分组、读组成与状态、挂网，一次给全。要问服务端的网络读数先问一遍，回答还在路上就等一会儿。
     private Next<Phase> deliver() {
-        List<MachineGrouping.Claimed> claimed = claimedStates.entrySet().stream()
-                .map(entry -> new MachineGrouping.Claimed(entry.getKey(),
-                        services.claiming(entry.getValue())))
-                .toList();
-        machines = MachineGrouping.group(claimed, at -> MachineGrouping.membershipsOf(services, at));
-        recordProgress("分成 " + machines.size() + " 台机器");
+        if (deliverWaits == 0) {
+            List<MachineGrouping.Claimed> claimed = claimedStates.entrySet().stream()
+                    .map(entry -> new MachineGrouping.Claimed(entry.getKey(),
+                            services.claiming(entry.getValue())))
+                    .toList();
+            machines = MachineGrouping.group(claimed, at -> MachineGrouping.membershipsOf(services, at));
+            recordProgress("分成 " + machines.size() + " 台机器");
+            machines.forEach(this::networksOf);
+        }
+        if (summariesPending() && ++deliverWaits <= SUMMARY_WAIT_TICKS) {
+            return Next.stay();
+        }
         if (input.archive() != null) {
             archiveCheck = ArchiveCheck.compare(input.archive(), services);
             recordProgress("和档案「" + input.archive().name() + "」比完");
@@ -275,6 +286,18 @@ final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
         return byRole.entrySet().stream()
                 .map(entry -> new MachineDetails.RoleGroup(entry.getKey(), entry.getValue()))
                 .toList();
+    }
+
+    // 有没有哪张网的读数还在路上（问了服务端还没回）。
+    private boolean summariesPending() {
+        for (MachineGrouping.Machine machine : machines) {
+            for (MachineDetails.NetworkView network : networksOf(machine)) {
+                for (NetworkReader reader : services.networkReaders()) {
+                    if (reader.kind().equals(network.kind()) && reader.summaryPending(network.networkId())) return true;
+                }
+            }
+        }
+        return false;
     }
 
     private List<MachineDetails.NetworkView> networksOf(MachineGrouping.Machine machine) {

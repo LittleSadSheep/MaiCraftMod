@@ -38,6 +38,7 @@ import org.maiwithu.maicraft.compat.SupportedMod;
 import org.maiwithu.maicraft.compat.VerifiedVersions;
 import org.maiwithu.maicraft.game.loader.LoaderEnvironment;
 import org.maiwithu.maicraft.game.player.GearSlotName;
+import org.maiwithu.maicraft.game.serverlink.ServerReads;
 import org.maiwithu.maicraft.game.world.BlockScanService;
 import org.maiwithu.maicraft.game.world.FurnaceFuels;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -62,7 +63,7 @@ class Ae2TerminalSourceTest {
                 name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self");
         return new PlayerServices(() -> null, (target, permissions) -> null, new Interactions(null),
                 itemId -> Optional.empty(), new NoGear(), inner -> inner, (request, permissions) -> null, nobodyOwns,
-                itemId -> Set.of(), MenuLayouts.VANILLA, new BlockScanService());
+                itemId -> Set.of(), MenuLayouts.VANILLA, new BlockScanService(), ServerReads.NONE);
     }
 
     /** 读写端的替身：附近没有终端，界面什么都读不到；这里只看联动入口交了什么。 */

@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.behavior.menu.spi.MenuLayoutProof;
 import org.maiwithu.maicraft.behavior.recipe.RecipeViewer;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.loader.LoaderEnvironment;
+import org.maiwithu.maicraft.game.serverlink.ClientOperation;
 import org.maiwithu.maicraft.kernel.knowledge.KnowledgeSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,9 +52,11 @@ public final class CompatRegistry {
     private final List<CarriedBackpack> carriedBackpacks = new ArrayList<>();
     private final List<KnowledgeSource> knowledgeSources = new ArrayList<>();
     private final List<RecipeViewer> recipeViewers = new ArrayList<>();
+    private final List<ClientOperation> serverReads = new ArrayList<>();
     /** 全部的槽：一个模组交接到一半出错时，按交接前的长度一起撤回。新加槽时把它的列表加进来。 */
     private final List<List<?>> slots = List.of(itemSources, machineTypes, networkReaders, questBooks,
-            breakAccelerators, dismantleTools, menuLayouts, carriedBackpacks, knowledgeSources, recipeViewers);
+            breakAccelerators, dismantleTools, menuLayouts, carriedBackpacks, knowledgeSources, recipeViewers,
+            serverReads);
     private final List<String> decisions = new ArrayList<>();
 
     private CompatRegistry() {}
@@ -172,6 +175,15 @@ public final class CompatRegistry {
         recipeViewers.add(new CompatRecipeViewer(module, viewer));
     }
 
+    /**
+     * 联动入口声明要向服务端问的一个只读操作（例如 ae2.network）：启动时就要登记进客户端的请求路由，
+     * 进世界后才问得了；服务端没装对应的读数、或所有者关了，问的时候如实说读不到。
+     */
+    public void serverRead(CompatModule module, String operationId, int version) {
+        Objects.requireNonNull(module, "module");
+        serverReads.add(new ClientOperation(operationId, version, false));
+    }
+
     /** 联动入口交一个随身背包。腾背包还没有接上调用方，接上时要像物品来源一样包一层，停用后回答放不下。 */
     public void carriedBackpack(CarriedBackpack backpack) {
         carriedBackpacks.add(Objects.requireNonNull(backpack, "backpack"));
@@ -252,6 +264,11 @@ public final class CompatRegistry {
     /** 联动模组提供的配方查看器，按联动清单的顺序；配方查询自己决定先问谁。 */
     public List<RecipeViewer> recipeViewers() {
         return Collections.unmodifiableList(recipeViewers);
+    }
+
+    /** 联动模组声明的只读操作：启动时登记进客户端的请求路由。 */
+    public List<ClientOperation> serverReads() {
+        return Collections.unmodifiableList(serverReads);
     }
 
     /** 清单每一行的结论，和日志里写的一样；调试面板与测试看它。 */

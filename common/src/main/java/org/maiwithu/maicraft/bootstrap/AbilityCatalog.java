@@ -129,6 +129,7 @@ import org.maiwithu.maicraft.game.player.ReadsFoodValues;
 import org.maiwithu.maicraft.game.player.ReadsGearFit;
 import org.maiwithu.maicraft.game.player.ReadsHunger;
 import org.maiwithu.maicraft.game.serverlink.ServerLinkSession;
+import org.maiwithu.maicraft.game.serverlink.SessionServerReads;
 import org.maiwithu.maicraft.game.world.BlockScanService;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -327,7 +328,7 @@ public final class AbilityCatalog {
         PlayerServices playerServices = new PlayerServices(deps.context(), bringsClose, deps.interactions(),
                 toMainhand, new ClientGearChanges(deps.context(), toMainhand),
                 new LiveHoldsSneak(deps.inputs(), deps.context()), innerNeeds, deps.protection(), deps.itemTags(),
-                deps.compat().menuLayouts(), deps.blockScans());
+                deps.compat().menuLayouts(), deps.blockScans(), new SessionServerReads(deps.session()));
         // 丢弃落点避让与走开读端：丢弃能力与腾地方的丢弃共用同一份，
         // 谁丢的都登记进同一本账，走路时一并绕开，不把刚丢出去的又吸回来。
         DropAvoidance dropAvoidance = new DropAvoidance();

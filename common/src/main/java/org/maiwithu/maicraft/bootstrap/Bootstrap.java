@@ -518,6 +518,8 @@ public final class Bootstrap {
             // 联动清单到这里才逐行检查：所有模组都构造完了，装没装、什么版本都已确定。
             // 登记上来的物品来源进能力清单（进世界时建），知识来源现在就接进知识库。
             compat = CompatRegistry.load(compatCatalog, loader);
+            // 联动模组要向服务端问的只读操作（ME 网络读数这类）入服前登记进请求路由，进世界后才问得了。
+            compat.serverReads().forEach(session.router()::register);
             tools = goalTools(abilities, goals, clientWork, taskEvents, chatEvents, () -> worldScope[0], recentCalls,
                     lookupTool(), () -> reminders == null ? List.of() : reminders.snapshot());
             try {

@@ -24,6 +24,14 @@ public interface NetworkReader {
     /** 那张网现在怎样；读不到时 readable 为假并写明原因。 */
     NetworkSummary summary(String networkId);
 
+    /**
+     * 那张网的读数还在路上：问了服务端、还没回答。看机器时问过一遍汇总后等它一会儿再交付，
+     * 等不到就照实交"读不到"；客户端直接读得到的网永远不在路上。
+     */
+    default boolean summaryPending(String networkId) {
+        return false;
+    }
+
     /** 这种网怎么用方块接线：接网络时线路规划按它铺；不会接线的网给空，接网络时如实说铺不了。 */
     default Optional<LineMaterials> lineMaterials() {
         return Optional.empty();

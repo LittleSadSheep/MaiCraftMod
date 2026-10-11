@@ -26,6 +26,7 @@ import org.maiwithu.maicraft.game.menu.MenuActions;
 import org.maiwithu.maicraft.game.player.GearSlotName;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
+import org.maiwithu.maicraft.game.serverlink.ServerReads;
 import org.maiwithu.maicraft.game.world.BlockScanService;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -327,7 +328,7 @@ class FtbQuestBookOperationsTest {
                 protection(),
                 LiveCarryReads.itemTags(),
                 new MenuLayouts(List.of()),
-                new BlockScanService());
+                new BlockScanService(), ServerReads.NONE);
     }
 
     /** 这个世界的保护判断：归属问不到、没有记住的区域，保护判断按"谁的东西都不碰"收窄。 */
