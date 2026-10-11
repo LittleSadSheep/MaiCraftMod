@@ -16,6 +16,7 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -80,12 +81,11 @@ class CreateCompatTest {
     }
 
     @Test
-    void 扳手与砂纸打磨也交给登记表() {
+    void 扳手_砂纸打磨与工具箱也交给登记表() {
         CompatRegistry registry = CompatRegistry.load(List.of(supported()), loaderWith("6.0.11"));
         assertEquals(1, registry.dismantleTools(offlineServices()).size());
         List<ItemSource> sources = registry.itemSources(offlineServices());
-        assertEquals(1, sources.size());
-        assertEquals("sandpaper", sources.getFirst().via().name());
+        assertEquals(List.of("sandpaper", "toolbox"), sources.stream().map(source -> source.via().name()).toList());
     }
 
     @Test
@@ -218,6 +218,9 @@ class CreateCompatTest {
             @Override public boolean track(BlockState state) { return false; }
             @Override public Optional<BlockPos> trackStart(ItemStack held) { return Optional.empty(); }
             @Override public boolean trackConnected(ClientLevel level, BlockPos from, BlockPos to) { return false; }
+            @Override public List<Toolbox> toolboxes(ClientLevel level, Player player) { return List.of(); }
+            @Override public int toolboxRange() { return 10; }
+            @Override public void equipFromToolbox(BlockPos box, int compartment, int hotbarSlot) { }
         };
         CreateValues values = new CreateValues() {
             @Override public Boxes boxes(ClientLevel level, BlockPos at) { return new Boxes(List.of(), List.of()); }

@@ -14,6 +14,14 @@ import java.util.Set;
 
 import com.simibubi.create.AllDataComponents;
 import com.simibubi.create.AllRecipeTypes;
+import com.simibubi.create.content.equipment.toolbox.ToolboxBlockEntity;
+import com.simibubi.create.content.equipment.toolbox.ToolboxEquipPacket;
+import com.simibubi.create.content.equipment.toolbox.ToolboxHandler;
+import com.simibubi.create.content.equipment.toolbox.ToolboxInventory;
+import com.simibubi.create.infrastructure.config.AllConfigs;
+import net.minecraft.world.entity.player.Player;
+import net.neoforged.neoforge.capabilities.Capabilities;
+import net.neoforged.neoforge.items.IItemHandler;
 import com.simibubi.create.content.trains.track.TrackBlock;
 import com.simibubi.create.content.trains.track.TrackBlockEntity;
 import com.simibubi.create.content.trains.track.TrackPlacement;
@@ -31,7 +39,8 @@ import org.maiwithu.maicraft.compat.create.CreateTools;
 /**
  * 读机械动力手持工具的读写端：能不能用扳手拆看方块是不是 Create 的可调方块；
  * 砂纸配方从客户端的配方表里按 Create 的砂纸打磨类型取，原料取配方唯一那一格能放的全部物品；
- * 铺轨读轨道物品记着的起点与两头轨道方块实体里的连接。只翻译，不判断。
+ * 铺轨读轨道物品记着的起点与两头轨道方块实体里的连接；工具箱读 Create 自己记着的附近工具箱，挂格发 ToolboxEquipPacket。
+ * 只翻译，不判断。
  */
 public final class CreateToolReads implements CreateTools {
 
@@ -83,5 +92,45 @@ public final class CreateToolReads implements CreateTools {
     @Override public boolean trackConnected(ClientLevel level, BlockPos from, BlockPos to) {
         return level.getBlockEntity(from) instanceof TrackBlockEntity start && start.getConnections().containsKey(to)
                 && level.getBlockEntity(to) instanceof TrackBlockEntity end && end.getConnections().containsKey(from);
+    }
+
+    // 够得着的工具箱：Create 自己记着每个已加载的工具箱，按范围与远近挑（最多八个）；工具箱的库存经物品能力读，
+    // 一格四叠装的都是同一种东西，按装着的数件数（空着的格拿不出东西，不列）。
+    @Override public List<Toolbox> toolboxes(ClientLevel level, Player player) {
+        List<Toolbox> boxes = new ArrayList<>();
+        for (ToolboxBlockEntity box : ToolboxHandler.getNearest(level, player, 8)) {
+            IItemHandler inventory = level.getCapability(Capabilities.ItemHandler.BLOCK, box.getBlockPos(), null);
+            if (inventory == null) continue;
+            List<Compartment> compartments = new ArrayList<>();
+            for (int index = 0; index < 8; index++) {
+                ItemStack sample = ItemStack.EMPTY;
+                int count = 0;
+                for (int i = 0; i < ToolboxInventory.STACKS_PER_COMPARTMENT; i++) {
+                    int slot = index * ToolboxInventory.STACKS_PER_COMPARTMENT + i;
+                    if (slot >= inventory.getSlots()) break;
+                    ItemStack stack = inventory.getStackInSlot(slot);
+                    if (stack.isEmpty()) continue;
+                    if (sample.isEmpty()) sample = stack;
+                    count += stack.getCount();
+                }
+                if (count == 0) continue;
+                compartments.add(new Compartment(index, BuiltInRegistries.ITEM.getKey(sample.getItem()).toString(), count,
+                        sample.getMaxStackSize()));
+            }
+            boxes.add(new Toolbox(box.getBlockPos(), compartments));
+        }
+        return boxes;
+    }
+
+    @Override public int toolboxRange() {
+        try {
+            return AllConfigs.server().equipment.toolboxRange.get();
+        } catch (RuntimeException unreadable) {
+            return 10;
+        }
+    }
+
+    @Override public void equipFromToolbox(BlockPos box, int compartment, int hotbarSlot) {
+        CatnipServices.NETWORK.sendToServer(new ToolboxEquipPacket(box, compartment, hotbarSlot));
     }
 }

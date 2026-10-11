@@ -159,4 +159,11 @@ class CreateShapesTest {
         assertEquals(10, TrackInstallation.tracksFor(new BlockPos(0, 64, 0), new BlockPos(10, 64, 0)));
         assertEquals(15, TrackInstallation.tracksFor(new BlockPos(0, 64, 0), new BlockPos(10, 64, 10)));
     }
+
+    @Test
+    void 工具箱挂一格给半组_工具一件() {
+        assertEquals(32, ToolboxSource.halfStack(64));
+        assertEquals(8, ToolboxSource.halfStack(16));
+        assertEquals(1, ToolboxSource.halfStack(1));
+    }
 }

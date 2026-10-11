@@ -9,6 +9,7 @@ import java.util.Set;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
@@ -22,7 +23,7 @@ import org.maiwithu.maicraft.compat.CompatRegistry;
  * 装的 Create 和编译时用的对不上时整个联动停用，不让 LinkageError 漏出去。
  *
  * <p>交给登记表的：每一种认得的机器、兜住附属模组动力方块的"其他动力方块"、应力网的网络读取器、
- * 扳手（施工清障时拆 Create 的方块）、砂纸打磨（拿东西的一条途径）、放置规则（施工放带漏斗、竖直齿轮箱、动力辊）。
+ * 扳手（施工清障时拆 Create 的方块）、砂纸打磨与附近的工具箱（拿东西的两条途径）、放置规则（施工放带漏斗、竖直齿轮箱、动力辊）。
  * 机器类型要走过去、点、换手、缺东西去拿，进世界时由登记表带着联动能用的玩家行为建。
  */
 public final class CreateCompat extends CompatModule {
@@ -54,6 +55,8 @@ public final class CreateCompat extends CompatModule {
         // 扳手拆机器方块、砂纸打磨当拿东西的一条途径：都要走过去、换手、点，进世界时带着玩家行为建。
         registry.dismantleTool(this, services -> new CreateWrench(this, services));
         registry.itemSource(this, services -> new SandpaperSource(this, services));
+        // 附近的工具箱：不用走过去，照轮盘那样把一格挂到快捷栏上（所有者定 C5）。
+        registry.itemSource(this, services -> new ToolboxSource(this, services));
         // 放方块的讲究：带漏斗拿漏斗放、等下面的带子，横着的齿轮箱拿竖直齿轮箱放，动力辊别被抬高一格。
         registry.placementRules(this, new CreatePlacementRules(this));
         // 蓝图桌、蓝图加农炮的界面：证明了两侧怎么分，角色才能往里放空白蓝图、蓝图与火药。
@@ -220,6 +223,21 @@ public final class CreateCompat extends CompatModule {
     /** 蓝图桌在传时传了多少；见 {@link CreateSchematics#uploading}。 */
     public Optional<Float> uploading(ClientLevel level, BlockPos at) {
         return call("读蓝图桌", () -> schematics.uploading(level, at));
+    }
+
+    /** 够得着的工具箱；见 {@link CreateTools#toolboxes}。 */
+    public List<CreateTools.Toolbox> toolboxes(ClientLevel level, Player player) {
+        return call("读附近的工具箱", () -> tools.toolboxes(level, player));
+    }
+
+    /** 工具箱够得着的范围；见 {@link CreateTools#toolboxRange}。 */
+    public int toolboxRange() {
+        return call("读工具箱范围", tools::toolboxRange);
+    }
+
+    /** 把工具箱一格挂到快捷栏；见 {@link CreateTools#equipFromToolbox}。 */
+    public void equipFromToolbox(BlockPos box, int compartment, int hotbarSlot) {
+        run("从工具箱挂到快捷栏", () -> tools.equipFromToolbox(box, compartment, hotbarSlot));
     }
 
     /** 是不是轨道；见 {@link CreateTools#track}。 */
