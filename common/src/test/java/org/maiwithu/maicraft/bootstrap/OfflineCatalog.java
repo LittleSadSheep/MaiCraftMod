@@ -126,6 +126,7 @@ final class OfflineCatalog {
                 WORLD_KEY,
                 new ItemsInUse(LiveCarryReads.itemTags()),
                 new DropConfirmations(),
-                Map.of("create:chain_conveyor", 1));
+                Map.of("create:chain_conveyor", 1),
+                (kind, message) -> { });
     }
 }

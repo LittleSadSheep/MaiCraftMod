@@ -22,10 +22,12 @@ import org.maiwithu.maicraft.ability.enchant.EnchantModule;
 import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import org.maiwithu.maicraft.behavior.interaction.spi.DismantleTool;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
+import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.ability.deposit.DepositModule;
 import org.maiwithu.maicraft.ability.drop.DropModule;
 import org.maiwithu.maicraft.ability.eat.EatModule;
 import org.maiwithu.maicraft.ability.equip.EquipModule;
+import org.maiwithu.maicraft.ability.explore.ExploreAbility;
 import org.maiwithu.maicraft.ability.fight.FightModule;
 import org.maiwithu.maicraft.ability.fish.FishModule;
 import org.maiwithu.maicraft.ability.fight.LiveFightMoves;
@@ -220,7 +222,9 @@ public final class AbilityCatalog {
             /** 掉落物的事实确认：捡掉落物、战斗拾荒按服务器的拾取包认东西进没进包。 */
             DropConfirmations dropConfirmations,
             /** 每台机器里某种方块最多几个（实例配置）：按蓝图建机器、接网络时数整台。 */
-            Map<String, Integer> machineBlockLimits) {
+            Map<String, Integer> machineBlockLimits,
+            /** 任务事件出口：探索途中的发现从这里告诉宿主。 */
+            TaskEventSink events) {
 
         public Deps {
             Objects.requireNonNull(context, "context");
@@ -240,6 +244,7 @@ public final class AbilityCatalog {
             Objects.requireNonNull(worldKey, "worldKey");
             Objects.requireNonNull(itemsInUse, "itemsInUse");
             Objects.requireNonNull(dropConfirmations, "dropConfirmations");
+            Objects.requireNonNull(events, "events");
         }
     }
 
@@ -488,6 +493,10 @@ public final class AbilityCatalog {
         // 寻找：方块与实体扫已加载区，结构查记过的产地线索；命中直接在场景的观察编号表上领编号。
         registry.register(FindModule.live(deps.context(), deps.blockScans(), deps.creatures(),
                 deps.memory(), deps.scene()));
+
+        // 探索：观察推进与走行段在探索走行里，发现落进世界记忆并经事件出口告诉宿主。
+        registry.register(ExploreAbility.live(deps.context(), deps.blockScans(), deps.walks(),
+                deps.memory(), deps.events()));
 
         // 聊天：发送与回显确认都走游戏聊天通道；是否放行游戏命令由所有者的实例配置决定。
         registry.register(chatModule(deps));

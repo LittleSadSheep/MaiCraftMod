@@ -232,6 +232,13 @@
         "mode": "controls_player"
       },
       {
+        "ability": "maicraft:explore",
+        "summary": "朝某个方向把外面的地形跑一遍：自由看看这一片，或去找一种群系、一块能站的平台、回露天的地面",
+        "parameters": "target: string, direction?: string, angle_degrees?: integer, min_distance?: integer, max_distance: integer = 768, max_seconds?: integer, interests?: array",
+        "targets": [],
+        "mode": "controls_player"
+      },
+      {
         "ability": "maicraft:chat",
         "summary": "向游戏聊天发一句话（对全体玩家可见）",
         "parameters": "message: string",
@@ -1137,6 +1144,76 @@
       "required_mods": [],
       "knowledge": [],
       "doc_resource": "assets/maicraft/abilities/find.md"
+    },
+    {
+      "ability": "maicraft:explore",
+      "summary": "朝某个方向把外面的地形跑一遍：自由看看这一片，或去找一种群系、一块能站的平台、回露天的地面",
+      "parameters": [
+        {
+          "name": "target",
+          "type": "string",
+          "required": true,
+          "doc": "探索目标：survey 自由跑图 / 群系 ID 或 # 标签 / platform 找平台 / surface 回露天；探索不接受已定位终点，找海岸给 minecraft:beach"
+        },
+        {
+          "name": "direction",
+          "type": "string",
+          "required": false,
+          "doc": "扇形朝向；platform 必配，其余可选，出发时按当时朝向固定",
+          "choices": [
+            "forward",
+            "backward",
+            "left",
+            "right",
+            "north",
+            "south",
+            "east",
+            "west"
+          ]
+        },
+        {
+          "name": "angle_degrees",
+          "type": "integer",
+          "required": false,
+          "doc": "扇形开口角（度）；有方向默认 90，无方向必须省略或 360",
+          "min": 1,
+          "max": 360
+        },
+        {
+          "name": "min_distance",
+          "type": "integer",
+          "required": false,
+          "doc": "忽略更近的目标匹配（格）；有方向默认 16，无方向默认 0",
+          "min": 0,
+          "max": 2048
+        },
+        {
+          "name": "max_distance",
+          "type": "integer",
+          "required": false,
+          "doc": "探索半径（格），默认 768；到范围边上就收工",
+          "default": 768,
+          "min": 64,
+          "max": 2048
+        },
+        {
+          "name": "max_seconds",
+          "type": "integer",
+          "required": false,
+          "doc": "最多做多久（秒）；观察与走行有真实进展就续期"
+        },
+        {
+          "name": "interests",
+          "type": "array",
+          "required": false,
+          "doc": "途中留意清单：地形要素（lava_pool）、结构 ID、方块 ID 或 # 标签、实体类型；看见了记下来并发一条发现事件，不改路线、不算抵达"
+        }
+      ],
+      "targets": [],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/explore.md"
     },
     {
       "ability": "maicraft:chat",

@@ -50,6 +50,7 @@ import org.maiwithu.maicraft.game.player.PlayerControlBoundary;
 import org.maiwithu.maicraft.game.serverlink.ServerLinkSession;
 import org.maiwithu.maicraft.game.world.BlockScanService;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
+import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.goal.DocumentGoalRunStore;
 import org.maiwithu.maicraft.kernel.goal.GoalRunStore;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -103,7 +104,7 @@ public final class WorldScope {
             AbilityRegistry abilities, InteractionSender interactionSender, MenuActions menuActions,
             InstanceConfig instanceConfig, FurnaceFuels furnaceFuels, CompatRegistry compat,
             NightRestWiring nightWiring, Path configDirectory, ShowsPreview preview, ItemsInUse itemsInUse,
-            DropConfirmations dropConfirmations) {
+            DropConfirmations dropConfirmations, TaskEventSink events) {
         // 游戏接口层认出是哪个存档或服务器，内核的世界身份只拿编号与目录。
         SaveIdentity save = SaveIdentity.current(minecraft)
                 .orElseThrow(() -> new IllegalStateException("进了世界却识别不出世界身份，记忆无处安放"));
@@ -166,7 +167,7 @@ public final class WorldScope {
                 compat,
                 kinds,
                 nightWiring, configDirectory, preview, documents, identity.key(), itemsInUse, dropConfirmations,
-                instanceConfig.machineBlockLimits()), abilities);
+                instanceConfig.machineBlockLimits(), events), abilities);
     }
 
     /**

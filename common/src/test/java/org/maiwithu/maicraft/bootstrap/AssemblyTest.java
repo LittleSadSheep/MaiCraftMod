@@ -62,7 +62,7 @@ class AssemblyTest {
         assertEquals(Set.of("use", "eat", "equip", "drop", "obtain", "gather", "deposit", "sleep", "design", "build",
                 "machine_inspect", "machine_review", "machine_configure", "machine_run",
                 "machine_build", "machine_connect",
-                "fight", "follow", "wait", "travel", "find", "chat", "remember", "sequence", "quest",
+                "fight", "follow", "wait", "travel", "find", "explore", "chat", "remember", "sequence", "quest",
                 "fish", "enchant"), registered,
                 "清单里的能力要一个不少地登记上");
     }
