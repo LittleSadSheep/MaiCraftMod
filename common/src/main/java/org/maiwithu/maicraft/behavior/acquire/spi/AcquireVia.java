@@ -17,8 +17,8 @@ public record AcquireVia(String name, String description) {
     // 取值的写法要先定好，下面的常量在类初始化时就要经它检查。
     private static final Pattern NAME = Pattern.compile("[a-z][a-z0-9_]*");
 
-    /** 身上已有的（主背包与副手）。 */
-    public static final AcquireVia CARRIED = new AcquireVia("carried", "身上已有的（主背包与副手）");
+    /** 身上已有的（主背包与副手；装了随身背包模组，包里的也算身上的仓库）。 */
+    public static final AcquireVia CARRIED = new AcquireVia("carried", "身上已有的（主背包、副手与随身背包）");
     /** 记得的箱子、现场看到的容器。 */
     public static final AcquireVia CONTAINER = new AcquireVia("container", "记得的箱子、现场看到的容器");
     /** 工作台上做出来（含石切台）。 */

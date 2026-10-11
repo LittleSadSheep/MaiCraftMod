@@ -15,17 +15,17 @@ import org.maiwithu.maicraft.behavior.menu.TransferPlan;
  *
  * <p>像真人一样不把整箱搬空：整堆够用（要的不少于这一格装着的，含刚好够）才整堆快速移动；
  * 只要这格的一部分时，按二分堆拿到光标上，放进背包那一侧放得下的一格，多拿的一个一个退回源格。
- * 拿够就停：容器里剩下的格子与件数都不再碰。
+ * 拿够就停：容器里剩下的格子与件数都不再碰。随身背包取货用的是同一份计划。
  */
-final class ContainerTakePlan {
+public final class ContainerTakePlan {
 
     /** 一步点击：在哪一格上、快速移动还是普通左右键、这一下会不会把东西拿到光标上。 */
-    record Click(int slotId, boolean quickMove, int button, boolean takesToCursor) {}
+    public record Click(int slotId, boolean quickMove, int button, boolean takesToCursor) {}
 
     /** 一笔取货：从容器哪一格拿几件，按顺序要点哪几下。 */
-    record Move(int containerSlotId, int amount, List<Click> clicks) {
+    public record Move(int containerSlotId, int amount, List<Click> clicks) {
 
-        Move {
+        public Move {
             if (clicks.isEmpty()) throw new IllegalArgumentException("一笔取货至少要有点击");
             clicks = List.copyOf(clicks);
         }
@@ -42,7 +42,7 @@ final class ContainerTakePlan {
      * @param wanted  什么样的槽位算想要的东西
      * @param needed  还缺几件；不缺时没有下一笔
      */
-    static Optional<Move> next(MenuContent.Reading reading, Predicate<SlotSnapshot> wanted, int needed) {
+    public static Optional<Move> next(MenuContent.Reading reading, Predicate<SlotSnapshot> wanted, int needed) {
         if (needed < 1) return Optional.empty();
         List<SlotSnapshot> container = reading.containerSnapshots();
         for (int i = 0; i < container.size(); i++) {

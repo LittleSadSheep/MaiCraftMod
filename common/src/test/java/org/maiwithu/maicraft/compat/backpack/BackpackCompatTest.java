@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat.backpack;
 
+import java.util.Optional;
+import net.minecraft.world.inventory.AbstractContainerMenu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -24,6 +27,18 @@ import org.maiwithu.maicraft.game.world.FurnaceFuels;
 /** 精妙背包的最小读数：认出身上哪几格是背包；读写端对不上就停用；装了且版本对才登记。 */
 class BackpackCompatTest {
 
+    /** 界面读写端的替身：测试不真开背包界面。 */
+    private final BackpackMenus menus = new BackpackMenus() {
+        @Override public boolean isBackpackMenu(AbstractContainerMenu menu) { return false; }
+        @Override public Optional<List<Integer>> mainStorageSlotIds(AbstractContainerMenu menu) {
+            return Optional.empty();
+        }
+        @Override public List<Integer> playerSlotIds(AbstractContainerMenu menu) {
+            return List.of();
+        }
+        @Override public void openCarried() { }
+    };
+
     /** 背包视图的替身：只有几格固定的东西。 */
     private static BackpackView carrying(String... itemIds) {
         List<BackpackStack> stacks = List.of(itemIds).stream()
@@ -37,7 +52,8 @@ class BackpackCompatTest {
 
     @Test
     void 认出身上哪几格是精妙背包() {
-        BackpackCompat compat = new BackpackCompat(itemId -> itemId.startsWith("sophisticatedbackpacks:"));
+        BackpackCompat compat = new BackpackCompat(itemId -> itemId.startsWith("sophisticatedbackpacks:"),
+                menus, Instant::now);
         List<BackpackStack> found = compat.carriedBackpacks(carrying(
                 "minecraft:cobblestone", "sophisticatedbackpacks:iron_backpack", "minecraft:torch",
                 "sophisticatedbackpacks:backpack"));
@@ -48,7 +64,8 @@ class BackpackCompatTest {
 
     @Test
     void 读写端的类对不上时停用并抛模组接口对不上() {
-        BackpackCompat compat = new BackpackCompat(itemId -> { throw new NoClassDefFoundError("BackpackItem"); });
+        BackpackCompat compat = new BackpackCompat(itemId -> { throw new NoClassDefFoundError("BackpackItem"); },
+                menus, Instant::now);
         assertThrows(ModApiMismatch.class, () -> compat.carriedBackpacks(carrying("minecraft:torch")));
         assertFalse(compat.active());
         assertTrue(compat.disabledReason().orElseThrow().contains("认背包物品"));
@@ -57,7 +74,7 @@ class BackpackCompatTest {
     @Test
     void 装了且版本在范围内才登记() {
         SupportedMod<CompatModule> supported = new SupportedMod<>(BackpackCompat.MOD_ID, "精妙背包", new VerifiedVersions("3.25.69", "3.26"),
-                () -> new BackpackCompat(itemId -> false));
+                () -> new BackpackCompat(itemId -> false, menus, Instant::now));
         CompatRegistry installed = CompatRegistry.load(List.of(supported), loaderWith("3.25.69"));
         assertEquals(List.of(BackpackCompat.MOD_ID), installed.modules().stream().map(module -> module.modId()).toList());
         assertEquals("精妙背包（sophisticatedbackpacks）：已登记，版本 3.25.69", installed.decisions().getFirst());

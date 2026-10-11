@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat.ftbquests;
 
+import org.maiwithu.maicraft.game.player.BackpackStack;
+import org.maiwithu.maicraft.game.player.BackpackView;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.maiwithu.maicraft.ability.quest.spi.QuestBookOperations;
@@ -328,7 +330,17 @@ class FtbQuestBookOperationsTest {
                 protection(),
                 LiveCarryReads.itemTags(),
                 new MenuLayouts(List.of()),
-                new BlockScanService(), ServerReads.NONE);
+                new BlockScanService(), ServerReads.NONE,
+                emptyBackpack());
+    }
+
+    /** 背包视图的替身：身上什么都没有，任务书操作的测试用不到它。 */
+    private static BackpackView emptyBackpack() {
+        return new BackpackView() {
+            @Override public List<BackpackStack> stacks() { return List.of(); }
+            @Override public int usedSlots() { return 0; }
+            @Override public int totalSlots() { return 36; }
+        };
     }
 
     /** 这个世界的保护判断：归属问不到、没有记住的区域，保护判断按"谁的东西都不碰"收窄。 */

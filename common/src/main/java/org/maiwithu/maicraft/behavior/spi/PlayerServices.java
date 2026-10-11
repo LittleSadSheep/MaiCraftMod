@@ -13,6 +13,7 @@ import org.maiwithu.maicraft.behavior.inventory.GearChanges;
 import org.maiwithu.maicraft.behavior.inventory.MovesToMainhand;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
 import org.maiwithu.maicraft.behavior.permission.Protection;
+import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.serverlink.ServerReads;
 import org.maiwithu.maicraft.game.world.BlockScanService;
@@ -34,11 +35,13 @@ import org.maiwithu.maicraft.game.world.BlockScanService;
  * @param menuLayouts  认得出哪些界面：原版加上联动模组证明过的
  * @param blockScans   在已加载的区块里按方块找东西
  * @param serverReads  向服务端问只读操作：客户端读不到的网络汇总（ME 网络的控制器、频道、能量）经它问
+ * @param backpack     角色的背包视图：随身背包的来源认身上哪几格放的是包
  */
 public record PlayerServices(Supplier<PlayerContext> context, BringsPlayerClose approach,
                              Interactions interactions, MovesToMainhand toMainhand, GearChanges gear,
                              HoldsSneak sneak, ItemNeeds needs, Protection protection, ReadsItemTags itemTags,
-                             MenuLayouts menuLayouts, BlockScanService blockScans, ServerReads serverReads) {
+                             MenuLayouts menuLayouts, BlockScanService blockScans, ServerReads serverReads,
+                             BackpackView backpack) {
 
     public PlayerServices {
         Objects.requireNonNull(context, "context");
@@ -52,6 +55,10 @@ public record PlayerServices(Supplier<PlayerContext> context, BringsPlayerClose 
         Objects.requireNonNull(itemTags, "itemTags");
         Objects.requireNonNull(menuLayouts, "menuLayouts");
         Objects.requireNonNull(blockScans, "blockScans");
+<<<<<<< HEAD
         Objects.requireNonNull(serverReads, "serverReads");
+=======
+        Objects.requireNonNull(backpack, "backpack");
+>>>>>>> 4ef786082 (feat(obtain): 装了精妙背包时从随身背包取货)
     }
 }
