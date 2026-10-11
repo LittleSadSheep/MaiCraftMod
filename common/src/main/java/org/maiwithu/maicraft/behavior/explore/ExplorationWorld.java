@@ -13,6 +13,9 @@ public interface ExplorationWorld {
     /** 角色此刻在哪（带维度）；没有角色时给 null。 */
     WorldPosition currentSpot();
 
+    /** 身体所在格的群系注册 ID（实测）；没有角色或读不到时给 null。起点到访记忆用这个实测值，不用列采样的顶盖群系。 */
+    String currentBiome();
+
     /** 角色此刻的视角角（度，0 朝南顺时针增大）；没有角色时给 null。 */
     Float facingYaw();
 

@@ -173,9 +173,10 @@ public final class ExploreTask extends PhasedTask<ExploreTask.Phase> implements 
         }
         boolean fresh = sampling.noteColumn(x, z, distanceFrom(x, z));
         WorldPosition spot = world.currentSpot();
-        // 身体所在群系免视线闸直接记（到访）；远望样本必须过视线闸——已加载不等于看得见。
+        // 身体所在群系免视线闸直接记（到访），值取身体所在格的实测群系——顶盖采样在区块刚同步时
+        // 可能落到地下（把森林起点记成深暗之域就是它）；远望样本必须过视线闸——已加载不等于看得见。
         if (spot.x() == x && spot.z() == z) {
-            record(new ExploreFinding(ExploreFinding.Kind.BIOME, sample.biome(),
+            record(new ExploreFinding(ExploreFinding.Kind.BIOME, world.currentBiome(),
                     spot, MemoryOrigin.VISITED));
             return fresh;
         }
@@ -440,8 +441,8 @@ public final class ExploreTask extends PhasedTask<ExploreTask.Phase> implements 
         if (conclusion == SelfConclusion.TARGET_CONFIRMED) {
             history.reached = world.currentSpot();
             if (objective.target() == ExploreObjective.Kind.BIOME) {
-                ColumnSample here = world.sampleColumn(history.reached.x(), history.reached.z());
-                record(new ExploreFinding(ExploreFinding.Kind.BIOME, here.biome(),
+                // 核实到访记的也是身体所在格的实测群系，与判据同一条路，不另采一次顶盖。
+                record(new ExploreFinding(ExploreFinding.Kind.BIOME, world.currentBiome(),
                         history.reached, MemoryOrigin.VISITED));
             }
             return Next.done(TaskResult.done("探索：核实通过，站实了（" + history.reached.x()
@@ -498,10 +499,10 @@ public final class ExploreTask extends PhasedTask<ExploreTask.Phase> implements 
         };
     }
 
-    /** 脚下群系是不是目标：在扇形内、过了起找距离、群系对得上。 */
+    /** 脚下群系是不是目标：在扇形内、过了起找距离、群系对得上。群系按身体所在格的实测值判。 */
     private boolean biomeUnderFeet(WorldPosition spot, double distance) {
-        ColumnSample here = world.sampleColumn(spot.x(), spot.z());
-        if (!here.loaded() || !world.matches(here.biome(), objective.selectors())) {
+        String biome = world.currentBiome();
+        if (biome == null || !world.matches(biome, objective.selectors())) {
             return false;
         }
         double dx = spot.x() - origin.getX();
@@ -615,6 +616,27 @@ public final class ExploreTask extends PhasedTask<ExploreTask.Phase> implements 
                 }
             });
         }
+    }
+
+    /** 空转满时限的收尾：按最近走行段的成败定收尾原因（前沿用尽或受阻），说明带上观察与走行的现场。 */
+    @Override
+    protected Problem noProgressProblem(ProgressTracker.Status status) {
+        history.stopReason = LegEscalation.stallReason(history.windowSnapshot());
+        String idleText = switch (status) {
+            case ProgressTracker.Status.Stuck stuck ->
+                    "自「" + stuck.lastProgress() + "」之后推进了 " + stuck.idleTicks() + " 刻都没有新进展";
+            case ProgressTracker.Status.TimedOut timedOut ->
+                    "已推进 " + timedOut.activeTicks() + " 刻，超过这件事最多能做的时长";
+            default -> "长时间没有新进展";
+        };
+        String suggestion = history.stopReason == ExploreDetails.StopReason.BLOCKED
+                ? "先许可动土（change_blocks 给 natural 或以上），或从别的方向重新下达"
+                : "能试的航点都试过了：加大 max_distance、换个方向，或先出行到更远处再下达";
+        return Problem.of(Problem.Kind.STUCK,
+                "探索空转收场：" + idleText + "；已观察 " + sampling.uniqueColumns + " 列，最远走到 "
+                        + (int) sampling.maxSelfDistance + " 格（探索半径 " + (int) radius.maxDistance()
+                        + " 格），共走 " + history.total + " 段失败 " + history.failures + " 段",
+                suggestion);
     }
 
     /** 记一条发现：落进世界记忆，新发现发一条事件；角色不停不问，照常跑图。 */

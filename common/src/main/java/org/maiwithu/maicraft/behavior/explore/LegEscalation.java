@@ -80,4 +80,20 @@ public final class LegEscalation {
         }
         return Level.BLOCKED;
     }
+
+    /**
+     * 长时间空转后的收尾原因（纯判断）：最近几段多数失败是受阻，否则是能试的航点都试过了。
+     * 观察与选航点空转不产生新段时，窗口还是空转前那段路的样子，按它定说法。
+     *
+     * @param recentOutcomes 最近走行段的成败，先走的在前（true 成功）
+     */
+    public static ExploreDetails.StopReason stallReason(List<Boolean> recentOutcomes) {
+        if (recentOutcomes.isEmpty()) {
+            return ExploreDetails.StopReason.FRONTIERS_EXHAUSTED;
+        }
+        long failures = recentOutcomes.stream().filter(succeeded -> !succeeded).count();
+        return failures * 2 >= recentOutcomes.size()
+                ? ExploreDetails.StopReason.BLOCKED
+                : ExploreDetails.StopReason.FRONTIERS_EXHAUSTED;
+    }
 }

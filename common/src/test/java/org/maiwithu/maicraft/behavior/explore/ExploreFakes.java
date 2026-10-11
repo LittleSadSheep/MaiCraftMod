@@ -55,6 +55,9 @@ final class ExploreFakes {
         Float yaw = 180f;
         String dimension = "minecraft:overworld";
         String defaultBiome = "minecraft:plains";
+        /** 身体所在格的实测群系：默认不设，按身体所在列的采样给（真实世界两条路读数一致）；
+         *  起点群系错记的复现把它摆成与采样不同。 */
+        String bodyBiome;
         /** 只认登记过的列：其余一概未加载（摆稀疏世界用）。 */
         boolean onlyRegisteredColumns = false;
         FakeWalks walks;
@@ -82,6 +85,14 @@ final class ExploreFakes {
                 return new WorldPosition(walking.getX(), walking.getY(), walking.getZ(), dimension);
             }
             return new WorldPosition(spot.x(), spot.y(), spot.z(), dimension);
+        }
+
+        @Override public String currentBiome() {
+            if (bodyBiome != null) {
+                return bodyBiome;
+            }
+            WorldPosition here = currentSpot();
+            return sampleColumn(here.x(), here.z()).biome();
         }
 
         @Override public Float facingYaw() {
@@ -126,12 +137,20 @@ final class ExploreFakes {
         private final Deque<WalkReport> reports = new ArrayDeque<>();
         private final Deque<Boolean> stopAnswers = new ArrayDeque<>();
         private WalkReport last = WalkReport.planning();
+        /** 在路上但每刻都没有真实进展：寻路对着走不到的落点空转的演法。 */
+        private boolean idle;
         int stopRequests;
 
         ScriptedWalk(WalkReport... reports) {
             for (WalkReport report : reports) {
                 this.reports.add(report);
             }
+        }
+
+        /** 脚本演完后一直在路上空转，不报真实进展。 */
+        ScriptedWalk idleWithoutProgress() {
+            this.idle = true;
+            return this;
         }
 
         ScriptedWalk stopAnswers(Boolean... answers) {
@@ -143,14 +162,14 @@ final class ExploreFakes {
 
         @Override public ActionStatus tick(TickContext context) {
             if (reports.isEmpty()) {
-                return ActionStatus.running();
+                return idle ? ActionStatus.running() : ActionStatus.progressed();
             }
             WalkReport next = reports.remove();
             last = next;
             return switch (next.state()) {
                 case ARRIVED, STOPPED -> ActionStatus.done();
                 case FAILED -> ActionStatus.failed(next.problem());
-                default -> ActionStatus.progressed();
+                default -> idle ? ActionStatus.running() : ActionStatus.progressed();
             };
         }
 

@@ -470,6 +470,58 @@ class ExploreTaskTest {
     }
 
     @Test
+    void 起点群系按身体所在格实测记_不采顶盖采样() {
+        WorldMemory memory = memory();
+        // 起点这一列的顶盖采样读到地下的深暗之域（区块刚同步时的错读），身体实测站在森林：
+        // 起点到访记忆认实测值，不把采样值写成脏记忆。世界只有起点一列加载，身体不动。
+        world.onlyRegisteredColumns = true;
+        world.putColumn(0, 0, new ColumnSample(true, "minecraft:deep_dark", 63, false, true,
+                "minecraft:grass_block"));
+        world.bodyBiome = "minecraft:forest";
+        ExploreTask task = task(memory, ExploreObjective.survey(), ExploreObjective.Interests.NONE,
+                null, 360, 0, 256, NATURAL);
+        runTicks(task, 60);
+
+        assertTrue(memory.allRecords().stream().anyMatch(record -> record.contents() != null
+                        && record.contents().contains("minecraft:forest")),
+                "起点群系按实测的森林记");
+        assertTrue(memory.allRecords().stream().noneMatch(record -> record.contents() != null
+                        && record.contents().contains("minecraft:deep_dark")),
+                "顶盖采样的深暗之域不进记忆");
+    }
+
+    @Test
+    void 空转满时限收场写明停工原因与现场() {
+        WorldMemory memory = memory();
+        // 观察圈看完后朝航点走，走到对着到不了的落点每刻空转：收场要有 stop_reason 与观察、走行的现场。
+        walks.enqueue(new ExploreFakes.ScriptedWalk(
+                WalkReport.planning(),
+                WalkReport.onTheWay(new BlockPos(8, 64, 0), false)).idleWithoutProgress());
+        ExploreTask task = task(memory, ExploreObjective.survey(), ExploreObjective.Interests.NONE,
+                null, 360, 0, 64, NATURAL);
+        task.start(tick);
+        TaskResult result = null;
+        for (int i = 0; i < 2400 && result == null; i++) {
+            TickResult tickResult = task.tick(tick);
+            if (tickResult instanceof TickResult.Finished finished) {
+                result = finished.result();
+            }
+            tick.nextTick();
+        }
+        assertNotNull(result, "空转满时限要按卡住收场");
+        TaskResult stalled = result;
+
+        assertEquals(TaskResult.Status.FAILED, stalled.status());
+        assertEquals(Problem.Kind.STUCK, stalled.problem().kind());
+        assertTrue(stalled.problem().message().contains("空转收场"), () -> "说明：" + stalled.problem().message());
+        assertTrue(stalled.problem().message().contains("已观察"), () -> "说明：" + stalled.problem().message());
+        assertTrue(stalled.problem().message().contains("最远走到"), () -> "说明：" + stalled.problem().message());
+        ExploreDetails details = assertInstanceOf(ExploreDetails.class, stalled.details());
+        assertEquals(ExploreDetails.StopReason.FRONTIERS_EXHAUSTED, details.stopReason(),
+                "没失败过段的空转按前沿用尽收场");
+    }
+
+    @Test
     void 探索中切换维度如实结束旧范围作废() {
         WorldMemory memory = memory();
         ExploreTask task = task(memory, ExploreObjective.survey(), ExploreObjective.Interests.NONE,

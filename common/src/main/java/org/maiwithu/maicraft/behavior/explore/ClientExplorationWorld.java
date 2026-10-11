@@ -71,6 +71,18 @@ public final class ClientExplorationWorld implements ExplorationWorld {
     }
 
     @Override
+    public String currentBiome() {
+        LocalPlayer player = player();
+        if (player == null) {
+            return null;
+        }
+        // 群系按身体所在格实测：顶盖采样读的是高度图那一格，区块刚同步时可能落到地下，
+        // 起点到访记忆认实测值，不认采样值。
+        return player.level().getBiome(player.blockPosition()).unwrapKey()
+                .map(key -> key.location().toString()).orElse(null);
+    }
+
+    @Override
     public ColumnSample sampleColumn(int x, int z) {
         ClientLevel level = level();
         if (level == null || !level.hasChunkAt(new BlockPos(x, 0, z))) {
