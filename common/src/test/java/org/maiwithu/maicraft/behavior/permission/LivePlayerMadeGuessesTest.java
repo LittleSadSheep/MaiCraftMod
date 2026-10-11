@@ -78,6 +78,24 @@ class LivePlayerMadeGuessesTest {
                 "推断帮不上忙时按不受保护放行，记录与地盘那几路照样起作用");
     }
 
+    @Test
+    void 寻路拿自己读到的门来问_按推断受保护_不回头读当刻现场() {
+        // 后台算路线程上读当刻现场会撞上玩家控制边界的线程检查；这里让现场读数一碰就炸，确认寻路那一问碰不到它。
+        var protection = new Protection(recorded(Map.of()), fixed(List.of()), remembered(Map.of()),
+                new LivePlayerMadeGuesses(at -> {
+                    throw new IllegalStateException("寻路线程不该读当刻现场");
+                }), SELF);
+        assertTrue(protection.blockProtectedAsSeen(FIELD, Set.of(), true), "寻路读到一扇没记录的门，不挖不垫");
+        assertFalse(protection.blockProtectedAsSeen(FIELD, Set.of(), false), "寻路读到的是普通方块，照常能挖");
+    }
+
+    @Test
+    void 寻路读到自己垫的活板门_以记录为准_照常收得回() {
+        var protection = new Protection(recorded(Map.of(FIELD, SELF)), fixed(List.of()), remembered(Map.of()),
+                GuessesPlayerMade.NOTHING, SELF);
+        assertFalse(protection.blockProtectedAsSeen(FIELD, Set.of(), true));
+    }
+
     private static ReadsBlockOwnership recorded(Map<WorldPosition, String> placements) {
         return (dimension, x, y, z) -> {
             var hit = placements.get(new WorldPosition(x, y, z, dimension));

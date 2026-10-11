@@ -1130,7 +1130,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
 
         @Override
         public double costOfPlacingAt(int x, int y, int z, BlockState current) {
-            if (isPossiblyProtected(x, y, z) || !worldBorder.canPlaceAt(x, z)) { // make calculation fail properly if we can't build
+            // 施工垫块也拿搜索读到的这格方块问保护：别人的、像玩家放的门不往上垫。
+            if (isPossiblyProtected(x, y, z, current) || !worldBorder.canPlaceAt(x, z)) { // make calculation fail properly if we can't build
                 return COST_INF;
             }
             BlockState sch = getSchematic(x, y, z, current);
@@ -1164,7 +1165,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
 
         @Override
         public double breakCostMultiplierAt(int x, int y, int z, BlockState current) {
-            if ((!allowBreak && !allowBreakAnyway.contains(current.getBlock())) || isPossiblyProtected(x, y, z)) {
+            // 施工拆方块同样按搜索读到的这格方块问保护，后台算路线程上不回头读当刻现场。
+            if ((!allowBreak && !allowBreakAnyway.contains(current.getBlock())) || isPossiblyProtected(x, y, z, current)) {
                 return COST_INF;
             }
             BlockState sch = getSchematic(x, y, z, current);

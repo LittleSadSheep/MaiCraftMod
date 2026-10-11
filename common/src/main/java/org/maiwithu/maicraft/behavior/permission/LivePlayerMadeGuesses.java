@@ -34,8 +34,11 @@ public final class LivePlayerMadeGuesses implements GuessesPlayerMade {
         return state != null && looksPlacedByPlayer(state);
     }
 
-    /** 这一格像不像玩家安放的：门、活板门、栅栏门这类结构件，天然生成不会孤零零出现。 */
-    static boolean looksPlacedByPlayer(BlockState state) {
+    /**
+     * 这一格像不像玩家安放的：门、活板门、栅栏门这类结构件，天然生成不会孤零零出现。
+     * 寻路在后台线程上拿自己读到的方块直接问这里，不经过当刻现场。
+     */
+    public static boolean looksPlacedByPlayer(BlockState state) {
         return state.getBlock() instanceof DoorBlock
                 || state.getBlock() instanceof TrapDoorBlock
                 || state.getBlock() instanceof FenceGateBlock;

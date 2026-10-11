@@ -31,6 +31,7 @@ import java.util.*;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.entity.item.FallingBlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationProtection;
@@ -154,9 +155,10 @@ public abstract class Movement implements IMovement, MovementHelper {
         }
         if (ctx.player().isInWall()) {
             ctx.getSelectedBlock().ifPresent(pos -> {
-                // 身体卡墙也不能擅自拆名单外建筑，仍由正常路线重新寻找出口。
-                if (!NavigationProtection.protects(pos) && ClearanceWhitelist.allows(BlockStateInterface.get(ctx, pos))) {
-                    MovementHelper.switchToBestToolFor(ctx, BlockStateInterface.get(ctx, pos));
+                // 身体卡墙也不能擅自拆名单外建筑，仍由正常路线重新寻找出口；保护按此刻读到的这格方块问。
+                BlockState stuckIn = BlockStateInterface.get(ctx, pos);
+                if (!NavigationProtection.protects(pos, stuckIn) && ClearanceWhitelist.allows(stuckIn)) {
+                    MovementHelper.switchToBestToolFor(ctx, stuckIn);
                     currentState.setInput(Input.CLICK_LEFT, true);
                 }
             });
@@ -206,9 +208,9 @@ public abstract class Movement implements IMovement, MovementHelper {
             }
             if (!MovementHelper.canWalkThrough(ctx, blockPos)) { // can't break air, so don't try
                 // Protection forbids mutation, not walking through air or using a doorway.
-                // 路线算好后有人换上名单外方块时，立即使这一段失效并重算绕路，不继续挥镐。
-                if (NavigationProtection.protects(blockPos)
-                        || !ClearanceWhitelist.allows(BlockStateInterface.get(ctx, blockPos))) {
+                // 路线算好后有人换上名单外方块、或这格现在是像玩家放的门时，立即使这一段失效并重算绕路，不继续挥镐。
+                BlockState inTheWay = BlockStateInterface.get(ctx, blockPos);
+                if (NavigationProtection.protects(blockPos, inTheWay) || !ClearanceWhitelist.allows(inTheWay)) {
                     state.setStatus(MovementStatus.UNREACHABLE);
                     return true;
                 }

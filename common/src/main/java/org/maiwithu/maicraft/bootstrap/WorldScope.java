@@ -150,8 +150,11 @@ public final class WorldScope {
                 minecraft.player.getUUID().toString(), trusted);
         this.dimension = minecraft.level.dimension().location().toString();
         // 寻路挖路、垫路也过这一份保护判断：不挖穿别人的房子，归属拿不准的格子不动。
-        NavigationProtection.installWorldRule((x, y, z) ->
-                protection.blockProtected(new WorldPosition(x, y, z, dimension), null, Set.of()));
+        // 算路跑在后台线程上，碰不了当刻的角色上下文（玩家控制边界只许客户端线程进），所以门类推断不走
+        // 上面那份读现场的推断，改用寻路自己读到的这格方块来认；归属记录、区域几路照旧。
+        NavigationProtection.installWorldRule((x, y, z, state) ->
+                protection.blockProtectedAsSeen(new WorldPosition(x, y, z, dimension), Set.of(),
+                        state != null && LivePlayerMadeGuesses.looksPlacedByPlayer(state)));
         // 会动的结构（联动登记的障碍来源）交给寻路：转着的风车、开着的列车、电梯井绕开走，挡路时先等它过去。
         NavigationObstacles.install(compat.obstacleSources());
         this.modSights = compat.modSights();

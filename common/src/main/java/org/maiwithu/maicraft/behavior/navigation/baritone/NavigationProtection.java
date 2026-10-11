@@ -6,6 +6,7 @@ import it.unimi.dsi.fastutil.longs.LongSet;
 import it.unimi.dsi.fastutil.longs.LongSets;
 import java.util.concurrent.atomic.AtomicReference;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.state.BlockState;
 
 /**
  * 把当前走到任务的保护要求交给内嵌 Baritone：哪些格不得破坏或掩埋，哪些格身体不得进入。
@@ -24,13 +25,18 @@ public final class NavigationProtection {
     private static final AtomicReference<Snapshot> CURRENT = new AtomicReference<>(Snapshot.EMPTY);
     private static final AtomicReference<CellRule> WORLD = new AtomicReference<>(CellRule.NONE);
 
-    /** 这个世界的保护判断：一格方块受不受保护；任何线程都能问。 */
+    /**
+     * 这个世界的保护判断：一格方块受不受保护；任何线程都能问。
+     * 方块由调用方带进来：后台算路拿它自己读到的那份，走路时拿当刻读到的；判断本身不回头读现场，
+     * 因为后台线程上碰不了当刻的角色与世界。
+     */
     @FunctionalInterface
     public interface CellRule {
         /** 什么都不保护：没进世界时用它。 */
-        CellRule NONE = (x, y, z) -> false;
+        CellRule NONE = (x, y, z, state) -> false;
 
-        boolean protects(int x, int y, int z);
+        /** @param state 调用方读到的这一格方块；读不到传 null，推断那一路就不猜 */
+        boolean protects(int x, int y, int z, BlockState state);
     }
 
     private NavigationProtection() {}
@@ -53,9 +59,9 @@ public final class NavigationProtection {
         WORLD.set(rule == null ? CellRule.NONE : rule);
     }
 
-    /** 这一格受不受这个世界的保护（别人放的、记住的区域里、归属拿不准）：挖路与垫路前问它。 */
-    public static boolean worldProtects(int x, int y, int z) {
-        return WORLD.get().protects(x, y, z);
+    /** 这一格受不受这个世界的保护（别人放的、记住的区域里、归属拿不准、像玩家放的门）：挖路与垫路前问它。 */
+    public static boolean worldProtects(int x, int y, int z, BlockState state) {
+        return WORLD.get().protects(x, y, z, state);
     }
 
     /** 走到结束后清空保护，避免上一次任务的保护格挡住下一次无关路线。 */
@@ -63,10 +69,10 @@ public final class NavigationProtection {
         CURRENT.set(Snapshot.EMPTY);
     }
 
-    /** 这一刻的实时保护检查：搜索走冻结的快照，实际挖掘与站位走这里。 */
-    public static boolean protects(BlockPos pos) {
+    /** 这一刻的实时保护检查：搜索走冻结的快照，实际挖掘与站位走这里；state 是此刻读到的这一格方块。 */
+    public static boolean protects(BlockPos pos, BlockState state) {
         return pos != null && (CURRENT.get().protects(pos.getX(), pos.getY(), pos.getZ())
-                || worldProtects(pos.getX(), pos.getY(), pos.getZ()));
+                || worldProtects(pos.getX(), pos.getY(), pos.getZ(), state));
     }
 
     /** 这一刻的实时禁入检查：身体是否被允许站进这一格。 */

@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.permission;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 import org.maiwithu.maicraft.behavior.worldmemory.RemembersRegions;
 import org.maiwithu.maicraft.behavior.worldmemory.RememberedRegion;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -70,6 +71,23 @@ public final class Protection {
      * @param protectedLandmarks 这次任务额外保护的地标名
      */
     public boolean blockProtected(WorldPosition position, String blockType, Set<String> protectedLandmarks) {
+        return blockProtected(position, protectedLandmarks, () -> guesses.likelyPlayerMade(position, blockType));
+    }
+
+    /**
+     * 一格方块受不受保护，推断那一路由调用方自己给：寻路在后台线程上算路，读不了当刻现场，
+     * 只能拿它自己读到的那份方块来猜。归属记录、记住的区域、地标几路与 {@link #blockProtected} 一样，
+     * 记录说是角色自己放的照样不保护。
+     *
+     * @param seenPlayerMade 调用方看到的这一格像不像玩家放的
+     */
+    public boolean blockProtectedAsSeen(WorldPosition position, Set<String> protectedLandmarks,
+            boolean seenPlayerMade) {
+        return blockProtected(position, protectedLandmarks, () -> seenPlayerMade);
+    }
+
+    private boolean blockProtected(WorldPosition position, Set<String> protectedLandmarks,
+            BooleanSupplier likelyPlayerMade) {
         // 拿不准就按受保护处理：归属还没问到，宁可少动一格。
         if (!ownership.known(position.dimension(), position.x(), position.y(), position.z())) return true;
         Optional<ReadsBlockOwnership.PlacedBy> placedBy =
@@ -80,8 +98,8 @@ public final class Protection {
             if (region.contains(position)) return true;
         }
         if (inProtectedLandmark(position, protectedLandmarks)) return true;
-        // 记录与区域都说不清，才靠猜；猜像就当是。
-        return guesses.likelyPlayerMade(position, blockType);
+        // 记录与区域都说不清，才靠猜；猜像就当是。前几路都没命中才去猜，现场读数只在这时才读。
+        return likelyPlayerMade.getAsBoolean();
     }
 
     /**

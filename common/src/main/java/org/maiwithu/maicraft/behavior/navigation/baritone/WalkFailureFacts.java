@@ -66,7 +66,8 @@ final class WalkFailureFacts {
             StringBuilder one = new StringBuilder(name).append(' ')
                     .append(BuiltInRegistries.BLOCK.getKey(state.getBlock()));
             if (!state.isAir() && !ClearanceWhitelist.allows(state)) one.append("（不在可挖名单）");
-            if (NavigationProtection.protects(cell)) one.append("（受保护）");
+            // 受不受保护按刚读到的这格方块问：像玩家放的门也要在走不过去的交代里标出来。
+            if (NavigationProtection.protects(cell, state)) one.append("（受保护）");
             if (NavigationProtection.forbidsEntry(cell)) one.append("（不许进）");
             cells.add(one.toString());
         }

@@ -331,7 +331,7 @@ public class CalculationContext {
         if (!hasThrowaway) { // only true if allowPlace is true, see constructor
             return COST_INF;
         }
-        if (isPossiblyProtected(x, y, z)) {
+        if (isPossiblyProtected(x, y, z, current)) {
             return COST_INF;
         }
         if (!worldBorder.canPlaceAt(x, z)) {
@@ -352,7 +352,7 @@ public class CalculationContext {
         if (!allowBreak && !allowBreakAnyway.contains(current.getBlock())) {
             return COST_INF;
         }
-        if (isPossiblyProtected(x, y, z)) {
+        if (isPossiblyProtected(x, y, z, current)) {
             return COST_INF;
         }
         return 1;
@@ -396,8 +396,15 @@ public class CalculationContext {
     }
 
     public boolean isPossiblyProtected(int x, int y, int z) {
-        // 这一趟的保护格之外，还要过这个世界的保护判断：别人放的方块、记住的区域、归属拿不准的格子都不挖不垫。
-        return maicraftPolicy.protects(x, y, z) || NavigationProtection.worldProtects(x, y, z);
+        return isPossiblyProtected(x, y, z, get(x, y, z));
+    }
+
+    /**
+     * 这一趟的保护格之外，还要过这个世界的保护判断：别人放的方块、记住的区域、归属拿不准的格子、像玩家放的门都不挖不垫。
+     * 方块用搜索自己读到的那份（current）：算路在后台线程上，世界的保护判断不能回头去读当刻现场。
+     */
+    public boolean isPossiblyProtected(int x, int y, int z, BlockState current) {
+        return maicraftPolicy.protects(x, y, z) || NavigationProtection.worldProtects(x, y, z, current);
     }
 
     /** A semantic parent may forbid occupying exact body cells without changing block costs. */

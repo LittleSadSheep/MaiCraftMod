@@ -5,6 +5,7 @@ import baritone.behavior.PathingBehavior;
 import baritone.pathing.movement.movements.MovementFall;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Predicate;
 
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -104,6 +105,11 @@ final class WalkLanding {
         conclude();
     }
 
+    // 落地救援在客户端刻里逐刻问落点能不能放东西：按角色所在世界此刻的这格方块问保护，像玩家放的门才认得出来。
+    private static Predicate<BlockPos> protectedNow(LocalPlayer player) {
+        return cell -> NavigationProtection.protects(cell, player.level().getBlockState(cell));
+    }
+
     // 有计划的一跳：路线当前这一步是下落、人站在出发点上、这一跳会摔伤又有落地办法。
     // 走着走着意外掉下去、会掉血：就地找落点，空中边掉边备。
     private boolean start(PlayerContext context, LocalPlayer player, PathingBehavior pathing) {
@@ -112,7 +118,7 @@ final class WalkLanding {
             checkedFall = fall;
             List<LandingPlan> plans = fall.landingPlans();
             if (!plans.isEmpty()) {
-                rescue = LandingRescue.planned(plans, NavigationProtection::protects,
+                rescue = LandingRescue.planned(plans, protectedNow(player),
                         NavigationProtection.snapshot().noEntryCells());
             } else {
                 // 放东西接不住：身上带着船、或落点停着空船，就用船接。
@@ -126,7 +132,7 @@ final class WalkLanding {
         if (!EmergencyLanding.needed(player)) return false;
         if (emergencySearchedTick != Long.MIN_VALUE
                 && context.clientTick() - emergencySearchedTick < EMERGENCY_SEARCH_INTERVAL_TICKS) return false;
-        rescue = EmergencyLanding.find(context, NavigationProtection::protects,
+        rescue = EmergencyLanding.find(context, protectedNow(player),
                 NavigationProtection.snapshot().noEntryCells());
         if (rescue == null) {
             emergencySearchedTick = context.clientTick();
