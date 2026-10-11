@@ -11,6 +11,7 @@
   "client": [
     "GuiOverlayMessageAccessor",
     "AbstractSignEditScreenAccessor",
+    "FishingHookAccessor",
     "ClientLevelBlockChangeMixin",
     "GameRendererCameraMixin",
     "MouseHandlerControlMixin",
