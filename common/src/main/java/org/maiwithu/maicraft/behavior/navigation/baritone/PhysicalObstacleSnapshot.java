@@ -29,7 +29,14 @@ public record PhysicalObstacleSnapshot(List<AABB> boxes, int blockReads, int con
 
     /** 扫掠直立身体空间；若已接触或正向障碍移动，则额外检查向外脱离路线。 */
     public boolean clearSegment(Vec3 from, Vec3 to, double width, double height) {
+        if (boxes.isEmpty()) return true;
+        // 先按这一步扫过的范围粗筛：算路一次要问成千上万步，离得远的障碍不必逐个求交。
+        double minX = Math.min(from.x, to.x) - width, maxX = Math.max(from.x, to.x) + width;
+        double minY = Math.min(from.y, to.y) - height, maxY = Math.max(from.y, to.y) + height;
+        double minZ = Math.min(from.z, to.z) - width, maxZ = Math.max(from.z, to.z) + width;
         for (AABB obstacle : boxes) {
+            if (obstacle.maxX < minX || obstacle.minX > maxX || obstacle.maxY < minY || obstacle.minY > maxY
+                    || obstacle.maxZ < minZ || obstacle.minZ > maxZ) continue;
             AABB expanded = new AABB(obstacle.minX - width / 2 + EPS, obstacle.minY - height + EPS,
                     obstacle.minZ - width / 2 + EPS, obstacle.maxX + width / 2 - EPS,
                     obstacle.maxY - EPS, obstacle.maxZ + width / 2 - EPS);

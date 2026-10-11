@@ -59,7 +59,7 @@ import org.maiwithu.maicraft.behavior.landing.BoatOptions;
 import org.maiwithu.maicraft.behavior.landing.BoatPlan;
 import org.maiwithu.maicraft.behavior.landing.LandingAid;
 import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationProtection;
-import org.maiwithu.maicraft.behavior.navigation.baritone.PhysicalObstacleSnapshot;
+import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationObstacles;
 import org.maiwithu.maicraft.behavior.navigation.baritone.MaiCraftGoals;
 import org.maiwithu.maicraft.behavior.navigation.baritone.ClearanceWhitelist;
 import org.maiwithu.maicraft.behavior.navigation.HazardEscapePolicy;
@@ -177,7 +177,8 @@ public class CalculationContext {
                 pos -> bsi.worldContainsLoadedChunk(pos.getX(), pos.getZ()));
         this.collisionGeometry = new CollisionGeometry(bsi.access, forUseOnAnotherThread,
                 player.position(), baritone.getPlayerContext().playerFeet(),
-                () -> PhysicalObstacleSnapshot.EMPTY,
+                // 会动的结构（联动登记的障碍来源）当障碍：后台算路冻结开算这一刻的那份，主线程每刻按当刻的问。
+                () -> NavigationObstacles.capture(world, player).all(),
                 player.getBbWidth(), player.getBbHeight());
         this.fallDamageBudget = FallDamage.capture(player);
         this.fallOrigin = baritone.getPlayerContext().playerFeet().immutable();

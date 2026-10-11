@@ -95,6 +95,8 @@ final class BaritoneWalkRun implements WalkRun {
     private boolean safeToPause;
     /** 这一趟在哪些面前格反复卡住：第一次先切途经的门，第二次列为障碍绕开，障碍用完才如实走不通。 */
     private final NavigationStallMemory stalls = new NavigationStallMemory();
+    /** 路线前方被正在动的东西挡着时原地等它过去。 */
+    private final MovingObstacleWait obstacleWait = new MovingObstacleWait();
     /** 刚列了新障碍、还没能安全撤路线：落地站稳后重算一次绕行。 */
     private boolean replanWhenSafe;
     /** 引擎本刻请求的按键是否读出来过；用于区分排队与真正在走。 */
@@ -272,6 +274,7 @@ final class BaritoneWalkRun implements WalkRun {
         resumeAfterHuman(engine, context);
         if (stagingScaffold(context, player, pathing, engine)) return; // 垫料只在主背包：先挪到快捷栏再走
         if (landingHolds(context, player, pathing, engine)) return; // 落地救援占着身体：出发前备料、落地后收回
+        if (waitsForMovingObstacle(context, player, pathing, engine)) return; // 前方有正在动的东西：原地等它过去
         boolean routePresent = pathing.getCurrent() != null;
         boolean calculating = pathing.getInProgress().isPresent();
 
@@ -484,6 +487,25 @@ final class BaritoneWalkRun implements WalkRun {
                 yield true;
             }
         };
+    }
+
+    // 路线前方 16 格被正在动的东西（转着的风车、开过来的火车）挡着：站稳、能停时原地等它过去，最多 5 秒，
+    // 等的这几刻不算没有进展；等满了还挡着就交回引擎，引擎按碰撞里的障碍自己绕。
+    private boolean waitsForMovingObstacle(PlayerContext context, LocalPlayer player, PathingBehavior pathing,
+                                           IBaritone engine) {
+        PathExecutor current = pathing.getCurrent();
+        if (current == null || progress.stopRequested() || !player.onGround() || !pathing.isSafeToCancel()) return false;
+        var positions = current.getPath().positions();
+        int from = Math.max(0, Math.min(current.getPosition(), positions.size()));
+        List<BlockPos> ahead = new ArrayList<>();
+        ahead.add(player.blockPosition());
+        ahead.addAll(positions.subList(from, Math.min(positions.size(), from + MovingObstacleWait.AHEAD_BLOCKS + 1)));
+        var obstacles = NavigationObstacles.capture(context.level(), player);
+        if (!obstacleWait.holds(context.clientTick(), ahead, obstacles.moving())) return false;
+        engine.getInputOverrideHandler().clearAllKeys();
+        context.input().applyNavigationMovement(PlayerInput.Movement.STOPPED, context.clientTick());
+        displacement.restart(context.clientTick());
+        return true;
     }
 
     // 位移与派发观察用于卡住判断：位置累计变化算真实进展，原地踏步不算；搜索或复算在算时不算派发落空。

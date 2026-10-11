@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.bootstrap;
 
 import java.time.Instant;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.nio.file.Path;
 import java.util.Objects;
 import java.util.Set;
@@ -20,6 +21,7 @@ import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
 import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 import org.maiwithu.maicraft.behavior.permission.ClientCreatureSituations;
 import org.maiwithu.maicraft.behavior.permission.LivePlayerMadeGuesses;
+import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationObstacles;
 import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationProtection;
 import org.maiwithu.maicraft.behavior.permission.OwnershipMap;
 import org.maiwithu.maicraft.behavior.permission.Protection;
@@ -142,6 +144,8 @@ public final class WorldScope {
         // 寻路挖路、垫路也过这一份保护判断：不挖穿别人的房子，归属拿不准的格子不动。
         NavigationProtection.installWorldRule((x, y, z) ->
                 protection.blockProtected(new WorldPosition(x, y, z, dimension), null, Set.of()));
+        // 会动的结构（联动登记的障碍来源）交给寻路：转着的风车、开着的列车、电梯井绕开走，挡路时先等它过去。
+        NavigationObstacles.install(compat.obstacleSources());
 
         // 当刻角色的供给者：感知、背包、聊天都从它拿这一刻的角色，不留到下一刻。
         Supplier<PlayerContext> now = () -> playerControl.activeContext().orElse(null);
@@ -214,9 +218,10 @@ public final class WorldScope {
         scene.expire(gameTick);
     }
 
-    /** 离开这个世界：寻路不再按这个世界的保护判断挖路，记下的归属作废。 */
+    /** 离开这个世界：寻路不再按这个世界的保护判断挖路、不再问它的障碍来源，记下的归属作废。 */
     public void leave() {
         NavigationProtection.installWorldRule(NavigationProtection.CellRule.NONE);
+        NavigationObstacles.install(List.of());
         ownership.forgetAll();
     }
 
