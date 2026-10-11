@@ -23,6 +23,7 @@ import org.maiwithu.maicraft.neoforge.compat.backpack.SophisticatedBackpackItems
 import org.maiwithu.maicraft.neoforge.compat.backpack.SophisticatedBackpackMenus;
 import org.maiwithu.maicraft.neoforge.compat.create.CreateBeltReads;
 import org.maiwithu.maicraft.neoforge.compat.create.CreateChainConveyorReads;
+import org.maiwithu.maicraft.neoforge.compat.create.CreateContraptionReads;
 import org.maiwithu.maicraft.neoforge.compat.create.CreateKineticReads;
 import org.maiwithu.maicraft.neoforge.compat.create.CreateStationReads;
 import org.maiwithu.maicraft.neoforge.compat.create.CreateToolReads;
@@ -79,7 +80,7 @@ public final class ClientCompatCatalog {
                         () -> new CreateCompat(new CreateKineticReads(), new CreateBeltReads(),
                                 new CreateChainConveyorReads(), new CreateStationReads(), new CreateToolReads(),
                                 new CreateValueReads(), new CreateSchematicReads(), new CreateFilterReads(),
-                                new CreateLogisticsReads())),
+                                new CreateLogisticsReads(), new CreateContraptionReads())),
                 // 通用机械：按 10.7.19 编译，实测实例装的是 10.7.19.85；装了 10.8 及以上不登记，实测通过后再放宽。
                 new SupportedMod<>(MekanismCompat.MOD_ID, "通用机械", new VerifiedVersions("10.7.19", "10.8"),
                         () -> new MekanismCompat(new MekanismClientReads())));

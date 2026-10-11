@@ -257,7 +257,8 @@ class CreateCompatTest {
             @Override public boolean requestMenuOpen(LocalPlayer player) { return false; }
             @Override public void order(BlockPos ticker, Map<String, Integer> items, String address) { }
         };
-        return new CreateCompat(kinetics, belts, chains, stations, tools, values, schematics, filters, logistics);
+        return new CreateCompat(kinetics, belts, chains, stations, tools, values, schematics, filters, logistics,
+                (level, viewer, region) -> List.of());
     }
 
     /** 不在世界里的玩家行为：角色为空，靠近与交互都碰不到；只够建出机器类型、回答"读不到"。 */

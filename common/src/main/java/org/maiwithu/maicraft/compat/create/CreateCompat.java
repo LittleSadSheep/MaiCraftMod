@@ -13,9 +13,12 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 
+import org.maiwithu.maicraft.behavior.navigation.spi.MovingStructure;
 import org.maiwithu.maicraft.compat.CompatModule;
 import org.maiwithu.maicraft.compat.CompatRegistry;
 
@@ -25,7 +28,8 @@ import org.maiwithu.maicraft.compat.CompatRegistry;
  * 装的 Create 和编译时用的对不上时整个联动停用，不让 LinkageError 漏出去。
  *
  * <p>交给登记表的：每一种认得的机器、兜住附属模组动力方块的"其他动力方块"、应力网的网络读取器、
- * 扳手（施工清障时拆 Create 的方块）、砂纸打磨与附近的工具箱（拿东西的两条途径）、放置规则（施工放带漏斗、竖直齿轮箱、动力辊）。
+ * 扳手（施工清障时拆 Create 的方块）、砂纸打磨与附近的工具箱（拿东西的两条途径）、放置规则（施工放带漏斗、竖直齿轮箱、动力辊）、
+ * 移动装置当寻路的障碍。
  * 机器类型要走过去、点、换手、缺东西去拿，进世界时由登记表带着联动能用的玩家行为建。
  */
 public final class CreateCompat extends CompatModule {
@@ -41,10 +45,11 @@ public final class CreateCompat extends CompatModule {
     private final CreateSchematics schematics;
     private final CreateFilters filters;
     private final CreateLogistics logistics;
+    private final CreateContraptions contraptions;
 
     public CreateCompat(CreateKinetics kinetics, CreateBelts belts, CreateChainConveyors chains,
             CreateStations stations, CreateTools tools, CreateValues values, CreateSchematics schematics,
-            CreateFilters filters, CreateLogistics logistics) {
+            CreateFilters filters, CreateLogistics logistics, CreateContraptions contraptions) {
         super(MOD_ID, "机械动力");
         this.kinetics = Objects.requireNonNull(kinetics, "kinetics");
         this.belts = Objects.requireNonNull(belts, "belts");
@@ -55,6 +60,7 @@ public final class CreateCompat extends CompatModule {
         this.schematics = Objects.requireNonNull(schematics, "schematics");
         this.filters = Objects.requireNonNull(filters, "filters");
         this.logistics = Objects.requireNonNull(logistics, "logistics");
+        this.contraptions = Objects.requireNonNull(contraptions, "contraptions");
     }
 
     @Override public void contribute(CompatRegistry registry) {
@@ -77,6 +83,14 @@ public final class CreateCompat extends CompatModule {
         registry.menuLayout(this, new CreateSchematicLayout());
         // 机器资料：每种机器的加工处、接转动的面、转速门槛与应力，挂到物品资料页的相关资料里。
         registry.knowledgeSource(this, new CreateMachineKnowledge(this));
+        // 移动装置当障碍交给寻路：转着的风车整个扫盘、开着的列车与活塞的前方、电梯井都绕开，挡路时先等它过去。
+        registry.obstacleSource(this, (level, viewer, region, sink) ->
+                movingContraptions(level, viewer, region).forEach(sink::add));
+    }
+
+    /** 和一个区域沾边的移动装置；见 {@link CreateContraptions#near}。 */
+    public List<MovingStructure> movingContraptions(Level level, Player viewer, AABB region) {
+        return call("读移动装置", () -> contraptions.near(level, viewer, region));
     }
 
     /** 一格动力方块的读数；见 {@link CreateKinetics#reading}。 */
