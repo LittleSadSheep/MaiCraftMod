@@ -81,6 +81,8 @@ final class BaritoneWalkRun implements WalkRun {
     private final ClientMovesToMainhand hands = new ClientMovesToMainhand(() -> this.lastContext);
     /** 正在把垫料挪到快捷栏的动作；没在挪为 null。 */
     private Action scaffoldMove;
+    /** 会摔伤的一跳靠什么接住：出发点备料、空中放下、落地收回；意外掉下去就地接手。 */
+    private final WalkLanding landing = new WalkLanding();
     /** 不许挖时走不通的只读复算："假如允许挖垫有没有路、要动哪些格"，只进说明不执行。 */
     private final TerrainProbe probe;
     /** 人按 F8 收回角色时路线被撤了：交回后第一刻重新算路、进展计时重新起算。 */
@@ -146,7 +148,20 @@ final class BaritoneWalkRun implements WalkRun {
 
     /** 这段路垫上的方块格子。 */
     List<BlockPos> placements() {
-        return placements;
+        // 落地救援放下后没收回、留在原地的也算这段路改过的格子。
+        List<BlockPos> all = new ArrayList<>(placements);
+        all.addAll(landing.leftInPlace());
+        return all;
+    }
+
+    /** 这段路上每次落地救援的经过：放了什么、收没收回、掉没掉血。 */
+    List<String> landings() {
+        return landing.notes();
+    }
+
+    /** 落地救援正在进行：寻路引擎的通用超时不能把它丢下。 */
+    boolean landingInProgress() {
+        return landing.inProgress();
     }
 
     /** 上路：把目标交给引擎并让它开始第一次算路。 */
@@ -244,6 +259,7 @@ final class BaritoneWalkRun implements WalkRun {
         IBaritone engine = owner.engine();
         resumeAfterHuman(engine, context);
         if (stagingScaffold(context, player, pathing, engine)) return; // 垫料只在主背包：先挪到快捷栏再走
+        if (landingHolds(context, player, pathing, engine)) return; // 落地救援占着身体：出发前备料、落地后收回
         boolean routePresent = pathing.getCurrent() != null;
         boolean calculating = pathing.getInProgress().isPresent();
 
@@ -268,37 +284,15 @@ final class BaritoneWalkRun implements WalkRun {
             pathing.forceCancel();
         }
 
-        // 按键合成：读引擎按下的方向、跳跃与潜行，交给角色输入入口；每刻续发，缺刻自动松键。
-        IInputOverrideHandler input = engine.getInputOverrideHandler();
-        float forward = (input.isInputForcedDown(Input.MOVE_FORWARD) ? 1F : 0F)
-                - (input.isInputForcedDown(Input.MOVE_BACK) ? 1F : 0F);
-        float strafe = (input.isInputForcedDown(Input.MOVE_LEFT) ? 1F : 0F)
-                - (input.isInputForcedDown(Input.MOVE_RIGHT) ? 1F : 0F);
-        boolean jump = input.isInputForcedDown(Input.JUMP);
-        boolean sneak = input.isInputForcedDown(Input.SNEAK);
-        boolean sprint = input.isInputForcedDown(Input.SPRINT);
-        PlayerInput playerInput = context.input();
         // 走不通：把起点那几格、手边的垫料、许可与附近的岩浆补进问题，LLM 据此调整，而不是只拿到一句"没有路"。
         var spare = owner.spareScaffold(player);
         progress.explainFailure(problem -> WalkFailureFacts.enrich(probe.explain(problem, !spare.isEmpty()),
                 context.level(), player, permit, spare));
         if (progress.done()) {
-            // 运行结束：停挖、交还没等到确认的右键，松开全部按键，把身体交回给下一个动作或玩家。
-            clicks.stop(context);
-            playerInput.releaseAll(player);
-            owner.release(this);
-            finishEngine(engine, pathing);
+            finishRun(context, player, engine, pathing);
             return;
         }
-        if (forward != 0F || strafe != 0F || jump || sneak) {
-            playerInput.applyNavigationMovement(
-                    new PlayerInput.Movement(forward, strafe, jump, sneak, sprint), context.clientTick());
-        } else if (routePresent && !calculating) {
-            // 路线在手而引擎本刻没按键：保持站立但按住路线朝向，等执行段下一刻的指令。
-            playerInput.applyNavigationMovement(PlayerInput.Movement.STOPPED, context.clientTick());
-        }
-        lookAlongRoute(engine, playerInput, context, player, routePresent);
-        workBlocks(context, input);
+        steer(context, player, engine, routePresent, calculating);
         engineFailedPath = false;
     }
 
@@ -419,6 +413,63 @@ final class BaritoneWalkRun implements WalkRun {
         engine.getCustomGoalProcess().setGoalAndPath(engineGoal);
     }
 
+    // 运行结束：停挖、交还没等到确认的右键，松开全部按键，把身体交回给下一个动作或玩家。
+    private void finishRun(PlayerContext context, LocalPlayer player, IBaritone engine, PathingBehavior pathing) {
+        clicks.stop(context);
+        context.input().releaseAll(player);
+        owner.release(this);
+        finishEngine(engine, pathing);
+    }
+
+    // 按键合成：读引擎按下的方向、跳跃与潜行，交给角色输入入口；每刻续发，缺刻自动松键。
+    // 空中落地救援在管这一掉时，按键与镜头归救援：往落点推、按它的意思潜行，镜头它自己转。
+    private void steer(PlayerContext context, LocalPlayer player, IBaritone engine, boolean routePresent,
+                       boolean calculating) {
+        IInputOverrideHandler input = engine.getInputOverrideHandler();
+        PlayerInput playerInput = context.input();
+        if (landing.steersAirborne()) {
+            playerInput.applySteering(yaw -> landing.airborneMovement(context, yaw), player.getYRot(),
+                    context.clientTick());
+            workBlocks(context, input);
+            return;
+        }
+        float forward = (input.isInputForcedDown(Input.MOVE_FORWARD) ? 1F : 0F)
+                - (input.isInputForcedDown(Input.MOVE_BACK) ? 1F : 0F);
+        float strafe = (input.isInputForcedDown(Input.MOVE_LEFT) ? 1F : 0F)
+                - (input.isInputForcedDown(Input.MOVE_RIGHT) ? 1F : 0F);
+        boolean jump = input.isInputForcedDown(Input.JUMP);
+        boolean sneak = input.isInputForcedDown(Input.SNEAK);
+        boolean sprint = input.isInputForcedDown(Input.SPRINT);
+        if (forward != 0F || strafe != 0F || jump || sneak) {
+            playerInput.applyNavigationMovement(
+                    new PlayerInput.Movement(forward, strafe, jump, sneak, sprint), context.clientTick());
+        } else if (routePresent && !calculating) {
+            // 路线在手而引擎本刻没按键：保持站立但按住路线朝向，等执行段下一刻的指令。
+            playerInput.applyNavigationMovement(PlayerInput.Movement.STOPPED, context.clientTick());
+        }
+        lookAlongRoute(engine, playerInput, context, player, routePresent);
+        workBlocks(context, input);
+    }
+
+    // 落地救援这一刻占不占身体：出发前备料、落地后收回时站定，引擎不推进（这几刻站着不算没进展）；
+    // 出发前备不成就不往下跳，按危险如实结束这一趟。
+    private boolean landingHolds(PlayerContext context, LocalPlayer player, PathingBehavior pathing,
+                                 IBaritone engine) {
+        return switch (landing.beforeEngine(context, player, pathing)) {
+            case ENGINE -> false;
+            case HOLD -> {
+                displacement.restart(context.clientTick());
+                yield true;
+            }
+            case BLOCKED -> {
+                progress.fail(Problem.of(Problem.Kind.DANGER, landing.blockedReason(),
+                        "把落地要用的东西放进背包或快捷栏再走，或换一个不用往下跳的目标"), player.blockPosition());
+                finishRun(context, player, engine, pathing);
+                yield true;
+            }
+        };
+    }
+
     // 位移与派发观察用于卡住判断：位置累计变化算真实进展，原地踏步不算；搜索或复算在算时不算派发落空。
     private void watchProgress(PlayerContext context, LocalPlayer player, IBaritone engine, boolean routePresent,
                                boolean working, BlockPos feet) {
@@ -515,11 +566,13 @@ final class BaritoneWalkRun implements WalkRun {
         // 挪垫料挪到一半也放下：背包界面要是还开着，人自己关；交回后要垫时重新看一遍再挪。
         scaffoldMove = null;
         probe.cancel();
+        landing.stop(lastContext, "人接回了角色");
         routeDropped = true;
     }
 
     private void finishEngine(IBaritone engine, PathingBehavior pathing) {
         probe.cancel();
+        landing.stop(lastContext, "这一趟走路结束了");
         pathing.forceCancel();
         engine.getInputOverrideHandler().clearAllKeys();
         NavigationProtection.clear();
@@ -555,6 +608,7 @@ final class BaritoneWalkRun implements WalkRun {
 
     private void finishEngineQuietly() {
         probe.cancel();
+        landing.stop(lastContext, "这一趟走路结束了");
         var pathing = owner.pathing();
         if (pathing == null) return;
         pathing.forceCancel();

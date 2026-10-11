@@ -204,6 +204,12 @@ public final class LandingRescue {
         if (!failed) trySubmit(context, player);
     }
 
+    /** 离过地、现在又落回地上（或落进水里停住）了：之后的站稳、收回由救援占着身体。 */
+    public boolean touchedDown(PlayerContext context) {
+        LocalPlayer player = context.localPlayer();
+        return airborneObserved && (player.onGround() || player.isInWater() && player.fallDistance == 0);
+    }
+
     /** 收回水源的那几刻按住站位，别让游泳、漂浮把人带走。 */
     public boolean holdsPosition(PlayerContext context) {
         LocalPlayer player = context.localPlayer();

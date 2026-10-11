@@ -60,6 +60,8 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
     private BaritoneWalkRun queued;
     /** 上一次运行垫上的方块；运行交出身体后，结算方还要读得到它。 */
     private List<BlockPos> lastPlacements = List.of();
+    /** 上一次运行里的落地救援经过；运行交出身体后结算方还要读得到。 */
+    private List<String> lastLandings = List.of();
     /** 正要用的东西每种留几件：垫脚只用多出来的。 */
     private final ScaffoldBlocks.Keeps keeps;
     /** 镜头离引擎要的精确瞄点差这么多度以内算转到位：平滑镜头收敛到 0.3° 吸附，留点余量。 */
@@ -149,6 +151,7 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
         if (active != run) return;
         // 垫块清单跟着运行走：运行结算后结算方读的是上一段路的清单。
         lastPlacements = List.copyOf(run.placements());
+        lastLandings = run.landings();
         active = null;
     }
 
@@ -157,6 +160,20 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
     public List<BlockPos> placedDuringCurrentWalk() {
         BaritoneWalkRun current = active;
         return current != null ? List.copyOf(current.placements()) : lastPlacements;
+    }
+
+    /** 这段走到（或刚结束的一段）里每次落地救援的经过。 */
+    @Override
+    public List<String> landingsDuringCurrentWalk() {
+        BaritoneWalkRun current = active;
+        return current != null ? current.landings() : lastLandings;
+    }
+
+    /** 寻路引擎问：此刻在走的这一趟是不是正在落地救援（空中放东西、等确认、收回）。 */
+    public static boolean landingInProgress() {
+        BaritoneInternals internals = ATTACHED.get();
+        BaritoneWalkRun current = internals == null ? null : internals.active;
+        return current != null && current.landingInProgress();
     }
 
     /** 排队请求被更新的请求顶掉或所属任务已放弃时结算，不能永远占着队位。 */
@@ -200,7 +217,7 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
         settings.allowPlace.value = switches.allowPlace();
         settings.allowParkourPlace.value = switches.allowParkourPlace();
         settings.allowDownward.value = switches.allowDownward();
-        settings.allowWaterBucketFall.value = switches.allowWaterBucketFall();
+        settings.allowWaterBucketFall.value = switches.allowLandingAids();
         // 背包换槽由原生交换流程负责，这里不开放引擎的直接背包操作。
         settings.allowInventory.value = false;
         settings.allowSprint.value = true;

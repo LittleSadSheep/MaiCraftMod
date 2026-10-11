@@ -179,7 +179,9 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> {
         WorldPosition arrivedAt = arrived && feet != null
                 ? new WorldPosition(feet.getX(), feet.getY(), feet.getZ(), destination.position().dimension())
                 : null;
-        settlement = new TravelSettlement(arrivedAt, arrived ? null : remaining, placed, crossedWater);
+        // 落地救援的经过原样带上：放了什么、收没收回、掉没掉血，LLM 据此决定要不要回去收拾。
+        settlement = new TravelSettlement(arrivedAt, arrived ? null : remaining, placed,
+                placedBlocks.landingsDuringCurrentWalk(), crossedWater);
     }
 
     private RemainingDistance measureFrom(WalkReport report) {

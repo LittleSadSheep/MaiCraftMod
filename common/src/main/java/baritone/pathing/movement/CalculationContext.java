@@ -41,6 +41,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Predicate;
 
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
@@ -50,6 +51,11 @@ import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
 
 import static baritone.api.pathing.movement.ActionCosts.COST_INF;
 import org.maiwithu.maicraft.game.player.FallDamage;
+import org.maiwithu.maicraft.behavior.landing.WaterLandingWindow;
+import org.maiwithu.maicraft.behavior.landing.LandingPlan;
+import org.maiwithu.maicraft.behavior.landing.LandingOptions;
+import org.maiwithu.maicraft.behavior.landing.LandingGeometry;
+import org.maiwithu.maicraft.behavior.landing.LandingAid;
 import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationProtection;
 import org.maiwithu.maicraft.behavior.navigation.baritone.PhysicalObstacleSnapshot;
 import org.maiwithu.maicraft.behavior.navigation.baritone.MaiCraftGoals;
@@ -97,6 +103,10 @@ public class CalculationContext {
     public final BetterWorldBorder worldBorder;
     /** Frozen task safety policy; safe for the calculation worker. */
     public final NavigationProtection.Snapshot maicraftPolicy;
+    /** 这次算路能用的落地办法：出发前取一份，搜索全程一致；会摔伤的一跳只有落点接得住人才收。 */
+    public final LandingOptions landingOptions;
+    /** 有计划地往下跳时，留不留得出倒水的那一刻。 */
+    private final WaterLandingWindow waterLandingWindow;
 
     /**
      * 允许脚位进入的下界传送门内格键：只收导航目标本身要求站进的格子（exact 站位、走近类目标的中心格）。
@@ -243,6 +253,10 @@ public class CalculationContext {
         // then you get a wildly inconsistent path that isn't optimal for either scenario.
         this.worldBorder = new BetterWorldBorder(world.getWorldBorder());
         this.maicraftPolicy = Objects.requireNonNull(frozenPolicy, "frozenPolicy");
+        this.landingOptions = LandingOptions.capture(player,
+                forceTerrainMutation || Baritone.settings().allowWaterBucketFall.value);
+        this.waterLandingWindow = new WaterLandingWindow(fallDamageBudget.gravity(), player.blockInteractionRange(),
+                player.getEyeHeight(), Math.max(0, -player.getDeltaMovement().y));
         this.portalEntryCells = portalEntryCells(
                 MaiCraftGoals.unwrap(
                         baritone.getPathingBehavior().getGoal()));
@@ -336,6 +350,26 @@ public class CalculationContext {
             return COST_INF;
         }
         return 1;
+    }
+
+    /**
+     * 落在 feet、要掉 drop 格时能用的落地办法：放好后身体放得下、干草减完伤还活着、
+     * 新放的水留得出倒水的那一刻。没有就是这一跳会摔伤又没东西接，不走。
+     */
+    public List<LandingPlan> landingPlans(BlockPos feet, int drop) {
+        if (!landingOptions.allowed()) return List.of();
+        Predicate<BlockPos> loaded = pos -> bsi.worldContainsLoadedChunk(pos.getX(), pos.getZ());
+        List<LandingPlan> usable = new ArrayList<>();
+        for (LandingPlan plan : landingOptions.plans(bsi.access, feet,
+                pos -> isPossiblyProtected(pos.getX(), pos.getY(), pos.getZ()))) {
+            if (!LandingGeometry.safe(bsi.access, loaded, plan, landingOptions.width(), landingOptions.height(),
+                    maicraftPolicy.noEntryCells())) continue;
+            if (!plan.survives(fallDamageBudget, feet.getY() + drop, true)) continue;
+            if (!plan.existing() && plan.aid() == LandingAid.WATER
+                    && !waterLandingWindow.permits(feet.getY() + drop - plan.placementHeight(bsi.access))) continue;
+            usable.add(plan);
+        }
+        return usable;
     }
 
     public double placeBucketCost() {

@@ -234,7 +234,7 @@ public final class Bootstrap {
                         () -> new NativeBlockBreaking(interactionSender, menuActions)),
                 new BreathNeed(new SurvivalSituation.FromPlayer(), ceilings),
                 new FallNeed(new SurvivalSituation.FromPlayer(), interactions, FirstPersonScene::of,
-                        PlayerContext::backpack),
+                        PlayerContext::backpack, BaritoneInternals::landingInProgress),
                 new SelfDefenseNeed(combatSenses, new LiveCombatMoves(walks), events),
                 new HungerNeed(new LiveHungerView(foods), foodMoves, events),
                 new NightfallNeed(new LiveNightView(combatSenses),

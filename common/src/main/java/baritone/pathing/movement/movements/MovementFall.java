@@ -31,6 +31,7 @@ import baritone.pathing.movement.MovementState;
 import baritone.pathing.movement.MovementState.MovementTarget;
 import baritone.utils.pathing.MutableMoveResult;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
@@ -41,6 +42,7 @@ import net.minecraft.world.level.block.LadderBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.WaterFluid;
 import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.behavior.landing.LandingPlan;
 
 public class MovementFall extends Movement {
     private boolean departureObserved;
@@ -53,6 +55,19 @@ public class MovementFall extends Movement {
 
     public MovementFall(IBaritone baritone, BetterBlockPos src, BetterBlockPos dest) {
         super(baritone, src, dest, MovementFall.buildPositionsToBreak(src, dest));
+    }
+
+    /**
+     * 这一跳要不要靠落地办法接住：按此刻的身体与背包重算，会摔伤又有办法时给出办法，不会摔伤或没办法时为空。
+     * 走路在出发点用它备料；离地后不再重算。
+     */
+    public List<LandingPlan> landingPlans() {
+        CalculationContext context = new CalculationContext(baritone);
+        MutableMoveResult result = new MutableMoveResult();
+        boolean assisted = MovementDescend.dynamicFallCost(context, src.x, src.y, src.z, dest.x, dest.z, 0,
+                context.get(dest.x, src.y - 2, dest.z), result);
+        if (!assisted || result.y != dest.y) return List.of();
+        return context.landingPlans(dest, src.y - dest.y);
     }
 
     @Override

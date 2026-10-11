@@ -13,4 +13,9 @@ public interface ReadsPlacedBlocks {
 
     /** 当前这段走到里垫上的方块格子；没垫过给空列表。 */
     List<BlockPos> placedDuringCurrentWalk();
+
+    /** 当前这段走到里每次落地救援的经过（放了什么、收没收回、掉没掉血）；没有给空列表。 */
+    default List<String> landingsDuringCurrentWalk() {
+        return List.of();
+    }
 }

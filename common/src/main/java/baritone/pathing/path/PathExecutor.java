@@ -42,6 +42,7 @@ import net.minecraft.world.phys.Vec3;
 import java.util.*;
 
 import static baritone.api.pathing.movement.MovementStatus.*;
+import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 import org.maiwithu.maicraft.behavior.navigation.baritone.SubmergedWaterTravelPolicy;
 import org.maiwithu.maicraft.behavior.navigation.baritone.MovementStall;
 import org.maiwithu.maicraft.behavior.navigation.baritone.GroundJumpContinuation;
@@ -308,9 +309,9 @@ public class PathExecutor implements IPathExecutor, Helper {
         return false;
     }
 
-    // 落地救援还没有接入：坠落不再有独立的救援窗口，只按移动自身的安全取消判断。
+    // 走路正在跑一次落地救援（空中放东西、等确认）：这一掉有自己的时限，通用的超时与"下一段没加载就停"不能把它丢下。
     private static boolean ownsUnsettledLanding(Movement movement) {
-        return false;
+        return BaritoneInternals.landingInProgress();
     }
 
     private boolean cancelIfTimedOut(Movement movement) {

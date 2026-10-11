@@ -137,13 +137,30 @@ class SurvivalNeedsTest {
         // 悬空搭桥时往虚空掉：掉下去就是死，落地防护立刻打断。
         SurvivalSituation falling = SurvivalFakes.calm().feet(200.0).fallingIntoVoid().build();
         MainTask bridging = new MainTask(Interruptibility.UNSAFE_TO_STOP);
-        ControlLoop loop = new ControlLoop(List.of(new FallNeed(scripted(falling), null, null, null)));
+        ControlLoop loop = new ControlLoop(List.of(new FallNeed(scripted(falling), null, null, null, () -> false)));
         loop.setMainTask(bridging);
 
         ControlLoop.Decision.Advanced decision = advance(loop.tick(tick));
 
         assertEquals("落地防护", decision.interrupting().name());
         assertEquals(1, bridging.pauses);
+    }
+
+    @Test
+    void aFallTheWalkIsAlreadyCatchingIsLeftToTheWalk() {
+        TestPlayer player = new TestPlayer();
+        TestTick tick = new TestTick(player);
+        // 走路正在跑落地救援（出发点备好了水、空中等着倒）：落地防护不插进来抢着倒水。
+        SurvivalSituation falling = SurvivalFakes.calm().feet(200.0).fallingIntoVoid().build();
+        MainTask walking = new MainTask(Interruptibility.UNSAFE_TO_STOP);
+        ControlLoop loop = new ControlLoop(List.of(new FallNeed(scripted(falling), null, null, null, () -> true)));
+        loop.setMainTask(walking);
+
+        ControlLoop.Decision.Advanced decision = advance(loop.tick(tick));
+
+        assertSame(walking, decision.task());
+        assertNull(decision.interrupting());
+        assertEquals(0, walking.pauses);
     }
 
     @Test
@@ -154,7 +171,7 @@ class SurvivalNeedsTest {
         ControlLoop loop = new ControlLoop(List.of(
                 new DigOutNeed(scripted(fine), SurvivalFakes.FakeBreaking::new),
                 new BreathNeed(scripted(fine)),
-                new FallNeed(scripted(fine), null, null, null)));
+                new FallNeed(scripted(fine), null, null, null, () -> false)));
         MainTask main = new MainTask(Interruptibility.WORKING);
         loop.setMainTask(main);
 

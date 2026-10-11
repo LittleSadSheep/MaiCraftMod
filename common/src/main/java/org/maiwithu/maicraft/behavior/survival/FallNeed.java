@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.survival;
 
+import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 
 import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
@@ -22,20 +23,26 @@ public final class FallNeed implements SurvivalNeed {
     private final Interactions interactions;
     private final Function<PlayerContext, FirstPersonScene> scenes;
     private final Function<PlayerContext, BackpackView> backpacks;
+    /** 走路自己正在跑落地救援。 */
+    private final BooleanSupplier walkHandlesFall;
 
     public FallNeed(SurvivalSituation.SituationReader reader, Interactions interactions,
                     Function<PlayerContext, FirstPersonScene> scenes,
-                    Function<PlayerContext, BackpackView> backpacks) {
+                    Function<PlayerContext, BackpackView> backpacks,
+                    BooleanSupplier walkHandlesFall) {
         this.reader = reader;
         this.interactions = interactions;
         this.scenes = scenes;
         this.backpacks = backpacks;
+        this.walkHandlesFall = walkHandlesFall;
     }
 
     @Override public String name() { return "落地防护"; }
 
     @Override
     public Urgency urgency(TickContext context) {
+        // 走路里的落地救援正在管这一掉（出发点备好了料、空中等着放）：这里让开，免得两边抢着放水。
+        if (walkHandlesFall.getAsBoolean()) return null;
         SurvivalSituation situation = reader.read(context);
         return situation == null ? null : FallDanger.assess(situation);
     }
