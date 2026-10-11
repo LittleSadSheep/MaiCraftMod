@@ -85,6 +85,21 @@ class StructureGeometryTest {
         assertFalse(StructureGeometry.moving(structure(STILL, STILL, Map.of())));
     }
 
+    @Test
+    void 位姿变化按结构自己的轴算() {
+        StructureGeometry.Change turned = StructureGeometry.change(STILL, TURNED);
+        assertEquals(90, turned.turnDegrees().y, 1e-6, "绕竖直轴转了 90°");
+        assertEquals(0, turned.moved().length(), 1e-9);
+        // 转过 90° 的船往世界 -z 挪 3 格：结构自己的 +x 此刻朝 -z，所以是沿自己的 +x 挪了 3 格。
+        SableStructures.Pose ahead = new SableStructures.Pose(new Vec3(100, 70, 97), new double[]{0, HALF, 0, HALF},
+                new Vec3(10000, 64, 10000), new Vec3(1, 1, 1));
+        StructureGeometry.Change forward = StructureGeometry.change(TURNED, ahead);
+        assertEquals(-3, forward.moved().z, 1e-6);
+        assertEquals(3, forward.alongOwnAxes().x, 1e-6);
+        assertEquals(0, forward.alongOwnAxes().z, 1e-6);
+        assertEquals(0, forward.turnDegrees().length(), 1e-6);
+    }
+
     private static SableStructures.Structure structure(SableStructures.Pose pose, SableStructures.Pose last,
             Map<BlockPos, BlockState> plot) {
         return new SableStructures.Structure("ship", "", new AABB(98, 68, 98, 104, 74, 102), pose, last,

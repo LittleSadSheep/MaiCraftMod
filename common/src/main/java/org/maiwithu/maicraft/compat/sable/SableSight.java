@@ -55,7 +55,7 @@ final class SableSight implements ModSight {
             }
             detail.add("seat_positions", seats);
             JsonArray controls = new JsonArray();
-            scan.controls().stream().distinct().forEach(controls::add);
+            scan.controls().stream().map(StructureGeometry.Part::id).distinct().forEach(controls::add);
             detail.add("controls", controls);
             Vec3 center = structure.worldBounds().getCenter();
             WorldPosition at = new WorldPosition((int) Math.floor(center.x), (int) Math.floor(center.y),

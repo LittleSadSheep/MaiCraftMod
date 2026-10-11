@@ -3,6 +3,9 @@ package org.maiwithu.maicraft.compat.sable;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
@@ -15,12 +18,15 @@ import org.maiwithu.maicraft.compat.CompatRegistry;
 
 /**
  * Simulated（Create Aeronautics 一套里的载具部件：物理组装器、无线红石打字机、舵轮、油门拉杆）的联动入口。
- * 交给登记表：用物理组装器组装与拆回载具的办法。组装出来的是 Sable 的子世界，所以这里也读 Sable 的结构
- * （和 Sable 的联动用同一个读端，读写端放在一起）。每一下都经联动入口包一层。
+ * 交给登记表：用物理组装器组装与拆回载具的办法。
+ * 组装出来的是 Sable 的子世界，所以这里也读 Sable 的结构（和 Sable 的联动用同一个读端，读写端放在一起）。
+ * 每一下都经联动入口包一层。
  */
 public final class SimulatedCompat extends CompatModule {
 
     public static final String MOD_ID = "simulated";
+    /** 在角色周围多远找结构（格）。 */
+    static final int NEAR = 64;
 
     private final SimulatedParts parts;
     private final SableStructures structures;
@@ -35,6 +41,12 @@ public final class SimulatedCompat extends CompatModule {
     @Override public void contribute(CompatRegistry registry) {
         // 物理组装器拉一次杆组装或拆回（所有者 10-11 批的载具规格）：要走过去、拉、确认，进世界时带着玩家行为建。
         registry.vehicleAssembler(this, services -> new PhysicsAssembly(this, services));
+    }
+
+    /** 角色附近这个编号的物理结构；不在附近为空。 */
+    Optional<SableStructures.Structure> structure(ClientLevel level, Player viewer, String id) {
+        return structures(level, viewer, viewer.getBoundingBox().inflate(NEAR)).stream()
+                .filter(candidate -> candidate.id().equals(id)).findFirst();
     }
 
     /** 和一个区域沾边的物理结构；见 {@link SableStructures#near}。 */
@@ -60,5 +72,25 @@ public final class SimulatedCompat extends CompatModule {
     /** 拉一次物理组装器的杆；见 {@link SimulatedParts#pullAssembler}。 */
     void pullAssembler(BlockPos at) {
         run("拉物理组装器的杆", () -> parts.pullAssembler(at));
+    }
+
+    /** 无线红石打字机绑了频率的键；见 {@link SimulatedParts#typewriterKeys}。 */
+    Set<Integer> typewriterKeys(ClientLevel level, String structureId, BlockPos local) {
+        return call("读无线红石打字机绑的键", () -> parts.typewriterKeys(level, structureId, local));
+    }
+
+    /** 无线红石打字机是不是这个玩家在用；见 {@link SimulatedParts#typewriterUsedBy}。 */
+    boolean typewriterUsedBy(ClientLevel level, String structureId, BlockPos local, UUID player) {
+        return call("读无线红石打字机谁在用", () -> parts.typewriterUsedBy(level, structureId, local, player));
+    }
+
+    /** 按下或松开无线红石打字机的一个键；见 {@link SimulatedParts#typewriterKey}。 */
+    void typewriterKey(BlockPos local, int key, boolean press) {
+        run(press ? "按下无线红石打字机的键" : "松开无线红石打字机的键", () -> parts.typewriterKey(local, key, press));
+    }
+
+    /** 交还无线红石打字机；见 {@link SimulatedParts#typewriterDisconnect}。 */
+    void typewriterDisconnect(ClientLevel level, String structureId, BlockPos local) {
+        run("交还无线红石打字机", () -> parts.typewriterDisconnect(level, structureId, local));
     }
 }

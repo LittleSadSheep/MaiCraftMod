@@ -88,6 +88,8 @@ allow behavior.navigation.baritone.BaritoneWalkRun.handleStall 动词：处理�
 
 term 打字机 比喻叫法；这个行为说「逐字打字」，动作类型是 TypeChatDraft
 keep 无线红石打字机 Simulated 的方块 linked_typewriter 的官方中文名，载具的控制件，不是聊天打字的比喻
+keep 打字机: 驾驶载具时输入的写法（打字机:W），指无线红石打字机的一个键
+keep 打字机： 同上，全角冒号
 
 # 钓鱼与附魔规格定下的说法
 term 附魔预算 不再有预算参数（费用由档位决定）：第 n 档固定扣 n 级 n 个青金石，选档用 tier

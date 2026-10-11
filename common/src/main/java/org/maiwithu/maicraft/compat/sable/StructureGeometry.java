@@ -14,6 +14,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
+import org.joml.Quaterniond;
+import org.joml.Vector3d;
 
 /**
  * 物理结构的几何，纯函数：地块里的方块按位姿换到世界里——逐格碰撞、甲板上能站的格、在怎么动。
@@ -31,6 +33,8 @@ final class StructureGeometry {
             "simulated:steering_wheel", "simulated:throttle_lever");
     /** Simulated 的物理组装器。 */
     static final String ASSEMBLER = "simulated:physics_assembler";
+    /** Simulated 的无线红石打字机：接管后按键就往绑的频率发信号。 */
+    static final String TYPEWRITER = "simulated:linked_typewriter";
 
     private StructureGeometry() {}
 
@@ -41,17 +45,26 @@ final class StructureGeometry {
      * @param boxes    逐格碰撞盒（地块坐标）
      * @param blocks   不是空气的方块数
      * @param seats    座位所在的格
-     * @param controls 控制件（无线红石打字机、舵轮、油门拉杆）的方块 ID
+     * @param controls 控制件（无线红石打字机、舵轮、油门拉杆）：所在的格与方块 ID
      * @param assemblers 物理组装器所在的格（拆回时拉它）
      */
-    record Scan(boolean complete, List<AABB> boxes, int blocks, List<BlockPos> seats, List<String> controls,
-                List<BlockPos> assemblers) {}
+    record Scan(boolean complete, List<AABB> boxes, int blocks, List<BlockPos> seats, List<Part> controls,
+                List<BlockPos> assemblers) {
+
+        /** 某一种控制件所在的格。 */
+        List<BlockPos> controlsOf(String id) {
+            return controls.stream().filter(part -> part.id().equals(id)).map(Part::local).toList();
+        }
+    }
+
+    /** 结构上的一个部件：地块里的格与方块 ID。 */
+    record Part(BlockPos local, String id) {}
 
     /** 地块里逐格读一遍：每格自己的碰撞形状、座位、控制件；格数超了或有没加载的格就是没读全。 */
     static Scan scan(SableStructures.Structure structure, Function<BlockPos, BlockState> read) {
         List<AABB> boxes = new ArrayList<>();
         List<BlockPos> seats = new ArrayList<>();
-        List<String> controls = new ArrayList<>();
+        List<Part> controls = new ArrayList<>();
         List<BlockPos> assemblers = new ArrayList<>();
         if (cells(structure) > MAX_CELLS) return new Scan(false, boxes, 0, seats, controls, assemblers);
         boolean complete = true;
@@ -66,7 +79,7 @@ final class StructureGeometry {
             blocks++;
             String id = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
             if (id.endsWith("_seat")) seats.add(local.immutable());
-            if (CONTROLS.contains(id)) controls.add(id);
+            if (CONTROLS.contains(id)) controls.add(new Part(local.immutable(), id));
             if (ASSEMBLER.equals(id)) assemblers.add(local.immutable());
             VoxelShape shape = state.getCollisionShape(EmptyBlockGetter.INSTANCE, local);
             for (AABB part : shape.toAabbs()) boxes.add(part.move(local));
@@ -109,6 +122,35 @@ final class StructureGeometry {
         double[] b = structure.lastPose().orientation();
         double dot = Math.abs(a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]);
         return 2 * Math.acos(Math.min(1, dot));
+    }
+
+    /**
+     * 两个位姿之间的变化：世界里挪了多少；换到开始那一刻结构自己的轴上挪了多少；绕结构自己的 x、y、z 轴各转了多少度。
+     * 结构自己的轴就是组装那一刻的世界轴（组装不转方块），所以"沿 +z"就是造的时候朝南的那头。
+     */
+    record Change(Vec3 moved, Vec3 alongOwnAxes, Vec3 turnDegrees) {}
+
+    /** 从 from 到 to 的变化。 */
+    static Change change(SableStructures.Pose from, SableStructures.Pose to) {
+        Vec3 moved = to.position().subtract(from.position());
+        Quaterniond start = quaternion(from);
+        Vector3d own = start.transformInverse(new Vector3d(moved.x, moved.y, moved.z));
+        // 相对转动 = 开始的逆 × 现在：转轴落在开始那一刻结构自己的轴上；取短的那一圈。
+        Quaterniond relative = new Quaterniond(start).conjugate().mul(quaternion(to));
+        double sign = relative.w < 0 ? -1 : 1;
+        double x = relative.x * sign, y = relative.y * sign, z = relative.z * sign, w = relative.w * sign;
+        double sin = Math.sqrt(x * x + y * y + z * z);
+        Vec3 turn = Vec3.ZERO;
+        if (sin > 1e-9) {
+            double degrees = Math.toDegrees(2 * Math.atan2(sin, w));
+            turn = new Vec3(x / sin * degrees, y / sin * degrees, z / sin * degrees);
+        }
+        return new Change(moved, new Vec3(own.x, own.y, own.z), turn);
+    }
+
+    private static Quaterniond quaternion(SableStructures.Pose pose) {
+        double[] q = pose.orientation();
+        return new Quaterniond(q[0], q[1], q[2], q[3]);
     }
 
     /** 在动（挪或转）。 */

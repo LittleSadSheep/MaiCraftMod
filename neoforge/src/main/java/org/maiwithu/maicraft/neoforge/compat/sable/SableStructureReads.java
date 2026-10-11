@@ -51,12 +51,17 @@ public final class SableStructureReads implements SableStructures {
     }
 
     @Override public BlockState block(ClientLevel level, String id, BlockPos local) {
+        LevelChunk chunk = plotChunk(level, id, local);
+        return chunk == null ? null : chunk.getBlockState(local);
+    }
+
+    /** 结构地块里装着这一格的区块；结构不在、那一块没拿到为 null（不为读而去加载）。 */
+    static LevelChunk plotChunk(ClientLevel level, String id, BlockPos local) {
         SubLevel subLevel = subLevel(level, id);
         if (subLevel == null) return null;
         LevelPlot plot = subLevel.getPlot();
         PlotChunkHolder holder = plot.getChunkHolder(plot.toLocal(new ChunkPos(local)));
-        LevelChunk chunk = holder == null ? null : holder.getChunk();
-        return chunk == null ? null : chunk.getBlockState(local);
+        return holder == null ? null : holder.getChunk();
     }
 
     @Override public List<AABB> attachedEntities(ClientLevel level, String id) {
