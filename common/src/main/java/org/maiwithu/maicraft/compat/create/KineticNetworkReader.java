@@ -10,6 +10,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 
+import org.maiwithu.maicraft.ability.machine.spi.LineMaterials;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkKind;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkSummary;
@@ -50,6 +51,11 @@ final class KineticNetworkReader implements NetworkReader {
                 .map(network -> PREFIX + network);
         id.ifPresent(network -> lastMember.put(network, at.immutable()));
         return id;
+    }
+
+    // 接线：近处轴与齿轮箱、远处链条输送机；Create 的这几种方块找不到时不给线材，接网络如实说铺不了。
+    @Override public Optional<LineMaterials> lineMaterials() {
+        return KineticLines.of(compat, services);
     }
 
     @Override public NetworkSummary summary(String networkId) {

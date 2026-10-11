@@ -6,13 +6,17 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 
+import org.maiwithu.maicraft.behavior.construction.ConstructionServices;
+import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.ModIdentity;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilitySpec;
 import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
 import org.maiwithu.maicraft.kernel.ability.Listing;
+import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.goal.Target;
@@ -25,18 +29,20 @@ import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 
 /**
- * 接网络的能力：把 target 那台机器接进 source 所在的那种网，核对两端同网与运行读数；
- * source 不给就在 radius 内找。认网与核对在这里，铺线路要的方块知识由各网络的联动给，
- * 现在没有登记的途径能给出时如实说动不了手，不猜着铺。
+ * 接网络的能力：把 target 那台机器接进 source 所在的那种网。已经同网就不动；没接上时按那种网的联动给的线材
+ * 规划一条线路（直线优先、少拐弯、远处用链条这类跨越），写成机器蓝图交给施工铺好，再核对两端同网与运行读数。
+ * source 不给就在 radius 内找在转的那张网。不会接线的网如实说铺不了，不猜着铺。
  */
 final class MachineConnectModule implements AbilityModule {
 
     private final MachineServices services;
     private final MachineArchives archives;
+    private final WorldMemory memory;
+    private final Function<Permissions, ConstructionServices> construction;
     private final AbilitySpec spec = new AbilitySpec(
             ModIdentity.MOD_ID + ":machine_connect",
-            "把 target 那台机器接进一张网络（应力、ME、能量……按已装的联动），核对两端同网与运行读数；"
-                    + "已经接着就不动，没接上时如实说差哪一段",
+            "把 target 那台机器接进一张网络（应力、ME、能量……按已装的联动）：已经接着就不动，"
+                    + "没接上就规划线路、铺好再核对两端同网与运行读数",
             AbilityDoc.forAbility("machine_connect"),
             ParamSpecs.of(
                     ParamSpec.of("network", ParamType.TEXT).required()
@@ -51,9 +57,12 @@ final class MachineConnectModule implements AbilityModule {
             List.of(),
             Listing.LISTED);
 
-    MachineConnectModule(MachineServices services, MachineArchives archives) {
+    MachineConnectModule(MachineServices services, MachineArchives archives, WorldMemory memory,
+            Function<Permissions, ConstructionServices> construction) {
         this.services = Objects.requireNonNull(services, "services");
         this.archives = Objects.requireNonNull(archives, "archives");
+        this.memory = Objects.requireNonNull(memory, "memory");
+        this.construction = Objects.requireNonNull(construction, "construction");
     }
 
     @Override public AbilitySpec spec() {
@@ -117,6 +126,8 @@ final class MachineConnectModule implements AbilityModule {
     }
 
     @Override public void registerTasks(TaskFactories factories) {
-        factories.register(MachineConnectInput.class, input -> new MachineConnectTask(input, services, archives));
+        // 铺线路用按蓝图施工的同一套任务：施工服务按这次任务的许可拼一份。
+        factories.register(MachineConnectInput.class,
+                input -> new MachineConnectTask(input, services, archives, memory, construction));
     }
 }

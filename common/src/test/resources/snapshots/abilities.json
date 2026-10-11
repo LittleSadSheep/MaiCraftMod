@@ -156,7 +156,7 @@
       },
       {
         "ability": "maicraft:machine_connect",
-        "summary": "把 target 那台机器接进一张网络（应力、ME、能量……按已装的联动），核对两端同网与运行读数；已经接着就不动，没接上时如实说差哪一段",
+        "summary": "把 target 那台机器接进一张网络（应力、ME、能量……按已装的联动）：已经接着就不动，没接上就规划线路、铺好再核对两端同网与运行读数",
         "parameters": "network: string, source?: string, radius: integer = 32",
         "targets": [
           "here",
@@ -832,7 +832,7 @@
     },
     {
       "ability": "maicraft:machine_connect",
-      "summary": "把 target 那台机器接进一张网络（应力、ME、能量……按已装的联动），核对两端同网与运行读数；已经接着就不动，没接上时如实说差哪一段",
+      "summary": "把 target 那台机器接进一张网络（应力、ME、能量……按已装的联动）：已经接着就不动，没接上就规划线路、铺好再核对两端同网与运行读数",
       "parameters": [
         {
           "name": "network",

@@ -23,4 +23,9 @@ public interface NetworkReader {
 
     /** 那张网现在怎样；读不到时 readable 为假并写明原因。 */
     NetworkSummary summary(String networkId);
+
+    /** 这种网怎么用方块接线：接网络时线路规划按它铺；不会接线的网给空，接网络时如实说铺不了。 */
+    default Optional<LineMaterials> lineMaterials() {
+        return Optional.empty();
+    }
 }

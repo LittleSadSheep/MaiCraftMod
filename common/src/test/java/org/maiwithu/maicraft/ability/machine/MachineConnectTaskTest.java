@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.behavior.recipe.GameRecipeTable;
 import org.maiwithu.maicraft.behavior.recipe.RecipeLookup;
+import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.Target;
@@ -153,8 +154,11 @@ class MachineConnectTaskTest {
         }
 
         TaskResult run(MachineConnectInput input) {
-            MachineConnectTask task = new MachineConnectTask(input, services,
-                    new MachineArchives(new DocumentStore(tempDir.resolve("state.sqlite")), "world1"));
+            DocumentStore documents = new DocumentStore(tempDir.resolve("state.sqlite"));
+            MachineConnectTask task = new MachineConnectTask(input, services, new MachineArchives(documents, "world1"),
+                    new WorldMemory(documents, "world1"), permissions -> {
+                        throw new AssertionError("这里的场景不该走到施工");
+                    });
             task.start(tick());
             for (long i = 0; i < 2000; i++) {
                 if (task.tick(tick()) instanceof TickResult.Finished finished) {

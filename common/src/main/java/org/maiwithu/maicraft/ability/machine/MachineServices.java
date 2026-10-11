@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.ability.machine;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.function.Supplier;
 
@@ -34,11 +35,12 @@ import org.maiwithu.maicraft.kernel.result.Problem;
  * @param interactions   原生交互：开关是机器自带的拉杆或按钮时右键拨一下
  * @param seenTargets    观察编号查位置；b# 指的机器组成格靠它落实
  * @param places         按名字查记过的地点；档案还没有接入，地标先按记过的地点找
+ * @param blockLimits    每台机器里某种方块最多几个（实例配置，方块 ID → 上限），例如链条输送机默认 1 个
  */
 record MachineServices(Supplier<PlayerContext> context, MachineWorldView world, List<MachineType> machineTypes,
                        List<NetworkReader> networkReaders, ReadsMachineArea area, RecipeLookup recipes,
                        ItemNeeds needs, BringsPlayerClose close, MachineInteractions interactions,
-                       ReadsSeenTargets seenTargets, ReadsRememberedPlaces places) {
+                       ReadsSeenTargets seenTargets, ReadsRememberedPlaces places, Map<String, Integer> blockLimits) {
 
     MachineServices {
         Objects.requireNonNull(context, "context");
@@ -49,6 +51,16 @@ record MachineServices(Supplier<PlayerContext> context, MachineWorldView world, 
         Objects.requireNonNull(recipes, "recipes");
         Objects.requireNonNull(seenTargets, "seenTargets");
         Objects.requireNonNull(places, "places");
+        blockLimits = Map.copyOf(blockLimits);
+    }
+
+    /** 不限任何方块个数的一份：离线测试与没有实例配置时用。 */
+    MachineServices(Supplier<PlayerContext> context, MachineWorldView world, List<MachineType> machineTypes,
+            List<NetworkReader> networkReaders, ReadsMachineArea area, RecipeLookup recipes, ItemNeeds needs,
+            BringsPlayerClose close, MachineInteractions interactions, ReadsSeenTargets seenTargets,
+            ReadsRememberedPlaces places) {
+        this(context, world, machineTypes, networkReaders, area, recipes, needs, close, interactions, seenTargets,
+                places, Map.of());
     }
 
     /** 认领一格的机器类型：按登记顺序问，最先认领的算数；都没有为 null。 */

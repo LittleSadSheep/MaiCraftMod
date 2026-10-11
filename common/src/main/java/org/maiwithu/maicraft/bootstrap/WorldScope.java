@@ -165,7 +165,8 @@ public final class WorldScope {
                 furnaceFuels,
                 compat,
                 kinds,
-                nightWiring, configDirectory, preview, documents, identity.key(), itemsInUse, dropConfirmations), abilities);
+                nightWiring, configDirectory, preview, documents, identity.key(), itemsInUse, dropConfirmations,
+                instanceConfig.machineBlockLimits()), abilities);
     }
 
     /**

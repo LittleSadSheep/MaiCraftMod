@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -75,5 +76,26 @@ class InstanceConfigTest {
         InstanceConfig broken = InstanceConfig.read(configDir);
         assertEquals(List.of(), broken.trustedPlayers());
         assertFalse(broken.allowGameCommands());
+    }
+
+    @Test
+    void machineBlockLimitsDefaultToOneChainConveyorAndReadFromFile() throws IOException {
+        // 没写这一项：链条输送机每台机器最多一个（所有者定的默认）。
+        Files.writeString(configDir.resolve("maicraft.json"), "{}", StandardCharsets.UTF_8);
+        assertEquals(Map.of("create:chain_conveyor", 1), InstanceConfig.read(configDir).machineBlockLimits());
+
+        // 写了就整份按写的来：可以放宽、可以加别的方块，写成空对象就都不限。
+        Files.writeString(configDir.resolve("maicraft.json"),
+                "{\"machineBlockLimits\": {\"create:chain_conveyor\": 3, \"create:encased_chain_drive\": 2}}",
+                StandardCharsets.UTF_8);
+        assertEquals(Map.of("create:chain_conveyor", 3, "create:encased_chain_drive", 2),
+                InstanceConfig.read(configDir).machineBlockLimits());
+        Files.writeString(configDir.resolve("maicraft.json"), "{\"machineBlockLimits\": {}}", StandardCharsets.UTF_8);
+        assertEquals(Map.of(), InstanceConfig.read(configDir).machineBlockLimits());
+
+        // 上限不是正整数：整份按坏文件收场，用默认值。
+        Files.writeString(configDir.resolve("maicraft.json"),
+                "{\"machineBlockLimits\": {\"create:chain_conveyor\": 0}}", StandardCharsets.UTF_8);
+        assertEquals(Map.of("create:chain_conveyor", 1), InstanceConfig.read(configDir).machineBlockLimits());
     }
 }

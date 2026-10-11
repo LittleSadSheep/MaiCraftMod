@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.machine;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
+
+import net.minecraft.core.registries.BuiltInRegistries;
 
 import org.maiwithu.maicraft.ability.design.api.BuildingDesign;
 import org.maiwithu.maicraft.ability.design.api.DesignCompiler;
@@ -139,6 +142,8 @@ final class MachineBuildModule implements AbilityModule {
             return fail("档案名「" + name + "」已经有一台机器在用", Problem.Kind.INVALID_PARAMETER,
                     "换一个 name，或把 target 指到那台机器上来修改它");
         }
+        Optional<StepDecision> over = overLimit(parsed);
+        if (over.isPresent()) return over.get();
         return new StepDecision.Run(new MachineBuildInput(false, parsed, at, name, null,
                 step.goal().permissions(), "按" + what + "在 (" + at.x() + "," + at.y() + "," + at.z() + ") 建机器"));
     }
@@ -153,6 +158,8 @@ final class MachineBuildModule implements AbilityModule {
                     Problem.Kind.UNREACHABLE, "到 " + archive.dimension() + " 再下达");
         }
         MachineBlueprint merged = MachinePatch.merge(archive.blueprint(), parsed);
+        Optional<StepDecision> over = overLimit(merged);
+        if (over.isPresent()) return over.get();
         WorldPosition at = new WorldPosition(archive.anchor().getX(), archive.anchor().getY(),
                 archive.anchor().getZ(), archive.dimension());
         return new StepDecision.Run(new MachineBuildInput(false, merged, at, archive.name(), archive,
@@ -186,6 +193,24 @@ final class MachineBuildModule implements AbilityModule {
         }
         return new StepDecision.Run(new MachineBuildInput(true, null, at, target.name(), target,
                 step.goal().permissions(), "拆掉机器「" + target.name() + "」"));
+    }
+
+    /**
+     * 整台机器（合并后的蓝图，含档案里已有的）里某种方块超过实例配置的上限时，在计划阶段报出来：
+     * 链条输送机默认每台一个，是所有者定的，近处用传动杆接得上的就别用链条。拆除不受限。
+     */
+    private Optional<StepDecision> overLimit(MachineBlueprint merged) {
+        List<String> over = new ArrayList<>();
+        services.blockLimits().forEach((block, limit) -> {
+            long count = merged.cells().stream()
+                    .filter(cell -> BuiltInRegistries.BLOCK.getKey(cell.state().getBlock()).toString().equals(block))
+                    .count();
+            if (count > limit) over.add(block + " 有 " + count + " 个，上限 " + limit);
+        });
+        if (over.isEmpty()) return Optional.empty();
+        return Optional.of(fail("整台机器里方块个数超过实例配置的上限：" + String.join("；", over),
+                Problem.Kind.INVALID_PARAMETER,
+                "近处用传动杆、齿轮箱接；上限在 config/maicraft.json 的 machineBlockLimits 里，由所有者改"));
     }
 
     /** 角色所在维度与目标维度对不上、或角色不在世界里时的问题；同维度给 null。 */

@@ -35,6 +35,7 @@ import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 import org.maiwithu.maicraft.behavior.perception.FakeBlockTags;
 
 import java.nio.file.Path;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Supplier;
 
@@ -124,6 +125,7 @@ final class OfflineCatalog {
                 new DocumentStore(tempDir.resolve("state.sqlite")),
                 WORLD_KEY,
                 new ItemsInUse(LiveCarryReads.itemTags()),
-                new DropConfirmations());
+                new DropConfirmations(),
+                Map.of("create:chain_conveyor", 1));
     }
 }

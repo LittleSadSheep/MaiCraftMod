@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.ability.machine;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
@@ -37,13 +38,15 @@ public final class MachineAbilities {
     /**
      * 按清单顺序建六个机器能力：看机器、审蓝图、改设置、用机器做东西、按蓝图施工、接网络。
      * 机器档案按世界存在给定的文档库里，键是这个世界的身份编号。
+     *
+     * @param blockLimits 每台机器里某种方块最多几个（实例配置，方块 ID → 上限）
      */
     public static List<AbilityModule> all(Supplier<PlayerContext> context, List<MachineType> machineTypes,
             List<NetworkReader> networkReaders, RecipeLookup recipes, ItemNeeds needs,
             BringsPlayerClose close, Interactions interactions, ReadsSeenTargets seenTargets,
             ReadsRememberedPlaces places, WorldMemory memory, DocumentStore worldDocuments, String worldKey,
             AnchorResolver anchors, Optional<DesignStore> designs,
-            Function<Permissions, ConstructionServices> construction) {
+            Function<Permissions, ConstructionServices> construction, Map<String, Integer> blockLimits) {
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(recipes, "recipes");
         Objects.requireNonNull(needs, "needs");
@@ -59,11 +62,11 @@ public final class MachineAbilities {
         Objects.requireNonNull(construction, "construction");
         MachineServices services = new MachineServices(context, new LiveMachineWorld(context), machineTypes,
                 networkReaders, new LiveMachineArea(context), recipes, needs, close,
-                new LiveMachineInteractions(interactions), seenTargets, places);
+                new LiveMachineInteractions(interactions), seenTargets, places, blockLimits);
         MachineArchives archives = new MachineArchives(worldDocuments, worldKey);
         return List.of(new MachineInspectModule(services), new MachineReviewModule(services, designs),
                 new MachineConfigureModule(services), new MachineRunModule(services),
                 new MachineBuildModule(services, archives, anchors, designs, memory, construction),
-                new MachineConnectModule(services, archives));
+                new MachineConnectModule(services, archives, memory, construction));
     }
 }

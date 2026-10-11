@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.machine;
 
+import java.util.List;
+
 import org.maiwithu.maicraft.ability.machine.spi.NetworkKind;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkSummary;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -16,13 +18,16 @@ import org.maiwithu.maicraft.kernel.result.ResultDetails;
  * @param joined     两端是不是同一张网
  * @param running    接上的话机器在不在转；没接上为 null
  * @param summary    那张网现在的读数；没接上或读不到时 readable 为假
+ * @param route      这次铺的线路：每格放了什么（方块 ID 加坐标），跨越写成一行；没铺为空表
  * @param note       给 LLM 的一句说明（缺联动、线路 lay 不了的原因），没有为空字符串
  */
 record MachineConnectDetails(NetworkKind kind, WorldPosition targetCell, WorldPosition sourceCell,
-                             boolean joined, Boolean running, NetworkSummary summary, String note)
+                             boolean joined, Boolean running, NetworkSummary summary, List<String> route,
+                             String note)
         implements ResultDetails {
 
     MachineConnectDetails {
+        route = List.copyOf(route);
         note = note == null ? "" : note;
     }
 }

@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.bootstrap;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.Objects;
 import java.util.Optional;
@@ -201,7 +202,9 @@ public final class AbilityCatalog {
             /** 正要用的东西：拿东西的引擎建好后接上，走路垫脚按它留够数。 */
             ItemsInUse itemsInUse,
             /** 掉落物的事实确认：捡掉落物、战斗拾荒按服务器的拾取包认东西进没进包。 */
-            DropConfirmations dropConfirmations) {
+            DropConfirmations dropConfirmations,
+            /** 每台机器里某种方块最多几个（实例配置）：按蓝图建机器、接网络时数整台。 */
+            Map<String, Integer> machineBlockLimits) {
 
         public Deps {
             Objects.requireNonNull(context, "context");
@@ -213,6 +216,7 @@ public final class AbilityCatalog {
             Objects.requireNonNull(selfPlayerId, "selfPlayerId");
             Objects.requireNonNull(blockScans, "blockScans");
             Objects.requireNonNull(compat, "compat");
+            machineBlockLimits = machineBlockLimits == null ? Map.of() : Map.copyOf(machineBlockLimits);
             Objects.requireNonNull(facilities, "facilities");
             Objects.requireNonNull(configDirectory, "configDirectory");
             Objects.requireNonNull(preview, "preview");
@@ -361,7 +365,7 @@ public final class AbilityCatalog {
                 recipes, shared.innerNeeds(), shared.bringClose(), deps.interactions(),
                 new SceneSeenTargets(deps::scene), deps.memory(), deps.memory(),
                 deps.worldDocuments(), deps.worldKey(),
-                anchors(deps), Optional.of(designs), construction)) {
+                anchors(deps), Optional.of(designs), construction, deps.machineBlockLimits())) {
             registry.register(module);
         }
     }
