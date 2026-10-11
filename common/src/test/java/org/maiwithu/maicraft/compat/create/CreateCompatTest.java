@@ -41,6 +41,8 @@ import org.maiwithu.maicraft.compat.CompatRegistry;
 import org.maiwithu.maicraft.compat.SupportedMod;
 import org.maiwithu.maicraft.compat.VerifiedVersions;
 import org.maiwithu.maicraft.game.loader.LoaderEnvironment;
+import org.maiwithu.maicraft.game.player.BackpackStack;
+import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.game.player.GearSlotName;
 import org.maiwithu.maicraft.game.serverlink.ServerReads;
 import org.maiwithu.maicraft.game.world.BlockScanService;
@@ -199,7 +201,16 @@ class CreateCompatTest {
                 name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self");
         return new PlayerServices(() -> null, (target, permissions) -> null, new Interactions(null),
                 itemId -> Optional.empty(), new NoGear(), inner -> inner, (request, permissions) -> null, nobodyOwns,
-                itemId -> Set.of(), MenuLayouts.VANILLA, new BlockScanService(), ServerReads.NONE);
+                itemId -> Set.of(), MenuLayouts.VANILLA, new BlockScanService(), ServerReads.NONE, emptyBackpack());
+    }
+
+    /** 背包视图的替身：身上什么都没有，Create 的测试用不到它。 */
+    private static BackpackView emptyBackpack() {
+        return new BackpackView() {
+            @Override public List<BackpackStack> stacks() { return List.of(); }
+            @Override public int usedSlots() { return 0; }
+            @Override public int totalSlots() { return 36; }
+        };
     }
 
     private static LoaderEnvironment loaderWith(String version) {

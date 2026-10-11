@@ -30,6 +30,8 @@ import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.inventory.GearChanges;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
 import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
+import org.maiwithu.maicraft.game.player.BackpackStack;
+import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.compat.CompatModule;
@@ -126,7 +128,16 @@ class MekanismCompatTest {
                     @Override public Optional<Action> wear(String itemId, GearSlotName slot) { return Optional.empty(); }
                     @Override public Optional<Action> takeOff(GearSlotName slot) { return Optional.empty(); }
                 }, inner -> inner, (request, permissions) -> null, nobodyOwns, itemId -> Set.of(),
-                MenuLayouts.VANILLA, new BlockScanService(), ServerReads.NONE);
+                MenuLayouts.VANILLA, new BlockScanService(), ServerReads.NONE, emptyBackpack());
+    }
+
+    /** 背包视图的替身：身上什么都没有，通用机械的测试用不到它。 */
+    private static BackpackView emptyBackpack() {
+        return new BackpackView() {
+            @Override public List<BackpackStack> stacks() { return List.of(); }
+            @Override public int usedSlots() { return 0; }
+            @Override public int totalSlots() { return 36; }
+        };
     }
 
     private static LoaderEnvironment loader(String version) {

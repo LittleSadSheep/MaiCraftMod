@@ -4,10 +4,14 @@ package org.maiwithu.maicraft.compat.backpack;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquisitionCost;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
+import org.maiwithu.maicraft.behavior.inventory.GearChanges;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
 import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.Protection;
+import org.maiwithu.maicraft.game.player.GearSlotName;
+import org.maiwithu.maicraft.game.serverlink.ServerReads;
 import org.maiwithu.maicraft.game.world.BlockScanService;
+import org.maiwithu.maicraft.kernel.task.Action;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -65,11 +69,22 @@ class SophisticatedBackpackSourceTest {
                 MENUS, () -> NOW);
         PlayerServices services = new PlayerServices(() -> null, (target, permissions) -> null,
                 new Interactions(null),
-                itemId -> Optional.empty(), (request, permissions) -> null,
+                itemId -> Optional.empty(), new NoGear(), inner -> inner, (request, permissions) -> null,
                 new Protection((dimension, x, y, z) -> Optional.empty(), List::of, name -> Optional.empty(),
                         GuessesPlayerMade.NOTHING, "self"),
-                itemId -> Set.of(), MenuLayouts.VANILLA, new BlockScanService(), backpack);
+                itemId -> Set.of(), MenuLayouts.VANILLA, new BlockScanService(), ServerReads.NONE, backpack);
         return new SophisticatedBackpackSource(compat, services, MENUS, seen, () -> NOW);
+    }
+
+    /** 换不了装备的替身：这里的测试不穿卸、不放副手。 */
+    private static final class NoGear implements GearChanges {
+        @Override public Optional<Action> wear(String itemId, GearSlotName slot) {
+            return Optional.empty();
+        }
+
+        @Override public Optional<Action> takeOff(GearSlotName slot) {
+            return Optional.empty();
+        }
     }
 
     @Test
