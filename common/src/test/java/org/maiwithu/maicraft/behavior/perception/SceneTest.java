@@ -12,6 +12,7 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** 场景的整理与视图：方位说法、观察编号、失效交代、写进世界记忆、速写按方位成行且列表不截断。 */
@@ -35,10 +36,11 @@ class SceneTest {
     void entitiesGetDirectionsIdsAndStableNumbering() {
         scene.updateEntities(10, List.of(
                 new EntitySight.Observation(1, "minecraft:zombie", null,
-                        WorldPosition.here(0, 65, -12), true, true, true, Map.of()),
+                        WorldPosition.here(0, 65, -12), true, true, true,
+                        new EntitySight.Health(14, 20), Map.of()),
                 new EntitySight.Observation(2, "minecraft:sheep", null,
                         WorldPosition.here(9, 64, 0), true, false, false,
-                        Map.of("color", "white"))));
+                        null, Map.of("color", "white"))));
         List<SceneEntity> entities = scene.entities();
         assertEquals(2, entities.size());
         SceneEntity zombie = entities.get(0);
@@ -48,16 +50,19 @@ class SceneTest {
         assertEquals(12, zombie.distance());
         assertEquals(1, zombie.dy());
         assertTrue(zombie.hostile() && zombie.targetingMe());
+        // 血量跟着观察一路进场景：活体的快照原样带上来，不是活体的没有血量。
+        assertEquals(new EntitySight.Health(14, 20), zombie.health());
+        assertNull(entities.get(1).health());
         // 同一只僵尸再刷新一次，编号不变。
         scene.updateEntities(20, List.of(new EntitySight.Observation(1, "minecraft:zombie", null,
-                WorldPosition.here(0, 65, -10), true, true, true, Map.of())));
+                WorldPosition.here(0, 65, -10), true, true, true, null, Map.of())));
         assertEquals("e1", scene.entities().getFirst().id());
     }
 
     @Test
     void expireReportsGoneIdsWithLastDirection() {
         scene.updateEntities(100, List.of(new EntitySight.Observation(5, "minecraft:creeper", null,
-                WorldPosition.here(0, 64, -3), true, true, false, Map.of())));
+                WorldPosition.here(0, 64, -3), true, true, false, null, Map.of())));
         assertTrue(scene.expire(200).isEmpty());
         List<SeenRegistry.Gone> gone = scene.expire(400);
         assertEquals(1, gone.size());
@@ -111,9 +116,9 @@ class SceneTest {
     void summaryCountsWithoutRepeatingTheLists() {
         scene.updateEntities(10, List.of(
                 new EntitySight.Observation(1, "minecraft:zombie", null,
-                        WorldPosition.here(0, 64, -8), true, true, true, Map.of()),
+                        WorldPosition.here(0, 64, -8), true, true, true, null, Map.of()),
                 new EntitySight.Observation(2, "minecraft:sheep", null,
-                        WorldPosition.here(8, 64, 0), true, false, false, Map.of())));
+                        WorldPosition.here(8, 64, 0), true, false, false, null, Map.of())));
         scene.updateFacilities(10, NOW, List.of(
                 new NearbyBlocksSight.BlockSighting(WorldPosition.here(0, 64, 6), "minecraft:crafting_table")));
         String summary = scene.summary();
@@ -127,16 +132,16 @@ class SceneTest {
         List<EntitySight.Observation> crowd = new ArrayList<>();
         for (int i = 0; i < 30; i++) {
             crowd.add(new EntitySight.Observation(1000 + i, "minecraft:squid", null,
-                    WorldPosition.here(0, 50, -100 - i), false, false, false, Map.of()));
+                    WorldPosition.here(0, 50, -100 - i), false, false, false, null, Map.of()));
         }
         crowd.add(new EntitySight.Observation(2000, "minecraft:bat", null,
-                WorldPosition.here(60, 40, 0), false, false, false, Map.of()));
+                WorldPosition.here(60, 40, 0), false, false, false, null, Map.of()));
         crowd.add(new EntitySight.Observation(3000, "minecraft:skeleton", null,
-                WorldPosition.here(0, 64, -60), true, true, false, Map.of()));
+                WorldPosition.here(0, 64, -60), true, true, false, null, Map.of()));
         crowd.add(new EntitySight.Observation(3001, "minecraft:wolf", "小白",
-                WorldPosition.here(50, 64, 0), true, false, false, Map.of()));
+                WorldPosition.here(50, 64, 0), true, false, false, null, Map.of()));
         crowd.add(new EntitySight.Observation(3002, "minecraft:cow", null,
-                WorldPosition.here(5, 64, 0), true, false, false, Map.of()));
+                WorldPosition.here(5, 64, 0), true, false, false, null, Map.of()));
         scene.updateEntities(10, crowd);
         assertEquals(34, scene.entities().size(), "场景自己的列表照样完整");
         List<String> listed = scene.listedEntities().stream().map(SceneEntity::type).toList();

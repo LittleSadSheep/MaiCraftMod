@@ -74,6 +74,11 @@ public final class SceneView {
         json.addProperty("visible", entity.visible());
         json.addProperty("hostile", entity.hostile());
         json.addProperty("targeting_me", entity.targetingMe());
+        // 血量快照：活体生物才有，打不打得过、还要打几下都看它。
+        if (entity.health() != null) {
+            json.addProperty("health", entity.health().current());
+            json.addProperty("max_health", entity.health().max());
+        }
         if (!entity.traits().isEmpty()) {
             JsonObject traits = new JsonObject();
             entity.traits().forEach(traits::addProperty);

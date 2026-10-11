@@ -83,7 +83,8 @@ public final class Scene {
                     direction, nowTick);
             next.add(new SceneEntity(id, sighting.type(), sighting.name(),
                     direction, DirectionWords.compassOf(dx, dz), (int) Math.round(distance), dy,
-                    sighting.visible(), sighting.hostile(), sighting.targetingMe(), sighting.traits()));
+                    sighting.visible(), sighting.hostile(), sighting.targetingMe(),
+                    sighting.health(), sighting.traits()));
         }
         entities = List.copyOf(next);
     }

@@ -25,15 +25,19 @@ public interface EntitySight {
      * @param visible 此刻视线没有被挡住
      * @param hostile 是敌对生物
      * @param targetingMe 正把攻击目标放在角色身上
+     * @param health 血量快照：当前值与上限，看得见的观察事实；不是活体生物（掉落物、矿车这类）为 null
      * @param traits 看得出来的特征：羊的颜色、是否剪过毛、幼年、着火、手持物、盔甲
      */
     record Observation(
             int entityId, String type, String name, WorldPosition position,
             boolean visible, boolean hostile, boolean targetingMe,
-            Map<String, String> traits) {
+            Health health, Map<String, String> traits) {
 
         public Observation {
             traits = Map.copyOf(traits);
         }
     }
+
+    /** 一次读到的血量：当前值与上限，一格血一条命的同一把尺（角色满血 20，末影龙满血 200）。 */
+    record Health(float current, float max) {}
 }

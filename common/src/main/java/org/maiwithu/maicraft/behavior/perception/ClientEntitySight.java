@@ -29,7 +29,7 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
  * <p>每只实体都报告，"此刻视线有没有被挡住"用与观察同一套遮挡判断
  * （{@code ObservationVisibility}，探索看到的和感知看到的同一条事实）；视线被挡住的
  * 实体仍带 {@code visible=false} 报上来，让场景的编号保留期知道它只是暂时看不见，
- * 而不是把它当成已经走掉。掉落物也算实体——地上的东西是观察的一部分。
+ * 而不是把它当成已经走掉。活体生物带血量快照，掉落物也算实体——地上的东西是观察的一部分。
  */
 public final class ClientEntitySight implements EntitySight {
 
@@ -53,6 +53,11 @@ public final class ClientEntitySight implements EntitySight {
             if (entity == player || entity.isRemoved()) {
                 continue;
             }
+            // 活体生物的血量是看得见的观察事实：按原版的LivingEntity读当前值与上限，
+            // 末影龙这类boss也走同一条路；掉落物、矿车这些不是活体，不报血量。
+            EntitySight.Health health = entity instanceof LivingEntity living
+                    ? new EntitySight.Health(living.getHealth(), living.getMaxHealth())
+                    : null;
             found.add(new Observation(
                     entity.getId(),
                     BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString(),
@@ -62,6 +67,7 @@ public final class ClientEntitySight implements EntitySight {
                     ObservationVisibility.entity(player, entity),
                     entity instanceof Enemy,
                     targetsPlayer(entity, player),
+                    health,
                     traits(entity)));
         }
         return found;

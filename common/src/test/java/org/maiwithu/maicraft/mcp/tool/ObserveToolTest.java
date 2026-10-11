@@ -97,7 +97,8 @@ class ObserveToolTest {
         scene.updateSelf(new SelfSight.Facts(0.5, 64, 0.5, 180f,
                 20, 18, 300, 300, "minecraft:stone_pickaxe", List.of(), List.of(), true, false));
         scene.updateEntities(10, List.of(new EntitySight.Observation(1, "minecraft:zombie", null,
-                WorldPosition.here(0, 64, -12), true, true, true, Map.of())));
+                WorldPosition.here(0, 64, -12), true, true, true,
+                new EntitySight.Health(14, 20), Map.of())));
         scene.updateFacilities(10, Instant.ofEpochMilli(1000),
                 List.of(new NearbyBlocksSight.BlockSighting(WorldPosition.here(4, 64, 0), "minecraft:chest")));
         // 控制权交接给空实现：observe 测试不接输入层。
@@ -150,6 +151,9 @@ class ObserveToolTest {
         assertEquals("e1", zombie.get("id").getAsString());
         assertEquals("前方", zombie.get("direction").getAsString());
         assertTrue(zombie.get("targeting_me").getAsBoolean());
+        // 列表里的活体直接带血量：scene 与 detail 是同一份事实，不藏在详情后面。
+        assertEquals(14.0f, zombie.get("health").getAsFloat());
+        assertEquals(20.0f, zombie.get("max_health").getAsFloat());
         assertEquals("minecraft:chest", view.getAsJsonArray("facilities").get(0).getAsJsonObject()
                 .get("block").getAsString());
         // 速写只是一句总览：数得出敌对、盯着角色的有几只，编号和方位只在列表里出现一次。
@@ -232,6 +236,10 @@ class ObserveToolTest {
         JsonObject home = data(observe("{\"what\": \"detail\", \"id\": \"家\"}"));
 
         assertEquals("minecraft:zombie", zombie.getAsJsonObject("now").get("type").getAsString());
+        // 活体生物的详情带血量快照：当前值与上限都在，末影龙这类 boss 走同一条路。
+        JsonObject now = zombie.getAsJsonObject("now");
+        assertEquals(14.0f, now.get("health").getAsFloat());
+        assertEquals(20.0f, now.get("max_health").getAsFloat());
         assertEquals("后方", home.get("direction").getAsString());
         assertEquals(30, home.get("distance").getAsInt());
         assertEquals("unknown_id", errorCode(observe("{\"what\": \"detail\", \"id\": \"e99\"}")));
