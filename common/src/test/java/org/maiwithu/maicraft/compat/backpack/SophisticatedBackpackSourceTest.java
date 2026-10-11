@@ -52,6 +52,7 @@ class SophisticatedBackpackSourceTest {
         @Override public Optional<List<Integer>> mainStorageSlotIds(AbstractContainerMenu menu) { return Optional.empty(); }
         @Override public List<Integer> playerSlotIds(AbstractContainerMenu menu) { return List.of(); }
         @Override public void openCarried() { }
+        @Override public void open(int inventorySlot) { }
     };
 
     private static BackpackView carrying(String... itemIds) {
@@ -107,7 +108,7 @@ class SophisticatedBackpackSourceTest {
     @Test
     void 开包读数五分钟内算数_报明确数量() {
         SeenBackpackStock seen = new SeenBackpackStock();
-        seen.saw(Map.of("minecraft:torch", 20, "minecraft:bread", 3), NOW.minusSeconds(60));
+        seen.saw(0, Map.of("minecraft:torch", 20, "minecraft:bread", 3), NOW.minusSeconds(60));
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class,
                 source(carrying("sophisticatedbackpacks:iron_backpack"), seen).quote(TORCHES, CONTEXT));
         // 要 10 个、包里记着 20 个：报要拿的量，代价只算开包取货的动作。
@@ -119,7 +120,7 @@ class SophisticatedBackpackSourceTest {
     @Test
     void 读数过了五分钟当没看过() {
         SeenBackpackStock seen = new SeenBackpackStock();
-        seen.saw(Map.of("minecraft:torch", 20), NOW.minus(Duration.ofMinutes(6)));
+        seen.saw(0, Map.of("minecraft:torch", 20), NOW.minus(Duration.ofMinutes(6)));
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class,
                 source(carrying("sophisticatedbackpacks:iron_backpack"), seen).quote(TORCHES, CONTEXT));
         assertEquals(SourceQuote.Offer.UNKNOWN_COUNT, offer.obtainableCount());
@@ -128,10 +129,32 @@ class SophisticatedBackpackSourceTest {
     @Test
     void 读数里没有的东西如实说_不去开包赌运气() {
         SeenBackpackStock seen = new SeenBackpackStock();
-        seen.saw(Map.of("minecraft:bread", 3), NOW.minusSeconds(30));
+        seen.saw(0, Map.of("minecraft:bread", 3), NOW.minusSeconds(30));
         SourceQuote.Unavailable unavailable = assertInstanceOf(SourceQuote.Unavailable.class,
                 source(carrying("sophisticatedbackpacks:iron_backpack"), seen).quote(TORCHES, CONTEXT));
         assertTrue(unavailable.reason().contains("里面没有"), unavailable.reason());
+    }
+
+    @Test
+    void 两只包只看过一只_看过的不够就说另一只还没开过() {
+        SeenBackpackStock seen = new SeenBackpackStock();
+        seen.saw(0, Map.of("minecraft:torch", 3), NOW.minusSeconds(30));
+        BackpackView twoBags = carrying("sophisticatedbackpacks:iron_backpack", "sophisticatedbackpacks:gold_backpack");
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class,
+                source(twoBags, seen).quote(TORCHES, CONTEXT));
+        assertEquals(SourceQuote.Offer.UNKNOWN_COUNT, offer.obtainableCount());
+        assertTrue(offer.risk().contains("还没开过"), offer.risk());
+        // 两只都看过、加起来都没有：如实说没有。
+        SeenBackpackStock none = new SeenBackpackStock();
+        none.saw(0, Map.of("minecraft:bread", 3), NOW.minusSeconds(30));
+        none.saw(5, Map.of("minecraft:bread", 2), NOW.minusSeconds(10));
+        assertInstanceOf(SourceQuote.Unavailable.class, source(twoBags, none).quote(TORCHES, CONTEXT));
+        // 两只加起来够：报明确数量。
+        SeenBackpackStock enough = new SeenBackpackStock();
+        enough.saw(0, Map.of("minecraft:torch", 6), NOW.minusSeconds(30));
+        enough.saw(5, Map.of("minecraft:torch", 6), NOW.minusSeconds(10));
+        assertEquals(10, assertInstanceOf(SourceQuote.Offer.class,
+                source(twoBags, enough).quote(TORCHES, CONTEXT)).obtainableCount());
     }
 
     @Test

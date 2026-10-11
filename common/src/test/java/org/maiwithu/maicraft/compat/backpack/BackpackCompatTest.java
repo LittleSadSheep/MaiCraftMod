@@ -37,6 +37,7 @@ class BackpackCompatTest {
             return List.of();
         }
         @Override public void openCarried() { }
+        @Override public void open(int inventorySlot) { }
     };
 
     /** 背包视图的替身：只有几格固定的东西。 */

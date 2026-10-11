@@ -7,7 +7,10 @@ import java.util.List;
 import java.util.Objects;
 import java.util.function.Supplier;
 
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.item.ItemStack;
 
 import org.maiwithu.maicraft.compat.CompatModule;
 import org.maiwithu.maicraft.compat.CompatRegistry;
@@ -53,6 +56,20 @@ public final class BackpackCompat extends CompatModule {
             }
         }
         return List.copyOf(found);
+    }
+
+    /** 角色背包里装着随身背包的那几格（原版格号：主背包 0..35、盔甲 36..39、副手 40）；饰品栏里的不在这里。 */
+    public List<Integer> carriedSlots(Inventory inventory) {
+        List<Integer> slots = new ArrayList<>();
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (stack.isEmpty()) continue;
+            String itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+            if (call("认背包物品", () -> items.isBackpack(itemId))) {
+                slots.add(slot);
+            }
+        }
+        return List.copyOf(slots);
     }
 
     /** 点开的界面是不是精妙背包的；见 {@link BackpackMenus#isBackpackMenu}。 */

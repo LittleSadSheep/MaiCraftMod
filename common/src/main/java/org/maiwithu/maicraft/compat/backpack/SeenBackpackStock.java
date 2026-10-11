@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.compat.backpack;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -14,31 +15,46 @@ import java.util.function.Predicate;
  * 下次要东西时不用先开一遍包才知道有没有；但包里的东西会因腾地方、取放而变，
  * 记下的数只当线索，取的时候以现场为准，隔久了就当没看过。
  *
- * <p>只在这次启动内有效，不存盘：重开游戏后第一次要东西时，按"包里可能有、不知道有多少"报。
+ * <p>身上可能不止一只包：按包所在的格分开记，问价时把五分钟内看过的几只加起来，
+ * 并说清还有几只没看过。只在这次启动内有效，不存盘：重开游戏后第一次要东西时，按"包里可能有、不知道有多少"报。
  */
 public final class SeenBackpackStock {
 
     /** 记下的开包读数多久内还算数。包里的东西会变，五分钟前看到的只能当大概；类别：玩家常识。 */
     public static final Duration FRESH_FOR = Duration.ofMinutes(5);
 
-    private Sighting sighting;
+    /** 每只包（按所在的格；按不了格、模组自己找第一只的记在 -1）上次开包的读数。 */
+    private final Map<Integer, Sighting> sightings = new HashMap<>();
 
-    /** 开包读到了主存储的内容之后记一笔，盖掉以前的记录。 */
-    public void saw(Map<String, Integer> stacksByItem, Instant when) {
-        sighting = new Sighting(Map.copyOf(new LinkedHashMap<>(stacksByItem)), when);
+    /** 开包读到了这只包主存储的内容之后记一笔，盖掉这只包以前的记录。 */
+    public void saw(int slot, Map<String, Integer> stacksByItem, Instant when) {
+        sightings.put(slot, new Sighting(Map.copyOf(new LinkedHashMap<>(stacksByItem)), when));
     }
 
-    /** 上次开包读到的存货；没开过或已经过了 {@link #FRESH_FOR} 都给空。 */
+    /** 五分钟内看过的几只包加起来的存货（时刻取最早看的那只）；一只都没看过或都过了 {@link #FRESH_FOR} 给空。 */
     public Optional<Sighting> fresh(Instant now) {
-        if (sighting == null || sighting.seenAt().plus(FRESH_FOR).isBefore(now)) {
-            return Optional.empty();
+        Map<String, Integer> total = new LinkedHashMap<>();
+        Instant oldest = null;
+        for (Sighting sighting : sightings.values()) {
+            if (sighting.seenAt().plus(FRESH_FOR).isBefore(now)) continue;
+            sighting.stacksByItem().forEach((itemId, count) -> total.merge(itemId, count, Integer::sum));
+            oldest = oldest == null || sighting.seenAt().isBefore(oldest) ? sighting.seenAt() : oldest;
         }
-        return Optional.of(sighting);
+        return oldest == null ? Optional.empty() : Optional.of(new Sighting(total, oldest));
     }
 
-    /** 开包忘了关（被打断、界面被顶掉）读数没记成：清掉旧数，别照着数不去看。 */
-    public void forget() {
-        sighting = null;
+    /** 五分钟内看过几只包：比身上的包少，说明还有没看过的。 */
+    public int freshCount(Instant now) {
+        int count = 0;
+        for (Sighting sighting : sightings.values()) {
+            if (!sighting.seenAt().plus(FRESH_FOR).isBefore(now)) count++;
+        }
+        return count;
+    }
+
+    /** 开包忘了关（被打断、界面被顶掉）读数没记成：清掉这只包的旧数，别照着数不去看。 */
+    public void forget(int slot) {
+        sightings.remove(slot);
     }
 
     /**

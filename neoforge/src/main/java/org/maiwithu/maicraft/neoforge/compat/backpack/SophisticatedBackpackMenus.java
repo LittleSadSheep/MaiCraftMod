@@ -10,6 +10,7 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.p3pp3rf1y.sophisticatedbackpacks.common.gui.BackpackContainer;
 import net.p3pp3rf1y.sophisticatedbackpacks.network.BackpackOpenPayload;
+import net.p3pp3rf1y.sophisticatedbackpacks.util.PlayerInventoryProvider;
 
 import org.maiwithu.maicraft.compat.backpack.BackpackMenus;
 
@@ -56,5 +57,23 @@ public final class SophisticatedBackpackMenus implements BackpackMenus {
     @Override public void openCarried() {
         // 模组自己的打开请求：与玩家按 B 键发的是同一种包，服务端找身上第一只背包打开。
         PacketDistributor.sendToServer(new BackpackOpenPayload());
+    }
+
+    /** 胸甲格与副手格的原版格号：模组按这两个号认盔甲栏与副手栏。 */
+    private static final int CHEST_SLOT = 38;
+    private static final int OFFHAND_SLOT = 40;
+
+    @Override public void open(int inventorySlot) {
+        // 按格开指定的那一只：与玩家在背包界面里对着那只包按 B 键发的同一种包（格号、栏位名）。
+        // 主背包、胸甲、副手各有模组认的栏位名；别的位置按不了格，退回找第一只。
+        String handler = inventorySlot == CHEST_SLOT ? PlayerInventoryProvider.ARMOR_INVENTORY
+                : inventorySlot == OFFHAND_SLOT ? PlayerInventoryProvider.OFFHAND_INVENTORY
+                : inventorySlot >= 0 && inventorySlot < 36 ? PlayerInventoryProvider.MAIN_INVENTORY
+                : null;
+        if (handler == null) {
+            openCarried();
+            return;
+        }
+        PacketDistributor.sendToServer(new BackpackOpenPayload(inventorySlot, "", handler));
     }
 }
