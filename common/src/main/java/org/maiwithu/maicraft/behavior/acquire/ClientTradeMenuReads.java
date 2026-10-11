@@ -5,7 +5,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.function.Supplier;
+
+import net.minecraft.world.entity.player.Inventory;
 
 import net.minecraft.world.inventory.MerchantMenu;
 import net.minecraft.world.item.ItemStack;
@@ -49,6 +52,34 @@ public final class ClientTradeMenuReads implements ReadsTradeMenu {
         var stack = menu.getSlot(index).getItem();
         return Optional.of(stack.isEmpty() ? TradeOffers.SlotContent.EMPTY
                 : new TradeOffers.SlotContent(itemId(stack), stack.getCount()));
+    }
+
+    @Override public OptionalInt stashSlot() {
+        var menu = tradeMenu();
+        if (menu == null) {
+            return OptionalInt.empty();
+        }
+        // 光标上拿着货就给它找地方；光标空着就按结果格里那一份找，买之前先确认装得下。
+        ItemStack goods = menu.getCarried().isEmpty() ? menu.getSlot(2).getItem() : menu.getCarried();
+        if (goods.isEmpty()) {
+            return OptionalInt.empty();
+        }
+        int empty = -1;
+        for (int index = 0; index < menu.slots.size(); index++) {
+            var slot = menu.slots.get(index);
+            if (!(slot.container instanceof Inventory)) continue;
+            ItemStack held = slot.getItem();
+            if (held.isEmpty()) {
+                if (empty < 0) empty = index;
+                continue;
+            }
+            // 同样东西（含组件）还装得下这一整份：叠上去，不占新格。
+            if (ItemStack.isSameItemSameComponents(held, goods)
+                    && held.getCount() + goods.getCount() <= Math.min(held.getMaxStackSize(), slot.getMaxStackSize(held))) {
+                return OptionalInt.of(index);
+            }
+        }
+        return empty < 0 ? OptionalInt.empty() : OptionalInt.of(empty);
     }
 
     private MerchantMenu tradeMenu() {

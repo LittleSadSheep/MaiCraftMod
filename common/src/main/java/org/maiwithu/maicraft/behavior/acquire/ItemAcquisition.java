@@ -10,6 +10,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 
+import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
@@ -121,7 +122,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
      * 一次拿东西的限定：只走哪些途径、愿意走多远、在多大半径里找。
      * 空的途径集合与 null 的距离、半径都表示不限。
      *
-     * @param vias            允许的途径（来源自报的门户）；空集合表示全部参与
+     * @param vias            允许的途径（来源自报的门户）；空集合表示除了只有点名才做的（交易）全部参与
      * @param maxDistanceBlocks 愿意为此走多远（格）；来源报的距离超过它的不参与
      * @param radiusBlocks      容器与采掘的搜索半径（格）；传给来源，给了就不越界
      */
@@ -134,9 +135,9 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             vias = Set.copyOf(vias);
         }
 
-        /** 这条途径这次能不能参与。 */
+        /** 这条途径这次能不能参与：点名了只走点名的；没点名时按代价自己挑，只有点名才做的（交易）不参与。 */
         public boolean allows(String via) {
-            return vias.isEmpty() || vias.contains(via);
+            return vias.isEmpty() ? !AcquireVia.onlyWhenNamed(via) : vias.contains(via);
         }
     }
 

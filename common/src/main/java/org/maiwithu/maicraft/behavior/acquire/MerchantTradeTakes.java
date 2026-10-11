@@ -6,6 +6,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
@@ -30,8 +31,9 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 /**
  * 交易的生产实现：逐个走到村民跟前右键搭话，按界面上的报价一连买，买够或都试完为止。
  *
- * <p>每笔成交是三步：点选报价列表里那条（游戏照报价把付款从背包摆进付款格）、等结果格亮出货、
- * 把结果整堆快速移动进背包。身上真的多了东西才算这笔成交；点出去了却没能确认结果的不重付，
+ * <p>每笔成交是四步：点选报价列表里那条（游戏照报价把付款从背包摆进付款格，会摆满一组）、等结果格亮出货、
+ * 左键把这一份拿到光标上（原版只成交这一笔）、放进背包装得下的那一格。不 shift 点结果格：那样原版会拿着
+ * 付款格里的一组一直成交下去，要一个面包会把一组绿宝石花光。身上真的多了东西才算这笔成交；点出去了却没能确认结果的不重付，
  * 一句一条交回给引擎，这单就此收场（引擎换别的来源，不再回到交易上重复买）。
  * 付款不够就关上界面、按同一套拿东西的办法先去凑，凑齐了回到同一个村民接着买。
  * 付款格或结果格里已经有东西的界面不碰（那可能不是留给我们的格子），换下一个村民。
@@ -77,7 +79,7 @@ public final class MerchantTradeTakes implements TradesWithMerchants {
      */
     private final class TradeAction implements Action, ReportsUnconfirmed {
 
-        private enum Stage { NEXT_MERCHANT, APPROACH, CLICK, WAIT_SYNC, BUY, VERIFY_SELECT, VERIFY_TAKE, CLOSE,
+        private enum Stage { NEXT_MERCHANT, APPROACH, CLICK, WAIT_SYNC, BUY, VERIFY_SELECT, STASH, VERIFY_TAKE, CLOSE,
                 FETCH_PAYMENT }
 
         private final Iterator<ScansMerchants.MerchantSpot> candidates;
@@ -98,6 +100,8 @@ public final class MerchantTradeTakes implements TradesWithMerchants {
         private long merchantTicks;
         /** 有没能确认的取货：出了这种事这单就此收场，不回到交易上重复买。 */
         private boolean uncertain;
+        /** 背包装不下下一份货：不再买，已买的照算，按背包满了收场。 */
+        private boolean noRoom;
         /** 缺的付款：界面关上后按它去凑。 */
         private TradeOffers.PaymentGap fetchingFor;
         private Action fetching;
@@ -126,6 +130,7 @@ public final class MerchantTradeTakes implements TradesWithMerchants {
                 case WAIT_SYNC -> waitSync();
                 case BUY -> buy();
                 case VERIFY_SELECT -> verifySelect();
+                case STASH -> stash();
                 case VERIFY_TAKE -> verifyTake();
                 case CLOSE -> closeMenu(tick);
                 case FETCH_PAYMENT -> fetchPayment(tick);
@@ -269,10 +274,17 @@ public final class MerchantTradeTakes implements TradesWithMerchants {
                 return closedMidTake();
             }
             if (selectConfirmed()) {
+                if (menus.stashSlot().isEmpty()) {
+                    // 背包装不下这一份货：不买，已买的照算。
+                    noRoom = true;
+                    return toClose();
+                }
                 carriedAtTakeStart = carriedWanted();
                 waitTicks = 0;
-                if (!menu.quickMove(2)) return ActionStatus.running();
-                stage = Stage.VERIFY_TAKE;
+                // 一笔一点：左键把结果格这一份拿到光标上，原版只成交这一笔，再放进背包。
+                // 不能 shift 点结果格：点选报价时原版把付款格自动摆满一组，shift 会拿着这一组一直成交下去。
+                if (!menu.click(2, 0)) return ActionStatus.running();
+                stage = Stage.STASH;
                 return ActionStatus.progressed();
             }
             if (++waitTicks > SETTLE_TICKS) {
@@ -301,27 +313,47 @@ public final class MerchantTradeTakes implements TradesWithMerchants {
                     && content.count() >= payment.count();
         }
 
-        // 取货之后：结果格空了、光标空了、身上真的多了，才算这笔成交；等不到不重付。
+        // 货拿到光标上了：放进背包里装得下的那一格；光标一直没拿到货说明这一笔没成，交回一句。
+        private ActionStatus stash() {
+            if (!menu.stillOpen()) {
+                return closedMidTake();
+            }
+            if (!menu.cursorCarrying()) {
+                if (++waitTicks > SETTLE_TICKS) {
+                    unconfirmed.add("向" + merchant.describe() + "买" + request.wanted().describe()
+                            + "：点了结果格，光标上一直没见到货，没能确认这笔成交了没有，不再接着买");
+                    uncertain = true;
+                    return toClose();
+                }
+                return ActionStatus.running();
+            }
+            OptionalInt slot = menus.stashSlot();
+            if (slot.isEmpty()) {
+                // 买之前核过装得下，这会儿却没地方了：货留在光标上交给关界面的收尾放回，不再接着买。
+                unconfirmed.add("向" + merchant.describe() + "买" + request.wanted().describe()
+                        + "：货拿到了光标上，背包却没地方放了，交给关界面时放回");
+                uncertain = true;
+                return toClose();
+            }
+            if (!menu.click(slot.getAsInt(), 0)) return ActionStatus.running();
+            waitTicks = 0;
+            stage = Stage.VERIFY_TAKE;
+            return ActionStatus.progressed();
+        }
+
+        // 放进背包之后：光标空了、身上真的多了，才算这笔成交；等不到不重付。
         private ActionStatus verifyTake() {
             if (!menu.stillOpen()) {
                 return closedMidTake();
             }
-            Optional<Boolean> resultGone = menus.resultMatches(request, tags);
-            if (resultGone.isPresent() && !resultGone.get() && !menu.cursorCarrying()) {
-                if (carriedWanted() > carriedAtTakeStart) {
-                    currentOffer = null;
-                    stage = Stage.BUY;
-                    return ActionStatus.progressed();
-                }
-                // 结果格空了身上却没多：货去了说不清的地方，这一笔按没能确认交代，不再接着买。
-                unconfirmed.add("向" + merchant.describe() + "买" + request.wanted().describe()
-                        + "：结果从界面上取走了，背包里却没见到多出来，没能确认这笔去了哪");
-                uncertain = true;
-                return toClose();
+            if (!menu.cursorCarrying() && carriedWanted() > carriedAtTakeStart) {
+                currentOffer = null;
+                stage = Stage.BUY;
+                return ActionStatus.progressed();
             }
             if (++waitTicks > SETTLE_TICKS) {
                 unconfirmed.add("向" + merchant.describe() + "买" + request.wanted().describe()
-                        + "：把结果点向背包后一直没等到界面清空，没能确认这笔成交了没有，不再接着买");
+                        + "：把货放进背包后一直没见到背包多出来，没能确认这笔成交了没有，不再接着买");
                 uncertain = true;
                 return toClose();
             }
@@ -377,6 +409,10 @@ public final class MerchantTradeTakes implements TradesWithMerchants {
             if (uncertain) {
                 return ActionStatus.failed(Problem.of(Problem.Kind.NEED_ITEM,
                         describeSummary("有一笔没能确认成交，不再接着买"), null));
+            }
+            if (noRoom && !boughtEnough()) {
+                return ActionStatus.failed(Problem.of(Problem.Kind.INVENTORY_FULL,
+                        describeSummary("背包装不下下一份货，已买的照算"), "先腾出背包再买"));
             }
             if (boughtEnough()) return ActionStatus.done();
             return toNextMerchantOrEnd();
@@ -506,7 +542,7 @@ public final class MerchantTradeTakes implements TradesWithMerchants {
                 case BUY -> "在看" + merchant.describe() + "的报价";
                 case VERIFY_SELECT -> "按" + merchant.describe() + "的第 "
                         + (currentOffer == null ? "?" : currentOffer.listIndex() + 1) + " 条报价付款";
-                case VERIFY_TAKE -> "把买到的东西收进背包";
+                case STASH, VERIFY_TAKE -> "把买到的东西收进背包";
                 case CLOSE -> "关上" + merchant.describe() + "的交易界面";
                 case FETCH_PAYMENT -> "先去凑买" + request.wanted().describe() + "的付款";
             };

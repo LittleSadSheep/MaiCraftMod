@@ -91,6 +91,16 @@ class AcquireScopeTest {
     }
 
     @Test
+    void 交易要点名才做_不给via时不自己去买() {
+        // 交易要花绿宝石这类付款：不给 via 按代价自己挑时不参与，点名 via=trade 才参与。
+        assertFalse(ItemAcquisition.Scope.ALL.allows(AcquireVia.TRADE.name()));
+        assertTrue(ItemAcquisition.Scope.ALL.allows(AcquireVia.CRAFT.name()));
+        assertTrue(ItemAcquisition.Scope.ALL.allows(AcquireVia.HUNT.name()));
+        assertTrue(new ItemAcquisition.Scope(Set.of(AcquireVia.TRADE.name()), null, null)
+                .allows(AcquireVia.TRADE.name()));
+    }
+
+    @Test
     void via只让指定途径的来源动手() {
         FakeBackpack backpack = backpack();
         OfferingSource mine = new OfferingSource("采掘", AcquireVia.MINE, backpack, 5);

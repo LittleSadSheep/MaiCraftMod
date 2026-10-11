@@ -29,11 +29,19 @@ public record AcquireVia(String name, String description) {
     public static final AcquireVia MINE = new AcquireVia("mine", "挖掉会掉出它的方块");
     /** 收成熟的作物。 */
     public static final AcquireVia HARVEST = new AcquireVia("harvest", "收成熟的作物");
-    /** 和附近已加载的村民与流浪商人买（付款收什么他摆什么，不还价）。 */
-    public static final AcquireVia TRADE = new AcquireVia("trade", "和村民交易");
+    /** 和附近已加载的村民与流浪商人买（付款收什么他摆什么，不还价）；会花掉付款，只有点名才做。 */
+    public static final AcquireVia TRADE = new AcquireVia("trade", "和村民交易（会花绿宝石等付款，只有点名 via=trade 才做）");
     /** 打掉会掉出它的动物或生物：动物照 kill_animals、敌对生物照 fight 判许可。 */
     public static final AcquireVia HUNT = new AcquireVia("hunt", "打掉会掉出它的动物或生物");
 
+
+    /**
+     * 这条途径是不是只有点名才做：不给 via 时按代价自己挑的来源里不含它。
+     * 交易要花掉绿宝石这类付款，绿宝石本身不算稀有物品、许可拦不住，所以不替 LLM 自作主张去买。
+     */
+    public static boolean onlyWhenNamed(String name) {
+        return TRADE.name().equals(name);
+    }
 
     public AcquireVia {
         Objects.requireNonNull(name, "name");
