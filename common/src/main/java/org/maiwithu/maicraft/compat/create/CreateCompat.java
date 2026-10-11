@@ -35,6 +35,8 @@ import org.maiwithu.maicraft.compat.CompatRegistry;
 public final class CreateCompat extends CompatModule {
 
     public static final String MOD_ID = CreateMachineCatalog.MOD_ID;
+    /** 向服务端问各趟列车时刻表的只读操作：坐火车的报价经它问（服务端的 CreateServerCompat 回答）。 */
+    public static final String TRAINS_OPERATION = "create.trains";
 
     private final CreateKinetics kinetics;
     private final CreateBelts belts;
@@ -47,10 +49,12 @@ public final class CreateCompat extends CompatModule {
     private final CreateLogistics logistics;
     private final CreateContraptions contraptions;
     private final CreateElevators elevators;
+    private final CreateRailways railways;
 
     public CreateCompat(CreateKinetics kinetics, CreateBelts belts, CreateChainConveyors chains,
             CreateStations stations, CreateTools tools, CreateValues values, CreateSchematics schematics,
-            CreateFilters filters, CreateLogistics logistics, CreateContraptions contraptions, CreateElevators elevators) {
+            CreateFilters filters, CreateLogistics logistics, CreateContraptions contraptions, CreateElevators elevators,
+            CreateRailways railways) {
         super(MOD_ID, "机械动力");
         this.kinetics = Objects.requireNonNull(kinetics, "kinetics");
         this.belts = Objects.requireNonNull(belts, "belts");
@@ -63,6 +67,7 @@ public final class CreateCompat extends CompatModule {
         this.logistics = Objects.requireNonNull(logistics, "logistics");
         this.contraptions = Objects.requireNonNull(contraptions, "contraptions");
         this.elevators = Objects.requireNonNull(elevators, "elevators");
+        this.railways = Objects.requireNonNull(railways, "railways");
     }
 
     @Override public void contribute(CompatRegistry registry) {
@@ -90,6 +95,21 @@ public final class CreateCompat extends CompatModule {
                 movingContraptions(level, viewer, region).forEach(sink::add));
         // 坐电梯当一种出行方式（via=elevator，所有者 10-11 批）：呼梯、进轿厢选层、到了出来，要走过去、按按钮。
         registry.travelMode(this, services -> new CreateElevatorMode(this, services));
+    }
+
+    /** 这个维度轨道图上的车站；见 {@link CreateRailways#stations}。 */
+    public List<CreateRailways.Station> stations(ClientLevel level) {
+        return call("读车站", () -> railways.stations(level));
+    }
+
+    /** 和一个区域沾边的列车车厢；见 {@link CreateRailways#cars}。 */
+    public List<CreateRailways.Car> trainCars(ClientLevel level, Player viewer, AABB region) {
+        return call("读列车车厢", () -> railways.cars(level, viewer, region));
+    }
+
+    /** 坐到车厢的座位上；见 {@link CreateRailways#sit}。 */
+    public void sitOnTrain(int entityId, BlockPos seat) {
+        run("坐列车座位", () -> railways.sit(entityId, seat));
     }
 
     /** 和一个区域沾边的电梯；见 {@link CreateElevators#elevators}。 */

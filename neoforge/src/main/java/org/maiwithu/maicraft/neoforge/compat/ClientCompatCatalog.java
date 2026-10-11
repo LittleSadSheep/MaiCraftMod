@@ -27,6 +27,7 @@ import org.maiwithu.maicraft.neoforge.compat.create.CreateChainConveyorReads;
 import org.maiwithu.maicraft.neoforge.compat.createjetpack.JetpackReads;
 import org.maiwithu.maicraft.neoforge.compat.create.CreateContraptionReads;
 import org.maiwithu.maicraft.neoforge.compat.create.CreateElevatorReads;
+import org.maiwithu.maicraft.neoforge.compat.create.CreateRailwayReads;
 import org.maiwithu.maicraft.neoforge.compat.create.CreateKineticReads;
 import org.maiwithu.maicraft.neoforge.compat.create.CreateStationReads;
 import org.maiwithu.maicraft.neoforge.compat.create.CreateToolReads;
@@ -83,7 +84,8 @@ public final class ClientCompatCatalog {
                         () -> new CreateCompat(new CreateKineticReads(), new CreateBeltReads(),
                                 new CreateChainConveyorReads(), new CreateStationReads(), new CreateToolReads(),
                                 new CreateValueReads(), new CreateSchematicReads(), new CreateFilterReads(),
-                                new CreateLogisticsReads(), new CreateContraptionReads(), new CreateElevatorReads())),
+                                new CreateLogisticsReads(), new CreateContraptionReads(), new CreateElevatorReads(),
+                                new CreateRailwayReads())),
                 // 机械动力：喷气背包：按 5.1.2 编译（带的 FlightLib 是 3.2.1），实测实例装的就是它；装了 5.2 及以上不登记。
                 new SupportedMod<>(CreateJetpackCompat.MOD_ID, "机械动力：喷气背包", new VerifiedVersions("5.1.2", "5.2"),
                         () -> new CreateJetpackCompat(new JetpackReads())),
