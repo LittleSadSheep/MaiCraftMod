@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 
+import com.simibubi.create.content.fluids.drain.ItemDrainBlockEntity;
 import com.simibubi.create.content.kinetics.belt.BeltBlockEntity;
 import com.simibubi.create.content.kinetics.deployer.DeployerBlockEntity;
 import com.simibubi.create.content.kinetics.belt.transport.TransportedItemStack;
@@ -103,6 +104,15 @@ public final class CreateStationReads implements CreateStations {
         List<ItemStack> items = new ArrayList<>(stacksOf(basin.getInputInventory()));
         items.addAll(stacksOf(basin.getOutputInventory()));
         return Optional.of(items);
+    }
+
+    // 分液池上的那一件：公开取值，倒着的与倒空了还留着的都是它。
+    @Override public Optional<List<ItemStack>> drainItems(ClientLevel level, BlockPos at) {
+        if (!level.isLoaded(at) || !(level.getBlockEntity(at) instanceof ItemDrainBlockEntity drain)) {
+            return Optional.empty();
+        }
+        ItemStack held = drain.getHeldItemStack();
+        return Optional.of(held.isEmpty() ? List.of() : List.of(held.copy()));
     }
 
     @Override public Optional<List<ItemStack>> beltItems(ClientLevel level, BlockPos at) {

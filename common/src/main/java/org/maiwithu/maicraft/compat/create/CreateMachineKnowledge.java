@@ -199,6 +199,7 @@ final class CreateMachineKnowledge implements KnowledgeSource {
             case LOGISTICS -> "搬运";
             case STORAGE -> "存放";
             case CONTROL -> "控制";
+            case MOTION -> "装置";
             case CABLE -> "管线";
             case NETWORK_CORE -> "网络核心";
         } + "（" + kind.role().name().toLowerCase(Locale.ROOT) + "）";

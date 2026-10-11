@@ -22,6 +22,9 @@ public interface CreateStations {
     /** 工作盆里的物品：待加工的与做好的都算；不是工作盆、没加载给空。 */
     Optional<List<ItemStack>> basinItems(ClientLevel level, BlockPos at);
 
+    /** 分液池上正在倒的（或倒空了还留着的）那一件；不是分液池、没加载给空。 */
+    Optional<List<ItemStack>> drainItems(ClientLevel level, BlockPos at);
+
     /** 这一格所在的整条传送带上正在送的东西；不是传送带、没加载给空。 */
     Optional<List<ItemStack>> beltItems(ClientLevel level, BlockPos at);
 

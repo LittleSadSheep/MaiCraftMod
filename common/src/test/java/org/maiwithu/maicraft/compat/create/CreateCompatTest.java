@@ -190,6 +190,9 @@ class CreateCompatTest {
             @Override public Optional<List<ItemStack>> basinItems(ClientLevel level, BlockPos at) {
                 return Optional.empty();
             }
+            @Override public Optional<List<ItemStack>> drainItems(ClientLevel level, BlockPos at) {
+                return Optional.empty();
+            }
             @Override public Optional<List<ItemStack>> beltItems(ClientLevel level, BlockPos at) {
                 return Optional.empty();
             }

@@ -63,8 +63,9 @@ final class StationHandling {
         return switch (work) {
             case DEPOT -> compat.depotItems(level, at).orElse(List.of());
             case BASIN -> compat.basinItems(level, at).orElse(List.of());
+            case DRAIN -> compat.drainItems(level, at).orElse(List.of());
             case BELT -> compat.beltItems(level, at).orElse(List.of());
-            case PRESS, MIXER, DEPLOYER -> ProcessingSpots.workCell(work, state, at)
+            case PRESS, MIXER, DEPLOYER, SPOUT -> ProcessingSpots.workCell(work, state, at)
                     .map(cell -> itemsAt(level, cell)).orElse(List.of());
             case FAN -> fanDepot(level, state, at).map(cell -> itemsAt(level, cell)).orElse(List.of());
             default -> List.of();
@@ -94,6 +95,8 @@ final class StationHandling {
 
     /** 工作盆盆沿的高度：掉落物碰到盆沿就算落进盆了。类别：游戏事实（BASIN_COLLISION_SHAPE）。 */
     static final double BASIN_RIM = 13 / 16.0;
+    /** 分液池顶面的高度：落在上面的东西被收进去。类别：游戏事实（ItemDrainBlock 的 CASING_13PX）。 */
+    static final double DRAIN_TOP = 13 / 16.0;
     /** 朝上的锯面高度。类别：游戏事实（CASING_12PX）。 */
     static final double SAW_TOP = 12 / 16.0;
     /** 石磨外圈台面的高度：落到中间磨盘顶上或外圈台面上都收。类别：游戏事实（MILLSTONE 外形）。 */
@@ -117,6 +120,7 @@ final class StationHandling {
             Predicate<BlockPos> basinAt, Function<BlockPos, BlockState> blockAt) {
         return switch (work) {
             case BASIN -> basinAt.test(at) ? Optional.of(new TossSpot(at, BASIN_RIM)) : Optional.empty();
+            case DRAIN -> Optional.of(new TossSpot(at, DRAIN_TOP));
             case PRESS, MIXER -> ProcessingSpots.workCell(work, state, at).filter(basinAt)
                     .map(cell -> new TossSpot(cell, BASIN_RIM));
             case SAW -> facing(state).filter(face -> face == Direction.UP).map(face -> new TossSpot(at, SAW_TOP));
@@ -155,6 +159,11 @@ final class StationHandling {
         if (depot.isPresent()) {
             return Optional.of(emptyHandTake(level, depot.get(), "从置物台取回东西",
                     () -> compat.depotItems(level, depot.get()).orElse(List.of()), permissions));
+        }
+        // 分液池：倒空的那一件留在上面，空手右键取回。
+        if (work == CreateMachineCatalog.Work.DRAIN && compat.drainItems(level, at).isPresent()) {
+            return Optional.of(emptyHandTake(level, at, "从分液池取回东西",
+                    () -> compat.drainItems(level, at).orElse(List.of()), permissions));
         }
         Optional<BlockPos> basin = basinFor(work, state, at).filter(cell -> compat.basinItems(level, cell).isPresent());
         return basin.map(cell -> emptyHandTake(level, cell, "从工作盆取出东西",
@@ -222,7 +231,7 @@ final class StationHandling {
             BlockPos at) {
         Optional<BlockPos> cell = switch (work) {
             case DEPOT -> Optional.of(at);
-            case PRESS, DEPLOYER -> ProcessingSpots.workCell(work, state, at);
+            case PRESS, DEPLOYER, SPOUT -> ProcessingSpots.workCell(work, state, at);
             case FAN -> fanDepot(level, state, at);
             default -> Optional.empty();
         };

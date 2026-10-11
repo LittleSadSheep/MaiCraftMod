@@ -227,10 +227,11 @@ final class MachineReview {
         for (PlannedCell cell : blueprint.cells()) {
             MachineType type = services.claiming(cell.state());
             if (type == null) continue;
-            // 加工机器只有吃转动的才要接动力：注液器、Mekanism 的机器、烈焰人燃烧室不靠轴。
+            // 加工机器与装置只有吃转动的才要接动力：注液器、Mekanism 的机器、烈焰人燃烧室不靠轴；
+            // 活塞、轴承、绳索滑轮靠轴转着推拉，和加工机器一样算动力的用户。
             boolean counts = switch (type.role()) {
                 case POWER_SOURCE, TRANSMISSION -> true;
-                case PROCESSING -> takesRotation(type, cell);
+                case PROCESSING, MOTION -> takesRotation(type, cell);
                 default -> false;
             };
             if (counts) roles.put(cell.pos(), type.role());

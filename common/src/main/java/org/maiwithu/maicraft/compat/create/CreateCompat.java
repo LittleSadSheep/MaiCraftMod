@@ -169,6 +169,11 @@ public final class CreateCompat extends CompatModule {
         return call("读库存请求器的现货", () -> stations.stock(level, at));
     }
 
+    /** 分液池上的那一件；见 {@link CreateStations#drainItems}。 */
+    public Optional<List<ItemStack>> drainItems(ClientLevel level, BlockPos at) {
+        return call("读分液池", () -> stations.drainItems(level, at));
+    }
+
     /** 机械手手里拿着什么与模式；见 {@link CreateStations#deployer}。 */
     public Optional<CreateStations.DeployerReading> deployer(ClientLevel level, BlockPos at) {
         return call("读机械手", () -> stations.deployer(level, at));

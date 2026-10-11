@@ -28,7 +28,7 @@ final class ProcessingSpots {
     /** 这台加工机器干活的那一格：压机、搅拌器正下方第二格，机械手朝向前方第二格，鼓风机朝向前方第一格；别的没有。 */
     static Optional<BlockPos> workCell(CreateMachineCatalog.Work work, BlockState state, BlockPos at) {
         return switch (work) {
-            case PRESS, MIXER -> Optional.of(at.below(2));
+            case PRESS, MIXER, SPOUT -> Optional.of(at.below(2));
             case DEPLOYER -> facing(state).map(face -> at.relative(face, 2));
             case FAN -> facing(state).map(at::relative);
             default -> Optional.empty();
@@ -86,6 +86,24 @@ final class ProcessingSpots {
                     ExchangePoint.Flow.BOTH, "台面：手持东西右键顶面放一整叠（先收回台上原有的），空手右键顶面收回"));
             case BASIN -> points.add(new ExchangePoint(at, Direction.UP, ExchangePoint.Medium.ITEM,
                     ExchangePoint.Flow.BOTH, "盆口：东西扔进盆里，流体用桶倒进去；空手右键取出盆里的东西"));
+            case SPOUT -> {
+                points.add(new ExchangePoint(at.below(2), null, ExchangePoint.Medium.ITEM, ExchangePoint.Flow.BOTH,
+                        "加工处：正下方第二格放置物台或传送带，上面的东西被注上流体；中间那一格空着"));
+                points.add(new ExchangePoint(at, Direction.UP, ExchangePoint.Medium.FLUID, ExchangePoint.Flow.INPUT,
+                        "顶上接流体管，或手持装着流体的桶右键倒进去"));
+            }
+            case DRAIN -> {
+                points.add(new ExchangePoint(at, Direction.UP, ExchangePoint.Medium.ITEM, ExchangePoint.Flow.BOTH,
+                        "东西扔上去或从侧面送进来，倒出里面的流体；倒空的东西留在上面，空手右键取回"));
+                points.add(new ExchangePoint(at, Direction.DOWN, ExchangePoint.Medium.FLUID, ExchangePoint.Flow.OUTPUT,
+                        "倒出的流体从下面或侧面接管抽走，手持空桶右键也能装"));
+            }
+            case CRAFTER -> points.add(new ExchangePoint(at, null, ExchangePoint.Medium.ITEM, ExchangePoint.Flow.BOTH,
+                    "几台连成一片，每台放配方的一格料（手持料右键它的正面），凑齐后一起做，产物从箭头指的那一台出"));
+            case MOTION -> points.add(new ExchangePoint(at, null, ExchangePoint.Medium.ROTATION, ExchangePoint.Flow.INPUT,
+                    "转起来（或通电）时把粘在它前面的一片方块推拉、转动、吊起；停下后落回方块"));
+            case SCHEMATIC -> points.add(new ExchangePoint(at, null, ExchangePoint.Medium.ITEM, ExchangePoint.Flow.INPUT,
+                    "界面里放蓝图与材料；蓝图加农炮照蓝图一格格放方块"));
             default -> {
             }
         }
