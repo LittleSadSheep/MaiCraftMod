@@ -22,13 +22,17 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 
 /**
  * 做出来的来源：合成、烧炼、石切台同走一条路——配方从世界真实的配方管理器读（含模组配方），
  * 设施从世界记忆里记过的工作站里找（用过一台才会记得一台）。原料缺多少、烧炼要多少燃料，
- * 递归回到拿到物品的引擎去弄，用途标签写清是为谁备的；备齐了才去设施上动手做。
+ * 递归回到拿到物品的引擎去弄，用途标签写清是为谁备的，备完了去设施上动手做。
+ *
+ * <p>备料弄不全不白跑：某样原料弄不来，先把身上的料够做的件数做掉（要 16 根火把、木炭只够 8 根，就先做 8 根），
+ * 引擎按拿到几件、还差几件报部分完成，弄不来的原因一并交代；身上的料连一份都不够才以备料的原因失败。
  */
 public final class RecipeSource implements ItemSource {
 
@@ -181,13 +185,15 @@ public final class RecipeSource implements ItemSource {
 
     // 背包合成的一整串：缺的原料逐项去弄，然后打开背包在合成格里做，不走工作台。
     private Action assembleInInventory(WorkstationRecipe recipe, int times, SourceContext context) {
-        List<Action> steps = ingredientSteps(recipe, times, context.permissions());
+        Shortfall shortfall = new Shortfall();
+        List<Action> steps = shortfall.tolerating(ingredientSteps(recipe, times, context.permissions()));
         Optional<Action> run = runs.runInInventory(recipe, times);
         if (run.isEmpty()) {
             return steps.isEmpty() ? nothingToDo(recipe)
                     : new StepwiseActions("为「做" + recipe.result().describe() + "」备原料", steps.toArray(Action[]::new));
         }
-        steps.add(run.get());
+        steps.add(enoughForOne(recipe, shortfall));
+        steps.add(shortfall.explaining(run.get()));
         return new StepwiseActions("备齐原料后在背包里做" + recipe.result().describe(), steps.toArray(Action[]::new));
     }
 
@@ -208,10 +214,13 @@ public final class RecipeSource implements ItemSource {
     // 备料的一整串：缺的原料逐项去弄，烧炼再备燃料，没有设施就先摆一个，最后到设施上做。
     private Action assemble(WorkstationRecipe recipe, WorldPosition station, int times, SourceContext context) {
         Permissions permissions = context.permissions();
-        List<Action> steps = ingredientSteps(recipe, times, permissions);
+        Shortfall shortfall = new Shortfall();
+        List<Action> steps = shortfall.tolerating(ingredientSteps(recipe, times, permissions));
         if (recipe.kind() == WorkstationRecipe.Kind.SMELTING) {
-            steps.addAll(fuelSteps(recipe, times, permissions));
+            steps.addAll(shortfall.tolerating(fuelSteps(recipe, times, permissions)));
         }
+        // 备完料先看够不够做一份：一份都不够就不去摆设施、不走过去，以备料的原因收场。
+        steps.add(enoughForOne(recipe, shortfall));
         if (station == null) {
             // 附近没有记住的设施：先去弄一个设施方块、在身边放下，再到新设施上做。
             steps.addAll(placeSteps(recipe, permissions));
@@ -222,7 +231,7 @@ public final class RecipeSource implements ItemSource {
                         : new StepwiseActions("为「做" + recipe.result().describe() + "」备料",
                                 steps.toArray(Action[]::new));
             }
-            steps.add(run.get());
+            steps.add(shortfall.explaining(run.get()));
             return new StepwiseActions("就地摆下" + workstationName(recipe.kind()) + "再做"
                     + recipe.result().describe(), steps.toArray(Action[]::new));
         }
@@ -234,9 +243,92 @@ public final class RecipeSource implements ItemSource {
                     : new StepwiseActions("为「做" + recipe.result().describe() + "」备原料",
                             steps.toArray(Action[]::new));
         }
-        steps.add(run.get());
+        steps.add(shortfall.explaining(run.get()));
         return new StepwiseActions("备齐原料后去" + workstationName(recipe.kind()) + "做"
                 + recipe.result().describe(), steps.toArray(Action[]::new));
+    }
+
+    // 备完料的关口：身上的料够做一份就往下走（有多少做多少）；一份都不够就失败，原因写弄不来的那几样。
+    private Action enoughForOne(WorkstationRecipe recipe, Shortfall shortfall) {
+        return new Action() {
+            @Override public ActionStatus tick(TickContext context) {
+                if (missingFor(recipe, recipe.resultCount()) == 0) return ActionStatus.done();
+                String why = shortfall.reasons.isEmpty() ? "身上的原料不够做一份"
+                        : "原料没备齐：" + String.join("；", shortfall.reasons);
+                return ActionStatus.failed(Problem.of(Problem.Kind.NEED_ITEM,
+                        why + "，一份" + recipe.result().describe() + "都做不了"));
+            }
+            @Override public String describe() {
+                return "看身上的料够不够做" + recipe.result().describe();
+            }
+        };
+    }
+
+    /** 备料弄不来的原因：备料失败不拦住后面，动手那一步收场时一并交代。 */
+    private static final class Shortfall {
+        private final List<String> reasons = new ArrayList<>();
+
+        // 备料的每一步：做砸了记下原因、按做完往下走——身上已有的料还能先做掉一部分。
+        List<Action> tolerating(List<Action> steps) {
+            List<Action> wrapped = new ArrayList<>();
+            for (Action step : steps) wrapped.add(new Tolerant(step));
+            return wrapped;
+        }
+
+        // 动手那一步：做不下去时（料用完了）把弄不来的原因接在后面，引擎写进结果。
+        Action explaining(Action run) {
+            return new Action() {
+                @Override public ActionStatus tick(TickContext context) {
+                    ActionStatus status = run.tick(context);
+                    if (!(status instanceof ActionStatus.Failed failed) || reasons.isEmpty()) return status;
+                    Problem problem = failed.problem();
+                    return ActionStatus.failed(Problem.of(Problem.Kind.NEED_ITEM, problem.message()
+                            + "（原料没备齐：" + String.join("；", reasons) + "，身上的料能做的已经做了）",
+                            problem.suggestion()));
+                }
+                @Override public void pause() {
+                    run.pause();
+                }
+                @Override public void close() {
+                    run.close();
+                }
+                @Override public Interruptibility interruptibility() {
+                    return run.interruptibility();
+                }
+                @Override public String describe() {
+                    return run.describe();
+                }
+            };
+        }
+
+        private final class Tolerant implements Action {
+            private final Action step;
+
+            private Tolerant(Action step) {
+                this.step = step;
+            }
+
+            @Override public ActionStatus tick(TickContext context) {
+                ActionStatus status = step.tick(context);
+                if (status instanceof ActionStatus.Failed failed) {
+                    reasons.add(step.describe() + "没成：" + failed.problem().message());
+                    return ActionStatus.done();
+                }
+                return status;
+            }
+            @Override public void pause() {
+                step.pause();
+            }
+            @Override public void close() {
+                step.close();
+            }
+            @Override public Interruptibility interruptibility() {
+                return step.interruptibility();
+            }
+            @Override public String describe() {
+                return step.describe();
+            }
+        }
     }
 
     // 摆一个设施要的几步：身上没有设施方块就先去弄一个，然后在身边放下。摆不了（没接上）时给一个当场说明问题的动作。

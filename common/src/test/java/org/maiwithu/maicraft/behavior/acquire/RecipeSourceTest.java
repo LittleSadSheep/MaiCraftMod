@@ -261,6 +261,45 @@ class RecipeSourceTest {
     }
 
     @Test
+    void 原料弄不全_身上够做一份就先做_一份都不够才以备料原因失败() {
+        WorldMemory memory = memory();
+        memory.rememberWorkstationUsed(TABLE_AT, "minecraft:crafting_table", NOW);
+        ItemNeeds failing = (request, permissions) -> new Action() {
+            @Override public ActionStatus tick(TickContext context) {
+                return ActionStatus.failed(Problem.of(Problem.Kind.NOT_FOUND, "附近没有橡木"));
+            }
+            @Override public String describe() {
+                return "备" + request.wanted().describe();
+            }
+        };
+        RecipeSource recipeSource = new RecipeSource(wanted -> List.of(plankRecipe()), memory, itemId -> 0,
+                FakeRuns.READY, backpack, offhand, tags, failing);
+        ItemRequest request = new ItemRequest(WantedItem.ofItem("minecraft:oak_planks"), 8, "施工备料");
+
+        // 要 8 块板（两根木头），身上只有一根：备料弄不来，但一根够做一份，照样去做。
+        backpack.add("minecraft:oak_log", 1);
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, recipeSource.quote(request, CONTEXT));
+        assertInstanceOf(ActionStatus.Done.class, runToEnd(recipeSource.begin(request, offer, CONTEXT).orElseThrow()));
+
+        // 一根都没有：一份都做不了，失败原因写弄不来的那一样。
+        FakeBackpack empty = new FakeBackpack(36);
+        RecipeSource bare = new RecipeSource(wanted -> List.of(plankRecipe()), memory, itemId -> 0,
+                FakeRuns.READY, empty, offhand, tags, failing);
+        SourceQuote.Offer bareOffer = assertInstanceOf(SourceQuote.Offer.class, bare.quote(request, CONTEXT));
+        ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class,
+                runToEnd(bare.begin(request, bareOffer, CONTEXT).orElseThrow()));
+        assertTrue(failed.problem().message().contains("附近没有橡木"), failed.problem().message());
+    }
+
+    private static ActionStatus runToEnd(Action action) {
+        for (long t = 0; t < 100; t++) {
+            ActionStatus status = action.tick(new StubTick(t));
+            if (!(status instanceof ActionStatus.Running)) return status;
+        }
+        throw new AssertionError("没收场");
+    }
+
+    @Test
     void 烧炼身上没燃料_先去弄煤_用途写明是燃料() {
         WorldMemory memory = memory();
         memory.rememberWorkstationUsed(TABLE_AT, "minecraft:furnace", NOW);
