@@ -50,6 +50,21 @@ public interface CreateTools {
     /** 照工具箱轮盘选一格那样，把 box 的第 compartment 格挂到快捷栏第 hotbarSlot 格（0~8）。 */
     void equipFromToolbox(BlockPos box, int compartment, int hotbarSlot);
 
+    /** 土豆加农炮能不能打这件、打出去什么样：读 Create 的弹药类型注册表（数据包可改）；不能打为空。 */
+    Optional<PotatoAmmo> potatoAmmo(Player player, ItemStack ammo);
+
+    /**
+     * 一种土豆加农炮弹药的数值（PotatoCannonProjectileType）。
+     *
+     * @param reloadTicks        打完冷却几刻
+     * @param split              一发分成几颗
+     * @param drag               每刻乘的减速
+     * @param velocityMultiplier 出膛速度倍数（基准每刻 2 格）
+     * @param gravityMultiplier  重力倍数（基准每刻 0.05）
+     */
+    record PotatoAmmo(int reloadTicks, int split, float drag, float velocityMultiplier, float gravityMultiplier) {
+    }
+
     /** 一个工具箱：在哪、八格各装着什么（空格不列）。 */
     record Toolbox(BlockPos pos, List<Compartment> compartments) {
         public Toolbox {

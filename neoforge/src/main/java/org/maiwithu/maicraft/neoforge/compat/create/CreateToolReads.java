@@ -14,6 +14,7 @@ import java.util.Set;
 
 import com.simibubi.create.AllDataComponents;
 import com.simibubi.create.AllRecipeTypes;
+import com.simibubi.create.api.equipment.potatoCannon.PotatoCannonProjectileType;
 import com.simibubi.create.content.equipment.toolbox.ToolboxBlockEntity;
 import com.simibubi.create.content.equipment.toolbox.ToolboxEquipPacket;
 import com.simibubi.create.content.equipment.toolbox.ToolboxHandler;
@@ -132,5 +133,16 @@ public final class CreateToolReads implements CreateTools {
 
     @Override public void equipFromToolbox(BlockPos box, int compartment, int hotbarSlot) {
         CatnipServices.NETWORK.sendToServer(new ToolboxEquipPacket(box, compartment, hotbarSlot));
+    }
+
+    // 弹药类型是数据包注册表、带网络编码，客户端的注册表里也有。
+    @Override public Optional<PotatoAmmo> potatoAmmo(Player player, ItemStack ammo) {
+        if (ammo.isEmpty()) return Optional.empty();
+        return PotatoCannonProjectileType.getTypeForItem(player.level().registryAccess(), ammo.getItem())
+                .map(reference -> {
+                    PotatoCannonProjectileType type = reference.value();
+                    return new PotatoAmmo(type.reloadTicks(), type.split(), type.drag(), type.velocityMultiplier(),
+                            type.gravityMultiplier());
+                });
     }
 }

@@ -57,6 +57,8 @@ public final class CreateCompat extends CompatModule {
         registry.itemSource(this, services -> new SandpaperSource(this, services));
         // 附近的工具箱：不用走过去，照轮盘那样把一格挂到快捷栏上（所有者定 C5）。
         registry.itemSource(this, services -> new ToolboxSource(this, services));
+        // 土豆加农炮当远程武器（所有者定 C5）：只交事实，挑、换手、瞄、出手由战斗做。
+        registry.rangedWeapon(this, new CreatePotatoCannon(this));
         // 放方块的讲究：带漏斗拿漏斗放、等下面的带子，横着的齿轮箱拿竖直齿轮箱放，动力辊别被抬高一格。
         registry.placementRules(this, new CreatePlacementRules(this));
         // 蓝图桌、蓝图加农炮的界面：证明了两侧怎么分，角色才能往里放空白蓝图、蓝图与火药。
@@ -238,6 +240,11 @@ public final class CreateCompat extends CompatModule {
     /** 把工具箱一格挂到快捷栏；见 {@link CreateTools#equipFromToolbox}。 */
     public void equipFromToolbox(BlockPos box, int compartment, int hotbarSlot) {
         run("从工具箱挂到快捷栏", () -> tools.equipFromToolbox(box, compartment, hotbarSlot));
+    }
+
+    /** 土豆加农炮能不能打这件；见 {@link CreateTools#potatoAmmo}。 */
+    public Optional<CreateTools.PotatoAmmo> potatoAmmo(Player player, ItemStack ammo) {
+        return call("读土豆加农炮弹药", () -> tools.potatoAmmo(player, ammo));
     }
 
     /** 是不是轨道；见 {@link CreateTools#track}。 */
