@@ -291,9 +291,12 @@ final class BaritoneWalkRun implements WalkRun {
         boolean onGround = player.onGround();
         boolean inWater = player.isInWater();
 
-        boolean noPath = concludeNoPath(engine, routePresent, feet, context.clientTick());
+        // 引擎这次没算出路线时先看是不是程序出错：程序出错不做只读复算、不升级脱困，直接按程序出错收场。
+        String calcError = engineFailedPath && !routePresent ? pathing.calculationFailure() : null;
+        boolean noPath = calcError != null || concludeNoPath(engine, routePresent, feet, context.clientTick());
         watchProgress(context, player, engine, routePresent, calculating || probe.waiting(), feet);
-        progress.observe(new WalkRunProgress.Observation(feet, onGround, inWater, routePresent, calculating, noPath));
+        progress.observe(new WalkRunProgress.Observation(
+                feet, onGround, inWater, routePresent, calculating, noPath, calcError));
         safeToPause = (onGround || inWater) && pathing.isSafeToCancel();
 
         if (progress.stopRequested() && onGround && pathing.isSafeToCancel()) {
@@ -302,9 +305,11 @@ final class BaritoneWalkRun implements WalkRun {
         }
 
         // 走不通：把起点那几格、手边的垫料、许可与附近的岩浆补进问题，LLM 据此调整，而不是只拿到一句"没有路"。
+        // 程序出错不补地形现场与垫料建议：那些会把程序问题说成地形问题。
         var spare = owner.spareScaffold(player);
-        progress.explainFailure(problem -> WalkFailureFacts.enrich(
-                escape.explain(probe.explain(problem, !spare.isEmpty())), context.level(), player, permit, spare));
+        progress.explainFailure(problem -> problem.kind() == Problem.Kind.INTERNAL_ERROR ? problem
+                : WalkFailureFacts.enrich(escape.explain(probe.explain(problem, !spare.isEmpty())),
+                        context.level(), player, permit, spare));
         if (progress.done()) {
             finishRun(context, player, engine, pathing);
             return;

@@ -89,6 +89,21 @@ class ApproachTest {
     }
 
     @Test
+    void 寻路程序出错就不再换站位_照原样交上去() {
+        // 实机里算路程序出错时，采集挨个试了 58 个站位，每个都错在同一处；程序出错换站位没用。
+        world.grounded = false;
+        Problem broken = Problem.of(Problem.Kind.INTERNAL_ERROR, "寻路程序出错，这次没算出路线，不是没有路：x");
+        StubMoves moves = new StubMoves(world, ActionStatus.failed(broken), ActionStatus.done());
+        Approach approach = approach(moves, null, Permissions.DEFAULT);
+        approach.tick(new StubTick(1));
+        approach.tick(new StubTick(2));
+        ActionStatus status = approach.tick(new StubTick(3));
+        ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, status);
+        assertEquals(Problem.Kind.INTERNAL_ERROR, failed.problem().kind());
+        assertEquals(1, moves.begun.size(), "只走了第一个站位");
+    }
+
+    @Test
     void 候选用尽且许可不许改方块就按到不了结束() {
         world.hidden = (eye, target) -> true;
         Approach approach = approach(new StubMoves(world), null,

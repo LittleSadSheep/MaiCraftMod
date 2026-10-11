@@ -25,15 +25,32 @@ public class PathCalculationResult {
 
     private final IPath path;
     private final Type type;
+    /** 算路程序出错时的异常说明（类名加消息）；别的结论为 null。 */
+    private final String failure;
 
     public PathCalculationResult(Type type) {
         this(type, null);
     }
 
     public PathCalculationResult(Type type, IPath path) {
+        this(type, path, null);
+    }
+
+    private PathCalculationResult(Type type, IPath path, String failure) {
         Objects.requireNonNull(type);
         this.path = path;
         this.type = type;
+        this.failure = failure;
+    }
+
+    /** 算路程序出错：记下异常本身，走到的结果据此说"程序出错"，不说成"没有路"。 */
+    public static PathCalculationResult error(Throwable failure) {
+        return new PathCalculationResult(Type.EXCEPTION, null, failure == null ? "未知异常" : failure.toString());
+    }
+
+    /** 程序出错时的异常说明；不是程序出错为空。 */
+    public final Optional<String> getFailure() {
+        return Optional.ofNullable(this.failure);
     }
 
     public final Optional<IPath> getPath() {

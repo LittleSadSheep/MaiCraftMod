@@ -143,6 +143,8 @@ public final class Approach implements Action {
             case ActionStatus.Running running -> running;
             // 到了再核对一次：路走完了不等于位置还能用，世界可能在这几刻里变了。
             case ActionStatus.Done done -> verifyArrival();
+            // 寻路程序出错：换哪个站位都一样会错，不再挨个试，照原样交上去。
+            case ActionStatus.Failed failed when failed.problem().kind() == Problem.Kind.INTERNAL_ERROR -> failed;
             case ActionStatus.Failed failed -> {
                 recordTried(current.feet(), "这条路走不通：" + failed.problem().message());
                 stage = Stage.NEXT_SPOT;

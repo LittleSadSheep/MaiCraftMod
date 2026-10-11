@@ -123,6 +123,22 @@ class WalkRunProgressTest {
     }
 
     @Test
+    void programErrorInTheSearchIsNotReportedAsNoRoute() {
+        // 实机里算路线程抛异常时结果写成"没有能走到目标的路线"，模型照着换目标、带垫料白试了十几次。
+        var progress = progressExact();
+        progress.observe(seen(ELSEWHERE, true, false, false, false));
+        var conclusion = progress.observe(new WalkRunProgress.Observation(ELSEWHERE, true, false, false, false, true,
+                "java.lang.IllegalStateException: the player control boundary may only run on the Minecraft client thread"));
+        assertEquals(WalkReport.State.FAILED, conclusion.report().state());
+        Problem problem = conclusion.report().problem();
+        assertEquals(Problem.Kind.INTERNAL_ERROR, problem.kind());
+        assertTrue(problem.message().startsWith("寻路程序出错，这次没算出路线，不是没有路"));
+        assertTrue(problem.message().contains("IllegalStateException"), "异常本身要带上，方便对着日志查");
+        assertFalse(problem.message().contains("没有能走到目标的路线"));
+        assertTrue(conclusion.done());
+    }
+
+    @Test
     void aFailureIsExplainedWithSiteFactsExactlyOnce() {
         var progress = progressExact();
         // 还在路上时没有失败可解释，补现场不改结果。

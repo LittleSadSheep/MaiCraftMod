@@ -24,9 +24,16 @@ final class WalkRunProgress {
     /**
      * 一刻的观察：脚下格与身体状态来自角色，路线状态来自寻路引擎。
      * {@code routePresent} 与 {@code calculating} 分别表示已有可走的路线和仍在搜索。
+     * {@code calcError} 是算路程序出错时的异常说明：有它时这次没算出路线是程序的问题，不是没有路。
      */
     record Observation(BlockPos feet, boolean onGround, boolean inWater,
-                       boolean routePresent, boolean calculating, boolean calcFailed) {}
+                       boolean routePresent, boolean calculating, boolean calcFailed, String calcError) {
+
+        Observation(BlockPos feet, boolean onGround, boolean inWater,
+                    boolean routePresent, boolean calculating, boolean calcFailed) {
+            this(feet, onGround, inWater, routePresent, calculating, calcFailed, null);
+        }
+    }
 
     record Conclusion(WalkReport report, Action action, boolean done, boolean progressed) {}
 
@@ -84,6 +91,12 @@ final class WalkRunProgress {
         report = WalkReport.failed(explain.apply(report.problem()), report.feet(), report.crossedWater());
     }
 
+    /** 算路程序出错的问题：写明是程序的问题和异常本身，建议先做不用走路的事。 */
+    static Problem programError(String calcError) {
+        return Problem.of(Problem.Kind.INTERNAL_ERROR, "寻路程序出错，这次没算出路线，不是没有路：" + calcError,
+                "这是程序的问题，不是地形挡路：换目标、换方向、带垫脚料都绕不开，先做不用走路的事");
+    }
+
     boolean done() {
         var state = report.state();
         return state == WalkReport.State.ARRIVED || state == WalkReport.State.STOPPED
@@ -98,8 +111,9 @@ final class WalkRunProgress {
         crossedWater |= o.inWater && o.routePresent;
 
         if (o.calcFailed && !o.routePresent) {
-            report = WalkReport.failed(
-                    Problem.of(Problem.Kind.UNREACHABLE, "没有能走到目标的路线", null), o.feet, crossedWater);
+            // 算路程序出错与真的没有路分开说：程序出错时换目标、带垫料都绕不开，不能让调用方当成地形问题反复试。
+            report = WalkReport.failed(o.calcError != null ? programError(o.calcError)
+                    : Problem.of(Problem.Kind.UNREACHABLE, "没有能走到目标的路线", null), o.feet, crossedWater);
             return new Conclusion(report, Action.CANCEL_ROUTE, true, false);
         }
 

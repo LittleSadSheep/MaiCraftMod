@@ -88,6 +88,8 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
     private Level calculationWorld;
     private long calculationTimeoutMillis;
     private PathCalculationResult.Type lastCalculationResult;
+    /** 最近一次算路程序出错时的异常说明；最近一次不是程序出错为 null。 */
+    private String lastCalculationFailure;
     private boolean calculationStalled;
     private int searchRecoveries;
     private BlockPos recoveryOrigin;
@@ -436,6 +438,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         // 新导航不能继承旧进程的暂停、失败标签或执行上下文；实际旧失败已由任务在退役前冻结。
         pauseRequestedLastTick = false; pausedThisTick = false; unpausedLastTick = false;
         context = null; customCalculationContext = null; lastCalculationResult = null; calculationStalled = false;
+        lastCalculationFailure = null;
     }
 
     public CalculationContext secretInternalGetCalculationContext() {
@@ -541,7 +544,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         if (recoveryOrigin == null || recoveryOrigin.distSqr(start) > 4 || !Objects.equals(recoveryGoal, goal) || recoveryWorld != ctx.world()) {
             searchRecoveries = 0; recoveryOrigin = start.immutable(); recoveryGoal = goal; recoveryWorld = ctx.world(); lastRecovery = Map.of();
         }
-        calculationStalled = false; lastCalculationResult = null;
+        calculationStalled = false; lastCalculationResult = null; lastCalculationFailure = null;
         calculationTimeoutMillis = Math.max(10_000L, (Baritone.settings().slowPath.value
                 ? Baritone.settings().slowPathTimeoutMS.value : failureTimeout) + 5_000L);
         AbstractNodeCostSearch pathfinder = createPathfinder(start, goal,
@@ -579,7 +582,8 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
             result = pendingCalculation.getNow(null);
         } catch (RuntimeException failure) {
             logDirect("Path calculation failed: " + failure);
-            result = new PathCalculationResult(PathCalculationResult.Type.EXCEPTION);
+            // 计算线程没交回结论（排队被拒、线程里抛了 Error 等）：同样是程序出错，异常照原样带上。
+            result = PathCalculationResult.error(failure.getCause() != null ? failure.getCause() : failure);
         }
         BlockPos start = calculationStart;
         Goal requestedGoal = calculationGoal;
@@ -599,6 +603,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         if (path.isEmpty() && (!Objects.equals(requestedGoal, goal)
                 || !Objects.equals(start, current == null ? expectedSegmentStart : current.getPath().getDest()))) return;
         lastCalculationResult = result.getType();
+        lastCalculationFailure = result.getFailure().orElse(null);
         if (current == null) {
             if (path.isPresent()) {
                 if (path.get().positions().contains(expectedSegmentStart)) {
@@ -665,6 +670,10 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         return stall;
     }
     public boolean calculationErrored() { return lastCalculationResult == PathCalculationResult.Type.EXCEPTION; }
+    /** 最近一次算路程序出错时的异常说明：走到据此单独报程序出错；不是程序出错为 null。 */
+    public String calculationFailure() {
+        return calculationErrored() ? (lastCalculationFailure == null ? "未知异常" : lastCalculationFailure) : null;
+    }
 
     /** 默认回执分别呈现真正无解、搜索停滞与已有执行路线，不能仅以“没有位移”反推搜索结论。 */
     public Map<String, Object> searchDiagnostics() {
