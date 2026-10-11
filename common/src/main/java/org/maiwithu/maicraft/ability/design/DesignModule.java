@@ -164,7 +164,9 @@ public final class DesignModule implements AbilityModule {
         return new StepDecision.Finish(TaskResult.builder(TaskResult.Status.DONE, summary).details(details).build());
     }
 
+    // 没开工就收场：一句话结论只带结论句，展开的原因（比如转述下一层的失败）只在问题里留一份。
     private static StepDecision fail(String message, Problem.Kind kind, String suggestion) {
-        return new StepDecision.Finish(TaskResult.failed(message, Problem.of(kind, message, suggestion)));
+        Problem problem = Problem.of(kind, message, suggestion);
+        return new StepDecision.Finish(TaskResult.failed(problem.headline(), problem));
     }
 }

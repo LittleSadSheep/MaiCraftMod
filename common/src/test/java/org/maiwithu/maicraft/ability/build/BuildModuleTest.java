@@ -128,5 +128,7 @@ class BuildModuleTest {
         var finish = assertInstanceOf(StepDecision.Finish.class, decision);
         assertTrue(finish.result().problem() != null, finish.result().summary());
         assertEquals(kind, finish.result().problem().kind(), finish.result().summary());
+        // 一句话结论只带问题的结论句，展开的原因只在问题里一份。
+        assertEquals(finish.result().problem().headline(), finish.result().summary());
     }
 }
