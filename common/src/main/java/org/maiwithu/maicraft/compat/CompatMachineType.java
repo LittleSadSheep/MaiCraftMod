@@ -119,7 +119,7 @@ public final class CompatMachineType implements MachineType {
 
     // 要一个动作：给出的动作包一层，推进到一半停用时如实按不支持收场。
     private Optional<Action> act(Supplier<Optional<Action>> make) {
-        return ask(make, Optional.<Action>empty()).map(action -> new CompatAction(module, action));
+        return ask(make, Optional.<Action>empty()).map(action -> CompatAction.of(module, action));
     }
 
     private String disabled() {

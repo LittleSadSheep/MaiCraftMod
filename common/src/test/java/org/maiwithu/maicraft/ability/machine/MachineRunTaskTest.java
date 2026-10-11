@@ -12,6 +12,7 @@ import net.minecraft.world.level.block.Blocks;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.ability.machine.spi.FeedReport;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.behavior.recipe.GameRecipeTable;
@@ -25,6 +26,8 @@ import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
+import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
@@ -164,6 +167,52 @@ class MachineRunTaskTest {
                 Permissions.DEFAULT));
         assertEquals(TaskResult.Status.FAILED, result.status());
         assertEquals(Problem.Kind.NEED_ITEM, result.problem().kind());
+    }
+
+    @Test
+    void 扔进去的投法按真进去的件数记_没进去的写进说明() {
+        Rig rig = new Rig();
+        rig.machineRunsAtFullSpeed();
+        rig.type.feedActions.clear();
+        rig.type.feedActions.add(new ReportedFeed(1, List.of("1 件落在 3,64,0，没落进 0,64,0"),
+                () -> rig.type.output.put(PLATE, 2)));
+        TaskResult result = rig.run(new MachineRunInput(positionOf(CELL), PLATE, 2, true, 5,
+                Permissions.DEFAULT));
+        MachineRunDetails details = (MachineRunDetails) result.details();
+        assertEquals(1, details.fed().get(0).count(), "要投两件，进去一件就记一件");
+        assertTrue(details.notes().contains("1 件落在 3,64,0，没落进 0,64,0"));
+        assertTrue(result.changes().stream().anyMatch(change -> change.kind() == Change.Kind.ITEM_CONSUMED
+                && INGOT.equals(change.what()) && change.count() == 1));
+    }
+
+    /** 交得出实情的投料动作替身：一刻做完，报进去几件与说明。 */
+    private static final class ReportedFeed implements Action, FeedReport {
+        private final int delivered;
+        private final List<String> notes;
+        private final Runnable onEnd;
+
+        ReportedFeed(int delivered, List<String> notes, Runnable onEnd) {
+            this.delivered = delivered;
+            this.notes = notes;
+            this.onEnd = onEnd;
+        }
+
+        @Override public ActionStatus tick(TickContext context) {
+            onEnd.run();
+            return ActionStatus.done();
+        }
+
+        @Override public int delivered() {
+            return delivered;
+        }
+
+        @Override public List<String> notes() {
+            return notes;
+        }
+
+        @Override public String describe() {
+            return "扔料替身";
+        }
     }
 
     private static Target positionOf(BlockPos cell) {

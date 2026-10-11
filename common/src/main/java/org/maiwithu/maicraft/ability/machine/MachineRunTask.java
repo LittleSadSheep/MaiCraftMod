@@ -11,6 +11,7 @@ import java.util.Optional;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 
+import org.maiwithu.maicraft.ability.machine.spi.FeedReport;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
@@ -71,6 +72,8 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
     private Switching switching;
     /** 下一刻要推进的动作：上一刻按现场备好，进入阶段时交给基类。 */
     private Action prepared;
+    /** 正在投的这一样料交得出实情时（扔进去这类不一定件件都进的投法）留着它，做完按实情记账。 */
+    private FeedReport feeding;
 
     MachineRunTask(MachineRunInput input, MachineServices services) {
         super("用机器做东西", Phase.RESOLVE,
@@ -194,11 +197,7 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
             return switch (runAction(context)) {
                 case ActionStatus.Running running -> Next.stay();
                 case ActionStatus.Done done -> {
-                    MachineRunDetails.Fed done1 = toFeed.poll();
-                    fed.add(done1);
-                    recordChange(new Change(Change.Kind.ITEM_CONSUMED, done1.item(), done1.count(),
-                            "投进了" + describeMachine()));
-                    recordProgress("投进了 " + done1.item() + " ×" + done1.count());
+                    MachineRunDetails.Fed done1 = settleFeed(toFeed.poll());
                     yield Next.go(toFeed.isEmpty() ? Phase.SWITCH : Phase.FEED,
                             toFeed.isEmpty() ? "投料完了，开机" : "投进去一样，接着投下一样");
                 }
@@ -212,10 +211,29 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
         return type.feed(cell, next.item(), next.count(), input.permissions())
                 .map(action -> {
                     prepared = action;
+                    feeding = action instanceof FeedReport report ? report : null;
                     return Next.go(Phase.FEED, "把 " + next.item() + " 投进" + describeMachine());
                 })
                 .orElseGet(() -> stop(Problem.of(Problem.Kind.UNSUPPORTED,
                         describeMachine() + "不收 " + next.item() + " 这种料")));
+    }
+
+    // 一样料投完记账：投法交得出实情（扔进去的）按进去的件数记，没进去的在哪写进说明；
+    // 一下就整份放好的（手持右键放上置物台）按要投的件数记。没进去的不重投，交给 LLM 看说明再定。
+    private MachineRunDetails.Fed settleFeed(MachineRunDetails.Fed asked) {
+        int count = feeding == null ? asked.count() : feeding.delivered();
+        if (feeding != null) {
+            notes.addAll(feeding.notes());
+            feeding = null;
+        }
+        MachineRunDetails.Fed settled = new MachineRunDetails.Fed(asked.item(), count);
+        fed.add(settled);
+        if (count > 0) {
+            recordChange(new Change(Change.Kind.ITEM_CONSUMED, asked.item(), count, "投进了" + describeMachine()));
+        }
+        recordProgress(count == asked.count() ? "投进了 " + asked.item() + " ×" + count
+                : "要投 " + asked.item() + " ×" + asked.count() + "，进去了 " + count + " 件");
+        return settled;
     }
 
     // 开机：在转就不拨；读数说停着的，走近右键拨一下；别的读数不预判，投了料等产物见分晓。

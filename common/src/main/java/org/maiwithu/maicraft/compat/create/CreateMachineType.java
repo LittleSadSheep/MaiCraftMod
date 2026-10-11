@@ -139,7 +139,7 @@ final class CreateMachineType implements MachineType {
     @Override public Optional<Action> feed(BlockPos at, String itemId, int count, Permissions permissions) {
         ClientLevel level = level();
         if (level == null) return Optional.empty();
-        return stations.feed(kind.work(), level, level.getBlockState(at), at, itemId, permissions);
+        return stations.feed(kind.work(), level, level.getBlockState(at), at, itemId, count, permissions);
     }
 
     @Override public List<MachineState.Shown> output(BlockPos at) {

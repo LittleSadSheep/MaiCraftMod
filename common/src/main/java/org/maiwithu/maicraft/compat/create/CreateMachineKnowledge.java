@@ -143,9 +143,14 @@ final class CreateMachineKnowledge implements KnowledgeSource {
     private static void appendUse(StringBuilder text, CreateMachineCatalog.Kind kind) {
         switch (kind.work()) {
             case PRESS, DEPLOYER, FAN -> text.append("- machine_run：target 指这台机器；加工处放着置物台时，")
-                    .append("料放到那台置物台上，产物从置物台空手收回\n");
-            case MIXER -> text.append("- machine_run：产物留在正下方第二格的工作盆里，空手右键工作盆取出；")
-                    .append("料要扔进盆里（这一步角色现在还不会做）\n");
+                    .append("料放到那台置物台上，产物从置物台空手收回")
+                    .append(kind.work() == CreateMachineCatalog.Work.PRESS ? "；加工处是工作盆时站到盆边把料扔进去（压块）\n" : "\n");
+            case MIXER -> text.append("- machine_run：料扔进正下方第二格的工作盆里（站到盆边扔），产物留在盆里，")
+                    .append("空手右键工作盆取出\n");
+            case BASIN -> text.append("- machine_run：站到盆边把料扔进去，落在盆沿上也收；空手右键取出盆里的东西\n");
+            case SAW -> text.append("- machine_run：锯齿朝上时站到旁边把料扔到锯面上；锯没转时料停在上面，转起来再锯\n");
+            case GRINDER -> text.append("- machine_run：石磨站到旁边把料扔到顶上；粉碎轮扔进两只轮子中间那一格，")
+                    .append("那一格要朝下送料（两只轮子对着往里转）\n");
             case DEPOT -> text.append("- machine_run：手持料右键顶面放一整叠；空手右键顶面收回\n");
             case BELT -> text.append("- machine_build：installations 写 `{kind: create:belt, cells: [从一端到另一端]}`；")
                     .append("cells 里两端写与带子垂直的 `create:shaft`（不能用机壳传动杆），中间不写或写 air；")

@@ -102,4 +102,27 @@ class CreateReadingsTest {
         assertEquals(Direction.UP, depot.getFirst().side());
         assertEquals(ExchangePoint.Flow.BOTH, depot.getFirst().flow());
     }
+
+    @Test
+    void 工作盆_搅拌器下的盆_朝上的锯_石磨都扔上去_锯不朝上给不出() {
+        BlockPos at = new BlockPos(0, 70, 0);
+        BlockPos basin = new BlockPos(0, 68, 0);
+        var stone = Blocks.STONE.defaultBlockState();
+        assertEquals(Optional.of(new StationHandling.TossSpot(at, StationHandling.BASIN_RIM)),
+                StationHandling.spotFor(CreateMachineCatalog.Work.BASIN, stone, at, cell -> true, cell -> stone));
+        // 搅拌器下方第二格是工作盆时扔进那个盆；那里没有盆就给不出。
+        assertEquals(Optional.of(new StationHandling.TossSpot(basin, StationHandling.BASIN_RIM)),
+                StationHandling.spotFor(CreateMachineCatalog.Work.MIXER, stone, at, basin::equals, cell -> stone));
+        assertTrue(StationHandling.spotFor(CreateMachineCatalog.Work.MIXER, stone, at, cell -> false, cell -> stone)
+                .isEmpty());
+        // 锯的朝向在方块状态的 facing 上：拿发射器的方块状态代它摆朝向。
+        var up = Blocks.DISPENSER.defaultBlockState().setValue(BlockStateProperties.FACING, Direction.UP);
+        var east = Blocks.DISPENSER.defaultBlockState().setValue(BlockStateProperties.FACING, Direction.EAST);
+        assertEquals(Optional.of(new StationHandling.TossSpot(at, StationHandling.SAW_TOP)),
+                StationHandling.spotFor(CreateMachineCatalog.Work.SAW, up, at, cell -> false, cell -> stone));
+        assertTrue(StationHandling.spotFor(CreateMachineCatalog.Work.SAW, east, at, cell -> false, cell -> stone)
+                .isEmpty());
+        assertEquals(Optional.of(new StationHandling.TossSpot(at, StationHandling.MILLSTONE_RIM)),
+                StationHandling.spotFor(CreateMachineCatalog.Work.GRINDER, stone, at, cell -> false, cell -> stone));
+    }
 }

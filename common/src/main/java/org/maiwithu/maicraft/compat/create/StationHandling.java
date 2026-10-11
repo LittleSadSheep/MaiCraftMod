@@ -4,6 +4,8 @@ package org.maiwithu.maicraft.compat.create;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -12,6 +14,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
@@ -22,14 +25,15 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.compat.HandThenClick;
+import org.maiwithu.maicraft.compat.TossFeed;
 
 /**
  * 机械动力里"放东西的地方"怎么用：置物台手持东西右键顶面放上去一整叠（原有的先收回背包），空手右键顶面收回；
  * 工作盆空手右键取出盆里的东西。压机、机械手、鼓风机以它们加工处的置物台为投料口与出口，
  * 搅拌器以正下方第二格的工作盆为出口。
  *
- * <p>看得见的才读：台面、盆里、带上画出来的东西。料扔进工作盆、扔进石磨这类"扔进去"的投法现在不做，
- * 投料时如实给不出动作。
+ * <p>工作盆、石磨、朝上的锯、粉碎轮中间那一格只收落到上面的东西，右键放不进去：投料是站到旁边把料扔上去，
+ * 压机、搅拌器下面是工作盆时扔进那个盆。看得见的才读：台面、盆里、带上画出来的东西。
  */
 final class StationHandling {
 
@@ -63,10 +67,76 @@ final class StationHandling {
         return shownAt(work, level, state, at);
     }
 
-    /** 往这台机器投料的动作：置物台放在自己顶面，压机、机械手、鼓风机放在加工处的置物台上；别的给不出。 */
+    /**
+     * 往这台机器投料的动作：置物台放在自己顶面，压机、机械手、鼓风机放在加工处的置物台上；
+     * 工作盆、石磨、朝上的锯、粉碎轮扔上去，压机、搅拌器下面是工作盆时扔进盆里；别的给不出。
+     */
     Optional<Action> feed(CreateMachineCatalog.Work work, ClientLevel level, BlockState state, BlockPos at,
-            String itemId, Permissions permissions) {
-        return depotFor(work, level, state, at).map(depot -> putOnDepot(level, depot, itemId, permissions));
+            String itemId, int count, Permissions permissions) {
+        Optional<BlockPos> depot = depotFor(work, level, state, at);
+        if (depot.isPresent()) return Optional.of(putOnDepot(level, depot.get(), itemId, permissions));
+        return tossSpot(work, level, state, at).map(spot -> new TossFeed(services, itemId, count, spot.cell(),
+                spot.catchHeight(), permissions));
+    }
+
+    /** 扔料的落点：收料的那一格，东西落到离它底面多高就被接住。 */
+    record TossSpot(BlockPos cell, double catchHeight) {
+    }
+
+    /** 工作盆盆沿的高度：掉落物碰到盆沿就算落进盆了。类别：游戏事实（BASIN_COLLISION_SHAPE）。 */
+    static final double BASIN_RIM = 13 / 16.0;
+    /** 朝上的锯面高度。类别：游戏事实（CASING_12PX）。 */
+    static final double SAW_TOP = 12 / 16.0;
+    /** 石磨外圈台面的高度：落到中间磨盘顶上或外圈台面上都收。类别：游戏事实（MILLSTONE 外形）。 */
+    static final double MILLSTONE_RIM = 6 / 16.0;
+    /** 粉碎轮两只轮子中间那一格的方块。 */
+    static final String CRUSHING_GAP = "create:crushing_wheel_controller";
+    private static final String CRUSHING_WHEEL = "create:crushing_wheel";
+
+    // 这台机器的扔料落点；工作盆读不读得到、方块长什么样从现场问。
+    private Optional<TossSpot> tossSpot(CreateMachineCatalog.Work work, ClientLevel level, BlockState state,
+            BlockPos at) {
+        return spotFor(work, state, at, cell -> compat.basinItems(level, cell).isPresent(), level::getBlockState);
+    }
+
+    /**
+     * 扔料扔到哪：工作盆扔进自己；压机、搅拌器下方第二格是工作盆时扔进那个盆；锯朝上时扔到锯面上；
+     * 石磨扔到顶上；粉碎轮扔进旁边那一格朝下送料的中间格，东西一落进格子就被卷进去。
+     * 锯不朝上、粉碎轮旁边没有朝下送料的中间格时给不出。
+     */
+    static Optional<TossSpot> spotFor(CreateMachineCatalog.Work work, BlockState state, BlockPos at,
+            Predicate<BlockPos> basinAt, Function<BlockPos, BlockState> blockAt) {
+        return switch (work) {
+            case BASIN -> basinAt.test(at) ? Optional.of(new TossSpot(at, BASIN_RIM)) : Optional.empty();
+            case PRESS, MIXER -> ProcessingSpots.workCell(work, state, at).filter(basinAt)
+                    .map(cell -> new TossSpot(cell, BASIN_RIM));
+            case SAW -> facing(state).filter(face -> face == Direction.UP).map(face -> new TossSpot(at, SAW_TOP));
+            case GRINDER -> idOf(state).equals(CRUSHING_WHEEL) ? crushingGap(at, blockAt)
+                    : Optional.of(new TossSpot(at, MILLSTONE_RIM));
+            default -> Optional.empty();
+        };
+    }
+
+    // 粉碎轮：两只轮子隔一格摆，中间那一格朝下送料时从它顶上扔进去；朝别的方向送料的扔不进去。
+    private static Optional<TossSpot> crushingGap(BlockPos wheel, Function<BlockPos, BlockState> blockAt) {
+        for (Direction side : Direction.Plane.HORIZONTAL) {
+            BlockPos gap = wheel.relative(side);
+            BlockState there = blockAt.apply(gap);
+            if (there != null && idOf(there).equals(CRUSHING_GAP)
+                    && facing(there).filter(face -> face == Direction.DOWN).isPresent()) {
+                return Optional.of(new TossSpot(gap, 1.0));
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static Optional<Direction> facing(BlockState state) {
+        return state.hasProperty(BlockStateProperties.FACING)
+                ? Optional.of(state.getValue(BlockStateProperties.FACING)) : Optional.empty();
+    }
+
+    private static String idOf(BlockState state) {
+        return BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
     }
 
     /** 从出口取东西的动作：置物台空手右键顶面；工作盆（搅拌器下方那个也算）空手右键；别的给不出。 */
