@@ -18,7 +18,7 @@ import org.maiwithu.maicraft.compat.CompatRegistry;
 
 /**
  * Simulated（Create Aeronautics 一套里的载具部件：物理组装器、无线红石打字机、舵轮、油门拉杆）的联动入口。
- * 交给登记表：用物理组装器组装与拆回载具的办法。
+ * 交给登记表：用物理组装器组装与拆回载具的办法，接管无线红石打字机试按的驾驶办法。
  * 组装出来的是 Sable 的子世界，所以这里也读 Sable 的结构（和 Sable 的联动用同一个读端，读写端放在一起）。
  * 每一下都经联动入口包一层。
  */
@@ -41,6 +41,8 @@ public final class SimulatedCompat extends CompatModule {
     @Override public void contribute(CompatRegistry registry) {
         // 物理组装器拉一次杆组装或拆回（所有者 10-11 批的载具规格）：要走过去、拉、确认，进世界时带着玩家行为建。
         registry.vehicleAssembler(this, services -> new PhysicsAssembly(this, services));
+        // 坐上驾驶座接管无线红石打字机试按（同一份规格）：要坐下、右键接管、逐条按住再松开，同样进世界时建。
+        registry.vehicleDriver(this, services -> new TypewriterDriver(this, services));
     }
 
     /** 角色附近这个编号的物理结构；不在附近为空。 */
