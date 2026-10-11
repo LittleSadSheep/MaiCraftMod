@@ -61,6 +61,9 @@ class BattleTest {
         final List<Footwork.Step> steps = new ArrayList<>();
         final List<GoalCompiler.Compiled> walks = new ArrayList<>();
         ActionStatus walkStatus = ActionStatus.progressed();
+        BattleMoves.Posture posture = BattleMoves.Posture.GROUNDED;
+
+        @Override public BattleMoves.Posture posture(TickContext context) { return posture; }
 
         @Override public Action strike(TickContext context, int entityId) {
             return new Instant(() -> {
@@ -211,6 +214,30 @@ class BattleTest {
         for (int tick = 0; tick < 3; tick++) last = fight.tick(new Tick(tick));
         assertTrue(last.cornered(), "连着三次走不通退无可退");
         assertEquals(Battle.State.FIGHTING, fight.tick(new Tick(3)).state(), "背水一战");
+    }
+
+    @Test
+    void jumpsWhenAlmostChargedAndStrikesOnTheWayDown() {
+        Senses senses = new Senses();
+        senses.threats.add(zombie(1, 2.6));
+        Moves moves = new Moves();
+        Battle fight = battle(senses, moves);
+        // 站在地上、头顶有空、充能过半：起跳，这一刻不砍。
+        moves.posture = new BattleMoves.Posture(true, false, true, 0.6f);
+        fight.tick(new Tick(0));
+        assertTrue(moves.lastStep().jump(), "起跳");
+        assertEquals(0, moves.strikes);
+        // 往上升时不砍，往下落时砍（原版暴击）。
+        moves.posture = new BattleMoves.Posture(false, false, false, 0.9f);
+        fight.tick(new Tick(1));
+        assertEquals(0, moves.strikes, "还在往上升");
+        moves.posture = new BattleMoves.Posture(false, true, false, 1f);
+        fight.tick(new Tick(2));
+        assertEquals(1, moves.strikes, "下落时砍");
+        // 跳不了（头顶有方块）：站着砍。
+        moves.posture = new BattleMoves.Posture(true, false, false, 1f);
+        fight.tick(new Tick(3));
+        assertEquals(2, moves.strikes);
     }
 
     @Test

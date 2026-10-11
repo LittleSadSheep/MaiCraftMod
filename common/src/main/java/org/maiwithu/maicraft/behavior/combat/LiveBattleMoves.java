@@ -107,6 +107,20 @@ public final class LiveBattleMoves implements BattleMoves {
         return BuiltInRegistries.ITEM.getKey(self.getMainHandItem().getItem()).toString();
     }
 
+    @Override
+    public Posture posture(TickContext context) {
+        var self = context.player() == null ? null : context.player().localPlayer();
+        if (self == null) return Posture.GROUNDED;
+        boolean onGround = self.onGround();
+        boolean falling = !onGround && self.getDeltaMovement().y < 0 && self.fallDistance > 0;
+        // 能起跳：站在地上，不在水里岩浆里、没在爬梯子、没骑着东西，头顶那一格空着（跳起来不撞头）。
+        BlockPos head = self.blockPosition().above(2);
+        boolean headroom = self.level().getBlockState(head).getCollisionShape(self.level(), head).isEmpty();
+        boolean canJump = onGround && headroom && !self.isInWater() && !self.isInLava() && !self.onClimbable()
+                && !self.isPassenger();
+        return new Posture(onGround, falling, canJump, self.getAttackStrengthScale(0.0F));
+    }
+
     /** 第一刻才开走的寻路：走到没接上时如实失败。 */
     private final class Walk implements Action {
         private final GoalCompiler.Compiled goal;

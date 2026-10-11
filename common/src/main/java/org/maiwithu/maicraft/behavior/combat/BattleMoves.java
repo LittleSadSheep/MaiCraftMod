@@ -49,4 +49,22 @@ public interface BattleMoves {
 
     /** 此刻主手里拿着什么（物品 ID，空手为"空手"）。 */
     String mainHand(TickContext context);
+
+    /**
+     * 此刻身子在不在地上、在不在往下落、能不能起跳（不在水里岩浆里、没在爬梯子、没骑着东西、头顶有空），
+     * 以及攻击充能到几成。跳劈要看这些；没接上时按站在地上、不能跳、充满算。
+     */
+    default Posture posture(TickContext context) {
+        return Posture.GROUNDED;
+    }
+
+    /**
+     * 身子此刻的姿势。
+     *
+     * @param falling 离地往下落：这时候砍是原版暴击（伤害 × 1.5）
+     * @param charge  攻击充能（0 到 1）
+     */
+    record Posture(boolean onGround, boolean falling, boolean canJump, float charge) {
+        public static final Posture GROUNDED = new Posture(true, false, false, 1f);
+    }
 }

@@ -68,6 +68,12 @@ public final class Battle {
     static final double REPLAN_AFTER = 3.0;
     /** 原生攻击连着被拒这么多次才当打不出去，换下一只。 */
     static final int MAX_REJECTS = 3;
+    /** 充能到这么多就起跳：落到能砍的时候正好充满，跳劈不比站着砍慢。 */
+    static final float JUMP_AT = 0.5f;
+    /** 连着这么多刻想跳却没离地（灵魂沙、蜂蜜块上）：这一阵不跳了，站着砍。 */
+    static final int MAX_GROUNDED_JUMPS = 5;
+    /** 跳不起来之后多久不再试跳（刻）。 */
+    static final int NO_LEAP_TICKS = 100;
 
     private final CombatSenses senses;
     private final BattleMoves moves;
@@ -89,6 +95,9 @@ public final class Battle {
     /** 上一刻每只的距离：估它冲过来多快，拉弓的距离带按它留。 */
     private final Map<Integer, Double> lastDistance = new HashMap<>();
     private String doing = "观察战场";
+    /** 连着想跳却没离地的刻数，与这之后不再试跳还剩多少刻。 */
+    private int groundedJumps;
+    private int noLeapTicks;
     /** 上一段寻路走不通：逼近的那只记成走不到。 */
     private boolean lastWalkFailed;
 
@@ -217,7 +226,23 @@ public final class Battle {
         Battlefield.Me me = field.me();
         CombatSenses.Threat threat = target.threat();
         boolean inReach = threat.visible() && threat.withinReach(me.reach());
-        boolean struck = inReach && swing(context, target.id());
+        // 跳劈：够得着、头顶有空、不是苦力怕（跳起来落不回原地躲不了），充能快好时起跳，往下落时才砍，原版算暴击；
+        // 跳不了（水里、梯子上、头顶有方块）就站着砍。
+        BattleMoves.Posture posture = moves.posture(context);
+        if (noLeapTicks > 0) noLeapTicks--;
+        boolean leaping = inReach && noLeapTicks == 0 && threat.kind() != ThreatAssessment.Kind.EXPLOSIVE
+                && (posture.canJump() || !posture.onGround());
+        boolean jumpNow = leaping && posture.onGround() && posture.charge() >= JUMP_AT;
+        groundedJumps = jumpNow ? groundedJumps + 1 : posture.onGround() ? groundedJumps : 0;
+        if (groundedJumps > MAX_GROUNDED_JUMPS) {
+            // 按了跳却一直没离地：这一阵站着砍，别卡在"等跳起来"上一下都不出手。
+            groundedJumps = 0;
+            noLeapTicks = NO_LEAP_TICKS;
+            leaping = false;
+            jumpNow = false;
+        }
+        boolean holdSwing = leaping && (posture.onGround() || !posture.falling());
+        boolean struck = inReach && !holdSwing && swing(context, target.id());
         if (!inReach) dropStrike();
         if (threat.dangerRadius() > 0) moves.guard(context, threat.distance(), inReach && me.attackReady());
         else moves.lowerGuard();
@@ -227,8 +252,9 @@ public final class Battle {
             dropWalk();
             Footwork.Step step = Footwork.choose(me.x(), me.z(),
                     new Footwork.Stance(band, sideHazards(field, target.id(), SIDE_MARGIN), false), moves.ground(context));
+            if (jumpNow) step = new Footwork.Step(step.dx(), step.dz(), true, false);
             moves.step(context, target.id(), step);
-            moved = !step.standing();
+            moved = !step.standing() || jumpNow;
         } else {
             List<ThreatField.Threat> threats = pathThreats(field, -1);
             Vec3 focus = new Vec3(threat.x(), threat.y(), threat.z());
