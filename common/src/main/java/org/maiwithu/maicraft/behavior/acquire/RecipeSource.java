@@ -288,15 +288,9 @@ public final class RecipeSource implements ItemSource {
         steps.add(enoughForOne(recipe, shortfall));
         if (station == null) {
             // 附近没有记住的设施：先去弄一个设施方块、在身边放下，再到新设施上做。
+            // 动手那一步等摆完才认新设施的位置（它的记录是摆台这一步才写下的），少这一步就只剩摆台、不做东西。
             steps.addAll(placeSteps(recipe, permissions));
-            Optional<Action> run = runs.runAtRememberedStation(recipe, times, permissions);
-            if (run.isEmpty()) {
-                return steps.isEmpty()
-                        ? nothingToDo(recipe)
-                        : new StepwiseActions("为「做" + recipe.result().describe() + "」备料",
-                                steps.toArray(Action[]::new));
-            }
-            steps.add(shortfall.explaining(run.get()));
+            steps.add(shortfall.explaining(runAtPlacedStation(recipe, times, permissions)));
             return new StepwiseActions("就地摆下" + workstationName(recipe.kind()) + "再做"
                     + recipe.result().describe(), steps.toArray(Action[]::new));
         }
@@ -311,6 +305,45 @@ public final class RecipeSource implements ItemSource {
         steps.add(shortfall.explaining(run.get()));
         return new StepwiseActions("备齐原料后去" + workstationName(recipe.kind()) + "做"
                 + recipe.result().describe(), steps.toArray(Action[]::new));
+    }
+
+    // 到刚摆下的那台设施上做：动手时才从世界记忆里认它的位置。附近本来没有这台设施，
+    // 它的记录是摆台那一步做完才写下的；串动作还没开始跑时就查，查到的永远是空，
+    // 于是只剩摆台、不做东西，回执还像做完了。认不出位置（摆台的动作没记下）就如实失败，由引擎换路。
+    private Action runAtPlacedStation(WorkstationRecipe recipe, int times, Permissions permissions) {
+        return new Action() {
+            private Action run;
+
+            @Override public ActionStatus tick(TickContext tick) {
+                if (run == null) {
+                    run = runs.runAtRememberedStation(recipe, times, permissions).orElse(null);
+                    if (run == null) {
+                        return ActionStatus.failed(Problem.of(Problem.Kind.STUCK,
+                                workstationName(recipe.kind()) + "摆下了，但记忆里没有它的位置，做不了"
+                                        + recipe.result().describe()));
+                    }
+                }
+                return run.tick(tick);
+            }
+
+            @Override public void pause() {
+                if (run != null) run.pause();
+            }
+
+            @Override public void close() {
+                if (run != null) run.close();
+            }
+
+            @Override public Interruptibility interruptibility() {
+                return run == null ? Interruptibility.WORKING : run.interruptibility();
+            }
+
+            @Override public String describe() {
+                return run == null
+                        ? "到刚摆下的" + workstationName(recipe.kind()) + "跟前做" + recipe.result().describe()
+                        : run.describe();
+            }
+        };
     }
 
     // 备完料的关口：身上的料够做一份就往下走（有多少做多少）；一份都不够就失败，原因写弄不来的那几样。
