@@ -97,7 +97,7 @@ class CreateCompatTest {
     void 登记坐电梯这种出行方式与移动装置障碍() {
         CompatRegistry registry = CompatRegistry.load(List.of(supported()), loaderWith("6.0.11"));
         List<TravelMode> modes = registry.travelModes(offlineServices());
-        assertEquals(List.of("elevator"), modes.stream().map(mode -> mode.via().name()).toList());
+        assertEquals(List.of("elevator", "train"), modes.stream().map(mode -> mode.via().name()).toList());
         assertEquals(List.of("floor"), modes.getFirst().options().stream().map(ParamSpec::name).toList());
         assertEquals(1, registry.obstacleSources().size());
     }
