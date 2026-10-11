@@ -89,6 +89,7 @@ final class PanelWords {
             case DEATH_RECOVERY_APPLIED -> "死亡恢复";
             case GEAR_BROKEN -> "装备用坏";
             case REMINDER -> "提醒";
+            case DISCOVERED -> "发现";
         };
     }
 
