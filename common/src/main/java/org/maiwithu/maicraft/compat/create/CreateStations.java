@@ -7,6 +7,7 @@ import java.util.Optional;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.item.ItemStack;
 
 /**
@@ -42,6 +43,33 @@ public interface CreateStations {
 
     /** 装置在不在动：机械与时钟轴承、机械活塞、绳索滑轮、电梯滑轮；不是这几种给空。 */
     Optional<Boolean> moving(ClientLevel level, BlockPos at);
+
+    /** 机械合成器：格里放着什么、箭头朝哪、朝向；不是机械合成器给空。 */
+    Optional<CrafterReading> crafter(ClientLevel level, BlockPos at);
+
+    /** 两台机械合成器的入口连在一起没有（Create 自己的判断：两台归同一组入口）。 */
+    boolean craftersConnected(ClientLevel level, BlockPos first, BlockPos second);
+
+    /**
+     * 拿扳手连这台机械合成器与 toward 那一边的邻居时，能点它的哪几面：那一面外面不能贴着实心面，
+     * 而且 Create 认这一面上朝 toward 的那条边；不是机械合成器给空表。
+     */
+    List<Direction> crafterLinkFaces(ClientLevel level, BlockPos at, Direction toward);
+
+    /**
+     * 机械合成器的读数。
+     *
+     * @param slot     格里放着的东西；空着是空物品
+     * @param pointing 箭头朝哪（up / down / left / right），料顺着箭头送到出口那一台
+     * @param facing   正面朝哪：放料、取料、扳手改箭头都点这一面
+     */
+    record CrafterReading(ItemStack slot, String pointing, Direction facing) {
+        public CrafterReading {
+            Objects.requireNonNull(slot, "slot");
+            Objects.requireNonNull(pointing, "pointing");
+            Objects.requireNonNull(facing, "facing");
+        }
+    }
 
     /** 一格流体：流体 ID、多少毫桶、能装多少（读不到容量为 0）。 */
     record FluidReading(String fluidId, int amount, int capacity) {

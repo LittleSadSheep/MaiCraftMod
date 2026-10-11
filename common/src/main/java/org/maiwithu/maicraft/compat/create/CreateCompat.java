@@ -181,6 +181,21 @@ public final class CreateCompat extends CompatModule {
         run("改设置框的值", () -> values.sendValue(at, netId, side, row, value));
     }
 
+    /** 机械合成器的读数；见 {@link CreateStations#crafter}。 */
+    public Optional<CreateStations.CrafterReading> crafter(ClientLevel level, BlockPos at) {
+        return call("读机械合成器", () -> stations.crafter(level, at));
+    }
+
+    /** 两台机械合成器的入口连没连；见 {@link CreateStations#craftersConnected}。 */
+    public boolean craftersConnected(ClientLevel level, BlockPos first, BlockPos second) {
+        return call("读机械合成器的入口", () -> stations.craftersConnected(level, first, second));
+    }
+
+    /** 连两台机械合成器能点哪几面；见 {@link CreateStations#crafterLinkFaces}。 */
+    public List<Direction> crafterLinkFaces(ClientLevel level, BlockPos at, Direction toward) {
+        return call("找机械合成器能连的面", () -> stations.crafterLinkFaces(level, at, toward));
+    }
+
     /** 这一格里装着的流体；见 {@link CreateStations#fluids}。 */
     public List<CreateStations.FluidReading> fluids(ClientLevel level, BlockPos at) {
         return call("读流体", () -> stations.fluids(level, at));

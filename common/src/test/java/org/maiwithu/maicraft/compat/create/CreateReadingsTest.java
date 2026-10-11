@@ -126,6 +126,25 @@ class CreateReadingsTest {
     }
 
     @Test
+    void 机械合成器_格里放什么与箭头两项_正面与连入口的点击框() {
+        CreateStations.CrafterReading reading = new CreateStations.CrafterReading(
+                new ItemStack(Items.IRON_INGOT), "left", Direction.NORTH);
+        List<MachineSetting> settings = CrafterSettings.of(Optional.of(reading));
+        assertEquals(List.of("minecraft:iron_ingot", "left"), settings.stream().map(MachineSetting::value).toList());
+        BlockPos at = new BlockPos(0, 64, 0);
+        var front = CrafterSettings.front(at, Direction.NORTH);
+        assertEquals(0.0, front.minZ, 1e-9);
+        assertEquals(0.15, front.minX, 1e-9);
+        // 连东边那一台：点背面（南面）靠东的那一条，x 在 13/16 到 1 之间，贴着南面。
+        var edge = CrafterSettings.edge(at, Direction.SOUTH, Direction.EAST);
+        assertEquals(0.8125, edge.minX, 1e-9);
+        assertEquals(1.0, edge.maxX, 1e-9);
+        assertEquals(1.0, edge.maxZ, 1e-9);
+        assertTrue(CrafterLinkInstallation.shapeProblem(List.of(at, at.east())).isEmpty());
+        assertTrue(CrafterLinkInstallation.shapeProblem(List.of(at, at.east(2))).isPresent());
+    }
+
+    @Test
     void 流体_显示的字_无线红石_装置在不在动并进读数() {
         CreateStations.LinkReading link = new CreateStations.LinkReading(
                 List.of(new ItemStack(Items.REDSTONE), ItemStack.EMPTY), List.of(), true, false);

@@ -147,6 +147,7 @@ final class CreateMachineType implements MachineType {
         if (level == null || !level.isLoaded(at)) return List.of();
         List<MachineSetting> settings = new ArrayList<>(CreateValueSettings.of(compat.valueBoxes(level, at)));
         if (kind.work() == CreateMachineCatalog.Work.DEPLOYER) settings.addAll(DeployerSettings.of(compat.deployer(level, at)));
+        if (kind.work() == CreateMachineCatalog.Work.CRAFTER) settings.addAll(CrafterSettings.of(compat.crafter(level, at)));
         settings.addAll(LinkSettings.of(compat.link(level, at)));
         return settings;
     }
@@ -158,6 +159,7 @@ final class CreateMachineType implements MachineType {
             return stations.changeDeployer(level.getBlockState(at), at, key, value, permissions);
         }
         if (key.startsWith("link.")) return values.changeLink(level, at, key, value, permissions);
+        if (key.startsWith("crafter.")) return stations.changeCrafter(level, at, key, value, permissions);
         return values.change(level, at, key, value, permissions);
     }
 

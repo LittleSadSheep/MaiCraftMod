@@ -12,6 +12,9 @@ import com.simibubi.create.content.contraptions.bearing.MechanicalBearingBlockEn
 import com.simibubi.create.content.contraptions.piston.LinearActuatorBlockEntity;
 import com.simibubi.create.content.decoration.placard.PlacardBlockEntity;
 import com.simibubi.create.content.fluids.drain.ItemDrainBlockEntity;
+import com.simibubi.create.content.kinetics.crafter.CrafterHelper;
+import com.simibubi.create.content.kinetics.crafter.MechanicalCrafterBlock;
+import com.simibubi.create.content.kinetics.crafter.MechanicalCrafterBlockEntity;
 import com.simibubi.create.content.fluids.tank.FluidTankBlockEntity;
 import com.simibubi.create.content.kinetics.belt.BeltBlockEntity;
 import com.simibubi.create.content.kinetics.deployer.DeployerBlockEntity;
@@ -29,6 +32,8 @@ import com.simibubi.create.content.trains.display.FlapDisplayLayout;
 import com.simibubi.create.content.trains.display.FlapDisplaySection;
 import com.simibubi.create.content.processing.basin.BasinBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
+import com.simibubi.create.foundation.blockEntity.behaviour.edgeInteraction.EdgeInteractionBehaviour;
+import com.simibubi.create.foundation.blockEntity.behaviour.edgeInteraction.EdgeInteractionHandler;
 import com.simibubi.create.foundation.blockEntity.behaviour.fluid.SmartFluidTankBehaviour;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
@@ -159,6 +164,34 @@ public final class CreateStationReads implements CreateStations {
         boolean receiver = state.hasProperty(RedstoneLinkBlock.RECEIVER) && state.getValue(RedstoneLinkBlock.RECEIVER);
         boolean powered = state.hasProperty(BlockStateProperties.POWERED) && state.getValue(BlockStateProperties.POWERED);
         return Optional.of(new LinkReading(frequencies, spots, receiver, powered));
+    }
+
+    // 机械合成器：格里的东西画在正面上，箭头与朝向在方块状态里。
+    @Override public Optional<CrafterReading> crafter(ClientLevel level, BlockPos at) {
+        if (!level.isLoaded(at)) return Optional.empty();
+        MechanicalCrafterBlockEntity crafter = CrafterHelper.getCrafter(level, at);
+        if (crafter == null) return Optional.empty();
+        BlockState state = level.getBlockState(at);
+        return Optional.of(new CrafterReading(crafter.getInventory().getItem(0).copy(),
+                state.getValue(MechanicalCrafterBlock.POINTING).getSerializedName(),
+                state.getValue(MechanicalCrafterBlock.HORIZONTAL_FACING)));
+    }
+
+    @Override public boolean craftersConnected(ClientLevel level, BlockPos first, BlockPos second) {
+        return level.isLoaded(first) && level.isLoaded(second) && CrafterHelper.areCraftersConnected(level, first, second);
+    }
+
+    // 扳手点哪几面能连 toward 那一边：Create 自己算这一面能连的边，含 toward 的面才算。
+    @Override public List<Direction> crafterLinkFaces(ClientLevel level, BlockPos at, Direction toward) {
+        if (!level.isLoaded(at)) return List.of();
+        EdgeInteractionBehaviour edges = BlockEntityBehaviour.get(level, at, EdgeInteractionBehaviour.TYPE);
+        if (edges == null) return List.of();
+        List<Direction> faces = new ArrayList<>();
+        for (Direction face : Direction.values()) {
+            if (face.getAxis() == toward.getAxis()) continue;
+            if (EdgeInteractionHandler.getConnectiveSides(level, at, face, edges).contains(toward)) faces.add(face);
+        }
+        return faces;
     }
 
     // 装置在不在动：轴承问它自己，活塞与滑轮看公开字段 running。

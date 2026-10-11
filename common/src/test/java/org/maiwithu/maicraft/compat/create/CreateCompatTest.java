@@ -202,6 +202,11 @@ class CreateCompatTest {
             @Override public Optional<String> shownText(ClientLevel level, BlockPos at) { return Optional.empty(); }
             @Override public Optional<LinkReading> link(ClientLevel level, BlockPos at) { return Optional.empty(); }
             @Override public Optional<Boolean> moving(ClientLevel level, BlockPos at) { return Optional.empty(); }
+            @Override public Optional<CrafterReading> crafter(ClientLevel level, BlockPos at) { return Optional.empty(); }
+            @Override public boolean craftersConnected(ClientLevel level, BlockPos first, BlockPos second) { return false; }
+            @Override public List<Direction> crafterLinkFaces(ClientLevel level, BlockPos at, Direction toward) {
+                return List.of();
+            }
         };
         CreateTools tools = new CreateTools() {
             @Override public boolean wrenchable(BlockState state) { return false; }

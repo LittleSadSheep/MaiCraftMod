@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat.create;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -211,6 +212,48 @@ final class StationHandling {
                             ? InteractionConfirmation.Verdict.APPLIED : InteractionConfirmation.Verdict.PENDING));
         }
         return Optional.empty();
+    }
+
+    /**
+     * 改机械合成器一项设置的动作：格里放什么是手持料（或空着手）右键正面，格里已有别的先空着手取出再放；
+     * 箭头是拿扳手右键正面，一下转一格，读回与再转由 machine_configure 做。键不认给空。
+     */
+    Optional<Action> changeCrafter(ClientLevel level, BlockPos at, String key, String value, Permissions permissions) {
+        Optional<CreateStations.CrafterReading> reading = compat.crafter(level, at);
+        if (reading.isEmpty()) return Optional.empty();
+        AABB front = CrafterSettings.front(at, reading.get().facing());
+        if (key.equals(CrafterSettings.POINTING)) {
+            return Optional.of(new HandThenClick(services, "用扳手转机械合成器的箭头", at, front, permissions,
+                    () -> holding(DeployerSettings.WRENCH) ? Optional.empty()
+                            : services.toMainhand().moveToMainhand(DeployerSettings.WRENCH)
+                                    .or(() -> Optional.of(needItem(DeployerSettings.WRENCH))),
+                    () -> {
+                        String before = compat.crafter(level, at).map(CreateStations.CrafterReading::pointing).orElse("");
+                        return context -> compat.crafter(context.level(), at)
+                                .filter(now -> !now.pointing().equals(before)).isPresent()
+                                ? InteractionConfirmation.Verdict.APPLIED : InteractionConfirmation.Verdict.PENDING;
+                    }));
+        }
+        if (!key.equals(CrafterSettings.SLOT)) return Optional.empty();
+        List<StepsInOrder.Step> steps = new ArrayList<>();
+        // 格里已有东西（不论是不是要的）先空着手取出：手里拿着别的东西点下去 Create 不收也不换。
+        if (!reading.get().slot().isEmpty()) {
+            steps.add(new StepsInOrder.Step("空着手取出格里的东西", () -> new HandThenClick(services,
+                    "从机械合成器取出东西", at, front, permissions,
+                    () -> mainhandEmpty() ? Optional.empty() : services.toMainhand().emptyMainhand(),
+                    () -> context -> compat.crafter(context.level(), at).filter(now -> now.slot().isEmpty()).isPresent()
+                            ? InteractionConfirmation.Verdict.APPLIED : InteractionConfirmation.Verdict.PENDING)));
+        }
+        if (!value.equals(CrafterSettings.EMPTY)) {
+            steps.add(new StepsInOrder.Step("手持 " + value + " 放进格里", () -> new HandThenClick(services,
+                    "把 " + value + " 放进机械合成器", at, front, permissions,
+                    () -> holding(value) ? Optional.empty()
+                            : services.toMainhand().moveToMainhand(value).or(() -> Optional.of(needItem(value))),
+                    () -> context -> compat.crafter(context.level(), at)
+                            .filter(now -> CrafterSettings.slotValue(now.slot()).equals(value)).isPresent()
+                            ? InteractionConfirmation.Verdict.APPLIED : InteractionConfirmation.Verdict.PENDING)));
+        }
+        return Optional.of(new StepsInOrder("把机械合成器格里换成 " + value, steps));
     }
 
     // 身上没有这样东西：换手这一步直接按缺东西失败，不拿着别的东西去点。

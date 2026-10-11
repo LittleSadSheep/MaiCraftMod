@@ -54,6 +54,7 @@ final class CreateMachines {
         Optional<CreateInstallation> installation = switch (kind.work()) {
             case BELT -> Optional.of(new BeltInstallation(compat, services));
             case CHAIN_CONVEYOR -> Optional.of(new ChainConveyorInstallation(compat, services));
+            case CRAFTER -> Optional.of(new CrafterLinkInstallation(compat, services));
             default -> Optional.empty();
         };
         return new CreateMachineType(kind, compat, services, state -> blocks.contains(state.getBlock()),
