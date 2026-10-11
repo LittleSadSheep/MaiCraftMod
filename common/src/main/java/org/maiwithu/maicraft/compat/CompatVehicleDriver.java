@@ -39,6 +39,15 @@ final class CompatVehicleDriver implements VehicleDriver {
         }
     }
 
+    @Override public Optional<Run> drive(DriveRequest request) {
+        if (!module.active()) return Optional.empty();
+        try {
+            return driver.drive(request).map(run -> new Guarded(module, run));
+        } catch (ModApiMismatch broken) {
+            return Optional.empty();
+        }
+    }
+
     /** 跑起来的一次：推进、暂停、收尾按动作那一层收住；经过只读它自己记下的。 */
     private static final class Guarded extends CompatAction implements Run {
         private final Run run;

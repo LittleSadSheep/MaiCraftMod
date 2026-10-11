@@ -2,10 +2,12 @@
 package org.maiwithu.maicraft.ability.vehicle.spi;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -55,6 +57,35 @@ public interface VehicleDriver {
     /** 这辆载具能不能用这种办法试按：能就给一次运行（坐下、接管、逐条按、松开），不是这种办法开的为空。 */
     Optional<Run> test(TestRequest request);
 
+    /**
+     * 一次开到某处的请求。
+     *
+     * @param structureId    哪辆（结构身份）
+     * @param destination    开到哪（世界坐标；高度不知道时按那一柱的地面）
+     * @param heightKnown    目的地的高度核实过
+     * @param cruiseAltitude 飞艇巡航高度（船底的世界 y）；不给为 null，按"当前与目的地高的那个 + 32"
+     * @param kind           载具种类：airship / car / boat
+     * @param forward        车头朝结构自己的哪根水平轴（+x / -x / +z / -z）
+     * @param roles          操纵表：角色 → 输入（power → 打字机:W）
+     * @param permissions    这次的许可
+     */
+    record DriveRequest(String structureId, Vec3 destination, boolean heightKnown, Integer cruiseAltitude, String kind,
+                        String forward, Map<String, String> roles, Permissions permissions) {
+        public DriveRequest {
+            Objects.requireNonNull(structureId, "structureId");
+            Objects.requireNonNull(destination, "destination");
+            Objects.requireNonNull(kind, "kind");
+            Objects.requireNonNull(forward, "forward");
+            roles = Map.copyOf(roles);
+            Objects.requireNonNull(permissions, "permissions");
+        }
+    }
+
+    /** 这辆能不能用这种办法开到某处：能就给一次运行（坐下、接管、开过去、停稳、交还），不是这种办法开的为空。 */
+    default Optional<Run> drive(DriveRequest request) {
+        return Optional.empty();
+    }
+
     /** 一次驾驶运行：做完后读经过。 */
     interface Run extends Action {
 
@@ -102,17 +133,37 @@ public interface VehicleDriver {
     record Effect(double x, double y, double z, double turnX, double turnY, double turnZ) {}
 
     /**
+     * 开到某处的经过：开到没有、停稳没有分开写。
+     *
+     * @param phases        阶段怎么变的，一条一句
+     * @param landing       落点（或目标）在哪、怎么选的
+     * @param traveled      实际挪了多远（水平，格）
+     * @param maxTilt       一路上最大倾斜（度）
+     * @param arrived       停在目的地附近
+     * @param distanceLeft  停下时离目的地还差多远（水平，格）
+     * @param parked        停稳了：松开所有键后接地（船是浮着）、每秒挪不到 0.35 格、倾斜 &lt; 8°，连着 20 个样本
+     * @param parkedSamples 停稳确认连着满足了几个样本
+     */
+    record Drove(List<String> phases, String landing, double traveled, double maxTilt, boolean arrived,
+                 double distanceLeft, boolean parked, int parkedSamples) {
+        public Drove {
+            phases = List.copyOf(phases);
+        }
+    }
+
+    /**
      * 一次驾驶的经过：动作成没成（按了没有、松开没有）和载具怎么动分开写。
      *
      * @param structureId  开的是哪辆
      * @param seat         怎么坐的：坐在哪个座位上，或没有够得着的座位站着
-     * @param tried        每条输入的经过
+     * @param tried        试按时每条输入的经过；开到某处时为空
      * @param released     本次按下的键都松开了
      * @param disconnected 控制件交还了（无线红石打字机断开连接）
      * @param note         经过一句话
+     * @param drove        开到某处的经过；试按时为 null
      */
     record Report(String structureId, String seat, List<Tried> tried, boolean released, boolean disconnected,
-                  String note) {
+                  String note, Drove drove) {
         public Report {
             tried = List.copyOf(tried);
         }
