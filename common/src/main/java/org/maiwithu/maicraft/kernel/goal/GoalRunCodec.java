@@ -128,6 +128,7 @@ final class GoalRunCodec {
                 json.addProperty("z", position.z());
                 if (position.dimension() != null) json.addProperty("dimension", position.dimension());
             }
+            case Target.Dimension dimension -> json.addProperty("name", dimension.name());
             case Target.Player player -> json.addProperty("name", player.name());
             case Target.Direction direction -> {
                 json.addProperty("toward", lower(direction.toward()));
@@ -148,6 +149,7 @@ final class GoalRunCodec {
             case POSITION -> new Target.Position(json.get("x").getAsInt(),
                     json.has("y") ? json.get("y").getAsInt() : null, json.get("z").getAsInt(),
                     json.has("dimension") ? json.get("dimension").getAsString() : null);
+            case DIMENSION -> new Target.Dimension(json.get("name").getAsString());
             case PLAYER -> new Target.Player(json.get("name").getAsString());
             case DIRECTION -> new Target.Direction(Target.Toward.valueOf(upper(json.get("toward").getAsString())),
                     json.get("distance").getAsInt());

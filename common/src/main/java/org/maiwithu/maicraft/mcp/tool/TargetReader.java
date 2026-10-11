@@ -50,6 +50,7 @@ final class TargetReader {
             case LANDMARK -> named(object, path, check, Target.Landmark::new);
             case PLAYER -> named(object, path, check, Target.Player::new);
             case POSITION -> position(object, path, check);
+            case DIMENSION -> named(object, path, check, Target.Dimension::new);
             case DIRECTION -> direction(object, path, check);
             case PREVIOUS -> previous(object, path, check);
         };

@@ -44,6 +44,7 @@
     "seen",
     "landmark",
     "position",
+    "dimension",
     "player",
     "direction",
     "previous"

@@ -54,6 +54,22 @@ public sealed interface Target {
         }
     }
 
+    /**
+     * 就是去那个维度：name 写命名空间维度 id，例如 minecraft:the_nether。
+     * "那个维度的这个坐标"不用这种目标对象——position 带上 dimension 字段表达。
+     */
+    record Dimension(String name) implements Target {
+        public Dimension {
+            if (name == null || !name.matches("[a-z0-9_.-]+:[a-z0-9/._-]+")) {
+                throw new IllegalArgumentException("维度 id 应写成命名空间 id，例如 minecraft:the_nether：" + name);
+            }
+        }
+
+        @Override public TargetKind kind() {
+            return TargetKind.DIMENSION;
+        }
+    }
+
     /** 一位玩家。 */
     record Player(String name) implements Target {
         public Player {

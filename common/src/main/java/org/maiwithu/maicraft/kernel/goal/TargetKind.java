@@ -7,6 +7,7 @@ public enum TargetKind {
     SEEN,
     LANDMARK,
     POSITION,
+    DIMENSION,
     PLAYER,
     DIRECTION,
     PREVIOUS

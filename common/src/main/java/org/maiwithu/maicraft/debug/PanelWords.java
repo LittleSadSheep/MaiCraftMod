@@ -100,7 +100,9 @@ final class PanelWords {
             case Target.Seen seen -> "看到的 " + seen.id();
             case Target.Landmark landmark -> "地点「" + landmark.name() + "」";
             case Target.Position position -> "(" + position.x() + ", "
-                    + (position.y() == null ? "?" : position.y()) + ", " + position.z() + ")";
+                    + (position.y() == null ? "?" : position.y()) + ", " + position.z() + ")"
+                    + (position.dimension() == null ? "" : " @" + position.dimension());
+            case Target.Dimension dimension -> "维度 " + dimension.name();
             case Target.Player player -> "玩家 " + player.name();
             case Target.Direction direction -> "往" + toward(direction.toward()) + " " + direction.distance() + " 格";
             case Target.Previous previous -> previous.step() == null ? "上一步的位置" : "第 " + previous.step() + " 步的位置";
