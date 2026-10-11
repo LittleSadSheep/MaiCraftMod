@@ -16,9 +16,8 @@ import org.maiwithu.maicraft.game.player.PlayerInput;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
- * 近身走位那一步的生产实现：面朝目标，往前凑或往后退一刻。迈之前先看那一步落脚处：
- * 脚下两格内没有能站的地面（悬崖、深坑）、是岩浆火堆仙人掌浆果丛这类伤人的、或者那一格被方块挡住，就站住不迈。
- * 后退时眼睛还看着它，被追上也照样出手。
+ * 走位那一步的生产实现：读当刻脚下的路给走位挑方向，再按挑好的一步迈。落脚处脚下两格内没有能站的地面（悬崖、深坑）、
+ * 是岩浆火堆仙人掌浆果丛这类伤人的、或者那一格被方块挡住，就不往那儿迈。后退、横移时眼睛还看着它，被追上也照样出手。
  */
 public final class CombatStepping {
 
@@ -28,29 +27,6 @@ public final class CombatStepping {
     private static final int SAFE_DROP = 2;
 
     private CombatStepping() {}
-
-    /** 面朝这只，往前（正）或往后（负）迈这一刻；0 或那一步不安全时站住。 */
-    public static void step(TickContext tick, int entityId, float forward) {
-        PlayerContext player = tick.player();
-        LocalPlayer self = player == null ? null : player.localPlayer();
-        Entity target = self == null ? null : self.level().getEntity(entityId);
-        if (target == null) return;
-        Vec3 delta = target.position().subtract(self.position());
-        double flat = Math.hypot(delta.x, delta.z);
-        if (flat < 1.0E-3) return;
-        Vec3 toward = new Vec3(delta.x / flat, 0, delta.z / flat);
-        float yaw = (float) Math.toDegrees(Math.atan2(delta.z, delta.x)) - 90;
-        Vec3 eye = self.getEyePosition();
-        Vec3 aim = target.getBoundingBox().getCenter();
-        float pitch = (float) -Math.toDegrees(Math.atan2(aim.y - eye.y, Math.hypot(aim.x - eye.x, aim.z - eye.z)));
-        player.input().requestLook(yaw, pitch, player.clientTick());
-        float move = forward;
-        if (move != 0f) {
-            Vec3 next = self.position().add(toward.scale(Math.signum(move) * LOOK_AHEAD));
-            if (!safeFooting(self.level(), BlockPos.containing(next))) move = 0f;
-        }
-        player.input().applyMovement(new PlayerInput.Movement(move, 0f, false, false, false), player.clientTick());
-    }
 
     /**
      * 当刻脚下的路，供走位挑方向：朝那个方向看一步远的落脚处，站得住是平地；那一格被挡、但上面两格空着、

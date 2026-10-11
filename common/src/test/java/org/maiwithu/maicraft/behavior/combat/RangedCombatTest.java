@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import net.minecraft.world.phys.Vec3;
 import org.junit.jupiter.api.Test;
 
-/** 弓与近战的取舍、弓的走位带、打玩家的出刀节拍环、箭的弹道公式。 */
+/** 弓与近战的取舍、箭的弹道公式。 */
 class RangedCombatTest {
 
     @Test
@@ -28,25 +28,6 @@ class RangedCombatTest {
         assertTrue(RangedCombat.preferBow(true, true, false, false, 7.5, false));
         assertTrue(RangedCombat.preferBow(true, true, false, false, 6.0, true));
         assertFalse(RangedCombat.preferBow(true, true, false, false, 4.0, true));
-    }
-
-    @Test
-    void bowBandKeepsEightToTwelveBlocks() {
-        assertEquals(-1f, RangedCombat.forward(5.0, false), "太近往后退");
-        assertEquals(0f, RangedCombat.forward(10.0, false), "带里站住");
-        assertEquals(1f, RangedCombat.forward(15.0, false), "太远往前凑");
-        assertEquals(-1f, RangedCombat.forward(15.0, true), "撤离只往后");
-    }
-
-    @Test
-    void playerRingFollowsAttackCadence() {
-        // 打玩家：充能好了凑进去，没好就退到对方够不着的地方；打怪照旧用怪的环。
-        CloseCombat.Ring ready = CloseCombat.Ring.player(true);
-        CloseCombat.Ring waiting = CloseCombat.Ring.player(false);
-        assertEquals(1f, CloseCombat.forward(3.5, false, ready), "充能好了往里凑");
-        assertEquals(-1f, CloseCombat.forward(3.5, false, waiting), "冷却中退出对方的手够不着的地方");
-        assertTrue(waiting.inner() > 3.3, "等冷却时站在玩家够不着的距离");
-        assertEquals(0f, CloseCombat.forward(2.5, false, CloseCombat.Ring.MOB), "打怪的环不变");
     }
 
     @Test

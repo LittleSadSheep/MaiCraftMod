@@ -75,7 +75,6 @@ public final class Battle {
     private final double radius;
 
     private final RangedCombat bow = new RangedCombat();
-    private final RangedCombat.Moves bowMoves;
     private final Retreat retreat = new Retreat();
     private Action strike;
     private int strikeTarget = -1;
@@ -99,15 +98,6 @@ public final class Battle {
         this.moves = moves;
         this.roster = roster;
         this.radius = radius;
-        this.bowMoves = new RangedCombat.Moves() {
-            @Override public Action strike(TickContext context, int entityId) {
-                return moves.strike(context, entityId);
-            }
-
-            @Override public Action shoot(TickContext context, int entityId) {
-                return moves.shoot(context, entityId);
-            }
-        };
     }
 
     public Moment tick(TickContext context) {
@@ -257,7 +247,7 @@ public final class Battle {
         moves.lowerGuard();
         retarget(target.id());
         CombatSenses.Threat threat = target.threat();
-        boolean fired = bow.tick(context, bowMoves, threat.entityId(), threat.distance(), false);
+        boolean fired = bow.tick(context, moves, threat.entityId());
         boolean moved = false;
         if (!bow.steady()) {
             double inner = bowInner(target);

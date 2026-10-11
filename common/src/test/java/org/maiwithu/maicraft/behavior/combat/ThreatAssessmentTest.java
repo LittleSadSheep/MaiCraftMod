@@ -50,14 +50,6 @@ class ThreatAssessmentTest {
     }
 
     @Test
-    void idleExplosiveExcludedFromMeleeCandidatesWithoutRanged() {
-        List<ThreatAssessment.Foe> candidates = ThreatAssessment.meleeCandidates(List.of(IDLE_CREEPER, ZOMBIE), false);
-        assertEquals(List.of(ZOMBIE), candidates, "会炸又没远程手段的不凑近打");
-        // 有远程手段时它仍是候选：隔远了点它不亏。
-        assertEquals(2, ThreatAssessment.meleeCandidates(List.of(IDLE_CREEPER, ZOMBIE), true).size());
-    }
-
-    @Test
     void retreatLineFollowsEffectiveHealth() {
         // 满血裸奔 20：折算后仍是 20，不在线下；4 血裸奔折算还是 4，在线下。
         assertTrue(ThreatAssessment.belowRetreatLine(new ThreatAssessment.MySide(4, 0, 5, 0, true)));

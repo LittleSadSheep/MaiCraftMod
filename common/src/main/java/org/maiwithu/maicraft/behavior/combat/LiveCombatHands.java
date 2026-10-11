@@ -2,8 +2,6 @@
 package org.maiwithu.maicraft.behavior.combat;
 
 import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.player.Player;
 
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -11,7 +9,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 打架时手上那些事的生产实现，自卫和点名战斗共用一份：射一箭、举盾放盾、看身上有没有能射的和剑斧、
- * 打玩家时按出刀节拍挑走位环。
+ * 攻击充能好了没。
  */
 public final class LiveCombatHands {
 
@@ -52,13 +50,6 @@ public final class LiveCombatHands {
     public boolean attackReady(TickContext context) {
         LocalPlayer self = self(context);
         return self == null || self.getAttackStrengthScale(0.0F) >= ATTACK_READY;
-    }
-
-    /** 打玩家按出刀节拍走位，打怪按怪的环。 */
-    public CloseCombat.Ring ring(TickContext context, int entityId) {
-        LocalPlayer self = self(context);
-        Entity target = self == null ? null : self.level().getEntity(entityId);
-        return target instanceof Player ? CloseCombat.Ring.player(attackReady(context)) : CloseCombat.Ring.MOB;
     }
 
     public void guard(TickContext context, double distance, boolean aboutToStrike) {

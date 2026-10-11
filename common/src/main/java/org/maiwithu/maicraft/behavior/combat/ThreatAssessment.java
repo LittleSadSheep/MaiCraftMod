@@ -151,21 +151,6 @@ public final class ThreatAssessment {
             .thenComparing(foe -> foe.chasingMe() ? 0 : 1)
             .thenComparingDouble(Foe::distance);
 
-    /**
-     * 近战候选：会炸但没点引信的目标，手里又没有远程手段时不进近战候选——
-     * 凑近一拳可能把它点着；躲它归撤离与避险。
-     */
-    public static List<Foe> meleeCandidates(List<Foe> foes, boolean hasRanged) {
-        List<Foe> candidates = new ArrayList<>();
-        for (Foe foe : foes) {
-            if (foe.kind() == Kind.EXPLOSIVE && !foe.armed() && !hasRanged) {
-                continue;
-            }
-            candidates.add(foe);
-        }
-        return candidates;
-    }
-
     /** 一次评估的结论：判定与打不过时差在哪（空列表表示没有阻拦）。 */
     public record Assessment(Verdict verdict, List<String> gaps) {
         public Assessment {

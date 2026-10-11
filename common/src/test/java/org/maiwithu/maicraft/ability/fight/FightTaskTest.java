@@ -158,7 +158,7 @@ class FightTaskTest {
 
     @Test
     void litCreeperNearbyIsEvadedBeforeApproachingTheNamedTarget() {
-        // 点名打僵尸，旁边一只点着引信的苦力怕离 4 格：先退到 9 格外，不朝僵尸走。
+        // 点名打僵尸，旁边一只点着引信的苦力怕离 4 格：当刻背离它疾跑，不朝僵尸走。
         CombatSenses withCreeper = new CombatSenses() {
             @Override public List<Threat> threats(TickContext context, double radius) {
                 return List.of(new Threat(9, new UUID(0, 9), "minecraft:creeper", 4, 64, 0, 4,

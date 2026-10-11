@@ -214,6 +214,23 @@ class BattleTest {
     }
 
     @Test
+    void meleeBandFollowsBothSidesReachAndTheCooldown() {
+        Battlefield.Me me = new Battlefield.Me(0, 64, 0, 0.3, 20, 0, 3.0, true, true, false, 3, 4);
+        Footwork.Band ready = Battle.meleeBand(me, zombie(1, 3), true);
+        assertEquals(2.02, ready.inner(), 1e-9, "内沿是僵尸够得着我");
+        assertEquals(3.15, ready.outer(), 1e-9, "外沿是我稳稳够得着它");
+        Footwork.Band cooling = Battle.meleeBand(me, zombie(1, 3), false);
+        assertTrue(cooling.inner() > ready.inner(), "冷却中退到它够不着外");
+        // 打玩家：两边手一样长，冷却好了才凑进去（3.15 内），没好就退到他够不着的地方（3.3 外）等。
+        CombatSenses.Threat player = new CombatSenses.Threat(5, UUID.randomUUID(), "minecraft:player", 3, 64, 0, 3,
+                ThreatAssessment.Kind.MELEE, false, true, false, 0.3, 2.7, false, 3.3, false);
+        assertTrue(Battle.meleeBand(me, player, true).outer() <= 3.15);
+        assertTrue(Battle.meleeBand(me, player, false).inner() > 3.3);
+        // 苦力怕守在点火距离（3 格）外砍。
+        assertTrue(Battle.meleeBand(me, creeper(3.2, false), true).inner() > CombatGeometry.CREEPER_IGNITE);
+    }
+
+    @Test
     void shootsFromAfarAndFinishesWhenClear() {
         Senses senses = new Senses();
         senses.threats.add(zombie(1, 10));
