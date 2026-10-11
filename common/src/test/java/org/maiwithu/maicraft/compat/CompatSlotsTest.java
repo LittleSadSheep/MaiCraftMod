@@ -17,8 +17,11 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
+import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
+import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.block.state.BlockState;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
@@ -45,6 +48,13 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 模组停用或接口对不上时如实回答"用不了"，交出的动作推进到一半停用时按不支持收场。
  */
 class CompatSlotsTest {
+
+    // 测试里要用到原版物品（扳手替身认的工具）：先引导注册表，不靠别的测试类先跑过。
+    @BeforeAll
+    static void bootMinecraft() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+    }
 
     /** 这里的建法都不碰玩家行为：登记表只把它原样交给建法。 */
     private static final PlayerServices NO_SERVICES = null;

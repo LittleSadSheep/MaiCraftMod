@@ -87,6 +87,16 @@ repositories {
         }
         filter { includeGroup 'mezz.jei' }
     }
+    // 通用机械（Mekanism）从它的官方 maven 取，免登录；只放行 mekanism 这个组。
+    exclusiveContent {
+        forRepository {
+            maven {
+                name = 'ModMaven'
+                url = 'https://modmaven.dev'
+            }
+        }
+        filter { includeGroup 'mekanism' }
+    }
     // FTB 任务与 FTB Library 从 FTB 的官方 maven 取，免登录。
     exclusiveContent {
         forRepository {
@@ -114,6 +124,8 @@ dependencies {
     compileOnly("net.createmod.ponder:ponder-neoforge:${ponder_version}") { transitive = false }
     // 机械动力只要它自己的类：读写端读动力、传送带、链条输送机、置物台这些方块实体，不碰 Flywheel 的渲染。
     compileOnly("com.simibubi.create:create-${minecraft_version}:${create_version}") { transitive = false }
+    // 通用机械只要它自己的类：读写端读侧面配置、管道连接、配置器模式，发配置器换模式的包。
+    compileOnly("mekanism:Mekanism:${mekanism_version}") { transitive = false }
     // EMI 要整个 jar：加载完没有要看 runtime 包里的 EmiReloadManager。JEI 只要两份公开接口。
     compileOnly("dev.emi:emi-neoforge:${emi_version}") { transitive = false }
     compileOnly("mezz.jei:jei-${minecraft_version}-common-api:${jei_version}") { transitive = false }
