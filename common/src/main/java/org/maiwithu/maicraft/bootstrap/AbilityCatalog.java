@@ -48,7 +48,9 @@ import org.maiwithu.maicraft.ability.light.LightModule;
 import org.maiwithu.maicraft.ability.obtain.ObtainAbility;
 import org.maiwithu.maicraft.ability.vehicle.VehicleAssembleModule;
 import org.maiwithu.maicraft.ability.vehicle.VehicleDriveModule;
+import org.maiwithu.maicraft.ability.vehicle.VehicleTravelMode;
 import org.maiwithu.maicraft.ability.vehicle.api.VehicleControls;
+import org.maiwithu.maicraft.ability.vehicle.spi.VehicleDriver;
 import org.maiwithu.maicraft.ability.quest.QuestModule;
 import org.maiwithu.maicraft.ability.remember.RememberAbility;
 import org.maiwithu.maicraft.ability.sequence.SequenceModule;
@@ -170,6 +172,7 @@ import org.maiwithu.maicraft.game.world.FurnaceFuels;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
+import org.maiwithu.maicraft.behavior.travel.spi.TravelMode;
 import org.maiwithu.maicraft.compat.CompatRegistry;
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
@@ -522,7 +525,7 @@ public final class AbilityCatalog {
                         deps.walks(), shared.innerNeeds(), shared.toMainhand(),
                         new LiveBlockUses(deps.interactions()), construction,
                         deps.memory(), deps.walkInternals(), deps.travelProgress()),
-                deps.travelWorld(), deps.compat().travelModes(services)));
+                deps.travelWorld(), travelModes(deps, services)));
 
         // 寻找：方块与实体扫已加载区，结构查记过的产地线索；命中直接在场景的观察编号表上领编号。
         registry.register(FindModule.live(deps.context(), deps.blockScans(), deps.creatures(),
@@ -556,6 +559,19 @@ public final class AbilityCatalog {
                 new SceneSeenTargets(deps::scene), id -> deps.scene().seen().structureOf(id), deps.memory(),
                 () -> deps.context().get() == null || deps.context().get().localPlayer() == null ? BlockPos.ZERO
                         : deps.context().get().localPlayer().blockPosition()));
+    }
+
+    /**
+     * 出行的方式：联动登记的（电梯、喷气背包、火车、上下船），装了能开载具的联动时再加开自己的载具（via=vehicle）。
+     */
+    private static List<TravelMode> travelModes(Deps deps, PlayerServices services) {
+        List<TravelMode> modes = new ArrayList<>(deps.compat().travelModes(services));
+        List<VehicleDriver> drivers = deps.compat().vehicleDrivers(services);
+        if (!drivers.isEmpty()) {
+            modes.add(new VehicleTravelMode(drivers, deps.compat().vehicleReaders(services), vehicleControls(deps),
+                    id -> deps.scene().seen().structureOf(id)));
+        }
+        return modes;
     }
 
     /**
