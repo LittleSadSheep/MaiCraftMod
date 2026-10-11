@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.neoforge.compat.create;
 
+import net.minecraft.world.phys.AABB;
+import net.minecraft.core.BlockPos;
+import net.createmod.catnip.platform.CatnipServices;
+import com.simibubi.create.content.contraptions.glue.SuperGlueSelectionPacket;
+import com.simibubi.create.content.contraptions.glue.SuperGlueEntity;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -45,5 +50,16 @@ public final class CreateToolReads implements CreateTools {
                     result.getCount()));
         }
         return recipes;
+    }
+
+    @Override public void glue(BlockPos from, BlockPos to) {
+        CatnipServices.NETWORK.sendToServer(new SuperGlueSelectionPacket(from, to));
+    }
+
+    // 那一片有没有胶：附近的胶里有一块的范围正好是这一片（Create 用 span 算两角盖住的方块）。
+    @Override public boolean glued(ClientLevel level, BlockPos from, BlockPos to) {
+        AABB span = SuperGlueEntity.span(from, to);
+        return level.getEntitiesOfClass(SuperGlueEntity.class, span.inflate(1)).stream()
+                .anyMatch(glue -> glue.getBoundingBox().equals(span));
     }
 }

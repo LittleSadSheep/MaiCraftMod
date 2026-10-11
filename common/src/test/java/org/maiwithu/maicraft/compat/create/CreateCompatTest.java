@@ -213,6 +213,8 @@ class CreateCompatTest {
         CreateTools tools = new CreateTools() {
             @Override public boolean wrenchable(BlockState state) { return false; }
             @Override public List<Polishing> polishing(ClientLevel level) { return List.of(); }
+            @Override public void glue(BlockPos from, BlockPos to) { }
+            @Override public boolean glued(ClientLevel level, BlockPos from, BlockPos to) { return false; }
         };
         CreateValues values = new CreateValues() {
             @Override public Boxes boxes(ClientLevel level, BlockPos at) { return new Boxes(List.of(), List.of()); }

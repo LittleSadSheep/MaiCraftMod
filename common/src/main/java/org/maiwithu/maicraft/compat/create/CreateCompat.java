@@ -166,6 +166,16 @@ public final class CreateCompat extends CompatModule {
         return call("读砂纸打磨的配方", () -> tools.polishing(level));
     }
 
+    /** 用强力胶粘一片；见 {@link CreateTools#glue}。 */
+    public void glue(BlockPos from, BlockPos to) {
+        run("用强力胶粘一片", () -> tools.glue(from, to));
+    }
+
+    /** 那一片粘上没有；见 {@link CreateTools#glued}。 */
+    public boolean glued(ClientLevel level, BlockPos from, BlockPos to) {
+        return call("读强力胶", () -> tools.glued(level, from, to));
+    }
+
     /** 库存请求器上次读到的现货；见 {@link CreateStations#stock}。 */
     public Optional<CreateStations.StockSnapshot> stock(ClientLevel level, BlockPos at) {
         return call("读库存请求器的现货", () -> stations.stock(level, at));

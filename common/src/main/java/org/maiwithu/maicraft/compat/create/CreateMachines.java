@@ -56,6 +56,8 @@ final class CreateMachines {
             case CHAIN_CONVEYOR -> Optional.of(new ChainConveyorInstallation(compat, services));
             case CRAFTER -> Optional.of(new CrafterLinkInstallation(compat, services));
             case ARM -> Optional.of(new ArmInstallation(compat, services));
+            // 装置都会粘强力胶：谁先接下这一段谁来装，粘的是哪一片由安装段自己说。
+            case MOTION -> Optional.of(new GlueInstallation(compat, services));
             default -> Optional.empty();
         };
         return new CreateMachineType(kind, compat, services, state -> blocks.contains(state.getBlock()),

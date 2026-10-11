@@ -168,6 +168,8 @@ final class CreateMachineKnowledge implements KnowledgeSource {
             case MIXER -> text.append("- machine_run：料扔进正下方第二格的工作盆里（站到盆边扔），产物留在盆里，")
                     .append("空手右键工作盆取出\n");
             case BASIN -> text.append("- machine_run：站到盆边把料扔进去，落在盆沿上也收；空手右键取出盆里的东西\n");
+            case MOTION -> text.append("- 要一起动的方块用强力胶粘：machine_build 的安装段 `{kind: create:super_glue, offsets: [一角, 对角]}`，")
+                    .append("两角之间的方块要连着、相距不到 25 格，身上要有强力胶；装置的轴转起来（或通电）时把粘着的一片推拉、转动、吊起\n");
             case ARM -> text.append("- machine_build：机械臂那一格不写进 cells，写一段安装段 `{kind: create:mechanical_arm, ")
                     .append("offsets: [机械臂, 取放点...], roles: [arm, take 或 deposit...]}`；取放点（置物台、传送带、漏斗、工作盆……）")
                     .append("照常写进 cells。施工先放好取放点，再拿着机械臂物品挨个点（取点一下、放点两下），最后放下机械臂；")

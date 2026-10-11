@@ -94,6 +94,14 @@ class CreateShapesTest {
     }
 
     @Test
+    void 强力胶写两个对角_相距不到二十五格() {
+        BlockPos corner = new BlockPos(0, 64, 0);
+        assertTrue(GlueInstallation.shapeProblem(List.of(corner, corner.offset(3, 2, 4))).isEmpty());
+        assertTrue(GlueInstallation.shapeProblem(List.of(corner)).isPresent(), "只写了一角");
+        assertTrue(GlueInstallation.shapeProblem(List.of(corner, corner.east(25))).isPresent(), "太远");
+    }
+
+    @Test
     void 机械臂第一格是它自己_取放点写take或deposit_不重复不出范围() {
         BlockPos arm = new BlockPos(0, 64, 0);
         BlockPos depot = arm.east(2);
