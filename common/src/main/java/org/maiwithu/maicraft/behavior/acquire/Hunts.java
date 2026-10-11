@@ -23,7 +23,7 @@ public interface Hunts {
      * 附近没有候选、愿意走时出去找的动作：走到一片看一片，见到候选就地转入狩猎，
      * 走满给定的距离还没见到就如实失败，不把身体带进没有上限的搜索。
      */
-    Optional<Action> searchAndHunt(SearchPlan plan, Permissions permissions);
+    Optional<Action> searchAndHunt(ItemRequest request, SearchPlan plan, Permissions permissions);
 
     /** 出去找一片的打算：找哪些类型、羊毛要什么颜色、扫多大、走多远、多久看一片。 */
     record SearchPlan(List<String> typeIds, Optional<String> sheepColorNeeded, boolean woolRequest,

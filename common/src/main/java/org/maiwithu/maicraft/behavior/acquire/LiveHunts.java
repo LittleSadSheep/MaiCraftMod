@@ -23,7 +23,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 /**
  * 狩猎的生产实现：逐只走近、看准、交给战斗域的攻击动作出手，打倒了就地收掉落。
  *
- * <p>出手前必须看得见（射线核对把关）：被墙挡住就朝它走，看见才出手；出手后盯住这只，
+ * <p>出手前必须看得见、够得着（射线核对把关）：被墙挡住或离得远就朝它现在的位置走，看见又够得着才出手；
+ * 出手用和自卫同一个近战出手，先把最好的剑斧换到主手。出手后盯住这只，
  * 不因更近的同类反复改道。打斗中每刻核对目标：被拴绳、被命名、被驯服、圈起来了——变成别人的了
  * 就停手，记下原因换下一只（事实核对，不是拦截）。它不在了（走远、被别人打死）就地捡一下
  * 这次新掉出来的，捡不到的如实记下、不冒充收干净——目标物品够数就算这一单拿到。
@@ -38,6 +39,8 @@ public final class LiveHunts implements Hunts {
     private static final long PER_TARGET_TICKS = 20L * 40;
     /** 出去找时，走向一个搜索点的期限（刻）；走不到就换下一个点。 */
     private static final long PER_POINT_TICKS = 20L * 30;
+    /** 追猎物时按多大的方格认"它挪地方了"（格）：挪出这一格就按新位置重新走。 */
+    private static final double APPROACH_CELL = 4.0;
 
     private final HuntMoves moves;
     private final PicksUpDrops drops;
@@ -63,8 +66,9 @@ public final class LiveHunts implements Hunts {
         return Optional.of(new Hunting(request, candidates.iterator(), null, permissions));
     }
 
-    @Override public Optional<Action> searchAndHunt(SearchPlan plan, Permissions permissions) {
-        return Optional.of(new Hunting(null, List.<ScansCreatures.CreatureSpot>of().iterator(), plan, permissions));
+    @Override public Optional<Action> searchAndHunt(ItemRequest request, SearchPlan plan, Permissions permissions) {
+        // 出去找也要知道找什么、要几件：够数没有、失败说明里缺什么，都按这一单的请求算。
+        return Optional.of(new Hunting(request, List.<ScansCreatures.CreatureSpot>of().iterator(), plan, permissions));
     }
 
     /** 一次狩猎的动作：逐只打；或先出去一片一片找，见到再打。 */
@@ -198,10 +202,14 @@ public final class LiveHunts implements Hunts {
                 dropTarget();
                 return ActionStatus.progressed();
             }
-            if (!seen.get()) {
-                // 被墙挡住：朝它走过去，看见再出手；一直看不见就超时换下一只。
-                keep("走近 " + target.entityId(),
-                        () -> moves.walkTo(target.at().x() + 0.5, target.at().y(), target.at().z() + 0.5));
+            if (!seen.get() || !moves.inReach(tick, target.entityId())) {
+                // 被墙挡住或还够不着：朝它现在的位置走过去，看得见又够得着再出手；一直走不到就超时换下一只。
+                // 它挪出原来那片（四格见方）就按新位置重新走，不追着扫描时的旧位置跑。
+                double[] at = moves.positionOf(tick, target.entityId()).orElse(new double[] {
+                        target.at().x() + 0.5, target.at().y(), target.at().z() + 0.5});
+                keep("走近 " + target.entityId() + "@" + (int) Math.floor(at[0] / APPROACH_CELL)
+                                + "," + (int) Math.floor(at[2] / APPROACH_CELL),
+                        () -> moves.walkTo(at[0], at[1], at[2]));
                 stepCurrent(tick, "走近 " + target.describe());
                 return ActionStatus.running();
             }

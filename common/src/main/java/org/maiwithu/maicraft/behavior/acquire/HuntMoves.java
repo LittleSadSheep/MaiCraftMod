@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.acquire;
 
+import java.util.Optional;
+
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
@@ -10,8 +12,14 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  */
 public interface HuntMoves {
 
-    /** 对这只生物出手一次（原生攻击，充能够格才挥、逐刻确认）。 */
+    /** 对这只生物出手一次：先把挑好的近战武器拿到主手，再原生攻击（充能够格才挥、逐刻确认）。 */
     Action strike(TickContext context, int entityId);
+
+    /** 站在这儿够不够得着它：按角色的实体触及距离量到它的包围盒，够不着就得先走近。 */
+    boolean inReach(TickContext context, int entityId);
+
+    /** 这只生物此刻在哪；不在了为空。走近时朝它现在的位置走，不朝扫描时记下的旧位置走。 */
+    Optional<double[]> positionOf(TickContext context, int entityId);
 
     /** 朝一个位置走过去（只走不改）。 */
     Action walkTo(double x, double y, double z);

@@ -2,15 +2,16 @@
 package org.maiwithu.maicraft.behavior.acquire;
 
 import java.util.Objects;
+import java.util.Optional;
 
 import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 
-import org.maiwithu.maicraft.behavior.interaction.InteractionAction;
+import org.maiwithu.maicraft.behavior.survival.MeleeStrike;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
-import org.maiwithu.maicraft.game.interaction.Interaction;
+import org.maiwithu.maicraft.game.world.InteractionRange;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -19,10 +20,14 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 /**
  * 狩猎出手的生产实现：原生攻击与走到。
  *
- * <p>出手按游戏接口层的攻击交互走——充能够格才挥、换手当刻与目标无敌帧不挥，这些逐刻确认都在交互里；
- * 走位只走不改，追猎物不挖路不垫路。与自卫、战斗的动手是同一条攻击事实，不另写一套。
+ * <p>出手和自卫、点名战斗是同一个近战出手：先把剑斧里最好的那把换到主手，再原生攻击——充能够格才挥、
+ * 换手当刻与目标无敌帧不挥，这些逐刻确认都在交互里。够不够得着按角色的实体触及距离量，
+ * 够不着由狩猎先走近；走位只走不改，追猎物不挖路不垫路。
  */
 public final class LiveHuntMoves implements HuntMoves {
+
+    /** 触及距离留的余量（格）：量到包围盒刚好在边上时准星常打不中，先多走半步。 */
+    private static final double REACH_MARGIN = 0.4;
 
     private final WalkTo walks;
 
@@ -37,9 +42,26 @@ public final class LiveHuntMoves implements HuntMoves {
             // 目标已经不在或这一刻交不出交互：返回一个立刻结束的空动作，下一刻重新决定。
             return AlreadyOver.INSTANCE;
         }
-        Interaction attack = Interaction.attackEntity(player, player.interactionSender(),
-                player.menuActions(), player.input(), target);
-        return new InteractionAction(attack, "攻击 " + target.getType().toString());
+        // 换武器 -> 出手：拿着镐打羊也能打，但有剑斧就先换上，和自卫、点名战斗同一套出手。
+        return new MeleeStrike(entityId);
+    }
+
+    @Override public boolean inReach(TickContext context, int entityId) {
+        var player = context.player();
+        var self = player == null ? null : player.localPlayer();
+        var target = self == null || player.level() == null ? null : player.level().getEntity(entityId);
+        if (target == null) return false;
+        // 眼睛到它包围盒最近一点的距离，留一点余量：贴着触及边缘时准星常常差一丝打不到。
+        var eye = self.getEyePosition();
+        double reach = InteractionRange.entityReach(self) - REACH_MARGIN;
+        return target.getBoundingBox().distanceToSqr(eye) <= reach * reach;
+    }
+
+    @Override public Optional<double[]> positionOf(TickContext context, int entityId) {
+        var player = context.player();
+        var target = player == null || player.level() == null ? null : player.level().getEntity(entityId);
+        if (target == null || target.isRemoved()) return Optional.empty();
+        return Optional.of(new double[] {target.getX(), target.getY(), target.getZ()});
     }
 
     @Override public Action walkTo(double x, double y, double z) {

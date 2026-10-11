@@ -64,7 +64,7 @@ class HuntSourceTest {
             });
         }
 
-        @Override public Optional<Action> searchAndHunt(SearchPlan plan, Permissions permissions) {
+        @Override public Optional<Action> searchAndHunt(ItemRequest request, SearchPlan plan, Permissions permissions) {
             return Optional.of(new Action() {
                 @Override public ActionStatus tick(TickContext context) { return ActionStatus.done(); }
                 @Override public String describe() { return "出去找替身"; }

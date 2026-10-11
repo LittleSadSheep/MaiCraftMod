@@ -89,7 +89,7 @@ public final class HuntSource implements ItemSource {
             // 出去找：按 max_distance 一片一片看，见到候选就地转入狩猎。
             double maxDistance = context.maxDistanceBlocks() == null
                     ? SEARCH_RADIUS_BLOCKS : context.maxDistanceBlocks();
-            return hunts.searchAndHunt(new Hunts.SearchPlan(types,
+            return hunts.searchAndHunt(request, new Hunts.SearchPlan(types,
                     VanillaEntityDrops.sheepColorNeeded(request.wanted(), tags),
                     VanillaEntityDrops.woolRequest(request.wanted(), tags),
                     searchRadius(context), maxDistance, SEARCH_STEP_BLOCKS, scans, creatures, permission),
