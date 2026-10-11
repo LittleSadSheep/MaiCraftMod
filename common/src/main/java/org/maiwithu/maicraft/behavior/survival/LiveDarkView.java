@@ -11,8 +11,8 @@ import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
- * 太暗处境的生产读取：脚部与眼部实测方块光的最小值（亮度读数从只读亮度接缝来，测试换替身），
- * 包里有没有火把按背包视图数。角色不在世界里时如实交空，这一刻不评估。
+ * 太暗处境的生产读取：脚部与眼部实测方块光的最小值、天空光的较大值（头顶见不见得到天；
+ * 亮度读数从只读亮度接缝来，测试换替身），包里有没有火把按背包视图数。角色不在世界里时如实交空，这一刻不评估。
  */
 public final class LiveDarkView implements DarknessNeed.ReadsDarkness {
 
@@ -39,7 +39,13 @@ public final class LiveDarkView implements DarknessNeed.ReadsDarkness {
         int darkest = atFeet.isEmpty() ? atEye.getAsInt()
                 : atEye.isEmpty() ? atFeet.getAsInt()
                 : Math.min(atFeet.getAsInt(), atEye.getAsInt());
-        return new DarknessNeed.DarknessFacts(OptionalInt.of(darkest), carriedTorches(player.backpack()) > 0, feet);
+        // 头顶见不见得到天按脚、眼里较亮的那个算：洞口、林下只要有一处透着天就不算地下。
+        OptionalInt skyFeet = lights.skyLight(feet);
+        OptionalInt skyEye = lights.skyLight(eye);
+        OptionalInt sky = skyFeet.isEmpty() ? skyEye
+                : skyEye.isEmpty() ? skyFeet
+                : OptionalInt.of(Math.max(skyFeet.getAsInt(), skyEye.getAsInt()));
+        return new DarknessNeed.DarknessFacts(OptionalInt.of(darkest), carriedTorches(player.backpack()) > 0, feet, sky);
     }
 
     /** 背包里的火把数：主格为准，副手不占背包格、单独清点时另算。 */

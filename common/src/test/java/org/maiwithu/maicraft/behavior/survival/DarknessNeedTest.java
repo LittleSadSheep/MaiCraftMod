@@ -14,6 +14,7 @@ import net.minecraft.core.BlockPos;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.lighting.FollowLighting;
 import org.maiwithu.maicraft.behavior.lighting.HandlesOwnLighting;
+import org.maiwithu.maicraft.behavior.lighting.TorchesAlongTheWay;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.Task;
@@ -34,7 +35,13 @@ class DarknessNeedTest {
     }
 
     private static DarknessNeed.ReadsDarkness dark(int light, boolean torches, BlockPos feet) {
-        return context -> new DarknessNeed.DarknessFacts(OptionalInt.of(light), torches, feet);
+        // 默认在地下：头顶遮着，天空光 0。
+        return context -> new DarknessNeed.DarknessFacts(OptionalInt.of(light), torches, feet, OptionalInt.of(0));
+    }
+
+    /** 露天的暗处：方块光 0、天空光 15（白天黑夜都是这个原始值）。 */
+    private static DarknessNeed.ReadsDarkness openSky() {
+        return context -> new DarknessNeed.DarknessFacts(OptionalInt.of(0), true, FEET, OptionalInt.of(15));
     }
 
     private static final DarknessNeed.TorchMoves NO_MOVES = (context, onAttempt) -> null;
@@ -83,6 +90,21 @@ class DarknessNeedTest {
     }
 
     @Test
+    void 露天不算太暗_白天黑夜都不插() {
+        FollowLighting follow = new FollowLighting();
+        DarknessNeed need = new DarknessNeed(openSky(), NO_MOVES, follow);
+        assertNull(urgency(need, null), "露天的方块光处处是 0，按它算会每两格插一支");
+        assertTrue(follow.darkOnRoute().isEmpty(), "露天不记暗格");
+    }
+
+    @Test
+    void 出行探索走路途中落地站稳就插_不等走完() {
+        DarknessNeed need = new DarknessNeed(dark(0, true), NO_MOVES, new FollowLighting());
+        assertEquals(Urgency.SOON, urgency(need, new RouteTask()), "沿路走的任务按尽快插，停下安全时插得进来");
+        assertEquals(Urgency.LATER, urgency(need, null), "其余照旧找空当");
+    }
+
+    @Test
     void 照明任务自己管灯时让位() {
         FollowLighting follow = new FollowLighting();
         DarknessNeed need = new DarknessNeed(dark(0, true), NO_MOVES, follow);
@@ -119,6 +141,19 @@ class DarknessNeedTest {
         Task placed = new FakeTask();
         DarknessNeed need = new DarknessNeed(dark(0, true), (context, onAttempt) -> placed, new FollowLighting());
         assertSame(placed, need.createTask(tick()));
+    }
+
+    /** 沿路走的任务替身：出行、探索声明的特征接口。 */
+    private static final class RouteTask implements Task, TorchesAlongTheWay {
+        @Override public void start(TickContext context) { }
+        @Override public TickResult tick(TickContext context) { return TickResult.RUNNING; }
+        @Override public void pause() { }
+        @Override public TaskResult close(CloseReason reason) { return TaskResult.cancelled("替身"); }
+        @Override public Interruptibility interruptibility(TickContext context) {
+            return Interruptibility.WORKING;
+        }
+        @Override public Optional<TaskProgress> currentProgress() { return Optional.empty(); }
+        @Override public String describe() { return "沿路走的替身任务"; }
     }
 
     /** 什么都不做的任务替身。 */

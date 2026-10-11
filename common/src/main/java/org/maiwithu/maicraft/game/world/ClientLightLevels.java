@@ -30,4 +30,13 @@ public final class ClientLightLevels implements ReadsLightLevels {
         // 方块光只看光源，不受昼夜天气影响；那一列没同步完时光照引擎自己会给旧值，等几刻再量是调用方的纪律。
         return OptionalInt.of(context.level().getBrightness(LightLayer.BLOCK, pos));
     }
+
+    @Override public OptionalInt skyLight(BlockPos pos) {
+        PlayerContext context = contexts.get();
+        if (context == null || context.level() == null || !context.level().isLoaded(pos)) {
+            return OptionalInt.empty();
+        }
+        // 天空光层的原始值：只看头顶遮没遮住，不随昼夜天气变（昼夜的折算在别处，这里不掺）。
+        return OptionalInt.of(context.level().getBrightness(LightLayer.SKY, pos));
+    }
 }

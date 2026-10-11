@@ -64,7 +64,10 @@ class LightModuleTest {
                 permissions -> {
                     throw new UnsupportedOperationException("计划阶段不拼服务");
                 },
-                pos -> OptionalInt.empty(), unloadedWorld(), null, offhandEmpty());
+                new ReadsLightLevels() {
+                    @Override public OptionalInt blockLight(BlockPos pos) { return OptionalInt.empty(); }
+                    @Override public OptionalInt skyLight(BlockPos pos) { return OptionalInt.empty(); }
+                }, unloadedWorld(), null, offhandEmpty());
     }
 
     private static LightingWorld unloadedWorld() {

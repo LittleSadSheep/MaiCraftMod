@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.travel;
 
 import it.unimi.dsi.fastutil.longs.LongSets;
 import net.minecraft.core.BlockPos;
+import org.maiwithu.maicraft.behavior.lighting.TorchesAlongTheWay;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
@@ -32,7 +33,7 @@ import java.util.List;
  * 停下后按取消结算，写明实测停在哪、离目的地还差多远；被生存需求打断时走到运行先把自己停稳，
  * 处理完从原地接着走。路上垫的临时方块逐格进结果，不自动收回；泅渡如实记录。
  */
-public final class TravelTask extends PhasedTask<TravelTask.Phase> {
+public final class TravelTask extends PhasedTask<TravelTask.Phase> implements TorchesAlongTheWay {
 
     /** 出行的阶段：在路上。 */
     public enum Phase { WALK }

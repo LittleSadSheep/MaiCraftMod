@@ -160,7 +160,8 @@ class PlaceTorchTaskTest {
                 spot -> new PlaceTorchTask.Click(new InstantAction(), () -> null));
         TaskResult result = run(guarded);
         assertEquals(TaskResult.Status.FAILED, result.status());
-        assertTrue(attempts.isEmpty(), "没出手就不算出过手");
+        // 眼前没地方也记一回（记在脚下）：往前走两格再看，走路途中不在原地反复停下来找。
+        assertEquals(1, attempts.size(), "眼前没地方也算看过一回：" + attempts);
         assertTrue(result.problem().message().contains("找不到"));
     }
 }

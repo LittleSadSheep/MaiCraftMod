@@ -73,6 +73,11 @@ final class LightingFakes {
             Integer value = values.get(pos.immutable());
             return value == null ? OptionalInt.of(0) : OptionalInt.of(value);
         }
+
+        // 天空光：替身场景都当头顶遮着。
+        @Override public OptionalInt skyLight(BlockPos pos) {
+            return OptionalInt.of(0);
+        }
     }
 
     /**
@@ -96,6 +101,11 @@ final class LightingFakes {
                 }
             }
             return OptionalInt.of(brightest);
+        }
+
+        // 天空光：替身场景都当头顶遮着；没加载如实给空。
+        @Override public OptionalInt skyLight(BlockPos pos) {
+            return world.loaded(pos) ? OptionalInt.of(0) : OptionalInt.empty();
         }
 
         private static int manhattan(BlockPos a, BlockPos b) {

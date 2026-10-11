@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
+import org.maiwithu.maicraft.behavior.lighting.TorchesAlongTheWay;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
@@ -44,7 +45,7 @@ import it.unimi.dsi.fastutil.longs.LongSets;
  * 垫料、换气、中途停下都是走到的行程保证，许可决定能不能挖垫，目标探测本身永不改方块。
  * 行进中达成目标立即取消在途段收尾，不走过头；越过硬边界截停失败，一次跳出去不冒充达成。
  */
-public final class ExploreTask extends PhasedTask<ExploreTask.Phase> {
+public final class ExploreTask extends PhasedTask<ExploreTask.Phase> implements TorchesAlongTheWay {
 
     /** 探索的阶段：观察 → 选航点 → 走行段 → 到场复核。 */
     public enum Phase { OBSERVE, WAYPOINT, WALK, ARRIVE }

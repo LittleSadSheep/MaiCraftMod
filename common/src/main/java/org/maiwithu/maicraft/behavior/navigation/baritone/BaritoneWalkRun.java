@@ -91,6 +91,8 @@ final class BaritoneWalkRun implements WalkRun {
     private boolean routeDropped;
     /** 最近一刻的角色上下文；暂停、放弃时用它停挖、交还没等到确认的右键。 */
     private PlayerContext lastContext;
+    /** 最近一刻身体停得下来没有：站在地上或水里、引擎这一步能停（不在跳、不在搭桥柱跳的半截）。 */
+    private boolean safeToPause;
     /** 这一趟在哪些面前格反复卡住：第一次先切途经的门，第二次列为障碍绕开，障碍用完才如实走不通。 */
     private final NavigationStallMemory stalls = new NavigationStallMemory();
     /** 刚列了新障碍、还没能安全撤路线：落地站稳后重算一次绕行。 */
@@ -289,6 +291,7 @@ final class BaritoneWalkRun implements WalkRun {
         boolean noPath = concludeNoPath(engine, routePresent, feet, context.clientTick());
         watchProgress(context, player, engine, routePresent, calculating || probe.waiting(), feet);
         progress.observe(new WalkRunProgress.Observation(feet, onGround, inWater, routePresent, calculating, noPath));
+        safeToPause = (onGround || inWater) && pathing.isSafeToCancel();
 
         if (progress.stopRequested() && onGround && pathing.isSafeToCancel()) {
             // 落地后才真正撤路线：空中撤掉会让执行段把重力全交给身体，摔出可以避免的伤。
@@ -657,11 +660,13 @@ final class BaritoneWalkRun implements WalkRun {
 
     @Override
     public Interruptibility interruptibility() {
-        // 身体在空中或正在跳时停下不安全；落地站稳后可以随时交出。
+        // 身体在空中、正在跳、正踩在搭桥柱跳的半截时停下不安全；落地站稳（或在水里）、引擎说这一步能停，
+        // 就是正常干活：饿了、有怪靠近这类"尽快"的事能插进来，处理完接着走。原先只要路线还在就一律报不安全，
+        // 整趟出行里只有"必须立刻"的事插得进来。
         var report = progress.report();
         if (progress.done()) return Interruptibility.BETWEEN_ACTIONS;
-        return report.state() == WalkReport.State.ON_THE_WAY ? Interruptibility.UNSAFE_TO_STOP
-                : Interruptibility.WORKING;
+        if (report.state() != WalkReport.State.ON_THE_WAY) return Interruptibility.WORKING;
+        return safeToPause ? Interruptibility.WORKING : Interruptibility.UNSAFE_TO_STOP;
     }
 
     @Override

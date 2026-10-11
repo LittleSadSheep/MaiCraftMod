@@ -94,6 +94,10 @@ final class PlaceTorchTask extends PhasedTask<PlaceTorchTask.Phase> {
         var found = FrontLampSites.choose(scene, opensScreen, protectedAt,
                 scene.eyePosition(), scene.viewVector(), torches);
         if (found.isEmpty()) {
+            // 眼前没地方插也算出手过一回：再往前走两格才看下一回，不在原地反复停下来找。
+            BlockPos feet = BlockPos.containing(scene.eyePosition().x, scene.eyePosition().y - 1.62,
+                    scene.eyePosition().z);
+            onAttempt.accept(feet);
             return Next.fail(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
                     "眼前找不到能插火把的墙或地面", null));
         }

@@ -44,6 +44,8 @@ import java.nio.file.Path;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
+
+import org.maiwithu.maicraft.game.world.ReadsLightLevels;
 import java.util.function.Supplier;
 
 /**
@@ -151,7 +153,10 @@ final class OfflineCatalog {
                 Map.of("create:chain_conveyor", 1),
                 (kind, message) -> { },
                 // 只读亮度与照明现场离线给"读不到"的替身：能力清单照常登记，真量光在实机验收。
-                pos -> OptionalInt.empty(),
+                new ReadsLightLevels() {
+                    @Override public OptionalInt blockLight(BlockPos pos) { return OptionalInt.empty(); }
+                    @Override public OptionalInt skyLight(BlockPos pos) { return OptionalInt.empty(); }
+                },
                 new UnloadedWorld(),
                 new FollowLighting());
     }

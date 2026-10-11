@@ -183,6 +183,12 @@ class LightTaskTest {
             return OptionalInt.of(brightest);
         }
 
+        // 天空光：这些场景都在地下，头顶遮着。
+        @Override public OptionalInt skyLight(BlockPos pos) {
+            if (!loadedColumns.contains(new BlockPos(pos.getX(), 64, pos.getZ()))) return OptionalInt.empty();
+            return OptionalInt.of(0);
+        }
+
         private static int manhattan(BlockPos a, BlockPos b) {
             return Math.abs(a.getX() - b.getX()) + Math.abs(a.getY() - b.getY()) + Math.abs(a.getZ() - b.getZ());
         }
