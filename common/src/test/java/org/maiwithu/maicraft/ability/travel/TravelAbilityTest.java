@@ -47,7 +47,7 @@ class TravelAbilityTest {
     private final StubWalks walks = new StubWalks();
     private final TravelAbility ability = new TravelAbility(walks,
             new DestinationResolver(new StubWorld(), name -> Optional.empty(), id -> Optional.empty()),
-            List::of, progress -> {});
+            List::of, progress -> {}, null);
 
     /** 推进一刻用的决定上下文：只有目标。 */
     private static StepContext step(Goal goal) {
@@ -68,7 +68,7 @@ class TravelAbilityTest {
 
     /** 按能力自己的参数规格解析参数，得到与 MCP 入口一致的取值。 */
     private static ParamValues params(String json) {
-        ParseResult result = new TravelAbility(new StubWalks(), null, List::of, progress -> {})
+        ParseResult result = new TravelAbility(new StubWalks(), null, List::of, progress -> {}, null)
                 .spec().paramSpecs().parse(JsonParser.parseString(json).getAsJsonObject());
         assertTrue(result.ok(), "参数应能解析：" + result.errors());
         return result.params();

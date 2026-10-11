@@ -123,6 +123,10 @@ import org.maiwithu.maicraft.behavior.recipe.RecipeLookup;
 import org.maiwithu.maicraft.behavior.survival.BlockBreaking;
 import org.maiwithu.maicraft.behavior.survival.CombatSenses;
 import org.maiwithu.maicraft.behavior.travel.DestinationResolver;
+import org.maiwithu.maicraft.behavior.travel.ClientDimensionWorld;
+import org.maiwithu.maicraft.behavior.travel.DimensionTravelServices;
+import org.maiwithu.maicraft.behavior.travel.LiveBlockUses;
+import org.maiwithu.maicraft.behavior.travel.PortalFinder;
 import org.maiwithu.maicraft.behavior.travel.SceneSeenTargets;
 import org.maiwithu.maicraft.behavior.travel.TravelProgressListener;
 import org.maiwithu.maicraft.behavior.travel.TravelWorldView;
@@ -315,7 +319,7 @@ public final class AbilityCatalog {
 
         registerMachineAbilities(registry, deps, designs, shared, construction);
 
-        registerStandalone(registry, deps, shared, shared.permission(), shared.playerServices());
+        registerStandalone(registry, deps, shared, construction);
         return registry;
     }
 
@@ -451,7 +455,9 @@ public final class AbilityCatalog {
 
     /** 不和别的能力共用现场部件的那些能力：战斗、跟随、等待、钓鱼、出行、聊天、记地点、按顺序做事、任务书。 */
     private static void registerStandalone(AbilityRegistry registry, Deps deps, Shared shared,
-            PermissionCheck permission, PlayerServices services) {
+            Function<Permissions, ConstructionServices> construction) {
+        PermissionCheck permission = shared.permission();
+        PlayerServices services = shared.playerServices();
         // 战斗：感观与生存需求共用一份，观察编号与动手都接在真实客户端上。
         registry.register(new FightModule(deps.senses(),
                 new LiveSeenTargets(deps.scene().seen()), new LiveFightMoves(deps.walks(), deps.dropConfirmations(), deps.useKeyProjection()), permission));
@@ -466,11 +472,18 @@ public final class AbilityCatalog {
         registry.register(new FishModule(deps.context(), shared.innerNeeds(), shared.toMainhand(),
                 deps.walks(), shared.drops(), shared.space(), new ClientFishingHookFacts(deps.context())));
 
-        // 出行：目的地解析用当刻的世界、记住的地点与场景里的观察编号；
-        // 走到由内嵌 Baritone 执行，路上垫的方块从走到实现方读回。
+        // 出行：目的地解析用当刻的世界、记住的地点与场景里的观察编号；走到由内嵌 Baritone 执行，
+        // 路上垫的方块从走到实现方读回。跨维度的现场部件一次拼好：找门、进门、建门与末地门房间共用。
         registry.register(new TravelAbility(deps.walks(),
                 new DestinationResolver(deps.travelWorld(), deps.memory(), new SceneSeenTargets(deps::scene)),
-                deps.walkInternals(), deps.travelProgress()));
+                deps.walkInternals(), deps.travelProgress(),
+                new DimensionTravelServices(
+                        new ClientDimensionWorld(deps.context(),
+                                new PortalFinder(deps.context(), deps.blockScans()), deps.blockScans()),
+                        deps.context(),
+                        deps.walks(), shared.innerNeeds(), shared.toMainhand(),
+                        new LiveBlockUses(deps.interactions()), construction,
+                        deps.memory(), deps.walkInternals(), deps.travelProgress())));
 
         // 寻找：方块与实体扫已加载区，结构查记过的产地线索；命中直接在场景的观察编号表上领编号。
         registry.register(FindModule.live(deps.context(), deps.blockScans(), deps.creatures(),

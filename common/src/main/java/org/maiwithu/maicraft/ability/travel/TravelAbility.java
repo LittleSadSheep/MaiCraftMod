@@ -4,6 +4,8 @@ package org.maiwithu.maicraft.ability.travel;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.travel.DestinationResolver;
+import org.maiwithu.maicraft.behavior.travel.DimensionTravelServices;
+import org.maiwithu.maicraft.behavior.travel.DimensionTravelTask;
 import org.maiwithu.maicraft.behavior.travel.ReadsPlacedBlocks;
 import org.maiwithu.maicraft.behavior.travel.TravelProgressListener;
 import org.maiwithu.maicraft.behavior.travel.TravelTask;
@@ -29,46 +31,52 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * 出行能力：走到一个地方。能力只做薄皮——做决定时用玩家行为层的目的地解析器把目标对象落成目的地
- * （说不清就向 LLM 提问，已经站在那里就直接结束），再把目的地、时限和许可交给出行任务；
- * 走到、到达确认与结算都是出行任务自己的事。
- *
- * <p>里程碑一只有步行：目的地在别的维度、乘船、飞行、电梯都由目的地解析或任务以
- * "暂不支持"如实结束，本能力不做变通。需要的走到、目的地解析、垫方块记录与进展去处
+ * 出行能力：走到一个地方，包括去别的维度。能力只做薄皮——做决定时用玩家行为层的目的地解析器
+ * 把目标对象落成目的地（说不清就向 LLM 提问，已经站在那里就直接结束）：同维度的目的地交给
+ * 出行任务步行；落在别的维度或"就是去那个维度"交给跨维度任务（找活门、走进门、没门按许可建门、
+ * 末地去要塞激活，到了带坐标的目的地接着步行）。需要的走到、解析、扫描、交互、施工这些现场部件
  * 都从构造函数传入；本能力不认任何具体的服务实现。
  */
 public final class TravelAbility implements AbilityModule {
 
     /** 最多走多久没有给时的缺省：不设时限，交给进度跟踪按"有没有在前进"判断。 */
     private static final int NO_TIME_LIMIT = 0;
+    /** 找活门范围的缺省（格）：查了这么远的已加载区没有门才轮到建门。 */
+    private static final int DEFAULT_SEARCH_DISTANCE = 128;
 
     private final WalkTo walks;
     private final DestinationResolver resolver;
     private final ReadsPlacedBlocks placedBlocks;
     private final TravelProgressListener progressListener;
+    private final DimensionTravelServices dimensionServices;
 
     public TravelAbility(WalkTo walks, DestinationResolver resolver,
-            ReadsPlacedBlocks placedBlocks, TravelProgressListener progressListener) {
+            ReadsPlacedBlocks placedBlocks, TravelProgressListener progressListener,
+            DimensionTravelServices dimensionServices) {
         this.walks = walks;
         this.resolver = resolver;
         this.placedBlocks = placedBlocks;
         this.progressListener = progressListener;
+        this.dimensionServices = dimensionServices;
     }
 
     @Override
     public AbilitySpec spec() {
         return new AbilitySpec(
                 "maicraft:travel",
-                "走到一个地方：给坐标、地点名、看得见的东西或往某方向走多远",
+                "走到一个地方：给坐标、地点名、看得见的东西或往某方向走多远；给维度就是去那个维度",
                 AbilityDoc.forAbility("travel"),
                 ParamSpecs.of(
                         ParamSpec.of("radius", ParamType.NUMBER)
                                 .defaultValue(2.0).range(0, 2048)
                                 .doc("到达容差，单位格，默认 2；给 0 表示必须站进那一格").build(),
+                        ParamSpec.of("max_distance", ParamType.NUMBER)
+                                .defaultValue(128.0).range(16, 2048)
+                                .doc("找传送门的范围，单位格，默认 128；查遍已加载区没有门才建门").build(),
                         ParamSpec.of("max_seconds", ParamType.INTEGER)
                                 .doc("最多走多久（秒）；超时以卡住结束，写明停在哪、离目标多远").build()),
                 Set.of(TargetKind.HERE, TargetKind.SEEN, TargetKind.LANDMARK,
-                        TargetKind.POSITION, TargetKind.DIRECTION),
+                        TargetKind.POSITION, TargetKind.DIMENSION, TargetKind.DIRECTION),
                 ExecutionMode.CONTROLS_PLAYER,
                 Set.of(),
                 List.of(),
@@ -82,12 +90,17 @@ public final class TravelAbility implements AbilityModule {
             // 去哪必须用目标对象说明：没有目标对象就没有目的地，开局就结束，不猜脚边。
             return new StepDecision.Finish(TaskResult.failed("出行的目标没有说去哪",
                     Problem.of(Problem.Kind.UNSUPPORTED,
-                            "出行的目标对象没有给：要用坐标、地点名、观察编号或方向说明去哪")));
+                            "出行的目标对象没有给：要用坐标、地点名、观察编号、维度或方向说明去哪")));
         }
-        // 目的地现在就解析：坐标没给 y 走那一柱列，地标没记过就问，观察编号失效就如实结束。
+        // 目的地现在就解析：坐标没给 y 走那一柱列，地标没记过就问，观察编号失效就如实结束；
+        // 落在别的维度按维度路由认门，认不出的维度对在这里就以走不了结束。
         var resolution = resolver.resolve(goal.target(), goal.params().number("radius"));
         if (resolution instanceof DestinationResolver.Resolution.Ready ready) {
             return new StepDecision.Run(new TravelInput(ready.destination(), maxSeconds(goal), TerrainPermit.of(goal.permissions())));
+        }
+        if (resolution instanceof DestinationResolver.Resolution.CrossDimension cross) {
+            return new StepDecision.Run(new DimensionTravelInput(cross.targetDimension(), cross.destination(),
+                    searchDistance(goal), maxSeconds(goal), goal.permissions()));
         }
         if (resolution instanceof DestinationResolver.Resolution.AlreadyThere) {
             return new StepDecision.Finish(TaskResult.done("出行：开始时已经站在目的地"));
@@ -115,6 +128,12 @@ public final class TravelAbility implements AbilityModule {
             return new TravelTask(input.destination(), input.maxSeconds(), input.permit(),
                     walks, placedBlocks, progressListener);
         });
+        factories.register(DimensionTravelInput.class, input -> {
+            // 跨维度行程：找门、进门、建门与末地门房间都从这个任务里按阶段走。
+            return new DimensionTravelTask(new DimensionTravelTask.Journey(input.targetDimension(),
+                    input.destination(), input.searchDistance(), input.maxSeconds(), input.permissions()),
+                    dimensionServices);
+        });
     }
 
     /** 秒换内部用的整数时限；没给就不设时限。 */
@@ -128,5 +147,14 @@ public final class TravelAbility implements AbilityModule {
             return NO_TIME_LIMIT;
         }
         return (int) seconds;
+    }
+
+    /** 找门范围（格）；没给按缺省，给得不合理也按缺省。 */
+    private int searchDistance(Goal goal) {
+        if (!goal.params().has("max_distance")) {
+            return DEFAULT_SEARCH_DISTANCE;
+        }
+        double given = goal.params().number("max_distance");
+        return given <= 0 ? DEFAULT_SEARCH_DISTANCE : (int) Math.min(given, Integer.MAX_VALUE / 2);
     }
 }

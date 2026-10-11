@@ -55,10 +55,7 @@ public record PlayerServices(Supplier<PlayerContext> context, BringsPlayerClose 
         Objects.requireNonNull(itemTags, "itemTags");
         Objects.requireNonNull(menuLayouts, "menuLayouts");
         Objects.requireNonNull(blockScans, "blockScans");
-<<<<<<< HEAD
         Objects.requireNonNull(serverReads, "serverReads");
-=======
         Objects.requireNonNull(backpack, "backpack");
->>>>>>> 4ef786082 (feat(obtain): 装了精妙背包时从随身背包取货)
     }
 }

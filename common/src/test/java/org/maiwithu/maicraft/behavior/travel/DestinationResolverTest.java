@@ -2,6 +2,9 @@
 package org.maiwithu.maicraft.behavior.travel;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.SharedConstants;
+import net.minecraft.server.Bootstrap;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
 import org.maiwithu.maicraft.behavior.travel.TravelFakes.FakePlaces;
@@ -14,11 +17,19 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** 目的地解析：坐标、记得的地点、观察编号、方向走多远各解析成什么样的导航要求。 */
 class DestinationResolverTest {
+
+    @BeforeAll
+    static void bootMinecraft() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+    }
 
     private final FakeWorld world = new FakeWorld();
     private final FakePlaces places = new FakePlaces();
@@ -75,10 +86,68 @@ class DestinationResolverTest {
     }
 
     @Test
-    void otherDimensionIsUnsupported() {
+    void moddedDimensionPositionEndsWithUnsupported() {
+        // 模组维度没有原版门：如实说不支持，不开始一段走不到的行程。
         var deadEnd = assertInstanceOf(DestinationResolver.Resolution.DeadEnd.class,
-                resolver.resolve(new Target.Position(0, 64, 0, "minecraft:the_nether"), 2));
+                resolver.resolve(new Target.Position(0, 64, 0, "somemod:custom_dim"), 2));
         assertEquals(Problem.Kind.UNSUPPORTED, TravelFakes.kindOf(deadEnd.problem()));
+    }
+
+    @Test
+    void dimensionTargetResolvesToACrossDimensionJourney() {
+        // "就是去那个维度"：主世界出发去下界，路由到下界传送门。
+        world.spot = new WorldPosition(0, 64, 0, "minecraft:overworld");
+        var cross = assertInstanceOf(DestinationResolver.Resolution.CrossDimension.class,
+                resolver.resolve(new Target.Dimension("minecraft:the_nether"), 2));
+        assertEquals("minecraft:the_nether", cross.targetDimension());
+        assertNull(cross.destination(), "不带坐标就是只去维度");
+    }
+
+    @Test
+    void dimensionTargetAlreadyThereFinishesAtOnce() {
+        // 已经在下界再去下界：没有跨维度段，按已满足结束。
+        world.spot = new WorldPosition(0, 64, 0, "minecraft:the_nether");
+        var already = assertInstanceOf(DestinationResolver.Resolution.AlreadyThere.class,
+                resolver.resolve(new Target.Dimension("minecraft:the_nether"), 2));
+        assertEquals("minecraft:the_nether", already.spot().dimension());
+        world.spot = new WorldPosition(0, 64, 0, null);
+    }
+
+    @Test
+    void positionInAnotherDimensionCarriesItsDestination() {
+        world.spot = new WorldPosition(0, 64, 0, "minecraft:overworld");
+        // "那个维度的这个坐标"：跨完接着走到坐标，坐标按目标维度的坐标系写。
+        var cross = assertInstanceOf(DestinationResolver.Resolution.CrossDimension.class,
+                resolver.resolve(new Target.Position(100, 40, -30, "minecraft:the_nether"), 2));
+        assertEquals("minecraft:the_nether", cross.targetDimension());
+        assertEquals(100, cross.destination().position().x());
+        assertEquals(40, cross.destination().position().y());
+    }
+
+    @Test
+    void rememberedPlaceInAnotherDimensionCrossesToIt() {
+        // 记过的地点带维度（记的时候人在下界）：照着那个维度走。
+        world.spot = new WorldPosition(0, 64, 0, "minecraft:overworld");
+        places.put("堡垒", new WorldPosition(120, 70, -80, "minecraft:the_nether"));
+        var cross = assertInstanceOf(DestinationResolver.Resolution.CrossDimension.class,
+                resolver.resolve(new Target.Landmark("堡垒"), 2));
+        assertEquals("minecraft:the_nether", cross.targetDimension());
+        assertNotNull(cross.destination());
+    }
+
+    @Test
+    void dimensionPairsWithoutPortalsEndWithReasons() {
+        // 下界与末地之间没有原版门：建议经主世界中转；模组维度如实说不支持。
+        world.spot = new WorldPosition(0, 64, 0, "minecraft:the_nether");
+        var hub = assertInstanceOf(DestinationResolver.Resolution.DeadEnd.class,
+                resolver.resolve(new Target.Dimension("minecraft:the_end"), 2));
+        assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, TravelFakes.kindOf(hub.problem()));
+        assertTrue(hub.problem().suggestion().contains("主世界"));
+
+        var modded = assertInstanceOf(DestinationResolver.Resolution.DeadEnd.class,
+                resolver.resolve(new Target.Dimension("somemod:custom"), 2));
+        assertEquals(Problem.Kind.UNSUPPORTED, TravelFakes.kindOf(modded.problem()));
+        world.spot = new WorldPosition(0, 64, 0, null);
     }
 
     @Test

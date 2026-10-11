@@ -49,7 +49,7 @@ final class TravelFakes {
 
     /** 现场替身：角色站哪、朝哪。 */
     static final class FakeWorld implements TravelWorldView {
-        private WorldPosition spot = WorldPosition.here(0, 64, 0);
+        WorldPosition spot = WorldPosition.here(0, 64, 0);
         Target.Toward facing = Target.Toward.NORTH;
 
         @Override public WorldPosition currentSpot() {
