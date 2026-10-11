@@ -63,8 +63,9 @@ final class StationHandling {
             case DEPOT -> compat.depotItems(level, at).orElse(List.of());
             case BASIN -> compat.basinItems(level, at).orElse(List.of());
             case BELT -> compat.beltItems(level, at).orElse(List.of());
-            case PRESS, MIXER, DEPLOYER, FAN -> ProcessingSpots.workCell(work, state, at)
+            case PRESS, MIXER, DEPLOYER -> ProcessingSpots.workCell(work, state, at)
                     .map(cell -> itemsAt(level, cell)).orElse(List.of());
+            case FAN -> fanDepot(level, state, at).map(cell -> itemsAt(level, cell)).orElse(List.of());
             default -> List.of();
         };
     }
@@ -177,10 +178,17 @@ final class StationHandling {
             BlockPos at) {
         Optional<BlockPos> cell = switch (work) {
             case DEPOT -> Optional.of(at);
-            case PRESS, DEPLOYER, FAN -> ProcessingSpots.workCell(work, state, at);
+            case PRESS, DEPLOYER -> ProcessingSpots.workCell(work, state, at);
+            case FAN -> fanDepot(level, state, at);
             default -> Optional.empty();
         };
         return cell.filter(spot -> compat.depotItems(level, spot).isPresent());
+    }
+
+    // 鼓风机的置物台在风里：前方第一格多半放着水、岩浆或火，沿风向往前找第一台置物台，挡风的实心方块为止。
+    private Optional<BlockPos> fanDepot(ClientLevel level, BlockState state, BlockPos at) {
+        return ProcessingSpots.fanDepot(state, at, cell -> compat.depotItems(level, cell).isPresent(),
+                cell -> level.isLoaded(cell) && level.getBlockState(cell).isCollisionShapeFullBlock(level, cell));
     }
 
     private static Optional<BlockPos> basinFor(CreateMachineCatalog.Work work, BlockState state, BlockPos at) {

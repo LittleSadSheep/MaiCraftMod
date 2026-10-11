@@ -104,6 +104,20 @@ class CreateReadingsTest {
     }
 
     @Test
+    void 鼓风机沿风向往前找置物台_水在第一格_被实心方块挡住就停() {
+        BlockPos fan = new BlockPos(0, 64, 0);
+        var east = Blocks.DISPENSER.defaultBlockState().setValue(BlockStateProperties.FACING, Direction.EAST);
+        // 第一格是水，第二格是置物台：找到第二格。
+        assertEquals(Optional.of(new BlockPos(2, 64, 0)), ProcessingSpots.fanDepot(east, fan,
+                cell -> cell.equals(new BlockPos(2, 64, 0)), cell -> false));
+        // 第二格是石头挡着风，第三格的置物台吹不到。
+        assertTrue(ProcessingSpots.fanDepot(east, fan, cell -> cell.equals(new BlockPos(3, 64, 0)),
+                cell -> cell.equals(new BlockPos(2, 64, 0))).isEmpty());
+        // 六格以内都没有置物台。
+        assertTrue(ProcessingSpots.fanDepot(east, fan, cell -> false, cell -> false).isEmpty());
+    }
+
+    @Test
     void 工作盆_搅拌器下的盆_朝上的锯_石磨都扔上去_锯不朝上给不出() {
         BlockPos at = new BlockPos(0, 70, 0);
         BlockPos basin = new BlockPos(0, 68, 0);

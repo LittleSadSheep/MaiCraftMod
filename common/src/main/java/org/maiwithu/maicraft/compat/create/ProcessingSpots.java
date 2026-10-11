@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Predicate;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -32,6 +33,28 @@ final class ProcessingSpots {
             case FAN -> facing(state).map(at::relative);
             default -> Optional.empty();
         };
+    }
+
+    /** 鼓风机往前找置物台最多找这么多格：风吹得更远，但置物台一般就放在水、岩浆或火后面一两格。 */
+    static final int FAN_DEPOT_REACH = 6;
+
+    /**
+     * 鼓风机风里的那台置物台：沿风向从前方第一格起往前找，遇到置物台就是它；遇到挡风的实心方块就停，
+     * 风吹不过去。前方第一格多半是水、岩浆或火（加工用的），置物台在它后面。
+     *
+     * @param depotAt 这一格是不是置物台
+     * @param blocks  这一格是不是挡风的实心方块
+     */
+    static Optional<BlockPos> fanDepot(BlockState state, BlockPos at, Predicate<BlockPos> depotAt,
+            Predicate<BlockPos> blocks) {
+        Optional<Direction> face = facing(state);
+        if (face.isEmpty()) return Optional.empty();
+        for (int step = 1; step <= FAN_DEPOT_REACH; step++) {
+            BlockPos cell = at.relative(face.get(), step);
+            if (depotAt.test(cell)) return Optional.of(cell);
+            if (blocks.test(cell)) return Optional.empty();
+        }
+        return Optional.empty();
     }
 
     /** 这一格的进出口：吃转动的面，加上加工处或放东西的面。 */

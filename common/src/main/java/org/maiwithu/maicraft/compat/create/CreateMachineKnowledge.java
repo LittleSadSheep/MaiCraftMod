@@ -144,7 +144,13 @@ final class CreateMachineKnowledge implements KnowledgeSource {
         switch (kind.work()) {
             case PRESS, DEPLOYER, FAN -> text.append("- machine_run：target 指这台机器；加工处放着置物台时，")
                     .append("料放到那台置物台上，产物从置物台空手收回")
-                    .append(kind.work() == CreateMachineCatalog.Work.PRESS ? "；加工处是工作盆时站到盆边把料扔进去（压块）\n" : "\n");
+                    .append(switch (kind.work()) {
+                        case PRESS -> "；加工处是工作盆时站到盆边把料扔进去（压块）\n";
+                        // 风会把扔进去的东西一路吹走，落点不在一格里：machine_run 不往风里扔，只用风里的置物台。
+                        case FAN -> "；鼓风机的置物台放在风里、水岩浆或火的后面（沿风向往前六格以内），"
+                                + "风里没有置物台时 machine_run 不投料\n";
+                        default -> "\n";
+                    });
             case MIXER -> text.append("- machine_run：料扔进正下方第二格的工作盆里（站到盆边扔），产物留在盆里，")
                     .append("空手右键工作盆取出\n");
             case BASIN -> text.append("- machine_run：站到盆边把料扔进去，落在盆沿上也收；空手右键取出盆里的东西\n");
