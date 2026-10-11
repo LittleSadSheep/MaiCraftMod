@@ -65,6 +65,8 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
     private BlockPos entrance;
     private Set<Long> portalCells = Set.of();
     private int entryTicks;
+    /** 这趟已经建过一扇门：建好后只回去找它走，不再建第二扇。 */
+    private boolean portalBuilt;
     private String startDimension;
     private BlockPos startFeet;
     private DimensionTravelDetails settlement;
@@ -170,6 +172,12 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
         }
         // 扫完了确实一个入口都没有：下界按许可建门，末地去要塞激活门。
         if (route.way() == DimensionRoute.Way.NETHER_PORTAL) {
+            if (portalBuilt) {
+                // 刚建好的门也没有走得进的入口：不再建第二扇，把试过的入口交代清楚。
+                return Next.fail(Problem.of(Problem.Kind.UNREACHABLE,
+                        "刚建好的下界门找不到走得进去的入口（试过的入口见试过的办法）",
+                        "看看门口是不是被挡住，清出一条路再出行"));
+            }
             if (journey.permissions().changeBlocks() == Permissions.BlockChanges.NONE) {
                 return Next.fail(Problem.of(Problem.Kind.NOT_FOUND,
                         noPortalFoundText() + "；建门要摆黑曜石，这次 change_blocks=none 动不了地形",
@@ -324,6 +332,11 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
                 return Next.fail(result.problem());
             }
             if (phase() == Phase.BUILD_PORTAL) {
+                if (result.status() == TaskResult.Status.DONE) {
+                    // 门点着了、门面验出来了：回去找这扇门走进去；只建这一次，再找不到入口就如实结束。
+                    portalBuilt = true;
+                    return Next.go(Phase.FIND_PORTAL, "门建好点着了，回去找这扇门走进去");
+                }
                 // 施工做完门框没成型就是建门没成：整个目标就此结束，保留施工事实，不循环。
                 return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL,
                                 "建门做完但没验出活门，" + result.summary())

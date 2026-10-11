@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.Set;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.Blocks;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -165,6 +166,39 @@ class DimensionTravelTaskTest {
                 "试过哪个门口要写清楚：" + result.attempts());
         assertTrue(result.problem().message().contains("平整空地") || result.problem().kind() == Problem.Kind.NOT_FOUND,
                 "失败交代现场：" + result.problem());
+    }
+
+    @Test
+    void builtPortalIsWalkedThrough() {
+        // 附近没门：建门子任务点着火、门面出现之后，回去找这扇门走进去，不按"没验出活门"收场。
+        NetherPortalFrame frame = new NetherPortalFrame(new BlockPos(10, 65, 10), Direction.Axis.X, 2, 3);
+        for (BlockPos cell : frame.frame()) {
+            world.blocks.put(cell, Blocks.OBSIDIAN.defaultBlockState());
+        }
+        for (BlockPos cell : frame.interior()) {
+            world.blocks.put(cell, Blocks.AIR.defaultBlockState());
+        }
+        world.carried = PortalBuilder.FLINT_AND_STEEL;
+        world.enqueueScan(new DimensionWorldView.Scan(List.of(frame.cell(0, -1)), true));
+        DimensionFakes.FakeUses lights = new DimensionFakes.FakeUses();
+        lights.effects.add(() -> {
+            for (BlockPos cell : frame.interior()) {
+                world.blocks.put(cell, Blocks.NETHER_PORTAL.defaultBlockState());
+            }
+        });
+        BlockPos doorway = frame.interior().get(0);
+        world.enqueuePortals(new PortalFinder.Round(List.of(), true));
+        world.enqueuePortals(new PortalFinder.Round(List.of(
+                new PortalFinder.Entrance(doorway, Set.of(doorway.asLong()))), true));
+        crossToNetherOnThirdRead();
+        DimensionTravelServices building = new DimensionTravelServices(world, () -> context, walks,
+                new DimensionFakes.FakeObtain(), new DimensionFakes.FakeToMainhand(), lights,
+                permissions -> null, null, () -> List.of(), progress -> {});
+        TaskResult result = run(new DimensionTravelTask(new DimensionTravelTask.Journey(
+                DimensionRoute.NETHER, null, 128, 0, Permissions.DEFAULT), building));
+
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary() + " / " + result.problem());
+        assertEquals(DimensionRoute.NETHER, ((DimensionTravelDetails) result.details()).arrivedDimension());
     }
 
     @Test
