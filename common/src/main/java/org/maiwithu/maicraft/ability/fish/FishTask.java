@@ -279,7 +279,7 @@ class FishTask extends PhasedTask<FishTask.Phase> {
         PendingInteraction settled = cast.reelPending;
         cast.reelPending = null;
         if (settled.status() == PendingInteraction.Status.CONFIRMED_APPLIED) {
-            if (cast.reelReason == ReelReason.KEEP) return startCollect();
+            if (cast.reelReason == ReelReason.KEEP) return startCollect(context);
             // 报废的一竿收干净了：按暂存的原因排除水面并计数，连续五次结束。
             return finishScrap(cast.scrapWhy, cast.scrapRejects);
         }
@@ -293,10 +293,9 @@ class FishTask extends PhasedTask<FishTask.Phase> {
     private Next<Phase> collect(TickContext context) {
         return switch (collect.step) {
             case GRACE -> {
-                // 先等约 1 秒：原版收线把战利品抛向玩家，这段时间走近多半就能被拾取包络吸进包。
+                // 先等约 1 秒：原版收线把战利品抛向玩家，这段时间多半已经被拾取包络吸进包；
+                // 基线在收竿确认那一刻就记好了，这里飞进来的照样算这一竿的。
                 if (++collect.waited < LOOT_RETURN_GRACE_TICKS) yield Next.stay();
-                collect.baseline = itemCounts(context);
-                collect.lootBefore = services.pickups().nearby();
                 collect.step = CollectStep.PICKUP;
                 yield Next.go(Phase.COLLECT, "冲量窗口过了，开始捡这一竿的钓获");
             }
@@ -387,12 +386,15 @@ class FishTask extends PhasedTask<FishTask.Phase> {
         return Next.go(Phase.REEL, reason == ReelReason.KEEP ? "咬钩，收竿" : "先收掉挂着的钩");
     }
 
-    private Next<Phase> startCollect() {
+    private Next<Phase> startCollect(TickContext context) {
         collect.step = CollectStep.GRACE;
         collect.waited = 0;
         collect.pickup = null;
         collect.makeRoom = null;
-        collect.baseline = Map.of();
+        // 收竿确认这一刻记背包与脚边掉落物：鱼获大约半秒就飞到身上被吸进包，
+        // 等飞回来再记，基线里已经有这条鱼，就会把钓到了当成没钓到。
+        collect.baseline = itemCounts(context);
+        collect.lootBefore = services.pickups().nearby();
         return Next.go(Phase.COLLECT, "收竿确认，等战利品飞回来");
     }
 
