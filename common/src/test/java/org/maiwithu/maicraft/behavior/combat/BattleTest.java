@@ -161,7 +161,8 @@ class BattleTest {
         Battle fight = battle(senses, moves);
         fight.tick(new Tick(0));
         Battle.Moment next = fight.tick(new Tick(1));
-        assertEquals(Battle.State.HOLDING, next.state(), "走不到又不能射：不再追，只避开");
+        assertEquals(Battle.State.FINISHED, next.state(), "走不到、不能射、又没打我：不再追，收手");
+        assertTrue(fight.unreachable().contains(1), "记着它走不到，交代给调用方");
     }
 
     @Test

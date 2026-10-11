@@ -14,8 +14,8 @@ import java.util.Set;
  *   <li>打不过：血线破了还有追兵，或手上什么都没有、对面会还手，就撤；</li>
  *   <li>挑目标：近处的苦力怕最急，其次马上要打到我的，再是点名的那一批，最后最近的；认准的那只没被更急的顶掉就接着打；</li>
  *   <li>打法：有远程且（目标点着引信、走不到、手上没近战、目标是会炸的、或离得远）就射，否则近身打；</li>
- *   <li>挑不出能打的但还有追兵（点着引信在远处、走不到又不能射）：只走位，离开所有危险半径；</li>
- *   <li>都没有：打完了。</li>
+ *   <li>挑不出能打的，但还有压着我的追兵（点着引信的、刚打过我的、贴到快够得着我的）：只走位，离开所有危险半径；</li>
+ *   <li>都没有：打完了。隔着坑、隔着栅栏走不到又不打我的不算，不为它们站着干耗。</li>
  * </ol>
  */
 public final class Tactic {
@@ -88,7 +88,9 @@ public final class Tactic {
         // 4 挑目标。
         Battlefield.Foe target = pickTarget(field, memory);
         if (target == null) {
-            return chased ? new KeepClear("没有能打的，先避开追兵") : new Finished();
+            boolean pressed = field.chasers().stream()
+                    .anyMatch(foe -> foe.fusing() || foe.attacker() || foe.imminent());
+            return pressed ? new KeepClear("没有能打的，先避开追兵") : new Finished();
         }
         // 5 打法。
         return shoots(me, memory, target) ? new Shoot(target) : new Melee(target);

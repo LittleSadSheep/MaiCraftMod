@@ -441,6 +441,11 @@ public final class Battle {
         return retreating;
     }
 
+    /** 寻路说走不到、或出手连着被拒的那些：结果里写够不着谁，自卫记一阵不再为它插进来。 */
+    public Set<Integer> unreachable() {
+        return Set.copyOf(unreachable);
+    }
+
     /** 撤离连着走不通，正在背水一战。 */
     public boolean cornered() {
         return cornered;

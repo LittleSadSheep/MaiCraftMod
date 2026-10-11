@@ -85,7 +85,10 @@ class TacticTest {
     void unreachableTargetsAreShotOrSkipped() {
         Tactic.Memory unreachable = new Tactic.Memory(-1, false, false, Set.of(1), false, false);
         assertInstanceOf(Tactic.Shoot.class, decide(me(20, true, true), unreachable, zombie(1, 5)));
-        assertInstanceOf(Tactic.KeepClear.class, decide(me(20, true, false), unreachable, zombie(1, 5)));
+        assertInstanceOf(Tactic.KeepClear.class, decide(me(20, true, false), unreachable, zombie(1, 3)),
+                "贴到快够得着我了：避开它");
+        assertInstanceOf(Tactic.Finished.class, decide(me(20, true, false), unreachable, zombie(1, 5)),
+                "隔着坑走不到、又没打我：不为它站着干耗");
     }
 
     @Test
