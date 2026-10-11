@@ -433,7 +433,8 @@ public final class AbilityCatalog {
                 anchors(deps), Optional.of(designs), construction, deps.machineBlockLimits(),
                 deps.compat().placementRules(), deps.compat().itemSettings(shared.playerServices()),
                 new MachineVehicles(deps.compat().vehicleReaders(shared.playerServices()), vehicleControls(deps),
-                        id -> deps.scene().seen().structureOf(id)))) {
+                        id -> deps.scene().seen().structureOf(id), deps.compat().trainSchedulers(shared.playerServices()),
+                        id -> deps.scene().seen().gameEntityOf(id)))) {
             registry.register(module);
         }
     }

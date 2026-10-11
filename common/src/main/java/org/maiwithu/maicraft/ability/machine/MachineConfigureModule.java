@@ -89,6 +89,11 @@ final class MachineConfigureModule implements AbilityModule {
         if (step.goal().target() instanceof Target.Seen seen && seen.id().startsWith("s")) {
             return VehicleControlsTask.decide(seen.id(), settings, vehicles);
         }
+        // 指列车的一节车厢 e#、写的是 schedule.*：给这趟车定时刻表，交给坐在操纵台座位上的列车长。
+        if (step.goal().target() instanceof Target.Seen seen && seen.id().startsWith("e")
+                && settings.keySet().stream().anyMatch(key -> key.startsWith("schedule."))) {
+            return TrainScheduleTask.decide(seen.id(), settings, vehicles, step.goal().permissions());
+        }
         // 给了 item：改身上那件物品自己的设置（过滤器、属性过滤器），不碰 target 指的方块。
         if (step.goal().params().has("item")) {
             Integer slot = step.goal().params().has("inventory_slot")
@@ -105,5 +110,6 @@ final class MachineConfigureModule implements AbilityModule {
         // 身上物品的设置：看（machine_inspect 给 item）与改共用一个任务。
         factories.register(ItemSettingsTask.Input.class, input -> new ItemSettingsTask(input, services));
         factories.register(VehicleControlsTask.Input.class, input -> new VehicleControlsTask(input, vehicles));
+        factories.register(TrainScheduleTask.Input.class, input -> new TrainScheduleTask(input, vehicles.schedulers()));
     }
 }

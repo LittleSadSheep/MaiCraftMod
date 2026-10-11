@@ -22,6 +22,7 @@ import org.maiwithu.maicraft.behavior.travel.spi.TravelMode;
 import org.maiwithu.maicraft.behavior.navigation.spi.ObstacleSource;
 import org.maiwithu.maicraft.behavior.landing.spi.FallBrake;
 import org.maiwithu.maicraft.behavior.perception.spi.ModSight;
+import org.maiwithu.maicraft.ability.vehicle.spi.TrainScheduler;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleAssembler;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleDriver;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleReader;
@@ -73,11 +74,12 @@ public final class CompatRegistry {
     private final List<ToBuild<VehicleAssembler>> vehicleAssemblers = new ArrayList<>();
     private final List<ToBuild<VehicleDriver>> vehicleDrivers = new ArrayList<>();
     private final List<ToBuild<VehicleReader>> vehicleReaders = new ArrayList<>();
+    private final List<ToBuild<TrainScheduler>> trainSchedulers = new ArrayList<>();
     /** 全部的槽：一个模组交接到一半出错时，按交接前的长度一起撤回。新加槽时把它的列表加进来。 */
     private final List<List<?>> slots = List.of(itemSources, machineTypes, networkReaders, questBooks,
             breakAccelerators, dismantleTools, menuLayouts, carriedBackpacks, knowledgeSources, recipeViewers,
             serverReads, placementRules, rangedWeapons, itemSettings, travelModes, obstacleSources, fallBrakes, modSights, vehicleAssemblers,
-            vehicleDrivers, vehicleReaders);
+            vehicleDrivers, vehicleReaders, trainSchedulers);
     private final List<String> decisions = new ArrayList<>();
 
     private CompatRegistry() {}
@@ -246,6 +248,11 @@ public final class CompatRegistry {
         vehicleReaders.add(new ToBuild<>(module, build));
     }
 
+    /** 联动入口交一种给列车定时刻表的办法（机械动力）的建法：进世界时建，包一层后交给 machine_configure。 */
+    public void trainScheduler(CompatModule module, Function<PlayerServices, TrainScheduler> build) {
+        trainSchedulers.add(new ToBuild<>(module, build));
+    }
+
     /** 联动入口交一种观察（电梯、车站、列车、物理结构在 observe 里的样子）：包一层后交给场景；模组停用后不再报。 */
     public void modSight(CompatModule module, ModSight sight) {
         modSights.add(new CompatModSight(module, sight));
@@ -319,6 +326,11 @@ public final class CompatRegistry {
     /** 进世界时建联动模组的读载具办法；规矩同物品来源。 */
     public List<VehicleReader> vehicleReaders(PlayerServices services) {
         return build(vehicleReaders, services, "读载具的办法", CompatVehicleReader::new);
+    }
+
+    /** 进世界时建联动模组的定时刻表办法；规矩同物品来源。 */
+    public List<TrainScheduler> trainSchedulers(PlayerServices services) {
+        return build(trainSchedulers, services, "定列车时刻表的办法", CompatTrainScheduler::new);
     }
 
     /** 进世界时建联动模组的挖掘加速；规矩同物品来源。 */

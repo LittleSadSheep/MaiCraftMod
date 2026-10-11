@@ -98,8 +98,9 @@ public final class CreateCompat extends CompatModule {
         // 坐火车当一种出行方式（via=train，所有者 10-11 批）：时刻表只在服务端，经只读操作 create.trains 问。
         registry.serverRead(this, TRAINS_OPERATION, 1);
         registry.travelMode(this, services -> new TrainMode(this, services));
-        // 车站组车、拆车当组装载具的一种办法（载具规格，所有者 10-11 批）。
+        // 车站组车、拆车当组装载具的一种办法；给列车写时刻表交给列车长（载具规格，所有者 10-11 批）。
         registry.vehicleAssembler(this, services -> new StationAssembly(this, services));
+        registry.trainScheduler(this, services -> new TrainTimetable(this, services));
         // 观察里列出电梯（当前层、楼层表）、车站（站名、有没有车在站）、列车（车名、动没动、空座）。
         registry.modSight(this, new CreateModSight(this));
     }
