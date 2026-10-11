@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.survival;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.game.player.PlayerInput;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -96,6 +100,71 @@ class BreathTaskTest {
 
         assertTrue(digging.dug.contains(ice), "挖的是压在水面上的那一格");
         assertTrue(digging.closed, "挖完收尾");
+    }
+
+    /** 水下路线替身：给一条路线，每游一刻到一个点。 */
+    private static final class FakeRoutes implements BreathTask.SwimsToAir {
+        private final BreathTask.AirRoute route;
+        final List<Vec3> swum = new ArrayList<>();
+
+        FakeRoutes(BreathTask.AirRoute route) {
+            this.route = route;
+        }
+
+        @Override public Optional<BreathTask.AirRoute> route(TickContext context) {
+            return Optional.ofNullable(route);
+        }
+
+        @Override public boolean swimToward(TickContext context, Vec3 point) {
+            swum.add(point);
+            return true;
+        }
+    }
+
+    @Test
+    void underACapItSwimsToAnOpeningInsteadOfDiggingWhenAirAllows() {
+        // 大片冰面下：十几格外有能露头的地方，氧气够游过去，就游过去，不挖头顶。
+        BlockPos ice = new BlockPos(0, 44, 0);
+        SurvivalSituation underIce = SurvivalFakes.calm().feet(40.0).underwater(200).underCeiling(ice).build();
+        var route = new BreathTask.AirRoute(List.of(new Vec3(0.5, 40, 0.5), new Vec3(3.5, 40, 0.5),
+                new Vec3(3.5, 43, 0.5)), 120);
+        FakeRoutes routes = new FakeRoutes(route);
+        FakeBreaking digging = new FakeBreaking(ActionStatus.done());
+        SurvivalSituation surfaced = SurvivalFakes.calm().feet(43.0).build();
+        BreathTask task = new BreathTask(scripted(underIce, underIce, underIce, underIce, surfaced),
+                (context, cell) -> {
+                    digging.aimAt(cell);
+                    return Optional.of(digging);
+                }, routes);
+        task.start(tick);
+        for (int i = 0; i < 4; i++) {
+            assertTrue(task.tick(tick) instanceof TickResult.Running);
+            player.nextTick();
+        }
+        assertEquals(route.points(), routes.swum, "一个点一个点游过去");
+        // 游到了能露头的地方、氧气补满：换气做完，从头到尾没挖头顶。
+        assertTrue(task.tick(tick) instanceof TickResult.Finished);
+        assertTrue(digging.dug.isEmpty(), "游得过去就不挖");
+    }
+
+    @Test
+    void underACapWithTooLittleAirItDigsInstead() {
+        // 能露头的地方太远、氧气不够游过去：退回挖头顶。
+        BlockPos ice = new BlockPos(0, 44, 0);
+        SurvivalSituation underIce = SurvivalFakes.calm().feet(40.0).underwater(30).underCeiling(ice).build();
+        FakeRoutes routes = new FakeRoutes(new BreathTask.AirRoute(List.of(new Vec3(9.5, 40, 0.5)), 200));
+        FakeBreaking digging = new FakeBreaking(ActionStatus.running(), ActionStatus.done());
+        BreathTask task = new BreathTask(scripted(underIce, underIce, underIce), (context, cell) -> {
+            digging.aimAt(cell);
+            return Optional.of(digging);
+        }, routes);
+        task.start(tick);
+        for (int i = 0; i < 3; i++) {
+            task.tick(tick);
+            player.nextTick();
+        }
+        assertTrue(routes.swum.isEmpty());
+        assertTrue(digging.dug.contains(ice));
     }
 
     @Test

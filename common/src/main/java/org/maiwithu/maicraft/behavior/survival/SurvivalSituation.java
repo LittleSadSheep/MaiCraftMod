@@ -51,6 +51,9 @@ public record SurvivalSituation(
         BlockPos buriedCell,
         BlockPos waterCeiling) implements FallDanger.View, DrowningDanger.View, BuriedDanger.View {
 
+    /** 头顶被盖住时多留的氧气（刻）：绕到能露头的地方或挖开头顶要的时间。类别：玩家常识。 */
+    private static final int CAPPED_RESERVE_TICKS = 100;
+
     /** 往上数水深最多数多少格；再深按这个深度估，照样会早早叫人上浮。类别：玩家常识。 */
     private static final int MAX_DEPTH_PROBE = 16;
 
@@ -76,6 +79,9 @@ public record SurvivalSituation(
 
         boolean headWet = player.isEyeInFluid(FluidTags.WATER);
         int needed = headWet ? SwimAirBudget.requiredAirForAscent(waterAbove(level, eyeCell), 1.0) : 0;
+        // 头顶被盖住时直着游上去是出不去的：多留五秒给绕到能露头的地方或挖开头顶，早一点开始换气。
+        BlockPos cap = headWet ? ceilingAbove(level, eyeCell) : null;
+        if (cap != null) needed += CAPPED_RESERVE_TICKS;
         return new SurvivalSituation(
                 player.getHealth(),
                 player.getY(),
@@ -91,7 +97,7 @@ public record SurvivalSituation(
                 needed,
                 buried != null,
                 buried,
-                headWet ? ceilingAbove(level, eyeCell) : null);
+                cap);
     }
 
     // 往上那一柱水的顶上：是空气就能浮出去；是实心方块（冰面、石头）就是压在头顶的盖子，给出那一格。

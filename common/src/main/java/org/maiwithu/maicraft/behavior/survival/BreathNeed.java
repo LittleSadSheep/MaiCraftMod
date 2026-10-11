@@ -16,15 +16,21 @@ public final class BreathNeed implements SurvivalNeed {
 
     private final SurvivalSituation.SituationReader reader;
     private final BreathTask.DigsCeiling ceilings;
+    private final BreathTask.SwimsToAir airRoutes;
 
     public BreathNeed(SurvivalSituation.SituationReader reader) {
-        this(reader, BreathTask.DigsCeiling.NONE);
+        this(reader, BreathTask.DigsCeiling.NONE, BreathTask.SwimsToAir.NONE);
     }
 
-    /** @param ceilings 水面被盖住时怎么挖开头顶那一格 */
-    public BreathNeed(SurvivalSituation.SituationReader reader, BreathTask.DigsCeiling ceilings) {
+    /**
+     * @param ceilings  水面被盖住时怎么挖开头顶那一格
+     * @param airRoutes 水面被盖住时往哪游能换上气（先试它，不行再挖）
+     */
+    public BreathNeed(SurvivalSituation.SituationReader reader, BreathTask.DigsCeiling ceilings,
+                      BreathTask.SwimsToAir airRoutes) {
         this.reader = reader;
         this.ceilings = ceilings;
+        this.airRoutes = airRoutes;
     }
 
     @Override public String name() { return "换气"; }
@@ -37,6 +43,6 @@ public final class BreathNeed implements SurvivalNeed {
 
     @Override
     public Task createTask(TickContext context) {
-        return new BreathTask(reader, ceilings);
+        return new BreathTask(reader, ceilings, airRoutes);
     }
 }

@@ -55,6 +55,7 @@ import org.maiwithu.maicraft.behavior.survival.LiveNightAndEdgeMoves;
 import org.maiwithu.maicraft.behavior.survival.LiveBurrow;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.survival.BlockBreaking;
+import org.maiwithu.maicraft.behavior.survival.LiveAirRoutes;
 import org.maiwithu.maicraft.behavior.survival.LiveCeilingDigs;
 import org.maiwithu.maicraft.behavior.survival.LiveNightView;
 import org.maiwithu.maicraft.behavior.survival.NightfallNeed;
@@ -232,7 +233,7 @@ public final class Bootstrap {
         return new ControlLoop(List.of(
                 new DigOutNeed(new SurvivalSituation.FromPlayer(),
                         () -> new NativeBlockBreaking(interactionSender, menuActions)),
-                new BreathNeed(new SurvivalSituation.FromPlayer(), ceilings),
+                new BreathNeed(new SurvivalSituation.FromPlayer(), ceilings, new LiveAirRoutes()),
                 new FallNeed(new SurvivalSituation.FromPlayer(), EmergencyLanding::findToSaveLife,
                         BaritoneInternals::landingInProgress),
                 new SelfDefenseNeed(combatSenses, new LiveCombatMoves(walks), events),
