@@ -154,6 +154,21 @@ class StandSpotsTest {
         assertEquals(Optional.of("还没落地"), StandSpots.checkArrival(target, REACH, world, guarded));
     }
 
+    @Test
+    void 往一格里扔只站正挨着它_出手点比盆沿高的地方() {
+        // 工作盆在 (3,64,0)，盆沿在 13/16 格高：平地上站在它四邻能扔，斜对角太远、正上方会踩着它。
+        StandSpots.Ranking ranking = find(ApproachTarget.forToss(new BlockPos(3, 64, 0), 13 / 16.0));
+        List<BlockPos> feet = ranking.spots().stream().map(StandSpot::feet).toList();
+        assertTrue(feet.containsAll(List.of(new BlockPos(2, 64, 0), new BlockPos(4, 64, 0),
+                new BlockPos(3, 64, 1), new BlockPos(3, 64, -1))));
+        assertTrue(feet.stream().allMatch(spot -> Math.abs(spot.getX() - 3) + Math.abs(spot.getZ()) == 1),
+                "能用的站位都在正挨着它的四格（高低不论）");
+        assertEquals("离得太远，扔不准", failureAt(ranking, new BlockPos(2, 64, 1)));
+        assertEquals("站在它正上方", failureAt(ranking, new BlockPos(3, 65, 0)));
+        assertEquals("比落点低，扔不进去", failureAt(ranking, new BlockPos(2, 63, 0)));
+        assertEquals("比落点高太多，扔下去会偏", failureAt(ranking, new BlockPos(2, 67, 0)));
+    }
+
     private String failureAt(StandSpots.Ranking ranking, BlockPos feet) {
         List<RejectedSpot> matches = ranking.rejected().stream()
                 .filter(spot -> spot.feet().equals(feet)).toList();

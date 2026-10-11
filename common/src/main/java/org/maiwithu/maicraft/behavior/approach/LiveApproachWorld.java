@@ -130,6 +130,11 @@ public final class LiveApproachWorld implements ApproachWorldView {
         if (target.kind() == InteractionKind.ENTITY) {
             return entityVisible(level, player, eye, target.bounds());
         }
+        // 往一格里扔：东西从格顶上方落进去，看格顶正上方那一点有没有被挡；落不落得准由丢的时候按抛物线算。
+        if (target.kind() == InteractionKind.TOSS) {
+            Vec3 above = new Vec3(target.center().x, target.bounds().maxY + 0.05, target.center().z);
+            return pointVisible(level, player, eye, above);
+        }
         BlockPos cell = target.block();
         BlockState state = level.getBlockState(cell);
         if (state.isAir() || state.getBlock() instanceof LiquidBlock) {

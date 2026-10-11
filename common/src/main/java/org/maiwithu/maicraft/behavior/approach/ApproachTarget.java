@@ -49,6 +49,21 @@ public record ApproachTarget(InteractionKind kind, BlockPos block, AABB bounds, 
         return new ApproachTarget(InteractionKind.BED, half, new AABB(half), null);
     }
 
+    /**
+     * 往一格里扔东西（把料扔进工作盆、扔到石磨顶上）：站位只挑那一格旁边、出手点比接住东西的高度高的地方。
+     * 包围盒是那一格从接住东西的高度到格顶的一段，看不看得见按格顶正上方那一点判：扔的东西从上面落进去。
+     *
+     * @param catchHeight 东西落到离这一格底面多高就被接住（格）：工作盆的盆沿、锯面、石磨外圈台面的高度
+     */
+    public static ApproachTarget forToss(BlockPos cell, double catchHeight) {
+        if (!(catchHeight >= 0.0 && catchHeight <= 1.0)) {
+            throw new IllegalArgumentException("接住东西的高度要在这一格里：" + catchHeight);
+        }
+        AABB landing = new AABB(cell.getX(), cell.getY() + catchHeight, cell.getZ(),
+                cell.getX() + 1, cell.getY() + Math.max(1.0, catchHeight + 0.05), cell.getZ() + 1);
+        return new ApproachTarget(InteractionKind.TOSS, cell, landing, null);
+    }
+
     /** 对一个实体做事；包围盒由调用方在取目标的同一刻读出来。 */
     public static ApproachTarget ofEntity(AABB box) {
         BlockPos center = BlockPos.containing(box.getCenter());

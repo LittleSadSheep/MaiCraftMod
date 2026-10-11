@@ -114,6 +114,7 @@ public final class Approach implements Action {
             case BLOCK -> "方块 " + anchor.toShortString();
             case ENTITY -> "实体" + target.center();
             case BED -> "床 " + anchor.toShortString();
+            case TOSS -> "能往 " + anchor.toShortString() + " 扔东西的地方";
         };
     }
 

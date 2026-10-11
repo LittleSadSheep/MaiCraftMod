@@ -39,6 +39,24 @@ public final class StandSpots {
     /** 床距离的高度差上限：服务端对床横向卡三格、高度只允许差两格。类别：游戏事实。 */
     private static final int BED_VERTICAL_LIMIT = 2;
 
+    /** 原版 Q 丢出的东西从眼睛下方这么多格出手。类别：游戏事实。 */
+    private static final double TOSS_RELEASE_DROP = 0.3;
+
+    /**
+     * 往一格里扔东西时，出手点至少比接住东西的地方高这么多格：再低东西飞平了，撞上那一格的侧面。
+     * 高出三格以上，竖直方向的随机偏差在下落途中放大，落点散出那一格。类别：游戏事实（丢出物的抛物线）。
+     */
+    private static final double TOSS_MIN_RISE = 0.2;
+    private static final double TOSS_MAX_RISE = 3.0;
+
+    /**
+     * 往一格里扔东西时，眼睛离那一格中心的水平距离：只站正挨着它的那四格（一格远）。
+     * 斜对角或再远一格，丢出物竖直方向的随机偏差会让落点散出那一格；站在它正上方也不行，锯会割脚。
+     * 类别：游戏事实（丢出物的抛物线与随机偏差）。
+     */
+    private static final double TOSS_MIN_FLAT = 0.5;
+    private static final double TOSS_MAX_FLAT = 1.1;
+
     /** 一次站位搜索的结果：能用的排好序，被拒的带着失败项。 */
     public record Ranking(List<StandSpot> spots, List<RejectedSpot> rejected) {
     }
@@ -151,7 +169,20 @@ public final class StandSpots {
             case ENTITY -> eye.distanceTo(nearestPoint(target.bounds(), eye)) > reach.entityRange() ? "够不着" : null;
             // 床：服务端按床底面中心分轴卡距离，横向不超过床距离档，高度差不超过两格。
             case BED -> bedOutOfRange(feet, target.block(), reach.bedDistance()) ? "够不着" : null;
+            // 往一格里扔：不看交互距离，看出手点比接住东西的地方高多少、离那一格多近。
+            case TOSS -> tossFailure(target, eye);
         };
+    }
+
+    /** 往一格里扔东西的站位：出手点比接住东西的高度高一截又不太高，人站在那一格正旁边、不在它正上方。 */
+    private static String tossFailure(ApproachTarget target, Vec3 eye) {
+        double rise = eye.y - TOSS_RELEASE_DROP - target.bounds().minY;
+        if (rise < TOSS_MIN_RISE) return "比落点低，扔不进去";
+        if (rise > TOSS_MAX_RISE) return "比落点高太多，扔下去会偏";
+        double flat = Math.hypot(eye.x - target.center().x, eye.z - target.center().z);
+        if (flat < TOSS_MIN_FLAT) return "站在它正上方";
+        if (flat > TOSS_MAX_FLAT) return "离得太远，扔不准";
+        return null;
     }
 
     /** 包围盒上离给定点最近的点：把点的三个坐标各自夹进盒子的范围。 */
