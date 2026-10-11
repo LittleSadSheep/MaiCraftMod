@@ -18,6 +18,7 @@ import org.maiwithu.maicraft.ability.chat.ChatAbility;
 import org.maiwithu.maicraft.ability.design.DesignModule;
 import org.maiwithu.maicraft.ability.design.api.DesignStore;
 import org.maiwithu.maicraft.ability.chat.ReadsChatEcho;
+import org.maiwithu.maicraft.ability.enchant.EnchantModule;
 import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import org.maiwithu.maicraft.behavior.interaction.spi.DismantleTool;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
@@ -267,11 +268,25 @@ public final class AbilityCatalog {
         // 看不见石头时往下挖楼梯：挖一格、捡这一级掉的东西与采掘共用一套，走下一级只走不改地形。
         ClientStairsDown stairs = new ClientStairsDown(new LiveStairsSite(deps.walks()), shared.digging(),
                 shared.drops(), shared.permission());
+        // 从记得的箱子与现场容器拿东西的来源：拿到物品的引擎与附魔的受限补齐共用同一份。
+        ContainerSource containerSource = new ContainerSource(deps.memory(), deps.itemTags(), deps.protection(),
+                new MenuContainerTakes(shared.bringClose(), deps.interactions(), deps.itemTags(),
+                        deps.memory(), deps.context(), deps.compat().menuLayouts()));
         registry.register(obtainModule(deps, shared.playerServices(), shared.bringClose(), shared.toMainhand(),
-                shared.permission(), shared.innerNeeds(), shared.collects(), stairs, shared.space()));
+                shared.permission(), shared.innerNeeds(), shared.collects(), stairs, shared.space(),
+                containerSource));
 
         // 存东西：找容器把现场扫描与世界记忆并起来，打开容器、逐笔搬运与挖盖子都接上了。
         registry.register(depositModule(deps, shared.storing(), shared.collects()));
+
+        // 附魔：缺料走受限补齐（身上与记得的容器，要下矿才够就 NEED_ITEM），界面里装料与报价
+        // 走容器界面的既有规矩；观察编号查场景、记过的地点查世界记忆、台子分刻扫描找。
+        registry.register(new EnchantModule(deps.context(),
+                containerOnlyAcquisition(containerSource, deps, shared.space()), shared.space(),
+                (at, permissions) -> new ClientMenuOpening(at, permissions, deps.compat().menuLayouts(),
+                        shared.bringClose(), deps.interactions(), deps.context()),
+                new SceneSeenTargets(deps::scene), deps.memory(), deps.blockScans(),
+                deps.itemTags(), deps.itemRegistry()));
 
         // 睡觉：选床、放自带床、现做一张、白天备床与夜间自动休息都从这里接，见 registerSleep。
         registerSleep(registry, deps, shared);
@@ -495,7 +510,7 @@ public final class AbilityCatalog {
      */
     private static AbilityModule obtainModule(Deps deps, PlayerServices playerServices, LiveApproaches bringsClose,
             ClientMovesToMainhand toMainhand, PermissionCheck permission, DeferredInnerNeeds innerNeeds,
-            ClientCollectsBlocks collects, DigsStairsDown stairs, InventorySpace space) {
+            ClientCollectsBlocks collects, DigsStairsDown stairs, InventorySpace space, ContainerSource containerSource) {
         RegistryRecipeReads recipeReads = new RegistryRecipeReads(deps.context(), deps.itemTags(), deps.furnaceFuels());
         // 在工作站上动手：熔炉添燃料时按同一份燃料表挑身上烧得最久的。
         RecipeRuns recipeRuns = new MenuRecipeRuns(bringsClose, deps.interactions(),
@@ -517,10 +532,7 @@ public final class AbilityCatalog {
                 new ClientCropReplanting(toMainhand, deps.interactions(), deps.context()));
         // 自带的来源在前，联动模组登记的在后：装了才有，停用后由登记表那一层回答不支持。
         List<ItemSource> sources = new ArrayList<>(List.of(
-                new ContainerSource(deps.memory(), deps.itemTags(), deps.protection(),
-                        new MenuContainerTakes(bringsClose, deps.interactions(), deps.itemTags(),
-                                deps.memory(), deps.context(), deps.compat().menuLayouts())),
-                craftSource, smeltSource, miningSource, harvestSource, new TradeSource()));
+                containerSource, craftSource, smeltSource, miningSource, harvestSource, new TradeSource()));
         // 联动来源进世界时带着这一份玩家行为建：缺东西去拿也回到同一个引擎（内需入口），许可原样传下去。
         sources.addAll(deps.compat().itemSources(playerServices));
         ItemAcquisition acquisition = new ItemAcquisition(sources,
@@ -532,6 +544,17 @@ public final class AbilityCatalog {
         // via 的可选值就是这些来源自报的途径：来源列表变了，能力说明里的参数表跟着变。
         return new ObtainAbility(acquisition, viasOf(sources),
                 deps.itemRegistry(), deps.backpack(), deps.offhand(), deps.itemTags());
+    }
+
+    /**
+     * 附魔用的受限补齐引擎：只有容器一条来源（加上引擎自带的身上清点）——
+     * 缺青金石或缺可附魔物品先算身上与记得的容器，要下矿才够就 NEED_ITEM 交回 LLM 决定。
+     */
+    private static ItemAcquisition containerOnlyAcquisition(ContainerSource containerSource, Deps deps,
+            InventorySpace space) {
+        return new ItemAcquisition(List.of(containerSource),
+                deps.backpack(), deps.offhand(), deps.itemTags(),
+                deps.characterPosition(), Optional.of(space), ItemAcquisition.DEFAULT_MAX_DEPTH);
     }
 
     /** 来源自报的途径，按来源顺序去重；合成与烧炼各是一条，同一条途径有几个来源也只列一次。 */

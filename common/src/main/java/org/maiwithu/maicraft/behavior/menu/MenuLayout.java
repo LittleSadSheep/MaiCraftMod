@@ -41,6 +41,9 @@ public final class MenuLayout {
     /** 石切台：第 0 格是投入口，第 1 格是产出格。 */
     private static final Set<String> STONECUTTER = Set.of("minecraft:stonecutter");
 
+    /** 附魔台：容器侧只有第 0、1 两格工作槽（第 0 格放待附魔物品、第 1 格放青金石），三个按钮不在槽位里。 */
+    private static final Set<String> ENCHANTING = Set.of("minecraft:enchantment");
+
     /** 角色侧固定 36 格：27 格主背包 + 9 格快捷栏。 */
     private static final int PLAYER_SLOTS = 36;
 
@@ -97,6 +100,13 @@ public final class MenuLayout {
         }
         if (CRAFTING.contains(typeId) || STONECUTTER.contains(typeId)) {
             // 合成台与石切台的产出格只会被拿走不会被塞进，点击都按普通槽核对。
+            return new Supported(List.copyOf(playerSlots), List.copyOf(containerSlots), Set.of());
+        }
+        if (ENCHANTING.contains(typeId)) {
+            // 附魔台的两格工作槽都按普通槽核对：放进去的东西不会被立刻吃掉，附魔按按钮结算。
+            if (containerSlots.size() != 2) {
+                return new Unsupported("界面类型 " + typeId + " 的容器侧不是两格工作槽，证明不了附魔台布局");
+            }
             return new Supported(List.copyOf(playerSlots), List.copyOf(containerSlots), Set.of());
         }
         // 联动模组证明过的界面：按它的证明分侧；证明的是模组自己的界面，原版类型走不到这里。

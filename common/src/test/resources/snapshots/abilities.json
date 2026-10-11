@@ -54,6 +54,17 @@
         "mode": "controls_player"
       },
       {
+        "ability": "maicraft:enchant",
+        "summary": "在附魔台给一件东西附魔：选料、看三档报价、按选定档，附出什么如实列出",
+        "parameters": "item: string, tier: integer = 1, radius: integer = 32",
+        "targets": [
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
         "ability": "maicraft:sleep",
         "summary": "找一张床躺下睡觉，白天会先备好今晚的床再报告睡不了",
         "parameters": "",
@@ -189,6 +200,13 @@
         "ability": "maicraft:wait",
         "summary": "在游戏里等一个条件：等一段时间、等天黑天亮、等血回满或不再饥饿",
         "parameters": "condition: string = elapsed, after_seconds: integer = 0",
+        "targets": [],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:fish",
+        "summary": "在附近的水边钓鱼：自己找钓位、抛竿、咬钩就收，钓上来的照单全收",
+        "parameters": "count?: integer, max_seconds?: integer",
         "targets": [],
         "mode": "controls_player"
       },
@@ -493,6 +511,45 @@
       "required_mods": [],
       "knowledge": [],
       "doc_resource": "assets/maicraft/abilities/deposit.md"
+    },
+    {
+      "ability": "maicraft:enchant",
+      "summary": "在附魔台给一件东西附魔：选料、看三档报价、按选定档，附出什么如实列出",
+      "parameters": [
+        {
+          "name": "item",
+          "type": "string",
+          "required": true,
+          "doc": "附魔哪件：物品 ID 或 # 标签（身上第一件匹配且台子肯收的）"
+        },
+        {
+          "name": "tier",
+          "type": "integer",
+          "required": false,
+          "doc": "选三档报价里的第几档；第 n 档消耗 n 级和 n 个青金石，各档另有等级门槛",
+          "default": 1,
+          "min": 1,
+          "max": 3
+        },
+        {
+          "name": "radius",
+          "type": "integer",
+          "required": false,
+          "doc": "不给 target 时找台子的范围（格）",
+          "default": 32,
+          "min": 1,
+          "max": 9223372036854775807
+        }
+      ],
+      "targets": [
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/enchant.md"
     },
     {
       "ability": "maicraft:sleep",
@@ -957,6 +1014,33 @@
       "required_mods": [],
       "knowledge": [],
       "doc_resource": "assets/maicraft/abilities/wait.md"
+    },
+    {
+      "ability": "maicraft:fish",
+      "summary": "在附近的水边钓鱼：自己找钓位、抛竿、咬钩就收，钓上来的照单全收",
+      "parameters": [
+        {
+          "name": "count",
+          "type": "integer",
+          "required": false,
+          "doc": "钓到几次收竿（垃圾、宝藏也算一次）；不给就一直钓（常驻）",
+          "min": 1,
+          "max": 9223372036854775807
+        },
+        {
+          "name": "max_seconds",
+          "type": "integer",
+          "required": false,
+          "doc": "最多钓多久（秒）；到时按没进展结束，已钓到的照算",
+          "min": 1,
+          "max": 9223372036854775807
+        }
+      ],
+      "targets": [],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/fish.md"
     },
     {
       "ability": "maicraft:travel",

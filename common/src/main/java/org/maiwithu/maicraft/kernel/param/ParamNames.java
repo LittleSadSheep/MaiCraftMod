@@ -50,7 +50,8 @@ public final class ParamNames {
             Map.entry("settings", "要改成的设置（JSON 对象）：键是这台机器认的设置项，值写字符串"),
             Map.entry("collect", "做完要不要把出口的东西拿进背包"),
             Map.entry("network", "接哪种网络：取值由已登记的网络读取器自报，例如 kinetic / me / energy"),
-            Map.entry("source", "接到哪：另一台机器或那张网里任一格的位置，写法与 target 相同"));
+            Map.entry("source", "接到哪：另一台机器或那张网里任一格的位置，写法与 target 相同"),
+            Map.entry("tier", "附魔台三档报价里选第几档（1..3）：第 n 档消耗 n 级和 n 个青金石"));
 
     private ParamNames() {}
 

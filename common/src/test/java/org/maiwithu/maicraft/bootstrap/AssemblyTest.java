@@ -58,10 +58,12 @@ class AssemblyTest {
         // 任务书也接上了：离线清单当作 FTB 任务装着，操作来自登记表（空登记表时它如实说用不了）。
         // 机器的六个能力也接上了：机器类型与网络读取器由登记表按装了的模组建，离线一份没有也照常登记，
         // 施工与接网络只认这两样接口，放方块不需要认识机器。
+        // 钓鱼与附魔也接上了：钓位几何、咬钩收竿、装料与报价都组合玩家行为层已有的模型。
         assertEquals(Set.of("use", "eat", "equip", "drop", "obtain", "gather", "deposit", "sleep", "design", "build",
                 "machine_inspect", "machine_review", "machine_configure", "machine_run",
                 "machine_build", "machine_connect",
-                "fight", "follow", "wait", "travel", "find", "chat", "remember", "sequence", "quest"), registered,
+                "fight", "follow", "wait", "travel", "find", "chat", "remember", "sequence", "quest",
+                "fish", "enchant"), registered,
                 "清单里的能力要一个不少地登记上");
     }
 

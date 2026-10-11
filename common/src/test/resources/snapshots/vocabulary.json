@@ -36,6 +36,7 @@
     "source": "接到哪：另一台机器或那张网里任一格的位置，写法与 target 相同",
     "structure": "要找的结构 ID（命名空间 id），例如 minecraft:village_plains",
     "text": "要发送或书写的文字",
+    "tier": "附魔台三档报价里选第几档（1..3）：第 n 档消耗 n 级和 n 个青金石",
     "via": "指定途径，例如拿东西时指定合成、烧炼或采掘"
   },
   "target_kinds": [
