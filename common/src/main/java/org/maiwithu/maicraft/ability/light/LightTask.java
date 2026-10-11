@@ -46,13 +46,14 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
 /**
- * 区域补光的任务：量光（采样范围内的可行走格或作物与耕地，分几刻扫完）→ 备光源（默认火把，
- * 备料经施工引擎去弄）→ 选灯位（资格与贪心）→ 转蓝图交施工引擎放置 → 等几刻复测，
- * 没达标且这轮有真实进展就再来一轮；同一批候选原样重现、或选中集为空，就按穷尽如实收场。
+ * 区域补光的任务：量光（采样范围内的可行走格或作物与耕地，分几刻扫完）→ 备光源（默认火把；身上不够就
+ * 如实 partial 写明还缺多少，采购不发生在 light 里，LLM 让它 obtain 再下达一次）→ 选灯位（资格与贪心）
+ * → 转蓝图交施工引擎放置 → 等几刻复测，没达标且这轮有真实进展就再来一轮；同一批候选原样重现、
+ * 或选中集为空，就按穷尽如实收场。
  *
  * <p>本任务声明"自己管照明"：太暗这项生存需求看到就让位，不往验收范围里插野火把。
- * 放灯、许可、备料、临时方块、每格结局全是施工引擎的事，这里只管量光、选灯位与亮没亮；
- * 照明不声明要清空的格子，蓝图没写的格子不要求为空。
+ * 放灯、许可、临时方块、受保护格提问、每格结局全是施工引擎的事，这里只管量光、选灯位与亮没亮；
+ * 照明不声明要清空的格子，蓝图没写的格子不要求为空。施工交代没做完的部分（没收回的临时方块）照样并进结果。
  */
 final class LightTask extends PhasedTask<LightTask.Phase> implements HandlesOwnLighting {
 
@@ -89,6 +90,10 @@ final class LightTask extends PhasedTask<LightTask.Phase> implements HandlesOwnL
 
     /** 这次用的光源：第一轮定下后锁定沿用，不每轮重新挑。 */
     private LampItem lamp;
+    /** 身上的灯不够照完这片时还缺多少支：结论里写明缺口，采购不发生在 light 里。 */
+    private int lampShortfall;
+    /** 施工子任务交代没做完的部分（例如没收回的临时方块）：并进本任务的结果，不悄悄消失。 */
+    private List<String> constructionRemainder = List.of();
     /** 放灯轮次的账。 */
     private final Rounds rounds = new Rounds();
     /** 正在推进的施工子任务、它的结果与复测前的等待。 */
@@ -248,26 +253,44 @@ final class LightTask extends PhasedTask<LightTask.Phase> implements HandlesOwnL
         return Next.go(Phase.CHOOSE, "量完了：样本 " + obs.survey().samples().size() + " 格，暗 " + dark.size() + " 格");
     }
 
-    // 选灯位：围绕暗格按资格与贪心挑一批；一支都选不出来、或跟上一轮原样重现，就按穷尽收场。
+    // 选灯位：围绕暗格按资格与贪心挑一批；身上的灯有几支就提交几处，一支都交不出去或跟上一轮
+    // 原样重现，就按穷尽收场。
     private Next<Phase> choose(TickContext context) {
         LampSiteChooser.Selection selection = LampSiteChooser.choose(darkSamples(), world, obs.survey().sensitive(),
                 protectedAt(), nearFeet(context), lamp, input.minimumLight());
+        List<LampSiteChooser.LampSite> sites = sitesOnHand(selection);
         Set<BlockPos> chosen = new LinkedHashSet<>();
-        selection.chosen().forEach(site -> chosen.add(site.pos()));
-        if (selection.chosen().isEmpty() || chosen.equals(rounds.previousChosen)) {
+        sites.forEach(site -> chosen.add(site.pos()));
+        if (chosen.isEmpty() || chosen.equals(rounds.previousChosen)) {
             return concludeUnmet(selection, rounds.placedTotal == 0);
         }
         rounds.previousChosen = chosen;
         rounds.placedThisRound = 0;
         rounds.count++;
         placing = new Placing();
-        // 灯位清单转蓝图（绝对坐标，BLOCK 格）：许可、备料、临时方块、每格结局全按施工的规矩。
+        // 灯位清单转蓝图（绝对坐标，BLOCK 格）：许可、临时方块、受保护格提问、每格结局全按施工的规矩；
+        // 灯就是身上这些，施工不再去备料。
         placing.runner.begin(new ConstructionTask(new ConstructionInput(
-                        new Blueprint(dimension(), chosen.iterator().next(), cells(selection.chosen())),
+                        new Blueprint(dimension(), chosen.iterator().next(), cells(sites)),
                         input.permissions(), "照明"),
                 services), context);
-        recordProgress("第 " + rounds.count + " 轮选中 " + selection.chosen().size() + " 处灯位");
+        recordProgress("第 " + rounds.count + " 轮选中 " + sites.size() + " 处灯位");
         return Next.go(Phase.PLACE, "交给施工引擎插灯");
+    }
+
+    /** 这一次插得出去的灯位：身上的灯有几支就提交几处，不够的差额记下来在结论里写明。 */
+    private List<LampSiteChooser.LampSite> sitesOnHand(LampSiteChooser.Selection selection) {
+        List<LampSiteChooser.LampSite> chosen = selection.chosen();
+        int carried = services.site().carried(lamp.itemId());
+        if (chosen.size() <= carried) {
+            lampShortfall = 0;
+            return chosen;
+        }
+        lampShortfall = chosen.size() - carried;
+        // 贪心的次序就是覆盖从大到小：只交出手上够用的前几处，不为了插灯去弄料。
+        recordAttempt("备光源", "身上只有 " + carried + " 支 " + lamp.itemId()
+                + "，先插这些，还缺 " + lampShortfall + " 支");
+        return chosen.subList(0, carried);
     }
 
     // 放置：整段交给施工引擎这个子任务；它失败按它的问题结束，已放的不回滚。
@@ -275,13 +298,14 @@ final class LightTask extends PhasedTask<LightTask.Phase> implements HandlesOwnL
         if (placing.runner.tick(context) instanceof TickResult.Finished finished) {
             placing.result = finished.result();
             copyFacts(placing.result);
+            copyRemainder(placing.result);
             if (placing.result.status() == TaskResult.Status.FAILED) {
                 return Next.fail(placing.result.problem());
             }
             rounds.placedThisRound = placedCount();
             rounds.placedTotal += rounds.placedThisRound;
             if (rounds.placedThisRound == 0 && placing.result.problem() != null) {
-                // 备料、许可这类一步都没走成的：把引擎的问题原样交出去，不静默变成"灯位不足"。
+                // 许可这类一步都没走成的：把引擎的问题原样交出去，不静默变成"灯位不足"。
                 return Next.fail(placing.result.problem());
             }
             recordProgress("放下了 " + rounds.placedThisRound + " 支灯");
@@ -324,7 +348,9 @@ final class LightTask extends PhasedTask<LightTask.Phase> implements HandlesOwnL
         if (satisfied(lit, checked)) {
             return Next.done(TaskResult.builder(TaskResult.Status.DONE,
                     rounds.placedTotal == 0 ? "开始时已满足" : "放了 " + rounds.placedTotal + " 支灯，"
-                            + lit + "/" + checked + " 格达标").build());
+                            + lit + "/" + checked + " 格达标")
+                    .remaining(constructionRemainder)
+                    .build());
         }
         // 还有暗格且这轮有真实进展 → 再来一轮；候选原样重现或没进展时，选灯位那一步会按穷尽收场。
         if (rounds.placedThisRound > 0) {
@@ -334,8 +360,16 @@ final class LightTask extends PhasedTask<LightTask.Phase> implements HandlesOwnL
                 protectedAt(), nearFeet(context), lamp, input.minimumLight()), rounds.placedTotal == 0);
     }
 
-    // 没达标收场："一支都没放出去"与"放了 N 支仍有 M 格暗"是两种话术，不能混成一句。
+    /** 施工子任务交代没做完的部分（例如没收回的临时方块）接到本任务的结果里：垫出去的要记账，收不回的说清留下几块。 */
+    private void copyRemainder(TaskResult result) {
+        if (result.remaining().isEmpty()) return;
+        constructionRemainder = List.copyOf(result.remaining());
+    }
+
+    /** 没达标收场："一支都没放出去"与"放了 N 支仍有 M 格暗"是两种话术，不能混成一句。 */
     private Next<Phase> concludeUnmet(LampSiteChooser.Selection selection, boolean nothingPlaced) {
+        // 身上的灯不够照完这片：采购不发生在 light 里，如实写明还缺多少，LLM 让它 obtain 再来。
+        if (lampShortfall > 0) return concludeShortOfLamps(selection);
         int lit = litCount();
         int checked = checkedCount();
         int unlitLoaded = checked - lit;
@@ -375,6 +409,26 @@ final class LightTask extends PhasedTask<LightTask.Phase> implements HandlesOwnL
         if (!selection.onlyProtected().isEmpty()) return "够得着的灯位都在受保护的方块上";
         if (!obs.survey().unloaded().isEmpty()) return "有 " + obs.survey().unloaded().size() + " 列没加载也走不到";
         return "找不到能放灯具的格（要空气或草丛加结实支撑，还不挡窄道）";
+    }
+
+    // 灯不够的收场：手上的灯都用上了还有暗格，如实写明还缺多少支；一支都没插出去按失败交出去。
+    private Next<Phase> concludeShortOfLamps(LampSiteChooser.Selection selection) {
+        int lit = litCount();
+        int checked = checkedCount();
+        boolean placedSome = rounds.placedTotal > 0;
+        String summary = placedSome
+                ? "放了 " + rounds.placedTotal + " 支灯，身上的 " + lamp.itemId() + " 用完了，还有 "
+                        + Math.max(checked - lit, 0) + " 格验收样本暗着，还缺 " + lampShortfall + " 支"
+                : "身上没有 " + lamp.itemId() + "，一支灯都插不出去；这片要 " + selection.chosen().size()
+                        + " 支才能照完";
+        return Next.done(TaskResult.builder(
+                        placedSome ? TaskResult.Status.PARTIAL : TaskResult.Status.FAILED, summary)
+                .details(details(selection, lit))
+                .remaining(constructionRemainder)
+                .problem(Problem.of(Problem.Kind.NEED_ITEM,
+                        "还缺 " + lampShortfall + " 支 " + lamp.itemId() + "（发射量够 " + input.minimumLight() + "）",
+                        "照明不自己去弄灯：先 obtain 再下达一次，会从还暗的格接着补"))
+                .build());
     }
 
     /** 蓝图：选中的灯位转成计划格（BLOCK 格，没有 AIR 格）。 */
@@ -527,6 +581,11 @@ final class LightTask extends PhasedTask<LightTask.Phase> implements HandlesOwnL
     @Override protected ResultDetails details() {
         if (obs == null) return ResultDetails.NONE;
         return details(null, litCount());
+    }
+
+    /** 没做完的部分：施工交代没收回的临时方块这类尾巴，随结果带给调用方。 */
+    @Override protected List<String> remaining() {
+        return constructionRemainder;
     }
 
     /** 结果细节：光源、样本与达标数、实测覆盖率（分母是能验收的样本）、轮数灯数、没达标的按原因分组。 */

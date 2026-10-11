@@ -49,7 +49,7 @@ import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
-/** 区域补光的任务：开始时已满足零动作、量光选灯放灯复测达标、农田档只验收庄稼、备料失败原样透传、
+/** 区域补光的任务：开始时已满足零动作、量光选灯放灯复测达标、农田档只验收庄稼、缺灯不采购如实报缺口、
  * 没处插的暗格如实收场、走不到的样本不算进分母。 */
 class LightTaskTest {
 
@@ -255,18 +255,20 @@ class LightTaskTest {
     @Test
     void 量光选灯放灯复测_全达标() {
         Fake fake = new Fake().ground(-6, 6);
+        fake.carried.put("minecraft:torch", 64);
         TaskResult result = run(task(input(2, LightInput.Coverage.ALL, 8), fake));
         assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
         LightDetails details = (LightDetails) result.details();
         assertTrue(details.placed() > 0, "插了灯");
         assertEquals(details.samples(), details.lit(), "复测全部达标");
         assertEquals(1.0, details.coverageAchieved());
-        assertTrue(fake.purposes.contains("照明"), "备料带照明的用途标签");
+        assertTrue(fake.purposes.isEmpty(), "身上的灯够用，不去弄灯");
     }
 
     @Test
     void 农田档只验收庄稼与耕地_种着的庄稼上不落灯() {
         Fake fake = new Fake().ground(-6, 6);
+        fake.carried.put("minecraft:torch", 8);
         // 两格农田，其中一格种着麦子。
         for (int x = -1; x <= 0; x++) {
             fake.world.put(new BlockPos(x, 63, 0), FARMLAND);
@@ -286,13 +288,27 @@ class LightTaskTest {
     }
 
     @Test
-    void 备料弄不到_原样透传导料证据_不冒充灯位不足() {
+    void 身上一支灯都没有_如实报缺_不去弄灯() {
         Fake fake = new Fake().ground(-6, 6);
-        fake.unobtainable.add("minecraft:torch");
         TaskResult result = run(task(input(2, LightInput.Coverage.ALL, 8), fake));
         assertEquals(TaskResult.Status.FAILED, result.status(), result.summary());
-        assertEquals(Problem.Kind.NEED_ITEM, result.problem().kind(), "透传导料的问题");
+        assertEquals(Problem.Kind.NEED_ITEM, result.problem().kind(), "缺灯是物品缺口，不是没地方插");
         assertTrue(result.problem().message().contains("minecraft:torch"), "缺什么写清");
+        assertTrue(result.summary().contains("一支灯都插不出去"), result.summary());
+        assertTrue(fake.purposes.isEmpty(), "light 不采购：备料接缝一次都不被问");
+    }
+
+    @Test
+    void 火把不够照完_用完手上的_partial写明还缺多少() {
+        Fake fake = new Fake().ground(-6, 6);
+        fake.carried.put("minecraft:torch", 1);
+        TaskResult result = run(task(input(6, LightInput.Coverage.ALL, 8), fake));
+        assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
+        assertEquals(Problem.Kind.NEED_ITEM, result.problem().kind());
+        assertTrue(result.problem().message().contains("还缺"), result.problem().message());
+        LightDetails details = (LightDetails) result.details();
+        assertEquals(1, details.placed(), "手上的火把用上了");
+        assertTrue(fake.purposes.isEmpty(), "缺了也不去弄灯，采购不发生在 light 里");
     }
 
     @Test
@@ -315,6 +331,7 @@ class LightTaskTest {
     @Test
     void 走不到的样本不算进分母_不给全部达标的结论() {
         Fake withUnloaded = new Fake().ground(-6, 6);
+        withUnloaded.carried.put("minecraft:torch", 8);
         withUnloaded.loadedColumns.remove(new BlockPos(1, 64, 1));
         TaskResult partial = run(task(input(2, LightInput.Coverage.ALL, 8), withUnloaded));
         assertEquals(TaskResult.Status.PARTIAL, partial.status(), partial.summary());
@@ -328,6 +345,7 @@ class LightTaskTest {
     @Test
     void 没加载的列走过去就重量_不来回走() {
         Fake fake = new Fake().ground(-6, 6);
+        fake.carried.put("minecraft:torch", 8);
         BlockPos far = new BlockPos(1, 64, 1);
         fake.loadedColumns.remove(far);
         fake.walkLoads = true;
@@ -350,6 +368,7 @@ class LightTaskTest {
     @Test
     void 照明不挖一格_蓝图没有要清空的格子() {
         Fake fake = new Fake().ground(-6, 6);
+        fake.carried.put("minecraft:torch", 64);
         run(task(input(2, LightInput.Coverage.ALL, 8), fake));
         // 照明不声明 AIR 格：整场施工一次挖掘都不发生。
         for (Map.Entry<BlockPos, BlockState> entry : fake.world.entrySet()) {
