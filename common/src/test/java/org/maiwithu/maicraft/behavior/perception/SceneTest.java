@@ -5,9 +5,12 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+
+import com.google.gson.JsonObject;
 import net.minecraft.core.BlockPos;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.behavior.perception.spi.ModThing;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -157,5 +160,34 @@ class SceneTest {
         scene.updateEnvironment(new SceneEnvironment("夜晚", "晴", 4, "minecraft:plains"));
         assertEquals("夜晚", scene.environment().timeText());
         assertEquals("minecraft:plains", scene.environment().biome());
+    }
+
+    @Test
+    void modThingsGetIdsByIdentityAndListNearestPerCategory() {
+        // 模组的东西：方块领 b#、实体领 e#、物理结构领 s#；同一个结构再报沿用编号；每种只列最近的几样、其余计数。
+        List<ModThing> things = new ArrayList<>();
+        JsonObject floor = new JsonObject();
+        floor.addProperty("current_floor", "1F");
+        things.add(new ModThing("elevator", ModThing.Identity.BLOCK, "", WorldPosition.here(4, 64, 0), floor, null));
+        things.add(new ModThing("train", ModThing.Identity.ENTITY, "77", WorldPosition.here(20, 64, 0), null, null));
+        for (int i = 0; i < Scene.LISTED_THINGS + 2; i++) {
+            things.add(new ModThing("structure", ModThing.Identity.STRUCTURE, "ship-" + i,
+                    WorldPosition.here(10 + i, 70, 0), null, null));
+        }
+        scene.updateModThings(10, things);
+        assertTrue(scene.things().stream().anyMatch(thing -> thing.id().startsWith("b")
+                && "1F".equals(thing.summary().get("current_floor").getAsString())));
+        assertTrue(scene.things().stream().anyMatch(thing -> thing.category().equals("train") && thing.id().startsWith("e")));
+        String ship = scene.things().stream().filter(thing -> thing.category().equals("structure")).findFirst()
+                .orElseThrow().id();
+        assertTrue(ship.startsWith("s"), ship);
+        assertEquals(Map.of("structure", 2), scene.distantThingCounts());
+        assertEquals(Scene.LISTED_THINGS, scene.listedThings().stream()
+                .filter(thing -> thing.category().equals("structure")).count());
+
+        scene.updateModThings(20, things);
+        assertEquals(ship, scene.things().stream().filter(thing -> thing.category().equals("structure")).findFirst()
+                .orElseThrow().id(), "同一个结构沿用编号");
+        assertEquals("ship-0", scene.seen().structureOf(ship).orElseThrow());
     }
 }

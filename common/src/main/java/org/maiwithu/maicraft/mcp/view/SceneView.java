@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.mcp.view;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import org.maiwithu.maicraft.behavior.perception.SceneThing;
 import org.maiwithu.maicraft.behavior.perception.FacilitySighting;
 import org.maiwithu.maicraft.behavior.perception.HeardSound;
 import org.maiwithu.maicraft.behavior.perception.OverheadGrid;
@@ -56,6 +57,20 @@ public final class SceneView {
         JsonArray facilities = new JsonArray();
         scene.facilities().forEach(facility -> facilities.add(facility(facility)));
         json.add("facilities", facilities);
+        // 模组的东西（电梯、车站、列车、物理结构）按种类分组：每种列最近的几样，其余只报样数。
+        if (!scene.things().isEmpty()) {
+            JsonObject things = new JsonObject();
+            for (SceneThing thing : scene.listedThings()) {
+                if (!things.has(thing.category())) things.add(thing.category(), new JsonArray());
+                things.getAsJsonArray(thing.category()).add(thing(thing));
+            }
+            json.add("mod_things", things);
+            if (!scene.distantThingCounts().isEmpty()) {
+                JsonObject farther = new JsonObject();
+                scene.distantThingCounts().forEach(farther::addProperty);
+                json.add("mod_things_farther", farther);
+            }
+        }
         if (withGrid && scene.grid() != null) {
             json.add("grid", grid(scene.grid()));
         }
@@ -84,6 +99,17 @@ public final class SceneView {
             entity.traits().forEach(traits::addProperty);
             json.add("traits", traits);
         }
+        return json;
+    }
+
+    static JsonObject thing(SceneThing thing) {
+        JsonObject json = new JsonObject();
+        json.addProperty("id", thing.id());
+        json.addProperty("direction", thing.direction());
+        json.addProperty("compass", thing.compass());
+        json.addProperty("distance", thing.distance());
+        json.add("position", position(thing.position()));
+        thing.summary().entrySet().forEach(entry -> json.add(entry.getKey(), entry.getValue()));
         return json;
     }
 

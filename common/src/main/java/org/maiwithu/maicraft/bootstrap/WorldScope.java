@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.bootstrap;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.nio.file.Path;
@@ -11,6 +12,7 @@ import java.util.function.Supplier;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.client.player.LocalPlayer;
 
 import org.maiwithu.maicraft.behavior.construction.ShowsPreview;
@@ -21,6 +23,8 @@ import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
 import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 import org.maiwithu.maicraft.behavior.permission.ClientCreatureSituations;
 import org.maiwithu.maicraft.behavior.permission.LivePlayerMadeGuesses;
+import org.maiwithu.maicraft.behavior.perception.spi.ModSight;
+import org.maiwithu.maicraft.behavior.perception.spi.ModThing;
 import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationObstacles;
 import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationProtection;
 import org.maiwithu.maicraft.behavior.permission.OwnershipMap;
@@ -93,6 +97,10 @@ public final class WorldScope {
     /** 设施分类：容器与工作设施按这个世界同步过来的方块标签认。 */
     private final FacilityKinds kinds;
     private final Scene scene;
+    /** 联动模组的观察（电梯、车站、列车、物理结构）：场景每次刷新时问。 */
+    private final List<ModSight> modSights;
+    /** 模组的东西在角色周围多大范围里看（格）。 */
+    private static final int THINGS_RADIUS = 64;
     private final TravelProgressListener travelProgress = new LatestTravelProgress();
 
     /** 保留最近一刻出行进展的收件口：宿主查任务面板时读它，不攒历史。 */
@@ -146,6 +154,7 @@ public final class WorldScope {
                 protection.blockProtected(new WorldPosition(x, y, z, dimension), null, Set.of()));
         // 会动的结构（联动登记的障碍来源）交给寻路：转着的风车、开着的列车、电梯井绕开走，挡路时先等它过去。
         NavigationObstacles.install(compat.obstacleSources());
+        this.modSights = compat.modSights();
 
         // 当刻角色的供给者：感知、背包、聊天都从它拿这一刻的角色，不留到下一刻。
         Supplier<PlayerContext> now = () -> playerControl.activeContext().orElse(null);
@@ -215,6 +224,13 @@ public final class WorldScope {
         facilities.addAll(kinds.workstationBlockTypes());
         scene.updateFacilities(gameTick, when,
                 new ClientNearbyBlocksSight(blockScans, () -> current, kinds).nearby(facilities));
+        // 模组的东西：电梯、车站、列车、物理结构，联动模组各自报角色附近看得到的。
+        List<ModThing> things = new ArrayList<>();
+        AABB around = new AABB(player.blockPosition()).inflate(THINGS_RADIUS);
+        for (ModSight sight : modSights) {
+            sight.sight(current.level(), player, around, things::add);
+        }
+        scene.updateModThings(gameTick, things);
         scene.expire(gameTick);
     }
 

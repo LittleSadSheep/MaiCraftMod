@@ -28,6 +28,8 @@ public final class SeenRegistry {
         FEATURE,
         /** 设施：箱子、工作台、熔炉、床这类功能方块。 */
         FACILITY,
+        /** 物理结构：飞艇、船、车这类会动的方块结构（Sable 的子世界），不是实体，编号 s#。 */
+        STRUCTURE,
     }
 
     /** 一个刚失效的编号：最后看到的方位与位置，用来交代"最后一次在哪儿看见它"。 */
@@ -40,9 +42,11 @@ public final class SeenRegistry {
     private final Map<String, Entry> entries = new HashMap<>();
     private final Map<Integer, String> entityIds = new HashMap<>();
     private final Map<Long, String> placeIds = new HashMap<>();
+    private final Map<String, String> structureIds = new HashMap<>();
     private int nextEntity = 1;
     private int nextFeature = 1;
     private int nextFacility = 1;
+    private int nextStructure = 1;
 
     /**
      * 登记一只实体，返回它的观察编号：同一只实体（按游戏实体编号）还在册就沿用旧编号
@@ -68,6 +72,30 @@ public final class SeenRegistry {
     /** 登记一个设施，返回观察编号 b#；同一个位置的设施还在册就沿用旧编号。 */
     public String facility(WorldPosition position, String direction, long nowTick) {
         return place(position, direction, nowTick, Kind.FACILITY, () -> "b" + nextFacility++);
+    }
+
+    /**
+     * 登记一个物理结构，返回观察编号 s#：同一个结构（按它自己的身份，例如 Sable 子世界的编号）还在册就沿用旧编号；
+     * 结构会动，位置按这次看到的刷新，保留期和实体一样短。
+     */
+    public String structure(String identity, WorldPosition position, String direction, long nowTick) {
+        String existing = structureIds.get(identity);
+        if (existing != null && entries.containsKey(existing)) {
+            refresh(existing, position, direction, nowTick);
+            return existing;
+        }
+        String id = "s" + nextStructure++;
+        structureIds.put(identity, id);
+        put(new Entry(id, Kind.STRUCTURE, position, direction, nowTick, ENTITY_RETENTION_TICKS));
+        return id;
+    }
+
+    /** 观察编号对应的结构身份；编号不是在册结构时给空。登船这类按编号找回结构用。 */
+    public Optional<String> structureOf(String id) {
+        return structureIds.entrySet().stream()
+                .filter(entry -> entry.getValue().equals(id) && entries.containsKey(id))
+                .map(Map.Entry::getKey)
+                .findFirst();
     }
 
     /** 查一个编号还认不认得：认得就给它的登记项，不认得（从未见过或已失效）给空。 */
@@ -100,6 +128,8 @@ public final class SeenRegistry {
                 entries.remove(entry.id());
                 if (entry.kind() == Kind.ENTITY) {
                     entityIds.values().removeIf(id -> id.equals(entry.id()));
+                } else if (entry.kind() == Kind.STRUCTURE) {
+                    structureIds.values().removeIf(id -> id.equals(entry.id()));
                 } else {
                     placeIds.values().removeIf(id -> id.equals(entry.id()));
                 }

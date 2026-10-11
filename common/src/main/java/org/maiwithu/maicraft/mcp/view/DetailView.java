@@ -26,7 +26,7 @@ public final class DetailView {
     /** 找不到这个编号、也没有叫这个名字的地标时为空。 */
     public static Optional<JsonObject> of(Scene scene, WorldMemory memory, String id) {
         String normalized = id.trim().toLowerCase(Locale.ROOT);
-        if (normalized.matches("[efb][0-9]+")) {
+        if (normalized.matches("[efbs][0-9]+")) {
             return scene.lookup(normalized).map(entry -> seen(scene, memory, entry));
         }
         return memory.place(id.trim()).map(position -> landmark(scene.self(), id.trim(), position));
@@ -46,6 +46,14 @@ public final class DetailView {
                 .ifPresent(feature -> json.add("now", SceneView.feature(feature)));
         scene.facilities().stream().filter(facility -> facility.id().equals(entry.id())).findFirst()
                 .ifPresent(facility -> json.add("now", SceneView.facility(facility)));
+        // 模组的东西（电梯、车站、列车、物理结构）：场景里那几项加上全部详情（楼层表、座位……）。
+        scene.things().stream().filter(thing -> thing.id().equals(entry.id())).findFirst().ifPresent(thing -> {
+            JsonObject now = json.has("now") ? json.getAsJsonObject("now") : SceneView.thing(thing);
+            now.addProperty("category", thing.category());
+            thing.summary().entrySet().forEach(item -> now.add(item.getKey(), item.getValue()));
+            thing.detail().entrySet().forEach(item -> now.add(item.getKey(), item.getValue()));
+            json.add("now", now);
+        });
         if (!json.has("now")) {
             json.addProperty("in_scene", false);
         }

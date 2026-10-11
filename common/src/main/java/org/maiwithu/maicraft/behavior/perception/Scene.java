@@ -3,10 +3,12 @@ package org.maiwithu.maicraft.behavior.perception;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import org.maiwithu.maicraft.behavior.perception.spi.ModThing;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 /**
@@ -25,6 +27,8 @@ public final class Scene {
 
     /** 不敌对、没名字的实体在这么远以内才逐只列出来，再远只按种类计数。 */
     public static final int LISTED_RADIUS = 32;
+    /** 模组的东西每一种最多逐个列几样：电梯、车站、列车、物理结构近的先列，其余计数。 */
+    public static final int LISTED_THINGS = 8;
     private static final String PLAYER = "minecraft:player";
 
     private final SeenRegistry ids = new SeenRegistry();
@@ -38,6 +42,7 @@ public final class Scene {
     private List<HeardSound> heard = List.of();
     private List<TerrainFeature> features = List.of();
     private List<FacilitySighting> facilities = List.of();
+    private List<SceneThing> things = List.of();
 
     /**
      * @param kinds 设施分类：看见的功能方块是容器还是工作设施，按它写进世界记忆
@@ -160,6 +165,42 @@ public final class Scene {
     }
 
     /**
+     * 更新模组的东西（电梯、车站、列车、物理结构）：方块按位置领 b#、实体按实体编号领 e#、物理结构按它自己的身份领 s#，
+     * 按离角色远近排好。联动模组给的场景几项与详情原样带着。
+     */
+    public void updateModThings(long nowTick, List<ModThing> sightings) {
+        if (self == null) {
+            return;
+        }
+        List<SceneThing> next = new ArrayList<>();
+        for (ModThing thing : sightings) {
+            double dx = thing.position().x() + 0.5 - self.x();
+            double dy = thing.position().y() + 0.5 - self.y();
+            double dz = thing.position().z() + 0.5 - self.z();
+            String direction = DirectionWords.relative(dx, dz, self.facingYaw());
+            String id = switch (thing.identity()) {
+                case BLOCK -> ids.facility(thing.position(), direction, nowTick);
+                case ENTITY -> entityId(thing.key()) == null ? null
+                        : ids.entity(entityId(thing.key()), thing.position(), direction, nowTick);
+                case STRUCTURE -> ids.structure(thing.key(), thing.position(), direction, nowTick);
+            };
+            if (id == null) continue;
+            next.add(new SceneThing(id, thing.category(), thing.position(), direction, DirectionWords.compassOf(dx, dz),
+                    (int) Math.round(Math.sqrt(dx * dx + dy * dy + dz * dz)), thing.summary(), thing.detail()));
+        }
+        next.sort(Comparator.comparingInt(SceneThing::distance));
+        things = List.copyOf(next);
+    }
+
+    private static Integer entityId(String key) {
+        try {
+            return Integer.parseInt(key);
+        } catch (NumberFormatException wrong) {
+            return null;
+        }
+    }
+
+    /**
      * 把保留期内没再见到的编号移出场景，逐条报告最后一次在哪个方位看到、最后位置在哪：
      * 能力拿着编号找不到东西时，以"目标不在了"结束并如实交代。
      * 失效的条目同时从各视图里撤下——编号已经不认得，视图里还留着会冒充在场。
@@ -173,6 +214,7 @@ public final class Scene {
         entities = entities.stream().filter(entry -> !dead.contains(entry.id())).toList();
         features = features.stream().filter(entry -> !dead.contains(entry.id())).toList();
         facilities = facilities.stream().filter(entry -> !dead.contains(entry.id())).toList();
+        things = things.stream().filter(entry -> !dead.contains(entry.id())).toList();
         return gone;
     }
 
@@ -216,6 +258,33 @@ public final class Scene {
     /** 设施视图。 */
     public List<FacilitySighting> facilities() {
         return facilities;
+    }
+
+    /** 模组的东西：完整列表，近的在前。 */
+    public List<SceneThing> things() {
+        return things;
+    }
+
+    /** observe 列出来的模组的东西：每一种列最近的几样，其余只计数（见 {@link #distantThingCounts}）。 */
+    public List<SceneThing> listedThings() {
+        Map<String, Integer> shown = new LinkedHashMap<>();
+        List<SceneThing> listed = new ArrayList<>();
+        for (SceneThing thing : things) {
+            int count = shown.merge(thing.category(), 1, Integer::sum);
+            if (count <= LISTED_THINGS) listed.add(thing);
+        }
+        return listed;
+    }
+
+    /** 没列出来的模组的东西：种类 → 样数。 */
+    public Map<String, Integer> distantThingCounts() {
+        Map<String, Integer> total = new LinkedHashMap<>();
+        for (SceneThing thing : things) total.merge(thing.category(), 1, Integer::sum);
+        Map<String, Integer> rest = new LinkedHashMap<>();
+        total.forEach((category, count) -> {
+            if (count > LISTED_THINGS) rest.put(category, count - LISTED_THINGS);
+        });
+        return rest;
     }
 
     /**

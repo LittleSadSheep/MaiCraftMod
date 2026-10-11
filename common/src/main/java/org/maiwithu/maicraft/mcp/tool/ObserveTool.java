@@ -67,7 +67,7 @@ public final class ObserveTool implements McpTool {
         String id = check.text(arguments, "id", "id", false);
         Boolean grid = check.bool(arguments, "grid", "grid");
         if (what.equals("detail") && id == null && !arguments.has("id")) {
-            check.error("id", "what=detail 时要给 id", "观察编号（e12、f3、b5）或地标名");
+            check.error("id", "what=detail 时要给 id", "观察编号（e12、f3、b5、s2）或地标名");
         }
         if (!what.equals("detail") && id != null) check.error("id", "id 只在 what=detail 时用", null);
         if (!what.equals("scene") && grid != null) check.error("grid", "grid 只在 what=scene 时用", null);
