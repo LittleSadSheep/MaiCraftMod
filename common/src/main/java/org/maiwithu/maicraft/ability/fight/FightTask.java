@@ -74,6 +74,10 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
 
     private ThreatAssessment.Verdict verdict;
     private String weaponUsed = "空手";
+    /** 确认打中的下数（原生攻击得到服务器确认才算）。 */
+    private int hits;
+    /** 为什么撤的：撤离收场时写进结果。 */
+    private String retreatWhy;
     private Battle battle;
     /** 最后一个目标倒下的位置：拾荒以它为中心。 */
     private double[] lastKillSpot;
@@ -175,12 +179,14 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         }
         Battle.Moment moment = battle.tick(context);
         if (moment.struck() || moment.fired()) weaponUsed = moves.mainHand(context);
+        if (moment.struck()) hits++;
         if (moment.targetId() >= 0 && moment.state() != Battle.State.EVADING) rememberEngaged(context, moment.targetId());
         if (moment.progressed()) recordProgress(moment.doing());
         return switch (moment.state()) {
             case ESCAPED -> {
                 // 甩开了：撤离成功不等于任务成功，目标没死就以失败收场，写明为什么撤与出路。
                 fled = true;
+                retreatWhy = moment.retreatWhy();
                 yield Next.fail(Problem.of(Problem.Kind.DANGER,
                         "撤离成功，甩开了追兵（" + moment.retreatWhy() + "），但目标没有击败——这一仗算没打赢",
                         "吃点东西回血到拒战线以上，或换把武器再来"));
@@ -409,7 +415,12 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
 
     @Override
     protected ResultDetails details() {
-        return new FightDetails(List.copyOf(defeated), lostTrack, fled, verdictName(), weaponUsed, lootGained);
+        List<String> unreached = new ArrayList<>();
+        for (SeenTargets.Locked locked : named) {
+            if (battle != null && battle.unreachable().contains(locked.entityId())) unreached.add(describeOf(locked));
+        }
+        return new FightDetails(List.copyOf(defeated), lostTrack, fled, verdictName(), weaponUsed, hits, unreached,
+                retreatWhy, lootGained);
     }
 
     /** 正在打的仗自己接得住吗：评估不是"打不过"、没在撤离，被攻击的生存需求就让位。 */
@@ -451,12 +462,21 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         }
     }
 
-    /** 战斗的结果细节：击败、跟丢、撤离、评估结论、用的武器与捡到的战利品。 */
+    /**
+     * 战斗的结果细节。
+     *
+     * @param weapon     这场实际拿着打的那件
+     * @param hits       确认打中的下数
+     * @param reachIssue 点名目标里走不到跟前、也射不到的
+     * @param retreat    撤离收场时为什么撤；没撤为空
+     */
     record FightDetails(List<String> defeated, List<String> lostTrack, boolean fled, String threatVerdict,
-                        String weaponUsed, List<String> lootGained) implements ResultDetails {
+                        String weapon, int hits, List<String> reachIssue, String retreat,
+                        List<String> lootGained) implements ResultDetails {
         FightDetails {
             defeated = List.copyOf(defeated);
             lostTrack = List.copyOf(lostTrack);
+            reachIssue = List.copyOf(reachIssue);
             lootGained = List.copyOf(lootGained);
         }
     }
