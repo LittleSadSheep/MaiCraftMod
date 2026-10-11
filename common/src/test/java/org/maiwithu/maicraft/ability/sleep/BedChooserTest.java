@@ -31,7 +31,7 @@ class BedChooserTest {
                         bed(5, 0, false, false, false, 5)),
                 Set.of(), null);
         // 只有最后一张三关全过：被占用、受保护、旁边有怪的都不算能用的床。
-        assertEquals(new BlockPos(5, 64, 0), chosen.orElseThrow().head());
+        assertEquals(new BlockPos(5, 64, 0), chosen.orElseThrow().cell());
     }
 
     @Test
@@ -41,7 +41,7 @@ class BedChooserTest {
                 List.of(bed(1, 0, false, false, false, 1), bed(9, 0, false, false, false, 9)),
                 Set.of(tried), null);
         // 试过不行的床不再试，哪怕它更近。
-        assertEquals(new BlockPos(9, 64, 0), chosen.orElseThrow().head());
+        assertEquals(new BlockPos(9, 64, 0), chosen.orElseThrow().cell());
     }
 
     @Test
@@ -52,7 +52,7 @@ class BedChooserTest {
                         bed(200, 200, false, false, false, 0.5)),
                 Set.of(), area);
         // 指定了床区就只在半径内选：再近的远床也不算"这一片"的。
-        assertEquals(new BlockPos(3, 64, 3), chosen.orElseThrow().head());
+        assertEquals(new BlockPos(3, 64, 3), chosen.orElseThrow().cell());
     }
 
     @Test
@@ -63,7 +63,7 @@ class BedChooserTest {
                         bed(5, 0, false, false, false, 5)),
                 Set.of(), null);
         assertEquals(3, usable.size());
-        assertEquals(new BlockPos(2, 64, 0), usable.getFirst().head());
+        assertEquals(new BlockPos(2, 64, 0), usable.getFirst().cell());
         assertTrue(usable.stream().sorted(Comparator.comparingDouble(BedCandidate::distance))
                 .toList().equals(usable), "按近到远排好");
     }

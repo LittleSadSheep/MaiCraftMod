@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.ability.sleep;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayDeque;
@@ -241,6 +242,24 @@ class SleepTaskTest {
         assertEquals(SleepDetails.BedSource.WORLD, details.bedSource());
         assertEquals(List.of(BED_A), usesBeds.clicked);
         assertEquals(List.of(BED_A), approaches.targets);
+    }
+
+    @Test
+    void aWorldBedIsSleptInBeforeTheBedObtainerIsEverConsulted() {
+        // 复现 211：世界有能用的床时，走过去躺下这条路径必须走通，
+        // 弄床物品的分支一次都不能被问到——以前半张床被选床丢掉，就退化成去现做一张。
+        FakeScanner scanner = new FakeScanner();
+        scanner.offer(new BedScanner.BedScan(
+                List.of(new BedCandidate(BED_A, false, false, false, 4)), true));
+        StubObtain obtain = new StubObtain();
+        StubPlacer placer = new StubPlacer();
+        TaskResult result = runToCompletion(task(scanner, placer, obtain,
+                new StubApproaches(), new StubUsesBeds(), Optional::empty, Optional::empty));
+        assertEquals(TaskResult.Status.DONE, result.status());
+        SleepDetails details = assertInstanceOf(SleepDetails.class, result.details());
+        assertTrue(details.enteredSleep(), "世界有床时应该走到床边躺下");
+        assertEquals(SleepDetails.BedSource.WORLD, details.bedSource());
+        assertNull(obtain.last, "世界有床时不许问弄床引擎");
     }
 
     @Test

@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.ability.sleep;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -95,9 +96,11 @@ public final class LiveBedFinder implements BedScanner, NightfallNeed.ReadsBedAv
         var found = scans.query(level, center, bedBlocks, WANT_BEDS, SCAN_CHUNK_RADIUS, QUERY_BUDGET,
                 excluded, false);
         List<BedCandidate> candidates = new ArrayList<>();
+        Set<BlockPos> seen = new HashSet<>();
         for (BlockPos hit : found.hits()) {
             BedCandidate bed = inspect(level, hit, current, protectedLandmarks);
-            if (bed != null) {
+            // 一张完整的床占两格、扫描命中两次：折到床头后只报一张。
+            if (seen.add(bed.cell())) {
                 candidates.add(bed);
             }
         }
@@ -126,32 +129,28 @@ public final class LiveBedFinder implements BedScanner, NightfallNeed.ReadsBedAv
     }
 
     /**
-     * 现场查一张床：命中格可能是床头或床尾，先折到床头；床的两半有一半不在（被拆了一半、
-     * 只同步了一半）就不算一张完整的床。占用、保护、怪物、距离各查一遍。
+     * 现场查一次命中：命中格可能是床头或床尾，先折成睡它要对着点的那一格——床头不在的半张床
+     * 也照报，不再当作"半张床"悄悄丢掉（世界明明有床，选床却当没有，就退化成去现做一张）。
+     * 占用读锚点格；保护只问这次任务点名保护的地标——睡是"用"床不是动方块，
+     * 别人放的床、归属还没问到的床都照睡（村庄的床本来就是给人睡的），
+     * "归属拿不准就按受保护处理"是拆改方块的规矩，不套在用床上。
      */
     private BedCandidate inspect(ClientLevel level, BlockPos hit, PlayerContext current, Set<String> landmarks) {
         BlockState state = level.getBlockState(hit);
-        BlockPos head = state.getValue(BedBlock.PART) == BedPart.HEAD
-                ? hit.immutable()
-                : hit.relative(state.getValue(BedBlock.FACING));
-        BlockState headState = level.getBlockState(head);
-        if (!headState.hasProperty(BedBlock.PART) || headState.getValue(BedBlock.PART) != BedPart.HEAD) {
-            // 床头没同步好或已被拆：不把半张床当成能睡的床。
-            return null;
-        }
-        boolean occupied = headState.getValue(BedBlock.OCCUPIED);
-        boolean protectedLand = protection.blockProtected(here(head), blockId(headState), landmarks);
-        AABB around = new AABB(head).inflate(HOSTILE_HORIZONTAL, HOSTILE_VERTICAL, HOSTILE_HORIZONTAL);
+        boolean headHit = state.getValue(BedBlock.PART) == BedPart.HEAD;
+        BlockState stateTowardHead = headHit
+                ? state
+                : level.getBlockState(hit.relative(state.getValue(BedBlock.FACING)));
+        BlockPos cell = BedCandidate.clickCell(hit, state, stateTowardHead);
+        boolean occupied = level.getBlockState(cell).getValue(BedBlock.OCCUPIED);
+        boolean protectedLand = protection.protectedLandmarkHit(here(cell), landmarks).isPresent();
+        AABB around = new AABB(cell).inflate(HOSTILE_HORIZONTAL, HOSTILE_VERTICAL, HOSTILE_HORIZONTAL);
         boolean hostileNear = !level.getEntitiesOfClass(Monster.class, around).isEmpty();
-        double distance = Math.sqrt(current.localPlayer().blockPosition().distSqr(head));
-        return new BedCandidate(head, occupied, protectedLand, hostileNear, distance);
+        double distance = Math.sqrt(current.localPlayer().blockPosition().distSqr(cell));
+        return new BedCandidate(cell, occupied, protectedLand, hostileNear, distance);
     }
 
     private static WorldPosition here(BlockPos pos) {
         return WorldPosition.here(pos.getX(), pos.getY(), pos.getZ());
-    }
-
-    private static String blockId(BlockState state) {
-        return BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
     }
 }

@@ -38,19 +38,19 @@ public final class BedChooser {
     public static List<BedCandidate> usable(List<BedCandidate> candidates, Set<BlockPos> excluded,
             WorldPosition bedArea) {
         return candidates.stream()
-                .filter(bed -> !excluded.contains(bed.head()))
+                .filter(bed -> !excluded.contains(bed.cell()))
                 .filter(bed -> !bed.occupied() && !bed.protectedLand() && !bed.hostileNear())
                 .filter(bed -> bedArea == null
-                        || withinArea(bed.head(), bedArea, BED_AREA_RADIUS_BLOCKS))
+                        || withinArea(bed.cell(), bedArea, BED_AREA_RADIUS_BLOCKS))
                 .sorted(Comparator.comparingDouble(BedCandidate::distance))
                 .collect(Collectors.toList());
     }
 
     /** 一张床在不在床区半径内：按水平距离算，高度差是玩家常识里"这一片"的一部分，也计入。 */
-    private static boolean withinArea(BlockPos head, WorldPosition area, double radius) {
-        double dx = head.getX() - area.x();
-        double dy = head.getY() - area.y();
-        double dz = head.getZ() - area.z();
+    private static boolean withinArea(BlockPos cell, WorldPosition area, double radius) {
+        double dx = cell.getX() - area.x();
+        double dy = cell.getY() - area.y();
+        double dz = cell.getZ() - area.z();
         return Math.sqrt(dx * dx + dy * dy + dz * dz) <= radius;
     }
 }

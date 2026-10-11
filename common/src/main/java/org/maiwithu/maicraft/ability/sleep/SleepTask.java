@@ -150,7 +150,7 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
         BedScanner.BedScan scan = scanner.scan(context, excluded, permissions.protectedLandmarks());
         Optional<BedCandidate> chosen = BedChooser.choose(scan.candidates(), excluded, input.bedArea());
         if (chosen.isPresent()) {
-            chosenBed = chosen.get().head();
+            chosenBed = chosen.get().cell();
             bedTries++;
             bedSource = SleepDetails.BedSource.WORLD;
             recordProgress("选中了一张床");
