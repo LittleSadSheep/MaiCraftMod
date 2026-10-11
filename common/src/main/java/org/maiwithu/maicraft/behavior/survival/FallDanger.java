@@ -4,10 +4,10 @@ package org.maiwithu.maicraft.behavior.survival;
 import org.maiwithu.maicraft.kernel.task.Urgency;
 
 /**
- * 坠落判断：正往下掉时，这一掉落地会不会摔死。
+ * 坠落判断：正往下掉时，这一掉落地会不会掉血。
  *
- * <p>纯函数：读只读的处境，给急迫程度。要在刚开始掉的时候就判断出"会摔死"，
- * 才来得及低头、换水桶、等落点进入够得着的距离再放水；等摔到一半才发现就晚了。
+ * <p>纯函数：读只读的处境，给急迫程度。要在刚开始掉的时候就判断出"会掉血"，
+ * 才来得及把水桶、干草这类拿到手上、往落点推、等够得着再放；等摔到一半才发现就晚了。
  * 所以看的是预计落地伤害（落点、安全摔落距离与摔落伤害倍率、落点方块、药水效果、附魔都算进去），
  * 不是已经掉了多远。下面是虚空时无论如何都必须立刻处理；落点是水时落进水里不掉血，不归坠落需求管。
  */
@@ -15,7 +15,7 @@ public final class FallDanger {
 
     private FallDanger() {}
 
-    /** 此刻坠落有多急；没在往下掉、落进水里、或这一掉摔不死时返回 null，不归坠落需求管。 */
+    /** 此刻坠落有多急；没在往下掉、落进水里、或这一掉不掉血时返回 null，不归坠落需求管。 */
     public static Urgency assess(View situation) {
         if (!situation.falling()) {
             return null;
@@ -28,7 +28,7 @@ public final class FallDanger {
         if (situation.landsInWater()) {
             return null;
         }
-        return situation.survivesLanding() ? null : Urgency.NOW;
+        return situation.landsUnhurt() ? null : Urgency.NOW;
     }
 
     /** 坠落判断要读的处境；由游戏接口层每刻从角色身上取。 */
@@ -42,7 +42,7 @@ public final class FallDanger {
         /** 落点是水：落进水里不掉血。 */
         boolean landsInWater();
 
-        /** 按预计落地伤害算，落地后还活着（黄心先抵伤害）。 */
-        boolean survivesLanding();
+        /** 落地不会掉血：预计落地伤害为零（黄心不算抵），也没在快速坠落。 */
+        boolean landsUnhurt();
     }
 }

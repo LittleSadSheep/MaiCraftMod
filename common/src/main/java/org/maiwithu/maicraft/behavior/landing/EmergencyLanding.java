@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.landing;
 
 import it.unimi.dsi.fastutil.longs.LongSet;
+import it.unimi.dsi.fastutil.longs.LongSets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Predicate;
@@ -50,6 +51,11 @@ public final class EmergencyLanding {
         if (ground == null) return null;
         List<LandingPlan> plans = bestPlans(context, ground.above(), protectedCell, noEntryCells);
         return plans.isEmpty() ? null : LandingRescue.airborne(plans, protectedCell, noEntryCells);
+    }
+
+    /** 生存反射救命用：不看任务许可与走路的保护格，身体禁入格也不算。 */
+    public static LandingRescue findToSaveLife(PlayerContext context) {
+        return find(context, cell -> false, LongSets.EMPTY_SET);
     }
 
     // 正下方能放水、又推得到（或本来就是直着往下掉）就用它；否则在周围找，水优先、离得近优先。

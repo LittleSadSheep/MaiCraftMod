@@ -13,10 +13,9 @@ class SurvivalSituationTest {
 
     @Test
     void situationAnswersFallView() {
-        SurvivalSituation situation = SurvivalFakes.calm().fallingOnto(new BlockPos(1, 60, 1), false).build();
+        SurvivalSituation situation = SurvivalFakes.calm().fallingHard().build();
         assertTrue(situation.falling());
-        assertFalse(situation.survivesLanding());
-        assertEquals(new BlockPos(1, 60, 1), situation.waterCell());
+        assertFalse(situation.landsUnhurt());
     }
 
     @Test

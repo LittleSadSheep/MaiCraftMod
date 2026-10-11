@@ -3,15 +3,13 @@ package org.maiwithu.maicraft.behavior.survival;
 
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 
+import org.maiwithu.maicraft.behavior.landing.EmergencyLanding;
 import org.maiwithu.maicraft.behavior.navigation.util.SwimAirBudget;
-import org.maiwithu.maicraft.game.player.FallDamage;
 import org.maiwithu.maicraft.game.player.PlayerContext;
-import org.maiwithu.maicraft.game.world.BucketWater;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -26,8 +24,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * @param falling              正在往下掉
  * @param overVoid             下面一直到世界底都是空的
  * @param landsInWater         落点是水
- * @param survivesLanding      按预计落地伤害算落地后还活着
- * @param waterCell            落地前放水该放进的那一格（落点上面那格，矮草这类会被水冲掉的往上越过）；没有落点时为 null
+ * @param landsUnhurt          落地不会掉血：按预计落地伤害算为零、也没在快速坠落（伤害估算过时的保底）
  * @param headInWater          眼睛在水里
  * @param canBreatheUnderwater 有水下呼吸类效果
  * @param airTicks             剩下的氧气（刻）
@@ -44,8 +41,7 @@ public record SurvivalSituation(
         boolean falling,
         boolean overVoid,
         boolean landsInWater,
-        boolean survivesLanding,
-        BlockPos waterCell,
+        boolean landsUnhurt,
         boolean headInWater,
         boolean canBreatheUnderwater,
         int airTicks,
@@ -75,14 +71,8 @@ public record SurvivalSituation(
                 && !player.onClimbable() && !player.isFallFlying() && !player.getAbilities().flying
                 && player.getVehicle() == null;
         Landing landing = falling ? landingBelow(level, feet) : Landing.NONE;
-        boolean survives = true;
-        if (falling && landing.cell() != null && !landing.water()) {
-            BlockState support = level.getBlockState(landing.cell());
-            double top = landing.cell().getY()
-                    + support.getCollisionShape(level, landing.cell()).max(Direction.Axis.Y);
-            survives = FallDamage.capture(player).survives(Math.max(0.0, player.getY() - top),
-                    FallDamage.Landing.of(support), true);
-        }
+        // 落地会不会掉血与意外坠落救援用同一个判断：预计伤害大于零、或已经掉得很快。
+        boolean unhurt = !falling || landing.water() || landing.cell() == null || !EmergencyLanding.needed(player);
 
         boolean headWet = player.isEyeInFluid(FluidTags.WATER);
         int needed = headWet ? SwimAirBudget.requiredAirForAscent(waterAbove(level, eyeCell), 1.0) : 0;
@@ -93,9 +83,7 @@ public record SurvivalSituation(
                 falling,
                 falling && landing.cell() == null,
                 landing.water(),
-                survives,
-                landing.cell() == null || landing.water()
-                        ? null : BucketWater.exposedWaterCell(level, landing.cell().above()),
+                unhurt,
                 headWet,
                 player.canBreatheUnderwater() || player.getAbilities().invulnerable,
                 player.getAirSupply(),

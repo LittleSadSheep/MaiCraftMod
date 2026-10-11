@@ -24,7 +24,6 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.state.BlockState;
-import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyHoldProjection;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
@@ -36,6 +35,7 @@ import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.game.player.EquipmentConfirmations;
 import org.maiwithu.maicraft.game.world.DropConfirmations;
 import org.maiwithu.maicraft.behavior.acquire.LiveCarryReads;
+import org.maiwithu.maicraft.behavior.landing.EmergencyLanding;
 import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.survival.BreathNeed;
@@ -233,8 +233,8 @@ public final class Bootstrap {
                 new DigOutNeed(new SurvivalSituation.FromPlayer(),
                         () -> new NativeBlockBreaking(interactionSender, menuActions)),
                 new BreathNeed(new SurvivalSituation.FromPlayer(), ceilings),
-                new FallNeed(new SurvivalSituation.FromPlayer(), interactions, FirstPersonScene::of,
-                        PlayerContext::backpack, BaritoneInternals::landingInProgress),
+                new FallNeed(new SurvivalSituation.FromPlayer(), EmergencyLanding::findToSaveLife,
+                        BaritoneInternals::landingInProgress),
                 new SelfDefenseNeed(combatSenses, new LiveCombatMoves(walks), events),
                 new HungerNeed(new LiveHungerView(foods), foodMoves, events),
                 new NightfallNeed(new LiveNightView(combatSenses),

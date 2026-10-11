@@ -4,28 +4,16 @@ package org.maiwithu.maicraft.behavior.survival;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
-import java.util.HashSet;
 import java.util.List;
-import java.util.OptionalInt;
-import java.util.Set;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
-import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
 import org.maiwithu.maicraft.game.interaction.InteractionSender;
 import org.maiwithu.maicraft.game.menu.MenuActions;
-import org.maiwithu.maicraft.game.player.BackpackStack;
-import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -46,8 +34,7 @@ final class SurvivalFakes {
         boolean falling;
         boolean overVoid;
         boolean landsInWater;
-        boolean survivesLanding = true;
-        BlockPos waterCell;
+        boolean landsUnhurt = true;
         boolean headInWater;
         boolean canBreatheUnderwater;
         int air = 300;
@@ -58,13 +45,12 @@ final class SurvivalFakes {
         BlockPos ceiling;
 
         Situation feet(double y) { feetY = y; return this; }
-        Situation fallingOnto(BlockPos cell, boolean survives) {
+        Situation fallingHard() {
             falling = true;
-            waterCell = cell;
-            survivesLanding = survives;
+            landsUnhurt = false;
             return this;
         }
-        Situation fallingIntoVoid() { falling = true; overVoid = true; survivesLanding = false; return this; }
+        Situation fallingIntoVoid() { falling = true; overVoid = true; landsUnhurt = false; return this; }
         Situation fallingIntoWater() { falling = true; landsInWater = true; return this; }
         Situation underwater(int airTicks) { headInWater = true; air = airTicks; return this; }
         Situation breathing() { canBreatheUnderwater = true; return this; }
@@ -74,8 +60,8 @@ final class SurvivalFakes {
         Situation underCeiling(BlockPos cell) { ceiling = cell; return this; }
 
         SurvivalSituation build() {
-            return new SurvivalSituation(health, feetY, yaw, falling, overVoid, landsInWater, survivesLanding,
-                    waterCell, headInWater, canBreatheUnderwater, air, maxAir, airToSurface, stuck, buried, ceiling);
+            return new SurvivalSituation(health, feetY, yaw, falling, overVoid, landsInWater, landsUnhurt,
+                    headInWater, canBreatheUnderwater, air, maxAir, airToSurface, stuck, buried, ceiling);
         }
     }
 
@@ -181,40 +167,5 @@ final class SurvivalFakes {
         @Override public void close() { closed = true; }
 
         @Override public String describe() { return "测试挖掘"; }
-    }
-
-    /** 第一人称现场替身：哪些格子够得着由测试声明，其余一律看不到。 */
-    static final class FakeScene implements FirstPersonScene {
-        final Set<BlockPos> reachable = new HashSet<>();
-
-        @Override public Vec3 eyePosition() { return Vec3.ZERO; }
-        @Override public Vec3 viewVector() { return new Vec3(0, -1, 0); }
-        @Override public HitResult sightRay() { return null; }
-        @Override public BlockHitResult visibleHit(BlockPos target) {
-            return reachable.contains(target)
-                    ? new BlockHitResult(Vec3.atCenterOf(target), Direction.UP, target, false) : null;
-        }
-        @Override public BlockHitResult visibleItemHit(BlockPos target, InteractionHand hand) {
-            return visibleHit(target);
-        }
-        @Override public boolean heldItemPointsAt(BlockPos target, InteractionHand hand) { return false; }
-        @Override public BlockState blockAt(BlockPos pos) { return null; }
-        @Override public boolean isLoaded(BlockPos pos) { return true; }
-        @Override public ItemStack heldItem(InteractionHand hand) { return null; }
-    }
-
-    /** 背包替身：快捷栏哪一格放着水桶、选中第几格由测试声明。 */
-    static final class FakeHotbar implements BackpackView {
-        Integer waterBucketSlot;
-        int selected;
-
-        @Override public List<BackpackStack> stacks() { return List.of(); }
-        @Override public int usedSlots() { return 0; }
-        @Override public int totalSlots() { return 36; }
-        @Override public OptionalInt hotbarSlotOf(String itemId) {
-            return "minecraft:water_bucket".equals(itemId) && waterBucketSlot != null
-                    ? OptionalInt.of(waterBucketSlot) : OptionalInt.empty();
-        }
-        @Override public int selectedHotbarSlot() { return selected; }
     }
 }

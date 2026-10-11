@@ -1,156 +1,93 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.survival;
 
-import java.util.OptionalInt;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Function;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.block.state.BlockState;
 
-import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
-import org.maiwithu.maicraft.behavior.interaction.Interactions;
-import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
-import org.maiwithu.maicraft.game.interaction.PendingInteraction;
-import org.maiwithu.maicraft.game.player.BackpackView;
+import org.maiwithu.maicraft.behavior.landing.LandingRescue;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.Next;
 import org.maiwithu.maicraft.kernel.task.PhasedTask;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
- * 落地防护临时任务（落地放水）：这一掉会摔死时，像真人一样换上快捷栏里的水桶、低头，
- * 等落点进入够得着的距离就把水倒在落点上，落进水里抵掉这次坠落。
+ * 落地防护临时任务：意外掉下去、预计会掉血时，就地找落点（正下方或周围两格内空中推得过去的，水优先），
+ * 用身上带着的水桶、蛛网、浆果、藤蔓、黏液块或干草（或落点现成的水源、蛛网）接住自己，落地站稳后收回自己放的。
  *
- * <p>顺序：换水桶 → 低头等落点够得着 → 倒水 → 等落地。落点本来就是水时不用做任何事；
- * 快捷栏里没有水桶就如实说做不了，落地伤害由游戏结算。放下的水留在落点，结果里写清楚，要不要收回由上层决定。
+ * <p>顺序：找落点 → 接住（边掉边把东西拿到手上、往落点推、够得着时只放一次、落地站稳、收回）。
+ * 落点本来就是水不用做事；下面是虚空救不了；身上没东西、附近也没现成的就如实说，落地伤害由游戏结算。
+ * 救命不看任务许可；收不回的东西留在原地，结果里写清楚。
  */
 public final class FallGuardTask extends PhasedTask<FallGuardTask.Phase> {
 
-    /** 触发条件：预计落地伤害够得到当前生命，或正下方是虚空；多犹豫一刻高度就少一段。 */
-    public enum Phase { TAKE_BUCKET, LOOK_DOWN, POUR, LAND }
-
-    private static final String WATER_BUCKET = "minecraft:water_bucket";
-
-    /** 换水桶这一下等游戏确认的期限。 */
-    private static final int SELECT_TIMEOUT_TICKS = 5;
+    public enum Phase { FIND, CATCH }
 
     private final SurvivalSituation.SituationReader reader;
-    private final Interactions interactions;
-    private final Function<PlayerContext, FirstPersonScene> scenes;
-    private final Function<PlayerContext, BackpackView> backpacks;
+    /** 就地找落点与办法，交给一次空中救援；救不了为 null。 */
+    private final Function<PlayerContext, LandingRescue> rescues;
+    private LandingRescue rescue;
 
-    private PendingInteraction selecting;
-    /** 进入倒水阶段时冻结的现场：水要落进哪一格、那一格原来是什么、手里的水桶。 */
-    private BlockPos pourCell;
-    private BlockState cellBefore;
-    private ItemStack bucketBefore;
-    private boolean poured;
-
-    public FallGuardTask(SurvivalSituation.SituationReader reader, Interactions interactions,
-                         Function<PlayerContext, FirstPersonScene> scenes,
-                         Function<PlayerContext, BackpackView> backpacks) {
-        super("落地防护", Phase.TAKE_BUCKET, new ProgressTracker(20L * 30, 20L * 60));
+    public FallGuardTask(SurvivalSituation.SituationReader reader, Function<PlayerContext, LandingRescue> rescues) {
+        super("落地防护", Phase.FIND, new ProgressTracker(20L * 30, 20L * 60));
         this.reader = reader;
-        this.interactions = interactions;
-        this.scenes = scenes;
-        this.backpacks = backpacks;
+        this.rescues = rescues;
     }
 
-    @Override protected Action enter(Phase phase) {
-        if (phase != Phase.POUR) return null;
-        // 倒水：按水桶自己的射线朝那一格倒；手里的桶变空、或那一格变了，就算水倒出去了。
-        return interactions.useHeldItemToward(pourCell, InteractionHand.MAIN_HAND, InteractionConfirmation.anyOf(
-                InteractionConfirmation.heldItemChanged(InteractionHand.MAIN_HAND, bucketBefore),
-                InteractionConfirmation.blockChanged(pourCell, cellBefore)));
+    @Override
+    protected Action enter(Phase phase) {
+        return phase == Phase.CATCH ? new CatchFall(rescue) : null;
     }
 
     @Override
     protected Next<Phase> tick(Phase phase, TickContext context) {
+        if (phase == Phase.CATCH) return runActionThen(context, this::concluded);
         SurvivalSituation situation = reader.read(context);
         PlayerContext player = context.player();
-        if (situation == null || player == null) {
-            return Next.stay();
-        }
-        if (!situation.falling()) {
-            // 已经落地（或落进了水里、抓住了梯子）：放过水就算防护成功，没放成就如实交代。
-            return poured
-                    ? Next.done(TaskResult.done("落地防护：倒了水，落进水里"))
-                    : Next.fail(Problem.of(Problem.Kind.DANGER, "还没来得及倒水就落地了，伤害由游戏结算"));
-        }
-        if (situation.landsInWater() && !poured) {
-            return Next.done(TaskResult.done("落地防护：下面就是水，落进水里不用自救"));
-        }
+        if (situation == null || player == null) return Next.stay();
+        if (!situation.falling()) return Next.done(TaskResult.done("落地防护：已经没在往下掉了"));
+        if (situation.landsInWater()) return Next.done(TaskResult.done("落地防护：下面就是水，落进水里不用自救"));
         if (situation.overVoid()) {
-            return Next.fail(Problem.of(Problem.Kind.DANGER, "下面是虚空，倒水救不了这一掉"));
+            return Next.fail(Problem.of(Problem.Kind.DANGER, "下面是虚空，什么都接不住这一掉"));
         }
-        FirstPersonScene scene = scenes.apply(player);
-        return switch (phase) {
-            case TAKE_BUCKET -> takeBucket(player);
-            case LOOK_DOWN -> lookDown(player, scene, situation);
-            case POUR -> runActionThen(context, () -> {
-                poured = true;
-                recordChange(new Change(Change.Kind.BLOCK_PLACED, "minecraft:water", 1,
-                        "落地放水，位置 " + pourCell.toShortString() + "，水还留在那里"));
-                return Next.go(Phase.LAND, "水倒出去了");
-            });
-            case LAND -> Next.stay();
-        };
-    }
-
-    // 水桶在手上就直接低头；在快捷栏别的格子就先切过去，等游戏确认切好了再低头。
-    private Next<Phase> takeBucket(PlayerContext player) {
-        if (selecting != null) {
-            selecting = selecting.terminal() ? selecting : player.interactionSender().poll(player, selecting);
-            if (!selecting.terminal()) return Next.stay();
-            if (selecting.status() != PendingInteraction.Status.CONFIRMED_APPLIED) {
-                return Next.fail(Problem.of(Problem.Kind.REFUSED_BY_GAME, "换水桶没有生效：" + selecting.detail()));
-            }
-            selecting = null;
-        }
-        BackpackView backpack = backpacks.apply(player);
-        OptionalInt slot = backpack.hotbarSlotOf(WATER_BUCKET);
-        if (slot.isPresent() && slot.getAsInt() == backpack.selectedHotbarSlot()) {
-            return Next.go(Phase.LOOK_DOWN, "水桶在手上");
-        }
-        if (slot.isEmpty()) {
+        rescue = rescues.apply(player);
+        if (rescue == null) {
             return Next.fail(Problem.of(Problem.Kind.DANGER,
-                    "这一掉会摔死，但快捷栏里没有水桶，倒不了水；落地伤害由游戏结算",
-                    "身上带一桶水放在快捷栏里，高处干活时就能落地放水"));
+                    "这一掉会掉血，可身上没有能接住自己的东西（水桶、干草、黏液块、蛛网……），落点附近也没有现成的水；落地伤害由游戏结算",
+                    "高处干活时身上带一桶水（或干草、黏液块），掉下去时就能接住自己"));
         }
-        if (player.canInteractThisTick()) {
-            selecting = player.interactionSender().selectHotbar(player, slot.getAsInt(), SELECT_TIMEOUT_TICKS);
-        }
-        return Next.stay();
+        return Next.go(Phase.CATCH, "用" + rescue.plan().aid().itemId() + "接住，落点 "
+                + rescue.plan().feet().toShortString());
     }
 
-    // 低头盯着落点，等落点进入够得着的距离（按水桶自己的射线看得见）就冻结现场、开始倒水。
-    private Next<Phase> lookDown(PlayerContext player, FirstPersonScene scene, SurvivalSituation situation) {
-        player.input().requestLook(situation.facingYaw(), 90.0f, player.clientTick());
-        BlockPos cell = situation.waterCell();
-        if (cell == null || scene.visibleItemHit(cell, InteractionHand.MAIN_HAND) == null) {
-            return Next.stay();
+    // 接住这一掉收场：留在原地没收回的格子记进变化；救没救成按救援自己的认定。
+    private Next<Phase> concluded() {
+        List<BlockPos> leftInPlace = new ArrayList<>();
+        for (LandingRescue.Change change : rescue.drainChanges()) {
+            if (!leftInPlace.remove(change.position())) leftInPlace.add(change.position());
         }
-        pourCell = cell.immutable();
-        cellBefore = scene.blockAt(pourCell);
-        bucketBefore = scene.heldItem(InteractionHand.MAIN_HAND);
-        return Next.go(Phase.POUR, "落点够得着了");
+        for (BlockPos cell : leftInPlace) {
+            recordChange(new Change(Change.Kind.BLOCK_PLACED, rescue.plan().aid().itemId(), 1,
+                    "落地救援放在 " + cell.toShortString() + "，没收回，还留在那里"));
+        }
+        if (rescue.failed()) return Next.fail(Problem.of(Problem.Kind.DANGER, rescue.detail()));
+        return Next.done(TaskResult.done("落地防护：" + rescue.detail()));
     }
 
     @Override
     protected String describePhase(Phase value) {
         return switch (value) {
-            case TAKE_BUCKET -> "换上水桶";
-            case LOOK_DOWN -> "低头等落点够得着";
-            case POUR -> "往落点倒水";
-            case LAND -> "等着落进水里";
+            case FIND -> "找能接住自己的落点";
+            case CATCH -> rescue == null ? "接住这一掉" : "接住这一掉：" + rescue.detail();
         };
     }
 
@@ -158,5 +95,41 @@ public final class FallGuardTask extends PhasedTask<FallGuardTask.Phase> {
     public Interruptibility interruptibility(TickContext context) {
         // 高速下落的半路停下来等于放弃自救；只有同时被埋这种更急的事才打断得了。
         return Interruptibility.UNSAFE_TO_STOP;
+    }
+
+    /** 接住这一掉的动作：每刻推进救援、按它的意思往落点推；被打断时救援收手（没确认的放置交还、打开的背包关上）。 */
+    private static final class CatchFall implements Action {
+        private final LandingRescue rescue;
+        private PlayerContext last;
+
+        CatchFall(LandingRescue rescue) {
+            this.rescue = rescue;
+        }
+
+        @Override
+        public ActionStatus tick(TickContext context) {
+            PlayerContext player = context.player();
+            last = player;
+            rescue.tick(player);
+            if (rescue.complete()) return ActionStatus.done();
+            player.input().applySteering(yaw -> rescue.steering(player, yaw),
+                    player.localPlayer().getYRot(), player.clientTick());
+            return ActionStatus.running();
+        }
+
+        @Override
+        public void close() {
+            if (!rescue.complete() && last != null) rescue.stop(last, "落地防护被打断");
+        }
+
+        @Override
+        public Interruptibility interruptibility() {
+            return Interruptibility.UNSAFE_TO_STOP;
+        }
+
+        @Override
+        public String describe() {
+            return "接住这一掉：" + rescue.detail();
+        }
     }
 }
