@@ -121,9 +121,11 @@ public final class UseModule implements AbilityModule {
         }
         var rejected = UseDecider.rejectedItem(item);
         if (rejected.isPresent()) {
-            return new StepDecision.Finish(TaskResult.builder(TaskResult.Status.FAILED, rejected.get().message())
-                    .problem(Problem.of(Problem.Kind.UNSUPPORTED, rejected.get().message(),
-                            rejected.get().suggestion())).build());
+            // 不支持的东西不进游戏就收场：一句话结论只带结论句，展开的原因只在问题里一份。
+            Problem unsupported = Problem.of(Problem.Kind.UNSUPPORTED, rejected.get().message(),
+                    rejected.get().suggestion());
+            return new StepDecision.Finish(TaskResult.builder(TaskResult.Status.FAILED, unsupported.headline())
+                    .problem(unsupported).build());
         }
         long count = params.has("count") ? params.integer("count") : 1;
         long radius = params.has("radius") ? params.integer("radius") : 32;

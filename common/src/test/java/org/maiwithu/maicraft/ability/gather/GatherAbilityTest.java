@@ -127,6 +127,8 @@ class GatherAbilityTest {
         StepDecision.Finish finish = assertInstanceOf(StepDecision.Finish.class,
                 decide(new Target.Seen("b7")));
         assertEquals(Problem.Kind.TARGET_GONE, finish.result().problem().kind());
+        // 一句话结论只带问题的结论句，展开的原因只在问题里一份。
+        assertEquals("没有开始采集：" + finish.result().problem().headline(), finish.result().summary());
     }
 
     @Test

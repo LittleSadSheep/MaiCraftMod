@@ -128,15 +128,19 @@ public final class GatherAbility implements AbilityModule {
                 "采集 (" + position.x() + ", " + y + ", " + position.z() + ") 的方块"));
     }
 
+    // 目标没了、写法不对都不进游戏就收场：一句话结论只带结论句，展开的原因只在问题里一份。
     private StepDecision gone(String message) {
-        return new StepDecision.Finish(TaskResult.builder(TaskResult.Status.FAILED, "没有开始采集：" + message)
-                .problem(Problem.of(Problem.Kind.TARGET_GONE, message)).build());
+        return notStarted(Problem.of(Problem.Kind.TARGET_GONE, message));
     }
 
     private StepDecision invalid(String message) {
-        return new StepDecision.Finish(TaskResult.builder(TaskResult.Status.FAILED, "没有开始采集：" + message)
-                .problem(Problem.of(Problem.Kind.INVALID_PARAMETER, message,
-                        "用 observe 看一眼现场，拿观察编号或坐标再来")).build());
+        return notStarted(Problem.of(Problem.Kind.INVALID_PARAMETER, message,
+                "用 observe 看一眼现场，拿观察编号或坐标再来"));
+    }
+
+    private static StepDecision notStarted(Problem problem) {
+        return new StepDecision.Finish(TaskResult.builder(TaskResult.Status.FAILED, "没有开始采集：" + problem.headline())
+                .problem(problem).build());
     }
 
     @Override public void registerTasks(TaskFactories factories) {
