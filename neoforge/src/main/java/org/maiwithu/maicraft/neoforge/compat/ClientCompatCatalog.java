@@ -8,6 +8,7 @@ import org.maiwithu.maicraft.compat.SupportedMod;
 import org.maiwithu.maicraft.compat.VerifiedVersions;
 import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
 import org.maiwithu.maicraft.compat.backpack.BackpackCompat;
+import org.maiwithu.maicraft.compat.create.CreateCompat;
 import org.maiwithu.maicraft.compat.emi.EmiCompat;
 import org.maiwithu.maicraft.compat.ftbquests.FtbQuestsCompat;
 import org.maiwithu.maicraft.compat.jei.JeiCompat;
@@ -15,6 +16,10 @@ import org.maiwithu.maicraft.compat.ponder.PonderCompat;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsTerminalMenu;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsTerminals;
 import org.maiwithu.maicraft.neoforge.compat.backpack.SophisticatedBackpackItems;
+import org.maiwithu.maicraft.neoforge.compat.create.CreateBeltReads;
+import org.maiwithu.maicraft.neoforge.compat.create.CreateChainConveyorReads;
+import org.maiwithu.maicraft.neoforge.compat.create.CreateKineticReads;
+import org.maiwithu.maicraft.neoforge.compat.create.CreateStationReads;
 import org.maiwithu.maicraft.neoforge.compat.emi.EmiClientReads;
 import org.maiwithu.maicraft.neoforge.compat.ftbquests.FtbQuestsClientReads;
 import org.maiwithu.maicraft.neoforge.compat.ftbquests.FtbQuestsClientSends;
@@ -55,6 +60,10 @@ public final class ClientCompatCatalog {
                 // FTB 任务：按 2101.1.36 编译，实测实例还没装、没有实测过；装了 2101.2 及以上不登记。
                 // 读端翻任务书的样子，发端把提交、勾选、领取翻成 FTB 自己的网络包。
                 new SupportedMod<>(FtbQuestsCompat.MOD_ID, "FTB 任务", new VerifiedVersions("2101.1.36", "2101.2"),
-                        () -> new FtbQuestsCompat(new FtbQuestsClientReads()::read, new FtbQuestsClientSends())));
+                        () -> new FtbQuestsCompat(new FtbQuestsClientReads()::read, new FtbQuestsClientSends())),
+                // 机械动力：按 6.0.11 编译，实测实例装的就是它；装了 6.1 及以上不登记，实测通过后再放宽。
+                new SupportedMod<>(CreateCompat.MOD_ID, "机械动力", new VerifiedVersions("6.0.11", "6.1"),
+                        () -> new CreateCompat(new CreateKineticReads(), new CreateBeltReads(),
+                                new CreateChainConveyorReads(), new CreateStationReads())));
     }
 }
