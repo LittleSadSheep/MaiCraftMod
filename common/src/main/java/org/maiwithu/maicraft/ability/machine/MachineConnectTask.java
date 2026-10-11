@@ -278,8 +278,9 @@ final class MachineConnectTask extends PhasedTask<MachineConnectTask.Phase> {
     private Next<Phase> build(TickContext context) {
         if (runner == null) {
             runner = new ChildTaskRunner(ChildTaskRunner.NO_LIMIT);
-            runner.begin(new MachineBuildTask(routes.buildInput(route, targetCell, targetDimension, input.archive(),
-                    input.permissions()), services, archives, memory, construction), context);
+            runner.begin(new MachineBuildTask(routes.buildInput(route, reader.lineMaterials().orElseThrow(), targetCell,
+                    targetDimension, input.archive(), input.permissions()), services, archives, memory, construction),
+                    context);
             return Next.stay();
         }
         if (runner.tick(context) instanceof TickResult.Finished finished) {

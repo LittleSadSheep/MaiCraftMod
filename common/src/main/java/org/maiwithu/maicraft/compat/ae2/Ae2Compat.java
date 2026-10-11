@@ -2,14 +2,19 @@
 package org.maiwithu.maicraft.compat.ae2;
 
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.level.block.Block;
 
 import org.maiwithu.maicraft.compat.CompatModule;
 import org.maiwithu.maicraft.compat.CompatRegistry;
@@ -19,21 +24,26 @@ import org.maiwithu.maicraft.compat.CompatRegistry;
  * 找终端、核对点开的界面、读网络存货、发取货操作，每一下都经联动入口包一层，
  * 装的 AE2 和编译时用的对不上时整个联动停用，不让 LinkageError 漏出去。
  *
- * <p>交给登记表两样东西：ME 终端界面的布局证明（终端能像原版界面一样打开、读角色那一侧），
- * 以及 ME 终端来源的建法——来源要用的保护判断、靠近与交互是进世界后才有的，进世界时登记表带着它们建来源。
+ * <p>交给登记表的：ME 终端界面的布局证明（终端能像原版界面一样打开、读角色那一侧）、
+ * ME 终端来源的建法——来源要用的保护判断、靠近与交互是进世界后才有的，进世界时登记表带着它们建来源；
  * 每次进世界建一份新的"上次看到的网络存货"，换世界、重开游戏都从没看过开始。
+ * 机器这一半：每种 ME 设备的机器类型（线缆格还管接线缆、装部件）、ME 网络读取器，以及要向服务端问的只读操作 ae2.network。
  */
 public final class Ae2Compat extends CompatModule {
 
     public static final String MOD_ID = "ae2";
+    /** 问 ME 网络汇总的服务端只读操作：服务器装了 MaiCraft 的 AE2 读数才答。 */
+    public static final String NETWORK_OPERATION = "ae2.network";
 
     private final Ae2Terminals terminals;
     private final Ae2TerminalMenu menus;
+    private final Ae2Grid grid;
 
-    public Ae2Compat(Ae2Terminals terminals, Ae2TerminalMenu menus) {
+    public Ae2Compat(Ae2Terminals terminals, Ae2TerminalMenu menus, Ae2Grid grid) {
         super(MOD_ID, "应用能源2");
         this.terminals = Objects.requireNonNull(terminals, "terminals");
         this.menus = Objects.requireNonNull(menus, "menus");
+        this.grid = Objects.requireNonNull(grid, "grid");
     }
 
     @Override public void contribute(CompatRegistry registry) {
@@ -43,6 +53,37 @@ public final class Ae2Compat extends CompatModule {
             return new Ae2TerminalSource(this, services, new MenuTerminalTakes(this, services, seen, Instant::now),
                     seen, Instant::now);
         });
+        // 机器这一半：每种 ME 设备、ME 网络读取器（汇总经服务端只读操作问），线缆格还管接线缆与装部件。
+        for (Ae2MachineCatalog.Kind kind : Ae2MachineCatalog.kinds()) {
+            registry.machineType(this, services -> new Ae2MachineType(kind, this, services, blocksOf(kind.blocks())));
+        }
+        registry.networkReader(this, services -> new MeNetworkReader(this, services));
+        registry.serverRead(this, NETWORK_OPERATION, 1);
+    }
+
+    /** 注册 ID 换成方块对象；注册表里没有的不算进来。 */
+    static Set<Block> blocksOf(List<String> ids) {
+        Set<Block> blocks = new HashSet<>();
+        for (String id : ids) {
+            ResourceLocation key = ResourceLocation.tryParse(id);
+            if (key != null) BuiltInRegistries.BLOCK.getOptional(key).ifPresent(blocks::add);
+        }
+        return Set.copyOf(blocks);
+    }
+
+    /** 一格 ME 设备的读数；见 {@link Ae2Grid#cell}。 */
+    public Optional<Ae2Grid.GridCell> gridCell(ClientLevel level, BlockPos at) {
+        return call("读 ME 设备", () -> grid.cell(level, at));
+    }
+
+    /** 是不是 AE2 的部件；见 {@link Ae2Grid#partItem}。 */
+    public boolean partItem(String itemId) {
+        return call("认 AE2 部件", () -> grid.partItem(itemId));
+    }
+
+    /** 是不是 AE2 的线缆；见 {@link Ae2Grid#cableItem}。 */
+    public boolean cableItem(String itemId) {
+        return call("认 AE2 线缆", () -> grid.cableItem(itemId));
     }
 
     /** 角色周围已加载区块里装着 ME 终端的面；见 {@link Ae2Terminals#near}。 */

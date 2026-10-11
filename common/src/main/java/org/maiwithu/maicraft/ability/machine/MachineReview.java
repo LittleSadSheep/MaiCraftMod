@@ -107,8 +107,10 @@ final class MachineReview {
         for (MachineBlueprint.Part part : blueprint.parts()) {
             Optional<BlockState> host = blueprint.hostStateAt(part.offset());
             if (host.isEmpty()) {
+                // 宿主是一段安装段里的格（AE2 的线缆就是这样铺的）：施工时先装段再装部件，这里不报。
+                if (inInstallation(blueprint, part.offset())) continue;
                 issues.add(new Issue(where(part.offset()), "部件的宿主不在蓝图里，装不上",
-                        "先把宿主方块（一般是线缆）写进 cells"));
+                        "先把宿主方块写进 cells，或把宿主那一格写进线缆这类安装段"));
                 continue;
             }
             List<String> refusals = new ArrayList<>();
@@ -127,6 +129,10 @@ final class MachineReview {
                         "对照宿主方块与部件物品，或装上对应模组的联动再看"));
             }
         }
+    }
+
+    private static boolean inInstallation(MachineBlueprint blueprint, BlockPos offset) {
+        return blueprint.installations().stream().anyMatch(segment -> segment.offsets().contains(offset));
     }
 
     // 安装段：要有机器类型说形状合规则；一个都没有就是缺联动或形状不对。

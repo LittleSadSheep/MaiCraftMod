@@ -33,6 +33,14 @@ public interface LineMaterials {
     /** 这一格线材跟哪几面接上：轴是沿轴向的两面，齿轮箱是轴向以外的四面，线缆是六面。 */
     Set<Direction> connectedFaces(BlockState piece);
 
+    /**
+     * 这种线不是能直接放的方块（AE2 的线缆是装在线缆格中间的部件）：整条线写成这种安装段，
+     * 由认它的机器类型一格一格装；能直接放的（轴、齿轮箱）给空，按逐格方块交给施工。
+     */
+    default Optional<String> laidAsInstallation() {
+        return Optional.empty();
+    }
+
     /** 远距离跨越：两头各一个方块，用原生安装段连起来（链条输送机之间的链）；没有为空。 */
     Optional<Span> span();
 

@@ -95,14 +95,14 @@ final class LineRoutes {
      * 把线路写成施工输入：目标有档案就把线路当补丁并进去、按档案锚点施工；没有就按目标那一格起一份新档案，
      * 名字照 machine_build 的规矩起"机器@x,y,z"，这个名字已经有档案就并进它。
      */
-    MachineBuildInput buildInput(RoutePlanner.Plan plan, BlockPos targetCell, String dimension,
-            MachineArchive archive, Permissions permissions) {
+    MachineBuildInput buildInput(RoutePlanner.Plan plan, LineMaterials materials, BlockPos targetCell,
+            String dimension, MachineArchive archive, Permissions permissions) {
         MachineArchive into = archive;
         String name = archive != null ? archive.name()
                 : "机器@" + targetCell.getX() + "," + targetCell.getY() + "," + targetCell.getZ();
         if (into == null) into = archives.find(name).orElse(null);
         BlockPos anchor = into != null ? into.anchor() : targetCell;
-        MachineBlueprint route = blueprintOf(plan, anchor);
+        MachineBlueprint route = blueprintOf(plan, materials, anchor);
         MachineBlueprint merged = into != null ? MachinePatch.merge(into.blueprint(), route) : route;
         WorldPosition at = new WorldPosition(anchor.getX(), anchor.getY(), anchor.getZ(),
                 into != null ? into.dimension() : dimension);
@@ -110,8 +110,17 @@ final class LineRoutes {
                 "铺一条线路接到 (" + targetCell.getX() + "," + targetCell.getY() + "," + targetCell.getZ() + ")");
     }
 
-    /** 线路写成相对锚点的蓝图：每格线材要按轴向放的点名 axis，跨越写成一段安装段。 */
-    static MachineBlueprint blueprintOf(RoutePlanner.Plan plan, BlockPos anchor) {
+    /**
+     * 线路写成相对锚点的蓝图：每格线材要按轴向放的点名 axis，跨越写成一段安装段；
+     * 线材不是能直接放的方块（AE2 线缆）时整条线写成一段安装段，逐格清单里不写。
+     */
+    static MachineBlueprint blueprintOf(RoutePlanner.Plan plan, LineMaterials materials, BlockPos anchor) {
+        Optional<String> laidAs = materials.laidAsInstallation();
+        if (laidAs.isPresent()) {
+            List<BlockPos> offsets = plan.cells().stream().map(placed -> placed.pos().subtract(anchor)).toList();
+            return new MachineBlueprint(List.of(), List.of(), List.of(new MachineBlueprint.Segment(laidAs.get(), offsets)),
+                    List.of(), List.of());
+        }
         List<PlannedCell> cells = new ArrayList<>();
         for (RoutePlanner.Placed placed : plan.cells()) {
             Set<String> required = placed.state().hasProperty(BlockStateProperties.AXIS) ? Set.of("axis") : Set.of();

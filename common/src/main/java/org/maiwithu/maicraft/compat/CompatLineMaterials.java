@@ -45,6 +45,10 @@ final class CompatLineMaterials implements LineMaterials {
         return ask(() -> materials.connectedFaces(piece), Set.of(Direction.values()));
     }
 
+    @Override public Optional<String> laidAsInstallation() {
+        return materials.laidAsInstallation();
+    }
+
     @Override public Optional<Span> span() {
         return ask(materials::span, Optional.<Span>empty()).map(GuardedSpan::new);
     }

@@ -76,7 +76,7 @@ class Ae2CompatTest {
     @Test
     void 经联动入口找终端与发取货操作() {
         RecordingMenu menu = new RecordingMenu();
-        Ae2Compat compat = new Ae2Compat(ONE_TERMINAL, menu);
+        Ae2Compat compat = new Ae2Compat(ONE_TERMINAL, menu, new NoGrid());
         assertEquals(List.of(WALL_TERMINAL), compat.terminalsNear(null, BlockPos.ZERO, 16));
         assertTrue(compat.terminalStillThere(null, WALL_TERMINAL.block(), Direction.NORTH));
         assertFalse(compat.terminalStillThere(null, WALL_TERMINAL.block(), Direction.SOUTH));
@@ -98,7 +98,7 @@ class Ae2CompatTest {
                 return false;
             }
         };
-        Ae2Compat compat = new Ae2Compat(broken, new RecordingMenu());
+        Ae2Compat compat = new Ae2Compat(broken, new RecordingMenu(), new NoGrid());
         assertThrows(ModApiMismatch.class, () -> compat.terminalsNear(null, BlockPos.ZERO, 16));
         assertFalse(compat.active());
         assertTrue(compat.disabledReason().orElseThrow().contains("找附近的 ME 终端"));
@@ -109,7 +109,7 @@ class Ae2CompatTest {
     @Test
     void 装了且版本在范围内才登记() {
         SupportedMod<CompatModule> supported = new SupportedMod<>(Ae2Compat.MOD_ID, "应用能源2", new VerifiedVersions("19.2.17", "19.3"),
-                () -> new Ae2Compat(ONE_TERMINAL, new RecordingMenu()));
+                () -> new Ae2Compat(ONE_TERMINAL, new RecordingMenu(), new NoGrid()));
 
         CompatRegistry installed = CompatRegistry.load(List.of(supported), loaderWith("19.2.17"));
         assertEquals(List.of(Ae2Compat.MOD_ID), installed.modules().stream().map(module -> module.modId()).toList());

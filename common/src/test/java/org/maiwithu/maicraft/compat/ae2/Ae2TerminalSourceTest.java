@@ -95,7 +95,7 @@ class Ae2TerminalSourceTest {
             @Override public void takeOne(AbstractContainerMenu menu, long serial) {}
 
             @Override public void putBack(AbstractContainerMenu menu) {}
-        });
+        }, new NoGrid());
     }
 
     /** 一个界面的槽位描述替身：前 otherSlots 格是视图元件、合成格这类不是背包的格子，后面 36 格是角色背包。 */
