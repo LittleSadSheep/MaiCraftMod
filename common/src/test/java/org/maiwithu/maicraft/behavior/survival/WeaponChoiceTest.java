@@ -32,9 +32,11 @@ class WeaponChoiceTest {
                 WeaponChoice.pick(List.of(BOW, SWORD), true, false).orElseThrow().weapon());
         assertEquals(WeaponChoice.Weapon.SWORD_OR_AXE,
                 WeaponChoice.pick(List.of(BOW, SWORD), false, false).orElseThrow().weapon());
-        // 没上弦的弩顶不了已上弦的：退到剑。
-        assertEquals(WeaponChoice.Weapon.SWORD_OR_AXE,
+        // 没上弦的弩：身上有箭就装上再射；没箭装不了，退到剑。
+        assertEquals(WeaponChoice.Weapon.CROSSBOW,
                 WeaponChoice.pick(List.of(BARE_CROSSBOW, SWORD), true, false).orElseThrow().weapon());
+        assertEquals(WeaponChoice.Weapon.SWORD_OR_AXE,
+                WeaponChoice.pick(List.of(BARE_CROSSBOW, SWORD), false, false).orElseThrow().weapon());
     }
 
     @Test

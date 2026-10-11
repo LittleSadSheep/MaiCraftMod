@@ -20,6 +20,8 @@ public final class WeaponChoice {
         LOADED_CROSSBOW,
         /** 弓（背包里有箭）。 */
         READY_BOW,
+        /** 没上弦的弩，身上有箭可以装：装一下再射。 */
+        CROSSBOW,
         /** 剑或斧：近战。对手举盾时优先斧。 */
         SWORD_OR_AXE,
         /** 空手。 */
@@ -54,17 +56,32 @@ public final class WeaponChoice {
      * @param opponentShielding 对手是否举着盾（斧优先）
      */
     public static Optional<Picked> pick(List<Carried> carried, boolean hasArrows, boolean opponentShielding) {
+        return pickRanged(carried, hasArrows).or(() -> Optional.of(pickMelee(carried, opponentShielding)));
+    }
+
+    /**
+     * 远程挑哪件：已上弦的弩（拿来就能射）、有箭的弓、有箭可装的弩；一样的快捷栏里的先（不用开背包）。都没有为空。
+     */
+    public static Optional<Picked> pickRanged(List<Carried> carried, boolean hasArrows) {
+        Carried loaded = null;
+        Carried bow = null;
+        Carried crossbow = null;
         for (Carried stack : carried) {
-            if (isCrossbow(stack.item()) && stack.crossbowCharged() && stack.count() > 0) {
-                return Optional.of(new Picked(stack.item(), Weapon.LOADED_CROSSBOW));
-            }
+            if (stack.count() <= 0) continue;
+            if (isCrossbow(stack.item()) && stack.crossbowCharged()) loaded = handier(loaded, stack);
+            else if (isBow(stack.item()) && hasArrows) bow = handier(bow, stack);
+            else if (isCrossbow(stack.item()) && hasArrows) crossbow = handier(crossbow, stack);
         }
-        for (Carried stack : carried) {
-            if (isBow(stack.item()) && hasArrows && stack.count() > 0) {
-                return Optional.of(new Picked(stack.item(), Weapon.READY_BOW));
-            }
-        }
-        return Optional.of(pickMelee(carried, opponentShielding));
+        if (loaded != null) return Optional.of(new Picked(loaded.item(), Weapon.LOADED_CROSSBOW, loaded.slot()));
+        if (bow != null) return Optional.of(new Picked(bow.item(), Weapon.READY_BOW, bow.slot()));
+        if (crossbow != null) return Optional.of(new Picked(crossbow.item(), Weapon.CROSSBOW, crossbow.slot()));
+        return Optional.empty();
+    }
+
+    // 同一类里快捷栏的那件优先：拿起来只是按一下数字键。
+    private static Carried handier(Carried current, Carried candidate) {
+        if (current == null) return candidate;
+        return inHotbar(candidate.slot()) && !inHotbar(current.slot()) ? candidate : current;
     }
 
     /**
@@ -99,7 +116,7 @@ public final class WeaponChoice {
     public static int scoreOf(Weapon weapon) {
         return switch (weapon) {
             case LOADED_CROSSBOW -> 7;
-            case READY_BOW -> 6;
+            case READY_BOW, CROSSBOW -> 6;
             case SWORD_OR_AXE -> 5;
             case BARE_HANDS -> 0;
         };
