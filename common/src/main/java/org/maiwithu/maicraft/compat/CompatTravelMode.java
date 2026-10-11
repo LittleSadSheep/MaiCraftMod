@@ -52,6 +52,16 @@ public final class CompatTravelMode implements TravelMode {
         }
     }
 
+    // 非它不可吗：停用了或对不上就不是（没法用它，就别拦着别的方式）。
+    @Override public boolean claims(TravelRequest request) {
+        if (!module.active()) return false;
+        try {
+            return mode.claims(request);
+        } catch (ModApiMismatch broken) {
+            return false;
+        }
+    }
+
     // 这种方式自己的参数：进世界时登记一次，停用后照样认得（给了会如实答用不了）。
     @Override public List<ParamSpec> options() {
         return options;

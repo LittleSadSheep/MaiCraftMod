@@ -151,6 +151,18 @@ class JourneyTaskTest {
     }
 
     @Test
+    void 有方式说这一段非它不可_近处也只问它() {
+        // 站在船上要先下船：近处也不走路，只问说"非我不可"的那种方式，用它的报价。
+        FakeMode deck = new FakeMode(request -> new TravelOffer(ELEVATOR, request.from(), new BlockPos(3, 64, 0), 40,
+                List.of(), List.of(), ""), WorldPosition.here(3, 64, 0));
+        deck.claims = true;
+        TaskResult result = run(journey(at(3, 64, 0), null, deck), 50);
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertTrue(walks.isEmpty(), "非它不可时不先走路");
+        assertEquals(1, deck.started);
+    }
+
+    @Test
     void 走路途中被取消_出行任务的事实照样记进来() {
         nextWalk = destination -> new FakeWalk(null, null);
         JourneyTask task = journey(at(10, 64, 0), null);
@@ -207,6 +219,11 @@ class JourneyTaskTest {
         int asked;
         int started;
         TravelRequest lastRequest;
+        boolean claims;
+
+        @Override public boolean claims(TravelRequest request) {
+            return claims && started == 0;
+        }
 
         FakeMode(Function<TravelRequest, TravelOffer> answer, WorldPosition dropOff) {
             this.answer = answer;

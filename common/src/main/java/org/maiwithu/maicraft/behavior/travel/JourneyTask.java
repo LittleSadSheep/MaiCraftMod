@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.travel;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -103,6 +104,8 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
     private WorldPosition arrivedAt;
     /** 这一轮问报价用的请求：开跑那一段时原样交给方式（许可、给方式的话）。 */
     private TravelRequest request;
+    /** 这一轮说"非我不可"的方式（站在船上先下船、目的地在船上先上船）。 */
+    private List<TravelMode> claiming = List.of();
 
     /**
      * @param world   读角色此刻在哪（带维度）
@@ -154,23 +157,25 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
         }
         BlockPos aim = aim(feet);
         String via = journey.via();
-        boolean compare = !TravelVia.WALK.name().equals(via)
-                && !(via == null && walkProblem == null && TravelPlanner.near(feet, aim));
+        request = new TravelRequest(feet, aim, spot.dimension() == null ? "" : spot.dimension(),
+                destination == null ? 0 : destination.radius(), journey.permissions(), journey.options());
         if (askedTicks == 0) {
-            // 新一轮：上一轮的回答作废，只问指定的那种（没指定问全部）。
+            // 新一轮：上一轮的回答作废。有方式说这一段非它不可（人站在船上要先下船、目的地在船上要先上船），
+            // 就只问它；否则只问指定的那种（没指定问全部）。
             round++;
             answered.clear();
             offers.clear();
             declined.clear();
-            if (compare) {
-                for (TravelMode mode : modes) {
-                    if (via == null || mode.via().name().equals(via)) answered.put(mode, false);
-                }
+            claiming = modes.stream().filter(mode -> mode.claims(request)).toList();
+        }
+        boolean compare = !claiming.isEmpty() || !TravelVia.WALK.name().equals(via)
+                && !(via == null && walkProblem == null && TravelPlanner.near(feet, aim));
+        if (askedTicks == 0 && compare) {
+            for (TravelMode mode : claiming.isEmpty() ? modes : claiming) {
+                if (!claiming.isEmpty() || via == null || mode.via().name().equals(via)) answered.put(mode, false);
             }
         }
         if (compare) {
-            request = new TravelRequest(feet, aim, spot.dimension() == null ? "" : spot.dimension(),
-                    destination == null ? 0 : destination.radius(), journey.permissions(), journey.options());
             for (Map.Entry<TravelMode, Boolean> entry : answered.entrySet()) {
                 if (!entry.getValue()) entry.getKey().offer(request, sinkFor(entry, round));
             }
@@ -181,8 +186,9 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
             });
         }
         askedTicks = 0;
-        TravelPlanner.Plan plan = TravelPlanner.choose(via, feet, aim, walkProblem != null, rodeAlready,
-                offers, declined, tried);
+        TravelPlanner.Plan plan = claiming.isEmpty()
+                ? TravelPlanner.choose(via, feet, aim, walkProblem != null, rodeAlready, offers, declined, tried)
+                : claimed();
         return switch (plan) {
             case TravelPlanner.Plan.Walk ignored -> {
                 walk = new WalkingLeg(walking.apply(destination), feet, context.gameTick());
@@ -199,6 +205,17 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
             }
             case TravelPlanner.Plan.DeadEnd dead -> Next.fail(deadEnd(dead.problem()));
         };
+    }
+
+    // 非它不可的那一段：挑它没试过、最快的那份；它答不出就照它的原因结束，不改走路（走路过不去船上）。
+    private TravelPlanner.Plan claimed() {
+        return offers.stream().filter(offer -> !tried.contains(TravelPlanner.key(offer)))
+                .min(Comparator.comparingLong(TravelOffer::estimatedTicks))
+                .<TravelPlanner.Plan>map(TravelPlanner.Plan.Ride::new)
+                .orElseGet(() -> new TravelPlanner.Plan.DeadEnd(declined.isEmpty()
+                        ? Problem.of(Problem.Kind.UNREACHABLE, claiming.getFirst().via().name() + " 这一趟能试的都试过了，没走成")
+                        : Problem.of(declined.getFirst().kind(), declined.getFirst().via().name() + " 走不了："
+                                + declined.getFirst().reason())));
     }
 
     // 回答口只认这一轮：方式留着旧口在下一轮才答的，算不到这一轮里。
@@ -259,7 +276,8 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
             walkProblem = null;
         }
         if (failure == null) {
-            rodeAlready = true;
+            // 指定的方式送过一段，剩下的就是首尾的步行；先下船、先上船这种不算。
+            if (offer.via().name().equals(journey.via())) rodeAlready = true;
         } else {
             recordAttempt(offer.via().name() + " 从 " + offer.from().toShortString() + " 到 " + offer.to().toShortString(),
                     failure.headline());

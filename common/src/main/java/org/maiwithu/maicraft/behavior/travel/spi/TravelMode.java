@@ -23,6 +23,14 @@ public interface TravelMode {
     void offer(TravelRequest request, OfferSink sink);
 
     /**
+     * 这一段非它不可吗：人站在会动的船上要先下船、目的地在船上要先上船，走路过不去。说是的话行程这一轮只问它，
+     * 不管近不近、指定了什么方式；它答不出就照它的原因结束。默认不是。
+     */
+    default boolean claims(TravelRequest request) {
+        return false;
+    }
+
+    /**
      * 这种方式自己的 travel 参数（电梯的 floor、载具的 vehicle），装了才出现在参数表里；
      * 给了这些参数就是用这种方式，没给 via 时按它算。名字要先登记进参数名表。
      */

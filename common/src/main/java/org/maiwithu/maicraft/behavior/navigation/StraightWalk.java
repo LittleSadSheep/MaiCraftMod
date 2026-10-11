@@ -30,6 +30,8 @@ public final class StraightWalk implements Action {
     private final double tolerance;
     private final int maxTicks;
     private final String what;
+    /** 目标比脚下高半格以上时跳一下（走上一格高的甲板边）。 */
+    private final boolean climb;
     private int ticks;
     private int stalled;
     private double best = Double.MAX_VALUE;
@@ -41,6 +43,15 @@ public final class StraightWalk implements Action {
      * @param what      给面板与问题的一句话，例如"走进轿厢"
      */
     public StraightWalk(Supplier<PlayerContext> context, Vec3 target, double tolerance, int maxTicks, String what) {
+        this(context, target, tolerance, maxTicks, what, false);
+    }
+
+    /**
+     * @param climb 目标比脚下高半格以上、又离得近时跳一下：从地面走上一格高的甲板边用
+     */
+    public StraightWalk(Supplier<PlayerContext> context, Vec3 target, double tolerance, int maxTicks, String what,
+            boolean climb) {
+        this.climb = climb;
         this.context = Objects.requireNonNull(context, "context");
         this.target = Objects.requireNonNull(target, "target");
         this.tolerance = tolerance;
@@ -74,7 +85,8 @@ public final class StraightWalk implements Action {
             stalled++;
         }
         input.lookAt(player, new Vec3(target.x, player.getEyeY(), target.z));
-        input.applyMovement(new PlayerInput.Movement(1.0f, 0.0f, false, false, false), tick.gameTick());
+        boolean jump = climb && target.y - player.getY() > 0.55 && distance < 1.6 && player.onGround();
+        input.applyMovement(new PlayerInput.Movement(1.0f, 0.0f, jump, false, false), tick.gameTick());
         return gained ? ActionStatus.progressed() : ActionStatus.running();
     }
 
