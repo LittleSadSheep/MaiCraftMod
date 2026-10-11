@@ -29,7 +29,7 @@ import org.maiwithu.maicraft.compat.CompatRegistry;
  *
  * <p>交给登记表的：每一种认得的机器、兜住附属模组动力方块的"其他动力方块"、应力网的网络读取器、
  * 扳手（施工清障时拆 Create 的方块）、砂纸打磨与附近的工具箱（拿东西的两条途径）、放置规则（施工放带漏斗、竖直齿轮箱、动力辊）、
- * 移动装置当寻路的障碍。
+ * 移动装置当寻路的障碍、坐电梯这种出行方式。
  * 机器类型要走过去、点、换手、缺东西去拿，进世界时由登记表带着联动能用的玩家行为建。
  */
 public final class CreateCompat extends CompatModule {
@@ -88,6 +88,8 @@ public final class CreateCompat extends CompatModule {
         // 移动装置当障碍交给寻路：转着的风车整个扫盘、开着的列车与活塞的前方、电梯井都绕开，挡路时先等它过去。
         registry.obstacleSource(this, (level, viewer, region, sink) ->
                 movingContraptions(level, viewer, region).forEach(sink::add));
+        // 坐电梯当一种出行方式（via=elevator，所有者 10-11 批）：呼梯、进轿厢选层、到了出来，要走过去、按按钮。
+        registry.travelMode(this, services -> new CreateElevatorMode(this, services));
     }
 
     /** 和一个区域沾边的电梯；见 {@link CreateElevators#elevators}。 */

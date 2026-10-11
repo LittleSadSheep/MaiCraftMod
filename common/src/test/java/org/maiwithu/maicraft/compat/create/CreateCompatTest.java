@@ -27,6 +27,8 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.kernel.param.ParamSpec;
+import org.maiwithu.maicraft.behavior.travel.spi.TravelMode;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
@@ -91,6 +93,14 @@ class CreateCompatTest {
         assertEquals(List.of("sandpaper", "toolbox", "stock_ticker"), sources.stream().map(source -> source.via().name()).toList());
     }
 
+    @Test
+    void 登记坐电梯这种出行方式与移动装置障碍() {
+        CompatRegistry registry = CompatRegistry.load(List.of(supported()), loaderWith("6.0.11"));
+        List<TravelMode> modes = registry.travelModes(offlineServices());
+        assertEquals(List.of("elevator"), modes.stream().map(mode -> mode.via().name()).toList());
+        assertEquals(List.of("floor"), modes.getFirst().options().stream().map(ParamSpec::name).toList());
+        assertEquals(1, registry.obstacleSources().size());
+    }
 
     @Test
     void 砂纸报价按产物找配方_磨几次要几张砂纸写进风险() {

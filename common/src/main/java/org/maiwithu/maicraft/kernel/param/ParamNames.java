@@ -43,6 +43,7 @@ public final class ParamNames {
             Map.entry("file", "schematics 目录下的结构文件名"),
             Map.entry("inventory_slot", "背包里的第几格（0~35，副手 40）：同一种物品有几件时指定哪一件"),
             Map.entry("anchor", "蓝图原点落在哪一格 {x,y,z}：target 指的是别的东西（例如蓝图加农炮）时另给"),
+            Map.entry("floor", "坐电梯去哪一层：楼层名，或 top / bottom / up / down"),
             Map.entry("properties", "只放一格时要求的方块状态属性（JSON 对象），例如 {\"facing\":\"north\"}"),
             Map.entry("quest", "任务书里任务的编号（16 位十六进制，FTB 任务）"),
             Map.entry("requirement", "任务里一条要求的编号（任务书资料的条目页里给的）"),
