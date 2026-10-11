@@ -250,6 +250,26 @@ class BattleTest {
     }
 
     @Test
+    void standingInTheBandButOutOfReachClosesInThenGivesUp() {
+        // 它在坑里低一截：中心距 3 格在带里，眼睛到它碰撞箱却有 3.4 格，够不着——往里凑，凑到底还不行就换。
+        Senses senses = new Senses();
+        senses.threats.add(new CombatSenses.Threat(1, UUID.randomUUID(), "minecraft:zombie", 3, 63, 0, 3.2,
+                ThreatAssessment.Kind.MELEE, false, true, true, 0.3, 3.4, false, 2.02, false));
+        Moves moves = new Moves();
+        Battle fight = battle(senses, moves);
+        fight.tick(new Tick(0));
+        assertTrue(moves.lastStep().standing(), "一开始在带里站着");
+        boolean closedIn = false;
+        for (int tick = 1; tick < 20; tick++) {
+            fight.tick(new Tick(tick));
+            closedIn |= moves.lastStep().dx() > 0;
+        }
+        assertTrue(closedIn, "够不着就往里凑");
+        for (int tick = 20; tick < 80; tick++) fight.tick(new Tick(tick));
+        assertTrue(fight.unreachable().contains(1), "凑到底还够不着：当它走不到");
+    }
+
+    @Test
     void meleeBandFollowsBothSidesReachAndTheCooldown() {
         Battlefield.Me me = new Battlefield.Me(0, 64, 0, 0.3, 20, 0, 3.0, true, true, false, 3, 4);
         Footwork.Band ready = Battle.meleeBand(me, zombie(1, 3), true);

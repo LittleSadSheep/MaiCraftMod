@@ -68,6 +68,14 @@ public final class Battle {
     static final double REPLAN_AFTER = 3.0;
     /** 原生攻击连着被拒这么多次才当打不出去，换下一只。 */
     static final int MAX_REJECTS = 3;
+    /** 补站位：每这么多刻外沿往里收一步。 */
+    static final int TRIM_EVERY = 5;
+    /** 补站位每步收多少格。 */
+    static final double TRIM_STEP = 0.25;
+    /** 外沿最多收到离它这么近（格）。 */
+    static final double MIN_OUTER = 0.8;
+    /** 补了这么久（刻）还够不着就当走不到。 */
+    static final int TRIM_GIVE_UP = 60;
     /** 充能到这么多就起跳：落到能砍的时候正好充满，跳劈不比站着砍慢。 */
     static final float JUMP_AT = 0.5f;
     /** 连着这么多刻想跳却没离地（灵魂沙、蜂蜜块上）：这一阵不跳了，站着砍。 */
@@ -100,6 +108,9 @@ public final class Battle {
     private boolean perched;
     private double perchY;
     private Action pillar;
+    /** 补站位：在给哪只补、够不着几刻了。 */
+    private int trimTarget = -1;
+    private int trimTicks;
     /** 连着想跳却没离地的刻数，与这之后不再试跳还剩多少刻。 */
     private int groundedJumps;
     private int noLeapTicks;
@@ -290,7 +301,7 @@ public final class Battle {
         if (!inReach) dropStrike();
         if (threat.dangerRadius() > 0) moves.guard(context, threat.distance(), inReach && me.attackReady());
         else moves.lowerGuard();
-        Footwork.Band band = meleeBand(me, threat, me.attackReady());
+        Footwork.Band band = trimmed(meleeBand(me, threat, me.attackReady()), target.id(), inReach, threat.visible());
         boolean moved;
         if (perched) {
             // 站在柱顶：脚不动（一挪就掉下去），只砍够得着的。
@@ -375,6 +386,25 @@ public final class Battle {
         if (threat.kind() == ThreatAssessment.Kind.EXPLOSIVE) inner = danger + 0.1;
         else inner = danger < standoff - 0.1 ? danger : Math.max(0, standoff - 0.85);
         return new Footwork.Band(threat.x(), threat.z(), inner, Math.max(inner + 0.1, standoff));
+    }
+
+    /**
+     * 补站位：站在带里却够不着（被方块边角挡着、它在坑里低一截）时，外沿每过几刻往里收一点，凑近到真够得着；
+     * 收到底还够不着就当这只走不到——有弓去射，没弓换下一只，不原地空转。
+     */
+    private Footwork.Band trimmed(Footwork.Band band, int targetId, boolean inReach, boolean visible) {
+        if (targetId != trimTarget || inReach || !visible) {
+            trimTarget = targetId;
+            trimTicks = 0;
+            return band;
+        }
+        trimTicks++;
+        double trim = Math.min(band.outer() - Math.max(band.inner() + 0.1, MIN_OUTER), (trimTicks / TRIM_EVERY) * TRIM_STEP);
+        if (trimTicks > TRIM_GIVE_UP) {
+            unreachable.add(targetId);
+            trimTicks = 0;
+        }
+        return trim <= 0 ? band : new Footwork.Band(band.x(), band.z(), band.inner(), band.outer() - trim);
     }
 
     // 拉弓的内沿：对手冲过来越快留得越多，拉满一张弓的一秒半里它能走多远就多留多远。
