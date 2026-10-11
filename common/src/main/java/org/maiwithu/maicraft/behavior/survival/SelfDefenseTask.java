@@ -68,9 +68,11 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         this.battle = new Battle(senses, moves, this::wanted, ThreatAssessment.VIGILANCE_RADIUS);
     }
 
-    // 名单：正在追我的都打；出打点 16 格、又没在打我的不追（守在打点附近），正压着我打的、远处射我的照打。
+    // 名单：正在追我的都打；出打点 16 格、又没在打我的不追（守在打点附近），正压着我打的、远处射我的照打；
+    // 前一次自卫记下走不到、又没打我的不为它再插进来。
     private boolean wanted(CombatSenses.Threat threat, boolean attacker, boolean chasing) {
         if (!chasing) return false;
+        if (!attacker && need.ignored(threat.entityId())) return false;
         boolean shooting = threat.kind() == ThreatAssessment.Kind.RANGED && threat.aggressive() && threat.visible();
         return attacker || shooting || Math.hypot(threat.x() - anchor[0], threat.z() - anchor[2]) <= CHASE_LIMIT;
     }
@@ -129,6 +131,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         double drift = distanceFromAnchor(context);
         double heartsLost = heartsLost(context);
         if (drift < 1.5) {
+            need.ignoreUnreachable(battle.unreachable(), context.gameTick());
             events.publish(TaskEvent.Kind.TEMPORARY_TASK_FINISHED,
                     "自卫结束，回到打点；位移 " + Math.round(drift) + " 格，掉了约 " + Math.round(heartsLost) + " 颗心");
             return Next.done(TaskResult.builder(TaskResult.Status.DONE, "自卫结束，回到打点继续干活")
@@ -142,6 +145,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         if (status instanceof ActionStatus.Failed) {
             // 走不回去：不冒充回到了岗位。主任务停在半路，事件里说明停在了哪里。
             displaced = true;
+            need.ignoreUnreachable(battle.unreachable(), context.gameTick());
             double[] self = moves.selfPosition(context);
             String where = Math.round(self[0]) + ", " + Math.round(self[1]) + ", " + Math.round(self[2]);
             events.publish(TaskEvent.Kind.NEED_UNHANDLED,
