@@ -1,0 +1,53 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.behavior.survival;
+
+import java.util.OptionalInt;
+
+import net.minecraft.core.BlockPos;
+
+import org.maiwithu.maicraft.game.world.ReadsLightLevels;
+import org.maiwithu.maicraft.game.player.BackpackStack;
+import org.maiwithu.maicraft.game.player.BackpackView;
+import org.maiwithu.maicraft.kernel.task.TickContext;
+
+/**
+ * 太暗处境的生产读取：脚部与眼部实测方块光的最小值（亮度读数从只读亮度接缝来，测试换替身），
+ * 包里有没有火把按背包视图数。角色不在世界里时如实交空，这一刻不评估。
+ */
+public final class LiveDarkView implements DarknessNeed.ReadsDarkness {
+
+    private static final String TORCH_ID = "minecraft:torch";
+
+    private final ReadsLightLevels lights;
+
+    public LiveDarkView(ReadsLightLevels lights) {
+        this.lights = lights;
+    }
+
+    @Override public DarknessNeed.DarknessFacts read(TickContext context) {
+        var player = context.player();
+        if (player == null || player.localPlayer() == null || player.backpack() == null) {
+            return null;
+        }
+        BlockPos feet = player.localPlayer().blockPosition();
+        BlockPos eye = BlockPos.containing(player.localPlayer().getEyePosition());
+        OptionalInt atFeet = lights.blockLight(feet);
+        OptionalInt atEye = lights.blockLight(eye);
+        if (atFeet.isEmpty() && atEye.isEmpty()) {
+            return null;
+        }
+        int darkest = atFeet.isEmpty() ? atEye.getAsInt()
+                : atEye.isEmpty() ? atFeet.getAsInt()
+                : Math.min(atFeet.getAsInt(), atEye.getAsInt());
+        return new DarknessNeed.DarknessFacts(OptionalInt.of(darkest), carriedTorches(player.backpack()) > 0, feet);
+    }
+
+    /** 背包里的火把数：主格为准，副手不占背包格、单独清点时另算。 */
+    static int carriedTorches(BackpackView backpack) {
+        int total = 0;
+        for (BackpackStack stack : backpack.stacks()) {
+            if (stack.itemId().equals(TORCH_ID)) total += stack.count();
+        }
+        return total;
+    }
+}
