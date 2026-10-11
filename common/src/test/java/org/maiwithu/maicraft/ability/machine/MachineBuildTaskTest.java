@@ -195,6 +195,48 @@ Rig rig = new Rig(tempDir);
     }
 
     @Test
+    void 安装段两端写了方块的先由引擎放好_再交给机器装段() {
+        Rig rig = new Rig(tempDir);
+        BlockPos first = new BlockPos(0, 0, 0);
+        BlockPos last = new BlockPos(2, 0, 0);
+        BlockState shaft = Blocks.OAK_LOG.defaultBlockState();
+        MachineBlueprint.Segment segment = new MachineBlueprint.Segment("test:belt",
+                List.of(first, new BlockPos(1, 0, 0), last));
+        MachineBlueprint plan = new MachineBlueprint(List.of(PlannedCell.block(first, shaft, Set.of()),
+                PlannedCell.block(last, shaft, Set.of())), List.of(), List.of(segment), List.of(), List.of());
+        rig.type.installationOk = installation -> true;
+        // 装段的那一刻两端的"轴"要已经放好：传送带物品只认点在轴上。
+        rig.type.installActions.add(new MachineTestDoubles.Scripted(1, () -> {
+            assertEquals(shaft, rig.world.blocks.get(ANCHOR.offset(first)), "装段前左端已放好");
+            assertEquals(shaft, rig.world.blocks.get(ANCHOR.offset(last)), "装段前右端已放好");
+            rig.type.installedOk = installation -> true;
+        }));
+        TaskResult result = rig.run(buildInput(plan, null, "带子"));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary() + " / 问题:" + result.problem());
+        assertTrue(((MachineBuildDetails) result.details()).installations().get(0).installed());
+    }
+
+    @Test
+    void 已经装成的安装段整段交给机器_引擎不把带子拆回轴() {
+        Rig rig = new Rig(tempDir);
+        BlockPos first = new BlockPos(1, 0, 0);
+        BlockPos last = new BlockPos(2, 0, 0);
+        MachineBlueprint.Segment segment = new MachineBlueprint.Segment("test:belt", List.of(first, last));
+        MachineBlueprint plan = new MachineBlueprint(List.of(PlannedCell.block(BlockPos.ZERO, FURNACE, Set.of()),
+                PlannedCell.block(first, Blocks.OAK_LOG.defaultBlockState(), Set.of())), List.of(), List.of(segment),
+                List.of(), List.of());
+        // 现场：两端早就变成了"带子"（这里用石头代替），机器类型说这段已经装成。
+        rig.world.blocks.put(ANCHOR.offset(first), Blocks.STONE.defaultBlockState());
+        rig.world.blocks.put(ANCHOR.offset(last), Blocks.STONE.defaultBlockState());
+        rig.type.installationOk = installation -> true;
+        rig.type.installedOk = installation -> true;
+        TaskResult result = rig.run(buildInput(plan, null, "带子"));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary() + " / 问题:" + result.problem());
+        assertEquals(Blocks.STONE.defaultBlockState(), rig.world.blocks.get(ANCHOR.offset(first)), "带子没被拆回轴");
+        assertTrue(rig.type.touched.isEmpty(), "装成的段不再装一遍");
+    }
+
+    @Test
     void 没有联动认安装段_照实记下不冒充建成() {
         Rig rig = new Rig(tempDir);
         MachineBlueprint.Segment segment = new MachineBlueprint.Segment("test:belt", List.of(new BlockPos(0, 1, 0)));

@@ -52,8 +52,9 @@ import org.maiwithu.maicraft.kernel.task.TickResult;
  * 按机器蓝图施工的任务：先看档案是否已满足，普通格与流体交给施工引擎，之后装安装段、装部件、
  * 改装后设置（用 machine_configure 的同一套任务），最后整机比对并把补丁并进档案。
  *
- * <p>安装段与部件的格在蓝图里标成"由机器放"：引擎不放、不清障、核对时出"由机器核对"，
- * 由认领它们的机器类型用模组自己的方式装、按最终结构核对。拆整台是把档案范围换成全清空
+ * <p>安装段占的格：蓝图写了方块的（传送带两端的轴、中间要清空的格）先交给引擎放好，这是装段的前提；
+ * 没写的标成"由机器放"，引擎不放不清；已经装成的整段交给机器，不让引擎把带子拆回轴。整机比对时安装段与部件的格
+ * 一律出"由机器核对"，由认领它们的机器类型按最终结构核对。拆整台是把档案范围换成全清空
  * 交给同一个引擎逐格挖。施工子任务失败按它的问题结束，已放的不回滚；机器条目做不成的不
  * 拦住其余部分，各记各的结局。
  */
@@ -71,8 +72,8 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
     private final WorldMemory memory;
     private final Function<Permissions, ConstructionServices> constructionServices;
 
-    /** 施工要落的那份蓝图：安装段的格标成由机器放；拆整台是档案范围的全清空。 */
-    private final Blueprint site;
+    /** 拆整台时施工要落的那份蓝图（档案范围的全清空）；建的时候开工那一刻按现场再定，见 sitePlan。 */
+    private final Blueprint removal;
     /** 整机比对用的蓝图：安装段的格保留声明，核对时出"由机器核对"，不冒充逐格放好。 */
     private final Blueprint target;
     private final BlockPos anchor;
@@ -105,8 +106,8 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
         this.memory = memory;
         this.constructionServices = constructionServices;
         this.anchor = new BlockPos(input.anchor().x(), input.anchor().y(), input.anchor().z());
-        this.site = input.remove() ? removalPlan() : sitePlan();
-        this.target = input.remove() ? site : targetPlan();
+        this.removal = input.remove() ? removalPlan() : null;
+        this.target = input.remove() ? removal : targetPlan();
         if (!input.remove()) {
             toInstall.addAll(input.blueprint().installations());
             toMount.addAll(input.blueprint().parts());
@@ -151,6 +152,7 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
     private Next<Phase> construct(TickContext context) {
         if (runner == null) {
             runner = new ChildTaskRunner(ChildTaskRunner.NO_LIMIT);
+            Blueprint site = input.remove() ? removal : sitePlan();
             runner.begin(new ConstructionTask(new ConstructionInput(site, input.permissions(), purpose()),
                     constructionServices.apply(input.permissions())), context);
             return Next.stay();
@@ -456,19 +458,35 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
         return toInstall.isEmpty() && toMount.isEmpty() && toConfigure.isEmpty();
     }
 
-    /** 施工要落的那份蓝图：偏移落锚点，安装段占的格标成由机器放（引擎不放、不清、核对交给机器）。 */
+    /**
+     * 施工要落的那份蓝图，开工那一刻按现场定：安装段占的格里，蓝图写了方块的照常交给引擎（传送带两端的轴、
+     * 中间要清空的格），没写的标成由机器放（引擎不放、不清）；已经装成的安装段整段交给机器，不让引擎把带子拆回轴。
+     */
     private Blueprint sitePlan() {
         Blueprint laid = Blueprint.at(input.anchor().dimension(), anchor, Rotation.NONE, input.blueprint().cells());
+        Set<BlockPos> settled = installedCells();
+        Set<BlockPos> undeclared = installationCells();
         List<PlannedCell> adjusted = new ArrayList<>();
-        Set<BlockPos> machineCells = installationCells();
         for (PlannedCell cell : laid.cells()) {
-            adjusted.add(machineCells.remove(cell.pos()) ? cell.byMachine() : cell);
+            undeclared.remove(cell.pos());
+            adjusted.add(settled.contains(cell.pos()) ? cell.byMachine() : cell);
         }
-        for (BlockPos left : machineCells) {
+        for (BlockPos left : undeclared) {
             // 蓝图没逐格声明的安装段格：照样标给机器，引擎不碰，核对时由机器认。
             adjusted.add(PlannedCell.air(left).byMachine());
         }
         return new Blueprint(laid.dimension(), anchor, adjusted);
+    }
+
+    /** 此刻已经按要求装成的安装段占的格：这些格整段由机器管。 */
+    private Set<BlockPos> installedCells() {
+        Set<BlockPos> cells = new LinkedHashSet<>();
+        for (MachineBlueprint.Segment segment : input.blueprint().installations()) {
+            if (typeInstalled(absolute(segment)).isPresent()) {
+                segment.offsets().forEach(offset -> cells.add(anchor.offset(offset)));
+            }
+        }
+        return cells;
     }
 
     /** 比对用的蓝图：安装段占的格标成由机器核对，保留原声明，不冒充逐格放好。 */
