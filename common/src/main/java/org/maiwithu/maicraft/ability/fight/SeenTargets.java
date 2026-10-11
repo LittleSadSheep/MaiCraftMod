@@ -19,6 +19,13 @@ interface SeenTargets {
     /** 刚锁定时的目标：游戏实体编号、身份（查它有没有主用）与类型。 */
     record Locked(int entityId, UUID uuid, String type) {}
 
-    /** 实体此刻的观察：在哪、离多远、是否已经死亡（死亡证据由游戏侧确认）。 */
-    record Observed(double x, double y, double z, double distance, boolean dead) {}
+    /**
+     * 实体此刻的观察：在哪、离多远、是否已经死亡（死亡证据由游戏侧确认）、看不看得见（中间有没有方块挡着；
+     * 看得见的近处目标按走位环打，看不见的交给寻路绕过去）。
+     */
+    record Observed(double x, double y, double z, double distance, boolean dead, boolean visible) {
+        public Observed(double x, double y, double z, double distance, boolean dead) {
+            this(x, y, z, distance, dead, false);
+        }
+    }
 }

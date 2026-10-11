@@ -38,6 +38,12 @@ public final class LiveCombatMoves implements SelfDefenseTask.CombatMoves {
     }
 
     @Override
+    public void step(TickContext context, int entityId, float forward) {
+        // 面朝它往前凑或往后退一刻；那一步脚下没路就站住。
+        CombatStepping.step(context, entityId, forward);
+    }
+
+    @Override
     public Action walkTo(double x, double y, double z) {
         // 生产实现需要当刻上下文才能开走；走到在动作的第一刻拿上下文，见 WalkMove。
         return new WalkMove(new double[] {x, y, z});

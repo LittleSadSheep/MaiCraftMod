@@ -23,7 +23,9 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 /**
  * 自卫临时任务：谁威胁角色就打谁，打完回到开打的原地。
  *
- * <p>无差别实例：不按名单，正在威胁的都算（会分裂的怪裂开后新个体天然进威胁集）。
+ * <p>无差别实例：不按名单，正在威胁的都算（会分裂的怪裂开后新个体天然进威胁集）。认准一只打到它倒下或跑出圈再换，
+ * 不每刻按排序换目标（分裂的史莱姆不来回转头）。近处看得见的按走位环打：够得着就挥，离远了凑、太近了退，
+ * 退着也还手；远处的交给寻路追。撤离时被追上就退着还手，甩开以三十二格内没有追着自己的为准。
  * 不追出打点 16 格（只比水平距离）；撤退与躲爆炸不受这个限制。危险消失后再观察一小段
  * （跑得几乎一样快的怪会在边界上一进一出，不撒手太早）。收尾走回打点；走不回去
  * 就声明回不了岗位——主任务停在半路等 LLM 决定，事件里写明停在了哪里。
@@ -55,8 +57,9 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
      * 出手与走位怎么落地：任务负责挑目标与时机，动手交给行为模型。
      * 生产实现是原生攻击与走到；离线测试换替身记录调用。
      */
-    interface CombatMoves {
-        /** 对这只生物出手一次（原生攻击，逐刻确认）。 */
+    interface CombatMoves extends CloseCombat.Moves {
+        /** 对这只生物出手一次：先把最好的近战武器拿到主手，再原生攻击（逐刻确认）。 */
+        @Override
         Action strike(TickContext context, int entityId);
 
         /** 朝一个位置走过去（只走不改）。 */
@@ -86,7 +89,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
     private final double[] chaseGoal = new double[3];
 
     /** 当前动作的做法：出手打、追过去，或躲开点着引信的会炸物。 */
-    private enum Mode { STRIKE, CHASE, EVADE }
+    private enum Mode { CHASE, EVADE }
 
     /** 目标离追击出发时的位置超过这么远（格）才重新规划追击路线。 */
     private static final double RECHASE_AFTER = 3.0;
@@ -114,6 +117,10 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
     }
 
     private final Driver driver = new Driver();
+    /** 近身的走位环与出手：够得着就挥，凑近、后退和挥互不排斥。 */
+    private final CloseCombat close = new CloseCombat();
+    /** 认准的那一只：还在威胁、还能打就一直打它。 */
+    private int lockedTarget = -1;
 
     @Override protected Action enter(Phase phase) { return driver; }
 
@@ -154,9 +161,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         }
         // 自卫只会近战：没点引信的苦力怕照常当一只怪打（打一下它开始膨胀，上面那段会退开让引信熄了再上）；
         // 点着引信但已经在 7 格外的不去凑——凑近只会让它接着膨胀，等它熄了再打。
-        Tracked target = situation.foes().stream()
-                .filter(foe -> BlastAvoidance.meleeTarget(foe.foe().kind(), foe.foe().armed()))
-                .findFirst().orElse(null);
+        Tracked target = pickTarget(situation);
         if (target == null) {
             dropCurrent();
             recordProgress("只剩点着引信、离得远的会炸的，不凑上去，等它熄了再打");
@@ -164,13 +169,21 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         }
         // 追击上限只比水平距离：出打点 16 格的敌人不再追，守在打点附近迎击。
         double horizontalFromAnchor = Math.hypot(target.x() - anchor[0], target.z() - anchor[2]);
-        Mode want = horizontalFromAnchor > CHASE_LIMIT ? null
-                : target.distance() <= STRIKE_RANGE ? Mode.STRIKE : Mode.CHASE;
-        if (want == null) {
+        if (horizontalFromAnchor > CHASE_LIMIT) {
             dropCurrent();
+            close.close();
+            lockedTarget = -1;
             recordProgress("敌人在追击圈外，守在打点附近");
             return Next.stay();
         }
+        // 近处看得见、差不多同一层：按走位环打（够得着就挥、凑近或后退），不交给寻路。
+        if (closeRange(context, target)) {
+            dropCurrent();
+            boolean struck = close.tick(context, moves, target.entityId(), target.distance(), STRIKE_RANGE, false);
+            return accountStrike(struck, target);
+        }
+        close.close();
+        Mode want = Mode.CHASE;
         // 换了做法、换了目标、或追的目标已跑开：收尾旧动作再起新的；否则沿用，让出手与寻路做完。
         boolean ranOff = want == Mode.CHASE
                 && Math.hypot(target.x() - chaseGoal[0], target.z() - chaseGoal[2]) > RECHASE_AFTER;
@@ -178,8 +191,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
             dropCurrent();
         }
         if (current == null) {
-            current = want == Mode.STRIKE ? moves.strike(context, target.entityId())
-                    : moves.walkTo(target.x(), target.y(), target.z());
+            current = moves.walkTo(target.x(), target.y(), target.z());
             currentMode = want;
             currentTarget = target.entityId();
             chaseGoal[0] = target.x();
@@ -188,8 +200,14 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         }
         // 打击推进的账自己记一份：连续两次空转满 600 刻说明攻击通道本身失灵，转撤离；
         // 有真实进展就把这笔账清零（连自卫需求里跨任务记的那份一起清）。
-        boolean progressed = stepCurrent(context, (want == Mode.STRIKE ? "出手打 " : "追向 ") + target.type());
+        return accountStrike(stepCurrent(context, "追向 " + target.type()), target);
+    }
+
+    // 打击推进的账自己记一份：连续两次空转满 600 刻说明攻击通道本身失灵，转撤离；
+    // 有真实进展就把这笔账清零（连自卫需求里跨任务记的那份一起清）。
+    private Next<Phase> accountStrike(boolean progressed, Tracked target) {
         if (progressed) {
+            recordProgress("出手打 " + target.type());
             ticksSinceProgress = 0;
             need.noteAttackProgress();
         } else if (++ticksSinceProgress >= STUCK_AFTER_TICKS) {
@@ -201,6 +219,25 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
             recordProgress("攻击空转了一轮，重新评估战场再试");
         }
         return Next.stay();
+    }
+
+    // 认准一只：上次打的那只还在、还能近战打（没点引信的会炸物也算），就接着打它；否则按威胁排序挑第一只。
+    private Tracked pickTarget(ThreatSituation situation) {
+        Tracked first = null;
+        for (Tracked foe : situation.foes()) {
+            if (!BlastAvoidance.meleeTarget(foe.foe().kind(), foe.foe().armed())) continue;
+            if (foe.entityId() == lockedTarget) return foe;
+            if (first == null) first = foe;
+        }
+        lockedTarget = first == null ? -1 : first.entityId();
+        return first;
+    }
+
+    // 近身：几格内、看得见、上下差不到一格半——够得着走位环；隔着墙、在高处低处的交给寻路绕过去。
+    private boolean closeRange(TickContext context, Tracked target) {
+        double[] self = moves.selfPosition(context);
+        return target.visible() && target.distance() <= CloseCombat.CLOSE_RANGE
+                && Math.abs(target.y() - self[1]) <= 1.5;
     }
 
     // 点着引信、离得近到还会炸的那只（最近的）；没有为 null。
@@ -272,20 +309,10 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
      * 换个方向、隔一秒再试，连续走不通到上限才承认退无可退，回去背水一战。
      */
     private Next<Phase> retreat(TickContext context) {
-        ThreatSituation situation = situationOf(senses, context);
-        double heartsLost = Math.max(0, (healthAtStart - situation.mine().health()) / 2.0);
-        if (situation.foes().isEmpty()) {
-            // 撤离成功：人已经不在开打的原地，主任务不能在这里悄悄续上。
-            displaced = true;
-            double drift = distanceFromAnchor(context);
-            events.publish(TaskEvent.Kind.TEMPORARY_TASK_FINISHED,
-                    "打不出去，已撤离；主任务停在半路等下一步指示");
-            return Next.done(TaskResult.builder(TaskResult.Status.FAILED, "打不出去，已撤离")
-                    .problem(retreatProblem == null
-                            ? Problem.of(Problem.Kind.STUCK, "打不出去")
-                            : retreatProblem)
-                    .details(new DefenseDetails(drift, heartsLost)).build());
-        }
+        // 甩开以三十二格内没有追着自己的为准：和点名战斗的撤离同一个标准，不是走出警戒圈就算。
+        ThreatSituation situation = situationOf(senses, context, ThreatAssessment.FLEE_CLEAR_DISTANCE);
+        if (situation.foes().isEmpty()) return escaped(context, situation);
+        if (fightingBack(context, situation.foes().get(0))) return Next.stay();
         // 一条撤离路线失败后不立刻重开：逃跑路线每秒最多重开一次，给上一条路一点结算时间。
         if (fleeRetryCooldown > 0) {
             fleeRetryCooldown--;
@@ -345,6 +372,32 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
             dropCurrent();
         }
         return Next.stay();
+    }
+
+    // 撤离成功：人已经不在开打的原地，主任务不能在这里悄悄续上。
+    private Next<Phase> escaped(TickContext context, ThreatSituation situation) {
+        double heartsLost = Math.max(0, (healthAtStart - situation.mine().health()) / 2.0);
+        displaced = true;
+        double drift = distanceFromAnchor(context);
+        events.publish(TaskEvent.Kind.TEMPORARY_TASK_FINISHED, "打不出去，已撤离；主任务停在半路等下一步指示");
+        return Next.done(TaskResult.builder(TaskResult.Status.FAILED, "打不出去，已撤离")
+                .problem(retreatProblem == null ? Problem.of(Problem.Kind.STUCK, "打不出去") : retreatProblem)
+                .details(new DefenseDetails(drift, heartsLost)).build());
+    }
+
+    // 血少撤离时被追上（够得着、看得见）：先不寻路，面朝它往后退、够得着就还手，拉开了再接着沿撤离路线走。
+    // 因为攻击打不出去才撤的不还手：挥也挥不出去，只管跑。
+    private boolean fightingBack(TickContext context, Tracked pursuer) {
+        boolean canHit = retreatProblem == null || retreatProblem.kind() != Problem.Kind.STUCK;
+        if (canHit && pursuer.visible() && pursuer.distance() <= STRIKE_RANGE) {
+            dropCurrent();
+            if (close.tick(context, moves, pursuer.entityId(), pursuer.distance(), STRIKE_RANGE, true)) {
+                recordProgress("撤离途中被追上，退着还手");
+            }
+            return true;
+        }
+        close.close();
+        return false;
     }
 
     /** 角色离打点多远（水平，格）。 */
@@ -449,6 +502,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         public void close() {
             // 换阶段或任务结束时基类收尾外壳：当前动作一并收尾放下，换阶段后不会沿用已收尾的动作。
             dropCurrent();
+            SelfDefenseTask.this.close.close();
         }
 
         @Override
@@ -466,10 +520,15 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
 
     /** 一只排好序的敌人：威胁评估的输入加上位置与编号，供追击与出手。 */
     record Tracked(int entityId, String type, double x, double y, double z,
-                   double distance, ThreatAssessment.Foe foe) {}
+                   double distance, ThreatAssessment.Foe foe, boolean visible) {}
 
     /** 从感观读一份现场：敌对威胁与伤害证据合并成威胁列表，按威胁排序。 */
     static ThreatSituation situationOf(CombatSenses senses, TickContext context) {
+        return situationOf(senses, context, ThreatAssessment.VIGILANCE_RADIUS);
+    }
+
+    /** 同上，指定看多远：撤离看三十二格内还有没有追着自己的。 */
+    static ThreatSituation situationOf(CombatSenses senses, TickContext context, double radius) {
         CombatSenses.CombatProfile profile = senses.profile(context);
         int weaponScore = profile.weapon().map(picked -> WeaponChoice.scoreOf(picked.weapon())).orElse(0);
         ThreatAssessment.MySide mine = new ThreatAssessment.MySide(
@@ -480,12 +539,12 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         }
         // 只认正在威胁角色的怪；每只连同它的评估输入一起排序，同种同距离的两只不会被认成同一只。
         List<Tracked> tracked = new ArrayList<>();
-        for (CombatSenses.Threat threat : senses.threats(context, ThreatAssessment.VIGILANCE_RADIUS)) {
+        for (CombatSenses.Threat threat : senses.threats(context, radius)) {
             if (!threatening(threat, attackers)) continue;
             boolean chasing = attackers.contains(threat.uuid()) || threat.armed();
             ThreatAssessment.Foe foe = new ThreatAssessment.Foe(threat.distance(), threat.kind(), chasing, threat.armed());
             tracked.add(new Tracked(threat.entityId(), threat.type(),
-                    threat.x(), threat.y(), threat.z(), threat.distance(), foe));
+                    threat.x(), threat.y(), threat.z(), threat.distance(), foe, threat.visible()));
         }
         tracked.sort(Comparator.comparing(Tracked::foe, ThreatAssessment.BY_THREAT));
         return new ThreatSituation(mine, tracked);
@@ -497,15 +556,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
      * 既看不见也没动手，不算——自卫去打它们只会走不过去、原地干耗，还白白打断手上的活。
      */
     static boolean threatening(CombatSenses.Threat threat, List<UUID> attackers) {
-        if (attackers.contains(threat.uuid()) || threat.armed()) {
-            return true;
-        }
-        if (!threat.visible()) {
-            return false;
-        }
-        boolean closeCreeper = threat.kind() == ThreatAssessment.Kind.EXPLOSIVE
-                && threat.distance() <= ThreatAssessment.CREEPER_ALERT_RADIUS;
-        return threat.aggressive() || closeCreeper;
+        return CombatSenses.threatening(threat, attackers);
     }
 
     /** 自卫的结果细节：位移与红心差。 */

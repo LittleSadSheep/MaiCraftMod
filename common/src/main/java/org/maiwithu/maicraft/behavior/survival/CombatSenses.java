@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.survival;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -29,6 +30,29 @@ public interface CombatSenses {
 
     /** 按游戏实体编号找回实体；还活着且在附近时才有。自卫出手要的是实体本身。 */
     Entity entityById(TickContext context, int entityId);
+
+    /**
+     * 这么远内正追着角色的：十秒内真打过她的、引信点着的苦力怕、看得见她又亮着攻击标记的、看得见的近处苦力怕。
+     * 自卫与点名战斗撤离时甩没甩开都按它算（三十二格内一只都没有），只在附近游荡、隔着墙的不算。
+     */
+    default List<Threat> chasers(TickContext context, double radius) {
+        List<UUID> attackers = new ArrayList<>();
+        for (Attacker attacker : recentAttackers(context)) attackers.add(attacker.uuid());
+        List<Threat> result = new ArrayList<>();
+        for (Threat threat : threats(context, radius)) {
+            if (threatening(threat, attackers)) result.add(threat);
+        }
+        return result;
+    }
+
+    /** 这一只是不是正在威胁角色（判断见 {@link #chasers}）。 */
+    static boolean threatening(Threat threat, List<UUID> attackers) {
+        if (attackers.contains(threat.uuid()) || threat.armed()) return true;
+        if (!threat.visible()) return false;
+        boolean closeCreeper = threat.kind() == ThreatAssessment.Kind.EXPLOSIVE
+                && threat.distance() <= ThreatAssessment.CREEPER_ALERT_RADIUS;
+        return threat.aggressive() || closeCreeper;
+    }
 
     /**
      * 一只敌对生物：位置供追击与出手。

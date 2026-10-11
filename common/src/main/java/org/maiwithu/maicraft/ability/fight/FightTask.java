@@ -15,6 +15,7 @@ import java.util.function.Supplier;
 import org.maiwithu.maicraft.behavior.survival.BlastAvoidance;
 import org.maiwithu.maicraft.behavior.survival.CombatSenses;
 import org.maiwithu.maicraft.behavior.survival.ThreatAssessment;
+import org.maiwithu.maicraft.behavior.survival.CloseCombat;
 import org.maiwithu.maicraft.behavior.survival.WeaponChoice;
 import org.maiwithu.maicraft.kernel.interrupt.ThreatResponder;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
@@ -72,6 +73,8 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
 
     private ThreatAssessment.Verdict verdict;
     private String weaponUsed = "空手";
+    /** 近身的走位环与出手：够得着就挥，凑近、后退和挥互不排斥。 */
+    private final CloseCombat closeCombat = new CloseCombat();
     /** 打斗中盯住的目标；死亡或消失后换下一个。 */
     private Tracked engaged;
     /** 最后一个目标倒下的位置：拾荒以它为中心。 */
@@ -205,6 +208,15 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
             recordProgress("等 " + target.type + " 的引信熄了再上");
             return Next.stay();
         }
+        // 近处看得见、差不多同一层：按走位环打——够得着就挥，离远了凑、太近了退，不交给寻路。
+        if (closeRange(context, target)) {
+            dropCurrent();
+            closeCombat.tick(context, moves, target.entityId, distance, STRIKE_RANGE, false);
+            weaponUsed = moves.mainHand(context);
+            noteIfDefeated(target);
+            return Next.stay();
+        }
+        closeCombat.close();
         if (distance > STRIKE_RANGE) {
             // 逼近：目标没跑开就沿用这一趟走到，跑开三格以上再重新规划。
             if (Math.hypot(target.x - approachGoal[0], target.z - approachGoal[2]) > REAPPROACH_AFTER) {
@@ -236,7 +248,8 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
 
     private Next<Phase> retreat(TickContext context) {
         double[] self = moves.selfPosition(context);
-        List<CombatSenses.Threat> threats = senses.threats(context, ThreatAssessment.FLEE_CLEAR_DISTANCE);
+        // 甩开以三十二格内没有追着自己的为准：和自卫的撤离同一个标准，附近只是游荡、隔着墙的不算。
+        List<CombatSenses.Threat> threats = senses.chasers(context, ThreatAssessment.FLEE_CLEAR_DISTANCE);
         if (threats.isEmpty()) {
             // 甩开了：撤离成功不等于任务成功，目标没死就以失败收场，写明拒战线与出路。
             fled = true;
@@ -244,6 +257,14 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
                     "撤离成功，甩开了追兵，但目标没有击败——这一仗算没打赢",
                     "吃点东西回血到拒战线以上，或换把武器再来"));
         }
+        // 被追上了（够得着、看得见）：面朝它往后退、够得着就还手，拉开了再接着跑。
+        CombatSenses.Threat pursuer = nearest(threats);
+        if (pursuer.visible() && pursuer.distance() <= STRIKE_RANGE) {
+            dropCurrent();
+            closeCombat.tick(context, moves, pursuer.entityId(), pursuer.distance(), STRIKE_RANGE, true);
+            return Next.stay();
+        }
+        closeCombat.close();
         // 朝威胁的反方向撤：取威胁的重心，往相反方向跑。
         double cx = 0;
         double cz = 0;
@@ -572,6 +593,35 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
 
     /** 打斗中盯住的一个目标：编号、类型、位置、距离。 */
     private record Tracked(int entityId, String type, double x, double y, double z, double distance) {}
+
+    // 近身：几格内、看得见、上下差不到一格半——走位环；隔着墙、在高处低处的交给寻路绕过去。
+    private boolean closeRange(TickContext context, Tracked target) {
+        double[] self = moves.selfPosition(context);
+        SeenTargets.Observed observed = seenTargets.observe(context, target.entityId);
+        return observed != null && observed.visible() && target.distance <= CloseCombat.CLOSE_RANGE
+                && Math.abs(target.y - self[1]) <= 1.5;
+    }
+
+    // 打着打着它倒下了：记一笔击败，就地拾荒用它倒下的地方。
+    private void noteIfDefeated(Tracked target) {
+        SeenTargets.Observed after = seenTargets.observe(currentContext, target.entityId);
+        if (after != null && after.dead()) {
+            defeated.add(target.type + "（实体 " + target.entityId + "）");
+            recordChange(Change.of(Change.Kind.ENTITY_AFFECTED, target.type, 1));
+            lastKillSpot = new double[] {target.x, target.y, target.z};
+            engaged = null;
+            closeCombat.close();
+            recordProgress("击败了 " + target.type);
+        }
+    }
+
+    private static CombatSenses.Threat nearest(List<CombatSenses.Threat> threats) {
+        CombatSenses.Threat best = threats.getFirst();
+        for (CombatSenses.Threat threat : threats) {
+            if (threat.distance() < best.distance()) best = threat;
+        }
+        return best;
+    }
 
     private TickContext currentContext;
 }

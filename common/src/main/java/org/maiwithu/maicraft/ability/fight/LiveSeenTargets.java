@@ -8,6 +8,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 
+import org.maiwithu.maicraft.game.world.ObservationVisibility;
 import org.maiwithu.maicraft.behavior.perception.SeenRegistry;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
@@ -56,7 +57,8 @@ public final class LiveSeenTargets implements SeenTargets {
         // 不能当成"不在了"；动画放完实体被移除后才查不到。
         double distance = context.player().localPlayer().distanceTo(entity);
         boolean dead = !entity.isAlive() || entity instanceof LivingEntity living && living.isDeadOrDying();
-        return new Observed(entity.getX(), entity.getY(), entity.getZ(), distance, dead);
+        boolean visible = ObservationVisibility.entity(context.player().localPlayer(), entity);
+        return new Observed(entity.getX(), entity.getY(), entity.getZ(), distance, dead, visible);
     }
 
     private static ClientLevel level(TickContext context) {

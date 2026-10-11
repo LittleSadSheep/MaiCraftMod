@@ -11,6 +11,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.phys.AABB;
 
+import org.maiwithu.maicraft.behavior.survival.CombatStepping;
 import org.maiwithu.maicraft.behavior.survival.MeleeStrike;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
@@ -48,6 +49,12 @@ public final class LiveFightMoves implements FightMoves {
         }
         // 先把挑好的近战武器拿到主手再挥：和自卫共用一套出手。
         return new MeleeStrike(entityId);
+    }
+
+    @Override
+    public void step(TickContext context, int entityId, float forward) {
+        // 面朝它往前凑或往后退一刻；那一步脚下没路就站住。和自卫同一套走位。
+        CombatStepping.step(context, entityId, forward);
     }
 
     @Override

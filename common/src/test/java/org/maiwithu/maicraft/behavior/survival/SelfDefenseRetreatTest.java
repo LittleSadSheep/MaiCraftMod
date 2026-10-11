@@ -63,9 +63,9 @@ class SelfDefenseRetreatTest {
 
     @Test
     void healthBelowRetreatLineRetreatsRightAway() {
-        // 血快见底：不等空转两次，马上转撤离，一下手都不出。
+        // 血快见底：不等空转两次，马上转撤离；怪还没追上（五格外）就只管跑，一下手都不出。
         FakeSenses senses = new FakeSenses();
-        senses.threats = List.of(zombie(2));
+        senses.threats = List.of(zombie(5));
         senses.health = 4;
         FakeMoves moves = new FakeMoves();
         RecordingEvents events = new RecordingEvents();
@@ -79,6 +79,24 @@ class SelfDefenseRetreatTest {
         assertTrue(moves.walkCalls >= 1, "直接迈开腿撤离");
         assertTrue(result instanceof TickResult.Finished finished, "甩掉威胁后收场，实际 " + result);
         assertTrue(((TickResult.Finished) result).result().summary().contains("已撤离"));
+    }
+
+    @Test
+    void caughtUpWhileRetreatingOnLowHealthBacksOffAndStrikesBack() {
+        // 血少撤离时被追上（两格内、看得见）：不转身跑，面朝它往后退，够得着就还手。
+        FakeSenses senses = new FakeSenses();
+        senses.threats = List.of(zombie(2));
+        senses.health = 4;
+        FakeMoves moves = new FakeMoves();
+        SelfDefenseNeed need = new SelfDefenseNeed(senses, moves, new RecordingEvents());
+        SelfDefenseTask task = (SelfDefenseTask) need.createTask(null);
+        task.start(new Tick(0));
+
+        drive(task, senses, 6, 10);
+
+        assertTrue(moves.strikeCalls >= 1, "被追上时还手");
+        assertTrue(moves.backSteps >= 1, "边退边打");
+        assertEquals(0, moves.walkCalls, "被追着时不转身寻路");
     }
 
     @Test
@@ -205,6 +223,12 @@ class SelfDefenseRetreatTest {
         int strikeCalls;
         int strikeTicks;
         int walkCalls;
+        int backSteps;
+
+        @Override
+        public void step(TickContext context, int entityId, float forward) {
+            if (forward < 0) backSteps++;
+        }
 
         @Override
         public Action strike(TickContext context, int entityId) {
