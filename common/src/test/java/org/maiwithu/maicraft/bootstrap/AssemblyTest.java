@@ -59,10 +59,11 @@ class AssemblyTest {
         // 机器的六个能力也接上了：机器类型与网络读取器由登记表按装了的模组建，离线一份没有也照常登记，
         // 施工与接网络只认这两样接口，放方块不需要认识机器。
         // 钓鱼与附魔也接上了：钓位几何、咬钩收竿、装料与报价都组合玩家行为层已有的模型。
+        // 组装载具也接上了：物理组装器的办法由登记表按装了的 Simulated 建，离线一份没有也照常登记（如实说用不了）。
         assertEquals(Set.of("use", "eat", "equip", "drop", "obtain", "gather", "deposit", "sleep", "design", "build",
                 "machine_inspect", "machine_review", "machine_configure", "machine_run",
                 "machine_build", "machine_connect", "light",
-                "fight", "follow", "wait", "travel", "find", "explore", "chat", "remember", "sequence", "quest",
+                "fight", "follow", "wait", "travel", "find", "explore", "chat", "remember", "sequence", "quest", "vehicle_assemble",
                 "fish", "enchant"), registered,
                 "清单里的能力要一个不少地登记上");
     }
