@@ -79,6 +79,16 @@ final class TypewriterDriver implements VehicleDriver {
         });
     }
 
+    @Override public Optional<Run> drive(DriveRequest request) {
+        PlayerContext context = services.context().get();
+        ClientLevel level = context == null ? null : context.level();
+        LocalPlayer player = context == null ? null : context.localPlayer();
+        if (level == null || player == null) return Optional.empty();
+        Optional<SableStructures.Structure> ship = compat.structure(level, player, request.structureId());
+        if (ship.isEmpty()) return Optional.empty();
+        return station(level, player, ship.get()).map(station -> new TypewriterDrive(compat, services, request, station));
+    }
+
     // 离角色最近的无线红石打字机，和坐着够得着它的座位里最近的一个。
     private Optional<Station> station(ClientLevel level, LocalPlayer player, SableStructures.Structure ship) {
         StructureGeometry.Scan scan = compat.scan(level, ship);

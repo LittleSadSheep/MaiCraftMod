@@ -117,7 +117,7 @@ final class VehicleReading implements VehicleReader {
     }
 
     // 世界里一格顶面的高度（格内）：没有碰撞为 -1，没加载为 null。
-    private static Double solidTop(ClientLevel level, BlockPos cell) {
+    static Double solidTop(ClientLevel level, BlockPos cell) {
         if (!level.isLoaded(cell)) return null;
         VoxelShape shape = level.getBlockState(cell).getCollisionShape(level, cell);
         return shape.isEmpty() ? -1.0 : shape.max(Direction.Axis.Y);
