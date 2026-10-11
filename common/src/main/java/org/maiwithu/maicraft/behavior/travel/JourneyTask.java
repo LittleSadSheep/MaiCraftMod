@@ -158,7 +158,8 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
         BlockPos aim = aim(feet);
         String via = journey.via();
         request = new TravelRequest(feet, aim, spot.dimension() == null ? "" : spot.dimension(),
-                destination == null ? 0 : destination.radius(), journey.permissions(), journey.options());
+                destination == null ? 0 : destination.radius(), journey.permissions(), journey.options(),
+                rodeAlready ? null : via);
         if (askedTicks == 0) {
             // 新一轮：上一轮的回答作废。有方式说这一段非它不可（人站在船上要先下船、目的地在船上要先上船），
             // 就只问它；否则只问指定的那种（没指定问全部）。

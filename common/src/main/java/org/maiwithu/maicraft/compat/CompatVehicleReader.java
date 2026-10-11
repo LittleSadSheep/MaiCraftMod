@@ -20,6 +20,15 @@ final class CompatVehicleReader implements VehicleReader {
         this.reader = Objects.requireNonNull(reader, "reader");
     }
 
+    @Override public Optional<String> carrying() {
+        if (!module.active()) return Optional.empty();
+        try {
+            return reader.carrying();
+        } catch (ModApiMismatch broken) {
+            return Optional.empty();
+        }
+    }
+
     @Override public Optional<View> read(String structureId) {
         if (!module.active()) return Optional.empty();
         try {

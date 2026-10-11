@@ -41,6 +41,9 @@ final class DeckMode implements TravelMode {
     static final double WALK_TICKS_PER_BLOCK = 20 / 4.3;
     static final int STEP_TICKS = 40;
 
+    /** 开自己的载具那种方式的名字：指定了它、人又在船上时不抢着下船。 */
+    static final String VEHICLE = "vehicle";
+
     /** 这一段做哪一种。 */
     enum Kind { BOARD, LEAVE, ACROSS }
 
@@ -63,7 +66,8 @@ final class DeckMode implements TravelMode {
         LocalPlayer player = current == null ? null : current.localPlayer();
         if (level == null || player == null) return false;
         List<SableStructures.Structure> near = compat.structures(level, player, new AABB(request.from()).inflate(SEARCH));
-        if (near.stream().anyMatch(SableStructures.Structure::carriesPlayer)) return true;
+        // 指定开自己的载具、人已经在船上：这一段由开载具那种方式接手，不先下船。
+        if (near.stream().anyMatch(SableStructures.Structure::carriesPlayer)) return !VEHICLE.equals(request.via());
         return request.to() != null && holding(near, request.to()).isPresent();
     }
 
@@ -128,10 +132,30 @@ final class DeckMode implements TravelMode {
     // 上船：船边比旁边地面高不过一格的甲板格，地上那格站得住、离角色近。
     private void board(ClientLevel level, LocalPlayer player, SableStructures.Structure ship, TravelRequest request,
             OfferSink sink) {
-        List<AABB> hull = hull(level, ship);
+        Boarding boarding = boarding(compat, level, player, ship, Vec3.atBottomCenterOf(request.to()), 0.25);
+        if (boarding.pair() == null) {
+            sink.decline(Problem.Kind.UNREACHABLE, boarding.problem());
+            return;
+        }
+        Pair best = boarding.pair();
+        long ticks = Math.round(Math.sqrt(best.ground().distSqr(request.from())) * WALK_TICKS_PER_BLOCK) + STEP_TICKS;
+        sink.offer(new TravelOffer(VIA, request.from(), BlockPos.containing(best.deck().world()), ticks, List.of(),
+                List.of(), hint(Kind.BOARD, ship, best.deck().local(), best.ground())));
+    }
+
+    /** 上船的一处，或上不去的原因（两者只有一个）。 */
+    record Boarding(Pair pair, String problem) {}
+
+    /**
+     * 上船的一处：船边比旁边地面高不过一格的甲板格，地上那格站得住；代价是离角色多远加上离 toward 多远乘 weight。
+     * 驾驶前上船时 toward 给驾驶位、weight 给 1，挑离驾驶位近的那一边上。
+     */
+    static Boarding boarding(StructureReads reads, ClientLevel level, LocalPlayer player, SableStructures.Structure ship,
+            Vec3 toward, double weight) {
+        List<AABB> hull = hull(reads, level, ship);
         Pair best = null;
         double lowest = Double.MAX_VALUE;
-        for (StructureGeometry.Deck cell : deck(level, ship)) {
+        for (StructureGeometry.Deck cell : deck(reads, level, ship)) {
             for (BlockPos ground : beside(cell.world())) {
                 for (int down = 0; down <= 2; down++) {
                     BlockPos stand = ground.below(down);
@@ -139,21 +163,15 @@ final class DeckMode implements TravelMode {
                     double rise = cell.world().y - stand.getY();
                     lowest = Math.min(lowest, rise);
                     if (rise > 1.05) break;
-                    double cost = Math.sqrt(stand.distSqr(player.blockPosition()))
-                            + cell.world().distanceTo(Vec3.atBottomCenterOf(request.to())) * 0.25;
+                    double cost = Math.sqrt(stand.distSqr(player.blockPosition())) + cell.world().distanceTo(toward) * weight;
                     if (best == null || cost < best.cost()) best = new Pair(cell, stand, cost);
                     break;
                 }
             }
         }
-        if (best == null) {
-            sink.decline(Problem.Kind.UNREACHABLE, lowest == Double.MAX_VALUE
-                    ? "船边旁边找不到能站的地面" : "甲板离地 " + Math.round(lowest) + " 格，走不上去");
-            return;
-        }
-        long ticks = Math.round(Math.sqrt(best.ground().distSqr(request.from())) * WALK_TICKS_PER_BLOCK) + STEP_TICKS;
-        sink.offer(new TravelOffer(VIA, request.from(), BlockPos.containing(best.deck().world()), ticks, List.of(),
-                List.of(), hint(Kind.BOARD, ship, best.deck().local(), best.ground())));
+        if (best != null) return new Boarding(best, null);
+        return new Boarding(null, lowest == Double.MAX_VALUE
+                ? "船边旁边找不到能站的地面" : "甲板离地 " + Math.round(lowest) + " 格，走不上去");
     }
 
     @Override public TravelLeg start(TravelRequest request, TravelOffer offer) {
@@ -164,16 +182,25 @@ final class DeckMode implements TravelMode {
     }
 
     /** 一处甲板格与它旁边的地上格，以及走这一处的代价。 */
-    private record Pair(StructureGeometry.Deck deck, BlockPos ground, double cost) {}
+    record Pair(StructureGeometry.Deck deck, BlockPos ground, double cost) {}
+
+    /** 甲板上能站的格（此刻的位姿换到世界里）。 */
+    static List<StructureGeometry.Deck> deck(StructureReads reads, ClientLevel level, SableStructures.Structure ship) {
+        return StructureGeometry.deck(ship, local -> reads.block(level, ship.id(), local));
+    }
 
     private List<StructureGeometry.Deck> deck(ClientLevel level, SableStructures.Structure ship) {
-        return StructureGeometry.deck(ship, local -> compat.block(level, ship.id(), local));
+        return deck(compat, level, ship);
+    }
+
+    private static List<AABB> hull(StructureReads reads, ClientLevel level, SableStructures.Structure ship) {
+        List<AABB> boxes = new ArrayList<>();
+        for (AABB local : reads.scan(level, ship).boxes()) boxes.add(StructureGeometry.toWorld(ship.pose(), local));
+        return boxes;
     }
 
     private List<AABB> hull(ClientLevel level, SableStructures.Structure ship) {
-        List<AABB> boxes = new ArrayList<>();
-        for (AABB local : compat.scan(level, ship).boxes()) boxes.add(StructureGeometry.toWorld(ship.pose(), local));
-        return boxes;
+        return hull(compat, level, ship);
     }
 
     // 甲板格旁边一两格的地上格（同一高度那一层）。

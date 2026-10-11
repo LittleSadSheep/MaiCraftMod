@@ -44,7 +44,7 @@ final class DeckLeg implements TravelLeg {
     /** 迈一步最多走多少刻。 */
     static final int STEP_TICKS = 100;
 
-    private final SableCompat compat;
+    private final StructureReads compat;
     private final PlayerServices services;
     private final Permissions permissions;
     private final DeckMode.Kind kind;
@@ -58,7 +58,7 @@ final class DeckLeg implements TravelLeg {
     private long stillSince = Long.MIN_VALUE;
     private int steady;
 
-    DeckLeg(SableCompat compat, PlayerServices services, Permissions permissions, DeckMode.Kind kind, String structureId,
+    DeckLeg(StructureReads compat, PlayerServices services, Permissions permissions, DeckMode.Kind kind, String structureId,
             BlockPos deckLocal, BlockPos ground) {
         this.compat = Objects.requireNonNull(compat, "compat");
         this.services = Objects.requireNonNull(services, "services");

@@ -20,7 +20,7 @@ import org.maiwithu.maicraft.compat.CompatRegistry;
  *
  * <p>逐格读一艘船要读很多格：读一次按地块坐标记下来（{@link StructureScans}），换位姿只换算不重读。
  */
-public final class SableCompat extends CompatModule {
+public final class SableCompat extends CompatModule implements StructureReads {
 
     public static final String MOD_ID = "sable";
     private final SableStructures structures;
@@ -40,12 +40,12 @@ public final class SableCompat extends CompatModule {
     }
 
     /** 和一个区域沾边的物理结构；见 {@link SableStructures#near}。 */
-    public List<SableStructures.Structure> structures(ClientLevel level, Player viewer, AABB region) {
+    @Override public List<SableStructures.Structure> structures(ClientLevel level, Player viewer, AABB region) {
         return call("读物理结构", () -> structures.near(level, viewer, region));
     }
 
     /** 结构地块里一格的方块；见 {@link SableStructures#block}。 */
-    public BlockState block(ClientLevel level, String id, BlockPos local) {
+    @Override public BlockState block(ClientLevel level, String id, BlockPos local) {
         return call("读物理结构的方块", () -> structures.block(level, id, local));
     }
 
@@ -55,7 +55,7 @@ public final class SableCompat extends CompatModule {
     }
 
     /** 一个结构的逐格读结果；见 {@link StructureScans}。 */
-    StructureGeometry.Scan scan(ClientLevel level, SableStructures.Structure structure) {
+    @Override public StructureGeometry.Scan scan(ClientLevel level, SableStructures.Structure structure) {
         return scans.scan(level.getGameTime(), structure, local -> block(level, structure.id(), local));
     }
 }

@@ -22,7 +22,7 @@ import org.maiwithu.maicraft.compat.CompatRegistry;
  * 组装出来的是 Sable 的子世界，所以这里也读 Sable 的结构（和 Sable 的联动用同一个读端，读写端放在一起）。
  * 每一下都经联动入口包一层。
  */
-public final class SimulatedCompat extends CompatModule {
+public final class SimulatedCompat extends CompatModule implements StructureReads {
 
     public static final String MOD_ID = "simulated";
     /** 在角色周围多远找结构（格）。 */
@@ -54,17 +54,17 @@ public final class SimulatedCompat extends CompatModule {
     }
 
     /** 和一个区域沾边的物理结构；见 {@link SableStructures#near}。 */
-    List<SableStructures.Structure> structures(ClientLevel level, Player viewer, AABB region) {
+    @Override public List<SableStructures.Structure> structures(ClientLevel level, Player viewer, AABB region) {
         return call("读物理结构", () -> structures.near(level, viewer, region));
     }
 
     /** 结构地块里一格的方块；见 {@link SableStructures#block}。 */
-    BlockState block(ClientLevel level, String id, BlockPos local) {
+    @Override public BlockState block(ClientLevel level, String id, BlockPos local) {
         return call("读物理结构的方块", () -> structures.block(level, id, local));
     }
 
     /** 一个结构的逐格读结果；见 {@link StructureScans}。 */
-    StructureGeometry.Scan scan(ClientLevel level, SableStructures.Structure structure) {
+    @Override public StructureGeometry.Scan scan(ClientLevel level, SableStructures.Structure structure) {
         return scans.scan(level.getGameTime(), structure, local -> block(level, structure.id(), local));
     }
 

@@ -5,7 +5,9 @@ import java.util.Objects;
 import java.util.Optional;
 
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleDriver;
+import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.kernel.task.Action;
 
 /**
  * 联动模组交来的驾驶办法，登记表给它包的一层：模组停用后答不上（驾驶能力如实说没有认得的控制件）；
@@ -25,6 +27,15 @@ final class CompatVehicleDriver implements VehicleDriver {
         if (!module.active()) return Optional.empty();
         try {
             return driver.boardAt(structureId);
+        } catch (ModApiMismatch broken) {
+            return Optional.empty();
+        }
+    }
+
+    @Override public Optional<Action> board(String structureId, Permissions permissions) {
+        if (!module.active()) return Optional.empty();
+        try {
+            return driver.board(structureId, permissions).map(action -> new CompatAction(module, action));
         } catch (ModApiMismatch broken) {
             return Optional.empty();
         }

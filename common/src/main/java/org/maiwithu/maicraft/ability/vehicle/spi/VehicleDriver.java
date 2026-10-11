@@ -54,6 +54,14 @@ public interface VehicleDriver {
      */
     Optional<WorldPosition> boardAt(String structureId);
 
+    /**
+     * 把人送到驾驶位旁：上船（走到船边迈上甲板）、在船上走几步。已经够得着驾驶位、或不是这种办法开的为空；
+     * 上不去（甲板离地太高、船一直在动）时给的动作会以问题失败，写明原因。
+     */
+    default Optional<Action> board(String structureId, Permissions permissions) {
+        return Optional.empty();
+    }
+
     /** 这辆载具能不能用这种办法试按：能就给一次运行（坐下、接管、逐条按、松开），不是这种办法开的为空。 */
     Optional<Run> test(TestRequest request);
 

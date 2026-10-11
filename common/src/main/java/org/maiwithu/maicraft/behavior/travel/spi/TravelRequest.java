@@ -17,9 +17,11 @@ import org.maiwithu.maicraft.kernel.goal.Permissions;
  * @param radius      到达容差（格）
  * @param permissions 这次任务的许可：指定方式不放宽它
  * @param options     travel 参数里给方式的话：floor、vehicle……没给为空表
+ * @param via         这一轮还指定要用的方式（指定的那种已经坐过一段、或没指定为 null）：
+ *                    指定开自己的载具时，人在船上不先下船
  */
 public record TravelRequest(BlockPos from, BlockPos to, String dimension, double radius, Permissions permissions,
-                            Map<String, String> options) {
+                            Map<String, String> options, String via) {
 
     public TravelRequest {
         from = Objects.requireNonNull(from, "from").immutable();

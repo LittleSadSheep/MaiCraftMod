@@ -35,6 +35,15 @@ final class VehicleReading implements VehicleReader {
         this.services = Objects.requireNonNull(services, "services");
     }
 
+    @Override public Optional<String> carrying() {
+        PlayerContext context = services.context().get();
+        ClientLevel level = context == null ? null : context.level();
+        LocalPlayer player = context == null ? null : context.localPlayer();
+        if (level == null || player == null) return Optional.empty();
+        return compat.structures(level, player, player.getBoundingBox().inflate(SimulatedCompat.NEAR)).stream()
+                .filter(SableStructures.Structure::carriesPlayer).map(SableStructures.Structure::id).findFirst();
+    }
+
     @Override public Optional<View> read(String structureId) {
         PlayerContext context = services.context().get();
         ClientLevel level = context == null ? null : context.level();

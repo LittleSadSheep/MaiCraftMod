@@ -14,6 +14,11 @@ public interface VehicleReader {
     /** 读这个结构；不是这种联动认得的结构为空。 */
     Optional<View> read(String structureId);
 
+    /** 角色此刻正站在或坐在上面的那个结构的身份；不在任何结构上为空。 */
+    default Optional<String> carrying() {
+        return Optional.empty();
+    }
+
     /**
      * 一辆载具此刻的样子。
      *

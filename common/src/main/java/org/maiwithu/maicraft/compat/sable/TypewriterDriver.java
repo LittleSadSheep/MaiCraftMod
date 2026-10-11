@@ -15,7 +15,13 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleDriver;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.compat.StepsInOrder;
+import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.kernel.result.Problem;
+import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 接管无线红石打字机开载具：驾驶位是离角色最近的那台无线红石打字机，坐着够得着它的座位里挑最近的一个当驾驶座；
@@ -61,6 +67,51 @@ final class TypewriterDriver implements VehicleDriver {
                 .min(Comparator.comparingDouble(cell -> cell.world().distanceToSqr(spot)))
                 .map(cell -> new WorldPosition((int) Math.floor(cell.world().x), (int) Math.floor(cell.world().y + 0.01),
                         (int) Math.floor(cell.world().z), level.dimension().location().toString()));
+    }
+
+    // 走到驾驶位旁：在船上就在甲板上走过去；不在船上先挑离驾驶位近的那一边上船，再在甲板上走过去。
+    @Override public Optional<Action> board(String structureId, Permissions permissions) {
+        PlayerContext context = services.context().get();
+        ClientLevel level = context == null ? null : context.level();
+        LocalPlayer player = context == null ? null : context.localPlayer();
+        if (level == null || player == null) return Optional.empty();
+        Optional<SableStructures.Structure> found = compat.structure(level, player, structureId);
+        if (found.isEmpty()) return Optional.empty();
+        SableStructures.Structure ship = found.get();
+        Optional<Station> station = station(level, player, ship);
+        if (station.isEmpty()) return Optional.empty();
+        Vec3 spot = ship.pose().toWorld(Vec3.atCenterOf(station.get().spot()));
+        if (ship.carriesPlayer() && player.getEyePosition().distanceTo(spot) <= StructureBlockUse.REACH - 0.5) {
+            return Optional.empty();
+        }
+        Optional<StructureGeometry.Deck> near = DeckMode.deck(compat, level, ship).stream()
+                .min(Comparator.comparingDouble(cell -> cell.world().distanceToSqr(spot)));
+        if (near.isEmpty()) return Optional.of(failing("船上找不到能站的地方，走不到驾驶位旁"));
+        StructureGeometry.Deck cell = near.get();
+        if (ship.carriesPlayer()) {
+            return Optional.of(new DeckLeg(compat, services, permissions, DeckMode.Kind.ACROSS, ship.id(), cell.local(), null));
+        }
+        DeckMode.Boarding boarding = DeckMode.boarding(compat, level, player, ship, spot, 1.0);
+        if (boarding.pair() == null) return Optional.of(failing(boarding.problem()));
+        DeckMode.Pair pair = boarding.pair();
+        return Optional.of(new StepsInOrder("走到驾驶位旁", List.of(
+                new StepsInOrder.Step("上船", () -> new DeckLeg(compat, services, permissions, DeckMode.Kind.BOARD,
+                        ship.id(), pair.deck().local(), pair.ground())),
+                new StepsInOrder.Step("在船上走到驾驶位旁", () -> pair.deck().local().equals(cell.local()) ? null
+                        : new DeckLeg(compat, services, permissions, DeckMode.Kind.ACROSS, ship.id(), cell.local(), null)))));
+    }
+
+    // 一个立刻以"到不了"失败的动作：上不去的原因交给调用方照实说。
+    private static Action failing(String why) {
+        return new Action() {
+            @Override public ActionStatus tick(TickContext context) {
+                return ActionStatus.failed(Problem.of(Problem.Kind.UNREACHABLE, why));
+            }
+
+            @Override public String describe() {
+                return "走到驾驶位旁";
+            }
+        };
     }
 
     @Override public Optional<Run> test(TestRequest request) {
