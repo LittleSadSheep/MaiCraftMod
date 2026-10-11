@@ -140,7 +140,8 @@ class CreateCompatTest {
     void 目录里每种方块只出现在一行里() {
         Set<String> seen = new HashSet<>();
         for (CreateMachineCatalog.Kind kind : CreateMachineCatalog.kinds()) {
-            assertTrue(kind.id().startsWith("create:"));
+            // 机械动力自己的方块带 create: 前缀；载具部件（Simulated 一套）用它们自己的命名空间。
+            assertTrue(kind.id().matches("(create|simulated|aeronautics|offroad):.+"), kind.id());
             for (String block : kind.blocks()) {
                 assertTrue(seen.add(block), "方块出现在两行里：" + block);
             }

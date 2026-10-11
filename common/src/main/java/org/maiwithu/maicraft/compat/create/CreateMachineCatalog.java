@@ -100,7 +100,37 @@ final class CreateMachineCatalog {
         all.addAll(railway());
         all.addAll(signals());
         all.addAll(schematics());
+        all.addAll(vehicleParts());
         return List.copyOf(all);
+    }
+
+    // 载具部件（Simulated、Create Aeronautics、Offroad 一套，都是机械动力的附属模组）：它们的设置用的就是机械动力的设置框，
+    // 读法、改法和机械动力自己的方块一样，所以归在这里；没装那一套时这些方块不出现，这几行认领不到东西。
+    // 无线红石打字机不在这里：它的设置是绑键，归 Simulated 的联动。
+    private static List<Kind> vehicleParts() {
+        return List.of(
+                foreign("simulated:steering_wheel", "舵轮", MachineRole.CONTROL, Work.TURNING),
+                foreign("simulated:throttle_lever", "油门拉杆", MachineRole.CONTROL, Work.STILL),
+                foreign("simulated:torsion_spring", "扭力弹簧", MachineRole.CONTROL, Work.TURNING),
+                foreign("simulated:directional_gearshift", "定向齿轮换向器", MachineRole.CONTROL, Work.TURNING),
+                foreign("simulated:analog_transmission", "模拟传动器", MachineRole.CONTROL, Work.TURNING),
+                foreign("simulated:swivel_bearing", "旋转轴承", MachineRole.MOTION, Work.TURNING),
+                foreign("simulated:physics_assembler", "物理组装器", MachineRole.CONTROL, Work.STILL),
+                foreign("simulated:directional_linked_receiver", "定向无线红石接收器", MachineRole.CONTROL, Work.STILL),
+                foreign("simulated:modulating_linked_receiver", "调制无线红石接收器", MachineRole.CONTROL, Work.STILL),
+                foreign("simulated:altitude_sensor", "高度传感器", MachineRole.CONTROL, Work.STILL),
+                foreign("simulated:velocity_sensor", "速度传感器", MachineRole.CONTROL, Work.STILL),
+                foreign("simulated:gimbal_sensor", "姿态传感器", MachineRole.CONTROL, Work.STILL),
+                foreign("aeronautics:propeller_bearing", "螺旋桨轴承", MachineRole.MOTION, Work.TURNING),
+                foreign("aeronautics:gyroscopic_propeller_bearing", "陀螺螺旋桨轴承", MachineRole.MOTION, Work.TURNING),
+                foreign("aeronautics:adjustable_burner", "可调燃烧器", MachineRole.CONTROL, Work.STILL),
+                foreign("aeronautics:steam_vent", "蒸汽喷口", MachineRole.CONTROL, Work.STILL),
+                foreign("offroad:wheel_mount", "车轮悬架", MachineRole.MOTION, Work.TURNING));
+    }
+
+    // 别的模组的方块：编号就是它自己的注册 ID，不加 create: 前缀。
+    private static Kind foreign(String id, String name, MachineRole role, Work work) {
+        return new Kind(id, name, role, work, List.of(id));
     }
 
     // 动力源：自己转，把转动交给接上的传动件。

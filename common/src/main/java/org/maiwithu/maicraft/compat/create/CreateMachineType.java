@@ -63,7 +63,8 @@ final class CreateMachineType implements MachineType {
 
     @Override public String name() { return kind.name(); }
 
-    @Override public String modId() { return CreateMachineCatalog.MOD_ID; }
+    // 来自哪个模组按编号的命名空间：载具部件是 Simulated、Create Aeronautics、Offroad 的方块。
+    @Override public String modId() { return kind.id().substring(0, kind.id().indexOf(':')); }
 
     @Override public MachineRole role() { return kind.role(); }
 
