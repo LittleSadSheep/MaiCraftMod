@@ -43,6 +43,8 @@ final class GoalTestAbility implements AbilityModule {
     static final class ScriptedGoalTask implements Task {
         private final TickResult ending;
         private final RuntimeException startError;
+        /** 被提前收尾时交出的结果；没设过按取消交代。 */
+        private TaskResult closedResult;
         int closes;
         int pauses;
         CloseReason closedWith;
@@ -54,6 +56,12 @@ final class GoalTestAbility implements AbilityModule {
         ScriptedGoalTask(TickResult ending, RuntimeException startError) {
             this.ending = ending;
             this.startError = startError;
+        }
+
+        /** 约定被收尾时交出的结果（带停在哪一类的现场）。 */
+        ScriptedGoalTask closesWith(TaskResult result) {
+            this.closedResult = result;
+            return this;
         }
 
         @Override public void start(TickContext context) {
@@ -71,7 +79,7 @@ final class GoalTestAbility implements AbilityModule {
         @Override public TaskResult close(CloseReason reason) {
             closes++;
             closedWith = reason;
-            return TaskResult.cancelled("替身任务被收尾");
+            return closedResult != null ? closedResult : TaskResult.cancelled("替身任务被收尾");
         }
 
         @Override public String describe() {

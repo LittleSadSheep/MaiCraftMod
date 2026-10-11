@@ -269,11 +269,19 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, KeepsTempTaskFa
         if (result != null) {
             return result;
         }
-        // 还在跑的任务按同样的原因收尾，交代已经发生的变化；目标的结论是"被取消 / 被替换 / 角色没了"。
+        // 还在跑的任务按同样的原因收尾，交代已经发生的变化；目标的结论是"被取消 / 被替换 / 角色没了"，
+        // 任务交代的没做完的部分（停在哪、差多远）并进结论，它结的细节原样带上——
+        // 调用方在结论里就能看到现场，不用再查一次位置。
         TaskResult closed = closeRunningChild(reason);
-        TaskResult.Builder ending = TaskResult.builder(TaskResult.Status.CANCELLED, cancelledSummary(reason));
+        List<String> closedRemaining = closed == null ? List.of() : closed.remaining();
+        String summary = cancelledSummary(reason);
+        if (!closedRemaining.isEmpty()) {
+            summary = summary + "：" + String.join("；", closedRemaining);
+        }
+        TaskResult.Builder ending = TaskResult.builder(TaskResult.Status.CANCELLED, summary);
         if (closed != null) {
-            ending.remaining(closed.remaining());
+            ending.remaining(closedRemaining);
+            ending.details(closed.details());
         }
         ending.remaining(stepsNotStarted(goal.steps().isEmpty() ? 0 : run.stepIndex() + 1));
         TaskResult cancelled = ending.build();

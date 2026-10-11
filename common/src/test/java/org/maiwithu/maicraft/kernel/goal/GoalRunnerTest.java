@@ -7,6 +7,7 @@ import org.maiwithu.maicraft.kernel.goal.GoalTestAbility.ScriptedGoalTask;
 import org.maiwithu.maicraft.kernel.goal.GoalTestAbility.TestInput;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
+import org.maiwithu.maicraft.kernel.result.ResultDetails;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
@@ -388,6 +389,9 @@ class GoalRunnerTest {
         assertEquals(20, run.finishedTick());
         assertNull(run.question());
     }
+    /** 测试用的结果细节：只带一句现场。 */
+    private record StopSpot(String spot) implements ResultDetails {}
+
     private static TaskResult doneWith(String summary, String item) {
         return TaskResult.builder(TaskResult.Status.DONE, summary)
                 .change(Change.of(Change.Kind.ITEM_GAINED, item, 1)).build();
@@ -471,6 +475,30 @@ class GoalRunnerTest {
         assertEquals(TaskResult.Status.CANCELLED, result.status());
         assertEquals(List.of("minecraft:oak_log"), result.changes().stream().map(Change::what).toList());
         assertEquals(1, ability.shared().created.get("做木板").closes, "还在做的任务按取消收尾");
+    }
+
+    @Test
+    void closeCarriesRunningTaskFieldFactsIntoGoalConclusion() {
+        GoalTestAbility ability = new GoalTestAbility("maicraft:test");
+        ability.shared().keepRunning("走过去");
+        ability.next(new StepDecision.Run(new TestInput("走过去")));
+        GoalRunner runner = launch(Goal.of("maicraft:test", null, null), ability,
+                new InMemoryGoalRunStore(), new TestMemory());
+        runner.start(TICK0);
+        runner.tick(new GoalTestTick(101));
+        // 任务还没走完就被收尾：它交代的现场（停在哪、差多远、行程细节）要进目标的结论。
+        ((ScriptedGoalTask) ability.shared().created.get("走过去"))
+                .closesWith(TaskResult.builder(TaskResult.Status.CANCELLED, "出行：被取消")
+                        .remaining("停在 (0, 64, -40)，还没走到目的地：差 南 40.0 格、同高")
+                        .details(new StopSpot("(0, 64, -40)"))
+                        .build());
+
+        TaskResult result = runner.close(CloseReason.CANCELLED);
+
+        assertEquals(TaskResult.Status.CANCELLED, result.status());
+        assertTrue(result.summary().contains("停在 (0, 64, -40)"), "取消的结论带上停在哪：" + result.summary());
+        assertTrue(result.remaining().stream().anyMatch(line -> line.contains("停在 (0, 64, -40)")));
+        assertInstanceOf(StopSpot.class, result.details(), "任务结的细节原样带进取消结果");
     }
 
     @Test

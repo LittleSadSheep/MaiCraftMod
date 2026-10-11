@@ -180,13 +180,9 @@ public abstract class PhasedTask<P extends Enum<P>> implements Task {
         if (tickResult instanceof TickResult.Running) {
             // 先让本刻的动作有机会报告进展，再判断是否原地打转。
             ProgressTracker.Status status = progress.status();
-            if (status instanceof ProgressTracker.Status.Stuck stuck) {
-                return finish(failedResult(Problem.of(Problem.Kind.STUCK,
-                        "自「" + stuck.lastProgress() + "」之后推进了 " + stuck.idleTicks() + " 刻都没有新进展")));
-            }
-            if (status instanceof ProgressTracker.Status.TimedOut timedOut) {
-                return finish(failedResult(Problem.of(Problem.Kind.STUCK,
-                        "已推进 " + timedOut.activeTicks() + " 刻，超过这件事最多能做的时长")));
+            if (status instanceof ProgressTracker.Status.Stuck
+                    || status instanceof ProgressTracker.Status.TimedOut) {
+                return finish(failedResult(noProgressProblem(status)));
             }
         }
         return tickResult;
@@ -259,6 +255,21 @@ public abstract class PhasedTask<P extends Enum<P>> implements Task {
             }
             case Next.Done<P> done -> finish(merge(done.result()));
             case Next.Fail<P> fail -> finish(failedResult(fail.problem()));
+        };
+    }
+
+    /**
+     * 长时间没有真实进展或超过时限时的收尾问题；默认按进度跟踪的通用说法。
+     * 手上有现场的任务（走到停在哪、探索走到多远）可以换成本领域的事实，
+     * 让收尾说明带着现场，而不是只给一句通用的话。
+     */
+    protected Problem noProgressProblem(ProgressTracker.Status status) {
+        return switch (status) {
+            case ProgressTracker.Status.Stuck stuck -> Problem.of(Problem.Kind.STUCK,
+                    "自「" + stuck.lastProgress() + "」之后推进了 " + stuck.idleTicks() + " 刻都没有新进展");
+            case ProgressTracker.Status.TimedOut timedOut -> Problem.of(Problem.Kind.STUCK,
+                    "已推进 " + timedOut.activeTicks() + " 刻，超过这件事最多能做的时长");
+            default -> Problem.of(Problem.Kind.STUCK, "长时间没有真实进展");
         };
     }
 
