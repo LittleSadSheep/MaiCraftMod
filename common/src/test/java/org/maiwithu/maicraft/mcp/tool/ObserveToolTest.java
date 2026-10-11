@@ -7,6 +7,7 @@ import com.google.gson.JsonParser;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.maiwithu.maicraft.behavior.reminder.Reminder;
 import org.maiwithu.maicraft.ability.remember.RememberAbility;
 import org.maiwithu.maicraft.behavior.perception.EntitySight;
 import org.maiwithu.maicraft.behavior.perception.NearbyBlocksSight;
@@ -85,6 +86,8 @@ class ObserveToolTest {
     /** 本刻的角色上下文替身：默认没有（不在世界里或还没接上），看背包的用例先摆好。 */
     private PlayerContext heldPlayer;
     private ToolDispatcher tools;
+    /** 板上还成立的提醒：测试摆。 */
+    private List<Reminder> reminders = List.of();
 
     @BeforeEach
     void world() {
@@ -117,7 +120,8 @@ class ObserveToolTest {
             }
         };
         tools = new ToolDispatcher(List.of(new ObserveTool(() -> inWorld ? scene : null,
-                () -> inWorld ? memory : null, table, direct), new ExecuteTool(registry, table, direct)));
+                () -> inWorld ? memory : null, table, direct, () -> reminders),
+                new ExecuteTool(registry, table, direct)));
     }
 
     private JsonObject observe(String arguments) {
@@ -159,6 +163,20 @@ class ObserveToolTest {
         assertEquals("minecraft:stone_pickaxe", self.get("held").getAsString());
         assertEquals("空闲，没有在做的目标", self.getAsJsonObject("goal").get("doing").getAsString());
         assertEquals("natural", self.getAsJsonObject("permissions").get("change_blocks").getAsString());
+    }
+
+    @Test
+    void selfCarriesTheRemindersWithEvidenceAndSuggestions() {
+        // 提醒的证据只在 observe(self) 里给全：事件只是叫醒 LLM，数值与阈值在这里。
+        reminders = List.of(new Reminder("drowning_imminent", "正在水下憋气，氧气已不到一半", 10, 12,
+                Map.of("air_supply", 120, "max_air_supply", 300), List.of("马上上浮")));
+        JsonObject self = data(observe("{\"what\": \"self\"}"));
+
+        JsonObject first = self.getAsJsonArray("reminders").get(0).getAsJsonObject();
+        assertEquals("drowning_imminent", first.get("id").getAsString());
+        assertEquals(120, first.getAsJsonObject("evidence").get("air_supply").getAsInt());
+        assertEquals("马上上浮", first.getAsJsonArray("suggestions").get(0).getAsString());
+        assertEquals(12, first.get("observed_at_tick").getAsLong());
     }
 
     @Test

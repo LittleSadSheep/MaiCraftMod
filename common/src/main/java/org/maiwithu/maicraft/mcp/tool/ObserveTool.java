@@ -2,6 +2,10 @@
 package org.maiwithu.maicraft.mcp.tool;
 
 import com.google.gson.JsonObject;
+import com.google.gson.GsonBuilder;
+import com.google.gson.Gson;
+import com.google.gson.FieldNamingPolicy;
+import org.maiwithu.maicraft.behavior.reminder.Reminder;
 import org.maiwithu.maicraft.behavior.perception.Scene;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -27,21 +31,28 @@ import java.util.function.Supplier;
 public final class ObserveTool implements McpTool {
     private static final List<String> VIEWS = List.of("self", "scene", "detail", "world_memory");
 
+    /** 提醒转成 JSON：字段名照记录的写法换成下划线小写。 */
+    private static final Gson REMINDER_JSON = new GsonBuilder()
+            .setFieldNamingPolicy(FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES).create();
+
     private final Supplier<Scene> scene;
     private final Supplier<WorldMemory> memory;
     private final GoalRunTable table;
     private final ClientThread clientThread;
+    /** 角色身上还成立的提醒：observe(self) 每次都完整交出去，事件只负责叫醒。 */
+    private final Supplier<List<Reminder>> reminders;
 
     /**
      * @param scene  当前世界的感知场景；不在世界里时给 null
      * @param memory 当前世界的世界记忆；不在世界里时给 null
      */
     public ObserveTool(Supplier<Scene> scene, Supplier<WorldMemory> memory, GoalRunTable table,
-                       ClientThread clientThread) {
+                       ClientThread clientThread, Supplier<List<Reminder>> reminders) {
         this.scene = Objects.requireNonNull(scene, "scene");
         this.memory = Objects.requireNonNull(memory, "memory");
         this.table = Objects.requireNonNull(table, "table");
         this.clientThread = Objects.requireNonNull(clientThread, "clientThread");
+        this.reminders = Objects.requireNonNull(reminders, "reminders");
     }
 
     @Override public String name() {
@@ -98,7 +109,10 @@ public final class ObserveTool implements McpTool {
         String doing = main == null ? null : table.doing(main.id()).orElse(null);
         Boolean automation = player == null || player.input() == null ? null : player.input().automationOwnsControls();
         boolean tookOver = player != null && player.input() != null && player.input().humanTookOver();
-        return SelfView.of(currentScene.self(), dimension, player == null ? null : player.backpack(), main, doing,
+        JsonObject view = SelfView.of(currentScene.self(), dimension, player == null ? null : player.backpack(), main, doing,
                 automation, tookOver);
+        // 还成立的提醒原样交出：一句话、证据数值与阈值、可以考虑的做法；没有提醒时是空数组。
+        view.add("reminders", REMINDER_JSON.toJsonTree(reminders.get()));
+        return view;
     }
 }

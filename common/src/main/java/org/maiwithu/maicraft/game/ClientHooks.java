@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.game;
 
 import java.util.concurrent.atomic.AtomicReference;
 import org.maiwithu.maicraft.game.player.PlayerControlBoundary;
+import org.maiwithu.maicraft.game.player.RestStatistics;
 import org.maiwithu.maicraft.game.player.DamageObserver;
 import org.maiwithu.maicraft.game.player.EquipmentConfirmations;
 import org.maiwithu.maicraft.game.world.DropConfirmations;
@@ -27,6 +28,7 @@ public final class ClientHooks {
     private static final AtomicReference<DropConfirmations> DROP_CONFIRMATIONS = new AtomicReference<>();
     private static final AtomicReference<EquipmentConfirmations> EQUIPMENT_CONFIRMATIONS = new AtomicReference<>();
     private static final AtomicReference<DamageObserver> DAMAGE_OBSERVER = new AtomicReference<>();
+    private static final AtomicReference<RestStatistics> REST_STATISTICS = new AtomicReference<>();
 
     private ClientHooks() {}
 
@@ -90,6 +92,15 @@ public final class ClientHooks {
 
     public static DamageObserver damageObserver() {
         return DAMAGE_OBSERVER.get();
+    }
+
+    /** 启动时登记休息统计：个人统计包由 Mixin 转过来。传 null 表示停止。 */
+    public static void registerRestStatistics(RestStatistics statistics) {
+        REST_STATISTICS.set(statistics);
+    }
+
+    public static RestStatistics restStatistics() {
+        return REST_STATISTICS.get();
     }
 
     /** Mixin 类跨包读取；这里是与 Mixin 之间唯一允许的静态通道。 */

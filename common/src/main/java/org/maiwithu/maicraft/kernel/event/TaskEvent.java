@@ -46,7 +46,9 @@ public record TaskEvent(long cursor, Kind kind, long goalRunId, String message, 
         /** 死亡恢复决策已经执行：重生或观战的请求发出去了，或任务已取消；做了什么在消息里。 */
         DEATH_RECOVERY_APPLIED,
         /** 在用的工具或盔甲耐久打空消灭了：坏的是哪一件、在哪个槽位、满耐久多少在消息里。 */
-        GEAR_BROKEN
+        GEAR_BROKEN,
+        /** 角色身上有事要 LLM 知道（快溺水、装备快坏、黑暗里反复挨打……），或这条提醒撤下了；证据在 observe(self) 的 reminders。 */
+        REMINDER
     }
 
     public TaskEvent {

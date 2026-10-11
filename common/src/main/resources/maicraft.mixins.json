@@ -22,7 +22,8 @@
     "ChatComponentMessageMixin",
     "ItemEntityConfirmationMixin",
     "EquipmentConfirmationMixin",
-    "DamageEventMixin"
+    "DamageEventMixin",
+    "AwardStatsMixin"
   ],
   "server": [],
   "injectors": {

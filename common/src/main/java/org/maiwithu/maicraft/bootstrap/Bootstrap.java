@@ -29,6 +29,9 @@ import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyHoldProjection;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
 import org.maiwithu.maicraft.behavior.acquire.ItemsInUse;
+import org.maiwithu.maicraft.game.player.RestStatistics;
+import org.maiwithu.maicraft.behavior.reminder.PlayerReminders;
+import org.maiwithu.maicraft.behavior.reminder.Reminder;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.game.player.EquipmentConfirmations;
 import org.maiwithu.maicraft.game.world.DropConfirmations;
@@ -269,6 +272,9 @@ public final class Bootstrap {
         private EquipmentConfirmations equipmentConfirmations;
         /** 伤害证据的记忆：自卫与提醒共用；服务器的伤害包经 Mixin 喂进来。 */
         private CombatMemory combatMemory;
+        /** 角色身上的八条提醒：事件进任务事件流，证据经 observe(self) 交出去。 */
+        private PlayerReminders reminders;
+        private final RestStatistics restStatistics = new RestStatistics();
         private final UseKeyHold useKeyHold = new UseKeyHold();
         private final SubtitleFeed subtitles = new SubtitleFeed();
         private final McpConfig mcpConfig = McpConfig.localForProcess(8766);
@@ -358,7 +364,16 @@ public final class Bootstrap {
                     "装备用坏了：" + broken.slot() + " 的 " + broken.itemId() + " 耐久打空消灭了（满耐久 "
                             + broken.maxDurability() + "，最后看到剩 " + broken.durabilityLastSeen() + "）"));
             ClientHooks.registerEquipmentConfirmations(equipmentConfirmations);
-            ClientHooks.registerDamageObserver(combatMemory);
+            reminders = new PlayerReminders(taskEvents,
+                    PlayerViews.foods(() -> playerControl.activeContext().orElse(null)), restStatistics);
+            ClientHooks.registerRestStatistics(restStatistics);
+            // 一次伤害包两处要：自卫的伤害证据，与提醒（黑暗里挨打、战斗压力）。
+            CombatMemory memory = combatMemory;
+            PlayerReminders playerReminders = reminders;
+            ClientHooks.registerDamageObserver((player, source, tick) -> {
+                memory.hurt(player, source, tick);
+                playerReminders.hurt(player, source, tick);
+            });
             // 目标执行与 MCP 工具：LLM 用 execute 下达的目标经目标运行表成为控制循环的主任务；
             // 目标处境与生存需求的事件都进同一条任务事件流，宿主用 events 读。
             // 没进世界时的占位存储：进世界时换成那个世界的存盘（见 enterWorld），不在世界里也下达不了目标。
@@ -502,7 +517,7 @@ public final class Bootstrap {
             // 登记上来的物品来源进能力清单（进世界时建），知识来源现在就接进知识库。
             compat = CompatRegistry.load(compatCatalog, loader);
             tools = goalTools(abilities, goals, clientWork, taskEvents, chatEvents, () -> worldScope[0], recentCalls,
-                    lookupTool());
+                    lookupTool(), () -> reminders == null ? List.of() : reminders.snapshot());
             try {
                 mcp = EmbeddedMcpService.startWithFallback(mcpConfig, 2, tools);
                 LOG.info("{} MCP 服务已启动（端口 {}；五个工具都已接上）",
@@ -609,6 +624,8 @@ public final class Bootstrap {
             long gameTick = minecraft.level.getGameTime();
             // 装备耐久的基准每刻扫一遍：打空事件到了才说得出坏的是哪一件。
             if (equipmentConfirmations != null) equipmentConfirmations.observe(current.localPlayer());
+            // 提醒每刻看一遍角色：人自己玩的时候也照样看，LLM 该知道的事不因控制权换手断掉。
+            if (reminders != null) reminders.tick(current);
             clientWork.drain(new ClientTickContext(gameTick, current));
             boolean owned = playerControl.input().automationOwnsControls();
             if (owned != automationOwned) {
@@ -663,10 +680,12 @@ public final class Bootstrap {
     private static ToolDispatcher goalTools(AbilityRegistry abilities, GoalRunTable goals,
                                             ClientTickWork clientWork, TaskEventLog taskEvents,
                                             ChatEventLog chatEvents, Supplier<WorldScope> worldScope,
-                                            RecentToolCalls recentCalls, LookupTool lookup) {
+                                            RecentToolCalls recentCalls, LookupTool lookup,
+                                            Supplier<List<Reminder>> reminders) {
         return new ToolDispatcher(List.of(
                 new ObserveTool(() -> worldScope.get() == null ? null : worldScope.get().scene(),
-                        () -> worldScope.get() == null ? null : worldScope.get().memory(), goals, clientWork),
+                        () -> worldScope.get() == null ? null : worldScope.get().memory(), goals, clientWork,
+                        reminders),
                 // 查资料接随包的机制常识、物品资料页、联动模组登记的资料来源与配方；联网的资料来源还没登记。
                 lookup,
                 new ExecuteTool(abilities, goals, clientWork),

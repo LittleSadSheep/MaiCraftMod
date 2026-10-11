@@ -38,6 +38,7 @@ MaiCraft 按版本记录玩家和 Agent 能感受到的变化。版本号即 `gr
 
 ### 新增
 
+- 角色身上的八条提醒：快溺水（氧气过半）、着火或泡在岩浆里、随身口粮持续不够、在用的工具和盔甲耐久快用完、背包快满、黑暗里一分钟内被怪打三次、被怪打得血量压力大、好几天没睡（按原版个人统计）。提醒出现与撤下发 `events`（种类 reminder），`observe(what=self)` 的 `reminders` 里有每条的证据数值、阈值和可以考虑的做法；快到阈值才提醒、好透了才撤，贴着阈值来回抖不反复打扰；提醒只告诉 LLM，不暂停任务、不动角色，人自己玩的时候也照样看。
 - 施工（`build`）认结构文件了：`file` 给 `schematics/` 里的文件名，原版 `.nbt` / `.snbt`、Litematica `.litematic`、Sponge `.schem` 和 `design` 导出的 `.json` 都认，文件原点落在锚点、`rotation` 照转；展示框、盔甲架、画这些摆设实体不装，结果里 `fixtures_skipped` 写明有几个，箱子里的东西、告示牌的字不搬。
 - 施工预览画出来了：`design` 的 `preview` 投到世界里的蓝图会显示在世界里——半透明白是要放的方块、红是要清空的格、蓝是要倒桶的格，外加蓝线包围盒，只画镜头附近的格；F9+B 开关，默认开着，存在 `config/maicraft-debug.properties`，退世界清掉。
 - 知识库多了建筑这一组，`lookup(topic=knowledge, id=building/design)` 读得到图纸格式（字段、坐标与尺寸、材料表、十二种图元、组件与阵列、开孔、空心、面与棱、图案，每节带能直接交的例子），`building/roofs` 讲 ROOF 对象的九种 shape 和参数，`building/house`、`building/styles`、`building/example-cottage` 讲怎么设计、几种风格和一栋完整的小屋；`design` 的能力说明改成能直接照抄的 lookup 写法。

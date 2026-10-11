@@ -141,7 +141,8 @@
     "need_unhandled",
     "character_died",
     "death_recovery_applied",
-    "gear_broken"
+    "gear_broken",
+    "reminder"
   ],
   "chat_kinds": [
     "player",

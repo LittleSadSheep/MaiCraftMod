@@ -96,7 +96,7 @@ final class Timeline {
     private static PanelColor color(TaskEvent event) {
         return switch (event.kind()) {
             case STARTED, RESUMED -> PanelColor.DOING;
-            case ASKED, PAUSED, TEMPORARY_TASK_STARTED, NEED_UNHANDLED -> PanelColor.WAITING;
+            case ASKED, PAUSED, TEMPORARY_TASK_STARTED, NEED_UNHANDLED, REMINDER -> PanelColor.WAITING;
             // 人死了和装备用坏了都是已经发生的损失，用问题色提醒
             case CHARACTER_DIED, GEAR_BROKEN -> PanelColor.PROBLEM;
             case STEP_FINISHED, TEMPORARY_TASK_FINISHED, DEATH_RECOVERY_APPLIED -> PanelColor.MINOR;

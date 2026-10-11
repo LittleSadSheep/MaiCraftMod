@@ -3,7 +3,7 @@
   "tools": [
     {
       "name": "observe",
-      "description": "看世界和自己：角色状态与背包、周围场景、某个看到的东西的细节、世界记忆。",
+      "description": "看世界和自己：角色状态与背包、周围场景、某个看到的东西的细节、世界记忆。what=self 还带 reminders：角色身上还成立的提醒（快溺水、装备快坏、背包快满、黑暗里反复挨打、好几天没睡……），每条有证据数值与可以考虑的做法；提醒不会自己动角色。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -113,7 +113,7 @@
         "properties": {
           "topic": {
             "type": "string",
-            "description": "读哪条流：self（默认，角色身上发生的事：目标的进展、生存需求插进来的临时任务、角色死了）、chat（聊天栏收到的消息）",
+            "description": "读哪条流：self（默认，角色身上发生的事：目标的进展、生存需求插进来的临时任务、角色死了、装备用坏、提醒出现与撤下）、chat（聊天栏收到的消息）",
             "default": "self"
           },
           "goal_id": {
