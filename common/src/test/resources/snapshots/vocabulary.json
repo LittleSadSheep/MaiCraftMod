@@ -140,7 +140,8 @@
     "temporary_task_finished",
     "need_unhandled",
     "character_died",
-    "death_recovery_applied"
+    "death_recovery_applied",
+    "gear_broken"
   ],
   "chat_kinds": [
     "player",
