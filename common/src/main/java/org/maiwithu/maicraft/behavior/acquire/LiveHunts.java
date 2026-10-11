@@ -11,6 +11,7 @@ import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.behavior.inventory.PicksUpDrops;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
+import org.maiwithu.maicraft.behavior.perception.DirectionWords;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -26,9 +27,10 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * <p>出手前必须看得见、够得着（射线核对把关）：被墙挡住或离得远就朝它现在的位置走，看见又够得着才出手；
  * 出手用和自卫同一个近战出手，先把最好的剑斧换到主手。出手后盯住这只，
  * 不因更近的同类反复改道。打斗中每刻核对目标：被拴绳、被命名、被驯服、圈起来了——变成别人的了
- * 就停手，记下原因换下一只（事实核对，不是拦截）。它不在了（走远、被别人打死）就地捡一下
- * 这次新掉出来的，捡不到的如实记下、不冒充收干净——目标物品够数就算这一单拿到。
- * 打了一只没见到要的东西，记下原因换下一只，不重复打同一只。
+ * 就停手，记下原因换下一只（事实核对，不是拦截）。打倒了（它不在了）先回到它倒下的地方，
+ * 把这次新掉出来的目标物品与副产物都捡起来；够不着的如实记下、不冒充收干净——
+ * 目标物品够数就算这一单拿到。打了一只没见到要的东西，记下原因换下一只，不重复打同一只；
+ * 每次放弃一只都交代现场：它最后在哪、多远、看得见还是被挡住。
  *
  * <p>附近没有候选而这次愿意走时，先出去找：按环带一圈一圈往外，走一片看一片，
  * 见到合格的候选就地转入狩猎，走满愿意走的距离还没见到就如实收场。
@@ -88,6 +90,12 @@ public final class LiveHunts implements Hunts {
         private boolean struck;
         /** 出手前地上的掉落物：打倒了只捡这次新掉出来的。 */
         private Set<Integer> dropsBefore;
+        /** 猎物此刻在哪：每刻跟着它刷新，倒下后掉落物散在这一片，收掉落先回到这里。 */
+        private double[] lastKnownAt;
+        /** 收掉落前要先走回去的地方；不知道它倒在哪就原地捡。 */
+        private double[] lootSpot;
+        /** 这次有掉落物没能收进包：结算时不把"没见到"和"没捡到"混成一句。 */
+        private boolean lootMissed;
         /** 正在推进的动作（走近、出手、走向搜索点）：同一件事沿用，不每刻重建。 */
         private Action current;
         private String currentKey;
@@ -174,19 +182,23 @@ public final class LiveHunts implements Hunts {
             return ActionStatus.progressed();
         }
 
-        // 打当前目标：核对处境与视线，看得见才出手；它不在了就捡掉落、换下一只。
+        // 打当前目标：核对处境与视线，看得见才出手；打倒了先回它倒下的地方收掉落，再换下一只。
         private ActionStatus huntTarget(TickContext tick) {
             if (++stageTicks > PER_TARGET_TICKS) {
-                notes.add((target == null ? "这一片" : target.describe()) + "：在它身上耗了太久，先不追了");
+                notes.add((target == null ? "这一片" : target.describe()) + "：在它身上耗了太久，先不追了"
+                        + targetWhereabouts(tick));
                 dropTarget();
                 return ActionStatus.progressed();
             }
             if (target == null) {
                 return pickNextTarget(tick);
             }
+            // 它此刻在哪先记下来：放弃时要交代现场，倒下后要回这里收掉落。
+            Optional<double[]> where = moves.positionOf(tick, target.entityId());
+            where.ifPresent(at -> lastKnownAt = at);
             Optional<Boolean> seen = sight.visible(target.entityId());
             if (seen.isEmpty()) {
-                // 它不在了（走远、被别人打死）：出过手的捡一下这次掉出来的再换，没出过手的直接换。
+                // 它不在了：出过手的就是打倒了，回它倒下的地方把这次掉出来的收走；没出过手的直接换。
                 if (struck) {
                     startLoot();
                     return ActionStatus.progressed();
@@ -205,7 +217,7 @@ public final class LiveHunts implements Hunts {
             if (!seen.get() || !moves.inReach(tick, target.entityId())) {
                 // 被墙挡住或还够不着：朝它现在的位置走过去，看得见又够得着再出手；一直走不到就超时换下一只。
                 // 它挪出原来那片（四格见方）就按新位置重新走，不追着扫描时的旧位置跑。
-                double[] at = moves.positionOf(tick, target.entityId()).orElse(new double[] {
+                double[] at = where.orElse(new double[] {
                         target.at().x() + 0.5, target.at().y(), target.at().z() + 0.5});
                 keep("走近 " + target.entityId() + "@" + (int) Math.floor(at[0] / APPROACH_CELL)
                                 + "," + (int) Math.floor(at[2] / APPROACH_CELL),
@@ -274,13 +286,27 @@ public final class LiveHunts implements Hunts {
         }
 
         private void startLoot() {
+            // 掉落物散在它倒下的地方那一片：先走回那里，远处（八格外）的才进得了"附近"的名单。
+            lootSpot = lastKnownAt;
             loot = drops.pickUpNewSince(dropsBefore == null ? Set.of() : dropsBefore);
+            lootMissed = false;
             stage = Stage.LOOT;
             stageTicks = 0;
         }
 
-        // 收掉落：捡完（或没捡到如实认了）再看身上，够了就收工，不够换下一只。
+        // 收掉落：先回到它倒下的地方（走不到就到此为止），再一件件捡这次新掉出来的；
+        // 捡完（或没捡到如实认了）再看身上，够了就收工，不够换下一只。
         private ActionStatus lootDrops(TickContext tick) {
+            if (lootSpot != null) {
+                keep("回到倒下的地方 " + (int) lootSpot[0] + "," + (int) lootSpot[2],
+                        () -> moves.walkTo(lootSpot[0], lootSpot[1], lootSpot[2]));
+                boolean finished = stepCurrent(tick, "回到倒下的地方收掉落");
+                if (finished || ++stageTicks > PER_POINT_TICKS) {
+                    // 走不到也照样捡：站在原地，够得着的先收，收不到的由捡的动作如实记。
+                    lootSpot = null;
+                }
+                return ActionStatus.running();
+            }
             if (loot == null) {
                 return afterLoot();
             }
@@ -289,6 +315,7 @@ public final class LiveHunts implements Hunts {
             if (status instanceof ActionStatus.Failed failed) {
                 // 没收回的如实记下，不冒充收干净：目标物品够不够由身上的清点说了算。
                 notes.add("有掉落物没能收进包：" + failed.problem().message());
+                lootMissed = true;
             }
             loot.close();
             loot = null;
@@ -297,8 +324,8 @@ public final class LiveHunts implements Hunts {
 
         private ActionStatus afterLoot() {
             if (enough()) return ActionStatus.done();
-            if (carriedWanted() == carriedAtStart && struck) {
-                // 打倒了却一件没多：这只记进排除，换下一只，不在一棵树上吊死。
+            if (carriedWanted() == carriedAtStart && struck && !lootMissed) {
+                // 打倒了、地上也没见着它的掉落，才说"没见到"：捡到了别的或没捡到都另有交代，不混成一句。
                 notes.add("打倒了一只" + target.describe() + "，没见到" + request.wanted().describe());
             }
             dropTarget();
@@ -306,11 +333,31 @@ public final class LiveHunts implements Hunts {
             return ActionStatus.progressed();
         }
 
+        /** 放弃一只时的现场：它最后在哪（方位、几格、高低差），此刻看得见还是被挡住了、还是已经不在。
+         *  与出行走不通时报剩余距离是同一件事：只说"耗了太久"，旁观者看不出它到底卡在哪。 */
+        private String targetWhereabouts(TickContext tick) {
+            if (target == null) {
+                return "";
+            }
+            double[] self = moves.selfPosition(tick);
+            double[] at = lastKnownAt != null ? lastKnownAt
+                    : new double[] {target.at().x() + 0.5, target.at().y(), target.at().z() + 0.5};
+            double dx = at[0] - self[0];
+            double dz = at[2] - self[2];
+            String spot = DirectionWords.compassOf(dx, dz) + " " + Math.round(Math.hypot(dx, dz) * 10) / 10.0
+                    + " 格、" + DirectionWords.heightWord((int) Math.round(at[1] - self[1]));
+            return sight.visible(target.entityId())
+                    .map(visible -> "；它在" + spot + "，" + (visible ? "看得见" : "视线被挡住"))
+                    .orElse("；它最后在" + spot + "，现在已经不在了");
+        }
+
         /** 放下当前目标：换个候选从头来。 */
         private void dropTarget() {
             target = null;
             struck = false;
             dropsBefore = null;
+            lastKnownAt = null;
+            lootMissed = false;
             stageTicks = 0;
             dropCurrent();
         }
@@ -377,7 +424,8 @@ public final class LiveHunts implements Hunts {
                 case LOOK_AROUND -> "看看这一片有没有猎物";
                 case TARGET -> target == null ? "在挑猎物"
                         : (struck ? "打 " + target.describe() : "走近 " + target.describe());
-                case LOOT -> "捡" + (target == null ? "猎物" : target.describe()) + "掉出来的东西";
+                case LOOT -> (lootSpot != null ? "回它倒下的地方捡" : "捡")
+                        + (target == null ? "猎物" : target.describe()) + "掉出来的东西";
             };
         }
     }
