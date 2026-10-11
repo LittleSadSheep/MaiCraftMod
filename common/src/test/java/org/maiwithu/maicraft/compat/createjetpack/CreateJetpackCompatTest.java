@@ -89,7 +89,8 @@ class CreateJetpackCompatTest {
         CompatRegistry registry = CompatRegistry.load(List.of(new SupportedMod<>(CreateJetpackCompat.MOD_ID,
                 "机械动力：喷气背包", new VerifiedVersions("5.1.2", "5.2"),
                 () -> new CreateJetpackCompat(new FakeControls()))), loaderWith("5.1.2"));
-        assertEquals(List.of(), registry.travelModes(offlineServices()));
+        List<TravelMode> modes = registry.travelModes(offlineServices());
+        assertEquals(List.of("jetpack"), modes.stream().map(mode -> mode.via().name()).toList());
         assertEquals(1, registry.fallBrakes().size());
     }
 

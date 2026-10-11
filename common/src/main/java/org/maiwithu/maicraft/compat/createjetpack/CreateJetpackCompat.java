@@ -26,6 +26,8 @@ public final class CreateJetpackCompat extends CompatModule {
     }
 
     @Override public void contribute(CompatRegistry registry) {
+        // 飞过去：走路远或走不通时比报价；身上有喷气背包、背罐有气、目标附近有落脚处才报。
+        registry.travelMode(this, services -> new JetpackMode(this, services));
         // 意外往下掉：穿着有气的喷气背包就开悬停刹住，落稳再关（所有者 10-11 定，比落水桶优先）。
         registry.fallBrake(this, context -> JetpackFallBrake.start(this, context));
     }
