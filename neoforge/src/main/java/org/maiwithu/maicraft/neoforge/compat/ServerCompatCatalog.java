@@ -7,9 +7,11 @@ import org.maiwithu.maicraft.compat.SupportedMod;
 import org.maiwithu.maicraft.compat.VerifiedVersions;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsGridReads;
 import org.maiwithu.maicraft.neoforge.compat.create.CreateTrainScheduleReads;
+import org.maiwithu.maicraft.neoforge.compat.sable.SableForceServerReads;
 import org.maiwithu.maicraft.server.compat.ServerCompatModule;
 import org.maiwithu.maicraft.server.compat.ae2.Ae2ServerCompat;
 import org.maiwithu.maicraft.server.compat.create.CreateServerCompat;
+import org.maiwithu.maicraft.server.compat.sable.SableServerCompat;
 
 /**
  * 服务端一侧的联动清单：只有客户端读不到的模组数据（机器状态、网络库存）才需要在服务端接；
@@ -29,6 +31,9 @@ public final class ServerCompatCatalog {
                         () -> new Ae2ServerCompat(new AppliedEnergisticsGridReads())),
                 // 机械动力：列车时刻表只在服务端，没装铁路导航时坐火车经只读操作 create.trains 查哪趟车去哪。
                 new SupportedMod<>(CreateServerCompat.MOD_ID, "机械动力", new VerifiedVersions("6.0.11", "6.1"),
-                        () -> new CreateServerCompat(new CreateTrainScheduleReads())));
+                        () -> new CreateServerCompat(new CreateTrainScheduleReads())),
+                // Sable：质量、重心、各处的力只在服务端，看载具的受力经只读操作 sable.body 回答。
+                new SupportedMod<>(SableServerCompat.MOD_ID, "Sable 物理结构", new VerifiedVersions("2.0.3", "2.1"),
+                        () -> new SableServerCompat(new SableForceServerReads())));
     }
 }
