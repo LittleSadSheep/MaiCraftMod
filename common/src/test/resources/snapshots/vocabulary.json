@@ -1,6 +1,7 @@
 {
   "parameter_names": {
     "after_seconds": "先至少经过多少秒，再开始做检查",
+    "angle_degrees": "扇形开口角（度），1..360；配 direction 使用，有方向默认 90",
     "block": "方块 ID，或 # 开头的方块标签",
     "blocks": "多个方块 ID 或方块标签",
     "blueprint": "机器蓝图（JSON 对象）：cells 逐格、parts 部件、installations 安装段、settings 装后设置、processes 声明工序",
@@ -16,11 +17,13 @@
     "entity": "实体类型 ID，可给一个或几种",
     "file": "schematics 目录下的结构文件名",
     "format": "导出文件的格式：json / nbt",
+    "interests": "探索途中留意的东西：地形要素（lava_pool）、结构 ID、方块 ID 或 # 标签、实体类型 ID",
     "item": "物品 ID，或 # 开头的物品标签",
     "items": "多个物品 ID 或物品标签",
     "max_distance": "出行或搜索的最远距离，单位格",
     "max_seconds": "最多花多少秒",
     "message": "要发到游戏聊天的一句话，对全体玩家可见",
+    "min_distance": "忽略更近的目标匹配，单位格；有方向默认 16",
     "name": "名字，例如要记住的地点名",
     "network": "接哪种网络：取值由已登记的网络读取器自报，例如 kinetic / me / energy",
     "operation": "一个能力内部的几种操作选哪一种，例如 enable、disable、status",
