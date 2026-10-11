@@ -19,6 +19,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -89,6 +90,7 @@ class CreateCompatTest {
         List<ItemSource> sources = registry.itemSources(offlineServices());
         assertEquals(List.of("sandpaper", "toolbox", "stock_ticker"), sources.stream().map(source -> source.via().name()).toList());
     }
+
 
     @Test
     void 砂纸报价按产物找配方_磨几次要几张砂纸写进风险() {
@@ -257,8 +259,14 @@ class CreateCompatTest {
             @Override public boolean requestMenuOpen(LocalPlayer player) { return false; }
             @Override public void order(BlockPos ticker, Map<String, Integer> items, String address) { }
         };
+        CreateElevators elevators = new CreateElevators() {
+            @Override public List<Elevator> elevators(ClientLevel level, Player viewer, AABB region) { return List.of(); }
+            @Override public Optional<Elevator> elevator(ClientLevel level, Player viewer, int entityId) { return Optional.empty(); }
+            @Override public void requestFloors(int entityId) { }
+            @Override public void selectFloor(int entityId, int contactY) { }
+        };
         return new CreateCompat(kinetics, belts, chains, stations, tools, values, schematics, filters, logistics,
-                (level, viewer, region) -> List.of());
+                (level, viewer, region) -> List.of(), elevators);
     }
 
     /** 不在世界里的玩家行为：角色为空，靠近与交互都碰不到；只够建出机器类型、回答"读不到"。 */

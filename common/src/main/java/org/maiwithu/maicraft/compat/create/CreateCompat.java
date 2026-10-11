@@ -46,10 +46,11 @@ public final class CreateCompat extends CompatModule {
     private final CreateFilters filters;
     private final CreateLogistics logistics;
     private final CreateContraptions contraptions;
+    private final CreateElevators elevators;
 
     public CreateCompat(CreateKinetics kinetics, CreateBelts belts, CreateChainConveyors chains,
             CreateStations stations, CreateTools tools, CreateValues values, CreateSchematics schematics,
-            CreateFilters filters, CreateLogistics logistics, CreateContraptions contraptions) {
+            CreateFilters filters, CreateLogistics logistics, CreateContraptions contraptions, CreateElevators elevators) {
         super(MOD_ID, "机械动力");
         this.kinetics = Objects.requireNonNull(kinetics, "kinetics");
         this.belts = Objects.requireNonNull(belts, "belts");
@@ -61,6 +62,7 @@ public final class CreateCompat extends CompatModule {
         this.filters = Objects.requireNonNull(filters, "filters");
         this.logistics = Objects.requireNonNull(logistics, "logistics");
         this.contraptions = Objects.requireNonNull(contraptions, "contraptions");
+        this.elevators = Objects.requireNonNull(elevators, "elevators");
     }
 
     @Override public void contribute(CompatRegistry registry) {
@@ -86,6 +88,26 @@ public final class CreateCompat extends CompatModule {
         // 移动装置当障碍交给寻路：转着的风车整个扫盘、开着的列车与活塞的前方、电梯井都绕开，挡路时先等它过去。
         registry.obstacleSource(this, (level, viewer, region, sink) ->
                 movingContraptions(level, viewer, region).forEach(sink::add));
+    }
+
+    /** 和一个区域沾边的电梯；见 {@link CreateElevators#elevators}。 */
+    public List<CreateElevators.Elevator> elevators(ClientLevel level, Player viewer, AABB region) {
+        return call("读电梯", () -> elevators.elevators(level, viewer, region));
+    }
+
+    /** 按轿厢实体编号读一台电梯；见 {@link CreateElevators#elevator}。 */
+    public Optional<CreateElevators.Elevator> elevator(ClientLevel level, Player viewer, int entityId) {
+        return call("读电梯", () -> elevators.elevator(level, viewer, entityId));
+    }
+
+    /** 要一次楼层表；见 {@link CreateElevators#requestFloors}。 */
+    public void requestElevatorFloors(int entityId) {
+        run("要电梯楼层表", () -> elevators.requestFloors(entityId));
+    }
+
+    /** 在控制器上选层；见 {@link CreateElevators#selectFloor}。 */
+    public void selectElevatorFloor(int entityId, int contactY) {
+        run("给电梯选层", () -> elevators.selectFloor(entityId, contactY));
     }
 
     /** 和一个区域沾边的移动装置；见 {@link CreateContraptions#near}。 */
