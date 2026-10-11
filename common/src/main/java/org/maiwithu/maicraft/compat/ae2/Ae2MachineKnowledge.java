@@ -29,8 +29,8 @@ final class Ae2MachineKnowledge implements KnowledgeSource {
         if (!uri.equals(INDEX)) return null;
         StringBuilder text = new StringBuilder("# 应用能源2设备与 ME 网络\n\n");
         text.append("## 蓝图里怎么写\n\n")
-                .append("- 线缆不是方块，是装在线缆格中间的部件：写成一段安装段 `{kind: ae2:fluix_glass_cable, cells: [一格接一格]}`")
-                .append("（kind 写线缆物品 ID，不带颜色的福鲁伊克斯线缆和任何颜色都连），cells 里不写线缆格。\n")
+                .append("- 线缆不是方块，是装在线缆格中间的部件：写成一段安装段 `{kind: ae2:fluix_glass_cable, offsets: [一格接一格]}`")
+                .append("（kind 写线缆物品 ID，不带颜色的福鲁伊克斯线缆和任何颜色都连），cells 里不写线缆格（线缆格写在安装段的 offsets 里）。\n")
                 .append("- 终端、总线这类部件写进 parts：`{offset: 线缆那一格, side: 装在哪一面, item: ae2:terminal}`；")
                 .append("宿主那一格要是线缆（写在线缆安装段里就行），施工先接线缆再装部件。\n")
                 .append("- 设备方块（控制器、驱动器、接口、样板供应器……）照常写进 cells。\n\n");

@@ -169,7 +169,7 @@ final class CreateMachineKnowledge implements KnowledgeSource {
                     .append("空手右键工作盆取出\n");
             case BASIN -> text.append("- machine_run：站到盆边把料扔进去，落在盆沿上也收；空手右键取出盆里的东西\n");
             case CRAFTER -> text.append("- 几台连成一片按配方形状摆好（方块状态 pointing 定箭头，料顺着箭头送到出口那一台），")
-                    .append("machine_build 的 installations 写 `{kind: create:crafter_link, cells: [台 A, 台 B]}` 把相邻两台的入口连成一组")
+                    .append("machine_build 的 installations 写 `{kind: create:crafter_link, offsets: [台 A, 台 B]}` 把相邻两台的入口连成一组")
                     .append("（拿扳手点背面靠另一台的那条边）；machine_configure 每台的 crafter.slot 写这一格的料，")
                     .append("crafter.pointing 写箭头；凑齐、转起来就一起做\n");
             case SAW -> text.append("- machine_run：锯齿朝上时站到旁边把料扔到锯面上；锯没转时料停在上面，转起来再锯\n");
@@ -177,11 +177,11 @@ final class CreateMachineKnowledge implements KnowledgeSource {
                     .append("那一格要朝下送料（两只轮子对着往里转）\n");
             case DEPOT -> text.append("- machine_run：手持料右键顶面放上去，手上先只留要投的件数（一次最多一叠）；")
                     .append("空手右键顶面收回\n");
-            case BELT -> text.append("- machine_build：installations 写 `{kind: create:belt, cells: [从一端到另一端]}`；")
-                    .append("cells 里两端写与带子垂直的 `create:shaft`（不能用机壳传动杆），中间不写或写 air；")
+            case BELT -> text.append("- machine_build：installations 写 `{kind: create:belt, offsets: [从一端到另一端]}`；")
+                    .append("两端那两格在 cells 里写与带子垂直的 `create:shaft`（不能用机壳传动杆），中间不写或写 air；")
                     .append("沿东西或南北走，可以上下斜四十五度或竖直，两端距离小于服务器配置（默认 20）。")
                     .append("每段两端都要有和带子走向一致的轴；拐弯分成两段\n");
-            case CHAIN_CONVEYOR -> text.append("- machine_build：installations 写 `{kind: create:chain_conveyor, cells: [台 A, 台 B]}`，")
+            case CHAIN_CONVEYOR -> text.append("- machine_build：installations 写 `{kind: create:chain_conveyor, offsets: [台 A, 台 B]}`，")
                     .append("两台本身写进 cells；相距小于服务器配置（默认 32）、不小于两格半，不能竖直，")
                     .append("高差不超过水平距离；锁链约每 2.5 格一根\n");
             default -> {

@@ -121,6 +121,21 @@ class MachineReviewTest {
     }
 
     @Test
+    void 安装段的roles和offsets一一对应_长度不对报出来_存档读回照旧() {
+        MachineBlueprint blueprint = MachineBlueprints.parse(json("{\"cells\": [{\"offset\": [2, 0, 0], \"block\": \"minecraft:stone\"}],"
+                + " \"installations\": [{\"kind\": \"create:mechanical_arm\","
+                + " \"offsets\": [[0, 0, 0], [2, 0, 0]], \"roles\": [\"arm\", \"take\"]}]}"));
+        assertEquals(List.of("arm", "take"), blueprint.installations().getFirst().roles());
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> MachineBlueprints.parse(json("{\"cells\": [{\"offset\": [2, 0, 0], \"block\": \"minecraft:stone\"}],"
+                + " \"installations\": [{\"kind\": \"create:mechanical_arm\","
+                        + " \"offsets\": [[0, 0, 0], [2, 0, 0]], \"roles\": [\"take\"]}]}")));
+        assertTrue(error.getMessage().contains("roles"), error.getMessage());
+        var stored = MachineBlueprintCodec.installations(blueprint);
+        assertEquals(List.of("arm", "take"), MachineBlueprintCodec.readInstallations(stored).getFirst().roles());
+    }
+
+    @Test
     void air与流体源格换算成清空与倒桶() {
         MachineBlueprint blueprint = MachineBlueprints.parse(json("{\"cells\": ["
                 + "{\"offset\": [0, 0, 0], \"block\": \"minecraft:air\"},"

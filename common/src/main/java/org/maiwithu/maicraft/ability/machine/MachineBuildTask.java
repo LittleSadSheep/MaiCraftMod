@@ -609,7 +609,7 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
     }
 
     private Installation absolute(MachineBlueprint.Segment segment) {
-        return new Installation(segment.kind(), segment.offsets().stream().map(anchor::offset).toList());
+        return new Installation(segment.kind(), segment.offsets().stream().map(anchor::offset).toList(), segment.roles());
     }
 
     private PartCell absolute(MachineBlueprint.Part part) {

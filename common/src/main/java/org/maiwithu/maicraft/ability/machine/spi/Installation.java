@@ -13,12 +13,23 @@ import net.minecraft.core.BlockPos;
  *
  * @param kind  安装段的种类，例如 create:belt、create:chain_conveyor；由机器类型认
  * @param cells 这一段占的格，世界坐标，按从一端到另一端的顺序
+ * @param roles 每一格在这一段里是干什么的，和 cells 一一对应（机械臂的取放点写 take / deposit）；
+ *              用不着的安装段为空表
  */
-public record Installation(String kind, List<BlockPos> cells) {
+public record Installation(String kind, List<BlockPos> cells, List<String> roles) {
 
     public Installation {
         Objects.requireNonNull(kind, "kind");
         cells = cells.stream().map(BlockPos::immutable).toList();
+        roles = List.copyOf(roles);
         if (cells.isEmpty()) throw new IllegalArgumentException("安装段至少要有一格：" + kind);
+        if (!roles.isEmpty() && roles.size() != cells.size()) {
+            throw new IllegalArgumentException("安装段的 roles 要和格一一对应：" + kind);
+        }
+    }
+
+    /** 不分角色的安装段（传送带、链条）。 */
+    public Installation(String kind, List<BlockPos> cells) {
+        this(kind, cells, List.of());
     }
 }

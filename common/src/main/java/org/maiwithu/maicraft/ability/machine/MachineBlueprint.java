@@ -46,11 +46,17 @@ record MachineBlueprint(List<PlannedCell> cells, List<Part> parts, List<Segment>
     }
 
     /** 原生安装段：种类加这一段占的相对格。 */
-    record Segment(String kind, List<BlockPos> offsets) {
+    record Segment(String kind, List<BlockPos> offsets, List<String> roles) {
 
         Segment {
             Objects.requireNonNull(kind, "kind");
             offsets = List.copyOf(offsets);
+            roles = List.copyOf(roles);
+        }
+
+        /** 不分角色的一段。 */
+        Segment(String kind, List<BlockPos> offsets) {
+            this(kind, offsets, List.of());
         }
     }
 

@@ -180,8 +180,8 @@ final class MachineBlueprints {
             try {
                 JsonObject spec = objectAt(array.get(index), "installations[" + index + "]");
                 for (String key : spec.keySet()) {
-                    if (!Set.of("kind", "offsets").contains(key)) {
-                        throw new IllegalArgumentException("不认识的字段 " + key + "；可用：kind, offsets");
+                    if (!Set.of("kind", "offsets", "roles").contains(key)) {
+                        throw new IllegalArgumentException("不认识的字段 " + key + "；可用：kind, offsets, roles");
                     }
                 }
                 if (spec.get("kind") == null || !spec.get("kind").isJsonPrimitive()) {
@@ -199,7 +199,16 @@ final class MachineBlueprints {
                 for (JsonElement one : offsets.getAsJsonArray()) {
                     cells.add(offset(one));
                 }
-                out.add(new MachineBlueprint.Segment(kind, cells));
+                // roles 可选：和 offsets 一一对应，说每一格在这一段里干什么（机械臂的取放点 take / deposit）。
+                List<String> roles = new ArrayList<>();
+                JsonElement rolesJson = spec.get("roles");
+                if (rolesJson != null) {
+                    if (!rolesJson.isJsonArray() || rolesJson.getAsJsonArray().size() != cells.size()) {
+                        throw new IllegalArgumentException("roles 要是和 offsets 一样长的字符串数组");
+                    }
+                    for (JsonElement role : rolesJson.getAsJsonArray()) roles.add(role.getAsString());
+                }
+                out.add(new MachineBlueprint.Segment(kind, cells, roles));
             } catch (IllegalArgumentException invalid) {
                 errors.add(invalid.getMessage());
             }

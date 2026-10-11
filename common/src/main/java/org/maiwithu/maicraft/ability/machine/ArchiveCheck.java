@@ -112,7 +112,7 @@ final class ArchiveCheck {
         List<EntryCheck> out = new ArrayList<>();
         for (MachineBlueprint.Segment segment : archive.blueprint().installations()) {
             Installation absolute = new Installation(segment.kind(),
-                    segment.offsets().stream().map(archive.anchor()::offset).toList());
+                    segment.offsets().stream().map(archive.anchor()::offset).toList(), segment.roles());
             boolean done = services.machineTypes().stream().anyMatch(type -> type.installed(absolute));
             out.add(new EntryCheck(segment.kind(), absolute.cells().getFirst().toShortString() + " → "
                     + absolute.cells().getLast().toShortString(), done));

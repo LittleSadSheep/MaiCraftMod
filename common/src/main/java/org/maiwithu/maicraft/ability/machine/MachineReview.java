@@ -142,7 +142,7 @@ final class MachineReview {
             List<String> refusals = new ArrayList<>();
             for (MachineType type : services.machineTypes()) {
                 Optional<String> problem = type.installationProblem(
-                        new Installation(segment.kind(), segment.offsets()));
+                        new Installation(segment.kind(), segment.offsets(), segment.roles()));
                 if (problem.isEmpty()) {
                     refusals.clear();
                     break;

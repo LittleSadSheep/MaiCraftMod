@@ -38,6 +38,11 @@ final class MachineBlueprintCodec {
             JsonObject json = new JsonObject();
             json.addProperty("kind", segment.kind());
             json.add("offsets", positions(segment.offsets()));
+            if (!segment.roles().isEmpty()) {
+                JsonArray roles = new JsonArray();
+                segment.roles().forEach(roles::add);
+                json.add("roles", roles);
+            }
             out.add(json);
         }
         return out;
@@ -86,7 +91,10 @@ final class MachineBlueprintCodec {
         List<MachineBlueprint.Segment> out = new ArrayList<>();
         for (JsonElement element : array) {
             JsonObject json = element.getAsJsonObject();
-            out.add(new MachineBlueprint.Segment(json.get("kind").getAsString(), readPositions(json.getAsJsonArray("offsets"))));
+            List<String> roles = new ArrayList<>();
+            if (json.has("roles")) json.getAsJsonArray("roles").forEach(role -> roles.add(role.getAsString()));
+            out.add(new MachineBlueprint.Segment(json.get("kind").getAsString(), readPositions(json.getAsJsonArray("offsets")),
+                    roles));
         }
         return out;
     }
