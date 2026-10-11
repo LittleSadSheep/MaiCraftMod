@@ -89,3 +89,6 @@ term 打字机 比喻叫法；这个行为说「逐字打字」，动作类型�
 # 钓鱼与附魔规格定下的说法
 term 附魔预算 不再有预算参数（费用由档位决定）：第 n 档固定扣 n 级 n 个青金石，选档用 tier
 term 就地造台 附近没有附魔台就如实说（NOT_FOUND 写明找过的范围），不会就地造一个；造台是 build 加 obtain 的组合活
+# 照明：v0 的两个入口收成能力 light（operation=area / enable / disable / status），旧工具名不再出现
+term light_area 两个 v0 入口收成了能力 light：区域补光是 operation=area，随行补光是 enable / disable / status
+term auto_light 两个 v0 入口收成了能力 light：区域补光是 operation=area，随行补光是 enable / disable / status

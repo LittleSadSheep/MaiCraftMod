@@ -56,7 +56,9 @@ public final class ParamNames {
             Map.entry("direction", "扇形朝向：forward / backward / left / right / north / south / east / west；探索用，出发时按当时朝向固定"),
             Map.entry("interests", "探索途中留意的东西：地形要素（lava_pool）、结构 ID、方块 ID 或 # 标签、实体类型 ID"),
             Map.entry("angle_degrees", "扇形开口角（度），1..360；配 direction 使用，有方向默认 90"),
-            Map.entry("min_distance", "忽略更近的目标匹配，单位格；有方向默认 16"));
+            Map.entry("min_distance", "忽略更近的目标匹配，单位格；有方向默认 16"),
+            Map.entry("minimum_light", "验收亮度：方块光要达到的等级（1..15）；crops 档默认 9，其余默认 8；随行补光取 1..13"),
+            Map.entry("coverage", "验收范围档：all 全部样本达标 / most 九成达标 / crops 只按作物与耕地验收（全部达标）"));
 
     private ParamNames() {}
 

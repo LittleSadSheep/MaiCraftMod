@@ -61,7 +61,7 @@ class AssemblyTest {
         // 钓鱼与附魔也接上了：钓位几何、咬钩收竿、装料与报价都组合玩家行为层已有的模型。
         assertEquals(Set.of("use", "eat", "equip", "drop", "obtain", "gather", "deposit", "sleep", "design", "build",
                 "machine_inspect", "machine_review", "machine_configure", "machine_run",
-                "machine_build", "machine_connect",
+                "machine_build", "machine_connect", "light",
                 "fight", "follow", "wait", "travel", "find", "explore", "chat", "remember", "sequence", "quest",
                 "fish", "enchant"), registered,
                 "清单里的能力要一个不少地登记上");

@@ -2,8 +2,14 @@
 package org.maiwithu.maicraft.bootstrap;
 
 import com.google.gson.JsonObject;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.item.ItemStack;
+import org.maiwithu.maicraft.behavior.lighting.FollowLighting;
+import org.maiwithu.maicraft.behavior.lighting.LightingWorld;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.acquire.ItemsInUse;
@@ -37,6 +43,7 @@ import org.maiwithu.maicraft.behavior.perception.FakeBlockTags;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.function.Supplier;
 
 /**
@@ -74,6 +81,21 @@ final class OfflineCatalog {
     private static final String SELF_ID = "00000000-0000-0000-0000-000000000000";
 
     private OfflineCatalog() {}
+
+    /** 照明现场替身：永远没加载、没有结实支撑，量光与选灯位都会如实回答做不了。 */
+    private static final class UnloadedWorld implements LightingWorld {
+        @Override public boolean loaded(BlockPos pos) {
+            return false;
+        }
+
+        @Override public BlockState state(BlockPos pos) {
+            return Blocks.AIR.defaultBlockState();
+        }
+
+        @Override public boolean sturdy(BlockPos pos, Direction face) {
+            return false;
+        }
+    }
 
     /** 一份依赖；世界记忆的库文件放在给定的临时目录里。 */
     static AbilityCatalog.Deps deps(Path tempDir) {
@@ -127,6 +149,10 @@ final class OfflineCatalog {
                 new ItemsInUse(LiveCarryReads.itemTags()),
                 new DropConfirmations(),
                 Map.of("create:chain_conveyor", 1),
-                (kind, message) -> { });
+                (kind, message) -> { },
+                // 只读亮度与照明现场离线给"读不到"的替身：能力清单照常登记，真量光在实机验收。
+                pos -> OptionalInt.empty(),
+                new UnloadedWorld(),
+                new FollowLighting());
     }
 }

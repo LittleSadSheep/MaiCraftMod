@@ -178,6 +178,18 @@
         "mode": "controls_player"
       },
       {
+        "ability": "maicraft:light",
+        "summary": "给一片区域补光：量好哪里暗、自己备够火把、把灯插下去、再量一遍直到够亮；或开、关、查随行补光（走路经过暗处顺手插一支）",
+        "parameters": "operation: string = area, radius?: integer, item?: string, coverage: string = all, minimum_light?: integer",
+        "targets": [
+          "here",
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
         "ability": "maicraft:fight",
         "summary": "打指定的目标，或清掉附近一片区域的敌对生物；打得过才打，血见底会先撤",
         "parameters": "entity?: string, radius: integer = 32, count?: integer",
@@ -930,6 +942,69 @@
       "required_mods": [],
       "knowledge": [],
       "doc_resource": "assets/maicraft/abilities/machine_connect.md"
+    },
+    {
+      "ability": "maicraft:light",
+      "summary": "给一片区域补光：量好哪里暗、自己备够火把、把灯插下去、再量一遍直到够亮；或开、关、查随行补光（走路经过暗处顺手插一支）",
+      "parameters": [
+        {
+          "name": "operation",
+          "type": "string",
+          "required": false,
+          "doc": "area 补光一片区域（默认）/ enable 开随行补光 / disable 关 / status 查",
+          "default": "area",
+          "choices": [
+            "area",
+            "enable",
+            "disable",
+            "status"
+          ]
+        },
+        {
+          "name": "radius",
+          "type": "integer",
+          "required": false,
+          "doc": "以 target 为圆心的半径（格）；不给就是照亮整间屋、整条矿道（从 target 走出去连得着的范围）",
+          "min": 1,
+          "max": 32
+        },
+        {
+          "name": "item",
+          "type": "string",
+          "required": false,
+          "doc": "光源物品 ID；不给默认火把。发射量到不了验收亮度的灯不会用"
+        },
+        {
+          "name": "coverage",
+          "type": "string",
+          "required": false,
+          "doc": "all 全部样本达标（默认）/ most 九成达标 / crops 只按作物与耕地验收（全部达标，灯插在田边）",
+          "default": "all",
+          "choices": [
+            "all",
+            "most",
+            "crops"
+          ]
+        },
+        {
+          "name": "minimum_light",
+          "type": "integer",
+          "required": false,
+          "doc": "验收亮度：方块光要达到的等级（1..15）；不给时 all / most 档按 8，crops 档按 9（作物要光照够 9 才长）；随行 enable 取 1..13",
+          "min": 1,
+          "max": 15
+        }
+      ],
+      "targets": [
+        "here",
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/light.md"
     },
     {
       "ability": "maicraft:fight",

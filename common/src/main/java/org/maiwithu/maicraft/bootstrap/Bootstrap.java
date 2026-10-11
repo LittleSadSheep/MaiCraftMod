@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.bootstrap;
 import com.google.gson.JsonObject;
 import java.io.IOException;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.ArrayList;
 import java.util.List;
@@ -39,7 +40,14 @@ import org.maiwithu.maicraft.behavior.acquire.LiveCarryReads;
 import org.maiwithu.maicraft.behavior.landing.EmergencyLanding;
 import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
+import org.maiwithu.maicraft.behavior.lighting.FollowLighting;
+import org.maiwithu.maicraft.behavior.lighting.LightRegion;
+import org.maiwithu.maicraft.behavior.lighting.LiveLightingWorld;
+import org.maiwithu.maicraft.behavior.lighting.LightingWorld;
 import org.maiwithu.maicraft.behavior.survival.BreathNeed;
+import org.maiwithu.maicraft.behavior.survival.DarknessNeed;
+import org.maiwithu.maicraft.behavior.survival.LiveDarkView;
+import org.maiwithu.maicraft.behavior.survival.LiveTorchMoves;
 import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
 import org.maiwithu.maicraft.behavior.survival.DigOutNeed;
 import org.maiwithu.maicraft.behavior.survival.FallNeed;
@@ -82,6 +90,8 @@ import org.maiwithu.maicraft.game.serverlink.ClientOperation;
 import org.maiwithu.maicraft.game.serverlink.LinkTransport;
 import org.maiwithu.maicraft.game.serverlink.ServerLinkSession;
 import org.maiwithu.maicraft.game.world.BlockScanService;
+import org.maiwithu.maicraft.game.world.ClientLightLevels;
+import org.maiwithu.maicraft.game.world.ReadsLightLevels;
 import org.maiwithu.maicraft.behavior.survival.CombatMemory;
 import org.maiwithu.maicraft.behavior.survival.CombatSenses;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
@@ -223,13 +233,15 @@ public final class Bootstrap {
      * 战斗感观由外面递进来，与战斗能力共用一份；走到已接上，撤离与绕行用真的走路完成；
      * 饿了的临时任务吃随身食物：先换到主手，再原生按住吃完一口；有预算地弄吃的还没接。
      * 夜晚的"今晚有没有床"与夜间休息由睡觉能力进世界时接上桥，接上前按弄不到床对待。
+     * 太暗只在两个动作之间插（LATER）：走到暗处、包里有火把，就在眼前顺手插一支火把。
      */
     private static ControlLoop withSurvivalNeeds(
             TaskEventSink events, DeathDecisionHost deathDecisions,
             InteractionSender interactionSender, MenuActions menuActions, Interactions interactions,
             CombatSenses combatSenses, WalkTo walks,
             EatSoonTask.FoodMoves foodMoves, ReadsFoodValues foods, LiveBurrow burrow, LiveCeilingDigs ceilings,
-            NightRestWiring nightWiring, ItemsToKeep keeps) {
+            NightRestWiring nightWiring, ItemsToKeep keeps, Supplier<Protection> protection,
+            FollowLighting followLighting, ReadsLightLevels lightLevels, ClientMovesToMainhand hands) {
         // 角色死亡这类循环自身的处境变化也从同一条事件流出去；死亡决策从挂载口交给目标运行表。
         return new ControlLoop(List.of(
                 new DigOutNeed(new SurvivalSituation.FromPlayer(),
@@ -239,6 +251,8 @@ public final class Bootstrap {
                         BaritoneInternals::landingInProgress),
                 new SelfDefenseNeed(combatSenses, new LiveCombatMoves(walks, interactions.heldProjection()), events),
                 new HungerNeed(new LiveHungerView(foods, keeps), foodMoves, events),
+                new DarknessNeed(new LiveDarkView(lightLevels),
+                        new LiveTorchMoves(interactions, hands, protection, Set.of()), followLighting),
                 new NightfallNeed(new LiveNightView(combatSenses),
                         LiveNightAndEdgeMoves.burrow(burrow, events), nightWiring, nightWiring),
                 new EdgeProximityNeed(new LiveEdgeView(),
@@ -314,6 +328,11 @@ public final class Bootstrap {
         private DefaultMenuActions menuActions;
         private DefaultInteractionSender interactionSender;
         private CombatSenses combatSenses;
+        // 只读亮度读取一份：感知、太暗生存需求与照明量的是同一条游戏事实。
+        private final ReadsLightLevels lightLevels = new ClientLightLevels(() -> playerControl.activeContext().orElse(null));
+        private final LightingWorld lightingWorld = new LiveLightingWorld(() -> playerControl.activeContext().orElse(null));
+        /** 随行补光的会话设置：太暗生存需求与 light 能力共用一份，进世界重置为默认。 */
+        private final FollowLighting followLighting = new FollowLighting();
         /** 夜晚生存需求与睡觉能力之间的晚接：能力进世界登记后接上真实现。 */
         private final NightRestWiring nightWiring = new NightRestWiring();
         private Interactions interactions;
@@ -452,10 +471,12 @@ public final class Bootstrap {
             // 吃随身食物：挑一件能直接吃的，换到主手后原生按住吃完一口。
             // 食物数值一份：饿了挑吃的、数口粮都按游戏的食物组件认。
             ReadsFoodValues foods = PlayerViews.foods(() -> playerControl.activeContext().orElse(null));
+            // 换手一份：吃饭换手与随行插火把换手共用同一套界面搬运。
+            ClientMovesToMainhand hands = new ClientMovesToMainhand(() -> playerControl.activeContext().orElse(null));
             EatsCarriedFood foodMoves = new EatsCarriedFood(
                     PlayerViews.backpack(() -> playerControl.activeContext().orElse(null)),
                     foods,
-                    new ClientMovesToMainhand(() -> playerControl.activeContext().orElse(null)),
+                    hands,
                     useKeyProjection, itemsInUse);
             // 战斗感观一份：生存需求的自卫与战斗能力看的是同一份伤害证据。
             combatMemory = new CombatMemory();
@@ -474,7 +495,7 @@ public final class Bootstrap {
                     protection);
             controlLoop = withSurvivalNeeds(taskEvents, deathDecisions, interactionSender, menuActions, interactions,
                     combatSenses, walks, foodMoves, foods, burrow, new LiveCeilingDigs(diggings, protection),
-                    nightWiring, itemsInUse);
+                    nightWiring, itemsInUse, protection, followLighting, lightLevels, hands);
         }
 
         /**
@@ -572,9 +593,11 @@ public final class Bootstrap {
                 WorldScope scope = new WorldScope(minecraft, playerControl, blockScans, session,
                         subtitles, interactions, useKeyProjection, walks, combatSenses,
                         abilities, interactionSender, menuActions, instanceConfig, furnaceFuels,
-                        compat, nightWiring, loader.configDirectory(), blueprintOverlay, itemsInUse,
-                        dropConfirmations, taskEvents);
+                        compat, nightWiring, loader.configDirectory(), blueprintOverlay, itemsInUse, dropConfirmations,
+                        taskEvents, lightLevels, lightingWorld, followLighting);
                 worldScope[0] = scope;
+                // 随行补光的会话设置回默认：开关与阈值不跨世界残留，仍暗的路线格作废。
+                followLighting.reset();
                 // 换了世界，任务事件流换一条新的，宿主手里的旧游标如实作废；再把这个世界上次没做完的目标
                 // 读回来，全部恢复为暂停，等 LLM 决定接不接着做。读回时的暂停事件进的是新的这条流。
                 taskEvents.restart();

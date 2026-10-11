@@ -39,6 +39,7 @@ import org.maiwithu.maicraft.ability.find.FindModule;
 import org.maiwithu.maicraft.ability.gather.GatherAbility;
 import org.maiwithu.maicraft.ability.gather.LiveSceneTargets;
 import org.maiwithu.maicraft.ability.gather.LiveSpotReads;
+import org.maiwithu.maicraft.ability.light.LightModule;
 import org.maiwithu.maicraft.ability.obtain.ObtainAbility;
 import org.maiwithu.maicraft.ability.quest.QuestModule;
 import org.maiwithu.maicraft.ability.remember.RememberAbility;
@@ -101,6 +102,8 @@ import org.maiwithu.maicraft.behavior.interaction.ClientGameRefusals;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
 import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
+import org.maiwithu.maicraft.behavior.lighting.FollowLighting;
+import org.maiwithu.maicraft.behavior.lighting.LightingWorld;
 import org.maiwithu.maicraft.behavior.inventory.ClientGearChanges;
 import org.maiwithu.maicraft.behavior.interaction.LiveHoldsSneak;
 import org.maiwithu.maicraft.behavior.inventory.ClientDropPickup;
@@ -148,6 +151,7 @@ import org.maiwithu.maicraft.game.player.ClientFishingHookFacts;
 import org.maiwithu.maicraft.game.serverlink.ServerLinkSession;
 import org.maiwithu.maicraft.game.serverlink.SessionServerReads;
 import org.maiwithu.maicraft.game.world.BlockScanService;
+import org.maiwithu.maicraft.game.world.ReadsLightLevels;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -224,7 +228,13 @@ public final class AbilityCatalog {
             /** 每台机器里某种方块最多几个（实例配置）：按蓝图建机器、接网络时数整台。 */
             Map<String, Integer> machineBlockLimits,
             /** 任务事件出口：探索途中的发现从这里告诉宿主。 */
-            TaskEventSink events) {
+            TaskEventSink events,
+            /** 只读亮度读取：感知、生存需求的太暗与照明量的是同一条游戏事实。 */
+            ReadsLightLevels lightLevels,
+            /** 照明看现场的只读视图：一格是什么方块、支撑面结不结实。 */
+            LightingWorld lightingWorld,
+            /** 随行补光的会话设置：太暗需求与 light 能力共用一份，进世界重置为默认。 */
+            FollowLighting followLighting) {
 
         public Deps {
             Objects.requireNonNull(context, "context");
@@ -245,6 +255,9 @@ public final class AbilityCatalog {
             Objects.requireNonNull(itemsInUse, "itemsInUse");
             Objects.requireNonNull(dropConfirmations, "dropConfirmations");
             Objects.requireNonNull(events, "events");
+            Objects.requireNonNull(lightLevels, "lightLevels");
+            Objects.requireNonNull(lightingWorld, "lightingWorld");
+            Objects.requireNonNull(followLighting, "followLighting");
         }
     }
 
@@ -323,6 +336,10 @@ public final class AbilityCatalog {
         registerConstruction(registry, deps, designs, construction);
 
         registerMachineAbilities(registry, deps, designs, shared, construction);
+
+        // 照明：区域补光量光选灯位、放灯交给施工引擎；随行补光的开关接会话设置。
+        registry.register(new LightModule(deps.followLighting(), anchors(deps), deps.characterPosition(),
+                construction, deps.lightLevels(), deps.lightingWorld(), deps.backpack(), deps.offhand()));
 
         registerStandalone(registry, deps, shared, construction);
         return registry;
