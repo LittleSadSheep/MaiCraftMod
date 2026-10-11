@@ -86,7 +86,10 @@ final class CreateMachineType implements MachineType {
         if (!compat.kinetic(here)) {
             return CreateReadings.still(shown, "");
         }
-        return CreateReadings.kinetic(compat.kineticReading(level, at), compat.minimumSpeed(here), shown);
+        MachineState kinetic = CreateReadings.kinetic(compat.kineticReading(level, at), compat.minimumSpeed(here), shown);
+        // 机械手：手里拿着什么、什么模式并进读数，配方要它手里拿着东西时看这一项。
+        return kind.work() == CreateMachineCatalog.Work.DEPLOYER
+                ? DeployerSettings.withReading(kinetic, compat.deployer(level, at)) : kinetic;
     }
 
     // 应力：每转吃多少、给多少都读 Create 的应力表；两样都是 0 的（置物台、漏斗）不算在应力网上。
@@ -128,12 +131,17 @@ final class CreateMachineType implements MachineType {
         return false;
     }
 
+    // 能改的设置：机械手手里拿什么与模式；别的机器暂时没有可改的。
     @Override public List<MachineSetting> settings(BlockPos at) {
-        return List.of();
+        ClientLevel level = level();
+        if (level == null || kind.work() != CreateMachineCatalog.Work.DEPLOYER) return List.of();
+        return DeployerSettings.of(compat.deployer(level, at));
     }
 
     @Override public Optional<Action> change(BlockPos at, String key, String value, Permissions permissions) {
-        return Optional.empty();
+        ClientLevel level = level();
+        if (level == null || kind.work() != CreateMachineCatalog.Work.DEPLOYER) return Optional.empty();
+        return stations.changeDeployer(level.getBlockState(at), at, key, value, permissions);
     }
 
     @Override public Optional<Action> feed(BlockPos at, String itemId, int count, Permissions permissions) {

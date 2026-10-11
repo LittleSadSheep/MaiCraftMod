@@ -194,6 +194,7 @@ class CreateCompatTest {
                 return Optional.empty();
             }
             @Override public Optional<StockSnapshot> stock(ClientLevel level, BlockPos at) { return Optional.empty(); }
+            @Override public Optional<DeployerReading> deployer(ClientLevel level, BlockPos at) { return Optional.empty(); }
         };
         CreateTools tools = new CreateTools() {
             @Override public boolean wrenchable(BlockState state) { return false; }

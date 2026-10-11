@@ -168,4 +168,9 @@ public final class CreateCompat extends CompatModule {
     public Optional<CreateStations.StockSnapshot> stock(ClientLevel level, BlockPos at) {
         return call("读库存请求器的现货", () -> stations.stock(level, at));
     }
+
+    /** 机械手手里拿着什么与模式；见 {@link CreateStations#deployer}。 */
+    public Optional<CreateStations.DeployerReading> deployer(ClientLevel level, BlockPos at) {
+        return call("读机械手", () -> stations.deployer(level, at));
+    }
 }

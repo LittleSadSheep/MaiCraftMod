@@ -12,6 +12,8 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
@@ -19,6 +21,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
+import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkSummary;
 
 /** 动力读数翻成运行状态、应力网汇总、加工处在哪：纯函数。 */
@@ -101,6 +104,25 @@ class CreateReadingsTest {
                 Blocks.STONE.defaultBlockState(), at, Set.of(), false);
         assertEquals(Direction.UP, depot.getFirst().side());
         assertEquals(ExchangePoint.Flow.BOTH, depot.getFirst().flow());
+    }
+
+    @Test
+    void 机械手的两项设置_手里拿着的与模式_点击框只在前端那一截() {
+        CreateStations.DeployerReading holding = new CreateStations.DeployerReading(
+                new ItemStack(Items.ANDESITE, 12), "use");
+        List<MachineSetting> settings = DeployerSettings.of(Optional.of(holding));
+        assertEquals("minecraft:andesite", settings.get(0).value());
+        assertEquals("use", settings.get(1).value());
+        assertEquals("empty", DeployerSettings.heldValue(ItemStack.EMPTY));
+        assertTrue(DeployerSettings.of(Optional.empty()).isEmpty(), "读不到机械手就没有设置项");
+        // 朝下的机械手：前端是底面往上 0.2 格那一片。
+        BlockPos at = new BlockPos(0, 70, 0);
+        var front = DeployerSettings.front(at, Direction.DOWN);
+        assertEquals(70.0, front.minY, 1e-9);
+        assertEquals(70.2, front.maxY, 1e-9);
+        var state = DeployerSettings.withReading(MachineState.unknown(""), Optional.of(holding));
+        assertEquals("minecraft:andesite ×12", state.readings().get("held"));
+        assertEquals("use", state.readings().get("mode"));
     }
 
     @Test

@@ -26,6 +26,7 @@ import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
@@ -171,6 +172,49 @@ final class StationHandling {
                 ? "库存请求器还没读到现货：打开它的界面会向物流网络要一份"
                 : "上次读到的现货，" + snapshot.get().ticksSinceUpdate() / 20 + " 秒前";
         return CreateReadings.still(shown, note);
+    }
+
+    /**
+     * 改机械手一项设置的动作：手里拿什么是手持那样东西（或空着手）右键它前端那一截，模式是拿扳手右键前端那一截；
+     * 前端以外点下去不是交换、扳手是转方向，所以只点前端。键不认、值不合给空；身上没有要给它的东西时按缺东西失败。
+     */
+    Optional<Action> changeDeployer(BlockState state, BlockPos at, String key, String value, Permissions permissions) {
+        Optional<Direction> face = facing(state);
+        if (face.isEmpty()) return Optional.empty();
+        AABB front = DeployerSettings.front(at, face.get());
+        if (key.equals(DeployerSettings.HELD)) {
+            boolean empty = value.equals(DeployerSettings.EMPTY);
+            return Optional.of(new HandThenClick(services, "把机械手手里换成 " + value, at, front, permissions,
+                    () -> empty ? (mainhandEmpty() ? Optional.empty() : services.toMainhand().emptyMainhand())
+                            : holding(value) ? Optional.empty()
+                            : services.toMainhand().moveToMainhand(value).or(() -> Optional.of(needItem(value))),
+                    () -> context -> compat.deployer(context.level(), at)
+                            .filter(reading -> DeployerSettings.heldValue(reading.held()).equals(value)).isPresent()
+                            ? InteractionConfirmation.Verdict.APPLIED : InteractionConfirmation.Verdict.PENDING));
+        }
+        if (key.equals(DeployerSettings.MODE) && (value.equals("use") || value.equals("punch"))) {
+            return Optional.of(new HandThenClick(services, "用扳手把机械手换成 " + value, at, front, permissions,
+                    () -> holding(DeployerSettings.WRENCH) ? Optional.empty()
+                            : services.toMainhand().moveToMainhand(DeployerSettings.WRENCH)
+                                    .or(() -> Optional.of(needItem(DeployerSettings.WRENCH))),
+                    () -> context -> compat.deployer(context.level(), at)
+                            .filter(reading -> reading.mode().equals(value)).isPresent()
+                            ? InteractionConfirmation.Verdict.APPLIED : InteractionConfirmation.Verdict.PENDING));
+        }
+        return Optional.empty();
+    }
+
+    // 身上没有这样东西：换手这一步直接按缺东西失败，不拿着别的东西去点。
+    private static Action needItem(String itemId) {
+        return new Action() {
+            @Override public ActionStatus tick(TickContext context) {
+                return ActionStatus.failed(Problem.of(Problem.Kind.NEED_ITEM, "身上没有 " + itemId));
+            }
+
+            @Override public String describe() {
+                return "身上没有 " + itemId;
+            }
+        };
     }
 
     // 加工处的那一格放着置物台时它就是投料口与出口；置物台自己就是自己。

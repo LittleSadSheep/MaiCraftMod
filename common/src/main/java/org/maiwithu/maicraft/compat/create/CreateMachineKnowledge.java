@@ -146,6 +146,8 @@ final class CreateMachineKnowledge implements KnowledgeSource {
                     .append("料放到那台置物台上，产物从置物台空手收回")
                     .append(switch (kind.work()) {
                         case PRESS -> "；加工处是工作盆时站到盆边把料扔进去（压块）\n";
+                        case DEPLOYER -> "；要它手里拿着东西（涂抹、序列组装）用 machine_configure 的 deployer.held 写物品 ID，"
+                                + "deployer.mode 写 use 或 punch（拿扳手点它前端换）；machine_inspect 读得出它手里拿着什么\n";
                         // 风会把扔进去的东西一路吹走，落点不在一格里：machine_run 不往风里扔，只用风里的置物台。
                         case FAN -> "；鼓风机的置物台放在风里、水岩浆或火的后面（沿风向往前六格以内），"
                                 + "风里没有置物台时 machine_run 不投料\n";
