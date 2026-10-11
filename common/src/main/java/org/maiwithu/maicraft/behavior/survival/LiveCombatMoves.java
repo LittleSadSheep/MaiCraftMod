@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.survival;
 
+import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
 
@@ -21,9 +22,12 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 public final class LiveCombatMoves implements SelfDefenseTask.CombatMoves {
 
     private final WalkTo walks;
+    /** 射箭、举盾、看身上有没有弓和剑斧：和点名战斗共用一份。 */
+    private final LiveCombatHands hands;
 
-    public LiveCombatMoves(WalkTo walks) {
+    public LiveCombatMoves(WalkTo walks, UseKeyProjection projection) {
         this.walks = walks;
+        this.hands = new LiveCombatHands(projection);
     }
 
     @Override
@@ -41,6 +45,37 @@ public final class LiveCombatMoves implements SelfDefenseTask.CombatMoves {
     public void step(TickContext context, int entityId, float forward) {
         // 面朝它往前凑或往后退一刻；那一步脚下没路就站住。
         CombatStepping.step(context, entityId, forward);
+    }
+
+    @Override
+    public Action shoot(TickContext context, int entityId) {
+        return hands.shoot(entityId);
+    }
+
+    @Override
+    public boolean canShoot(TickContext context) {
+        return hands.canShoot(context);
+    }
+
+    @Override
+    public boolean hasMeleeWeapon(TickContext context) {
+        return hands.hasMeleeWeapon(context);
+    }
+
+    @Override
+    public boolean attackReady(TickContext context) {
+        return hands.attackReady(context);
+    }
+
+    @Override
+    public CloseCombat.Ring ring(TickContext context, int entityId) {
+        return hands.ring(context, entityId);
+    }
+
+    @Override
+    public void guard(TickContext context, int entityId, double distance, boolean aboutToStrike) {
+        // 对手近、自己还没到出手的时候举盾，要挥了先放下；副手空着、对手还远就先把盾装上。
+        hands.guard(context, distance, aboutToStrike);
     }
 
     @Override

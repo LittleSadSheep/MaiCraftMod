@@ -11,7 +11,10 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.phys.AABB;
 
+import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
+import org.maiwithu.maicraft.behavior.survival.CloseCombat;
 import org.maiwithu.maicraft.behavior.survival.CombatStepping;
+import org.maiwithu.maicraft.behavior.survival.LiveCombatHands;
 import org.maiwithu.maicraft.behavior.survival.MeleeStrike;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
@@ -35,9 +38,13 @@ public final class LiveFightMoves implements FightMoves {
     /** 掉落物的事实确认：拾荒按服务器的拾取包认东西进没进包。 */
     private final DropConfirmations confirmations;
 
-    public LiveFightMoves(WalkTo walks, DropConfirmations confirmations) {
+    /** 射箭、举盾、看身上有没有弓和剑斧：和自卫共用一份。 */
+    private final LiveCombatHands hands;
+
+    public LiveFightMoves(WalkTo walks, DropConfirmations confirmations, UseKeyProjection projection) {
         this.walks = walks;
         this.confirmations = confirmations;
+        this.hands = new LiveCombatHands(projection);
     }
 
     @Override
@@ -55,6 +62,37 @@ public final class LiveFightMoves implements FightMoves {
     public void step(TickContext context, int entityId, float forward) {
         // 面朝它往前凑或往后退一刻；那一步脚下没路就站住。和自卫同一套走位。
         CombatStepping.step(context, entityId, forward);
+    }
+
+    @Override
+    public Action shoot(TickContext context, int entityId) {
+        return hands.shoot(entityId);
+    }
+
+    @Override
+    public boolean canShoot(TickContext context) {
+        return hands.canShoot(context);
+    }
+
+    @Override
+    public boolean hasMeleeWeapon(TickContext context) {
+        return hands.hasMeleeWeapon(context);
+    }
+
+    @Override
+    public boolean attackReady(TickContext context) {
+        return hands.attackReady(context);
+    }
+
+    @Override
+    public CloseCombat.Ring ring(TickContext context, int entityId) {
+        // 打玩家按出刀节拍走位：充能好了凑进去出手，没好就退到它够不着的地方。
+        return hands.ring(context, entityId);
+    }
+
+    @Override
+    public void guard(TickContext context, int entityId, double distance, boolean aboutToStrike) {
+        hands.guard(context, distance, aboutToStrike);
     }
 
     @Override

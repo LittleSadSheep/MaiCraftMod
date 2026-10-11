@@ -23,6 +23,11 @@ public final class Interactions {
      *                       启动接线完成前可以传 null，此时持续使用仍能做，只是原版
      *       可能在确认期间看到松键，吃不完一块面包。
      */
+    /** 按住使用键的投影：拉弓、举盾这类自己逐刻续按的动作也用这一份。 */
+    public UseKeyProjection heldProjection() {
+        return heldProjection;
+    }
+
     public Interactions(UseKeyProjection heldProjection) {
         this.heldProjection = heldProjection;
     }

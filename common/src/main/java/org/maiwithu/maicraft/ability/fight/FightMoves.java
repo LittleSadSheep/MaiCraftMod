@@ -3,7 +3,7 @@ package org.maiwithu.maicraft.ability.fight;
 
 import java.util.List;
 
-import org.maiwithu.maicraft.behavior.survival.CloseCombat;
+import org.maiwithu.maicraft.behavior.survival.RangedCombat;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
@@ -12,7 +12,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  *
  * <p>任务负责挑目标、挑时机与结算，动手交给行为模型；生产实现是原生攻击与走到，测试换替身。
  */
-interface FightMoves extends CloseCombat.Moves {
+interface FightMoves extends RangedCombat.Moves {
 
     /** 对这只生物出手一次：先把挑好的近战武器拿到主手，再原生攻击（充能够格才挥、逐刻确认）。 */
     @Override

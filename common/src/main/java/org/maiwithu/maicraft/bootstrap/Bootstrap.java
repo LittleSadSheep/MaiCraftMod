@@ -237,7 +237,7 @@ public final class Bootstrap {
                 new BreathNeed(new SurvivalSituation.FromPlayer(), ceilings, new LiveAirRoutes()),
                 new FallNeed(new SurvivalSituation.FromPlayer(), EmergencyLanding::findToSaveLife,
                         BaritoneInternals::landingInProgress),
-                new SelfDefenseNeed(combatSenses, new LiveCombatMoves(walks), events),
+                new SelfDefenseNeed(combatSenses, new LiveCombatMoves(walks, interactions.heldProjection()), events),
                 new HungerNeed(new LiveHungerView(foods, keeps), foodMoves, events),
                 new NightfallNeed(new LiveNightView(combatSenses),
                         LiveNightAndEdgeMoves.burrow(burrow, events), nightWiring, nightWiring),

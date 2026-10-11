@@ -427,7 +427,7 @@ public final class AbilityCatalog {
             PlayerServices services) {
         // 战斗：感观与生存需求共用一份，观察编号与动手都接在真实客户端上。
         registry.register(new FightModule(deps.senses(),
-                new LiveSeenTargets(deps.scene().seen()), new LiveFightMoves(deps.walks(), deps.dropConfirmations()), permission));
+                new LiveSeenTargets(deps.scene().seen()), new LiveFightMoves(deps.walks(), deps.dropConfirmations(), deps.useKeyProjection()), permission));
 
         // 跟随：常驻任务，目标从场景的观察编号找。
         registry.register(new FollowModule(deps.walks(), new LiveFollowView(deps.scene().seen())));

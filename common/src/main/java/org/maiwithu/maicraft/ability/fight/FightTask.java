@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.behavior.survival.BlastAvoidance;
 import org.maiwithu.maicraft.behavior.survival.CombatSenses;
 import org.maiwithu.maicraft.behavior.survival.ThreatAssessment;
 import org.maiwithu.maicraft.behavior.survival.CloseCombat;
+import org.maiwithu.maicraft.behavior.survival.RangedCombat;
 import org.maiwithu.maicraft.behavior.survival.WeaponChoice;
 import org.maiwithu.maicraft.kernel.interrupt.ThreatResponder;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
@@ -75,6 +76,12 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     private String weaponUsed = "空手";
     /** 近身的走位环与出手：够得着就挥，凑近、后退和挥互不排斥。 */
     private final CloseCombat closeCombat = new CloseCombat();
+    /** 用弓弩打：八到十二格的走位带，边拉边走。 */
+    private final RangedCombat ranged = new RangedCombat();
+    /** 走不到跟前的那一只（逼近的寻路失败了）：有弓就改射它。 */
+    private int unreachable = -1;
+    /** 上一次推进的动作是不是失败收场的。 */
+    private boolean lastStepFailed;
     /** 打斗中盯住的目标；死亡或消失后换下一个。 */
     private Tracked engaged;
     /** 最后一个目标倒下的位置：拾荒以它为中心。 */
@@ -202,6 +209,10 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         }
         engaged = target;
         double distance = target.distance;
+        // 能射就射：没有剑斧、对手是会炸的、走不到跟前、或离得远（七格外换弓），按弓的走位带打——
+        // 点着引信、在 7 格外的苦力怕也能射，不用干等它熄。
+        if (shootsAt(context, target)) return shoot(context, target);
+        ranged.close();
         // 点着引信但在 7 格外的会炸物：不凑上去（凑近它接着膨胀），原地等它熄了再打。
         if (armedExplosive(context, target.entityId)) {
             dropCurrent();
@@ -229,6 +240,8 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
                 return moves.walkTo(target.x, target.y, target.z);
             });
             stepCurrent(context, "逼近 " + target.type);
+            // 逼近的寻路失败了：走不到它跟前（悬崖上、隔着水），有弓下一刻就改射。
+            if (lastStepFailed) unreachable = target.entityId;
             return Next.stay();
         }
         keep("攻击 " + target.entityId, () -> moves.strike(context, target.entityId));
@@ -529,6 +542,7 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
             return;
         }
         ActionStatus status = current.tick(context);
+        lastStepFailed = status instanceof ActionStatus.Failed;
         if (status instanceof ActionStatus.Done || status instanceof ActionStatus.Failed) {
             if (status instanceof ActionStatus.Failed failed) {
                 recordProgress(what + "没成：" + failed.problem().message());
@@ -571,8 +585,11 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
 
         @Override
         public void close() {
-            // 换阶段或任务结束时基类收尾外壳：当前动作一并收尾放下，换阶段后不会沿用已收尾的动作。
+            // 换阶段或任务结束时基类收尾外壳：当前动作一并收尾放下，换阶段后不会沿用已收尾的动作；
+            // 拉了一半的弓取消（切槽，不放箭），近身的出手收尾。
             dropCurrent();
+            closeCombat.close();
+            ranged.close();
         }
 
         @Override
@@ -600,6 +617,36 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         SeenTargets.Observed observed = seenTargets.observe(context, target.entityId);
         return observed != null && observed.visible() && target.distance <= CloseCombat.CLOSE_RANGE
                 && Math.abs(target.y - self[1]) <= 1.5;
+    }
+
+    // 用弓打这一刻：近身的出手收起来，推进手上这一箭并按弓的走位带走位；射出去记一笔，倒下了记击败。
+    private Next<Phase> shoot(TickContext context, Tracked target) {
+        dropCurrent();
+        closeCombat.close();
+        if (ranged.tick(context, moves, target.entityId, target.distance, false)) {
+            recordProgress("朝 " + target.type + " 射了一箭");
+        }
+        weaponUsed = moves.mainHand(context);
+        noteIfDefeated(target);
+        return Next.stay();
+    }
+
+    // 用不用弓：看得见、二十格内，按弓与近战的取舍该射；连着射不出去就交回近战。
+    private boolean shootsAt(TickContext context, Tracked target) {
+        if (ranged.givenUp() || target.distance > RangedCombat.ENGAGE_RANGE) return false;
+        SeenTargets.Observed observed = seenTargets.observe(context, target.entityId);
+        if (observed == null || !observed.visible()) return false;
+        return RangedCombat.preferBow(moves.canShoot(context), moves.hasMeleeWeapon(context),
+                explosive(context, target.entityId), unreachable == target.entityId, target.distance,
+                ranged.shooting());
+    }
+
+    // 这只是不是会炸的（苦力怕）：能射就别凑近。
+    private boolean explosive(TickContext context, int entityId) {
+        for (CombatSenses.Threat threat : senses.threats(context, RangedCombat.ENGAGE_RANGE)) {
+            if (threat.entityId() == entityId) return threat.kind() == ThreatAssessment.Kind.EXPLOSIVE;
+        }
+        return false;
     }
 
     // 打着打着它倒下了：记一笔击败，就地拾荒用它倒下的地方。

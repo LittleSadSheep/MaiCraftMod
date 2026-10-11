@@ -86,8 +86,8 @@ public final class LiveCombatSenses implements CombatSenses {
                 foodCount += stack.count();
             }
         }
-        // 打不打得过按真会拿来打的那件算：近战挑剑斧里最好的。
-        Optional<WeaponChoice.Picked> weapon = Optional.of(WeaponChoice.pickMelee(carried, false));
+        // 打不打得过按真会拿来打的那件算：有弓有箭、有弩就算上远程（战斗里真的会拿来射），否则是剑斧里最好的。
+        Optional<WeaponChoice.Picked> weapon = WeaponChoice.pick(carried, hasArrows, false);
         return new CombatProfile(self.getHealth(), self.getArmorValue(), weapon, foodCount);
     }
 

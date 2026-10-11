@@ -57,7 +57,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
      * 出手与走位怎么落地：任务负责挑目标与时机，动手交给行为模型。
      * 生产实现是原生攻击与走到；离线测试换替身记录调用。
      */
-    interface CombatMoves extends CloseCombat.Moves {
+    interface CombatMoves extends RangedCombat.Moves {
         /** 对这只生物出手一次：先把最好的近战武器拿到主手，再原生攻击（逐刻确认）。 */
         @Override
         Action strike(TickContext context, int entityId);
@@ -119,6 +119,8 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
     private final Driver driver = new Driver();
     /** 近身的走位环与出手：够得着就挥，凑近、后退和挥互不排斥。 */
     private final CloseCombat close = new CloseCombat();
+    /** 用弓弩打：八到十二格的走位带，边拉边走。 */
+    private final RangedCombat ranged = new RangedCombat();
     /** 认准的那一只：还在威胁、还能打就一直打它。 */
     private int lockedTarget = -1;
 
@@ -176,6 +178,13 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
             recordProgress("敌人在追击圈外，守在打点附近");
             return Next.stay();
         }
+        // 能射就射：没有剑斧、对手是会炸的、或离得远（七格外换弓、贴近到四格半才换回），按弓的走位带打。
+        if (shootsAt(context, target)) {
+            dropCurrent();
+            close.close();
+            return accountStrike(ranged.tick(context, moves, target.entityId(), target.distance(), false), target);
+        }
+        ranged.close();
         // 近处看得见、差不多同一层：按走位环打（够得着就挥、凑近或后退），不交给寻路。
         if (closeRange(context, target)) {
             dropCurrent();
@@ -231,6 +240,13 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         }
         lockedTarget = first == null ? -1 : first.entityId();
         return first;
+    }
+
+    // 用不用弓：看得见、二十格内，按弓与近战的取舍该射；连着射不出去就交回近战。
+    private boolean shootsAt(TickContext context, Tracked target) {
+        if (ranged.givenUp() || !target.visible() || target.distance() > RangedCombat.ENGAGE_RANGE) return false;
+        return RangedCombat.preferBow(moves.canShoot(context), moves.hasMeleeWeapon(context),
+                target.foe().kind() == ThreatAssessment.Kind.EXPLOSIVE, false, target.distance(), ranged.shooting());
     }
 
     // 近身：几格内、看得见、上下差不到一格半——够得着走位环；隔着墙、在高处低处的交给寻路绕过去。
@@ -503,6 +519,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
             // 换阶段或任务结束时基类收尾外壳：当前动作一并收尾放下，换阶段后不会沿用已收尾的动作。
             dropCurrent();
             SelfDefenseTask.this.close.close();
+            ranged.close();
         }
 
         @Override
