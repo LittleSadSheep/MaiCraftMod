@@ -71,6 +71,28 @@ class MemoryRecordTest {
     }
 
     @Test
+    void 远望的线索到了之后升级成到访_不降级也不重写() {
+        var seen = new MemoryRecord(MemoryKind.SITE, POS, null,
+                List.of("minecraft:village_plains"), MemoryOrigin.SEEN, EARLIER);
+        var visited = new MemoryRecord(MemoryKind.SITE, POS, null,
+                List.of("minecraft:village_plains"), MemoryOrigin.VISITED, LATER);
+        var merged = seen.mergedWith(visited);
+        assertSame(MemoryOrigin.VISITED, merged.origin());
+        assertEquals(List.of("minecraft:village_plains"), merged.contents());
+        // 升级之后只远望了一眼，不会退回去。
+        assertSame(MemoryOrigin.VISITED, visited.mergedWith(seen).origin());
+    }
+
+    @Test
+    void 到访的群系不因后来远望一眼退回远望() {
+        var visited = new MemoryRecord(MemoryKind.SITE, POS, null,
+                List.of("minecraft:plains"), MemoryOrigin.VISITED, EARLIER);
+        var seenAgain = new MemoryRecord(MemoryKind.SITE, POS, null,
+                List.of("minecraft:plains"), MemoryOrigin.SEEN, LATER);
+        assertSame(MemoryOrigin.VISITED, visited.mergedWith(seenAgain).origin());
+    }
+
+    @Test
     void 超过时限的记忆算旧_时限内不算() {
         var record = new MemoryRecord(MemoryKind.SITE, POS, null,
                 List.of("minecraft:iron_ore"), MemoryOrigin.SEEN, EARLIER);

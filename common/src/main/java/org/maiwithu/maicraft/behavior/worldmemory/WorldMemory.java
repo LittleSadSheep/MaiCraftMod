@@ -18,7 +18,7 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 
 /**
- * 世界记忆：角色记得自己亲眼看到过、亲手用过的东西——箱子在哪、里面大概有什么、
+ * 世界记忆：角色记得自己看过、到过、用过的东西——箱子在哪、里面大概有什么、
  * 在哪用过工作台、哪里大概有什么。给得出"哪里大概有什么"，给不出"现在一定有什么"。
  *
  * <p>使用纪律写在查询与写入的分工里：这里存的是记忆不是事实，记忆可能过时，
@@ -115,6 +115,15 @@ public final class WorldMemory implements RemembersPlaces, RemembersRegions, Rem
     /** 记一条产地线索：在这附近见过什么，例如路过时看到这一片有煤矿。只有大概位置，到现场要再找。 */
     public void rememberSite(WorldPosition position, List<String> roughlyThere, Instant when) {
         upsert(new MemoryRecord(MemoryKind.SITE, position, null, roughlyThere, MemoryOrigin.SEEN, when));
+    }
+
+    /**
+     * 记一条到访核实过的产地线索：身体到过这一片并核实了脚下是什么（跑图走到群系里、
+     * 站上平台、走到东西跟前）。位置与内容与远望线索同一条纪律，来源标到访；
+     * 同一个位置先记过远望的，合并后升级成到访，不会退回去。
+     */
+    public void rememberSiteVisited(WorldPosition position, List<String> roughlyThere, Instant when) {
+        upsert(new MemoryRecord(MemoryKind.SITE, position, null, roughlyThere, MemoryOrigin.VISITED, when));
     }
 
     /** 记下一块自己垫的临时方块：放下并确认后记，收回后用 forget 抹掉。内容只有一项，是垫它的用途（例如"施工"），

@@ -17,7 +17,7 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
  * @param blockType  方块类型，例如 minecraft:chest；产地线索没有对应方块，为 null
  * @param contents   打开时看到的东西（物品 ID 列表）；null 表示从没确认过里面有什么，
  *                   空列表表示确认过就是空的。两者不能混：没开过的箱子不等于空箱子
- * @param origin     这条记忆怎么得来的（亲眼看到 / 亲手用过）
+ * @param origin     这条记忆怎么得来的（远望看到 / 到访核实 / 亲手用过）
  * @param recordedAt 什么时候记下的
  */
 public record MemoryRecord(MemoryKind kind, WorldPosition position, String blockType,
@@ -58,7 +58,7 @@ public record MemoryRecord(MemoryKind kind, WorldPosition position, String block
      * 把一次新的观察合并进这条旧记忆，得到更新后的记忆；同一位置同一类东西只留这一条。
      *
      * <p>合并规则（触发条件：同一个位置、同一个种类又记了一条）：
-     * 记录时刻取新的；来源取更强的（亲手用过不会退回亲眼看到）；
+     * 记录时刻取新的；来源取更强的（远望到了升级成到访，到访与亲手用过也不会退回去）；
      * 这次确认过的内容覆盖旧的，这次没确认过（contents 为 null）就保留旧内容——
      * 路过又看了一眼不算打开过，不能把当初开箱看到的清单抹掉。
      */
