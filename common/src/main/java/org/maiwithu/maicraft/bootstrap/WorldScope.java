@@ -9,6 +9,7 @@ import java.util.Set;
 import java.util.function.Supplier;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
 import net.minecraft.client.player.LocalPlayer;
 
 import org.maiwithu.maicraft.behavior.construction.ShowsPreview;
@@ -18,7 +19,7 @@ import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
 import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 import org.maiwithu.maicraft.behavior.permission.ClientCreatureSituations;
-import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
+import org.maiwithu.maicraft.behavior.permission.LivePlayerMadeGuesses;
 import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationProtection;
 import org.maiwithu.maicraft.behavior.permission.OwnershipMap;
 import org.maiwithu.maicraft.behavior.permission.Protection;
@@ -123,15 +124,20 @@ public final class WorldScope {
         this.kinds = new FacilityKinds(new RegistryBlockTags());
         this.scene = new Scene(memory, kinds);
         // 保护判断：归属记录按区块问服务端（还没问到的按受保护处理），区域读每刻抄一份的快照，地标问世界记忆；
-        // 玩家放置推断没有接。
         this.ownership = new OwnershipMap(session);
         this.regions = new RegionsSnapshot(memory);
         this.regions.refresh();
         // 自家人：所有者在实例配置里列的信任玩家；名单写名字的，按在线玩家对上编号。
         TrustedPlayers trusted = new TrustedPlayers(instanceConfig.trustedPlayers(),
                 name -> OnlinePlayers.idByName(minecraft, name));
+        // 玩家放置推断按方块本身认：门、活板门、栅栏门这类归属记录查不到的，也按玩家的东西对待。
+        // 读不到当刻的现场（还没进世界、人接管中）就不猜，保护判断按其余几路走。
         this.protection = new Protection(ownership, regions, memory,
-                GuessesPlayerMade.NOTHING, minecraft.player.getUUID().toString(), trusted);
+                new LivePlayerMadeGuesses(position -> playerControl.activeContext()
+                        .map(context -> context.level() == null ? null
+                                : context.level().getBlockState(new BlockPos(position.x(), position.y(), position.z())))
+                        .orElse(null)),
+                minecraft.player.getUUID().toString(), trusted);
         this.dimension = minecraft.level.dimension().location().toString();
         // 寻路挖路、垫路也过这一份保护判断：不挖穿别人的房子，归属拿不准的格子不动。
         NavigationProtection.installWorldRule((x, y, z) ->
