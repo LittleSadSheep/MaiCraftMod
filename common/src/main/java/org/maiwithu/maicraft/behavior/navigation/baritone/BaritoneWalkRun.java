@@ -474,7 +474,7 @@ final class BaritoneWalkRun implements WalkRun {
             engine.getInputOverrideHandler().clearAllKeys();
         }
         context.input().applyNavigationMovement(PlayerInput.Movement.STOPPED, context.clientTick());
-        ActionStatus status = scaffoldMove.tick(tickOf(context));
+        ActionStatus status = scaffoldMove.tick(TickContext.of(context.level().getGameTime(), context));
         if (status instanceof ActionStatus.Running) return true;
         scaffoldMove = null;
         // 开背包挪料这几刻站着不动是正常的，不算进"长时间没有进展"。
@@ -500,21 +500,6 @@ final class BaritoneWalkRun implements WalkRun {
             }
         }
         return false;
-    }
-
-    // 换手动作要的本刻上下文：只在这一刻用，不留到下一刻。
-    private static TickContext tickOf(PlayerContext context) {
-        return new TickContext() {
-            @Override
-            public long gameTick() {
-                return context.level().getGameTime();
-            }
-
-            @Override
-            public PlayerContext player() {
-                return context;
-            }
-        };
     }
 
     /**

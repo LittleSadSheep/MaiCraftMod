@@ -27,14 +27,14 @@ public final class LandingGeometry {
      * 放好这一种之后人能不能安全落在落点：黏液块、干草把落脚面抬高一格，身体也跟着抬高一格查；
      * 水还要水面高过脚下的碰撞面（满格的上半砖、台阶里灌水，水面比脚低，清不了摔落）。
      *
-     * @param forbiddenBody 身体不许进的格子
+     * @param noEntryCells 身体不许进的格子
      */
     public static boolean safe(BlockGetter world, Predicate<BlockPos> loaded, LandingPlan plan,
-                               double width, double height, LongSet forbiddenBody) {
+                               double width, double height, LongSet noEntryCells) {
         boolean raisedSupport = plan.aid().raisesSupport() && !plan.existing();
         BlockPos physicalFeet = raisedSupport ? plan.feet().above() : plan.feet();
         BlockGetter afterwards = new Imagined(world, plan, raisedSupport);
-        var destination = TransportLanding.inspect(afterwards, loaded, physicalFeet, width, height, forbiddenBody)
+        var destination = TransportLanding.inspect(afterwards, loaded, physicalFeet, width, height, noEntryCells)
                 .destination();
         if (destination == null) return false;
         if (plan.aid() == LandingAid.WATER && plan.cell().getY() < plan.feet().getY()) {
@@ -46,10 +46,10 @@ public final class LandingGeometry {
 
     /** 收回自己放的之后还站不站得住：把那一格当成没放过（水排掉、方块拿走）再查一遍。 */
     public static boolean safeAfterRemoval(BlockGetter world, Predicate<BlockPos> loaded, LandingPlan plan,
-                                           double width, double height, LongSet forbiddenBody) {
+                                           double width, double height, LongSet noEntryCells) {
         var withoutAid = new LandingPlan(LandingAid.WATER, plan.feet(), plan.cell(), plan.clicked(), plan.face(),
                 false);
-        return safe(world, loaded, withoutAid, width, height, forbiddenBody);
+        return safe(world, loaded, withoutAid, width, height, noEntryCells);
     }
 
     // 放好以后的地形：水一律当排掉（含水方块只留外形）；放东西那一格换成放好的样子——
