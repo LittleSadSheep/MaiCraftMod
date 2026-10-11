@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.ability.machine;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import org.maiwithu.maicraft.game.ModIdentity;
@@ -19,6 +20,8 @@ import org.maiwithu.maicraft.kernel.goal.TargetKind;
 import org.maiwithu.maicraft.kernel.param.ParamSpec;
 import org.maiwithu.maicraft.kernel.param.ParamSpecs;
 import org.maiwithu.maicraft.kernel.param.ParamType;
+import org.maiwithu.maicraft.kernel.result.Problem;
+import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 
 /**
@@ -31,6 +34,7 @@ final class MachineInspectModule implements AbilityModule {
 
     private final MachineServices services;
     private final MachineArchives archives;
+    private final MachineVehicles vehicles;
     private final AbilitySpec spec = new AbilitySpec(
             ModIdentity.MOD_ID + ":machine_inspect",
             "看一台机器或一片机器区：组成、运行状态、进出口、挂在哪些网络上；指档案名时再和档案整机比对（只读）",
@@ -46,9 +50,10 @@ final class MachineInspectModule implements AbilityModule {
             List.of(),
             Listing.LISTED);
 
-    MachineInspectModule(MachineServices services, MachineArchives archives) {
+    MachineInspectModule(MachineServices services, MachineArchives archives, MachineVehicles vehicles) {
         this.services = services;
         this.archives = archives;
+        this.vehicles = vehicles;
     }
 
     @Override public AbilitySpec spec() {
@@ -62,6 +67,15 @@ final class MachineInspectModule implements AbilityModule {
             return new StepDecision.Run(new ItemSettingsTask.Input(step.goal().params().text("item").toLowerCase(Locale.ROOT),
                     null, Map.of(), step.goal().permissions()));
         }
+        // 指结构的观察编号 s#：载具也是机器，看它的 vehicle 一节（座位、回路、姿态），不扫世界里的方块。
+        if (step.goal().target() instanceof Target.Seen seen && seen.id().startsWith("s")) {
+            Optional<String> structure = vehicles.structureOf().apply(seen.id());
+            if (structure.isEmpty()) {
+                return new StepDecision.Finish(TaskResult.failed("指的结构不在了", Problem.of(Problem.Kind.TARGET_GONE,
+                        "观察编号 " + seen.id() + " 指的结构已经不在了", "重新 observe 再指")));
+            }
+            return new StepDecision.Run(new VehicleInspectTask.Input(structure.get(), seen.id()));
+        }
         int radius = (int) (step.goal().params().has("radius") ? step.goal().params().integer("radius") : 16);
         MachineArchive archive = step.goal().target() instanceof Target.Landmark landmark
                 ? archives.find(landmark.name()).filter(found -> !found.removed()).orElse(null)
@@ -71,5 +85,6 @@ final class MachineInspectModule implements AbilityModule {
 
     @Override public void registerTasks(TaskFactories factories) {
         factories.register(MachineInspectInput.class, input -> new MachineInspectTask(input, services));
+        factories.register(VehicleInspectTask.Input.class, input -> new VehicleInspectTask(input, vehicles.readers()));
     }
 }

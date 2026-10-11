@@ -16,6 +16,7 @@ import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.ability.build.BuildModule;
 import org.maiwithu.maicraft.ability.machine.MachineAbilities;
+import org.maiwithu.maicraft.ability.machine.MachineVehicles;
 import org.maiwithu.maicraft.ability.chat.ChatAbility;
 import org.maiwithu.maicraft.ability.design.DesignModule;
 import org.maiwithu.maicraft.ability.design.api.DesignStore;
@@ -426,7 +427,9 @@ public final class AbilityCatalog {
                 new SceneSeenTargets(deps::scene), deps.memory(), deps.memory(),
                 deps.worldDocuments(), deps.worldKey(),
                 anchors(deps), Optional.of(designs), construction, deps.machineBlockLimits(),
-                deps.compat().placementRules(), deps.compat().itemSettings(shared.playerServices()))) {
+                deps.compat().placementRules(), deps.compat().itemSettings(shared.playerServices()),
+                new MachineVehicles(deps.compat().vehicleReaders(shared.playerServices()),
+                        id -> deps.scene().seen().structureOf(id)))) {
             registry.register(module);
         }
     }

@@ -2,6 +2,14 @@
 
 给 `item`（物品 ID）时不看机器，看身上这种物品自己的设置（机械动力的过滤器、属性过滤器的规则）：`stacks[]` 每一件一行，写明在第几格（`inventory_slot`，副手 40）、现在每项是什么；要改用 machine_configure 带同样的 item。
 
+target 给物理结构的观察编号 `s#`（装了 Simulated 时）就是看一辆载具，不扫世界里的方块，结果是 `vehicle` 一节：
+
+- `kind`：`airship` 飞艇（有燃烧器、蒸汽喷口、气球或浮空水晶）/ `car` 车（有车轮悬架）/ `boat` 船（底下是水）/ `plane` 固定翼（只有螺旋桨）；没有座位或控制件的是 `structure`（只是会动的结构，不是载具）；没读全说不清是 `unknown`。
+- `seats[]`：每个座位此刻在世界里的位置，`driver` 是坐着够得着无线红石打字机的驾驶座。
+- `controls[]`：无线红石打字机每个绑了频率的键——`control` 就是 `vehicle_drive` 的 `inputs` 里写的名字（`打字机:W`），`frequency` 两格频率物品，`receivers` 结构上收这个频率的收端几个，`drives` 收端旁边接着的执行件，`role` 推出来的角色（`power` 动力、`lift` 升力、`steer` 转向，左右要试按）与 `basis` 依据；隔着离合器、齿轮、红石线的推不出，是 `unknown`，用 `vehicle_drive(test)` 试按看它让船怎么动。
+- `state`：`moving`、`speed` 每秒几格、`heading` 结构自己的 +z（造的时候朝南那头）此刻朝哪（0 南、90 西、180 北、270 东）、`pitch` 与 `roll` 绕自己的 x、z 轴斜了几度、`contact` 底面压着地面 `grounded` / 悬空 `airborne` / 底下有格没加载 `unknown`、`driving` 谁在驾驶（`self` 角色坐在驾驶座上、`other` 别人在用无线红石打字机）。
+- `complete` 为 false 时种类与回路只按读到的部分；`note` 写明没读的部分（舵轮、油门拉杆的回路、外面同频的发射端）。
+
 ## 结果怎么读
 
 - `machines[]`：分成一台台的机器。`id` 是这一眼里的编号（m1、m2……），只对这次结果有效；想再指某一台，用它的组成格（观察编号或坐标）。`types` 是按角色归并的组成，`ports` 是进出口，`running` 是各机器格的读数（转不转、转速、进度），`networks` 是挂着的网络与读数。

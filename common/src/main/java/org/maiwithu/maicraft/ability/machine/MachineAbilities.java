@@ -44,6 +44,7 @@ public final class MachineAbilities {
      * @param blockLimits 每台机器里某种方块最多几个（实例配置，方块 ID → 上限）
      * @param placementRules 联动的放置规则，审蓝图算材料用，和施工拿的是同一张表
      * @param itemSettings   联动的物品设置（过滤器写规则）
+     * @param vehicles       看载具用的读载具办法与 s# 查法
      */
     public static List<AbilityModule> all(Supplier<PlayerContext> context, List<MachineType> machineTypes,
             List<NetworkReader> networkReaders, RecipeLookup recipes, ItemNeeds needs,
@@ -51,7 +52,7 @@ public final class MachineAbilities {
             ReadsRememberedPlaces places, WorldMemory memory, DocumentStore worldDocuments, String worldKey,
             AnchorResolver anchors, Optional<DesignStore> designs,
             Function<Permissions, ConstructionServices> construction, Map<String, Integer> blockLimits,
-            List<PlacementRules> placementRules, List<ItemSettings> itemSettings) {
+            List<PlacementRules> placementRules, List<ItemSettings> itemSettings, MachineVehicles vehicles) {
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(recipes, "recipes");
         Objects.requireNonNull(needs, "needs");
@@ -69,7 +70,7 @@ public final class MachineAbilities {
                 networkReaders, new LiveMachineArea(context), recipes, needs, close,
                 new LiveMachineInteractions(interactions), seenTargets, places, blockLimits, placementRules, itemSettings);
         MachineArchives archives = new MachineArchives(worldDocuments, worldKey);
-        return List.of(new MachineInspectModule(services, archives), new MachineReviewModule(services, designs),
+        return List.of(new MachineInspectModule(services, archives, vehicles), new MachineReviewModule(services, designs),
                 new MachineConfigureModule(services), new MachineRunModule(services),
                 new MachineBuildModule(services, archives, anchors, designs, memory, construction),
                 new MachineConnectModule(services, archives, memory, construction));
