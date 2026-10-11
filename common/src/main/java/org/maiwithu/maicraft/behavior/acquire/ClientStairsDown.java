@@ -77,6 +77,8 @@ public final class ClientStairsDown implements DigsStairsDown {
     static final int MAX_STEPS = 64;
     /** 同一级最多挖几下：上面的沙砾一直往下掉时，不在原地挖到天荒地老。 */
     static final int MAX_DIGS_PER_STEP = 12;
+    /** 下一级脚下空着时再往下看几格：两格以内有实地就落到上面（连这一级共掉不到三格，摔不伤）。 */
+    static final int EXTRA_DROP = 2;
 
     private final Site site;
     private final DigsBlocks digs;
@@ -146,6 +148,8 @@ public final class ClientStairsDown implements DigsStairsDown {
         private int yielded;
         private int steps;
         private Set<Integer> dropsBefore = Set.of();
+        /** 这一级要走到哪一格落脚：一般是下一级，脚下空一两格时是再往下的实地上面。 */
+        private BlockPos stepTarget;
         private ActionStatus ended;
         /** 被打断过（夜里去睡觉、躲怪）：回来时人可能已经不在原来那一级上。 */
         private boolean paused;
@@ -239,7 +243,8 @@ public final class ClientStairsDown implements DigsStairsDown {
         }
 
         // 从上往下挖这一级还没通的格子：上面掉下沙砾、流进液体都照现场重新判断。三格都通了，
-        // 下一级脚下踩得住才走下去；下面是空的、是液体就停在这里。
+        // 下一级脚下踩得住就走下去；脚下空着、再往下一两格有实地（站在比地面高一格的地方开挖就是这样）就落到那上面；
+        // 往下三格都空（洞）、是液体就停在这里。
         private ActionStatus digNext(TickContext context) {
             for (BlockPos cell : stepCells(feet, heading)) {
                 Ground ground = site.ground(context, cell);
@@ -262,15 +267,20 @@ public final class ClientStairsDown implements DigsStairsDown {
                 digsThisStep++;
                 return ActionStatus.progressed();
             }
-            BlockPos next = nextFeet(feet, heading);
-            Ground floor = site.ground(context, next.below());
+            BlockPos landing = nextFeet(feet, heading);
+            Ground floor = site.ground(context, landing.below());
+            for (int extra = 0; floor == Ground.OPEN && extra < EXTRA_DROP; extra++) {
+                landing = landing.below();
+                floor = site.ground(context, landing.below());
+            }
             if (floor == Ground.OPEN || floor == Ground.FLUID) {
                 return finish(Problem.of(floor == Ground.FLUID ? Problem.Kind.DANGER : Problem.Kind.NOT_FOUND,
-                        "往下挖楼梯：下一级 " + at(next) + " 脚下是" + (floor == Ground.FLUID ? "液体" : "空的")
-                                + "，不往下走了"));
+                        "往下挖楼梯：下一级 " + at(nextFeet(feet, heading)) + " 脚下是"
+                                + (floor == Ground.FLUID ? "液体" : "空的（往下三格都没有实地）") + "，不往下走了"));
             }
             stage = Stage.STEP_DOWN;
-            step = site.stepDownTo(next);
+            stepTarget = landing;
+            step = site.stepDownTo(landing);
             return ActionStatus.progressed();
         }
 
@@ -285,7 +295,7 @@ public final class ClientStairsDown implements DigsStairsDown {
         private ActionStatus steppedDown(ActionStatus status) {
             if (status instanceof ActionStatus.Failed failed) {
                 return finish(Problem.of(Problem.Kind.UNREACHABLE, "往下挖楼梯：走不下下一级 "
-                        + at(nextFeet(feet, heading)) + "：" + failed.problem().message()));
+                        + at(stepTarget) + "：" + failed.problem().message()));
             }
             steps++;
             stage = Stage.PICK_UP;

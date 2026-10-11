@@ -212,9 +212,20 @@ class ClientStairsDownTest {
     }
 
     @Test
-    void 下一级脚下是空洞_挖开就停_不走下去() {
-        // 第一级脚下那格挖开后，下面是洞穴的空气。
+    void 下一级脚下只空一格_下面是实地_照常落下去接着挖() {
+        // 站在比地面高一格的地方开挖：下一级脚下空着，再往下一格就是地面，不是洞。
         world.placed.put(new BlockPos(0, 62, -1), "minecraft:air");
+
+        run(1);
+        assertTrue(world.walkedTo.contains(new BlockPos(0, 62, -1)), "落到实地上面那一格：" + world.walkedTo);
+    }
+
+    @Test
+    void 下一级脚下是空洞_挖开就停_不走下去() {
+        // 第一级脚下那格挖开后，下面三格都是洞穴的空气。
+        world.placed.put(new BlockPos(0, 62, -1), "minecraft:air");
+        world.placed.put(new BlockPos(0, 61, -1), "minecraft:air");
+        world.placed.put(new BlockPos(0, 60, -1), "minecraft:air");
 
         ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, run(1));
         assertEquals(Problem.Kind.NOT_FOUND, failed.problem().kind());
