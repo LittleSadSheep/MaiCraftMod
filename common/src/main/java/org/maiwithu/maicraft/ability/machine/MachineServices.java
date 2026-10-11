@@ -9,6 +9,7 @@ import java.util.function.Supplier;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.state.BlockState;
 
+import org.maiwithu.maicraft.ability.machine.spi.ItemSettings;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
@@ -38,12 +39,13 @@ import org.maiwithu.maicraft.kernel.result.Problem;
  * @param places         按名字查记过的地点；档案还没有接入，地标先按记过的地点找
  * @param blockLimits    每台机器里某种方块最多几个（实例配置，方块 ID → 上限），例如链条输送机默认 1 个
  * @param placementRules 联动的放置规则：审蓝图算材料时带漏斗算漏斗、横着的齿轮箱算竖直齿轮箱，和施工拿的一样
+ * @param itemSettings   联动的物品设置：machine_configure / machine_inspect 给 item 时用（过滤器写规则）
  */
 record MachineServices(Supplier<PlayerContext> context, MachineWorldView world, List<MachineType> machineTypes,
                        List<NetworkReader> networkReaders, ReadsMachineArea area, RecipeLookup recipes,
                        ItemNeeds needs, BringsPlayerClose close, MachineInteractions interactions,
                        ReadsSeenTargets seenTargets, ReadsRememberedPlaces places, Map<String, Integer> blockLimits,
-                       List<PlacementRules> placementRules) {
+                       List<PlacementRules> placementRules, List<ItemSettings> itemSettings) {
 
     MachineServices {
         Objects.requireNonNull(context, "context");
@@ -56,6 +58,7 @@ record MachineServices(Supplier<PlayerContext> context, MachineWorldView world, 
         Objects.requireNonNull(places, "places");
         blockLimits = Map.copyOf(blockLimits);
         placementRules = placementRules == null ? List.of() : List.copyOf(placementRules);
+        itemSettings = itemSettings == null ? List.of() : List.copyOf(itemSettings);
     }
 
     /** 不限任何方块个数的一份：离线测试与没有实例配置时用。 */
@@ -64,7 +67,7 @@ record MachineServices(Supplier<PlayerContext> context, MachineWorldView world, 
             BringsPlayerClose close, MachineInteractions interactions, ReadsSeenTargets seenTargets,
             ReadsRememberedPlaces places) {
         this(context, world, machineTypes, networkReaders, area, recipes, needs, close, interactions, seenTargets,
-                places, Map.of(), List.of());
+                places, Map.of(), List.of(), List.of());
     }
 
     /** 认领一格的机器类型：按登记顺序问，最先认领的算数；都没有为 null。 */

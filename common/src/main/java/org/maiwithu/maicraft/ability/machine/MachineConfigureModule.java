@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.ability.machine;
 
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -41,7 +42,11 @@ final class MachineConfigureModule implements AbilityModule {
             ParamSpecs.of(
                     ParamSpec.of("settings", ParamType.JSON_OBJECT).required()
                             .doc("要改成什么：键是这台机器认的设置项，值写字符串，"
-                                    + "例如 {\"side.north\": \"output:items\"}；能设哪些项先 lookup 查这台机器").build()),
+                                    + "例如 {\"side.north\": \"output:items\"}；能设哪些项先 lookup 查这台机器").build(),
+                    ParamSpec.of("item", ParamType.ITEM_OR_TAG)
+                            .doc("改身上物品自己的设置（过滤器写规则）时写物品 ID，这时不看 target").build(),
+                    ParamSpec.of("inventory_slot", ParamType.INTEGER).range(0, 40)
+                            .doc("配 item：身上有几件时改第几格那件（0~35，副手 40）；不给改第一件").build()),
             Set.of(TargetKind.HERE, TargetKind.SEEN, TargetKind.LANDMARK, TargetKind.POSITION),
             ExecutionMode.CONTROLS_PLAYER,
             Set.of(),
@@ -77,11 +82,20 @@ final class MachineConfigureModule implements AbilityModule {
                     .problem(Problem.of(Problem.Kind.INVALID_PARAMETER,
                             "settings 要是至少一项的对象，例如 {\"side.north\": \"output:items\"}")).build());
         }
+        // 给了 item：改身上那件物品自己的设置（过滤器、属性过滤器），不碰 target 指的方块。
+        if (step.goal().params().has("item")) {
+            Integer slot = step.goal().params().has("inventory_slot")
+                    ? (int) step.goal().params().integer("inventory_slot") : null;
+            return new StepDecision.Run(new ItemSettingsTask.Input(step.goal().params().text("item").toLowerCase(Locale.ROOT),
+                    slot, settings, step.goal().permissions()));
+        }
         return new StepDecision.Run(new MachineConfigureInput(step.goal().target(), settings,
                 step.goal().permissions()));
     }
 
     @Override public void registerTasks(TaskFactories factories) {
         factories.register(MachineConfigureInput.class, input -> new MachineConfigureTask(input, services));
+        // 身上物品的设置：看（machine_inspect 给 item）与改共用一个任务。
+        factories.register(ItemSettingsTask.Input.class, input -> new ItemSettingsTask(input, services));
     }
 }

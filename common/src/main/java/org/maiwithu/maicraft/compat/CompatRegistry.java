@@ -11,6 +11,7 @@ import java.util.Optional;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
+import org.maiwithu.maicraft.ability.machine.spi.ItemSettings;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
 import org.maiwithu.maicraft.ability.quest.spi.QuestBookOperations;
@@ -50,6 +51,7 @@ public final class CompatRegistry {
     private final List<ToBuild<QuestBookOperations>> questBooks = new ArrayList<>();
     private final List<ToBuild<BreakAccelerator>> breakAccelerators = new ArrayList<>();
     private final List<ToBuild<DismantleTool>> dismantleTools = new ArrayList<>();
+    private final List<ToBuild<ItemSettings>> itemSettings = new ArrayList<>();
     private final List<MenuLayoutProof> menuLayouts = new ArrayList<>();
     private final List<CarriedBackpack> carriedBackpacks = new ArrayList<>();
     private final List<KnowledgeSource> knowledgeSources = new ArrayList<>();
@@ -60,7 +62,7 @@ public final class CompatRegistry {
     /** 全部的槽：一个模组交接到一半出错时，按交接前的长度一起撤回。新加槽时把它的列表加进来。 */
     private final List<List<?>> slots = List.of(itemSources, machineTypes, networkReaders, questBooks,
             breakAccelerators, dismantleTools, menuLayouts, carriedBackpacks, knowledgeSources, recipeViewers,
-            serverReads, placementRules, rangedWeapons);
+            serverReads, placementRules, rangedWeapons, itemSettings);
     private final List<String> decisions = new ArrayList<>();
 
     private CompatRegistry() {}
@@ -144,6 +146,11 @@ public final class CompatRegistry {
     /** 联动入口交任务书操作的建法：进世界时建，包一层后交给 quest 能力；模组停用后任务书说用不了。 */
     public void questBook(CompatModule module, Function<PlayerServices, QuestBookOperations> build) {
         questBooks.add(new ToBuild<>(module, build));
+    }
+
+    /** 联动入口交一种物品设置（过滤器写规则）的建法：进世界时建，包一层后交给机器能力；模组停用后不再认物品。 */
+    public void itemSettings(CompatModule module, Function<PlayerServices, ItemSettings> build) {
+        itemSettings.add(new ToBuild<>(module, build));
     }
 
     /** 联动入口交一个挖掘加速（连锁挖）的建法：进世界时建，包一层后交给施工的清障；模组停用后给不出批，退回逐格挖。 */
@@ -237,6 +244,11 @@ public final class CompatRegistry {
     /** 进世界时建联动模组的任务书操作；规矩同物品来源。 */
     public List<QuestBookOperations> questBooks(PlayerServices services) {
         return build(questBooks, services, "任务书操作", CompatQuestBookOperations::new);
+    }
+
+    /** 进世界时建联动模组的物品设置；规矩同物品来源。 */
+    public List<ItemSettings> itemSettings(PlayerServices services) {
+        return build(itemSettings, services, "物品设置", CompatItemSettings::new);
     }
 
     /** 进世界时建联动模组的挖掘加速；规矩同物品来源。 */

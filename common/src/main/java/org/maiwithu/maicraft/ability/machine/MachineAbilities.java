@@ -9,6 +9,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.ability.design.api.DesignStore;
+import org.maiwithu.maicraft.ability.machine.spi.ItemSettings;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
@@ -42,6 +43,7 @@ public final class MachineAbilities {
      *
      * @param blockLimits 每台机器里某种方块最多几个（实例配置，方块 ID → 上限）
      * @param placementRules 联动的放置规则，审蓝图算材料用，和施工拿的是同一张表
+     * @param itemSettings   联动的物品设置（过滤器写规则）
      */
     public static List<AbilityModule> all(Supplier<PlayerContext> context, List<MachineType> machineTypes,
             List<NetworkReader> networkReaders, RecipeLookup recipes, ItemNeeds needs,
@@ -49,7 +51,7 @@ public final class MachineAbilities {
             ReadsRememberedPlaces places, WorldMemory memory, DocumentStore worldDocuments, String worldKey,
             AnchorResolver anchors, Optional<DesignStore> designs,
             Function<Permissions, ConstructionServices> construction, Map<String, Integer> blockLimits,
-            List<PlacementRules> placementRules) {
+            List<PlacementRules> placementRules, List<ItemSettings> itemSettings) {
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(recipes, "recipes");
         Objects.requireNonNull(needs, "needs");
@@ -65,7 +67,7 @@ public final class MachineAbilities {
         Objects.requireNonNull(construction, "construction");
         MachineServices services = new MachineServices(context, new LiveMachineWorld(context), machineTypes,
                 networkReaders, new LiveMachineArea(context), recipes, needs, close,
-                new LiveMachineInteractions(interactions), seenTargets, places, blockLimits, placementRules);
+                new LiveMachineInteractions(interactions), seenTargets, places, blockLimits, placementRules, itemSettings);
         MachineArchives archives = new MachineArchives(worldDocuments, worldKey);
         return List.of(new MachineInspectModule(services, archives), new MachineReviewModule(services, designs),
                 new MachineConfigureModule(services), new MachineRunModule(services),

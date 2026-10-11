@@ -113,7 +113,7 @@
       {
         "ability": "maicraft:machine_inspect",
         "summary": "看一台机器或一片机器区：组成、运行状态、进出口、挂在哪些网络上；指档案名时再和档案整机比对（只读）",
-        "parameters": "radius: integer = 16",
+        "parameters": "radius: integer = 16, item?: string",
         "targets": [
           "here",
           "landmark",
@@ -132,7 +132,7 @@
       {
         "ability": "maicraft:machine_configure",
         "summary": "改一台机器的设置：侧面、过滤、模式、样板（按已装模组的机器类型）",
-        "parameters": "settings: object",
+        "parameters": "settings: object, item?: string, inventory_slot?: integer",
         "targets": [
           "here",
           "landmark",
@@ -762,6 +762,12 @@
           "default": 16,
           "min": 1,
           "max": 32
+        },
+        {
+          "name": "item",
+          "type": "string",
+          "required": false,
+          "doc": "看身上物品自己的设置（过滤器的规则）时写物品 ID：每一件分别列出在哪一格、现在是什么规则"
         }
       ],
       "targets": [
@@ -807,6 +813,20 @@
           "type": "object",
           "required": true,
           "doc": "要改成什么：键是这台机器认的设置项，值写字符串，例如 {\"side.north\": \"output:items\"}；能设哪些项先 lookup 查这台机器"
+        },
+        {
+          "name": "item",
+          "type": "string",
+          "required": false,
+          "doc": "改身上物品自己的设置（过滤器写规则）时写物品 ID，这时不看 target"
+        },
+        {
+          "name": "inventory_slot",
+          "type": "integer",
+          "required": false,
+          "doc": "配 item：身上有几件时改第几格那件（0~35，副手 40）；不给改第一件",
+          "min": 0,
+          "max": 40
         }
       ],
       "targets": [

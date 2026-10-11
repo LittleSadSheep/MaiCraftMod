@@ -21,6 +21,7 @@
     "file": "schematics 目录下的结构文件名",
     "format": "导出文件的格式：json / nbt",
     "interests": "探索途中留意的东西：地形要素（lava_pool）、结构 ID、方块 ID 或 # 标签、实体类型 ID",
+    "inventory_slot": "背包里的第几格（0~35，副手 40）：同一种物品有几件时指定哪一件",
     "item": "物品 ID，或 # 开头的物品标签",
     "items": "多个物品 ID 或物品标签",
     "max_distance": "出行或搜索的最远距离，单位格",

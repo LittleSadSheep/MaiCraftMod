@@ -2,6 +2,8 @@
 package org.maiwithu.maicraft.ability.machine;
 
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 import org.maiwithu.maicraft.game.ModIdentity;
@@ -35,7 +37,9 @@ final class MachineInspectModule implements AbilityModule {
             AbilityDoc.forAbility("machine_inspect"),
             ParamSpecs.of(
                     ParamSpec.of("radius", ParamType.INTEGER).range(1, 32).defaultValue(16)
-                            .doc("看多大范围，单位格；给了目标就是以它为中心，没给以角色为中心").build()),
+                            .doc("看多大范围，单位格；给了目标就是以它为中心，没给以角色为中心").build(),
+                    ParamSpec.of("item", ParamType.ITEM_OR_TAG)
+                            .doc("看身上物品自己的设置（过滤器的规则）时写物品 ID：每一件分别列出在哪一格、现在是什么规则").build()),
             Set.of(TargetKind.HERE, TargetKind.SEEN, TargetKind.LANDMARK, TargetKind.POSITION),
             ExecutionMode.READ_ONLY,
             Set.of(),
@@ -53,6 +57,11 @@ final class MachineInspectModule implements AbilityModule {
 
     // 参数只有 radius，范围在参数规格里已经校过；目标是档案名就带上档案，看它的范围并做整机比对。
     @Override public StepDecision decide(StepContext step) {
+        // 给了 item：看身上那种物品每一件自己的设置，不看机器。
+        if (step.goal().params().has("item")) {
+            return new StepDecision.Run(new ItemSettingsTask.Input(step.goal().params().text("item").toLowerCase(Locale.ROOT),
+                    null, Map.of(), step.goal().permissions()));
+        }
         int radius = (int) (step.goal().params().has("radius") ? step.goal().params().integer("radius") : 16);
         MachineArchive archive = step.goal().target() instanceof Target.Landmark landmark
                 ? archives.find(landmark.name()).filter(found -> !found.removed()).orElse(null)

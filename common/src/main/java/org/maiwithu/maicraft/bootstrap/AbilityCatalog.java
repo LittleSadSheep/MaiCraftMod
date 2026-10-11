@@ -422,7 +422,7 @@ public final class AbilityCatalog {
                 new SceneSeenTargets(deps::scene), deps.memory(), deps.memory(),
                 deps.worldDocuments(), deps.worldKey(),
                 anchors(deps), Optional.of(designs), construction, deps.machineBlockLimits(),
-                deps.compat().placementRules())) {
+                deps.compat().placementRules(), deps.compat().itemSettings(shared.playerServices()))) {
             registry.register(module);
         }
     }

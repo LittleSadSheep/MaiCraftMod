@@ -41,6 +41,7 @@ public final class ParamNames {
             Map.entry("rotation", "蓝图落地时绕锚点转多少度：0 / 90 / 180 / 270"),
             Map.entry("cells", "逐格蓝图（JSON 数组）：每项 offset [x,y,z]、block、可选 properties；block 为 minecraft:air 表示清空"),
             Map.entry("file", "schematics 目录下的结构文件名"),
+            Map.entry("inventory_slot", "背包里的第几格（0~35，副手 40）：同一种物品有几件时指定哪一件"),
             Map.entry("anchor", "蓝图原点落在哪一格 {x,y,z}：target 指的是别的东西（例如蓝图加农炮）时另给"),
             Map.entry("properties", "只放一格时要求的方块状态属性（JSON 对象），例如 {\"facing\":\"north\"}"),
             Map.entry("quest", "任务书里任务的编号（16 位十六进制，FTB 任务）"),
