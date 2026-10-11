@@ -33,6 +33,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
  *
  * <p>备料弄不全不白跑：某样原料弄不来，先把身上的料够做的件数做掉（要 16 根火把、木炭只够 8 根，就先做 8 根），
  * 引擎按拿到几件、还差几件报部分完成，弄不来的原因一并交代；身上的料连一份都不够才以备料的原因失败。
+ * 某样原料弄不来、身上连一份的量都没有时当场放弃这个做法，不再去弄其余原料（没有羊毛就不去砍做床板的木头）。
  */
 public final class RecipeSource implements ItemSource {
 
@@ -46,8 +47,6 @@ public final class RecipeSource implements ItemSource {
 
     /** 缺得一样多的做法最多挨个试几种：木板十来种木头，再多也不一直试下去。 */
     private static final int MAX_VARIANTS = 12;
-    /** 都没做成时说明里列几种做法的原因，再多的用省略号。 */
-    private static final int SHOWN_FAILURES = 4;
 
     /** 烧炼一件东西要烧多少刻：原版熔炉的固定速度。 */
     private static final int SMELT_TICKS_PER_ITEM = 200;
@@ -197,7 +196,8 @@ public final class RecipeSource implements ItemSource {
             ActionStatus status = current.tick(tick);
             if (!(status instanceof ActionStatus.Failed failed)) return status;
             boolean delivered = CarriedItems.matching(backpack, offhand, request.wanted(), tags) > carriedBefore;
-            failures.add(variants.get(index).id() + "（" + failed.problem().message() + "）");
+            // 每种做法只记它自己那一句结论（缺哪几样原料）；原料为什么弄不来由拿东西的引擎收着，最外层讲一次。
+            failures.add(variants.get(index).id() + "：" + failed.problem().headline());
             if (!delivered && index + 1 < variants.size()) {
                 current.close();
                 current = null;
@@ -205,10 +205,8 @@ public final class RecipeSource implements ItemSource {
                 return ActionStatus.progressed();
             }
             if (failures.size() == 1) return status;
-            List<String> shown = failures.subList(0, Math.min(SHOWN_FAILURES, failures.size()));
-            return ActionStatus.failed(Problem.of(failed.problem().kind(), "试了 " + failures.size() + " 种做法都没做成："
-                    + String.join("；", shown) + (failures.size() > shown.size() ? "……" : ""),
-                    failed.problem().suggestion()));
+            return ActionStatus.failed(Problem.of(failed.problem().kind(), "试了 " + failures.size() + " 种做法都没做成；"
+                    + String.join("；", failures), failed.problem().suggestion()));
         }
 
         @Override public void pause() {
@@ -266,8 +264,8 @@ public final class RecipeSource implements ItemSource {
 
     // 背包合成的一整串：缺的原料逐项去弄，然后打开背包在合成格里做，不走工作台。
     private Action assembleInInventory(WorkstationRecipe recipe, int times, SourceContext context) {
-        Shortfall shortfall = new Shortfall();
-        List<Action> steps = shortfall.tolerating(ingredientSteps(recipe, times, context.permissions()));
+        Shortfall shortfall = new Shortfall(recipe);
+        List<Action> steps = shortfall.ingredients(times, context.permissions());
         Optional<Action> run = runs.runInInventory(recipe, times);
         if (run.isEmpty()) {
             return steps.isEmpty() ? nothingToDo(recipe)
@@ -278,27 +276,13 @@ public final class RecipeSource implements ItemSource {
         return new StepwiseActions("备齐原料后在背包里做" + recipe.result().describe(), steps.toArray(Action[]::new));
     }
 
-    // 缺的原料逐项回引擎去弄：身上已有的不再要，用途写清是为谁备的。
-    private List<Action> ingredientSteps(WorkstationRecipe recipe, int times, Permissions permissions) {
-        List<Action> steps = new ArrayList<>();
-        for (WorkstationRecipe.IngredientStack ingredient : recipe.ingredients()) {
-            int needed = ingredient.count() * times;
-            int carried = CarriedItems.matching(backpack, offhand, ingredient.item(), tags);
-            if (carried < needed) {
-                steps.add(needs.actionFor(new ItemRequest(ingredient.item(), needed - carried,
-                        "为「做" + recipe.result().describe() + "」备原料"), permissions));
-            }
-        }
-        return steps;
-    }
-
     // 备料的一整串：缺的原料逐项去弄，烧炼再备燃料，没有设施就先摆一个，最后到设施上做。
     private Action assemble(WorkstationRecipe recipe, WorldPosition station, int times, SourceContext context) {
         Permissions permissions = context.permissions();
-        Shortfall shortfall = new Shortfall();
-        List<Action> steps = shortfall.tolerating(ingredientSteps(recipe, times, permissions));
+        Shortfall shortfall = new Shortfall(recipe);
+        List<Action> steps = shortfall.ingredients(times, permissions);
         if (recipe.kind() == WorkstationRecipe.Kind.SMELTING) {
-            steps.addAll(shortfall.tolerating(fuelSteps(recipe, times, permissions)));
+            fuelNeed(recipe, times).ifPresent(fuel -> steps.add(shortfall.tolerant(fuel, 0, permissions)));
         }
         // 备完料先看够不够做一份：一份都不够就不去摆设施、不走过去，以备料的原因收场。
         steps.add(enoughForOne(recipe, shortfall));
@@ -334,10 +318,9 @@ public final class RecipeSource implements ItemSource {
         return new Action() {
             @Override public ActionStatus tick(TickContext context) {
                 if (missingFor(recipe, recipe.resultCount()) == 0) return ActionStatus.done();
-                String why = shortfall.reasons.isEmpty() ? "身上的原料不够做一份"
-                        : "原料没备齐：" + String.join("；", shortfall.reasons);
-                return ActionStatus.failed(Problem.of(Problem.Kind.NEED_ITEM,
-                        why + "，一份" + recipe.result().describe() + "都做不了"));
+                return ActionStatus.failed(shortfall.missing.isEmpty()
+                        ? Problem.of(Problem.Kind.NEED_ITEM, "身上的原料不够做一份" + recipe.result().describe())
+                        : shortfall.problem());
             }
             @Override public String describe() {
                 return "看身上的料够不够做" + recipe.result().describe();
@@ -345,26 +328,67 @@ public final class RecipeSource implements ItemSource {
         };
     }
 
-    /** 备料弄不来的原因：备料失败不拦住后面，动手那一步收场时一并交代。 */
-    private static final class Shortfall {
+    /**
+     * 备料弄不来的经过：一样原料弄不来，身上这样原料还够做一份就接着备别的，先把够做的做掉；
+     * 连一份的量都没有就当场放弃这个做法——别的原料弄来也做不成，不白跑去弄（没有羊毛就不去砍床板的木头）。
+     * 里层为什么弄不来只转述它的结论句，经过由拿东西的引擎收着，最外层讲一次。
+     */
+    private final class Shortfall {
+        private final WorkstationRecipe recipe;
+        /** 弄不来的原料：东西×件数。 */
+        private final List<String> missing = new ArrayList<>();
+        /** 里层没弄来的结论句。 */
         private final List<String> reasons = new ArrayList<>();
 
-        // 备料的每一步：做砸了记下原因、按做完往下走——身上已有的料还能先做掉一部分。
-        List<Action> tolerating(List<Action> steps) {
-            List<Action> wrapped = new ArrayList<>();
-            for (Action step : steps) wrapped.add(new Tolerant(step));
-            return wrapped;
+        private Shortfall(WorkstationRecipe recipe) {
+            this.recipe = recipe;
         }
 
-        // 动手那一步：做不下去时（料用完了）把弄不来的原因接在后面，引擎写进结果。
+        // 缺的原料逐项回引擎去弄，身上已有的不再要，用途写清是为谁备的。这一次里已经知道拿不到的那样排最前：
+        // 身上一份的量都没有，碰一下就放弃这个做法，不先去弄排在它前面的原料（没有白色羊毛，就不先去采染红色要的花）。
+        List<Action> ingredients(int times, Permissions permissions) {
+            List<WorkstationRecipe.IngredientStack> ordered = new ArrayList<>(recipe.ingredients());
+            ordered.sort(Comparator.comparingInt(
+                    (WorkstationRecipe.IngredientStack ingredient) -> needs.knownUnobtainable(ingredient.item()) ? 0 : 1));
+            List<Action> steps = new ArrayList<>();
+            for (WorkstationRecipe.IngredientStack ingredient : ordered) {
+                int needed = ingredient.count() * times;
+                int carried = CarriedItems.matching(backpack, offhand, ingredient.item(), tags);
+                if (carried < needed) {
+                    steps.add(tolerant(new ItemRequest(ingredient.item(), needed - carried,
+                            "为「做" + recipe.result().describe() + "」备原料"), ingredient.count(), permissions));
+                }
+            }
+            return steps;
+        }
+
+        // 备料的一步：回引擎去弄。perCraft 是做一份要几件，为 0 表示不按份数止损（燃料不够还能烧一部分）。
+        Action tolerant(ItemRequest request, int perCraft, Permissions permissions) {
+            return new Tolerant(needs.actionFor(request, permissions), request, perCraft);
+        }
+
+        // 原料没备齐、一份都做不了：结论句点名缺哪几样，展开写里层没弄来的结论。
+        // 做的是什么由转述的一层写在前面（哪种做法、哪样东西），这里不再重复成品的名字。
+        Problem problem() {
+            StringBuilder message = new StringBuilder("原料没备齐（缺").append(String.join("、", missing))
+                    .append("），一份都做不了");
+            for (String reason : reasons) message.append("；").append(reason);
+            return Problem.of(Problem.Kind.NEED_ITEM, message.toString());
+        }
+
+        // 动手那一步：做不下去时（料用完了）在它的结论后面补上缺哪几样，引擎写进结果。
         Action explaining(Action run) {
             return new Action() {
                 @Override public ActionStatus tick(TickContext context) {
                     ActionStatus status = run.tick(context);
-                    if (!(status instanceof ActionStatus.Failed failed) || reasons.isEmpty()) return status;
+                    if (!(status instanceof ActionStatus.Failed failed) || missing.isEmpty()) return status;
                     Problem problem = failed.problem();
-                    return ActionStatus.failed(Problem.of(Problem.Kind.NEED_ITEM, problem.message()
-                            + "（原料没备齐：" + String.join("；", reasons) + "，身上的料能做的已经做了）",
+                    String headline = problem.headline();
+                    StringBuilder message = new StringBuilder(headline).append("（原料没备齐：缺")
+                            .append(String.join("、", missing)).append("，身上的料能做的已经做了）")
+                            .append(problem.message().substring(headline.length()));
+                    for (String reason : reasons) message.append("；").append(reason);
+                    return ActionStatus.failed(Problem.of(Problem.Kind.NEED_ITEM, message.toString(),
                             problem.suggestion()));
                 }
                 @Override public void pause() {
@@ -384,18 +408,26 @@ public final class RecipeSource implements ItemSource {
 
         private final class Tolerant implements Action {
             private final Action step;
+            private final ItemRequest request;
+            private final int perCraft;
 
-            private Tolerant(Action step) {
+            private Tolerant(Action step, ItemRequest request, int perCraft) {
                 this.step = step;
+                this.request = request;
+                this.perCraft = perCraft;
             }
 
+            // 弄不来：记下缺什么和里层的结论句。身上这样原料还够做一份就按做完往下走，先把够做的做掉；
+            // 一份的量都没有就整个做法到此为止，别的原料弄来也做不成。
             @Override public ActionStatus tick(TickContext context) {
                 ActionStatus status = step.tick(context);
-                if (status instanceof ActionStatus.Failed failed) {
-                    reasons.add(step.describe() + "没成：" + failed.problem().message());
-                    return ActionStatus.done();
+                if (!(status instanceof ActionStatus.Failed failed)) return status;
+                missing.add(request.wanted().describe() + "×" + request.count());
+                reasons.add(failed.problem().headline());
+                if (perCraft > 0 && CarriedItems.matching(backpack, offhand, request.wanted(), tags) < perCraft) {
+                    return ActionStatus.failed(problem());
                 }
-                return status;
+                return ActionStatus.done();
             }
             @Override public void pause() {
                 step.pause();
@@ -464,7 +496,7 @@ public final class RecipeSource implements ItemSource {
     }
 
     // 烧炼要的燃料：身上有烧得着的就用身上的（挑烧得最久的），一件都没有才去弄煤。
-    private List<Action> fuelSteps(WorkstationRecipe recipe, int times, Permissions permissions) {
+    private Optional<ItemRequest> fuelNeed(WorkstationRecipe recipe, int times) {
         int smeltTicks = times * SMELT_TICKS_PER_ITEM;
         // 身上能烧的加起来够不够：十块木板能烤好几块肉，不能只看最耐烧的一件就说要去弄煤。
         // 工具、武器这类一格一件的不算燃料，这次要烧的原料也不算。
@@ -474,11 +506,11 @@ public final class RecipeSource implements ItemSource {
             burnable += (long) stack.count() * fuels.burnTicks(stack.itemId());
         }
         if (burnable >= smeltTicks) {
-            return List.of();
+            return Optional.empty();
         }
         int coalNeeded = Math.max(1, (int) Math.ceil((double) smeltTicks / PLANNED_COAL_BURN_TICKS));
-        return List.of(needs.actionFor(new ItemRequest(WantedItem.ofItem(COAL), coalNeeded,
-                "烧炼" + recipe.result().describe() + "的燃料"), permissions));
+        return Optional.of(new ItemRequest(WantedItem.ofItem(COAL), coalNeeded,
+                "烧炼" + recipe.result().describe() + "的燃料"));
     }
 
     // 没有备料要做、动手也接不上：一个当场说明问题的动作，免得"备料成功"冒充做成了。

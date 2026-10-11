@@ -90,6 +90,20 @@ class PhasedTaskTest {
     }
 
     @Test
+    void failureSummaryCarriesOnlyTheHeadline() {
+        // 展开的原因只在问题里一份：一句话结论（也是结束事件的那一句）不再整段抄一遍。
+        ScriptedAction approach = new ScriptedAction("走向床边", ActionStatus.done());
+        Problem noBed = Problem.of(Problem.Kind.NEED_ITEM, "还要1个床，问过各来源都拿不到；记得的容器：没有；采掘：没有");
+        ScriptedAction lieDown = new ScriptedAction("右键床头", ActionStatus.failed(noBed));
+        var task = new GoToBed(Map.of(Phase.APPROACH, approach, Phase.LIE_DOWN, lieDown), new ProgressTracker(20, 1000));
+
+        TaskResult result = resultOf(runUntilFinished(task, 10));
+
+        assertEquals("测试没有完成：还要1个床，问过各来源都拿不到", result.summary());
+        assertEquals(noBed, result.problem());
+    }
+
+    @Test
     void stuckWhenActionMakesNoRealProgress() {
         ScriptedAction approach = new ScriptedAction("走向床边", ActionStatus.running());
         var task = new GoToBed(Map.of(Phase.APPROACH, approach), new ProgressTracker(5, 1000));

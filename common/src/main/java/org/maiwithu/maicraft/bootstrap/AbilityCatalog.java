@@ -70,6 +70,7 @@ import org.maiwithu.maicraft.behavior.acquire.MerchantTradeTakes;
 import org.maiwithu.maicraft.game.world.DropConfirmations;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.WantedItem;
 import org.maiwithu.maicraft.behavior.acquire.MenuContainerTakes;
 import org.maiwithu.maicraft.behavior.acquire.LiveBlockDigging;
 import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
@@ -654,6 +655,11 @@ public final class AbilityCatalog {
                 throw new IllegalStateException("拿到物品的引擎还没建好，内需没有可以回的地方");
             }
             return engine.actionFor(request, permissions, records);
+        }
+
+        // 引擎还没建好时谁也没在拿东西，没有已知拿不到的。
+        @Override public boolean knownUnobtainable(WantedItem wanted) {
+            return engine != null && engine.knownUnobtainable(wanted);
         }
     }
 

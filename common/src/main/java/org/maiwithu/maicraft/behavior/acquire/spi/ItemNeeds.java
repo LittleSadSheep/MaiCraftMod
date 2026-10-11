@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.acquire.spi;
 
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.WantedItem;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.TaskRecords;
@@ -27,5 +28,14 @@ public interface ItemNeeds {
      */
     default Action actionFor(ItemRequest request, Permissions permissions, TaskRecords records) {
         return actionFor(request, permissions);
+    }
+
+    /**
+     * 这一次拿东西里是不是已经确认拿不到它：问遍了各来源、连自己做都做不成。
+     * 来源排备料先后时用：先去碰已知拿不到的那样，一件都没有就当场放弃这个做法，不先跑去弄别的原料。
+     * 不在拿东西的过程中、或实现不记这件事时为 false。
+     */
+    default boolean knownUnobtainable(WantedItem wanted) {
+        return false;
     }
 }

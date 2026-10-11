@@ -137,7 +137,8 @@ final class UseDecider {
      */
     static TaskResult stopped(long appliedTimes, long count, Problem problem) {
         if (appliedTimes == 0) {
-            return TaskResult.failed("用东西没有生效：" + problem.message(), problem);
+            // 一句话结论只带卡住的那句；去拿东西没拿到这类原因可能很长，展开的只留在问题里一份。
+            return TaskResult.failed("用东西没有生效：" + problem.headline(), problem);
         }
         return TaskResult.builder(TaskResult.Status.PARTIAL,
                         "确认生效了 " + appliedTimes + " 次，第 " + (appliedTimes + 1) + " 次没有效果，停下了（要做 "

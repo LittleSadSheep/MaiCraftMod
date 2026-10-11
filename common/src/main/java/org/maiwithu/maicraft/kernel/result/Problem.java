@@ -9,8 +9,11 @@ import java.util.Objects;
  * <p>例："没有床；做床还缺 2 块羊毛，附近没有羊"，建议是"带一张床来，或者给我羊毛"。
  * 没有把握的建议宁可不写（{@code suggestion} 为 null）：不编造建议，也不教 LLM 换个参数重试。
  *
+ * <p>说明的写法是先一句结论，展开的部分用"；"接在后面。上一层转述这次失败时只引结论句（{@link #headline()}），
+ * 展开的经过由这一层自己交代一次，不把整段说明一层层套进上一层的说明里。
+ *
  * @param kind       问题种类，一组小而稳定的取值
- * @param message    卡在哪：用游戏里的话说清楚
+ * @param message    卡在哪：用游戏里的话说清楚，先结论后展开
  * @param suggestion 怎样能继续；不确定时为 null
  */
 public record Problem(Kind kind, String message, String suggestion) {
@@ -66,5 +69,21 @@ public record Problem(Kind kind, String message, String suggestion) {
     /** 不知道怎样能继续时只写事实。 */
     public static Problem of(Kind kind, String message) {
         return new Problem(kind, message, null);
+    }
+
+    /**
+     * 结论句：说明里第一个不在括号里的"；"之前的那一句，没有这样的分号就是整段。
+     * 任务失败的一句话结论、上一层转述下一层的失败都只用它；展开的原因留在这条问题自己的说明里。
+     * 括号里的分号属于括号里的补充（"试过自己做（缺羊毛；附近没有羊）"），不从那里截断。
+     */
+    public String headline() {
+        int depth = 0;
+        for (int i = 0; i < message.length(); i++) {
+            char c = message.charAt(i);
+            if (c == '（' || c == '(') depth++;
+            else if ((c == '）' || c == ')') && depth > 0) depth--;
+            else if (c == '；' && depth == 0) return message.substring(0, i);
+        }
+        return message;
     }
 }

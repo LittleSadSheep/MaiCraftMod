@@ -4,8 +4,10 @@ package org.maiwithu.maicraft.behavior.acquire;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -34,6 +36,10 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 这些内部需求递归回到这里（深度有上限，转圈的请求当场拒绝）。
  * 背包要满时先请腾背包的模型腾地方，用途标签原样传过去。
  * need 返回的动作逐刻推进：问价、腾格子、执行来源，做完算拿到，弄不到以问题失败。
+ *
+ * <p>一次拿东西从最外层发起到结束算"这一次"：这一次里问遍各来源都没拿到的东西记下来，换一种做法又要到它时
+ * 当场按拿不到算，不再重新问一遍（白色羊毛没有，十一种颜色的床就都不用再去找羊）。
+ * 里层没拿到时只给外层一句结论，经过交给外层收着，由最外层把各层没拿到的东西摊平讲一次。
  */
 public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
 
@@ -159,6 +165,12 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         return new Run(request, permissions, Scope.ALL, null, records);
     }
 
+    /** 这一次拿东西里已经问遍各来源都没拿到它：看此刻在推进的这一串最外层记下的。 */
+    @Override public boolean knownUnobtainable(WantedItem wanted) {
+        Run outermost = advancing.peekLast();
+        return outermost != null && outermost.unobtainable.containsKey(wanted.specifier());
+    }
+
     /** 一场获取的执行：清点 → 问价挑路 → 腾格子 → 用一个来源 → 再清点，直到够数或路都走完。 */
     private final class Run implements Action {
 
@@ -177,6 +189,12 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         /** 这次办砸过或白跑过、不再回头的来源；报价再好也不选，免得在同一个地方撞两次。 */
         private final Set<String> excluded = new HashSet<>();
         private final List<String> deadEnds = new ArrayList<>();
+        /** 备料时里层没拿到的经过：里层只给一句结论，经过收在这里，到这一场讲给人听时摊平讲一次。 */
+        private final List<Shortage> causes = new ArrayList<>();
+        /** 只在最外层用：这一次拿东西里问遍各来源都没拿到的东西，按物品写法记，连同当时的经过。 */
+        private final Map<String, Shortage> unobtainable = new HashMap<>();
+        /** 这一场没拿到的经过，失败时定下；交给外层的就是它。 */
+        private Shortage shortage;
         private Stage stage = Stage.CONSULT;
         private List<Planned> plan = List.of();
         private Action step;
@@ -204,20 +222,41 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             if (!started) {
                 started = true;
                 Problem refused = refusedByChain();
-                if (refused != null) return ActionStatus.failed(refused);
+                if (refused != null) return settle(refused);
             }
+            ActionStatus status;
             advancing.push(this);
             try {
-                return advance(tick);
+                status = advance(tick);
             } finally {
                 advancing.pop();
             }
+            return status instanceof ActionStatus.Failed failed ? settle(failed.problem()) : status;
         }
 
-        // 第一次推进时看外层：同一样东西已经在链上是转了圈，链已经到深度上限是层数太深，都当场失败；
+        // 没拿到：在别人的备料里时，经过交给外层那一场收着，这一场只交一句结论，外层转述时不再整段套进去；
+        // 自己就是最外层时交完整的说明，各层没拿到的东西已经摊平写在里面。
+        private ActionStatus settle(Problem problem) {
+            Run outer = advancing.peek();
+            if (outer == null) return ActionStatus.failed(problem);
+            outer.causes.add(shortage != null ? shortage : new Shortage(request.wanted().specifier(),
+                    request.wanted().describe(), Math.max(1, request.count()), request.purpose(),
+                    List.of(problem.message()), causes));
+            return ActionStatus.failed(new Problem(problem.kind(), problem.headline(), problem.suggestion()));
+        }
+
+        // 第一次推进时看外层：这一次前面已经问遍各来源没拿到的，当场按拿不到算，不再问一遍；
+        // 同一样东西已经在链上是转了圈，链已经到深度上限是层数太深，都当场失败；
         // 来源备料没带记账口时接住外层的，同一条链是同一个任务发起的，事实记进一处。
         private Problem refusedByChain() {
             String key = request.wanted().specifier();
+            Run outermost = advancing.peekLast();
+            Shortage known = outermost == null ? null : outermost.unobtainable.get(key);
+            if (known != null) {
+                shortage = known;
+                return Problem.of(Problem.Kind.NEED_ITEM, "还要" + request.count() + "个" + request.wanted().describe()
+                        + "（" + request.purpose() + "），这一次前面已经问遍各来源，没拿到");
+            }
             if (advancing.stream().anyMatch(outer -> outer.request.wanted().specifier().equals(key))) {
                 return Problem.of(Problem.Kind.NEED_ITEM, "备料转了圈：" + request.purpose() + "需要"
                         + request.wanted().describe() + "，而它又要回到自己头上，不再往下试");
@@ -415,14 +454,27 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                 return Problem.of(Problem.Kind.NEED_APPROVAL, approvalMessages.getFirst(),
                         "放宽对应的许可，或指一个可以用的来源");
             }
+            // 结论句在前，这一层问过、试过的一条一句接在后面；备料时里层没拿到的摊平讲一次，接在最后。
+            // 这一次里问遍了都没拿到，记在最外层：换一种做法又要到它时不再问一遍。
+            List<String> reasons = new ArrayList<>();
+            for (SourceQuote refusal : refusals) {
+                reasons.add(describeRefusal(refusal));
+            }
+            for (String deadEnd : deadEnds) {
+                reasons.add("试过" + deadEnd);
+            }
+            String key = request.wanted().specifier();
+            shortage = new Shortage(key, request.wanted().describe(), target - carried, request.purpose(), reasons, causes);
+            advancing.getLast().unobtainable.put(key, shortage);
             StringBuilder message = new StringBuilder("还要").append(target - carried).append("个")
                     .append(request.wanted().describe()).append("（").append(request.purpose())
                     .append("），问过各来源都拿不到");
-            for (SourceQuote refusal : refusals) {
-                message.append("；").append(describeRefusal(refusal));
+            for (String reason : reasons) {
+                message.append("；").append(reason);
             }
-            for (String deadEnd : deadEnds) {
-                message.append("；试过").append(deadEnd);
+            String explained = Shortage.explain(causes);
+            if (!explained.isEmpty()) {
+                message.append("；").append(explained);
             }
             return Problem.of(Problem.Kind.NEED_ITEM, message.toString(), null);
         }

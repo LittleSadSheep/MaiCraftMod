@@ -273,8 +273,9 @@ public abstract class PhasedTask<P extends Enum<P>> implements Task {
         return builder.build();
     }
 
+    // 一句话结论只带卡住的那句结论；展开的原因在问题的说明里，结果、目标快照与结束事件里不各抄一遍整段。
     private TaskResult failedResult(Problem problem) {
-        return TaskResult.builder(TaskResult.Status.FAILED, label + "没有完成：" + problem.message())
+        return TaskResult.builder(TaskResult.Status.FAILED, label + "没有完成：" + problem.headline())
                 .problem(problem).changes(changes).unconfirmed(unconfirmed).attempts(attempts)
                 .remaining(remaining()).details(details()).build();
     }

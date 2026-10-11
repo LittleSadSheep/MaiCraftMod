@@ -38,4 +38,15 @@ class TaskResultTest {
         assertEquals(Problem.Kind.WRONG_TIME, result.problem().kind());
         assertSame(ResultDetails.NONE, result.details());
     }
+
+    @Test
+    void headlineStopsAtTheFirstSemicolonOutsideBrackets() {
+        // 结论句在前、展开用分号接在后面；括号里的分号是补充，不从那里截断。
+        Problem nested = Problem.of(Problem.Kind.NEED_ITEM,
+                "还要1个床，问过各来源都拿不到；记得的容器：没有；试过自己做（缺羊毛；附近没有羊）");
+        assertEquals("还要1个床，问过各来源都拿不到", nested.headline());
+        Problem bracketed = Problem.of(Problem.Kind.NEED_ITEM, "试过自己做（缺羊毛；附近没有羊），一份都做不了；展开");
+        assertEquals("试过自己做（缺羊毛；附近没有羊），一份都做不了", bracketed.headline());
+        assertEquals("现在是白天", Problem.of(Problem.Kind.WRONG_TIME, "现在是白天").headline());
+    }
 }
