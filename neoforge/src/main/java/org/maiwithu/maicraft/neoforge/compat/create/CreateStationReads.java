@@ -7,7 +7,12 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 
+import com.simibubi.create.content.contraptions.bearing.ClockworkBearingBlockEntity;
+import com.simibubi.create.content.contraptions.bearing.MechanicalBearingBlockEntity;
+import com.simibubi.create.content.contraptions.piston.LinearActuatorBlockEntity;
+import com.simibubi.create.content.decoration.placard.PlacardBlockEntity;
 import com.simibubi.create.content.fluids.drain.ItemDrainBlockEntity;
+import com.simibubi.create.content.fluids.tank.FluidTankBlockEntity;
 import com.simibubi.create.content.kinetics.belt.BeltBlockEntity;
 import com.simibubi.create.content.kinetics.deployer.DeployerBlockEntity;
 import com.simibubi.create.content.kinetics.belt.transport.TransportedItemStack;
@@ -15,18 +20,33 @@ import com.simibubi.create.content.logistics.BigItemStack;
 import com.simibubi.create.content.logistics.depot.DepotBehaviour;
 import com.simibubi.create.content.logistics.stockTicker.CraftableBigItemStack;
 import com.simibubi.create.content.logistics.stockTicker.StockTickerBlockEntity;
+import com.simibubi.create.content.redstone.link.LinkBehaviour;
+import com.simibubi.create.content.redstone.link.RedstoneLinkBlock;
+import com.simibubi.create.content.redstone.link.RedstoneLinkFrequencySlot;
+import com.simibubi.create.content.redstone.nixieTube.NixieTubeBlockEntity;
+import com.simibubi.create.content.trains.display.FlapDisplayBlockEntity;
+import com.simibubi.create.content.trains.display.FlapDisplayLayout;
+import com.simibubi.create.content.trains.display.FlapDisplaySection;
 import com.simibubi.create.content.processing.basin.BasinBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
+import com.simibubi.create.foundation.blockEntity.behaviour.fluid.SmartFluidTankBehaviour;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.phys.Vec3;
+import net.neoforged.neoforge.fluids.FluidStack;
+import net.neoforged.neoforge.fluids.capability.templates.FluidTank;
 import net.neoforged.neoforge.items.IItemHandler;
 import net.neoforged.neoforge.items.ItemStackHandler;
 
 import org.maiwithu.maicraft.compat.create.CreateStations;
+import org.maiwithu.maicraft.compat.create.CreateValues;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -63,6 +83,92 @@ public final class CreateStationReads implements CreateStations {
             items.addAll(stacksOf(outputs));
         }
         return Optional.of(items);
+    }
+
+    // 流体：储罐读整座罐的控制格，注液器、分液池读它的流体格，工作盆读进、出两组流体格。
+    @Override public List<FluidReading> fluids(ClientLevel level, BlockPos at) {
+        if (!level.isLoaded(at)) return List.of();
+        List<FluidReading> found = new ArrayList<>();
+        if (level.getBlockEntity(at) instanceof FluidTankBlockEntity tank) {
+            FluidTankBlockEntity controller = tank.getControllerBE();
+            if (controller != null) {
+                FluidTank inventory = controller.getTankInventory();
+                addFluid(found, inventory.getFluid(), inventory.getCapacity());
+            }
+            return found;
+        }
+        SmartFluidTankBehaviour single = BlockEntityBehaviour.get(level, at, SmartFluidTankBehaviour.TYPE);
+        if (single != null) {
+            addFluid(found, single.getPrimaryHandler().getFluid(), single.getPrimaryHandler().getCapacity());
+        }
+        for (var type : List.of(SmartFluidTankBehaviour.INPUT, SmartFluidTankBehaviour.OUTPUT)) {
+            SmartFluidTankBehaviour tanks = BlockEntityBehaviour.get(level, at, type);
+            if (tanks == null) continue;
+            for (SmartFluidTankBehaviour.TankSegment segment : tanks.getTanks()) {
+                addFluid(found, segment.getRenderedFluid(), 0);
+            }
+        }
+        return found;
+    }
+
+    private static void addFluid(List<FluidReading> found, FluidStack fluid, int capacity) {
+        if (fluid.isEmpty()) return;
+        found.add(new FluidReading(BuiltInRegistries.FLUID.getKey(fluid.getFluid()).toString(), fluid.getAmount(), capacity));
+    }
+
+    // 显示面：辉光管的两行字、翻牌显示板每一行的各段字连起来、告示框里放着的东西。
+    @Override public Optional<String> shownText(ClientLevel level, BlockPos at) {
+        if (!level.isLoaded(at)) return Optional.empty();
+        BlockEntity entity = level.getBlockEntity(at);
+        if (entity instanceof NixieTubeBlockEntity nixie) return Optional.of(nixie.getFullText().getString());
+        if (entity instanceof FlapDisplayBlockEntity flaps) {
+            FlapDisplayBlockEntity controller = flaps.getController();
+            if (controller == null) return Optional.of("");
+            List<String> lines = new ArrayList<>();
+            for (FlapDisplayLayout line : controller.getLines()) {
+                StringBuilder text = new StringBuilder();
+                for (FlapDisplaySection section : line.getSections()) text.append(section.getText().getString());
+                lines.add(text.toString().strip());
+            }
+            return Optional.of(String.join(" / ", lines));
+        }
+        if (entity instanceof PlacardBlockEntity placard) {
+            ItemStack held = placard.getHeldItem();
+            return Optional.of(held.isEmpty() ? "" : BuiltInRegistries.ITEM.getKey(held.getItem()).toString());
+        }
+        return Optional.empty();
+    }
+
+    // 无线红石：两个频率格放的东西、能点在哪（和 Create 判点中用的同一个框），收发看方块状态。
+    @Override public Optional<LinkReading> link(ClientLevel level, BlockPos at) {
+        if (!level.isLoaded(at)) return Optional.empty();
+        LinkBehaviour link = BlockEntityBehaviour.get(level, at, LinkBehaviour.TYPE);
+        if (link == null) return Optional.empty();
+        BlockState state = level.getBlockState(at);
+        List<ItemStack> frequencies = List.of(link.getNetworkKey().getFirst().getStack().copy(),
+                link.getNetworkKey().getSecond().getStack().copy());
+        List<CreateValues.Spot> spots = new ArrayList<>();
+        for (boolean first : List.of(true, false)) {
+            RedstoneLinkFrequencySlot slot = new RedstoneLinkFrequencySlot(first);
+            Vec3 local = slot.getLocalOffset(level, at, state);
+            if (local == null) continue;
+            Direction face = state.hasProperty(BlockStateProperties.FACING)
+                    ? state.getValue(BlockStateProperties.FACING) : Direction.UP;
+            spots.add(new CreateValues.Spot(face, Vec3.atLowerCornerOf(at).add(local), slot.getScale() / 3.5));
+        }
+        boolean receiver = state.hasProperty(RedstoneLinkBlock.RECEIVER) && state.getValue(RedstoneLinkBlock.RECEIVER);
+        boolean powered = state.hasProperty(BlockStateProperties.POWERED) && state.getValue(BlockStateProperties.POWERED);
+        return Optional.of(new LinkReading(frequencies, spots, receiver, powered));
+    }
+
+    // 装置在不在动：轴承问它自己，活塞与滑轮看公开字段 running。
+    @Override public Optional<Boolean> moving(ClientLevel level, BlockPos at) {
+        if (!level.isLoaded(at)) return Optional.empty();
+        BlockEntity entity = level.getBlockEntity(at);
+        if (entity instanceof MechanicalBearingBlockEntity bearing) return Optional.of(bearing.isRunning());
+        if (entity instanceof ClockworkBearingBlockEntity clock) return Optional.of(clock.isRunning());
+        if (entity instanceof LinearActuatorBlockEntity actuator) return Optional.of(actuator.running);
+        return Optional.empty();
     }
 
     // 机械手：模式在同步给客户端的数据里（Mode），手里那件反射读非公开字段；读不到就当空手报，不猜。

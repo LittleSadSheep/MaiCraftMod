@@ -98,6 +98,12 @@ final class CreateMachineKnowledge implements KnowledgeSource {
                 .append("写 empty 空着手点，清空。漏斗、智能溜槽这类还有 `filter.amount`：any、<=N 最多 N 件、=N 正好 N 件。\n")
                 .append("- 数值 `value`（转速控制器的转速带正负，脉冲计时器这类按刻写）、选项 `option`（写名字）：")
                 .append("角色走近后照 Create 设置界面那样改，读回对上为止。同一种有好几个时第二个起是 `value.2` 这样。\n\n");
+        text.append("## 看得见的读数\n\n")
+                .append("- machine_inspect 的读数里：`fluids` 储罐、注液器、分液池、工作盆装着什么流体多少毫桶；")
+                .append("`text` 辉光管、翻牌显示板显示的字，告示框里放的东西；`moving` 轴承、活塞、滑轮在不在动；")
+                .append("无线红石信号终端的 `frequency`（两个频率格）、`link_mode`、`powered`。\n")
+                .append("- 无线红石：`link.frequency.1`、`link.frequency.2` 写物品 ID（手持它点那一格），两格都一样的终端互相连着；")
+                .append("`link.mode` 写 receive 或 transmit（空着手潜行右键它换）。\n\n");
         text.append("## 认得的机器\n\n");
         for (CreateMachineCatalog.Kind kind : CreateMachineCatalog.kinds()) {
             text.append("- ").append(kind.name()).append("（`").append(kind.id()).append("`）：")

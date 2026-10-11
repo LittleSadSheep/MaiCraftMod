@@ -87,12 +87,19 @@ final class CreateMachineType implements MachineType {
             return stations.stockState(level, at);
         }
         if (!compat.kinetic(here)) {
-            return CreateReadings.still(shown, "");
+            return withReadouts(CreateReadings.still(shown, ""), level, at);
         }
         MachineState kinetic = CreateReadings.kinetic(compat.kineticReading(level, at), compat.minimumSpeed(here), shown);
         // 机械手：手里拿着什么、什么模式并进读数，配方要它手里拿着东西时看这一项。
-        return kind.work() == CreateMachineCatalog.Work.DEPLOYER
+        MachineState state = kind.work() == CreateMachineCatalog.Work.DEPLOYER
                 ? DeployerSettings.withReading(kinetic, compat.deployer(level, at)) : kinetic;
+        return withReadouts(state, level, at);
+    }
+
+    // 看得见的附加读数：装着的流体、显示面上的字、无线红石的频率与收发、装置在不在动。
+    private MachineState withReadouts(MachineState state, ClientLevel level, BlockPos at) {
+        return CreateReadouts.with(state, compat.fluids(level, at), compat.shownText(level, at), compat.link(level, at),
+                compat.moving(level, at));
     }
 
     // 应力：每转吃多少、给多少都读 Create 的应力表；两样都是 0 的（置物台、漏斗）不算在应力网上。
@@ -140,6 +147,7 @@ final class CreateMachineType implements MachineType {
         if (level == null || !level.isLoaded(at)) return List.of();
         List<MachineSetting> settings = new ArrayList<>(CreateValueSettings.of(compat.valueBoxes(level, at)));
         if (kind.work() == CreateMachineCatalog.Work.DEPLOYER) settings.addAll(DeployerSettings.of(compat.deployer(level, at)));
+        settings.addAll(LinkSettings.of(compat.link(level, at)));
         return settings;
     }
 
@@ -149,6 +157,7 @@ final class CreateMachineType implements MachineType {
         if (kind.work() == CreateMachineCatalog.Work.DEPLOYER && key.startsWith("deployer.")) {
             return stations.changeDeployer(level.getBlockState(at), at, key, value, permissions);
         }
+        if (key.startsWith("link.")) return values.changeLink(level, at, key, value, permissions);
         return values.change(level, at, key, value, permissions);
     }
 

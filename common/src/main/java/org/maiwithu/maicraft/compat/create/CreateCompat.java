@@ -181,6 +181,26 @@ public final class CreateCompat extends CompatModule {
         run("改设置框的值", () -> values.sendValue(at, netId, side, row, value));
     }
 
+    /** 这一格里装着的流体；见 {@link CreateStations#fluids}。 */
+    public List<CreateStations.FluidReading> fluids(ClientLevel level, BlockPos at) {
+        return call("读流体", () -> stations.fluids(level, at));
+    }
+
+    /** 显示面上的字；见 {@link CreateStations#shownText}。 */
+    public Optional<String> shownText(ClientLevel level, BlockPos at) {
+        return call("读显示面", () -> stations.shownText(level, at));
+    }
+
+    /** 无线红石信号终端的读数；见 {@link CreateStations#link}。 */
+    public Optional<CreateStations.LinkReading> link(ClientLevel level, BlockPos at) {
+        return call("读无线红石", () -> stations.link(level, at));
+    }
+
+    /** 装置在不在动；见 {@link CreateStations#moving}。 */
+    public Optional<Boolean> moving(ClientLevel level, BlockPos at) {
+        return call("读装置", () -> stations.moving(level, at));
+    }
+
     /** 分液池上的那一件；见 {@link CreateStations#drainItems}。 */
     public Optional<List<ItemStack>> drainItems(ClientLevel level, BlockPos at) {
         return call("读分液池", () -> stations.drainItems(level, at));

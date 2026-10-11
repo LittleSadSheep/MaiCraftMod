@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat.create;
 
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
@@ -14,6 +15,7 @@ import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.compat.HandThenClick;
+import org.maiwithu.maicraft.compat.StepsInOrder;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -68,22 +70,62 @@ final class ValueChanges {
         return Optional.of(setFilter(at, filter, value, permissions));
     }
 
+    /**
+     * 改无线红石信号终端的动作：频率格是手持那样东西（或空着手）点那一格；收发是空着手潜行右键终端，
+     * 潜行时 Create 不当成点频率格。键不认、值不合给空。
+     */
+    Optional<Action> changeLink(ClientLevel level, BlockPos at, String key, String value, Permissions permissions) {
+        Optional<CreateStations.LinkReading> reading = compat.link(level, at);
+        if (reading.isEmpty()) return Optional.empty();
+        Optional<Integer> index = LinkSettings.frequencyIndex(key);
+        if (index.isPresent()) {
+            if (index.get() >= reading.get().spots().size()) {
+                return Optional.of(failing(Problem.Kind.NOT_POSSIBLE_HERE, "这个频率格现在没有画出来能点的地方"));
+            }
+            int slot = index.get();
+            return Optional.of(clickWithHeld(at, reading.get().spots().get(slot), "把第 " + (slot + 1) + " 个频率格设成 " + value,
+                    value, permissions, now -> compat.link(now, at)
+                            .filter(link -> LinkSettings.itemValue(link.frequencies().get(slot)).equals(value)).isPresent()));
+        }
+        if (!key.equals(LinkSettings.MODE)) return Optional.empty();
+        if (!value.equals(LinkSettings.RECEIVE) && !value.equals(LinkSettings.TRANSMIT)) {
+            return Optional.of(failing(Problem.Kind.INVALID_PARAMETER, "link.mode 只认 receive 或 transmit：" + value));
+        }
+        boolean receiver = value.equals(LinkSettings.RECEIVE);
+        Action toggle = new HandThenClick(services, "把无线红石换成" + (receiver ? "收信号" : "发信号"), at, new AABB(at),
+                permissions, () -> mainhand().isEmpty() ? Optional.empty() : services.toMainhand().emptyMainhand(),
+                () -> context -> compat.link(context.level(), at).filter(link -> link.receiver() == receiver).isPresent()
+                        ? InteractionConfirmation.Verdict.APPLIED : InteractionConfirmation.Verdict.PENDING);
+        // 先照常走到跟前，到了再按住潜行点：一路潜行着走太慢，也不是人会做的。
+        return Optional.of(new StepsInOrder("把无线红石换成" + (receiver ? "收信号" : "发信号"), List.of(
+                new StepsInOrder.Step("走到终端跟前", () -> services.approach().toward(ApproachTarget.ofBlock(at), permissions)),
+                new StepsInOrder.Step("空着手潜行右键", () -> services.sneak().sneaking(toggle)))));
+    }
+
     // 设过滤格：空着手点是清空，手持东西点是设成它；身上没有那样东西就按缺东西失败，不拿着别的去点。
     private Action setFilter(BlockPos at, CreateValues.FilterBox filter, String value, Permissions permissions) {
         if (filter.spots().isEmpty()) {
             return failing(Problem.Kind.NOT_POSSIBLE_HERE, "「" + filter.label() + "」现在没有画出来能点的地方");
         }
-        CreateValues.Spot spot = filter.spots().getFirst();
+        return clickWithHeld(at, filter.spots().getFirst(), "把「" + filter.label() + "」设成 " + value, value, permissions,
+                now -> sameFilter(compat.valueBoxes(now, at), filter)
+                        .filter(box -> CreateValueSettings.filterValue(box.filter()).equals(value)).isPresent());
+    }
+
+    // 手持那样东西（empty 是空着手）点方块上的一处小框：框取 Create 判点中半径的六成，点在框里一定算点中；
+    // 身上没有那样东西就按缺东西失败，不拿着别的去点。读回对上才算做成。
+    private Action clickWithHeld(BlockPos at, CreateValues.Spot spot, String what, String value, Permissions permissions,
+            Predicate<ClientLevel> done) {
         double half = spot.radius() * SPOT_SHARE;
         AABB box = new AABB(spot.center().subtract(half, half, half), spot.center().add(half, half, half))
                 .intersect(new AABB(at));
         boolean clear = value.equals(CreateValueSettings.EMPTY);
-        return new HandThenClick(services, "把「" + filter.label() + "」设成 " + value, at, box, permissions,
+        return new HandThenClick(services, what, at, box, permissions,
                 () -> clear ? (mainhand().isEmpty() ? Optional.empty() : services.toMainhand().emptyMainhand())
                         : mainhand().equals(value) ? Optional.empty()
-                        : services.toMainhand().moveToMainhand(value).or(() -> Optional.of(failing(Problem.Kind.NEED_ITEM, "身上没有 " + value))),
-                () -> context -> sameFilter(compat.valueBoxes(context.level(), at), filter)
-                        .filter(now -> CreateValueSettings.filterValue(now.filter()).equals(value)).isPresent()
+                        : services.toMainhand().moveToMainhand(value)
+                                .or(() -> Optional.of(failing(Problem.Kind.NEED_ITEM, "身上没有 " + value))),
+                () -> context -> done.test(context.level())
                         ? InteractionConfirmation.Verdict.APPLIED : InteractionConfirmation.Verdict.PENDING);
     }
 

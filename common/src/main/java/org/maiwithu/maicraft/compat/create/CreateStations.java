@@ -31,6 +31,40 @@ public interface CreateStations {
     /** 库存请求器上次读到的网络现货；不是库存请求器、没加载给空；还没读过时是空表加上"多少刻前"。 */
     Optional<StockSnapshot> stock(ClientLevel level, BlockPos at);
 
+    /** 这一格里装着的流体：流体储罐（整座罐）、注液器、分液池、工作盆的流体格；没有流体格给空表。 */
+    List<FluidReading> fluids(ClientLevel level, BlockPos at);
+
+    /** 显示面上的字：辉光管、翻牌显示板的每一行，告示框里放的东西；不是显示面给空。 */
+    Optional<String> shownText(ClientLevel level, BlockPos at);
+
+    /** 无线红石信号终端：两个频率格放的东西、能点在哪、是收还是发、通不通电；不是它给空。 */
+    Optional<LinkReading> link(ClientLevel level, BlockPos at);
+
+    /** 装置在不在动：机械与时钟轴承、机械活塞、绳索滑轮、电梯滑轮；不是这几种给空。 */
+    Optional<Boolean> moving(ClientLevel level, BlockPos at);
+
+    /** 一格流体：流体 ID、多少毫桶、能装多少（读不到容量为 0）。 */
+    record FluidReading(String fluidId, int amount, int capacity) {
+        public FluidReading {
+            Objects.requireNonNull(fluidId, "fluidId");
+        }
+    }
+
+    /**
+     * 无线红石信号终端的读数。
+     *
+     * @param frequencies 两个频率格放的东西（第一格、第二格），空着是空物品
+     * @param spots       两个频率格能点在哪（世界坐标的中心与半径）
+     * @param receiver    是收信号（true）还是发信号
+     * @param powered     现在通不通电
+     */
+    record LinkReading(List<ItemStack> frequencies, List<CreateValues.Spot> spots, boolean receiver, boolean powered) {
+        public LinkReading {
+            frequencies = List.copyOf(frequencies);
+            spots = List.copyOf(spots);
+        }
+    }
+
     /** 机械手手里拿着的东西（画在它手上）与模式；不是机械手、没加载给空，手里那件读不到时给空物品。 */
     Optional<DeployerReading> deployer(ClientLevel level, BlockPos at);
 

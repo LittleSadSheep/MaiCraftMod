@@ -198,6 +198,10 @@ class CreateCompatTest {
             }
             @Override public Optional<StockSnapshot> stock(ClientLevel level, BlockPos at) { return Optional.empty(); }
             @Override public Optional<DeployerReading> deployer(ClientLevel level, BlockPos at) { return Optional.empty(); }
+            @Override public List<FluidReading> fluids(ClientLevel level, BlockPos at) { return List.of(); }
+            @Override public Optional<String> shownText(ClientLevel level, BlockPos at) { return Optional.empty(); }
+            @Override public Optional<LinkReading> link(ClientLevel level, BlockPos at) { return Optional.empty(); }
+            @Override public Optional<Boolean> moving(ClientLevel level, BlockPos at) { return Optional.empty(); }
         };
         CreateTools tools = new CreateTools() {
             @Override public boolean wrenchable(BlockState state) { return false; }

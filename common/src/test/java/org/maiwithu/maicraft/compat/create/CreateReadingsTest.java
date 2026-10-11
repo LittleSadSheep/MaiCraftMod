@@ -126,6 +126,27 @@ class CreateReadingsTest {
     }
 
     @Test
+    void 流体_显示的字_无线红石_装置在不在动并进读数() {
+        CreateStations.LinkReading link = new CreateStations.LinkReading(
+                List.of(new ItemStack(Items.REDSTONE), ItemStack.EMPTY), List.of(), true, false);
+        MachineState state = CreateReadouts.with(MachineState.unknown(""),
+                List.of(new CreateStations.FluidReading("minecraft:water", 1500, 8000)), Optional.of("12:00"),
+                Optional.of(link), Optional.of(true));
+        assertEquals(List.of("minecraft:water 1500/8000 mB"), state.readings().get("fluids"));
+        assertEquals("12:00", state.readings().get("text"));
+        assertEquals(List.of("minecraft:redstone", "empty"), state.readings().get("frequency"));
+        assertEquals("receive", state.readings().get("link_mode"));
+        assertEquals(true, state.readings().get("moving"));
+        List<MachineSetting> settings = LinkSettings.of(Optional.of(link));
+        assertEquals(List.of("link.frequency.1", "link.frequency.2", "link.mode"),
+                settings.stream().map(MachineSetting::key).toList());
+        assertEquals(Optional.of(1), LinkSettings.frequencyIndex("link.frequency.2"));
+        assertTrue(LinkSettings.frequencyIndex("link.frequency.3").isEmpty());
+        assertTrue(CreateReadouts.with(MachineState.unknown(""), List.of(), Optional.empty(), Optional.empty(),
+                Optional.empty()).readings().isEmpty(), "读不到的不写");
+    }
+
+    @Test
     void 鼓风机沿风向往前找置物台_水在第一格_被实心方块挡住就停() {
         BlockPos fan = new BlockPos(0, 64, 0);
         var east = Blocks.DISPENSER.defaultBlockState().setValue(BlockStateProperties.FACING, Direction.EAST);
