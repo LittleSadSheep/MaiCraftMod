@@ -15,8 +15,8 @@ final class MekanismMachineKnowledge implements KnowledgeSource {
 
     @Override public List<KnowledgeDocument.Entry> entries() {
         return List.of(new KnowledgeDocument.Entry(INDEX, "machine.mekanism.index", "通用机械的机器与侧面配置",
-                "认得哪些 Mekanism 机器与管道、侧面配置的设置项怎么写、配置器怎么改、管网怎么接",
-                "mekanism 通用机械 侧面配置 配置器 线缆 管道 导管 能量立方 冶金灌注机"));
+                "认得哪些 Mekanism 机器与管道、侧面配置与分拣器规则怎么写、配置器怎么改、怎么投料、管网怎么接",
+                "mekanism 通用机械 侧面配置 配置器 物流分拣器 规则 投料 线缆 管道 导管 能量立方 冶金灌注机"));
     }
 
     @Override public List<KnowledgeDocument.Entry> entriesAbout(String registryId) {
@@ -34,6 +34,11 @@ final class MekanismMachineKnowledge implements KnowledgeSource {
                 .append("值写模式名，例如 `{\"side.north.item\": \"output\"}`。化学品与热只看不改。\n")
                 .append("- 改的时候角色手持配置器、调到那种介质的模式、潜行右键那一面，每点一下往后换一种，读回对上为止；")
                 .append("身上没有配置器会先去拿。\n\n");
+        text.append("## 物流分拣器\n\n")
+                .append("- `sorter.item` 写一样物品的 ID：分拣器只放行这一样（一条精确的单物品规则）；没有规则就新建，")
+                .append("只有一条同物品规则就改成精确的，已经有别的规则时报冲突、不删。\n")
+                .append("- `sorter.auto_eject` 写 on / off：没有规则对得上的东西往不往外送。\n")
+                .append("- 规则只在开着界面时同步：改的时候角色会空着手点开它的界面再改，读数是上次打开时看见的。\n\n");
         text.append("## 投料\n\n")
                 .append("- `machine_run` 对加工机器会走过去点开界面，把料搬进去；格子在界面里，站在外面看不见出口，")
                 .append("投完就收手，做没做好用 `use` 打开它看。\n")

@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.compat.mekanism;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,6 +41,8 @@ final class MekanismMachineType implements MachineType {
     private final PlayerServices services;
     private final Predicate<BlockState> covers;
     private final ConfiguratorClicks configurator;
+    /** 每台分拣器上次打开界面时看见的规则与开关：规则只在开着界面时同步。 */
+    private final Map<BlockPos, MekanismReads.SorterState> sorterSeen = new HashMap<>();
 
     MekanismMachineType(MekanismMachineCatalog.Kind kind, MekanismCompat compat, PlayerServices services,
             Predicate<BlockState> covers) {
@@ -133,15 +136,29 @@ final class MekanismMachineType implements MachineType {
         return false;
     }
 
+    // 侧面配置随同步包下发，随时读得到；分拣器的规则与开关只在开着界面时同步，读的是上次打开时看见的。
     @Override public List<MachineSetting> settings(BlockPos at) {
         ClientLevel level = level();
         if (level == null) return List.of();
-        return compat.sideConfig(level, at).map(SideSettings::of).orElse(List.of());
+        List<MachineSetting> settings = new ArrayList<>(compat.sideConfig(level, at).map(SideSettings::of)
+                .orElse(List.of()));
+        if (sorter()) {
+            compat.openSorter(at).ifPresent(state -> sorterSeen.put(at.immutable(), state));
+            settings.addAll(SorterSettings.of(Optional.ofNullable(sorterSeen.get(at))));
+        }
+        return settings;
     }
 
-    // 改一项：键要是能改的那几种介质的某一面；改一下就是配置器点一下，读回与循环由 machine_configure 做。
+    // 改一项：分拣器的规则与开关开界面改；侧面配置是配置器点一下，读回与循环由 machine_configure 做。
     @Override public Optional<Action> change(BlockPos at, String key, String value, Permissions permissions) {
+        if (sorter() && (key.equals(SorterSettings.ITEM) || key.equals(SorterSettings.AUTO_EJECT))) {
+            return Optional.of(new SorterChange(compat, services, at, key, value, permissions, sorterSeen));
+        }
         return SideSettings.parse(key).map(parsed -> configurator.once(at, parsed, permissions));
+    }
+
+    private boolean sorter() {
+        return kind.id().equals(MekanismMachineCatalog.MOD_ID + ":logistical_sorter");
     }
 
     // 投料：走过去点开机器的界面，把料从背包搬进去，机器自己把它放进收它的格；能量立方、管道这类不加工的不收料。

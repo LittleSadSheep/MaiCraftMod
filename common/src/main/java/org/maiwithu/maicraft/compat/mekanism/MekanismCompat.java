@@ -92,6 +92,21 @@ public final class MekanismCompat extends CompatModule {
         return call("认机器界面的物品格", reads::openMachineSlots);
     }
 
+    /** 打开着的分拣器界面同步过来的样子；见 {@link MekanismReads#openSorter}。 */
+    public Optional<MekanismReads.SorterState> openSorter(BlockPos at) {
+        return call("读分拣器的规则", () -> reads.openSorter(at));
+    }
+
+    /** 按分拣器的"没规则对得上时往外送"开关；见 {@link MekanismReads#toggleSorterAutoEject}。 */
+    public void toggleSorterAutoEject(BlockPos at) {
+        run("按分拣器的往外送开关", () -> reads.toggleSorterAutoEject(at));
+    }
+
+    /** 让分拣器只认这一样物品；见 {@link MekanismReads#setSorterItemRule}。 */
+    public void setSorterItemRule(BlockPos at, String itemId) {
+        run("改分拣器的规则", () -> reads.setSorterItemRule(at, itemId));
+    }
+
     /** 把主手配置器的模式往后拨一格；见 {@link MekanismReads#nextConfiguratorMode}。 */
     public void nextConfiguratorMode() {
         run("给配置器换模式", reads::nextConfiguratorMode);

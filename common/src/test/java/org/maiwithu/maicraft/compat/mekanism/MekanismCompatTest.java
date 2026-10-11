@@ -70,6 +70,9 @@ class MekanismCompatTest {
         @Override public Optional<String> configuratorMode(ItemStack stack) { return Optional.empty(); }
         @Override public void nextConfiguratorMode() { }
         @Override public Set<Integer> openMachineSlots() { return machineSlots; }
+        @Override public Optional<SorterState> openSorter(BlockPos at) { return Optional.empty(); }
+        @Override public void toggleSorterAutoEject(BlockPos at) { }
+        @Override public void setSorterItemRule(BlockPos at, String itemId) { }
     }
 
     @Test
@@ -142,6 +145,29 @@ class MekanismCompatTest {
         reads.machineSlots = Set.of();
         assertTrue(layout.classify(slots, player, List.of(0, 1, 2, 3)) instanceof MenuLayout.Unsupported);
         assertTrue(MekanismMachineLayout.MACHINE_MENUS.contains("mekanism:metallurgic_infuser"));
+    }
+
+    @Test
+    void 分拣器只认一条精确的单物品规则_别的规则算冲突不删_没开过界面读作unknown() {
+        MekanismReads.SorterState none = new MekanismReads.SorterState(true, List.of());
+        MekanismReads.SorterState exactIron = new MekanismReads.SorterState(false,
+                List.of(new MekanismReads.SorterRule(true, "minecraft:iron_ingot", true)));
+        MekanismReads.SorterState fuzzyIron = new MekanismReads.SorterState(false,
+                List.of(new MekanismReads.SorterRule(true, "minecraft:iron_ingot", false)));
+        MekanismReads.SorterState tagRule = new MekanismReads.SorterState(false,
+                List.of(new MekanismReads.SorterRule(false, "", false)));
+        assertEquals(SorterSettings.Decision.ADD, SorterSettings.decide(none, "minecraft:iron_ingot"));
+        assertEquals(SorterSettings.Decision.READY, SorterSettings.decide(exactIron, "minecraft:iron_ingot"));
+        assertEquals(SorterSettings.Decision.EDIT, SorterSettings.decide(fuzzyIron, "minecraft:iron_ingot"));
+        assertEquals(SorterSettings.Decision.CONFLICT, SorterSettings.decide(exactIron, "minecraft:gold_ingot"));
+        assertEquals(SorterSettings.Decision.CONFLICT, SorterSettings.decide(tagRule, "minecraft:iron_ingot"));
+        assertEquals("none", SorterSettings.itemValue(none));
+        assertEquals("minecraft:iron_ingot", SorterSettings.itemValue(exactIron));
+        List<MachineSetting> unseen = SorterSettings.of(Optional.empty());
+        assertTrue(unseen.stream().allMatch(setting -> setting.value().equals(SorterSettings.UNKNOWN)));
+        List<MachineSetting> seen = SorterSettings.of(Optional.of(none));
+        assertEquals("on", seen.stream().filter(setting -> setting.key().equals(SorterSettings.AUTO_EJECT))
+                .findFirst().orElseThrow().value());
     }
 
     private static PlayerServices offline() {
