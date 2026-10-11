@@ -32,8 +32,9 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 就地摆工作站的生产实现：附近没有要用的设施时，把设施方块换到主手，对着身边
  * 一块能放的地面点一下放下去，再把新设施的位置与方块类型记进世界记忆。
  *
- * <p>放哪一格以当刻的现场为准：身边找"格子空着、没有人或生物挡着、下面是结实的地面"的格子，
- * 离角色最近的优先；一格都找不到、或游戏拒绝放置时，动作如实失败，
+ * <p>放哪一格以当刻的现场为准：身边找"格子空着、没有人或生物挡着、下面是结实的地面、头顶也空着"的格子——
+ * 不塞在树叶、原木、天花板底下（放进去用起来别扭，观众看着也怪）；和角色同一层、在眼前的优先，脚下、身后的往后排。
+ * 一格放不下（游戏拒绝）就换下一格，最多试三格；一格都找不到或都不行时动作如实失败，
  * 来源换别的路，不挪用别人的方块也不隔空放。对着支撑方块点一下，方块落在哪一格由点到的面决定，
  * 所以按实际落下的那一格记成"亲眼看到的工作站"，后面到那里动手、下次找设施都用这条记忆。
  */
@@ -41,6 +42,8 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation {
 
     /** 找放格的范围：身边两格以内，再远放下也不好走过去用。 */
     private static final int REACH_BLOCKS = 2;
+    /** 一格放不下最多换几格再试。 */
+    private static final int SPOT_TRIES = 3;
 
     private final Interactions interactions;
     private final ClientMovesToMainhand toMainhand;
@@ -74,6 +77,8 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation {
         private BlockPos spot;
         /** 点下去之前支撑格四周已经是这种设施的格子：确认时只认新落下的那一格。 */
         private Set<BlockPos> alreadyThere = Set.of();
+        /** 试过、放不下的格子：换格时跳过。 */
+        private final Set<BlockPos> tried = new HashSet<>();
 
         PlaceAction(String blockType) {
             this.blockType = blockType;
@@ -131,8 +136,17 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation {
         }
 
         // 放置结果与记忆一起收尾：真放下了才记，按实际落下的那一格记；没放下不冒充记得一台新设施。
+        // 这一格放不下（游戏拒绝、点不到）就换下一格再试，试满三格才如实失败。
         private ActionStatus confirmPlaced(PlayerContext current, TickContext tick) {
             ActionStatus status = placing.tick(tick);
+            if (status instanceof ActionStatus.Failed failed) {
+                placing.close();
+                placing = null;
+                tried.add(spot);
+                if (tried.size() < SPOT_TRIES) return ActionStatus.progressed();
+                failure = failed.problem();
+                return ActionStatus.failed(failure);
+            }
             if (!(status instanceof ActionStatus.Done)) {
                 return status;
             }
@@ -145,22 +159,25 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation {
             return ActionStatus.done();
         }
 
-        // 挑放格：身边一格空着（或可被替换）、没有人或生物挡着、下面是顶面结实的地面，离角色最近的优先。
+        // 挑放格：身边一格空着（或可被替换）、没有人或生物挡着、下面是顶面结实的地面、头顶也空着；
+        // 分数越小越好：离得近，和角色同一层，在眼前（不在身后）。试过放不下的跳过。
         private BlockPos findSpot(PlayerContext current) {
-            BlockPos base = current.localPlayer().blockPosition();
+            var self = current.localPlayer();
+            BlockPos base = self.blockPosition();
+            var look = self.getViewVector(1.0f);
             BlockPos best = null;
-            double bestDistance = Double.MAX_VALUE;
+            double bestScore = Double.MAX_VALUE;
             for (int dx = -REACH_BLOCKS; dx <= REACH_BLOCKS; dx++) {
                 for (int dy = -1; dy <= 1; dy++) {
                     for (int dz = -REACH_BLOCKS; dz <= REACH_BLOCKS; dz++) {
                         BlockPos cell = base.offset(dx, dy, dz);
-                        if (!placeableAt(current, cell)) {
+                        if (tried.contains(cell) || !placeableAt(current, cell)) {
                             continue;
                         }
-                        double distance = cell.distSqr(base);
-                        if (distance < bestDistance) {
+                        double score = spotScore(dx, dy, dz, look.x, look.z);
+                        if (score < bestScore) {
                             best = cell;
-                            bestDistance = distance;
+                            bestScore = score;
                         }
                     }
                 }
@@ -179,7 +196,11 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation {
                 return false;
             }
             BlockPos below = cell.below();
-            return current.level().getBlockState(below).isFaceSturdy(current.level(), below, Direction.UP);
+            if (!current.level().getBlockState(below).isFaceSturdy(current.level(), below, Direction.UP)) return false;
+            // 头顶那一格要空着：树叶、原木、天花板底下不放，压在底下用起来别扭。
+            BlockPos above = cell.above();
+            BlockState over = current.level().getBlockState(above);
+            return over.isAir() || over.canBeReplaced() && over.getCollisionShape(current.level(), above).isEmpty();
         }
 
         // 被生存需求打断：换手、放置先停住，恢复后接着推进。
@@ -205,6 +226,16 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation {
         public String describe() {
             return "在身边放下" + displayName();
         }
+    }
+
+    /**
+     * 放格的分数（越小越好）：水平距离，加上不同层（脚下一层、头那一层）的罚分，再加上在身后的罚分——
+     * 放在眼前、同一层，角色一转身就能用，观众也看得见它被放下。
+     */
+    static double spotScore(int dx, int dy, int dz, double lookX, double lookZ) {
+        double flat = Math.hypot(dx, dz);
+        double facing = flat < 1.0E-6 ? 0 : (dx * lookX + dz * lookZ) / flat;
+        return flat + (dy == 0 ? 0 : 1.5) + (facing < 0 ? 1.0 : 0) - facing * 0.25;
     }
 
     // 支撑格六个邻格里此刻是这种方块的格子。
