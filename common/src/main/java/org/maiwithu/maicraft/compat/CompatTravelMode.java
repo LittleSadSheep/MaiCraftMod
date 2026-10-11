@@ -10,6 +10,7 @@ import org.maiwithu.maicraft.behavior.travel.spi.TravelMode;
 import org.maiwithu.maicraft.behavior.travel.spi.TravelOffer;
 import org.maiwithu.maicraft.behavior.travel.spi.TravelRequest;
 import org.maiwithu.maicraft.behavior.travel.spi.TravelVia;
+import org.maiwithu.maicraft.kernel.param.ParamSpec;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -23,13 +24,15 @@ public final class CompatTravelMode implements TravelMode {
 
     private final CompatModule module;
     private final TravelMode mode;
-    /** 取值与说明进世界时读一次：参数表要用，停用后也照样认得这个取值。 */
+    /** 取值、说明与自己的参数进世界时读一次：参数表要用，停用后也照样认得。 */
     private final TravelVia via;
+    private final List<ParamSpec> options;
 
     public CompatTravelMode(CompatModule module, TravelMode mode) {
         this.module = Objects.requireNonNull(module, "module");
         this.mode = Objects.requireNonNull(mode, "mode");
         this.via = Objects.requireNonNull(mode.via(), "via");
+        this.options = List.copyOf(mode.options());
     }
 
     @Override public TravelVia via() {
@@ -39,23 +42,28 @@ public final class CompatTravelMode implements TravelMode {
     // 问报价：停用了或对不上就答"这里没有这种方式"，原因写明是哪个模组。
     @Override public void offer(TravelRequest request, OfferSink sink) {
         if (!module.active()) {
-            sink.decline(module.name() + "的联动已停用：" + module.disabledReason().orElse("原因不明"), true);
+            sink.decline(Problem.Kind.UNSUPPORTED, module.name() + "的联动已停用：" + module.disabledReason().orElse("原因不明"));
             return;
         }
         try {
             mode.offer(request, sink);
         } catch (ModApiMismatch broken) {
-            sink.decline(broken.getMessage(), true);
+            sink.decline(Problem.Kind.UNSUPPORTED, broken.getMessage());
         }
     }
 
+    // 这种方式自己的参数：进世界时登记一次，停用后照样认得（给了会如实答用不了）。
+    @Override public List<ParamSpec> options() {
+        return options;
+    }
+
     // 开跑这一段：停用了或对不上就给一段当场以不支持收场的，人没动，行程从原地接着规划。
-    @Override public TravelLeg start(TravelOffer offer) {
+    @Override public TravelLeg start(TravelRequest request, TravelOffer offer) {
         if (!module.active()) {
             return new Refused(module.name() + "的联动已停用：" + module.disabledReason().orElse("原因不明"));
         }
         try {
-            return new Leg(module, mode.start(offer));
+            return new Leg(module, mode.start(request, offer));
         } catch (ModApiMismatch broken) {
             return new Refused(broken.getMessage());
         }

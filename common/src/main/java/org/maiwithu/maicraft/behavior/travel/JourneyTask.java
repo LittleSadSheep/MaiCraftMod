@@ -59,8 +59,8 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
     /**
      * 这趟行程的给定输入。
      *
-     * @param destination 已经解析好的目的地
-     * @param via         指定的方式（walk 只走路）；没指定为 null
+     * @param destination 已经解析好的目的地；只用指定的方式、不往别处去（只坐电梯换楼层）时为 null
+     * @param via         指定的方式（walk 只走路）；没指定为 null，没有目的地时必须指定
      * @param options     travel 参数里给方式的话（floor、vehicle）；没给为空表
      * @param permissions 这次任务的许可：指定方式不放宽它
      * @param maxSeconds  整趟最多多久（秒）；不超过 0 表示不设时限
@@ -68,7 +68,7 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
     public record Journey(TravelDestination destination, String via, Map<String, String> options,
             Permissions permissions, int maxSeconds) {
         public Journey {
-            Objects.requireNonNull(destination, "destination");
+            if (destination == null && via == null) throw new IllegalArgumentException("没有目的地时要指定方式");
             options = options == null ? Map.of() : Map.copyOf(options);
             Objects.requireNonNull(permissions, "permissions");
         }
@@ -101,6 +101,8 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
     private boolean rodeAlready;
     private BlockPos lastFeet;
     private WorldPosition arrivedAt;
+    /** 这一轮问报价用的请求：开跑那一段时原样交给方式（许可、给方式的话）。 */
+    private TravelRequest request;
 
     /**
      * @param world   读角色此刻在哪（带维度）
@@ -139,10 +141,16 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
         if (spot == null) return Next.stay();
         BlockPos feet = new BlockPos(spot.x(), spot.y(), spot.z());
         lastFeet = feet;
-        if (journey.destination().navGoal().isAt(feet)) {
+        TravelDestination destination = journey.destination();
+        if (destination != null && destination.navGoal().isAt(feet)) {
             arrivedAt = spot;
-            return Next.done(TaskResult.done("出行：到了" + journey.destination().describe() + "，实测位置 "
+            return Next.done(TaskResult.done("出行：到了" + destination.describe() + "，实测位置 "
                     + feet.toShortString()));
+        }
+        if (destination == null && rodeAlready) {
+            // 只坐指定的方式、不往别处去（只坐电梯换楼层）：送完这一段就是到了。
+            arrivedAt = spot;
+            return Next.done(TaskResult.done("出行：" + journey.via() + " 送到了，实测位置 " + feet.toShortString()));
         }
         BlockPos aim = aim(feet);
         String via = journey.via();
@@ -161,15 +169,15 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
             }
         }
         if (compare) {
-            TravelRequest request = new TravelRequest(feet, aim, spot.dimension() == null ? "" : spot.dimension(),
-                    journey.destination().radius(), journey.permissions(), journey.options());
+            request = new TravelRequest(feet, aim, spot.dimension() == null ? "" : spot.dimension(),
+                    destination == null ? 0 : destination.radius(), journey.permissions(), journey.options());
             for (Map.Entry<TravelMode, Boolean> entry : answered.entrySet()) {
                 if (!entry.getValue()) entry.getKey().offer(request, sinkFor(entry, round));
             }
             if (answered.containsValue(false) && ++askedTicks < OFFER_WAIT_TICKS) return Next.stay();
             answered.forEach((mode, done) -> {
-                if (!done) declined.add(new TravelPlanner.Declined(mode.via(),
-                        "看了 " + OFFER_WAIT_TICKS / 20 + " 秒现场还没答上来", false));
+                if (!done) declined.add(new TravelPlanner.Declined(mode.via(), Problem.Kind.UNREACHABLE,
+                        "看了 " + OFFER_WAIT_TICKS / 20 + " 秒现场还没答上来"));
             });
         }
         askedTicks = 0;
@@ -177,14 +185,14 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
                 offers, declined, tried);
         return switch (plan) {
             case TravelPlanner.Plan.Walk ignored -> {
-                walk = new WalkingLeg(walking.apply(journey.destination()), feet, context.gameTick());
+                walk = new WalkingLeg(walking.apply(destination), feet, context.gameTick());
                 yield Next.go(Phase.WALK, "这一段走路");
             }
             case TravelPlanner.Plan.Ride chosen -> {
                 TravelOffer offer = chosen.offer();
                 TravelMode mode = modes.stream().filter(candidate -> candidate.via().equals(offer.via()))
                         .findFirst().orElseThrow();
-                ride = new RidingLeg(offer, mode.start(offer), feet, context.gameTick());
+                ride = new RidingLeg(offer, mode.start(request, offer), feet, context.gameTick());
                 recordProgress("这一段用 " + offer.via().name() + "：" + offer.from().toShortString()
                         + " → " + offer.to().toShortString());
                 yield Next.go(Phase.RIDE, "这一段用 " + offer.via().name());
@@ -202,9 +210,9 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
                 entry.setValue(true);
             }
 
-            @Override public void decline(String reason, boolean unsupported) {
+            @Override public void decline(Problem.Kind kind, String reason) {
                 if (askedRound != round) return;
-                declined.add(new TravelPlanner.Declined(entry.getKey().via(), reason, unsupported));
+                declined.add(new TravelPlanner.Declined(entry.getKey().via(), kind, reason));
                 entry.setValue(true);
             }
         };
@@ -266,10 +274,12 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
                 + TravelPlanner.reasons(declined), walkProblem.suggestion());
     }
 
-    // 量距离、问报价用的终点：高度没核实时按脚下这层算，只比水平远近。
+    // 量距离、问报价用的终点：高度没核实时按脚下这层算，只比水平远近；没有目的地为 null。
     private BlockPos aim(BlockPos feet) {
-        BlockPos center = journey.destination().center();
-        return journey.destination().heightConfirmed() ? center : new BlockPos(center.getX(), feet.getY(), center.getZ());
+        TravelDestination destination = journey.destination();
+        if (destination == null) return null;
+        BlockPos center = destination.center();
+        return destination.heightConfirmed() ? center : new BlockPos(center.getX(), feet.getY(), center.getZ());
     }
 
     private BlockPos feetNow() {
@@ -305,21 +315,25 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
     }
 
     @Override protected ResultDetails details() {
+        BlockPos aim = lastFeet == null ? null : aim(lastFeet);
         return new JourneyDetails(arrivedAt,
-                arrivedAt == null && lastFeet != null ? RemainingDistance.measure(lastFeet, aim(lastFeet)) : null,
+                arrivedAt == null && aim != null ? RemainingDistance.measure(lastFeet, aim) : null,
                 placedBlocks, landings, trapEscapes, crossedWater, legs);
     }
 
     @Override protected List<String> remaining() {
         if (arrivedAt != null || lastFeet == null) return List.of();
+        BlockPos aim = aim(lastFeet);
+        if (aim == null) return List.of("停在 " + shortSpot(lastFeet) + "，" + journey.via() + " 还没送到");
         return List.of("停在 " + shortSpot(lastFeet) + "，还没到目的地：差 "
-                + RemainingDistance.measure(lastFeet, aim(lastFeet)).describe());
+                + RemainingDistance.measure(lastFeet, aim).describe());
     }
 
     @Override protected String describePhase(Phase value) {
+        String where = journey.destination() == null ? "坐 " + journey.via() : "去" + journey.destination().describe();
         return switch (value) {
-            case PLAN -> "规划下一段：去" + journey.destination().describe();
-            case WALK -> "走路：去" + journey.destination().describe();
+            case PLAN -> "规划下一段：" + where;
+            case WALK -> "走路：" + where;
             case RIDE -> ride == null ? "换交通" : "坐 " + ride.offer.via().name();
         };
     }

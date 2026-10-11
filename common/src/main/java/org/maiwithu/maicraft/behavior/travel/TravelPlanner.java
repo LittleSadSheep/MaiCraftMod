@@ -41,15 +41,15 @@ public final class TravelPlanner {
         record DeadEnd(Problem problem) implements Plan {}
     }
 
-    /** 一种方式答不出的原因。 */
-    public record Declined(TravelVia via, String reason, boolean unsupported) {}
+    /** 一种方式答不出的原因：哪一种送不了（不支持、送不到、话说错了）和一句原因。 */
+    public record Declined(TravelVia via, Problem.Kind kind, String reason) {}
 
     /**
      * 挑这一段怎么走。
      *
      * @param via             指定的方式；没指定为 null
      * @param from            角色脚下
-     * @param to              目的地中心
+     * @param to              目的地中心；只用指定的方式、不往别处去时为 null
      * @param walkFailedHere  从这里走路刚走不通（无路、地形挡住、困住、缺垫料）
      * @param rodeAlready     这一趟已经用指定的方式送过一段
      * @param offers          各方式这一轮给的报价
@@ -59,8 +59,9 @@ public final class TravelPlanner {
     public static Plan choose(String via, BlockPos from, BlockPos to, boolean walkFailedHere, boolean rodeAlready,
             List<TravelOffer> offers, List<Declined> declined, Set<String> tried) {
         // 试过的不再试；送完离目的地反而不近的不算往前送（电梯往下、车往反方向开）。
+        // 没有目的地（只坐电梯换楼层）：只看指定的方式自己挑的那份。
         List<TravelOffer> fresh = offers.stream().filter(offer -> !tried.contains(key(offer)))
-                .filter(offer -> walkTicks(offer.to(), to) < walkTicks(from, to)).toList();
+                .filter(offer -> to == null || walkTicks(offer.to(), to) < walkTicks(from, to)).toList();
         if (TravelVia.WALK.name().equals(via)) return new Plan.Walk();
         if (via != null) {
             // 指定的方式送过一段，剩下的就是首尾的步行；还没送过就只看它的报价，给不出就如实结束。
@@ -73,11 +74,15 @@ public final class TravelPlanner {
                         "看 legs 里每段停在哪、为什么，换别的方式或不指定 via"));
             }
             Optional<Declined> why = declined.stream().filter(answer -> answer.via().name().equals(via)).findFirst();
-            return new Plan.DeadEnd(why.map(answer -> Problem.of(answer.unsupported() ? Problem.Kind.UNSUPPORTED
-                            : Problem.Kind.UNREACHABLE, "指定的 " + via + " 送不了：" + answer.reason(),
-                            "换别的方式，或不指定 via 让它自己挑"))
+            return new Plan.DeadEnd(why.map(answer -> Problem.of(answer.kind(), "指定的 " + via + " 送不了：" + answer.reason(),
+                            answer.kind() == Problem.Kind.INVALID_PARAMETER ? "照原因里说的改一下再试"
+                                    : "换别的方式，或不指定 via 让它自己挑"))
                     .orElse(Problem.of(Problem.Kind.UNSUPPORTED, "指定的 " + via + " 这里用不上（没有回答）",
                             "换别的方式，或不指定 via 让它自己挑")));
+        }
+        if (to == null) {
+            return new Plan.DeadEnd(Problem.of(Problem.Kind.INVALID_PARAMETER, "没说去哪，也没指定用什么方式",
+                    "给 target，或给 via 与这种方式的参数（例如 via=elevator 加 floor）"));
         }
         // 没指定：近处直接走；远处比"走过去"和"坐这段再走完剩下的"谁快，走路刚走不通就只比别的方式。
         if (near(from, to) && !walkFailedHere) return new Plan.Walk();
@@ -97,9 +102,9 @@ public final class TravelPlanner {
         return reasons.isEmpty() ? "" : "（" + String.join("；", reasons) + "）";
     }
 
-    /** 坐这一段再走完剩下的，一共要多少刻。 */
+    /** 坐这一段再走完剩下的，一共要多少刻；没有目的地时只算这一段。 */
     static long total(TravelOffer offer, BlockPos to) {
-        return offer.estimatedTicks() + walkTicks(offer.to(), to);
+        return offer.estimatedTicks() + (to == null ? 0 : walkTicks(offer.to(), to));
     }
 
     /** 近处：水平 32 格内、高差 6 格内。 */

@@ -28,6 +28,8 @@ import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.kernel.param.ParamSpec;
+import org.maiwithu.maicraft.kernel.param.ParamType;
 import org.maiwithu.maicraft.kernel.param.ParamValues;
 import org.maiwithu.maicraft.kernel.param.ParseResult;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -39,6 +41,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -201,10 +204,10 @@ class TravelAbilityTest {
             }
 
             @Override public void offer(TravelRequest request, OfferSink sink) {
-                sink.decline("没有电梯", true);
+                sink.decline(Problem.Kind.UNSUPPORTED, "没有电梯");
             }
 
-            @Override public TravelLeg start(TravelOffer offer) {
+            @Override public TravelLeg start(TravelRequest request, TravelOffer offer) {
                 throw new AssertionError("决定阶段不开跑");
             }
         };
@@ -228,6 +231,44 @@ class TravelAbilityTest {
         Goal walk = new Goal("maicraft:travel", null, new Target.Position(5, 120, 5, null), walkOnly.params(),
                 Permissions.DEFAULT, List.of(), null);
         assertInstanceOf(TravelInput.class, assertInstanceOf(StepDecision.Run.class, withModes.decide(step(walk))).input());
+    }
+
+    @Test
+    void modeOptionsPickTheModeAndAllowFloorOnlyTrips() {
+        // 给了电梯的 floor 就是坐电梯：不给 target 只换楼层；via 给了别的就是参数对不上。
+        TravelMode elevator = new TravelMode() {
+            @Override public TravelVia via() {
+                return new TravelVia("elevator", "坐 Create 电梯换楼层");
+            }
+
+            @Override public List<ParamSpec> options() {
+                return List.of(ParamSpec.of("floor", ParamType.TEXT).doc("去哪一层").build());
+            }
+
+            @Override public void offer(TravelRequest request, OfferSink sink) {}
+
+            @Override public TravelLeg start(TravelRequest request, TravelOffer offer) {
+                throw new AssertionError("决定阶段不开跑");
+            }
+        };
+        TravelAbility withModes = new TravelAbility(walks,
+                new DestinationResolver(new StubWorld(), name -> Optional.empty(), id -> Optional.empty()),
+                List::of, progress -> {}, null, new StubWorld(), List.of(elevator));
+        ParseResult floorOnly = withModes.spec().paramSpecs().parse(JsonParser.parseString("{\"floor\":\"top\"}")
+                .getAsJsonObject());
+        assertTrue(floorOnly.ok(), floorOnly.errors().toString());
+        Goal trip = new Goal("maicraft:travel", null, null, floorOnly.params(), Permissions.DEFAULT, List.of(), null);
+        JourneyInput input = assertInstanceOf(JourneyInput.class,
+                assertInstanceOf(StepDecision.Run.class, withModes.decide(step(trip))).input());
+        assertEquals("elevator", input.journey().via());
+        assertEquals(Map.of("floor", "top"), input.journey().options());
+
+        ParseResult clash = withModes.spec().paramSpecs().parse(JsonParser.parseString(
+                "{\"via\":\"walk\",\"floor\":\"top\"}").getAsJsonObject());
+        Goal wrong = new Goal("maicraft:travel", null, new Target.Position(5, 120, 5, null), clash.params(),
+                Permissions.DEFAULT, List.of(), null);
+        StepDecision.Finish finish = assertInstanceOf(StepDecision.Finish.class, withModes.decide(step(wrong)));
+        assertEquals(Problem.Kind.INVALID_PARAMETER, finish.result().problem().kind());
     }
 
     /** 能力决定阶段不会开始走到；真走了说明薄皮越界。 */

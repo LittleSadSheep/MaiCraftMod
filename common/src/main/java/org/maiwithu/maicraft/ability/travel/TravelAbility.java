@@ -27,11 +27,15 @@ import org.maiwithu.maicraft.kernel.goal.TargetKind;
 import org.maiwithu.maicraft.kernel.param.ParamSpec;
 import org.maiwithu.maicraft.kernel.param.ParamSpecs;
 import org.maiwithu.maicraft.kernel.param.ParamType;
+import org.maiwithu.maicraft.kernel.param.ParamValues;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 
+import com.google.gson.JsonElement;
+
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -117,6 +121,12 @@ public final class TravelAbility implements AbilityModule {
                     .doc("只用这种方式去（首尾免不了的步行除外），用不了会说明原因，不悄悄改走路；不给就近处走、远处挑最快的："
                             + vias.stream().map(via -> via.name() + " " + via.description())
                                     .collect(Collectors.joining("；"))).build());
+            // 各方式自己的参数（电梯的 floor……）跟在 via 后面，同名的只留第一个。
+            for (TravelMode mode : modes) {
+                for (ParamSpec option : mode.options()) {
+                    if (specs.stream().noneMatch(spec -> spec.name().equals(option.name()))) specs.add(option);
+                }
+            }
         }
         return ParamSpecs.of(specs.toArray(ParamSpec[]::new));
     }
@@ -133,7 +143,15 @@ public final class TravelAbility implements AbilityModule {
     @Override
     public StepDecision decide(StepContext step) {
         Goal goal = step.goal();
+        // 给方式的话（floor、vehicle）就是用那种方式：没给 via 时按它算，via 给了别的就是参数自相矛盾。
+        Choice choice = choose(goal.params());
+        if (choice.problem() != null) return new StepDecision.Finish(TaskResult.failed("出行：参数对不上", choice.problem()));
         if (goal.target() == null) {
+            if (choice.via() != null && !choice.options().isEmpty()) {
+                // 只用那种方式、不往别处去：只坐电梯换楼层（via=elevator 加 floor），不给 target。
+                return new StepDecision.Run(new JourneyInput(new JourneyTask.Journey(null, choice.via(), choice.options(),
+                        goal.permissions(), maxSeconds(goal)), TerrainPermit.of(goal.permissions())));
+            }
             // 去哪必须用目标对象说明：没有目标对象就没有目的地，开局就结束，不猜脚边。
             return new StepDecision.Finish(TaskResult.failed("出行的目标没有说去哪",
                     Problem.of(Problem.Kind.UNSUPPORTED,
@@ -144,13 +162,13 @@ public final class TravelAbility implements AbilityModule {
         var resolution = resolver.resolve(goal.target(), goal.params().number("radius"));
         if (resolution instanceof DestinationResolver.Resolution.Ready ready) {
             // 同维度：没有出行方式或指定只走路，就是出行任务；否则交给行程，近处走、远处比报价、给了 via 只用它。
-            String via = goal.params().has("via") ? goal.params().text("via") : null;
+            String via = choice.via();
             TerrainPermit permit = TerrainPermit.of(goal.permissions());
             if (modes.isEmpty() || TravelVia.WALK.name().equals(via)) {
                 return new StepDecision.Run(new TravelInput(ready.destination(), maxSeconds(goal), permit));
             }
-            return new StepDecision.Run(new JourneyInput(new JourneyTask.Journey(ready.destination(), via, Map.of(),
-                    goal.permissions(), maxSeconds(goal)), permit));
+            return new StepDecision.Run(new JourneyInput(new JourneyTask.Journey(ready.destination(), via,
+                    choice.options(), goal.permissions(), maxSeconds(goal)), permit));
         }
         if (resolution instanceof DestinationResolver.Resolution.CrossDimension cross) {
             return new StepDecision.Run(new DimensionTravelInput(cross.targetDimension(), cross.destination(),
@@ -173,6 +191,30 @@ public final class TravelAbility implements AbilityModule {
         }
         return new StepDecision.Finish(TaskResult.failed("出行：去不了",
                 ((DestinationResolver.Resolution.DeadEnd) resolution).problem()));
+    }
+
+    /** 用什么方式、给它的话；参数自相矛盾时带问题。 */
+    private record Choice(String via, Map<String, String> options, Problem problem) {}
+
+    // via 与各方式自己的参数凑一起：给了哪种方式的参数就是那种方式，via 给了别的就说清对不上。
+    private Choice choose(ParamValues params) {
+        String via = params.has("via") ? params.text("via") : null;
+        Map<String, String> options = new LinkedHashMap<>();
+        String owner = null;
+        for (TravelMode mode : modes) {
+            for (ParamSpec option : mode.options()) {
+                if (!params.has(option.name()) || options.containsKey(option.name())) continue;
+                JsonElement value = params.toJson().get(option.name());
+                options.put(option.name(), value.isJsonPrimitive() ? value.getAsString() : value.toString());
+                owner = owner == null ? mode.via().name() : owner;
+            }
+        }
+        if (owner != null && via != null && !via.equals(owner)) {
+            return new Choice(via, options, Problem.of(Problem.Kind.INVALID_PARAMETER,
+                    String.join("、", options.keySet()) + " 只配 via=" + owner + "，这次给的是 via=" + via,
+                    "去掉 via，或改成 via=" + owner));
+        }
+        return new Choice(via != null ? via : owner, options, null);
     }
 
     @Override

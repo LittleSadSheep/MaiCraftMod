@@ -19,6 +19,7 @@ record JourneyInput(JourneyTask.Journey journey, TerrainPermit permit) implement
 
     @Override
     public String describe() {
+        if (journey.destination() == null) return "坐 " + journey.via() + "（" + journey.options() + "）";
         return "去" + journey.destination().describe() + (journey.via() == null ? "" : "（via " + journey.via() + "）");
     }
 }

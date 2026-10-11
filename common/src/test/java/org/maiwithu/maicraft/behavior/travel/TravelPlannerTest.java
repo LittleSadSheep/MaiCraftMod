@@ -49,7 +49,7 @@ class TravelPlannerTest {
     @Test
     void 指定方式给不出报价_如实结束不改走路() {
         TravelPlanner.Plan plan = TravelPlanner.choose("elevator", HERE, new BlockPos(0, 100, 0), false, false,
-                List.of(), List.of(new TravelPlanner.Declined(ELEVATOR, "附近没有通到那一层的电梯", true)), Set.of());
+                List.of(), List.of(new TravelPlanner.Declined(ELEVATOR, Problem.Kind.UNSUPPORTED, "附近没有通到那一层的电梯")), Set.of());
         TravelPlanner.Plan.DeadEnd dead = assertInstanceOf(TravelPlanner.Plan.DeadEnd.class, plan);
         assertEquals(Problem.Kind.UNSUPPORTED, dead.problem().kind());
     }
@@ -63,7 +63,7 @@ class TravelPlannerTest {
     @Test
     void 走不通又没有别的方式_写明各方式的原因() {
         TravelPlanner.Plan plan = TravelPlanner.choose(null, HERE, new BlockPos(10, 64, 0), true, false,
-                List.of(), List.of(new TravelPlanner.Declined(ELEVATOR, "附近没有电梯", true)), Set.of());
+                List.of(), List.of(new TravelPlanner.Declined(ELEVATOR, Problem.Kind.UNSUPPORTED, "附近没有电梯")), Set.of());
         TravelPlanner.Plan.DeadEnd dead = assertInstanceOf(TravelPlanner.Plan.DeadEnd.class, plan);
         assertEquals(Problem.Kind.UNREACHABLE, dead.problem().kind());
     }

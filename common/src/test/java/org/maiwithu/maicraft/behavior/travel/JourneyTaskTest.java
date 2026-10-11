@@ -137,6 +137,20 @@ class JourneyTaskTest {
     }
 
     @Test
+    void 只坐指定的方式不往别处去_送到就结束() {
+        FakeMode elevator = new FakeMode(request -> new TravelOffer(ELEVATOR, request.from(), new BlockPos(0, 100, 0), 80,
+                List.of(), List.of(), ""), WorldPosition.here(0, 100, 0));
+        JourneyTask task = new JourneyTask(new JourneyTask.Journey(null, "elevator", Map.of("floor", "top"),
+                Permissions.DEFAULT, 0), world, List.of(elevator), destination -> {
+                    throw new AssertionError("只换楼层不走路");
+                });
+        TaskResult result = run(task, 50);
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(WorldPosition.here(0, 100, 0), details(result).arrivedAt());
+        assertEquals("top", elevator.lastRequest.options().get("floor"));
+    }
+
+    @Test
     void 走路途中被取消_出行任务的事实照样记进来() {
         nextWalk = destination -> new FakeWalk(null, null);
         JourneyTask task = journey(at(10, 64, 0), null);
@@ -192,6 +206,7 @@ class JourneyTaskTest {
         Problem failure;
         int asked;
         int started;
+        TravelRequest lastRequest;
 
         FakeMode(Function<TravelRequest, TravelOffer> answer, WorldPosition dropOff) {
             this.answer = answer;
@@ -204,15 +219,16 @@ class JourneyTaskTest {
 
         @Override public void offer(TravelRequest request, OfferSink sink) {
             asked++;
+            lastRequest = request;
             if (asked <= silentAsks) return;
             if (decline != null) {
-                sink.decline(decline, true);
+                sink.decline(Problem.Kind.UNSUPPORTED, decline);
                 return;
             }
             sink.offer(answer.apply(request));
         }
 
-        @Override public TravelLeg start(TravelOffer offer) {
+        @Override public TravelLeg start(TravelRequest request, TravelOffer offer) {
             started++;
             return new TravelLeg() {
                 private int ticks;
