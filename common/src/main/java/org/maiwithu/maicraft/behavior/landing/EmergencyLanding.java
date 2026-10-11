@@ -24,7 +24,7 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
  */
 public final class EmergencyLanding {
 
-    /** 下坠快过这个速度（格每刻）就当在快速坠落：伤害估算过时也照样接手。 */
+    /** 下面落在哪看不清时，下坠快过这个速度（格每刻）就当会掉血。 */
     private static final double FAST_FALL_SPEED = -0.7;
     /** 往四周找落点的半径（格）：够绕开活板门、种植床、机器这类落点。 */
     private static final int NEARBY_RADIUS = 2;
@@ -33,16 +33,17 @@ public final class EmergencyLanding {
 
     /**
      * 该不该接手：在往下掉（不在地上、水里、梯子上，没坐载具、没在飞），落点那一柱没有水，
-     * 并且预计落地会掉血或已经掉得很快。
+     * 并且预计落地会掉血（下面看不清时按掉得快不快算）。
      */
     public static boolean needed(LocalPlayer player) {
         if (player.isPassenger() || player.onGround() || player.isInWater() || player.isSwimming()
                 || player.onClimbable() || player.getAbilities().flying || player.isFallFlying()
                 || player.getDeltaMovement().y >= 0) return false;
         BlockPos ground = groundBelow(player);
-        if (ground != null && liquidOnTheWay(player, ground)) return false;
-        if (player.getDeltaMovement().y <= FAST_FALL_SPEED) return true;
-        return ground != null && predictedDamage(player, ground) > 0;
+        // 看不清下面落在哪（没加载、读不懂）时，掉得很快就当会掉血；看得清就按预计伤害算，护住了的（羽毛掉落、落在床上）不接手。
+        if (ground == null) return player.getDeltaMovement().y <= FAST_FALL_SPEED;
+        if (liquidOnTheWay(player, ground)) return false;
+        return predictedDamage(player, ground) > 0;
     }
 
     /** 找一个落点和那里能用的办法，交给一次空中救援；哪里都救不了时为 null。 */

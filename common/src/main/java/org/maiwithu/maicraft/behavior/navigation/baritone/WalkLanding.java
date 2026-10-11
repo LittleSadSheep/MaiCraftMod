@@ -27,6 +27,9 @@ import org.maiwithu.maicraft.game.player.PlayerInput;
  */
 final class WalkLanding {
 
+    /** 意外坠落找不到落点时，隔这么多刻再找一次。 */
+    private static final long EMERGENCY_SEARCH_INTERVAL_TICKS = 5;
+
     /** 这一刻怎么办：照常推进引擎、救援占着身体不推进、出发前没备好不能往下跳。 */
     enum Step { ENGINE, HOLD, BLOCKED }
 
@@ -36,6 +39,8 @@ final class WalkLanding {
     /** 看过、不用接的那一步：不每刻重算。 */
     private MovementFall checkedFall;
     private boolean departureReady;
+    /** 上一次就地找落点没找到的那一刻：同一掉里隔几刻再找，不每刻把四周算一遍。 */
+    private long emergencySearchedTick = Long.MIN_VALUE;
     private boolean leftGround;
     private String blockedReason;
     private final List<String> notes = new ArrayList<>();
@@ -119,9 +124,14 @@ final class WalkLanding {
             return true;
         }
         if (!EmergencyLanding.needed(player)) return false;
+        if (emergencySearchedTick != Long.MIN_VALUE
+                && context.clientTick() - emergencySearchedTick < EMERGENCY_SEARCH_INTERVAL_TICKS) return false;
         rescue = EmergencyLanding.find(context, NavigationProtection::protects,
                 NavigationProtection.snapshot().noEntryCells());
-        if (rescue == null) return false;
+        if (rescue == null) {
+            emergencySearchedTick = context.clientTick();
+            return false;
+        }
         departureReady = true;
         leftGround = true;
         return true;

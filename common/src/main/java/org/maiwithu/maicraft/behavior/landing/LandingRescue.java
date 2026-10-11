@@ -404,7 +404,10 @@ public final class LandingRescue implements CatchesFall {
                 : hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(plan.clicked())
                 && hit.getDirection() == plan.face();
         if (!onTarget) {
-            if (++mismatchTicks >= MISMATCH_TICKS_BEFORE_NEXT) switchToNext(context);
+            // 只在落点已经够得着时才算对不准：还在高处够不着时射线本来就点不到，不能因此换办法。
+            boolean inReach = player.getEyePosition().y - plan.placementHeight(context.level())
+                    <= player.blockInteractionRange();
+            if (inReach && ++mismatchTicks >= MISMATCH_TICKS_BEFORE_NEXT) switchToNext(context);
             return;
         }
         mismatchTicks = 0;

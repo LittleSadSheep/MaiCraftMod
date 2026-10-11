@@ -24,7 +24,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * @param falling              正在往下掉
  * @param overVoid             下面一直到世界底都是空的
  * @param landsInWater         落点是水
- * @param landsUnhurt          落地不会掉血：按预计落地伤害算为零、也没在快速坠落（伤害估算过时的保底）
+ * @param landsUnhurt          落地不会掉血：按预计落地伤害算为零（落点看不清时按没在快速坠落算）
  * @param headInWater          眼睛在水里
  * @param canBreatheUnderwater 有水下呼吸类效果
  * @param airTicks             剩下的氧气（刻）
@@ -71,7 +71,7 @@ public record SurvivalSituation(
                 && !player.onClimbable() && !player.isFallFlying() && !player.getAbilities().flying
                 && player.getVehicle() == null;
         Landing landing = falling ? landingBelow(level, feet) : Landing.NONE;
-        // 落地会不会掉血与意外坠落救援用同一个判断：预计伤害大于零、或已经掉得很快。
+        // 落地会不会掉血与意外坠落救援用同一个判断：预计伤害大于零（落点看不清时按掉得快不快算）。
         boolean unhurt = !falling || landing.water() || landing.cell() == null || !EmergencyLanding.needed(player);
 
         boolean headWet = player.isEyeInFluid(FluidTags.WATER);
