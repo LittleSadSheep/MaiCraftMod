@@ -11,9 +11,9 @@ import org.maiwithu.maicraft.kernel.task.TaskInput;
  * @param journey 目的地、via、给方式的话、许可与时限
  * @param permit  走路的几段被允许动多少地形（能不能挖路垫路）
  */
-record JourneyInput(JourneyTask.Journey journey, TerrainPermit permit) implements TaskInput {
+public record JourneyInput(JourneyTask.Journey journey, TerrainPermit permit) implements TaskInput {
 
-    JourneyInput {
+    public JourneyInput {
         if (journey == null) throw new IllegalArgumentException("出行必须有目的地");
     }
 

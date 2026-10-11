@@ -293,6 +293,17 @@
           "seen"
         ],
         "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:vehicle_drive",
+        "summary": "坐上驾驶座开载具：test 逐条按住控制件看它怎么动再松开（开到某处的 drive 还没做）",
+        "parameters": "vehicle: string, operation: string = drive, inputs?: array",
+        "targets": [
+          "direction",
+          "landmark",
+          "position"
+        ],
+        "mode": "controls_player"
       }
     ]
   },
@@ -1477,6 +1488,46 @@
       ],
       "knowledge": [],
       "doc_resource": "assets/maicraft/abilities/vehicle_assemble.md"
+    },
+    {
+      "ability": "maicraft:vehicle_drive",
+      "summary": "坐上驾驶座开载具：test 逐条按住控制件看它怎么动再松开（开到某处的 drive 还没做）",
+      "parameters": [
+        {
+          "name": "vehicle",
+          "type": "string",
+          "required": true,
+          "doc": "开哪辆：物理结构的观察编号 s#（observe 的 mod_things.structure）"
+        },
+        {
+          "name": "operation",
+          "type": "string",
+          "required": false,
+          "doc": "drive 开到一个地方（默认，还没做）/ test 逐条按 inputs 看反应",
+          "default": "drive",
+          "choices": [
+            "drive",
+            "test"
+          ]
+        },
+        {
+          "name": "inputs",
+          "type": "array",
+          "required": false,
+          "doc": "test 逐条按的输入：[{\"control\": \"打字机:W\", \"ticks\": 20}]；control 写控制件和键，ticks 按住几刻（1～200），最多 16 条"
+        }
+      ],
+      "targets": [
+        "direction",
+        "landmark",
+        "position"
+      ],
+      "mode": "controls_player",
+      "required_mods": [
+        "simulated"
+      ],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/vehicle_drive.md"
     }
   ]
 }
