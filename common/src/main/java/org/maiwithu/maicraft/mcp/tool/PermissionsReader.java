@@ -28,7 +28,7 @@ final class PermissionsReader {
     static Permissions read(JsonElement raw, String path, Permissions inherited, RequestCheck check) {
         Permissions fallback = inherited == null ? Permissions.DEFAULT : inherited;
         if (!raw.isJsonObject()) {
-            check.error(path, "permissions 应该是一个对象", "{\"fight\": \"self_defense\"}");
+            check.error(path, "permissions 应该是一个对象", "{\"fight\": \"self_defense\"}", raw);
             return fallback;
         }
         JsonObject object = raw.getAsJsonObject();

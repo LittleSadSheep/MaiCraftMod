@@ -134,13 +134,13 @@ public final class ParamSpecs {
     // 结构化正文只认形状：对象与数组各是一种类型，说明里报的类型名与收的形状一致，严格按类型校验的客户端不会把对的拒掉。
     private static JsonElement jsonObject(String name, JsonElement element, List<ParamError> errors) {
         if (element.isJsonObject()) return element.deepCopy();
-        errors.add(new ParamError(name, name + " 必须是 JSON 对象", "JSON 对象"));
+        errors.add(new ParamError(name, name + " 必须是 JSON 对象", "JSON 对象", ReceivedShape.of(element)));
         return null;
     }
 
     private static JsonElement jsonArray(String name, JsonElement element, List<ParamError> errors) {
         if (element.isJsonArray()) return element.deepCopy();
-        errors.add(new ParamError(name, name + " 必须是 JSON 数组", "JSON 数组"));
+        errors.add(new ParamError(name, name + " 必须是 JSON 数组", "JSON 数组", ReceivedShape.of(element)));
         return null;
     }
 
@@ -154,7 +154,7 @@ public final class ParamSpecs {
             notes.add(param.name() + "：\"" + element.getAsString() + "\" 按整数 " + value + " 处理");
         }
         if (value == null) {
-            errors.add(new ParamError(param.name(), param.name() + " 必须是整数", expected(param)));
+            errors.add(new ParamError(param.name(), param.name() + " 必须是整数", expected(param), ReceivedShape.of(element)));
             return null;
         }
         return inRange(param, value, errors) ? value : null;
@@ -169,7 +169,7 @@ public final class ParamSpecs {
             notes.add(param.name() + "：\"" + element.getAsString() + "\" 按数字 " + value + " 处理");
         }
         if (value == null || value.isNaN() || value.isInfinite()) {
-            errors.add(new ParamError(param.name(), param.name() + " 必须是数字", expected(param)));
+            errors.add(new ParamError(param.name(), param.name() + " 必须是数字", expected(param), ReceivedShape.of(element)));
             return null;
         }
         boolean belowMin = param.min() != null && value < param.min();
@@ -190,13 +190,13 @@ public final class ParamSpecs {
                 return Boolean.parseBoolean(text);
             }
         }
-        errors.add(new ParamError(name, name + " 必须是 true 或 false", "布尔值"));
+        errors.add(new ParamError(name, name + " 必须是 true 或 false", "布尔值", ReceivedShape.of(element)));
         return null;
     }
 
     private static String text(String name, JsonElement element, List<ParamError> errors) {
         if (isString(element) && !element.getAsString().isBlank()) return element.getAsString();
-        errors.add(new ParamError(name, name + " 必须是非空文字", "文字"));
+        errors.add(new ParamError(name, name + " 必须是非空文字", "文字", ReceivedShape.of(element)));
         return null;
     }
 
@@ -209,7 +209,7 @@ public final class ParamSpecs {
                 return value;
             }
         }
-        errors.add(new ParamError(param.name(), param.name() + " 只能取这些值之一", expected(param)));
+        errors.add(new ParamError(param.name(), param.name() + " 只能取这些值之一", expected(param), ReceivedShape.of(element)));
         return null;
     }
 
@@ -226,7 +226,7 @@ public final class ParamSpecs {
         }
         errors.add(new ParamError(name, name + " 写法不对", allowTag
                 ? "命名空间:路径，例如 minecraft:torch；标签以 # 开头，例如 #minecraft:logs"
-                : "命名空间:路径，例如 minecraft:sheep"));
+                : "命名空间:路径，例如 minecraft:sheep", ReceivedShape.of(element)));
         return null;
     }
 

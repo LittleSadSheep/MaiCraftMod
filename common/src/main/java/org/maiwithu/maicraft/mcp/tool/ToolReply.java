@@ -62,6 +62,8 @@ public final class ToolReply {
                 item.addProperty("field", field.field());
                 item.addProperty("message", field.message());
                 if (field.expected() != null) item.addProperty("expected", field.expected());
+                // 收到的是什么样：类型加一小段原文，对方照着 expected 改时看得见自己写成了什么。
+                if (field.received() != null) item.addProperty("received", field.received());
                 list.add(item);
             }
             error.add("fields", list);

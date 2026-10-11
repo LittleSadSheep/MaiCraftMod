@@ -29,7 +29,7 @@ final class TargetReader {
      */
     static Target read(JsonElement raw, String path, Set<TargetKind> accepted, RequestCheck check) {
         if (!raw.isJsonObject()) {
-            check.error(path, "target 应该是一个对象", "{\"kind\": \"seen\", \"id\": \"b5\"}");
+            check.error(path, "target 应该是一个对象", "{\"kind\": \"seen\", \"id\": \"b5\"}；原地写 {\"kind\": \"here\"}", raw);
             return null;
         }
         JsonObject object = raw.getAsJsonObject();

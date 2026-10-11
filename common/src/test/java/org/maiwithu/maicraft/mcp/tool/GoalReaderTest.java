@@ -79,6 +79,21 @@ class GoalReaderTest {
     }
 
     @Test
+    void wrongShapesSayWhatWasReceived() {
+        // 写法不对时报错带上收到的是什么样：steps 写成了对象、target 写成了一句文字。
+        GoalReader.Reading reading = read("""
+                {"ability": "maicraft:sequence", "target": "here", "steps": {"item": ["minecraft:torch"]}}""");
+
+        FieldError steps = reading.errors().stream().filter(error -> error.field().equals("goal.steps"))
+                .findFirst().orElseThrow();
+        assertTrue(steps.received().startsWith("对象 {\"item\""), steps.received());
+        FieldError target = reading.errors().stream().filter(error -> error.field().equals("goal.target"))
+                .findFirst().orElseThrow();
+        assertEquals("文字 \"here\"", target.received());
+        assertTrue(target.expected().contains("\"kind\": \"here\""), target.expected());
+    }
+
+    @Test
     void misspelledAbilitiesGetSimilarNamesAndTheRestIsStillChecked() {
         GoalReader.Reading reading = read("""
                 {"ability": "slep", "target": {"kind": "seen"}}""");

@@ -64,7 +64,7 @@ public final class ToolCatalog {
                 "开始做一件事（下达一个目标）；dry_run=true 只检查、不动手。"
                         + "这不是 Minecraft 的 /execute 命令，发消息或命令用能力 chat。",
                 properties(
-                        field("goal", "object", "目标：要说做什么、对谁、按什么许可", null),
+                        named("goal", GoalSchema.goal()),
                         field("dry_run", "boolean", "true 时只做校验和预检，返回计划编号和发现的问题", null),
                         field("plan_id", "string", "执行一次 dry_run 通过的计划；与 goal 二选一", null),
                         field("request_key", "string", "网络重试用的幂等键；不给时由入口自动生成", null)),
@@ -142,6 +142,12 @@ public final class ToolCatalog {
             properties.add(field.remove("name").getAsString(), field);
         }
         return properties;
+    }
+
+    // 一个写好了完整结构的字段（goal 这种嵌套对象）：挂上名字交给参数表。
+    private static JsonObject named(String name, JsonObject schema) {
+        schema.addProperty("name", name);
+        return schema;
     }
 
     private static JsonObject field(String name, String type, String description, String defaultValue) {

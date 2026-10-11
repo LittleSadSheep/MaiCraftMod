@@ -9,6 +9,7 @@ import com.google.gson.JsonPrimitive;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import org.maiwithu.maicraft.kernel.param.ReceivedShape;
 
 /**
  * 检查一次请求时记下的错误与规范化说明，以及按宽松写法读字段的办法。
@@ -23,6 +24,16 @@ final class RequestCheck {
 
     void error(String field, String message, String expected) {
         errors.add(new FieldError(field, message, expected));
+    }
+
+    /** 写法不对的一处，带上收到的是什么样：对方照着改时看得见自己写成了什么。 */
+    void error(String field, String message, String expected, JsonElement received) {
+        errors.add(new FieldError(field, message, expected, ReceivedShape.of(received)));
+    }
+
+    /** 原样记下一处已经整理好的错误（能力参数那一层查出来的）。 */
+    void add(FieldError error) {
+        errors.add(error);
     }
 
     void note(String text) {
@@ -58,7 +69,7 @@ final class RequestCheck {
             return null;
         }
         if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString()) {
-            error(path, key + " 应该是文字", "文字");
+            error(path, key + " 应该是文字", "文字", element);
             return null;
         }
         String text = element.getAsString().trim();
@@ -85,7 +96,7 @@ final class RequestCheck {
                 return value;
             }
         }
-        error(path, key + " 应该是整数", "整数");
+        error(path, key + " 应该是整数", "整数", element);
         return null;
     }
 
@@ -102,7 +113,7 @@ final class RequestCheck {
                 return Boolean.parseBoolean(raw);
             }
         }
-        error(path, key + " 应该是 true 或 false", "true / false");
+        error(path, key + " 应该是 true 或 false", "true / false", element);
         return null;
     }
 
@@ -128,7 +139,7 @@ final class RequestCheck {
             return List.of(element.getAsString().trim());
         }
         if (!element.isJsonArray()) {
-            error(path, key + " 应该是文字列表", "[\"…\", \"…\"]");
+            error(path, key + " 应该是文字列表", "[\"…\", \"…\"]", element);
             return null;
         }
         List<String> values = new ArrayList<>();
@@ -136,7 +147,7 @@ final class RequestCheck {
         for (int i = 0; i < array.size(); i++) {
             JsonElement item = array.get(i);
             if (!item.isJsonPrimitive() || !item.getAsJsonPrimitive().isString() || item.getAsString().isBlank()) {
-                error(path + "[" + i + "]", "列表里每一项都应该是非空文字", "文字");
+                error(path + "[" + i + "]", "列表里每一项都应该是非空文字", "文字", item);
                 continue;
             }
             values.add(item.getAsString().trim());

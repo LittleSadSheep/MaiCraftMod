@@ -48,7 +48,7 @@ public final class GoalReader {
     /** @param inherited sequence 里的一步时是整件事的许可，步骤没写的字段沿用它；最外层为 null */
     private Goal readGoal(JsonElement raw, String path, int depth, Permissions inherited, RequestCheck check) {
         if (raw == null || !raw.isJsonObject()) {
-            check.error(path, "目标应该是一个对象", "{\"ability\": \"…\", \"parameters\": {…}}");
+            check.error(path, "目标应该是一个对象", "{\"ability\": \"…\", \"parameters\": {…}}", raw);
             return null;
         }
         JsonObject object = raw.getAsJsonObject().deepCopy();
@@ -119,13 +119,14 @@ public final class GoalReader {
     private static ParamValues parameters(JsonObject object, String path, AbilityModule module, RequestCheck check) {
         JsonElement raw = object.get("parameters");
         if (raw != null && !raw.isJsonNull() && !raw.isJsonObject()) {
-            check.error(path + ".parameters", "parameters 应该是一个对象", "{\"count\": 8}");
+            check.error(path + ".parameters", "parameters 应该是一个对象", "{\"count\": 8}", raw);
             return null;
         }
         if (module == null) return null;
         ParseResult parsed = module.spec().paramSpecs().parse(raw == null || raw.isJsonNull() ? null : raw.getAsJsonObject());
         for (ParamError error : parsed.errors()) {
-            check.error(path + ".parameters." + error.field(), error.message(), error.expected());
+            check.add(new FieldError(path + ".parameters." + error.field(), error.message(), error.expected(),
+                    error.received()));
         }
         for (String note : parsed.notes()) {
             check.note(path + ".parameters." + note);
@@ -151,7 +152,7 @@ public final class GoalReader {
             return List.of();
         }
         if (!raw.isJsonArray() || raw.getAsJsonArray().isEmpty()) {
-            check.error(path + ".steps", "steps 应该是至少有一步的列表", "[{\"ability\": \"…\"}, …]");
+            check.error(path + ".steps", "steps 应该是至少有一步的列表", "[{\"ability\": \"…\"}, …]", raw);
             return List.of();
         }
         if (depth + 1 > MAX_DEPTH) {
