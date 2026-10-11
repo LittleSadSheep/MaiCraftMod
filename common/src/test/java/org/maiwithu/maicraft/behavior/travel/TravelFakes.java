@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.travel;
 
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkReport;
@@ -8,6 +11,11 @@ import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
+import org.maiwithu.maicraft.game.interaction.InteractionSender;
+import org.maiwithu.maicraft.game.menu.MenuActions;
+import org.maiwithu.maicraft.game.player.BackpackStack;
+import org.maiwithu.maicraft.game.player.BackpackView;
+import org.maiwithu.maicraft.game.player.PlayerInput;
 import org.maiwithu.maicraft.kernel.goal.Question;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -30,20 +38,77 @@ final class TravelFakes {
 
     private TravelFakes() {}
 
-    /** 本刻上下文替身：只有刻号。 */
+    /** 本刻上下文替身：只有刻号，角色可换（默认没有角色——出行测试多半不碰角色对象）。 */
     static final class TestTick implements TickContext {
         private long gameTick = 0;
+        private PlayerContext player;
 
         @Override public long gameTick() {
             return gameTick;
         }
 
         @Override public PlayerContext player() {
-            throw new IllegalStateException("出行测试不应该碰到角色对象");
+            return player;
         }
 
         void nextTick() {
             gameTick++;
+        }
+
+        /** 给这一刻摆上角色（出行记账要看背包）。 */
+        void withPlayer(PlayerContext player) {
+            this.player = player;
+        }
+    }
+
+    /** 角色替身：只有一个背包视图，其余一概不接（出行任务只读背包记账）。 */
+    static final class FakePlayer implements PlayerContext {
+        private final BackpackView backpack;
+
+        FakePlayer(BackpackView backpack) {
+            this.backpack = backpack;
+        }
+
+        @Override public BackpackView backpack() {
+            return backpack;
+        }
+
+        @Override public LocalPlayer localPlayer() { return null; }
+        @Override public ClientLevel level() { return null; }
+        @Override public ClientPacketListener connection() { return null; }
+        @Override public PlayerInput input() {
+            throw new UnsupportedOperationException("出行测试不碰角色输入");
+        }
+        @Override public InteractionSender interactionSender() {
+            throw new UnsupportedOperationException("出行测试不碰交互");
+        }
+        @Override public MenuActions menuActions() {
+            throw new UnsupportedOperationException("出行测试不碰界面");
+        }
+        @Override public long clientTick() { return 0; }
+        @Override public boolean isCurrent() { return true; }
+        @Override public boolean canInteractThisTick() { return false; }
+        @Override public boolean tryClaimInteraction() { return false; }
+    }
+
+    /** 背包替身：手工登记格子里的物品堆。 */
+    static final class FakeBag implements BackpackView {
+        final List<BackpackStack> stacks = new ArrayList<>();
+
+        void put(String itemId, int count) {
+            stacks.add(new BackpackStack(itemId, count, 64, false, false, false, true));
+        }
+
+        @Override public List<BackpackStack> stacks() {
+            return List.copyOf(stacks);
+        }
+
+        @Override public int usedSlots() {
+            return stacks.size();
+        }
+
+        @Override public int totalSlots() {
+            return 36;
         }
     }
 

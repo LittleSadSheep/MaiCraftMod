@@ -19,13 +19,16 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
+import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** 出行任务：拿着解析好的目的地上路，到达、中途停下、失败与打断后的接续都按现场如实结算。 */
@@ -43,15 +46,32 @@ class TravelTaskTest {
     private final TestTick tick = new TestTick();
 
     private TravelTask task(Target target) {
+        return task(target, permit);
+    }
+
+    private TravelTask task(Target target, TerrainPermit taskPermit) {
         DestinationResolver resolver = new DestinationResolver(world, places, seen);
         var ready = assertInstanceOf(DestinationResolver.Resolution.Ready.class, resolver.resolve(target, 2));
-        return new TravelTask(ready.destination(), 0, permit, walks, placed, progress);
+        return new TravelTask(ready.destination(), 0, taskPermit, walks, placed, progress);
     }
 
     /** 推进到出结果为止（最多几十刻），返回最终结果。 */
     private TaskResult runToFinish(TravelTask task) {
         task.start(tick);
         for (int i = 0; i < 50; i++) {
+            TickResult result = task.tick(tick);
+            if (result instanceof TickResult.Finished finished) {
+                return finished.result();
+            }
+            tick.nextTick();
+        }
+        throw new AssertionError("出行任务没有按脚本收场");
+    }
+
+    /** 推进到出结果为止，刻数上限给足空转收场用。 */
+    private TaskResult runToFinish(TravelTask task, int maxTicks) {
+        task.start(tick);
+        for (int i = 0; i < maxTicks; i++) {
             TickResult result = task.tick(tick);
             if (result instanceof TickResult.Finished finished) {
                 return finished.result();
@@ -166,6 +186,113 @@ class TravelTaskTest {
         TravelSettlement details = assertInstanceOf(TravelSettlement.class, result.details());
         assertEquals(List.of("5, 65, 0", "6, 66, -1"), details.placedBlocks());
         assertTrue(result.changes().get(0).note().contains("没有自动收回"));
+    }
+
+    @Test
+    void idleAtUnreachableHeightExplainsTargetHeightAndStandableCell() {
+        // 目标 y=300 到不了：身体已经在那一列，空转满时限的收场要写清目标高度与找不到能站的格子。
+        walks.enqueue(new ScriptedWalk(WalkReport.onTheWay(new BlockPos(-5, 178, 36), false)));
+        TravelTask travel = task(new Target.Position(-5, 300, 36, null));
+
+        TaskResult result = runToFinish(travel, 700);
+
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertEquals(Problem.Kind.UNREACHABLE, result.problem().kind(),
+                "高度不可达是走不到，不是一句通用卡住");
+        assertTrue(result.problem().message().contains("(-5, 300, 36)"), () -> "说明：" + result.problem().message());
+        assertTrue(result.problem().message().contains("脚下 y=178"), () -> "说明：" + result.problem().message());
+        assertTrue(result.problem().message().contains("找不到能站的格子"), () -> "说明：" + result.problem().message());
+        assertNotNull(result.problem().suggestion());
+        assertTrue(result.problem().suggestion().contains("y≈178"), () -> "建议：" + result.problem().suggestion());
+        TravelSettlement details = assertInstanceOf(TravelSettlement.class, result.details());
+        assertNotNull(details.remaining(), "没走到要写明还差多远");
+    }
+
+    @Test
+    void idleMidRouteWithoutDigPermitReportsUnreachableAndSuggestsPermit() {
+        // 不许动土、停在路上不走也不失败：空转满时限按 UNREACHABLE 收场，建议里写明许可动土能过。
+        walks.enqueue(new ScriptedWalk(WalkReport.onTheWay(new BlockPos(4, 64, 0), false)));
+        TravelTask travel = task(new Target.Position(12, 64, -2, null), TerrainPermit.WALK_ONLY);
+
+        TaskResult result = runToFinish(travel, 700);
+
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertEquals(Problem.Kind.UNREACHABLE, result.problem().kind());
+        assertTrue(result.problem().message().contains("停在 (4, 64, 0)"), () -> "说明：" + result.problem().message());
+        assertTrue(result.problem().message().contains("change_blocks=none"), () -> "说明：" + result.problem().message());
+        assertTrue(result.problem().message().contains("剩 东 8.2 格"), () -> "说明：" + result.problem().message());
+        assertTrue(result.problem().suggestion().contains("动土"), () -> "建议：" + result.problem().suggestion());
+    }
+
+    @Test
+    void externalCancelCarriesStoppedSpotRemainingAndDetails() {
+        // 走到一半目标被取消：结论带停在哪、剩多远与行程细节，垫过的方块也已经在变化里。
+        placed.put(new BlockPos(5, 65, 0));
+        walks.enqueue(new ScriptedWalk(
+                WalkReport.onTheWay(new BlockPos(4, 64, 0), false),
+                WalkReport.onTheWay(new BlockPos(6, 64, -1), false)));
+        TravelTask travel = task(new Target.Position(12, 64, -2, null));
+        travel.start(tick);
+        assertTrue(travel.tick(tick) instanceof TickResult.Running);
+        tick.nextTick();
+        assertTrue(travel.tick(tick) instanceof TickResult.Running);
+
+        TaskResult result = travel.close(CloseReason.CANCELLED);
+
+        assertEquals(TaskResult.Status.CANCELLED, result.status());
+        // 停在哪、差多远进 remaining，由目标收尾并进取消的结论（见 GoalRunnerTest 的取消现场传播）。
+        assertTrue(result.remaining().get(0).contains("停在 (6, 64, -1)"));
+        assertTrue(result.remaining().get(0).contains("差 东 6.1 格、同高"));
+        TravelSettlement details = assertInstanceOf(TravelSettlement.class, result.details());
+        assertNull(details.arrivedAt(), "取消不是到达");
+        assertNotNull(details.remaining());
+        assertTrue(result.changes().stream().anyMatch(change -> change.kind() == Change.Kind.BLOCK_PLACED),
+                "取消前垫的方块进变化");
+    }
+
+    @Test
+    void itemsPickedUpAlongTheWayAreRecordedAsChanges() {
+        // 路上顺带捡进背包的东西逐刻进变化，不用等事后翻背包才发现。
+        TravelFakes.FakeBag bag = new TravelFakes.FakeBag();
+        bag.put("minecraft:stick", 10);
+        tick.withPlayer(new TravelFakes.FakePlayer(bag));
+        walks.enqueue(new ScriptedWalk(
+                WalkReport.onTheWay(new BlockPos(4, 64, 0), false),
+                WalkReport.onTheWay(new BlockPos(6, 64, -1), false),
+                WalkReport.arrived(HOME, false)));
+        TravelTask travel = task(new Target.Position(12, 64, -2, null));
+        travel.start(tick);
+        assertTrue(travel.tick(tick) instanceof TickResult.Running, "第一刻记下背包基线");
+        tick.nextTick();
+        bag.put("minecraft:dirt", 6);
+        assertTrue(travel.tick(tick) instanceof TickResult.Running, "第二刻对比出捡到的泥土");
+
+        TaskResult result = runToFinish(travel);
+
+        assertEquals(TaskResult.Status.DONE, result.status());
+        Change dirt = result.changes().stream()
+                .filter(change -> "minecraft:dirt".equals(change.what()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("捡到的泥土没进变化：" + result.changes()));
+        assertEquals(Change.Kind.ITEM_GAINED, dirt.kind());
+        assertEquals(6, dirt.count());
+    }
+
+    @Test
+    void bagDiffRecordsGainsAndConsumes() {
+        List<Change> changes = TravelTask.bagChanges(
+                Map.of("minecraft:stick", 10),
+                Map.of("minecraft:stick", 7, "minecraft:dirt", 6));
+
+        assertEquals(2, changes.size());
+        Change gained = changes.get(0);
+        assertEquals(Change.Kind.ITEM_GAINED, gained.kind());
+        assertEquals("minecraft:dirt", gained.what());
+        assertEquals(6, gained.count());
+        Change consumed = changes.get(1);
+        assertEquals(Change.Kind.ITEM_CONSUMED, consumed.kind());
+        assertEquals("minecraft:stick", consumed.what());
+        assertEquals(3, consumed.count());
     }
 
     @Test

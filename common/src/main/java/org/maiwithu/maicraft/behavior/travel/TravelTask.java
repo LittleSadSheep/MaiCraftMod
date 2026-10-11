@@ -9,6 +9,7 @@ import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
+import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Change;
@@ -22,16 +23,20 @@ import org.maiwithu.maicraft.kernel.task.PhasedTask;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 出行任务：去一个地方。解析目的地 → 交给走到逐刻推进 → 到达或停下时如实结算。
  *
  * <p>到达以走到运行的结论为准（站实落地才算到），出行不另写一套判断。
- * 进展以剩余距离为信号：离目的地更近了才算前进，在原地打转会按卡住收场。
+ * 进展以剩余距离为信号：离目的地更近了才算前进，在原地打转会按卡住收场，
+ * 收场说明带上现场——停在哪、离目的地还差多少、许可能不能动土；目标高度够不着时写明高度。
  * 中途停下分两步：先向走到请求停，等落到安全边界（落地、走完正在跨的一步）才真停，
  * 停下后按取消结算，写明实测停在哪、离目的地还差多远；被生存需求打断时走到运行先把自己停稳，
- * 处理完从原地接着走。路上垫的临时方块逐格进结果，不自动收回；泅渡如实记录。
+ * 处理完从原地接着走。路上垫的临时方块逐格进结果，不自动收回；路上捡进背包与从背包用掉的
+ * 东西按刻记进变化；泅渡如实记录。
  */
 public final class TravelTask extends PhasedTask<TravelTask.Phase> implements TorchesAlongTheWay {
 
@@ -52,6 +57,13 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
     private boolean stopRequested;
     private boolean crossedWater;
     private double bestRemaining = Double.MAX_VALUE;
+    /** 最近一刻身体所在的方块格：空转收尾与取消结算都从这里取现场。 */
+    private BlockPos lastFeet;
+    /** 垫块记账的光标：跟着当前走到运行走，换段重新记。 */
+    private WalkRun placementsRecordedFor;
+    private int recordedPlacements;
+    /** 上一刻的背包份数：与这一刻比，多出的是路上捡的，少掉的是路上用掉的。 */
+    private Map<String, Integer> bagLastTick;
 
     /**
      * @param destination 已经解析好的目的地：能力做决定时用 {@link DestinationResolver} 解析，
@@ -98,7 +110,7 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
         }
         ActionStatus status = runAction(context);
         WalkReport report = walk.report();
-        observe(report);
+        observe(context, report);
         // 生存需求打断时请求过停；停稳了就从原地重新上路，接着走完剩下的路。
         if (report.state() == WalkReport.State.STOPPED) {
             recordProgress("从原地接着走");
@@ -116,14 +128,13 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
         boolean settled = walk.stop();
         ActionStatus status = runAction(context);
         WalkReport report = walk.report();
-        observe(report);
+        observe(context, report);
         // 走不动了也算停下了：取消结算如实交代停在哪，不把停不下来说成失败。
         if (settled || report.state() == WalkReport.State.STOPPED
                 || status instanceof ActionStatus.Failed) {
-            RemainingDistance remaining = measureFrom(report);
-            buildSettlement(report.feet(), false, remaining);
-            return Next.done(TaskResult.cancelled("出行：中途停下，停在 " + shortSpot(report.feet())
-                    + "，离目的地还" + (remaining == null ? "远近未知" : "剩 " + remaining.describe())));
+            buildSettlement(lastFeet, false, remainingFromHere());
+            return Next.done(TaskResult.cancelled("出行：中途停下，停在 " + shortSpot(lastFeet)
+                    + "，离目的地还" + (settlement.remaining() == null ? "远近未知" : "剩 " + settlement.remaining().describe())));
         }
         return Next.stay();
     }
@@ -134,21 +145,40 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
             return failWithJourney(Problem.of(Problem.Kind.INTERNAL_ERROR,
                     "走到报了做完，但到达情况不是到达：" + report.state()));
         }
-        buildSettlement(report.feet(), true, null);
+        buildSettlement(lastFeet, true, null);
         String water = crossedWater ? "，途中泅渡过水" : "";
-        return Next.done(TaskResult.done("出行：走到了目的地，实测位置 " + shortSpot(report.feet()) + water));
+        return Next.done(TaskResult.done("出行：走到了目的地，实测位置 " + shortSpot(lastFeet) + water));
     }
 
     private Next<Phase> failWithJourney(Problem problem) {
-        WalkReport report = walk.report();
-        buildSettlement(report.feet(), false, measureFrom(report));
+        buildSettlement(lastFeet, false, remainingFromHere());
         return Next.fail(problem);
     }
 
-    /** 记录这一刻的行程观察：泅渡、剩余距离、逐刻进展。 */
-    private void observe(WalkReport report) {
+    /** 空转满时限的收尾：换成本领域的现场说明，只给不出更好解释时沿用进度跟踪的通用说法。 */
+    @Override
+    protected Problem noProgressProblem(ProgressTracker.Status status) {
+        Problem generic = super.noProgressProblem(status);
+        String lastProgress = status instanceof ProgressTracker.Status.Stuck stuck
+                ? stuck.lastProgress() : "开始";
+        long idleTicks = switch (status) {
+            case ProgressTracker.Status.Stuck stuck -> stuck.idleTicks();
+            case ProgressTracker.Status.TimedOut timedOut -> timedOut.activeTicks();
+            default -> 0;
+        };
+        Problem judged = TravelStuckCheck.judge(destination, permit, lastFeet, lastProgress, idleTicks);
+        return judged == null ? generic : judged;
+    }
+
+    /** 记录这一刻的行程观察：泅渡、剩余距离、逐刻进展，垫块与背包的变化逐刻记账。 */
+    private void observe(TickContext context, WalkReport report) {
         crossedWater = crossedWater || report.crossedWater();
-        RemainingDistance remaining = measureFrom(report);
+        if (report.feet() != null) {
+            lastFeet = report.feet();
+        }
+        recordPlacementsSoFar();
+        noteBackpack(context);
+        RemainingDistance remaining = remainingFromHere();
         if (remaining != null && remaining.horizontalBlocks() < bestRemaining) {
             // 剩余距离是进展信号：更近了才算前进，站着不动早晚被判卡住。
             bestRemaining = remaining.horizontalBlocks();
@@ -156,6 +186,65 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
         }
         progressListener.onTravelProgress(new TravelProgress(
                 describeStage(report), report.feet(), remaining, crossedWater));
+    }
+
+    /** 路上垫的临时方块逐刻记进变化：取消或空转收场时也已经记下，不用等到结算那一刻。 */
+    private void recordPlacementsSoFar() {
+        if (placementsRecordedFor != walk) {
+            placementsRecordedFor = walk;
+            recordedPlacements = 0;
+        }
+        List<BlockPos> placed = placedBlocks.placedDuringCurrentWalk();
+        for (int i = recordedPlacements; i < placed.size(); i++) {
+            BlockPos cell = placed.get(i);
+            // 垫路用的临时方块先不自动收回；要不要拆由玩家看了结果再决定。
+            recordChange(new Change(Change.Kind.BLOCK_PLACED, cell.toShortString(), 1,
+                    "垫路用的临时方块，没有自动收回"));
+        }
+        recordedPlacements = placed.size();
+    }
+
+    /** 背包每刻记一份份数：与上一刻比，多出来的是路上捡的，少下去的是路上用掉的，都进变化。 */
+    private void noteBackpack(TickContext context) {
+        if (context.player() == null || context.player().backpack() == null) {
+            return;
+        }
+        Map<String, Integer> now = new HashMap<>();
+        for (BackpackStack stack : context.player().backpack().stacks()) {
+            now.merge(stack.itemId(), stack.count(), Integer::sum);
+        }
+        if (bagLastTick != null) {
+            for (Change change : bagChanges(bagLastTick, now)) {
+                recordChange(change);
+            }
+        }
+        bagLastTick = now;
+    }
+
+    /** 纯函数：背包两份份数快照的差——多出的算捡到，少掉的算用掉，测试直接喂快照。 */
+    static List<Change> bagChanges(Map<String, Integer> before, Map<String, Integer> after) {
+        List<Change> changes = new ArrayList<>();
+        for (Map.Entry<String, Integer> entry : after.entrySet()) {
+            int gained = entry.getValue() - before.getOrDefault(entry.getKey(), 0);
+            if (gained > 0) {
+                changes.add(new Change(Change.Kind.ITEM_GAINED, entry.getKey(), gained,
+                        "路上顺带捡进背包"));
+            }
+        }
+        for (Map.Entry<String, Integer> entry : before.entrySet()) {
+            int consumed = entry.getValue() - after.getOrDefault(entry.getKey(), 0);
+            if (consumed > 0) {
+                changes.add(new Change(Change.Kind.ITEM_CONSUMED, entry.getKey(), consumed,
+                        "出行期间从背包用掉（垫路、吃喝等）"));
+            }
+        }
+        return changes;
+    }
+
+    private RemainingDistance remainingFromHere() {
+        return destination == null || lastFeet == null
+                ? null
+                : RemainingDistance.measure(lastFeet, destination.center());
     }
 
     private String describeStage(WalkReport report) {
@@ -168,14 +257,11 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
         };
     }
 
-    /** 结算行程：垫过的方块逐格进变化与细节；走到没走到分开写，不混在一起。 */
+    /** 结算行程：垫过的方块、落地救援与卡坑脱困的经过进细节；走到没走到分开写，不混在一起。 */
     private void buildSettlement(BlockPos feet, boolean arrived, RemainingDistance remaining) {
         List<String> placed = new ArrayList<>();
         for (BlockPos cell : placedBlocks.placedDuringCurrentWalk()) {
             placed.add(cell.toShortString());
-            // 垫路用的临时方块先不自动收回；要不要拆由玩家看了结果再决定。
-            recordChange(new Change(Change.Kind.BLOCK_PLACED, cell.toShortString(), 1,
-                    "垫路用的临时方块，没有自动收回"));
         }
         WorldPosition arrivedAt = arrived && feet != null
                 ? new WorldPosition(feet.getX(), feet.getY(), feet.getZ(), destination.position().dimension())
@@ -186,21 +272,26 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
                 placedBlocks.landingsDuringCurrentWalk(), placedBlocks.trapEscapesDuringCurrentWalk(), crossedWater);
     }
 
-    private RemainingDistance measureFrom(WalkReport report) {
-        return destination == null || report.feet() == null
-                ? null
-                : RemainingDistance.measure(report.feet(), destination.center());
+    /** 这次行程的结算；取消、空转这类没走到结算步的收场到这里按"停下、没到"补结一次，
+     *  结果才带停在哪、差多远、垫了什么。还没迈出步子（没有身体位置）时无账可结。 */
+    private TravelSettlement settlement() {
+        if (settlement == null && lastFeet != null) {
+            buildSettlement(lastFeet, false, remainingFromHere());
+        }
+        return settlement;
     }
 
     @Override
     protected ResultDetails details() {
-        return settlement == null ? ResultDetails.NONE : settlement;
+        return settlement() == null ? ResultDetails.NONE : settlement();
     }
 
     @Override
     protected List<String> remaining() {
-        if (settlement != null && settlement.remaining() != null) {
-            return List.of("还没走到目的地：差 " + settlement.remaining().describe());
+        TravelSettlement done = settlement();
+        if (done != null && done.remaining() != null) {
+            return List.of("停在 " + shortSpot(lastFeet)
+                    + "，还没走到目的地：差 " + done.remaining().describe());
         }
         return List.of();
     }
