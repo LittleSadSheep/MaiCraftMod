@@ -1,0 +1,146 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.behavior.travel;
+
+import java.util.Optional;
+import java.util.Set;
+import java.util.function.Supplier;
+
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.phys.Vec3;
+
+import net.minecraft.client.player.LocalPlayer;
+
+import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
+import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.player.PlayerInput;
+import org.maiwithu.maicraft.kernel.result.Problem;
+import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
+import org.maiwithu.maicraft.kernel.task.TickContext;
+
+/**
+ * 直走进门：面向门格中心一路走过去，身体进了门格就停住。
+ *
+ * <p>这一步不走寻路：寻路把门内格当不可走方块，走进去要靠第一人称的直走——
+ * 看向门格中心、持续按住前进，等身体真的踩进门格。下界门要站着等几秒才传，
+ * 末地门碰到就传，等待归任务判断；20 秒进不去的期限也归任务管，动作只报告
+ * 进没进、门还在不在。正在过门（身体已沾着门格）时停下不安全，不被生存需求切碎。
+ */
+public final class WalksIntoPortal implements Action {
+
+    private final DimensionWorldView world;
+    private final Supplier<PlayerContext> context;
+    private final Block portalBlock;
+    private final BlockPos entrance;
+    private final Set<Long> portalCells;
+
+    public WalksIntoPortal(DimensionWorldView world, Supplier<PlayerContext> context, Block portalBlock,
+            BlockPos entrance, Set<Long> portalCells) {
+        this.world = world;
+        this.context = context;
+        this.portalBlock = portalBlock;
+        this.entrance = entrance.immutable();
+        this.portalCells = Set.copyOf(portalCells);
+    }
+
+    @Override
+    public ActionStatus tick(TickContext tick) {
+        PlayerContext current = context.get();
+        if (current == null || current.input() == null) {
+            return ActionStatus.failed(Problem.of(Problem.Kind.INTERNAL_ERROR,
+                    "角色的输入入口不在，直走不了"));
+        }
+        PlayerInput input = current.input();
+        LocalPlayer player = current.localPlayer();
+        if (world.touchesPortal(portalBlock, portalCells)) {
+            // 身体进了门格：停住站在门里，维度交接由任务等。
+            input.halt(player);
+            return ActionStatus.done();
+        }
+        if (!world.portalAlive(portalBlock, entrance)) {
+            input.halt(player);
+            return ActionStatus.failed(Problem.of(Problem.Kind.TARGET_GONE,
+                    "走近时门还在，直走时门方块没了（被人拆了或塌了）"));
+        }
+        input.lookAt(player, Vec3.atCenterOf(entrance));
+        input.applyMovement(new PlayerInput.Movement(1.0f, 0.0f, false, false, false), tick.gameTick());
+        return ActionStatus.running();
+    }
+
+    @Override
+    public void pause() {
+        releaseControls();
+    }
+
+    @Override
+    public void close() {
+        releaseControls();
+    }
+
+    private void releaseControls() {
+        PlayerContext current = context.get();
+        if (current != null && current.input() != null) {
+            current.input().halt(current.localPlayer());
+        }
+    }
+
+    @Override
+    public Interruptibility interruptibility() {
+        // 正在过门停下不安全：半个人在门里被切碎，下次接着走会被重入冷却或半程传送卡住。
+        if (world.touchesPortal(portalBlock, portalCells)) {
+            return Interruptibility.UNSAFE_TO_STOP;
+        }
+        return Interruptibility.WORKING;
+    }
+
+    @Override
+    public String describe() {
+        return "直走进门格 (" + entrance.getX() + ", " + entrance.getY() + ", " + entrance.getZ() + ")";
+    }
+
+    /** 身体有没有沾着门格：脚位或头位这一刻还是活的门方块。生产读端与动作共用。 */
+    static boolean touchesPortal(ClientLevel level, BlockPos feet, Set<Long> portalCells, Block portalBlock) {
+        for (BlockPos cell : new BlockPos[]{feet, feet.above()}) {
+            if (portalCells.contains(cell.asLong()) && PortalFinder.alive(level, cell, portalBlock)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 到达纪律：先离门口再结算。从门口出发挑一格干燥能站的落脚格——
+     * 沾着门格的不算（站在门里结算会被重入冷却再传回去），按离人近到远挑。
+     */
+    static Optional<BlockPos> stepAsideCell(BlockGetter level, Set<Long> portalCells, BlockPos from) {
+        Optional<BlockPos> chosen = Optional.empty();
+        double best = Double.MAX_VALUE;
+        for (int dx = -4; dx <= 4; dx++) {
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dz = -4; dz <= 4; dz++) {
+                    if (dx == 0 && dy == 0 && dz == 0) {
+                        continue;
+                    }
+                    BlockPos candidate = from.offset(dx, dy, dz);
+                    if (portalCells.contains(candidate.asLong())
+                            || portalCells.contains(candidate.above().asLong())) {
+                        continue;
+                    }
+                    if (!BlockPassability.isDryStandable(level, candidate)) {
+                        continue;
+                    }
+                    double distance = candidate.distSqr(from);
+                    if (distance < best) {
+                        best = distance;
+                        chosen = Optional.of(candidate);
+                    }
+                }
+            }
+        }
+        return chosen;
+    }
+}

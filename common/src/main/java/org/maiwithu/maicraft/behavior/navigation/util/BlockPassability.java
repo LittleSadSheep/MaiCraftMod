@@ -67,8 +67,11 @@ public final class BlockPassability {
         }
         // 明确列出角色绝不能穿过的方块。火、蜘蛛网、甜浆果丛、细雪、打开的活板门和大叶草等碰撞形状可能为空或不完整，
         // 单靠下方形状检测会误判为可通行，因此必须先用此名单拦截。
+        // 下界传送门内格碰撞为空，走进去会被原版机制传去另一维度：不能当普通可走格，
+        // 只有行程点名要进的那扇门由寻路的目标编译给出放行（见寻路目标编译的门格放行名单）。
         if (block instanceof BaseFireBlock
                 || state.is(Blocks.COBWEB) || state.is(Blocks.END_PORTAL)
+                || state.is(Blocks.NETHER_PORTAL)
                 || state.is(Blocks.COCOA) || block instanceof AbstractSkullBlock
                 || state.is(Blocks.BUBBLE_COLUMN) || block instanceof ShulkerBoxBlock
                 || block instanceof SlabBlock || block instanceof TrapDoorBlock

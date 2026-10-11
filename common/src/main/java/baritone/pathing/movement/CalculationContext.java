@@ -416,9 +416,14 @@ public class CalculationContext {
      * 时才放行——受控跨维度流程把门格作为最终走近点、exact travel 直接进格，都走这条放行。
      */
     public boolean mayEnterPortalCell(BlockPos pos) {
-        return portalEntryCells.contains(pos.asLong())
-                || portalEntryCells.contains(pos.below().asLong())
-                || portalEntryCells.contains(pos.below().below().asLong());
+        return mayEnterPortalCell(portalEntryCells, pos);
+    }
+
+    /** {@link #mayEnterPortalCell(BlockPos)} 的纯判断核心：给一份放行名单回答一格能不能进，离线可测。 */
+    public static boolean mayEnterPortalCell(LongSet passCells, BlockPos pos) {
+        return passCells.contains(pos.asLong())
+                || passCells.contains(pos.below().asLong())
+                || passCells.contains(pos.below().below().asLong());
     }
 
     static LongSet portalEntryCells(NavGoal goal) {
