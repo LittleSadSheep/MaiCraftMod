@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.navigation.goal;
 
+import org.maiwithu.maicraft.behavior.navigation.calc.ApproachAvoiding;
+import org.maiwithu.maicraft.behavior.navigation.calc.AwayFromThreats;
 import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
+import org.maiwithu.maicraft.behavior.navigation.calc.ThreatField;
 import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import it.unimi.dsi.fastutil.longs.LongSets;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -124,6 +128,30 @@ public final class GoalCompiler {
             sacred.add(t.asLong());
         }
         return new Compiled(NavGoal.composite(members), sacred);
+    }
+
+    /**
+     * 离开这些威胁：走到每一只的脱身圈外就到（战斗里退开等引信熄、冷却中退到够不着的地方、撤离躲开追兵）；
+     * 路上同样尽量不进别的怪的危险半径。没有保护格。
+     */
+    public static Compiled awayFrom(List<ThreatField.Threat> threats) {
+        return new Compiled(new AwayFromThreats(new ThreatField(ThreatField.DEFAULT_PENALTY, threats)),
+                LongSets.emptySet());
+    }
+
+    /**
+     * 走到原目标要求的地方，路上绕开这些威胁、终点也要在每一只的脱身圈外；保护格沿用原目标的。
+     * 没有威胁时就是原目标，不白包一层。
+     */
+    public static Compiled approachAvoiding(Compiled approach, List<ThreatField.Threat> threats) {
+        if (threats.isEmpty()) return approach;
+        return new Compiled(new ApproachAvoiding(approach.goal(),
+                new ThreatField(ThreatField.DEFAULT_PENALTY, threats)), approach.sacred());
+    }
+
+    /** 离一个点的三维距离落在 [inner, outer] 之间（近战接敌按真实够到距离，台阶上的也算）；没有保护格。 */
+    public static Compiled band(Vec3 focus, double inner, double outer) {
+        return new Compiled(NavGoal.distanceBand(focus, inner, outer), LongSets.emptySet());
     }
 
     private static LongSet single(BlockPos pos) {
