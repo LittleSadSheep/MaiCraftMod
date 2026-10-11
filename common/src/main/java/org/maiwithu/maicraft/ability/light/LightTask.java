@@ -8,9 +8,11 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
 
@@ -37,6 +39,7 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.ResultDetails;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Next;
 import org.maiwithu.maicraft.kernel.task.PhasedTask;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -79,6 +82,10 @@ final class LightTask extends PhasedTask<LightTask.Phase> implements HandlesOwnL
     private final Deque<BlockPos> pendingWalks = new ArrayDeque<>();
     /** 下一刻要推进的动作：走到没加载的那一列。 */
     private Action prepared;
+    /** 正在走去的那一列：走到（或没走到）后连它一起重量。 */
+    private BlockPos walkingTo;
+    /** 走过或试过走的没加载的列：走到后仍没加载、或走不到的，不再反复去。 */
+    private final Set<BlockPos> walkTried = new HashSet<>();
 
     /** 这次用的光源：第一轮定下后锁定沿用，不每轮重新挑。 */
     private LampItem lamp;
@@ -124,8 +131,8 @@ final class LightTask extends PhasedTask<LightTask.Phase> implements HandlesOwnL
             return survey;
         }
 
-        /** 重扫过的列并回来：样本与光以新值替换，没加载的名单以新名单为准。 */
-        void merge(LightSurveyor.LightSurvey fresh) {
+        /** 重扫过的列并回来：样本与光以新值替换；这回重扫过的列从没加载名单里摘掉，仍没加载的照新名单留着。 */
+        void merge(LightSurveyor.LightSurvey fresh, List<BlockPos> rescanned) {
             Map<BlockPos, LightSample> byPosition = new LinkedHashMap<>();
             for (LightSample sample : survey.samples()) byPosition.put(sample.pos(), sample);
             for (LightSample sample : fresh.samples()) byPosition.put(sample.pos(), sample);
@@ -134,9 +141,10 @@ final class LightTask extends PhasedTask<LightTask.Phase> implements HandlesOwnL
             for (Map.Entry<BlockPos, Integer> entry : fresh.lights().entrySet()) {
                 lights.put(entry.getKey(), entry.getValue());
             }
-            // 重扫过的列这回量到了：从没加载名单里摘掉；新名单里的照实留着。
+            // 没加载名单记的是列：按这回重扫过的列摘掉（不按样本格摘，样本的高度和列的基准高度对不上），
+            // 重扫时仍没加载的照新名单留着。
             Set<BlockPos> unloaded = new LinkedHashSet<>(survey.unloaded());
-            unloaded.removeAll(fresh.samples().stream().map(LightSample::pos).toList());
+            unloaded.removeAll(rescanned);
             unloaded.addAll(fresh.unloaded());
             survey = new LightSurveyor.LightSurvey(new ArrayList<>(byPosition.values()),
                     Map.copyOf(lights), sensitive, unloaded);
@@ -162,8 +170,9 @@ final class LightTask extends PhasedTask<LightTask.Phase> implements HandlesOwnL
 
     // 定范围：radius 给了按圆心取圆内各列；不给从起点泛洪连通可行走空间，到没加载的边界先走过去看看。
     private Next<Phase> region(TickContext context) {
-        if (prepared != null) {
-            return runActionThen(context, () -> Next.go(Phase.REGION, "走到了，接着量范围"));
+        if (action() != null) {
+            // 走过去了（或没走到）：从头再泛洪一遍，刚加载的那片连进来。
+            return walkThen(context, () -> Next.go(Phase.REGION, "走过去了，接着量范围"));
         }
         if (input.radius() != null) {
             columns = LightRegion.circleColumns(center(), input.radius());
@@ -174,6 +183,7 @@ final class LightTask extends PhasedTask<LightTask.Phase> implements HandlesOwnL
         }
         if (!flood.tick()) return Next.stay();
         if (queueUnloadedWalks(flood.unloadedFrontier()) && startWalk()) {
+            flood = null;
             return Next.go(Phase.REGION, "有边界没加载，走过去看看");
         }
         LightRegion.Flood done = flood;
@@ -186,10 +196,15 @@ final class LightTask extends PhasedTask<LightTask.Phase> implements HandlesOwnL
 
     // 量光：分几刻扫样本；扫完发现整列没加载，就先走过去让它加载，走不到的照实留在没加载名单里。
     private Next<Phase> measure(TickContext context) {
-        if (prepared != null) {
-            return runActionThen(context, () -> {
+        if (action() != null) {
+            return walkThen(context, () -> {
+                // 走去的那一列连同还没去的几列一起重量：走近了它们多半已经加载。
+                List<BlockPos> again = new ArrayList<>();
+                again.add(walkingTo);
+                again.addAll(pendingWalks);
+                columns = List.copyOf(again);
                 scan = newScan(columns);
-                return Next.go(Phase.MEASURE, "走到了，重量这些列");
+                return Next.go(Phase.MEASURE, "走过去了，重量这些列");
             });
         }
         if (scan == null) {
@@ -202,11 +217,10 @@ final class LightTask extends PhasedTask<LightTask.Phase> implements HandlesOwnL
         if (obs == null) {
             obs = new Observation(scan.survey());
         } else {
-            obs.merge(scan.survey());
+            obs.merge(scan.survey(), columns);
         }
         scan = null;
         if (queueUnloadedWalks(obs.survey().unloaded()) && startWalk()) {
-            columns = List.copyOf(pendingWalks);
             return Next.go(Phase.MEASURE, "有样本没加载，走过去让它加载");
         }
         if (obs.survey().samples().isEmpty()) {
@@ -215,6 +229,13 @@ final class LightTask extends PhasedTask<LightTask.Phase> implements HandlesOwnL
                     "换一个 target 或给一个小一点的 radius 再试"));
         }
         List<BlockPos> dark = darkSamples();
+        if (dark.isEmpty() && input.coverage() != LightInput.Coverage.MOST && !obs.survey().unloaded().isEmpty()) {
+            // 量得到的都够亮，可有几列没加载也走不到：没量到的不能算达标，如实写明分母。
+            return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL,
+                            "量得到的 " + checkedCount() + " 格开始时都够亮，一支灯没插；另有 "
+                                    + unloadedCount() + " 格没加载走不到，没量到")
+                    .details(details(null, litCount())).build());
+        }
         if (dark.isEmpty()) {
             return Next.done(TaskResult.done("开始时已满足，一支灯都不用插"));
         }
@@ -363,11 +384,11 @@ final class LightTask extends PhasedTask<LightTask.Phase> implements HandlesOwnL
                 .toList();
     }
 
-    /** 没加载的列排队走过去；走不到的照实留在没加载名单里，比率按能验收的样本算。 */
+    /** 没加载的列排队走过去；走过、试过的不再去，走不到的照实留在没加载名单里，比率按能验收的样本算。 */
     private boolean queueUnloadedWalks(Set<BlockPos> unloaded) {
         boolean queued = false;
         for (BlockPos column : unloaded) {
-            if (!pendingWalks.contains(column)) {
+            if (!pendingWalks.contains(column) && !walkTried.contains(column)) {
                 pendingWalks.addLast(column);
                 queued = true;
             }
@@ -375,16 +396,33 @@ final class LightTask extends PhasedTask<LightTask.Phase> implements HandlesOwnL
         return queued;
     }
 
-    /** 起身走向下一列没加载的列；走法给不出（走不到）时不动。 */
+    /** 起身走向下一列没加载的列；这一列给不出走法（走不到）就记下试过，换下一列。 */
     private boolean startWalk() {
         prepared = null;
-        if (services.travel() == null || pendingWalks.isEmpty()) return false;
-        BlockPos column = pendingWalks.pollFirst();
-        Optional<Action> walk = services.travel().toward(
-                new WorldPosition(column.getX(), column.getY(), column.getZ(), dimension()), input.permissions());
-        if (walk.isEmpty()) return false;
-        prepared = walk.get();
-        return true;
+        if (services.travel() == null) return false;
+        while (!pendingWalks.isEmpty()) {
+            BlockPos column = pendingWalks.pollFirst();
+            walkTried.add(column);
+            Optional<Action> walk = services.travel().toward(
+                    new WorldPosition(column.getX(), column.getY(), column.getZ(), dimension()), input.permissions());
+            if (walk.isPresent()) {
+                walkingTo = column;
+                prepared = walk.get();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // 走向没加载的那一列：走到了接着量；没走到如实记一笔，那一列留在没加载名单里，照样接着量能量的，不整单失败。
+    private Next<Phase> walkThen(TickContext context, Supplier<Next<Phase>> after) {
+        ActionStatus status = runAction(context);
+        if (status instanceof ActionStatus.Running) return Next.stay();
+        if (status instanceof ActionStatus.Failed failed) {
+            recordAttempt("走到没加载的一列（" + walkingTo.getX() + ", " + walkingTo.getZ() + "）",
+                    "没走到：" + failed.problem().message());
+        }
+        return after.get();
     }
 
     /** 这一次能用的光源：item 指定了就用它，没指定默认火把；发射量达不到验收亮度的不选。 */

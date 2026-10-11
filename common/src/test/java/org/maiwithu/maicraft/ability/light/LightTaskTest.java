@@ -78,6 +78,9 @@ class LightTaskTest {
         final Set<String> unobtainable = new HashSet<>();
         final Map<String, Integer> carried = new HashMap<>();
         final List<String> purposes = new ArrayList<>();
+        /** 走得过去：走到没加载的列，那一列就加载了；记下走了哪几列。 */
+        boolean walkLoads;
+        final List<BlockPos> walkedTo = new ArrayList<>();
 
         Fake ground(int from, int to) {
             for (int x = from; x <= to; x++) {
@@ -146,7 +149,12 @@ class LightTaskTest {
             return new Effect(() -> { });
         }
         @Override public Optional<Action> toward(WorldPosition where, Permissions permissions) {
-            return Optional.empty();
+            if (!walkLoads) return Optional.empty();
+            BlockPos column = new BlockPos(where.x(), 64, where.z());
+            return Optional.of(new Effect(() -> {
+                walkedTo.add(column);
+                loadedColumns.add(column);
+            }));
         }
 
         // 拿东西：火把弄不到就如实说；拿得到就进背包，用途记下来核对。
@@ -309,6 +317,28 @@ class LightTaskTest {
         assertEquals(LightDetails.UNLOADED, details.unlit().getFirst().reason());
         assertEquals(1.0, details.coverageAchieved(), "能验收的都达标，分母是能验收的样本");
         assertTrue(partial.problem() == null, "能验收的全亮了，不冤枉它");
+    }
+
+    @Test
+    void 没加载的列走过去就重量_不来回走() {
+        Fake fake = new Fake().ground(-6, 6);
+        BlockPos far = new BlockPos(1, 64, 1);
+        fake.loadedColumns.remove(far);
+        fake.walkLoads = true;
+        TaskResult result = run(task(input(2, LightInput.Coverage.ALL, 8), fake));
+        // 走过去那一列加载了，连它一起重量、照亮：全部达标，只走了这一趟。
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary() + " / " + result.problem());
+        assertEquals(List.of(far), fake.walkedTo);
+    }
+
+    @Test
+    void 量得到的都亮_可有列没加载走不到_不说开始时已满足() {
+        Fake fake = new Fake().ground(-6, 6);
+        fake.world.put(new BlockPos(0, 64, 0), Blocks.TORCH.defaultBlockState());
+        fake.loadedColumns.remove(new BlockPos(1, 64, 1));
+        TaskResult result = run(task(input(2, LightInput.Coverage.ALL, 8), fake));
+        assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
+        assertTrue(result.summary().contains("没加载"), result.summary());
     }
 
     @Test
