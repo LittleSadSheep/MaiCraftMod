@@ -137,6 +137,22 @@ class TravelTaskTest {
     }
 
     @Test
+    void columnDestinationRemainingIgnoresPlaceholderHeight() {
+        // 只给 x/z 的出行走不通时，还差多远按脚下这层量：实机里曾写成"低 64 格"，把占位的 y=0 当成了真高度。
+        walks.enqueue(new ScriptedWalk(
+                WalkReport.onTheWay(new BlockPos(6, 70, -2), false),
+                WalkReport.failed(Problem.of(Problem.Kind.UNREACHABLE, "没有能走到目标的路线"),
+                        new BlockPos(6, 70, -2), false)));
+        TaskResult result = runToFinish(task(new Target.Position(12, null, -2, null)));
+
+        TravelSettlement details = assertInstanceOf(TravelSettlement.class, result.details());
+        assertNotNull(details.remaining());
+        assertEquals(0, details.remaining().verticalBlocks(), "高度没给就不报高低差");
+        assertEquals("东 6.0 格、同高", details.remaining().describe());
+        assertTrue(result.remaining().get(0).contains("差 东 6.0 格、同高"));
+    }
+
+    @Test
     void survivalInterruptionResumesWalkingFromSameSpot() {
         ScriptedWalk firstLeg = new ScriptedWalk(
                 WalkReport.onTheWay(new BlockPos(2, 64, 0), false),

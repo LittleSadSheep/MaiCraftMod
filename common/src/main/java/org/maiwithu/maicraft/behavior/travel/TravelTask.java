@@ -244,7 +244,8 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
     private RemainingDistance remainingFromHere() {
         return destination == null || lastFeet == null
                 ? null
-                : RemainingDistance.measure(lastFeet, destination.center());
+                // 只给 x/z 的目的地按脚下这层量，结果里的高低差才不会拿占位的 y=0 来算。
+                : RemainingDistance.measure(lastFeet, destination.aimFrom(lastFeet));
     }
 
     private String describeStage(WalkReport report) {

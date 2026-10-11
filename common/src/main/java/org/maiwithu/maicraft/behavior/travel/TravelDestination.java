@@ -43,9 +43,17 @@ public record TravelDestination(WorldPosition position, boolean heightConfirmed,
         return radius <= 0 ? NavGoal.exact(cell) : NavGoal.near(cell, radius);
     }
 
-    /** 量剩余距离用的参照点：柱列目的地取给定的 x/z（高度按脚下的算）。 */
+    /** 目的地那一格；高度没核实时 y 只是占位（0），量剩余距离用 {@link #aimFrom}。 */
     public BlockPos center() {
         return new BlockPos(position.x(), position.y(), position.z());
+    }
+
+    /**
+     * 从脚下量剩余距离用的终点：高度核实过就是目的地那一格；只给了 x/z 时按脚下这层算，只比水平远近。
+     * 不然只给 x/z 的出行没走到时，结果里会把占位的 y=0 当真，写成"低 64 格"，误导调用方往下挖。
+     */
+    public BlockPos aimFrom(BlockPos feet) {
+        return heightConfirmed ? center() : new BlockPos(position.x(), feet.getY(), position.z());
     }
 
     /** 给日志与结果的一句话，例如"坐标 (120, 64, -80) 附近 2 格"。 */

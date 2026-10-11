@@ -34,7 +34,8 @@ public final class TravelStuckCheck {
         if (destination == null || feet == null) {
             return null;
         }
-        RemainingDistance remaining = RemainingDistance.measure(feet, destination.center());
+        // 只给 x/z 的目的地按脚下这层量：卡住的交代里不出现拿占位 y=0 算出来的高低差。
+        RemainingDistance remaining = RemainingDistance.measure(feet, destination.aimFrom(feet));
         if (destination.heightConfirmed()
                 && remaining.horizontalBlocks() <= destination.radius() + COLUMN_SLACK
                 && Math.abs(remaining.verticalBlocks()) > destination.radius() + COLUMN_SLACK) {
