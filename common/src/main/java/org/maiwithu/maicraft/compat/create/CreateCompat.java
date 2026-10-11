@@ -50,6 +50,8 @@ public final class CreateCompat extends CompatModule {
         // 扳手拆机器方块、砂纸打磨当拿东西的一条途径：都要走过去、换手、点，进世界时带着玩家行为建。
         registry.dismantleTool(this, services -> new CreateWrench(this, services));
         registry.itemSource(this, services -> new SandpaperSource(this, services));
+        // 机器资料：每种机器的加工处、接转动的面、转速门槛与应力，挂到物品资料页的相关资料里。
+        registry.knowledgeSource(this, new CreateMachineKnowledge(this));
     }
 
     /** 一格动力方块的读数；见 {@link CreateKinetics#reading}。 */

@@ -44,6 +44,8 @@ import org.maiwithu.maicraft.game.loader.LoaderEnvironment;
 import org.maiwithu.maicraft.game.player.GearSlotName;
 import org.maiwithu.maicraft.game.world.BlockScanService;
 import org.maiwithu.maicraft.game.world.FurnaceFuels;
+import org.maiwithu.maicraft.kernel.knowledge.KnowledgeDocument;
+import org.maiwithu.maicraft.kernel.knowledge.KnowledgeSource;
 import org.maiwithu.maicraft.kernel.task.Action;
 
 /** 机械动力的联动入口：装了、版本对就交出目录里每种机器、兜底的两种与应力网读取器；认方块按方块对象比。 */
@@ -89,6 +91,18 @@ class CreateCompatTest {
         assertEquals("create:rose_quartz", offer.hint());
         // 一次出两件的配方，要五件磨三次就够。
         assertEquals(3, SandpaperSource.roundsFor(new CreateTools.Polishing(List.of("a:b"), "a:c", 2), 5));
+    }
+
+    @Test
+    void 机器资料挂到物品页_压机那一篇写着加工处在正下方第二格() {
+        CompatRegistry registry = CompatRegistry.load(List.of(supported()), loaderWith("6.0.11"));
+        KnowledgeSource knowledge = registry.knowledgeSources().getFirst();
+        List<KnowledgeDocument.Entry> about = knowledge.entriesAbout("create:mechanical_press");
+        assertEquals(1, about.size());
+        KnowledgeDocument page = knowledge.read(about.getFirst().uri());
+        assertTrue(page.text().contains("正下方第二格"), page.text());
+        assertTrue(knowledge.read(CreateMachineKnowledge.INDEX).text().contains("链条输送机"));
+        assertTrue(knowledge.entriesAbout("minecraft:stone").isEmpty());
     }
 
     @Test

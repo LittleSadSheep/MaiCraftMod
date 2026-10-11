@@ -1,0 +1,192 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.compat.create;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.function.Supplier;
+
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+
+import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
+import org.maiwithu.maicraft.kernel.knowledge.KnowledgeDocument;
+import org.maiwithu.maicraft.kernel.knowledge.KnowledgeSource;
+
+/**
+ * 机械动力机器的资料：每种认得的机器一篇——在机器里干什么、加工处在哪、从哪面接转动、要多快才干活、
+ * 每转吃多少应力或给多少容量、用机器做东西时料放哪产物从哪收，传送带与链条怎么装。
+ * 物品资料页经"相关资料"挂上它，LLM 不用读能力说明也查得到"压机下面第二格要放置物台"。
+ *
+ * <p>另有一篇总览：认得哪些机器，以及接动力的几条经验（先接现场已有的应力网，远处用链条输送机、
+ * 近处用传动杆与齿轮箱，思索里的创造马达只是"这里接动力"的示意）。数值读 Create 自己的应力表与服务器配置，
+ * 读不到（没进世界）就写"进世界后读得到"，不编。
+ */
+final class CreateMachineKnowledge implements KnowledgeSource {
+
+    static final String PREFIX = "maicraft://knowledge/machine/create/";
+    static final String INDEX = PREFIX + "index";
+
+    private final CreateCompat compat;
+
+    CreateMachineKnowledge(CreateCompat compat) {
+        this.compat = Objects.requireNonNull(compat, "compat");
+    }
+
+    @Override public List<KnowledgeDocument.Entry> entries() {
+        return List.of(new KnowledgeDocument.Entry(INDEX, "machine.create.index", "机械动力机器总览",
+                "认得哪些 Create 机器、各自干什么，以及接动力的经验",
+                "机械动力 create 机器 应力 动力 传动 压机 搅拌 置物台 传送带 链条"));
+    }
+
+    @Override public List<KnowledgeDocument.Entry> searchCandidates(String query) {
+        List<KnowledgeDocument.Entry> entries = new ArrayList<>(entries());
+        for (CreateMachineCatalog.Kind kind : CreateMachineCatalog.kinds()) entries.add(entry(kind));
+        return List.copyOf(entries);
+    }
+
+    @Override public List<KnowledgeDocument.Entry> entriesAbout(String registryId) {
+        return CreateMachineCatalog.kinds().stream().filter(kind -> kind.blocks().contains(registryId))
+                .map(CreateMachineKnowledge::entry).toList();
+    }
+
+    @Override public KnowledgeDocument read(String uri) {
+        if (uri.equals(INDEX)) return index();
+        if (!uri.startsWith(PREFIX)) return null;
+        String id = CreateMachineCatalog.MOD_ID + ":" + uri.substring(PREFIX.length());
+        return CreateMachineCatalog.kinds().stream().filter(kind -> kind.id().equals(id)).findFirst()
+                .map(this::page).orElse(null);
+    }
+
+    @Override public String status() {
+        return "机械动力机器资料：可用，" + CreateMachineCatalog.kinds().size() + " 种机器";
+    }
+
+    static String uri(CreateMachineCatalog.Kind kind) {
+        return PREFIX + kind.id().substring(kind.id().indexOf(':') + 1);
+    }
+
+    private static KnowledgeDocument.Entry entry(CreateMachineCatalog.Kind kind) {
+        return new KnowledgeDocument.Entry(uri(kind), "machine.create.kind", kind.name() + "（" + kind.id() + "）",
+                "在机器里：" + roleName(kind) + "；加工处、接转动的面、转速门槛、应力", kind.name() + " " + kind.id(),
+                "text/markdown", kind.id(), kind.name());
+    }
+
+    private KnowledgeDocument index() {
+        StringBuilder text = new StringBuilder("# 机械动力机器总览\n\n");
+        text.append("机器能力（machine_inspect / machine_run / machine_build / machine_connect）认得下面这些 Create 方块；")
+                .append("附属模组的动力方块认作\"其他动力方块\"，只看得出转不转。每种的细节读它自己那一篇。\n\n");
+        text.append("## 接动力的经验\n\n")
+                .append("- 先接现场已有的应力网（主城的风车、蒸汽机）：machine_connect 不给 source 时会找最近在转的那张网。")
+                .append("自建动力源只在机器离哪张网都远、又要长期运转时才考虑。\n")
+                .append("- 思索（Ponder）演示里的创造马达、物品保险库是\"这里接动力、这里接料\"的示意，不是要照着放的方块。\n")
+                .append("- 近处用传动杆、齿轮箱、齿轮；远处用链条输送机架过去（锁链便宜，适合长距离，")
+                .append("一般用传动杆把它架高一点）；链式传动箱贵，不必用来跑长距离。\n")
+                .append("- 每台机器里链条输送机的个数有上限（实例配置，默认 1）：近处能用传动杆接上的就别用链条。\n")
+                .append("- 手摇曲柄只适合手动做几件东西（置物台上压几块板），长期生产线接真正的动力源。\n")
+                .append("- 过载时整张网停转：看 machine_inspect 里那张网的 stress 与 stress_capacity。\n\n");
+        text.append("## 认得的机器\n\n");
+        for (CreateMachineCatalog.Kind kind : CreateMachineCatalog.kinds()) {
+            text.append("- ").append(kind.name()).append("（`").append(kind.id()).append("`）：")
+                    .append(roleName(kind)).append("，资料 `").append(lookupId(kind)).append("`\n");
+        }
+        return new KnowledgeDocument(INDEX, "machine.create.index", "机械动力机器总览", "认得的 Create 机器与接动力经验",
+                text.toString());
+    }
+
+    private KnowledgeDocument page(CreateMachineCatalog.Kind kind) {
+        StringBuilder text = new StringBuilder("# ").append(kind.name()).append("（`").append(kind.id()).append("`）\n\n");
+        text.append("- 在机器里：").append(roleName(kind)).append("\n");
+        if (kind.blocks().size() > 1) {
+            text.append("- 包括这些方块：").append(String.join("、", kind.blocks())).append("\n");
+        }
+        BlockState shown = defaultState(kind).orElse(Blocks.AIR.defaultBlockState());
+        for (ExchangePoint point : ProcessingSpots.of(kind.work(), shown, BlockPos.ZERO, Set.of(), false)) {
+            text.append("- ").append(point.note()).append("\n");
+        }
+        defaultState(kind).ifPresent(state -> appendKinetics(text, state));
+        appendUse(text, kind);
+        return new KnowledgeDocument(uri(kind), "machine.create.kind", kind.name(), "Create 机器资料", text.toString());
+    }
+
+    // 转动与应力：从伸着轴的面接转动；门槛、每转应力与容量读 Create 自己的表，读不到就说进世界后再看。
+    private void appendKinetics(StringBuilder text, BlockState state) {
+        if (!safely(() -> compat.kinetic(state)).orElse(false)) return;
+        text.append("- 转动：从伸着轴的那几面接（machine_inspect 的 ports 里按面列出）\n");
+        Optional<Optional<Double>> minimum = safely(() -> compat.minimumSpeed(state));
+        if (minimum.isEmpty()) {
+            text.append("- 干活要的转速：进世界后读得到（来自服务器配置）\n");
+        } else {
+            text.append("- 干活要的转速：").append(minimum.get().map(speed -> "至少 " + CreateReadings.round(speed)
+                    + " 转/分").orElse("没有门槛，转起来就干活")).append("\n");
+        }
+        Block block = state.getBlock();
+        safely(() -> compat.stressImpact(block)).filter(impact -> impact > 0).ifPresent(impact -> text
+                .append("- 应力：每转吃 ").append(CreateReadings.round(impact)).append("（转速 n 时吃 ")
+                .append(CreateReadings.round(impact)).append("×n）\n"));
+        safely(() -> compat.stressCapacity(block)).filter(capacity -> capacity > 0).ifPresent(capacity -> {
+            text.append("- 应力容量：每转给 ").append(CreateReadings.round(capacity));
+            safely(() -> compat.generatedSpeed(block)).flatMap(speed -> speed)
+                    .ifPresent(speed -> text.append("，自己转 ").append(speed).append(" 转/分（最多）"));
+            text.append("\n");
+        });
+    }
+
+    // 用机器做东西与施工时要知道的：料放哪、产物从哪收，安装段怎么装。
+    private static void appendUse(StringBuilder text, CreateMachineCatalog.Kind kind) {
+        switch (kind.work()) {
+            case PRESS, DEPLOYER, FAN -> text.append("- machine_run：target 指这台机器；加工处放着置物台时，")
+                    .append("料放到那台置物台上，产物从置物台空手收回\n");
+            case MIXER -> text.append("- machine_run：产物留在正下方第二格的工作盆里，空手右键工作盆取出；")
+                    .append("料要扔进盆里（这一步角色现在还不会做）\n");
+            case DEPOT -> text.append("- machine_run：手持料右键顶面放一整叠；空手右键顶面收回\n");
+            case BELT -> text.append("- machine_build：installations 写 `{kind: create:belt, cells: [从一端到另一端]}`；")
+                    .append("cells 里两端写与带子垂直的 `create:shaft`（不能用机壳传动杆），中间不写或写 air；")
+                    .append("沿东西或南北走，可以上下斜四十五度或竖直，两端距离小于服务器配置（默认 20）。")
+                    .append("每段两端都要有和带子走向一致的轴；拐弯分成两段\n");
+            case CHAIN_CONVEYOR -> text.append("- machine_build：installations 写 `{kind: create:chain_conveyor, cells: [台 A, 台 B]}`，")
+                    .append("两台本身写进 cells；相距小于服务器配置（默认 32）、不小于两格半，不能竖直，")
+                    .append("高差不超过水平距离；锁链约每 2.5 格一根\n");
+            default -> {
+            }
+        }
+    }
+
+    private static Optional<BlockState> defaultState(CreateMachineCatalog.Kind kind) {
+        ResourceLocation id = ResourceLocation.tryParse(kind.blocks().getFirst());
+        return id == null ? Optional.empty() : BuiltInRegistries.BLOCK.getOptional(id).map(Block::defaultBlockState);
+    }
+
+    // 资料在 MCP 线程上读：Create 的配置没加载、模组接口对不上都按读不到收场，不让查资料报错。
+    private static <T> Optional<T> safely(Supplier<T> read) {
+        try {
+            return Optional.ofNullable(read.get());
+        } catch (RuntimeException unavailable) {
+            return Optional.empty();
+        }
+    }
+
+    private static String lookupId(CreateMachineCatalog.Kind kind) {
+        return uri(kind).substring("maicraft://knowledge/".length());
+    }
+
+    private static String roleName(CreateMachineCatalog.Kind kind) {
+        return switch (kind.role()) {
+            case POWER_SOURCE -> "动力源";
+            case TRANSMISSION -> "传动";
+            case PROCESSING -> "加工";
+            case LOGISTICS -> "搬运";
+            case STORAGE -> "存放";
+            case CONTROL -> "控制";
+            case CABLE -> "管线";
+            case NETWORK_CORE -> "网络核心";
+        } + "（" + kind.role().name().toLowerCase(Locale.ROOT) + "）";
+    }
+}
