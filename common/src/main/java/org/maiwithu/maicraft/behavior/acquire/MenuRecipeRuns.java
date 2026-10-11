@@ -6,31 +6,23 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
-import java.util.HashSet;
 import java.util.function.Supplier;
 
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.inventory.AbstractFurnaceMenu;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.inventory.StonecutterMenu;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.RecipeHolder;
 
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
-import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
-import org.maiwithu.maicraft.behavior.interaction.AimAndInteract;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
-import org.maiwithu.maicraft.behavior.menu.ClientMenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuSession;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
-import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.menu.MenuConfirmation;
 import org.maiwithu.maicraft.game.menu.PendingMenuAction;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -39,18 +31,19 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
- * 在工作站上动手做配方的生产实现：走到设施跟前、点开界面，按这种设施在原版里的用法摆料，
- * 产出格一出货就整堆收进背包，做够件数（按背包里实际多出来的算）收拾好再关上界面。
+ * 在工作站上动手做配方的生产实现：走到设施跟前、点开界面（见 {@link StationVisit}），按这种设施在原版里的用法摆料，
+ * 产出格一出货就整堆收进背包，做够件数（按背包里实际多出来的算）再关上界面。界面中途被关掉（吃东西、自卫打断，
+ * 或别的原因）不当成做完：回到设施跟前重新点开接着做，格子里的料关界面时原版已经还回背包。
  *
  * <p>三种设施的用法不同，都按原版界面真实的规矩来：
  * <ul>
  *   <li>背包合成格：摆得进 2×2 的合成不用工作台，打开背包照工作台的做法做（见 {@link InventoryCrafting}）；</li>
  *   <li>工作台：经配方簿一次摆一份原料，取走产出再摆下一份；</li>
- *   <li>熔炉：经配方簿一次摆一件原料；配方簿不管燃料，没在烧又没燃料时把身上烧得最久的燃料
- *       拿起来放进燃料槽；做完把剩下的燃料收回背包（熔炉不会自己把东西还回来）；</li>
+ *   <li>熔炉：装好原料和燃料就关上界面在旁边等，烧好了回来取（见 {@link FurnaceRun}）；</li>
  *   <li>石切台：配方簿不管石切台。把原料拿到手上，右键一件一件放进投入口，放够要切的件数，
  *       多的放回原格；再按下这条配方的按钮，取走产出。关界面时原版会把投入口剩下的还回背包。</li>
  * </ul>
@@ -59,14 +52,12 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  */
 public final class MenuRecipeRuns implements RecipeRuns {
 
-    /** 等界面打开并同步完的期限（刻）。 */
-    private static final int MENU_WAIT_LIMIT = 40;
-    /** 烧一件东西要多少刻：原版熔炉的固定速度，总期限按它与次数估。 */
-    private static final int SMELT_TICKS_PER_ITEM = 200;
     /** 一下点击等游戏确认的期限（刻）。 */
     private static final int CLICK_TIMEOUT_TICKS = 100;
-    /** 站的位置看不到或够不着设施时，最多再换几个站位：换遍了才弃台。 */
-    private static final int MORE_SPOTS = 2;
+    /** 合成、石切一轮的总期限：走过去、点开、摆料收货都算上。 */
+    private static final int GIVE_UP_TICKS = 20 * 60;
+    /** 界面不是被打断关上、而是无缘无故没了，最多重开几次。 */
+    private static final int MAX_REOPENS = 3;
 
     /** 合成台界面的类型注册 ID。 */
     private static final String CRAFTING_MENU = "minecraft:crafting";
@@ -75,10 +66,7 @@ public final class MenuRecipeRuns implements RecipeRuns {
     /** 石切台界面的类型注册 ID。 */
     private static final String STONECUTTER_MENU = "minecraft:stonecutter";
 
-    // 容器侧格子的次序（原版界面布局）：熔炉 0 投入口、1 燃料槽、2 产出格；石切台 0 投入口、1 产出格；
-    // 工作台 0 产出格、1 到 9 合成格。
-    private static final int FURNACE_INPUT = 0;
-    private static final int FURNACE_FUEL = 1;
+    // 容器侧格子的次序（原版界面布局）：石切台 0 投入口、1 产出格；工作台 0 产出格、1 到 9 合成格。
     private static final int CUTTER_INPUT = 0;
 
     private final BringsPlayerClose close;
@@ -108,8 +96,28 @@ public final class MenuRecipeRuns implements RecipeRuns {
         if (id == null) {
             return Optional.empty();
         }
-        return level.getRecipeManager().byKey(id)
-                .map(holder -> new WorkAction(holder, recipe, station, times, permissions));
+        // 烧炼要关着界面等炉子、烧好再回来取，单独一个动作；合成与石切台站在跟前一口气做完。
+        return level.getRecipeManager().byKey(id).map(holder -> recipe.kind() == WorkstationRecipe.Kind.SMELTING
+                ? new FurnaceRun(holder, recipe, station, times, () -> visit(recipe, station, permissions), fuels, memory)
+                : new WorkAction(holder, recipe, station, times, permissions));
+    }
+
+    // 到设施跟前点开界面的一趟：站位、点开、等同步、认界面类型，做配方和烧炉子共用。
+    private StationVisit visit(WorkstationRecipe recipe, WorldPosition station, Permissions permissions) {
+        String doing = (recipe.kind() == WorkstationRecipe.Kind.SMELTING ? "烧" : "做") + recipe.result().describe();
+        String menuType = switch (recipe.kind()) {
+            case CRAFTING -> CRAFTING_MENU;
+            case SMELTING -> FURNACE_MENU;
+            case STONECUTTING -> STONECUTTER_MENU;
+        };
+        return new StationVisit(close, interactions, context, station, permissions,
+                workstationName(recipe.kind()), doing, reading -> menuTypeIs(reading, menuType));
+    }
+
+    // 界面类型对得上这种设施才动手。
+    private static boolean menuTypeIs(MenuContent.Reading reading, String typeId) {
+        String shown = reading.slots().menuTypeId() == null ? "" : reading.slots().menuTypeId().toLowerCase(Locale.ROOT);
+        return shown.equals(typeId);
     }
 
     @Override
@@ -147,32 +155,30 @@ public final class MenuRecipeRuns implements RecipeRuns {
         ActionStatus settle(PendingMenuAction.Status status, TickContext tick);
     }
 
-    /** 动手做一轮的动作：靠近 → 点开 → 等同步 → 摆料与收货 → 收拾 → 关上，跨刻推进。 */
+    /** 在工作台、石切台上动手做一轮：走到跟前点开 → 摆料与收货 → 关上，跨刻推进。 */
     private final class WorkAction implements Action {
 
-        /** 推进的先后：靠近、点开、等同步、摆料收货、收拾熔炉里剩下的、关上。 */
-        private enum Stage { APPROACH, OPEN, WAIT, WORK, TIDY, CLOSE }
+        /** 推进的先后：走到跟前点开、摆料收货、关上。 */
+        private enum Stage { VISIT, WORK, CLOSE }
 
         private final RecipeHolder<?> holder;
         /** 这次任务的许可：走到设施跟前时能动多少地形按它来。 */
         private final Permissions permissions;
         private final WorkstationRecipe recipe;
         private final WorldPosition station;
-        private final int batches;
         /** 想做出的总件数：按配方的单次产出与次数估。 */
         private final int targetItems;
 
-        private Stage stage = Stage.APPROACH;
-        private Action approaching;
-        private AimAndInteract opening;
-        /** 点的时候看不到、够不着的站位：再靠近时不站这些格。 */
-        private final Set<BlockPos> poorSpots = new HashSet<>();
-        /** 界面打开后才建的读端：绑的就是点开的那份界面。 */
+        private Stage stage = Stage.VISIT;
+        /** 走到跟前点开的这一趟；界面被关掉要重开时换新的一趟。 */
+        private StationVisit visit;
+        /** 点开的那份界面的读端。 */
         private MenuContent menus;
         /** 收尾关界面用的那一份会话：认领一次，之后每刻只推进它。 */
         private MenuSession closingSession;
-        private int menuWaited;
         private int waited;
+        private int unexpectedCloses;
+        private boolean closedByPause;
         /** 背包里实际多出来的产出件数：每次取货按取货前后背包里的数量差记。 */
         private int produced;
         private Problem failure;
@@ -189,7 +195,6 @@ public final class MenuRecipeRuns implements RecipeRuns {
             this.holder = holder;
             this.recipe = recipe;
             this.station = station;
-            this.batches = batches;
             this.targetItems = batches * recipe.resultCount();
         }
 
@@ -198,123 +203,83 @@ public final class MenuRecipeRuns implements RecipeRuns {
             if (failure != null) {
                 return ActionStatus.failed(failure);
             }
-            if (++waited > giveUpTicks()) {
-                return fail(Problem.Kind.STUCK, "在工作站上做" + recipe.result().describe() + "超时，先收手");
+            if (++waited > GIVE_UP_TICKS) {
+                return fail(Problem.Kind.STUCK, "在" + workstationName() + "上做" + recipe.result().describe() + "超时，先收手");
             }
             if (pending != null) {
                 return awaitClick(tick);
             }
             return switch (stage) {
-                case APPROACH -> approach(tick);
-                case OPEN -> open(tick);
-                case WAIT -> waitMenu();
+                case VISIT -> visit(tick);
                 case WORK -> work(tick);
-                case TIDY -> tidy(tick);
                 case CLOSE -> close(tick);
             };
         }
 
-        // 总期限：烧炼按每件的烧制刻数估，合成石切按一次一两刻估，另留动手与收尾的余量。
-        private long giveUpTicks() {
-            long smelting = recipe.kind() == WorkstationRecipe.Kind.SMELTING
-                    ? (long) batches * SMELT_TICKS_PER_ITEM : 0;
-            return smelting + 20L * 60;
-        }
-
-        // 走到设施跟前：够不着就如实失败，不隔空点开。
-        private ActionStatus approach(TickContext tick) {
-            if (approaching == null) {
-                BlockPos at = new BlockPos(station.x(), station.y(), station.z());
-                // 走过去能动多少地形按这次任务的许可来，不另开一套默认档。
-                approaching = poorSpots.isEmpty() ? close.toward(ApproachTarget.ofBlock(at), permissions)
-                        : close.toward(ApproachTarget.ofBlock(at), permissions, cell -> poorSpots.contains(cell));
+        // 走到跟前点开：每次重开都重新走一遍，人可能被挤开、撤离过。
+        private ActionStatus visit(TickContext tick) {
+            if (visit == null) {
+                visit = MenuRecipeRuns.this.visit(recipe, station, permissions);
             }
-            ActionStatus status = approaching.tick(tick);
-            if (status instanceof ActionStatus.Running) {
-                return status;
-            }
+            ActionStatus status = visit.tick(tick);
             if (status instanceof ActionStatus.Failed failed) {
-                return fail(Problem.Kind.UNREACHABLE, "走不到工作站跟前做不了" + recipe.result().describe()
-                        + "：" + failed.problem().message());
-            }
-            stage = Stage.OPEN;
-            return ActionStatus.progressed();
-        }
-
-        // 点开设施：确认条件是界面打开（容器编号变了），点完等界面递过来。
-        private ActionStatus open(TickContext tick) {
-            if (opening == null) {
-                int menuIdBefore = tick.player().localPlayer().containerMenu.containerId;
-                BlockPos at = new BlockPos(station.x(), station.y(), station.z());
-                opening = interactions.useBlock(at, InteractionConfirmation.menuChanged(menuIdBefore));
-            }
-            ActionStatus status = opening.tick(tick);
-            if (status instanceof ActionStatus.Running) {
+                failure = failed.problem();
                 return status;
             }
-            // 站的位置看不到台面、或够不着：挪个站位再点，换遍了才弃台。
-            if (status instanceof ActionStatus.Failed failed && failed.problem().kind() == Problem.Kind.UNREACHABLE
-                    && poorSpots.size() < MORE_SPOTS) {
-                poorSpots.add(tick.player().localPlayer().blockPosition());
-                opening.close();
-                opening = null;
-                approaching.close();
-                approaching = null;
-                stage = Stage.APPROACH;
+            if (status instanceof ActionStatus.Done) {
+                menus = visit.menus();
+                closingSession = null;
+                stage = Stage.WORK;
                 return ActionStatus.progressed();
             }
-            if (status instanceof ActionStatus.Failed failed) {
-                return fail(Problem.Kind.REFUSED_BY_GAME, "点开工作站没成功，做不了" + recipe.result().describe()
-                        + "：" + failed.problem().message());
+            return status;
+        }
+
+        // 界面没了：被生存需求打断时关的、或别的原因关的，都回到设施跟前重新点开接着做，不当成做完了。
+        // 不是打断关的、一再被关掉才如实失败；格子里、鼠标上的料关界面时原版已经还回背包，石切台喂料从头来。
+        private ActionStatus reopen() {
+            if (!closedByPause && ++unexpectedCloses > MAX_REOPENS) {
+                return fail(Problem.Kind.STUCK, workstationName() + "的界面一再被关掉，" + recipe.result().describe()
+                        + "做不下去");
             }
-            stage = Stage.WAIT;
+            closedByPause = false;
+            feedFrom = -1;
+            feedLeft = 0;
+            dropVisit();
+            stage = Stage.VISIT;
             return ActionStatus.progressed();
         }
 
-        // 等格子同步完，并认下界面类型：认不出的界面不乱点。
-        private ActionStatus waitMenu() {
-            if (menus == null) {
-                // 读端在这里才建：绑的就是刚点开、还没被换掉的这份界面。
-                menus = new ClientMenuContent(context);
-            }
-            Optional<MenuContent.Reading> reading = menus.current();
-            if (reading.isEmpty()) {
-                if (++menuWaited > MENU_WAIT_LIMIT) {
-                    return fail(Problem.Kind.STUCK,
-                            "工作站点开了但界面一直没同步，做不了" + recipe.result().describe());
-                }
-                return ActionStatus.running();
-            }
-            if (!menuMatches(reading.get())) {
-                return fail(Problem.Kind.UNSUPPORTED,
-                        "打开的不是认得的" + workstationName() + "界面，做不了" + recipe.result().describe());
-            }
-            stage = Stage.WORK;
-            return ActionStatus.progressed();
+        private void dropVisit() {
+            if (visit != null) visit.close();
+            visit = null;
+            menus = null;
+            closingSession = null;
         }
 
-        // 摆料与收货：产出格有货先收；做够了去收拾；否则按设施种类摆下一份料。
+        // 还在的界面才读：点开的那份已经关了（就算又开了别的界面）都按界面没了算。
+        private Optional<MenuContent.Reading> openReading() {
+            return menus == null ? Optional.empty() : menus.current().filter(reading -> reading.channel().stillOpen());
+        }
+
+        // 摆料与收货：产出格有货先收；做够了关界面；否则按设施种类摆下一份料。
         private ActionStatus work(TickContext tick) {
-            Optional<MenuContent.Reading> reading = menus.current();
+            Optional<MenuContent.Reading> reading = openReading();
             if (reading.isEmpty()) {
-                // 界面被合上了：已出货的照实算数，收场让引擎清点。
-                return ActionStatus.done();
+                return reopen();
             }
             MenuContent.Reading open = reading.get();
             if (feedFrom < 0 && produced >= targetItems) {
                 memory.rememberWorkstationUsed(station, workstationBlockType(recipe.kind()), Instant.now());
-                stage = Stage.TIDY;
+                stage = Stage.CLOSE;
                 return ActionStatus.progressed();
             }
             int output = outputIndex();
             if (feedFrom < 0 && !open.containerSnapshots().get(output).isEmpty()) {
                 return takeOutput(tick, open, output);
             }
-            return switch (recipe.kind()) {
-                case CRAFTING -> placeByRecipeBook(tick);
-                case SMELTING -> feedFurnace(tick, open);
-                case STONECUTTING -> feedStonecutter(tick, open);
-            };
+            return recipe.kind() == WorkstationRecipe.Kind.STONECUTTING ? feedStonecutter(tick, open)
+                    : placeByRecipeBook(tick);
         }
 
         // 取货：整堆收进背包；收到几件按取货前后背包里这件东西的数量差记，不按产出格上写的数猜。
@@ -323,7 +288,7 @@ public final class MenuRecipeRuns implements RecipeRuns {
             int slotId = open.containerSlotIds().get(output);
             ItemStack shown = open.containerSnapshots().get(output).stack().copy();
             return click(tick, slotId, 0, ClickType.QUICK_MOVE, slotChanged(slotId, shown), (status, later) -> {
-                menus.current().ifPresent(now -> produced += Math.max(0, carriedResults(now) - before));
+                openReading().ifPresent(now -> produced += Math.max(0, carriedResults(now) - before));
                 if (status == PendingMenuAction.Status.CONFIRMED_NOT_APPLIED) {
                     return fail(Problem.Kind.INVENTORY_FULL,
                             "产出格的" + recipe.result().describe() + "收不进背包，背包可能满了");
@@ -332,7 +297,7 @@ public final class MenuRecipeRuns implements RecipeRuns {
             });
         }
 
-        // 工作台、熔炉的原料经配方簿摆：一次一份，等格子里真的出现原料才算摆上。
+        // 工作台的原料经配方簿摆：一次一份，等格子里真的出现原料才算摆上。
         private ActionStatus placeByRecipeBook(TickContext tick) {
             PlayerContext player = tick.player();
             if (!ready(player)) {
@@ -344,48 +309,6 @@ public final class MenuRecipeRuns implements RecipeRuns {
                     ? ActionStatus.progressed()
                     : fail(Problem.Kind.NEED_ITEM, "配方簿没有把原料摆进去（身上可能缺料），做不了"
                             + recipe.result().describe()));
-        }
-
-        // 熔炉：投入口空了就再摆一件；有料、没在烧、燃料槽空着时先添燃料；都齐了就等它烧。
-        private ActionStatus feedFurnace(TickContext tick, MenuContent.Reading open) {
-            if (open.containerSnapshots().get(FURNACE_INPUT).isEmpty()) {
-                return placeByRecipeBook(tick);
-            }
-            boolean lit = tick.player().localPlayer().containerMenu instanceof AbstractFurnaceMenu furnace
-                    && furnace.isLit();
-            if (lit || !open.containerSnapshots().get(FURNACE_FUEL).isEmpty()) {
-                return ActionStatus.running();
-            }
-            return addFuel(tick, open);
-        }
-
-        // 添燃料：把身上烧得最久的一堆拿起来整堆放进燃料槽，剩下的做完再收回；尽量不烧这次要烧的原料。
-        private ActionStatus addFuel(TickContext tick, MenuContent.Reading open) {
-            ItemStack carried = tick.player().localPlayer().containerMenu.getCarried();
-            int fuelSlot = open.containerSlotIds().get(FURNACE_FUEL);
-            if (!carried.isEmpty()) {
-                return click(tick, fuelSlot, 0, ClickType.PICKUP, cursorEmptied(), (status, later) ->
-                        status == PendingMenuAction.Status.CONFIRMED_APPLIED ? ActionStatus.progressed()
-                                : fail(Problem.Kind.REFUSED_BY_GAME, "燃料没能放进熔炉的燃料槽"));
-            }
-            int best = -1;
-            int bestBurn = 0;
-            for (int i = 0; i < open.playerSnapshots().size(); i++) {
-                SlotSnapshot stack = open.playerSnapshots().get(i);
-                // 工具、武器这类一格一件的不拿去烧：木镐也是燃料，可烧了就没得用了。
-                if (stack.isEmpty() || isIngredient(stack.stack()) || stack.stack().getMaxStackSize() <= 1) continue;
-                int burn = fuels.burnTicks(itemId(stack.stack()));
-                if (burn > bestBurn) {
-                    best = i;
-                    bestBurn = burn;
-                }
-            }
-            if (best < 0) {
-                return fail(Problem.Kind.NEED_ITEM, "身上没有能烧的燃料，烧不了" + recipe.result().describe());
-            }
-            return click(tick, open.playerSlotIds().get(best), 0, ClickType.PICKUP, cursorFilled(), (status, later) ->
-                    status == PendingMenuAction.Status.CONFIRMED_APPLIED ? ActionStatus.progressed()
-                            : fail(Problem.Kind.REFUSED_BY_GAME, "拿不起燃料，烧不了" + recipe.result().describe()));
         }
 
         // 石切台：手上拿着原料就接着往投入口放；投入口空着就去拿原料；料够了还没选配方就按配方按钮。
@@ -471,33 +394,10 @@ public final class MenuRecipeRuns implements RecipeRuns {
                             : fail(Problem.Kind.REFUSED_BY_GAME, "石切台没有选上切" + recipe.result().describe() + "的配方"));
         }
 
-        // 收拾：熔炉不会把东西还回来，燃料槽和投入口剩下的收回背包；工作台、石切台关界面时原版自己还。
-        private ActionStatus tidy(TickContext tick) {
-            Optional<MenuContent.Reading> reading = menus.current();
-            if (reading.isEmpty() || recipe.kind() != WorkstationRecipe.Kind.SMELTING) {
-                stage = Stage.CLOSE;
-                return ActionStatus.progressed();
-            }
-            MenuContent.Reading open = reading.get();
-            for (int index : List.of(FURNACE_FUEL, FURNACE_INPUT)) {
-                SlotSnapshot left = open.containerSnapshots().get(index);
-                if (left.isEmpty()) continue;
-                int slotId = open.containerSlotIds().get(index);
-                // 收不回（背包满了）就留在熔炉里，照常关界面，不为它卡住。
-                return click(tick, slotId, 0, ClickType.QUICK_MOVE, slotChanged(slotId, left.stack().copy()),
-                        (status, later) -> {
-                            if (status != PendingMenuAction.Status.CONFIRMED_APPLIED) stage = Stage.CLOSE;
-                            return ActionStatus.progressed();
-                        });
-            }
-            stage = Stage.CLOSE;
-            return ActionStatus.progressed();
-        }
-
         // 关界面：打开者负责关闭；一份界面会话从头用到尾，只请求游戏关一次、期限按这份会话算。
         // 关不上不冒充没开过，照常收场让引擎清点。
         private ActionStatus close(TickContext tick) {
-            Optional<MenuContent.Reading> reading = menus.current();
+            Optional<MenuContent.Reading> reading = openReading();
             if (reading.isEmpty()) {
                 return ActionStatus.done();
             }
@@ -564,7 +464,7 @@ public final class MenuRecipeRuns implements RecipeRuns {
             return total;
         }
 
-        // 这件东西是不是这条配方的原料：熔炉添燃料时不烧它，石切台拿料时只拿它。
+        // 这件东西是不是这条配方的原料：石切台拿料时只拿它。
         private boolean isIngredient(ItemStack stack) {
             return holder.value().getIngredients().stream().anyMatch(ingredient -> ingredient.test(stack));
         }
@@ -572,70 +472,58 @@ public final class MenuRecipeRuns implements RecipeRuns {
         // 摆料的确认条件：该有料的格子里真的出现了东西才算摆上。
         private MenuConfirmation ingredientsPlaced() {
             return (player, click) -> {
-                Optional<MenuContent.Reading> reading = menus.current();
+                Optional<MenuContent.Reading> reading = openReading();
                 if (reading.isEmpty()) return MenuConfirmation.Verdict.PENDING;
                 List<SlotSnapshot> container = reading.get().containerSnapshots();
-                boolean placed = recipe.kind() == WorkstationRecipe.Kind.SMELTING
-                        ? !container.get(FURNACE_INPUT).isEmpty()
-                        : container.subList(1, container.size()).stream().anyMatch(stack -> !stack.isEmpty());
+                boolean placed = container.subList(1, container.size()).stream().anyMatch(stack -> !stack.isEmpty());
                 return placed ? MenuConfirmation.Verdict.APPLIED : MenuConfirmation.Verdict.PENDING;
             };
         }
 
-        // 界面类型对得上这条配方的设施种类才动手。
-        private boolean menuMatches(MenuContent.Reading reading) {
-            String typeId = reading.slots().menuTypeId() == null
-                    ? "" : reading.slots().menuTypeId().toLowerCase(Locale.ROOT);
-            return switch (recipe.kind()) {
-                case CRAFTING -> typeId.equals(CRAFTING_MENU);
-                case SMELTING -> typeId.equals(FURNACE_MENU);
-                case STONECUTTING -> typeId.equals(STONECUTTER_MENU);
-            };
-        }
-
-        // 产出格在容器侧的下标：合成第 0 格，烧炼第 2 格，石切台第 1 格。
+        // 产出格在容器侧的下标：合成第 0 格，石切台第 1 格。
         private int outputIndex() {
-            return switch (recipe.kind()) {
-                case CRAFTING -> 0;
-                case SMELTING -> 2;
-                case STONECUTTING -> 1;
-            };
+            return recipe.kind() == WorkstationRecipe.Kind.STONECUTTING ? 1 : 0;
         }
 
         private String workstationName() {
-            return switch (recipe.kind()) {
-                case CRAFTING -> "工作台";
-                case SMELTING -> "熔炉";
-                case STONECUTTING -> "石切台";
-            };
+            return MenuRecipeRuns.workstationName(recipe.kind());
         }
 
-        // 被生存需求打断：正在走的那一趟、正在点的那一下先停住，恢复后接着推进。
+        // 被生存需求打断：走到一半、点到一半的先停住；界面开着就关上（格子里的料原版会还回背包），
+        // 回来重新走到跟前点开接着做。
         @Override
         public void pause() {
-            if (approaching != null) approaching.pause();
-            if (opening != null) opening.pause();
-            // 界面开着就先关上（工作台格子里的料原版会还回背包），回来时引擎按身上的清点再决定。
+            boolean menuOpen = openReading().isPresent();
+            if (visit != null) visit.pause();
             abandonMenu();
+            if (menuOpen) closedByPause = true;
+            if (stage == Stage.VISIT) dropVisit();
         }
 
         // 收尾：没走完的走到、没确认的点开一并收尾，开着的界面请游戏关上，不让它们悬着占着身体。
         @Override
         public void close() {
-            if (approaching != null) approaching.close();
-            if (opening != null) opening.close();
+            if (visit != null) visit.close();
             abandonMenu();
         }
 
         private void abandonMenu() {
-            if (menus != null) {
-                menus.current().ifPresent(reading -> reading.channel().requestClose());
+            MenuContent open = menus != null ? menus : visit != null ? visit.menus() : null;
+            if (open != null) {
+                open.current().filter(reading -> reading.channel().stillOpen())
+                        .ifPresent(reading -> reading.channel().requestClose());
             }
+        }
+
+        // 点到一半时不宜打断：等这一下的结果出来再停。
+        @Override
+        public Interruptibility interruptibility() {
+            return pending != null ? Interruptibility.UNSAFE_TO_STOP : Interruptibility.WORKING;
         }
 
         @Override
         public String describe() {
-            return "在工作站上做 " + recipe.result().describe();
+            return "在" + workstationName() + "上做 " + recipe.result().describe();
         }
     }
 
@@ -667,6 +555,14 @@ public final class MenuRecipeRuns implements RecipeRuns {
 
     private static String itemId(ItemStack stack) {
         return BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+    }
+
+    static String workstationName(WorkstationRecipe.Kind kind) {
+        return switch (kind) {
+            case CRAFTING -> "工作台";
+            case SMELTING -> "熔炉";
+            case STONECUTTING -> "石切台";
+        };
     }
 
     /** 配方的设施种类对应的方块类型；摆台与记设施都用它。 */
