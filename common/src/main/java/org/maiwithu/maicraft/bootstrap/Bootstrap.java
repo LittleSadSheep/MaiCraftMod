@@ -61,7 +61,7 @@ import org.maiwithu.maicraft.behavior.survival.EdgeProximityNeed;
 import org.maiwithu.maicraft.behavior.survival.EatSoonTask;
 import org.maiwithu.maicraft.behavior.survival.EatsCarriedFood;
 import org.maiwithu.maicraft.behavior.survival.HungerNeed;
-import org.maiwithu.maicraft.behavior.survival.LiveCombatMoves;
+import org.maiwithu.maicraft.behavior.combat.LiveBattleMoves;
 import org.maiwithu.maicraft.behavior.combat.LiveCombatSenses;
 import org.maiwithu.maicraft.behavior.survival.LiveEdgeView;
 import org.maiwithu.maicraft.behavior.survival.LiveHungerView;
@@ -255,7 +255,7 @@ public final class Bootstrap {
                 new BreathNeed(new SurvivalSituation.FromPlayer(), ceilings, new LiveAirRoutes()),
                 new FallNeed(new SurvivalSituation.FromPlayer(), fallRescues,
                         BaritoneInternals::landingInProgress),
-                new SelfDefenseNeed(combatSenses, new LiveCombatMoves(walks, interactions.heldProjection(), ranged), events),
+                new SelfDefenseNeed(combatSenses, new LiveBattleMoves(walks, interactions.heldProjection(), ranged), events),
                 new HungerNeed(new LiveHungerView(foods, keeps), foodMoves, events),
                 new DarknessNeed(new LiveDarkView(lightLevels),
                         new LiveTorchMoves(interactions, hands, protection, Set.of()), followLighting),
