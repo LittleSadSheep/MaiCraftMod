@@ -68,8 +68,8 @@ public final class WaypointChooser {
                 - Math.abs(candidate.eccentricity()) * 0.1;
     }
 
-    /** 已试过或已证实走不通的落点周围 16 格内的候选不再选。 */
-    private static boolean tried(BlockPos column, Set<Long> triedColumns) {
+    /** 已试过或已证实走不通的落点周围 16 格内的候选不再选；航点和目标候选用同一条。 */
+    static boolean tried(BlockPos column, Set<Long> triedColumns) {
         for (long tried : triedColumns) {
             BlockPos spot = BlockPos.of(tried);
             int dx = spot.getX() - column.getX();

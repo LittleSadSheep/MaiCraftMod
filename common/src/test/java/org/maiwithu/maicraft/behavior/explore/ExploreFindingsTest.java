@@ -54,6 +54,18 @@ class ExploreFindingsTest {
     }
 
     @Test
+    void 一片岩浆湖抽样命中好几列只算一条() {
+        ExploreFindings findings = new ExploreFindings();
+        // 抽样网格每 8 格一列：同一片岩浆湖命中三列，都在 24 格以内，只算一处、只发一条事件。
+        for (int x = 10; x <= 26; x += 8) {
+            ExploreFindings.Entry entry = findings.record(new ExploreFinding(ExploreFinding.Kind.TERRAIN,
+                    "lava_pool", new WorldPosition(x, 30, -5, "minecraft:overworld"), MemoryOrigin.SEEN)).entry();
+            assertEquals(x == 10 ? ExploreFindings.Entry.NEW : ExploreFindings.Entry.KNOWN, entry);
+        }
+        assertEquals(1, findings.all().size());
+    }
+
+    @Test
     void 有没有见过某一种发现() {
         ExploreFindings findings = new ExploreFindings();
         findings.record(new ExploreFinding(ExploreFinding.Kind.TERRAIN, "lava_pool", SPOT, MemoryOrigin.SEEN));

@@ -162,6 +162,33 @@ class ExploreTaskTest {
     }
 
     @Test
+    void 走失败的候选记进拒绝集_回观察不再选它() {
+        WorldMemory memory = memory();
+        // 一片丛林（抽样网格换了圆心也会命中旁边几列）。
+        for (int x = -10; x <= 10; x++) {
+            for (int z = -50; z <= -36; z++) {
+                world.putBiome(x, z, "minecraft:jungle");
+            }
+        }
+        // 朝候选走的几段都走不过去，身体留在出发点附近。
+        for (int i = 0; i < 6; i++) {
+            walks.enqueue(new ExploreFakes.ScriptedWalk(
+                    WalkReport.planning(),
+                    WalkReport.failed(Problem.of(Problem.Kind.UNREACHABLE, "隔着一道崖"),
+                            new BlockPos(0, 64, -2), false)));
+        }
+        ExploreTask task = task(memory,
+                new ExploreObjective(ExploreObjective.Kind.BIOME, List.of("minecraft:jungle")),
+                ExploreObjective.Interests.NONE, Target.Toward.NORTH, 90, 16, 256, NATURAL);
+        runTicks(task, 300);
+        // 走失败的那一处周围 16 格内不再当候选：朝这片丛林只出发过一次。
+        long toJungle = walks.started.stream()
+                .filter(destination -> Math.abs(destination.getX()) <= 10
+                        && destination.getZ() <= -36 && destination.getZ() >= -50).count();
+        assertEquals(1, toJungle, "走失败的候选不再反复去撞：" + walks.started);
+    }
+
+    @Test
     void 行进中达成目标立即取消在途段收尾() {
         WorldMemory memory = memory();
         world.putBiome(0, -40, "minecraft:jungle");

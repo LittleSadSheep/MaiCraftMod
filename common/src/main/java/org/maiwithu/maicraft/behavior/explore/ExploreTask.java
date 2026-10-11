@@ -209,7 +209,12 @@ public final class ExploreTask extends PhasedTask<ExploreTask.Phase> implements 
         if (!world.sightClear(x, sample.topY(), z)) {
             return Optional.empty();
         }
-        planLeg(new LegState(LegKind.TARGET, new BlockPos(x, 0, z)));
+        // 走失败或到场复核不过的候选记进了拒绝集：它周围 16 格内的同群系样本不再当候选，不反复去撞同一处。
+        BlockPos column = new BlockPos(x, 0, z);
+        if (WaypointChooser.tried(column, sampling.triedColumns)) {
+            return Optional.empty();
+        }
+        planLeg(new LegState(LegKind.TARGET, column));
         return Optional.of(Next.go(Phase.WALK, "朝候选群系走，到了按脚下群系核实"));
     }
 
