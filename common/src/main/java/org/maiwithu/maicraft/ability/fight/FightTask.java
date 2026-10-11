@@ -139,7 +139,8 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         if (named.isEmpty()) {
             // 区域清扫先认下这一批：此刻半径内看得见的；墙后、地下看不见的不算，之后新刷的也不算。
             for (CombatSenses.Threat threat : senses.threats(context, input.radius())) {
-                if (threat.visible() && (input.entityType() == null || threat.type().equals(input.entityType()))) {
+                if (threat.visible() && threat.kind() != ThreatAssessment.Kind.PLAYER
+                        && (input.entityType() == null || threat.type().equals(input.entityType()))) {
                     batch.add(threat.entityId());
                     engaged.put(threat.entityId(), threat.type());
                 }
@@ -195,7 +196,8 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     private final class Roster implements Battlefield.Roster {
         @Override
         public boolean wanted(CombatSenses.Threat threat, boolean attacker, boolean chasing) {
-            if (attacker) return true;
+            // 途中真打了角色的怪一并处理；没点名的玩家不自动还手，打不打他由 LLM 定。
+            if (attacker && threat.kind() != ThreatAssessment.Kind.PLAYER) return true;
             if (countReached()) return false;
             if (!named.isEmpty()) return remainingNamed().contains(threat.entityId());
             return batch.contains(threat.entityId());

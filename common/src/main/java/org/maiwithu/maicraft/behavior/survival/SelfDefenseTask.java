@@ -1,12 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.survival;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.player.Player;
 
 import org.maiwithu.maicraft.behavior.combat.Battle;
 import org.maiwithu.maicraft.behavior.combat.BattleMoves;
+import org.maiwithu.maicraft.behavior.combat.Battlefield;
 import org.maiwithu.maicraft.behavior.combat.CombatSenses;
 import org.maiwithu.maicraft.behavior.combat.ThreatAssessment;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
@@ -30,6 +36,9 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * <p>名单无差别：正在追我的都打（会分裂的怪裂开后新个体天然进来）。不追出打点 16 格（只比水平距离）去打没在打我的；
  * 正压着我打的、远处射我的不受这个限制。危险消失后再观察两秒（跑得几乎一样快的怪会在边界上一进一出）；
  * 撤离甩开了就是这次处理好了，人已不在原地，主任务不在这里悄悄续上。
+ *
+ * <p>被没点名的玩家打：不还手，只退到他够不着外、举着盾；他停手后停下来等 LLM 决定（还手就 fight 点名他，
+ * 不理就让主任务继续），不自己走回去接着干活。自家人打角色只发事件、不停工。
  */
 final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements DisplacedTask {
 
@@ -56,8 +65,10 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
     private int watchTicksLeft;
     private boolean reportedCornered;
     private Action walkBack;
-    /** 撤离后人不在原地，或收尾走不回打点：主任务不能在新地点悄悄续上。 */
+    /** 撤离后人不在原地，或收尾走不回打点，或被陌生玩家打了：主任务不能悄悄续上。 */
     private boolean displaced;
+    /** 这次打过角色的陌生玩家（实体编号）：不还手，收场时暂停主任务等 LLM 决定。 */
+    private final Set<Integer> strangers = new LinkedHashSet<>();
 
     SelfDefenseTask(CombatSenses senses, BattleMoves moves, TaskEventSink events, SelfDefenseNeed need) {
         super("自卫", Phase.ENGAGE, new ProgressTracker(STUCK_AFTER_TICKS, Long.MAX_VALUE));
@@ -65,13 +76,26 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         this.moves = Objects.requireNonNull(moves, "moves");
         this.events = Objects.requireNonNull(events, "events");
         this.need = Objects.requireNonNull(need, "need");
-        this.battle = new Battle(senses, moves, this::wanted, ThreatAssessment.VIGILANCE_RADIUS);
+        this.battle = new Battle(senses, moves, new Battlefield.Roster() {
+            @Override public boolean wanted(CombatSenses.Threat threat, boolean attacker, boolean chasing) {
+                return SelfDefenseTask.this.wanted(threat, attacker, chasing);
+            }
+
+            @Override public boolean ignores(CombatSenses.Threat threat) {
+                return need.trusted(threat);
+            }
+        }, ThreatAssessment.VIGILANCE_RADIUS);
     }
 
     // 名单：正在追我的都打；出打点 16 格、又没在打我的不追（守在打点附近），正压着我打的、远处射我的照打；
     // 前一次自卫记下走不到、又没打我的不为它再插进来。
     private boolean wanted(CombatSenses.Threat threat, boolean attacker, boolean chasing) {
         if (!chasing) return false;
+        // 没点名的玩家打我：不还手（打不打他由 LLM 定），引擎只退到他够不着外、举着盾；记下是谁，收场时说清。
+        if (threat.kind() == ThreatAssessment.Kind.PLAYER) {
+            if (attacker) strangers.add(threat.entityId());
+            return false;
+        }
         if (!attacker && need.ignored(threat.entityId())) return false;
         boolean shooting = threat.kind() == ThreatAssessment.Kind.RANGED && threat.aggressive() && threat.visible();
         return attacker || shooting || Math.hypot(threat.x() - anchor[0], threat.z() - anchor[2]) <= CHASE_LIMIT;
@@ -106,12 +130,29 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         }
         return switch (moment.state()) {
             case ESCAPED -> escaped(context, moment.retreatWhy());
-            case FINISHED -> {
-                watchTicksLeft = WATCH_TICKS;
-                yield Next.go(Phase.WATCH, "威胁暂时消失，观察一阵");
-            }
+            case FINISHED -> strangers.isEmpty() ? watchFirst() : stoppedByStranger(context);
             default -> Next.stay();
         };
+    }
+
+    private Next<Phase> watchFirst() {
+        watchTicksLeft = WATCH_TICKS;
+        return Next.go(Phase.WATCH, "威胁暂时消失，观察一阵");
+    }
+
+    // 被没点名的玩家打了：退开举盾、没有还手，他停手后不走回打点、不接着干活——停下来等 LLM 决定还不还手。
+    private Next<Phase> stoppedByStranger(TickContext context) {
+        displaced = true;
+        List<String> names = new ArrayList<>();
+        for (int id : strangers) {
+            names.add(senses.entityById(context, id) instanceof Player player
+                    ? player.getName().getString() : "实体 " + id);
+        }
+        String who = String.join("、", names);
+        events.publish(TaskEvent.Kind.NEED_UNHANDLED, "被玩家 " + who + " 打了：退到够不着的地方举着盾，没有还手；"
+                + "主任务已暂停，等你决定（要还手就用 fight 点名他，不理就让主任务继续）");
+        return Next.done(TaskResult.builder(TaskResult.Status.DONE, "被玩家 " + who + " 打了，没有还手，停下等指示")
+                .details(new DefenseDetails(distanceFromAnchor(context), heartsLost(context))).build());
     }
 
     // 观察期：引擎照样每刻看一眼，又有要打的就回去打；走不到又不打我的引擎自己不理。

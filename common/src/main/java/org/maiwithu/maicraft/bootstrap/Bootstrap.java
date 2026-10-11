@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.bootstrap;
 import com.google.gson.JsonObject;
 import java.io.IOException;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -247,7 +248,7 @@ public final class Bootstrap {
             EatSoonTask.FoodMoves foodMoves, ReadsFoodValues foods, LiveBurrow burrow, LiveCeilingDigs ceilings,
             NightRestWiring nightWiring, ItemsToKeep keeps, Supplier<Protection> protection,
             FollowLighting followLighting, ReadsLightLevels lightLevels, ClientMovesToMainhand hands,
-            ModRangedWeapons ranged, Function<PlayerContext, CatchesFall> fallRescues) {
+            ModRangedWeapons ranged, Function<PlayerContext, CatchesFall> fallRescues, Predicate<UUID> trusted) {
         // 角色死亡这类循环自身的处境变化也从同一条事件流出去；死亡决策从挂载口交给目标运行表。
         return new ControlLoop(List.of(
                 new DigOutNeed(new SurvivalSituation.FromPlayer(),
@@ -255,7 +256,9 @@ public final class Bootstrap {
                 new BreathNeed(new SurvivalSituation.FromPlayer(), ceilings, new LiveAirRoutes()),
                 new FallNeed(new SurvivalSituation.FromPlayer(), fallRescues,
                         BaritoneInternals::landingInProgress),
-                new SelfDefenseNeed(combatSenses, new LiveBattleMoves(walks, interactions.heldProjection(), ranged), events),
+                // 自家人打角色只发事件、不停工；别的玩家打角色退开举盾、停下等 LLM 决定。
+                new SelfDefenseNeed(combatSenses, new LiveBattleMoves(walks, interactions.heldProjection(), ranged), events,
+                        trusted),
                 new HungerNeed(new LiveHungerView(foods, keeps), foodMoves, events),
                 new DarknessNeed(new LiveDarkView(lightLevels),
                         new LiveTorchMoves(interactions, hands, protection, Set.of()), followLighting),
@@ -514,7 +517,9 @@ public final class Bootstrap {
                     combatSenses, walks, foodMoves, foods, burrow, new LiveCeilingDigs(diggings, protection),
                     nightWiring, itemsInUse, protection, followLighting, lightLevels, hands, ranged,
                     // 意外往下掉：先问联动的刹车（穿着有气的喷气背包开悬停），刹不住再就地找落点放东西接住。
-                    FallRescues.withBrakes(() -> compat.fallBrakes()));
+                    FallRescues.withBrakes(() -> compat.fallBrakes()),
+                    // 自家人按进世界时读的实例配置认；还没进世界时谁都不算。
+                    uuid -> worldScope[0] != null && worldScope[0].trustedPlayers().includes(uuid.toString()));
         }
 
         /**

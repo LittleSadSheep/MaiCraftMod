@@ -205,6 +205,45 @@ class SelfDefenseTaskTest {
         assertTrue(events.messages.stream().anyMatch(m -> m.contains("主任务已暂停")), events.messages.toString());
     }
 
+    /** 东边 x 格处、刚打过角色的另一位玩家。 */
+    private static CombatSenses.Threat player(int id, UUID uuid, double x) {
+        return new CombatSenses.Threat(id, uuid, "minecraft:player", x, 64, 0, Math.abs(x),
+                ThreatAssessment.Kind.PLAYER, false, true, false, 0.3, Math.abs(x) - 0.3, Math.abs(x) < 3.3, 3.3, false);
+    }
+
+    @Test
+    void aStrangerHittingMeIsNotHitBackAndTheMainTaskWaits() {
+        Senses senses = new Senses();
+        UUID stranger = UUID.randomUUID();
+        senses.threats.add(player(8, stranger, 2.5));
+        senses.attackers.add(new CombatSenses.Attacker(stranger, "minecraft:player", 0, "player"));
+        Moves moves = new Moves();
+        Events events = new Events();
+        SelfDefenseNeed need = new SelfDefenseNeed(senses, moves, events);
+        assertEquals(Urgency.NOW, need.urgency(new Tick(0)), "他够得着我：立刻退开");
+        SelfDefenseTask task = (SelfDefenseTask) need.createTask(new Tick(0));
+        task.start(new Tick(0));
+        run(task, 0, 5);
+        assertEquals(0, moves.strikes, "没点名的玩家不自动还手");
+        // 他停手、走了：不走回去接着干活，停下来等 LLM 决定。
+        senses.threats.clear();
+        senses.attackers.clear();
+        TaskResult finished = assertInstanceOf(TickResult.Finished.class, run(task, 5, 10)).result();
+        assertTrue(finished.summary().contains("没有还手"), finished.summary());
+        assertTrue(task.cannotResumeInPlace(), "主任务暂停等指示");
+        assertTrue(events.messages.stream().anyMatch(m -> m.contains("fight 点名")), events.messages.toString());
+    }
+
+    @Test
+    void trustedPlayersHittingMeOnlyMakeAnEvent() {
+        Senses senses = new Senses();
+        UUID friend = UUID.randomUUID();
+        senses.threats.add(player(8, friend, 2.5));
+        senses.attackers.add(new CombatSenses.Attacker(friend, "minecraft:player", 0, "player"));
+        SelfDefenseNeed need = new SelfDefenseNeed(senses, new Moves(), TaskEventSink.NONE, friend::equals);
+        assertNull(need.urgency(new Tick(0)), "自家人打我多半是玩笑，不停工");
+    }
+
     @Test
     void unreachableFoeThatNeverHitMeIsIgnoredForAWhile() {
         // 隔着坑冲我吼的僵尸：自卫走不到它，收场后半分钟内它不动手就不再为它插进来。

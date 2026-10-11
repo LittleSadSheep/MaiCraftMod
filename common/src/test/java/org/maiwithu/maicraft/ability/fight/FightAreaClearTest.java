@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.ability.fight;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -156,6 +157,22 @@ class FightAreaClearTest {
 
         assertNotNull(result);
         assertEquals(List.of(1), field.struck);
+    }
+
+    @Test
+    void aPlayerWhoHitsMeMidwayIsNotHitBack() {
+        // 清扫途中被路过的玩家打了一下：没点名，不自动还手，打不打他由 LLM 定。
+        field.zombie(1, 2, true);
+
+        run(40, () -> {
+            field.alive.put(6, new CombatSenses.Threat(6, new UUID(0, 6), "minecraft:player", 2, 64, 0, 2,
+                    ThreatAssessment.Kind.PLAYER, false, true, false, 0.3, 1.7, true, 3.3, false));
+            field.attackers.add(new CombatSenses.Attacker(new UUID(0, 6), "minecraft:player", tick, "player"));
+        });
+
+        // 他还在打的这段时间里只退开、举盾，直到他停手十秒后这一仗才收；这里只看有没有还手。
+        assertFalse(field.struck.contains(6), field.struck.toString());
+        assertTrue(field.struck.contains(1), "这一批照样清");
     }
 
     @Test

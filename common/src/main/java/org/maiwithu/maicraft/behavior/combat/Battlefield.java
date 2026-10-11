@@ -100,6 +100,11 @@ public record Battlefield(Me me, List<Foe> foes) {
          */
         boolean wanted(CombatSenses.Threat threat, boolean attacker, boolean chasing);
 
+        /** 整只不理：不打、不躲、不当追兵（自家人打我多半是玩笑）。 */
+        default boolean ignores(CombatSenses.Threat threat) {
+            return false;
+        }
+
         /** 点名或清扫的那一批：同样急时先打。 */
         default boolean primary(CombatSenses.Threat threat) {
             return false;
@@ -125,6 +130,7 @@ public record Battlefield(Me me, List<Foe> foes) {
         List<Foe> foes = new ArrayList<>();
         Set<Integer> seen = new HashSet<>();
         for (CombatSenses.Threat threat : senses.threats(context, radius)) {
+            if (roster.ignores(threat)) continue;
             boolean attacker = attackers.contains(threat.uuid());
             boolean chasing = CombatSenses.threatening(threat, List.copyOf(attackers));
             boolean wanted = roster.wanted(threat, attacker, chasing);

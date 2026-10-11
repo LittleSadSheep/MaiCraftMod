@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Predicate;
 
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.interrupt.SurvivalNeed;
@@ -48,11 +49,25 @@ public final class SelfDefenseNeed implements SurvivalNeed {
     private final Map<Integer, Long> ignoredUntil = new HashMap<>();
     private long now;
 
+    /** 自家人：实例配置里所有者信任的玩家，他们打角色只发事件、不停工。 */
+    private final Predicate<UUID> trusted;
+
     /** @param moves 出手与走位怎么落地；生产用原生攻击与走到，测试换替身。 */
     public SelfDefenseNeed(CombatSenses senses, BattleMoves moves, TaskEventSink events) {
+        this(senses, moves, events, uuid -> false);
+    }
+
+    /** @param trusted 这位玩家是不是自家人（打角色多半是玩笑，只发事件不停工） */
+    public SelfDefenseNeed(CombatSenses senses, BattleMoves moves, TaskEventSink events, Predicate<UUID> trusted) {
         this.senses = senses;
         this.moves = moves;
         this.events = events;
+        this.trusted = trusted;
+    }
+
+    /** 这只是自家人：不躲不打，也不为它停工。 */
+    boolean trusted(CombatSenses.Threat threat) {
+        return threat.kind() == ThreatAssessment.Kind.PLAYER && trusted.test(threat.uuid());
     }
 
     @Override public String name() { return "自卫"; }
@@ -70,7 +85,7 @@ public final class SelfDefenseNeed implements SurvivalNeed {
         boolean threatened = false;
         boolean imminent = false;
         for (CombatSenses.Threat threat : senses.threats(context, ThreatAssessment.VIGILANCE_RADIUS)) {
-            if (!CombatSenses.threatening(threat, attackers)) continue;
+            if (!CombatSenses.threatening(threat, attackers) || trusted(threat)) continue;
             if (!attackers.contains(threat.uuid()) && ignored(threat.entityId()) && !imminent(threat)) continue;
             threatened = true;
             imminent |= imminent(threat);

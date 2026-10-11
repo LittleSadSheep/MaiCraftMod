@@ -81,6 +81,13 @@ public final class LiveCombatSenses implements CombatSenses {
             }
             threats.add(threatOf(self, hostile));
         }
+        // 十秒内真打过她的别的玩家也算威胁：自卫不还手，但要退开、举盾、停下手上的事。
+        for (Player other : level.players()) {
+            if (other != self && other.isAlive() && attackers.contains(other.getUUID())
+                    && self.distanceTo(other) <= radius) {
+                threats.add(threatOf(self, other));
+            }
+        }
         return threats;
     }
 
@@ -175,6 +182,9 @@ public final class LiveCombatSenses implements CombatSenses {
     // 远程的（原版远程攻击接口的骷髅、流浪者、沼骸、掠夺者、女巫，以及自己写射击的烈焰人、守卫者、潜影贝、
     // 唤魔者、旋风人）；剩下的按近战。原先只认会炸与无重力两种，骷髅群一律当近战怪评估。
     static ThreatAssessment.Kind kindOf(Entity entity) {
+        if (entity instanceof Player) {
+            return ThreatAssessment.Kind.PLAYER;
+        }
         if (entity instanceof Creeper) {
             return ThreatAssessment.Kind.EXPLOSIVE;
         }

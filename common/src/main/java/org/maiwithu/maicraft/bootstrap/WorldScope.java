@@ -86,6 +86,8 @@ public final class WorldScope {
     private final WorldMemory memory;
     /** 这个世界的保护判断：能力挑方块、生存需求挖三填一都问它，归属查询的在途请求只留一份。 */
     private final Protection protection;
+    /** 自家人：存储能不能用、被打要不要停工都按这一份。 */
+    private final TrustedPlayers trusted;
     /** 方块归属按区块问服务端记下；角色走到哪先把周围问好。 */
     private final OwnershipMap ownership;
     /** 记住的区域每刻抄一份：寻路在后台线程上也要读。 */
@@ -138,7 +140,7 @@ public final class WorldScope {
         this.regions = new RegionsSnapshot(memory);
         this.regions.refresh();
         // 自家人：所有者在实例配置里列的信任玩家；名单写名字的，按在线玩家对上编号。
-        TrustedPlayers trusted = new TrustedPlayers(instanceConfig.trustedPlayers(),
+        this.trusted = new TrustedPlayers(instanceConfig.trustedPlayers(),
                 name -> OnlinePlayers.idByName(minecraft, name));
         // 玩家放置推断按方块本身认：门、活板门、栅栏门这类归属记录查不到的，也按玩家的东西对待。
         // 读不到当刻的现场（还没进世界、人接管中）就不猜，保护判断按其余几路走。
@@ -247,6 +249,11 @@ public final class WorldScope {
     /** 世界记忆：宿主查询与能力共用的那份。 */
     public WorldMemory memory() {
         return memory;
+    }
+
+    /** 自家人名单（按在线玩家对上编号）。 */
+    public TrustedPlayers trustedPlayers() {
+        return trusted;
     }
 
     /** 这个世界的保护判断。 */

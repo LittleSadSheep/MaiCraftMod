@@ -13,6 +13,7 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.projectile.AbstractArrow;
 import net.minecraft.world.entity.projectile.Projectile;
@@ -47,8 +48,9 @@ public final class CombatMemory implements DamageObserver {
         String kind = source.type().msgId();
         boolean hostile = attacker instanceof Enemy;
         lastHurt = new Hurt(gameTick, kind, attacker == null ? null : typeId(attacker), hostile);
-        if (attacker instanceof Mob mob) {
-            record(new Evidence(mob.getUUID(), typeId(mob), gameTick, kind));
+        // 怪和别的玩家都记：被玩家打也要退开、举盾、停下手上的事等 LLM 决定（自家人除外，由自卫需求判断）。
+        if (attacker instanceof Mob || attacker instanceof Player other && other != player) {
+            record(new Evidence(attacker.getUUID(), typeId(attacker), gameTick, kind));
             authoritativeTick = gameTick;
         }
     }

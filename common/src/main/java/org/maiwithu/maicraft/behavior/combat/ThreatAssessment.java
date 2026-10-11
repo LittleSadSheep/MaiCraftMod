@@ -36,7 +36,9 @@ public final class ThreatAssessment {
         /** 会爆炸的：苦力怕；点着引信时威胁最大。 */
         EXPLOSIVE,
         /** 飞着的：恶魂、幻翼这类，近战常够不着。 */
-        FLYING
+        FLYING,
+        /** 别的玩家：手和角色一样长，会举盾、会走位；没点名不还手，只退开等 LLM 决定。 */
+        PLAYER
     }
 
     /** 我方处境：血量、护甲点数、手里的武器分、带的食物份数、有没有退路。 */
@@ -131,6 +133,7 @@ public final class ThreatAssessment {
             case RANGED -> 2.0;
             case EXPLOSIVE -> foe.armed() ? 2.5 : 0.5;
             case FLYING -> 1.8;
+            case PLAYER -> 2.5;
         };
         return foe.chasingMe() ? base + 1.0 : base;
     }
