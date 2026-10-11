@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.machine;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
@@ -18,6 +20,7 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
+import org.maiwithu.maicraft.behavior.construction.PlannedCell;
 import org.maiwithu.maicraft.behavior.recipe.GameRecipeTable;
 import org.maiwithu.maicraft.behavior.recipe.RecipeLookup;
 import org.maiwithu.maicraft.behavior.travel.ReadsSeenTargets;
@@ -122,6 +125,36 @@ class MachineInspectTaskTest {
         assertEquals(Problem.Kind.UNREACHABLE, result.problem().kind());
     }
 
+    @Test
+    void 指档案名时和档案整机比对_没对上的格列出来_机器带上档案名() {
+        Rig rig = new Rig();
+        BlockPos anchor = new BlockPos(10, 64, 10);
+        rig.blocks.put(anchor, Blocks.FURNACE.defaultBlockState());
+        rig.blocks.put(anchor.east(), Blocks.DIRT.defaultBlockState());
+        rig.area.offer(new ReadsMachineArea.Round(List.of(
+                new ReadsMachineArea.Cell(anchor, Blocks.FURNACE.defaultBlockState(), true)), 0, true, false));
+        MachineBlueprint blueprint = new MachineBlueprint(List.of(
+                PlannedCell.block(BlockPos.ZERO, Blocks.FURNACE.defaultBlockState(), Set.of()),
+                PlannedCell.block(new BlockPos(1, 0, 0), Blocks.STONE.defaultBlockState(), Set.of())),
+                List.of(), List.of(), List.of(), List.of());
+        MachineArchive archive = MachineArchive.fresh("压板机", "minecraft:overworld", anchor, blueprint, null);
+        MachineInspectTask task = new MachineInspectTask(new MachineInspectInput(new Target.Landmark("压板机"), 8,
+                archive), rig.services);
+        task.start(rig.tick());
+        TaskResult result = null;
+        for (int i = 0; i < 200 && result == null; i++) {
+            if (task.tick(rig.tick()) instanceof TickResult.Finished finished) result = finished.result();
+        }
+        MachineDetails details = (MachineDetails) result.details();
+        assertEquals("压板机", details.archive());
+        assertEquals("压板机", details.machines().getFirst().name());
+        assertTrue(details.check().complete());
+        assertEquals(1, details.check().differences().size());
+        assertEquals("wrong_block", details.check().differences().getFirst().state());
+        assertEquals("minecraft:dirt", details.check().differences().getFirst().found());
+        assertTrue(result.summary().contains("1 格没对上"), result.summary());
+    }
+
     private static Target positionOf(BlockPos cell) {
         return new Target.Position(cell.getX(), cell.getY(), cell.getZ(), null);
     }
@@ -131,7 +164,7 @@ class MachineInspectTaskTest {
     }
 
     private static TaskResult runRaw(Rig rig, Target target) {
-        MachineInspectTask task = new MachineInspectTask(new MachineInspectInput(target, 8), rig.services);
+        MachineInspectTask task = new MachineInspectTask(new MachineInspectInput(target, 8, null), rig.services);
         task.start(rig.tick());
         for (int i = 0; i < 200; i++) {
             if (task.tick(rig.tick()) instanceof TickResult.Finished finished) {
@@ -147,6 +180,8 @@ class MachineInspectTaskTest {
                 new MachineTestDoubles.FakeMachineType("machinetest:press", "测试压机",
                         MachineRole.PROCESSING, state -> state.is(Blocks.FURNACE));
         final MachineTestDoubles.FakeArea area = new MachineTestDoubles.FakeArea();
+        /** 现场：记下的格是什么方块，其余是空气。 */
+        final Map<BlockPos, BlockState> blocks = new HashMap<>();
         final MachineServices services;
 
         Rig() {
@@ -157,7 +192,7 @@ class MachineInspectTaskTest {
                 }
 
                 @Override public Optional<BlockState> stateAt(BlockPos at) {
-                    return Optional.of(Blocks.AIR.defaultBlockState());
+                    return Optional.of(blocks.getOrDefault(at, Blocks.AIR.defaultBlockState()));
                 }
             }, List.of(type), List.of(), area, recipes, new MachineTestDoubles.FakeNeeds(),
                     new MachineTestDoubles.FakeClose(), new MachineTestDoubles.FakeClicks(),

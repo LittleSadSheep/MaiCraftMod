@@ -7,6 +7,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import net.minecraft.core.BlockPos;
@@ -31,8 +32,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 读每台的组成、进出口、运行状态与挂着的网络，一次给全，不截断。只读，不动角色。
  *
  * <p>"看着像机器但没有机器类型认领"的格（有方块实体、又不是原版方块）按方块 ID 归并着报，
- * 写明缺哪个联动；没加载的格只数个数，不按空气算。这一片没有档案可比（档案随施工接入），
- * 现状就是全部结论。
+ * 写明缺哪个联动；没加载的格只数个数，不按空气算。指的是档案名时看档案的范围，并和档案整机比对：
+ * 没对上的每一格、多出来的格、安装段与部件装没装成都列全；没指档案只给现状，不凭空生成参考设计。
  */
 final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
 
@@ -56,6 +57,10 @@ final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
     private boolean scanComplete;
     /** 交付阶段建好的机器清单；没走到交付为空。 */
     private List<MachineGrouping.Machine> machines = List.of();
+    /** 看的是一份档案时的整机比对；没给档案或没走到交付为 null。 */
+    private ArchiveCheck.Result archiveCheck;
+    /** 这次读多大范围：给了档案按档案的大小，否则按参数。 */
+    private int radius;
 
     MachineInspectTask(MachineInspectInput input, MachineServices services) {
         super("看机器", Phase.SCAN, new ProgressTracker(400, 2400));
@@ -79,14 +84,12 @@ final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
     // 第一刻先落实目标对象，之后每刻读一小段；读完了去交付。
     private Next<Phase> scanTick() {
         if (center == null) {
-            MachineTargets.Resolution resolved = targets.resolve(input.target());
-            if (resolved instanceof MachineTargets.Resolution.DeadEnd dead) {
-                return Next.fail(dead.problem());
+            Optional<Problem> unresolved = locate();
+            if (unresolved.isPresent()) {
+                return Next.fail(unresolved.get());
             }
-            center = ((MachineTargets.Resolution.Found) resolved).cell();
-            dimension = ((MachineTargets.Resolution.Found) resolved).dimension();
         }
-        ReadsMachineArea.Round round = services.area().scan(dimension, center, input.radius());
+        ReadsMachineArea.Round round = services.area().scan(dimension, center, radius);
         if (round.worldChanged()) {
             return Next.fail(Problem.of(Problem.Kind.UNREACHABLE,
                     "看到一半角色离开了这个世界，这一眼作废", "回到世界再看一遍"));
@@ -98,6 +101,39 @@ final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
         }
         scanComplete = true;
         return Next.go(Phase.DELIVER, "范围读完了，整理看到的东西");
+    }
+
+    // 落实看哪里：档案按档案锚点与它的大小看，别的目标交给机器目标解析、按参数的半径看。
+    private Optional<Problem> locate() {
+        MachineArchive archive = input.archive();
+        if (archive != null) {
+            Optional<MachineWorldView.Spot> spot = services.world().playerSpot();
+            if (spot.isPresent() && !spot.get().dimension().equals(archive.dimension())) {
+                return Optional.of(Problem.of(Problem.Kind.UNREACHABLE,
+                        "档案「" + archive.name() + "」在另一个维度（" + archive.dimension() + "）", null));
+            }
+            center = archive.anchor();
+            dimension = archive.dimension();
+            radius = archiveRadius(archive);
+            return Optional.empty();
+        }
+        MachineTargets.Resolution resolved = targets.resolve(input.target());
+        if (resolved instanceof MachineTargets.Resolution.DeadEnd dead) {
+            return Optional.of(dead.problem());
+        }
+        center = ((MachineTargets.Resolution.Found) resolved).cell();
+        dimension = ((MachineTargets.Resolution.Found) resolved).dimension();
+        radius = input.radius();
+        return Optional.empty();
+    }
+
+    /** 档案的范围：锚点到最远那一格的距离，多看一格，最多看 48 格。 */
+    static int archiveRadius(MachineArchive archive) {
+        double farthest = 0;
+        for (var cell : archive.blueprint().cells()) {
+            farthest = Math.max(farthest, Math.sqrt(cell.pos().distSqr(BlockPos.ZERO)));
+        }
+        return Math.min(48, (int) Math.ceil(farthest) + 1);
     }
 
     // 把这一轮读出的格子分拣：认领的记下来，没认领的按方块 ID 归并，未加载的记总数。
@@ -127,6 +163,10 @@ final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
                 .toList();
         machines = MachineGrouping.group(claimed, at -> MachineGrouping.membershipsOf(services, at));
         recordProgress("分成 " + machines.size() + " 台机器");
+        if (input.archive() != null) {
+            archiveCheck = ArchiveCheck.compare(input.archive(), services);
+            recordProgress("和档案「" + input.archive().name() + "」比完");
+        }
         return Next.done(TaskResult.done(summary()));
     }
 
@@ -144,8 +184,23 @@ final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
         if (unloadedSoFar > 0) {
             line.append("；").append(unloadedSoFar).append(" 格没加载，不知道是什么");
         }
+        if (archiveCheck != null) {
+            line.append("；和档案「").append(input.archive().name()).append("」比：")
+                    .append(archiveCheck.allMatch() ? "全部对上" : describeCheck());
+        }
         line.append("。机器能不能转以各台的运行状态为准，光看组成说不准");
         return line.toString();
+    }
+
+    private String describeCheck() {
+        List<String> parts = new ArrayList<>();
+        if (!archiveCheck.differences().isEmpty()) parts.add(archiveCheck.differences().size() + " 格没对上");
+        long segments = archiveCheck.installations().stream().filter(entry -> !entry.done()).count();
+        if (segments > 0) parts.add(segments + " 段安装段没装成");
+        long mounted = archiveCheck.parts().stream().filter(entry -> !entry.done()).count();
+        if (mounted > 0) parts.add(mounted + " 个部件没装上");
+        if (!archiveCheck.complete()) parts.add("有格没加载、下不了整机一致的结论");
+        return parts.isEmpty() ? "全部对上" : String.join("、", parts);
     }
 
     /**
@@ -165,7 +220,8 @@ final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
         return new MachineDetails(machines.stream().map(this::view).toList(), unrecognized.entrySet().stream()
                 .map(entry -> new MachineDetails.UnrecognizedBlock(entry.getKey(), entry.getValue().cells,
                         entry.getValue().samples, missing)).toList(),
-                unloadedSoFar, scanComplete, note());
+                unloadedSoFar, scanComplete, input.archive() == null ? null : input.archive().name(), archiveCheck,
+                note());
     }
 
     private String note() {
@@ -191,7 +247,16 @@ final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
             }
         }
         List<MachineDetails.NetworkView> networks = networksOf(machine);
-        return new MachineDetails.MachineView("m" + machine.number(), null, roles, ports, running, networks);
+        return new MachineDetails.MachineView("m" + machine.number(), archiveNameOf(machine), roles, ports, running,
+                networks);
+    }
+
+    // 这台机器有格落在档案里，就写上档案名：LLM 用名字指它。
+    private String archiveNameOf(MachineGrouping.Machine machine) {
+        MachineArchive archive = input.archive();
+        if (archive == null) return null;
+        Set<BlockPos> archived = new LinkedHashSet<>(LineRoutes.cellsOf(archive));
+        return machine.cells().stream().anyMatch(archived::contains) ? archive.name() : null;
     }
 
     // 分组结果里存的是格子的位置，方块状态从认领账里拿回来。

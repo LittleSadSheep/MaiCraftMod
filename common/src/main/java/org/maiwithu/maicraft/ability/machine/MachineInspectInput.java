@@ -11,8 +11,9 @@ import org.maiwithu.maicraft.kernel.task.TaskInput;
  *
  * @param target 目标对象；不给就是脚下这一片
  * @param radius 没给档案时看多大范围，单位格
+ * @param archive 目标对上的机器档案：看档案的范围并和档案整机比对；目标不是档案为 null
  */
-record MachineInspectInput(Target target, int radius) implements TaskInput {
+record MachineInspectInput(Target target, int radius, MachineArchive archive) implements TaskInput {
 
     MachineInspectInput {
         Objects.requireNonNull(radius, "radius");

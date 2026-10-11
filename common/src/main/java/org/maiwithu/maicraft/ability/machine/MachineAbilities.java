@@ -64,7 +64,7 @@ public final class MachineAbilities {
                 networkReaders, new LiveMachineArea(context), recipes, needs, close,
                 new LiveMachineInteractions(interactions), seenTargets, places, blockLimits);
         MachineArchives archives = new MachineArchives(worldDocuments, worldKey);
-        return List.of(new MachineInspectModule(services), new MachineReviewModule(services, designs),
+        return List.of(new MachineInspectModule(services, archives), new MachineReviewModule(services, designs),
                 new MachineConfigureModule(services), new MachineRunModule(services),
                 new MachineBuildModule(services, archives, anchors, designs, memory, construction),
                 new MachineConnectModule(services, archives, memory, construction));

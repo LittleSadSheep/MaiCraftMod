@@ -16,17 +16,21 @@ import org.maiwithu.maicraft.kernel.result.ResultDetails;
  * 机器查看的结果细节：看到哪些机器（每台的组成、进出口、运行状态、挂着的网络）、
  * 哪些格看着像机器但没有机器类型认领、有几格没加载。
  *
- * <p>机器的编号 m1、m2 只在这一次结果里有效：指某一台机器用它的组成格（观察编号或坐标）。
- * 机器档案随施工接入后，档案名也会出现在这里。
+ * <p>机器的编号 m1、m2 只在这一次结果里有效：指某一台机器用它的组成格（观察编号或坐标），
+ * 建过档的用档案名；有格落在所看档案里的那台机器会带上档案名。
  *
  * @param machines     分好台的机器，编号从 1 起
  * @param unrecognized 有方块实体、看着像机器、但没有机器类型认领的格，按方块 ID 归并
  * @param unloadedCells 范围内没加载的格数：这些格不知道是什么，不按空气算
  * @param scanComplete  范围扫完了没有；没扫完时下面列的只是已经看到的部分
+ * @param archive       看的是哪份档案；没指档案为 null
+ * @param check         和档案的整机比对：每种结论几格、没对上的每一格、多出来的格、安装段与部件；没指档案为 null。
+ *                      结构一致不等于能转，转不转看 machines 里各台的 running
  * @param note          给 LLM 的一句说明，没有为空字符串
  */
 record MachineDetails(List<MachineView> machines, List<UnrecognizedBlock> unrecognized,
-                      int unloadedCells, boolean scanComplete, String note) implements ResultDetails {
+                      int unloadedCells, boolean scanComplete, String archive, ArchiveCheck.Result check,
+                      String note) implements ResultDetails {
 
     MachineDetails {
         machines = List.copyOf(machines);

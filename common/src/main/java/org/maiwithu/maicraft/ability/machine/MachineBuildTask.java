@@ -489,14 +489,9 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
         return cells;
     }
 
-    /** 比对用的蓝图：安装段占的格标成由机器核对，保留原声明，不冒充逐格放好。 */
+    /** 比对用的蓝图：安装段占的格标成由机器核对，保留原声明，不冒充逐格放好；和看机器的整机比对同一份。 */
     private Blueprint targetPlan() {
-        Blueprint laid = Blueprint.at(input.anchor().dimension(), anchor, Rotation.NONE, input.blueprint().cells());
-        List<PlannedCell> adjusted = new ArrayList<>();
-        for (PlannedCell cell : laid.cells()) {
-            adjusted.add(installationCells().contains(cell.pos()) ? cell.byMachine() : cell);
-        }
-        return new Blueprint(laid.dimension(), anchor, adjusted);
+        return ArchiveCheck.targetPlan(input.blueprint(), anchor, input.anchor().dimension());
     }
 
     private Set<BlockPos> installationCells() {

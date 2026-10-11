@@ -12,6 +12,7 @@ import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
 import org.maiwithu.maicraft.kernel.ability.Listing;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
+import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.TargetKind;
 import org.maiwithu.maicraft.kernel.param.ParamSpec;
 import org.maiwithu.maicraft.kernel.param.ParamSpecs;
@@ -27,9 +28,10 @@ import org.maiwithu.maicraft.kernel.task.TaskFactories;
 final class MachineInspectModule implements AbilityModule {
 
     private final MachineServices services;
+    private final MachineArchives archives;
     private final AbilitySpec spec = new AbilitySpec(
             ModIdentity.MOD_ID + ":machine_inspect",
-            "看一台机器或一片机器区：组成、运行状态、进出口、挂在哪些网络上（只读）",
+            "看一台机器或一片机器区：组成、运行状态、进出口、挂在哪些网络上；指档案名时再和档案整机比对（只读）",
             AbilityDoc.forAbility("machine_inspect"),
             ParamSpecs.of(
                     ParamSpec.of("radius", ParamType.INTEGER).range(1, 32).defaultValue(16)
@@ -40,18 +42,22 @@ final class MachineInspectModule implements AbilityModule {
             List.of(),
             Listing.LISTED);
 
-    MachineInspectModule(MachineServices services) {
+    MachineInspectModule(MachineServices services, MachineArchives archives) {
         this.services = services;
+        this.archives = archives;
     }
 
     @Override public AbilitySpec spec() {
         return spec;
     }
 
-    // 参数只有 radius，范围在参数规格里已经校过；直接交给任务分刻去看。
+    // 参数只有 radius，范围在参数规格里已经校过；目标是档案名就带上档案，看它的范围并做整机比对。
     @Override public StepDecision decide(StepContext step) {
         int radius = (int) (step.goal().params().has("radius") ? step.goal().params().integer("radius") : 16);
-        return new StepDecision.Run(new MachineInspectInput(step.goal().target(), radius));
+        MachineArchive archive = step.goal().target() instanceof Target.Landmark landmark
+                ? archives.find(landmark.name()).filter(found -> !found.removed()).orElse(null)
+                : null;
+        return new StepDecision.Run(new MachineInspectInput(step.goal().target(), radius, archive));
     }
 
     @Override public void registerTasks(TaskFactories factories) {
