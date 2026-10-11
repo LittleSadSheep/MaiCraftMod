@@ -52,10 +52,6 @@ class FishTask extends PhasedTask<FishTask.Phase> {
 
     /** 鱼竿的注册 ID：只认原版鱼竿。 */
     static final String FISHING_ROD = "minecraft:fishing_rod";
-    /** 抛出 5 秒还没入水就收竿重抛。F 游戏事实（一竿落水的耐心）。 */
-    private static final int CAST_SETTLE_TICKS = 5 * 20;
-    /** 一竿 60 秒没咬钩就收竿重抛。F 游戏事实（一竿的等待上限）。 */
-    private static final int CAST_LIFETIME_TICKS = 60 * 20;
     /** 收竿后先等约 1 秒让原版把战利品抛向玩家，再走近去捡。F 游戏事实（收线冲量窗口）。 */
     private static final int LOOT_RETURN_GRACE_TICKS = 20;
     /** 连续 5 次失败抛竿就结束；成功一次清零。C 玩家常识。 */
@@ -94,8 +90,6 @@ class FishTask extends PhasedTask<FishTask.Phase> {
         long lastWaitTick = Long.MIN_VALUE;
         /** 最近一刻钩还挂着：被打断时据此决定恢复后要不要先收竿。 */
         boolean hookSeen;
-        /** 让位时钩还挂着：恢复推进后先收竿再重抛，不把咬了没收的一竿接着等。 */
-        boolean reelOnResume;
     }
 
     /** 收获段的现场：背包基线、动手前的掉落物、捡与腾的动作。 */
@@ -186,7 +180,7 @@ class FishTask extends PhasedTask<FishTask.Phase> {
             search = FishingSpot.search(world(context), feet(context), excludedStances, excludedLandings);
         }
         if (!(search instanceof FishingSpot.Search.Found found)) {
-            return Next.fail(Problem.of(Problem.Kind.UNREACHABLE, noSpotMessage(search),
+            return Next.fail(Problem.of(Problem.Kind.UNREACHABLE, FishingSpot.messageOf(search),
                     "沿着岸走到更开阔的水边再试，或先 travel 去别的水域"));
         }
         spot = found.stance();
@@ -258,29 +252,19 @@ class FishTask extends PhasedTask<FishTask.Phase> {
             return beginReel(ReelReason.ABANDON, "让位期间咬了没收的一竿", true);
         }
         cast.lastWaitTick = context.gameTick();
-        if (cast.reelOnResume) {
-            // 让位回来先清掉挂着的钩：打断那一刻没有交互机会收竿，恢复推进后第一件事补上。
-            cast.reelOnResume = false;
-            if (cast.hookSeen) return beginReel(ReelReason.ABANDON, "让位期间咬了没收的一竿", true);
-            return scrapCast(context, "鱼钩在让位期间消失了", false);
-        }
-        if (!cast.hookSeen) return scrapCast(context, "鱼钩在咬钩前消失了", false);
-        if (services.hooks().hookedEntity()) {
-            // 钩住实体（船、生物）而不是落在水里：先收竿，这一竿报废，水面进排除集。
-            return beginReel(ReelReason.ABANDON, "钩住了实体而不是水面", true);
-        }
-        if (services.hooks().isBiting()) {
-            // 咬钩看客户端同步的状态，不等服务端粒子：立刻收竿。
-            recordProgress("咬钩了，正在收竿");
-            return beginReel(ReelReason.KEEP, null, false);
-        }
-        if (!services.hooks().hookInWater() && cast.waitTicks >= CAST_SETTLE_TICKS) {
-            return beginReel(ReelReason.ABANDON, "抛出五秒还没落进水里", true);
-        }
-        if (cast.waitTicks >= CAST_LIFETIME_TICKS) {
-            return beginReel(ReelReason.ABANDON, "一竿等了 " + CAST_LIFETIME_TICKS / 20 + " 秒都没有咬钩", false);
-        }
-        return Next.stay();
+        BiteWatch.Verdict verdict = BiteWatch.judge(new BiteWatch.BiteFacts(cast.hookSeen,
+                services.hooks().isBiting(), services.hooks().hookedEntity(),
+                services.hooks().hookInWater(), cast.waitTicks));
+        return switch (verdict.step()) {
+            case WAIT -> Next.stay();
+            case REEL_IN -> {
+                recordProgress("咬钩了，正在收竿");
+                yield beginReel(ReelReason.KEEP, null, false);
+            }
+            case REEL_AND_SCRAP -> beginReel(ReelReason.ABANDON,
+                    BiteWatch.reason(verdict.step(), cast.waitTicks), verdict.rejectsLanding());
+            case SCRAP_GONE -> scrapCast(context, BiteWatch.reason(verdict.step(), cast.waitTicks), false);
+        };
     }
 
     private Next<Phase> reel(TickContext context) {
@@ -434,7 +418,9 @@ class FishTask extends PhasedTask<FishTask.Phase> {
         for (BackpackStack stack : context.player().backpack().stacks()) {
             if (rod.matches(stack.itemId(), Set.of())) return true;
         }
-        return context.player().localPlayer().getOffhandItem().is(Items.FISHING_ROD);
+        // 离线替身没有角色对象：副手查不了就只认背包，实机上有角色时连副手一起认。
+        var player = context.player().localPlayer();
+        return player != null && player.getOffhandItem().is(Items.FISHING_ROD);
     }
 
     private int backpackFreeSlots(TickContext context) {
@@ -460,19 +446,6 @@ class FishTask extends PhasedTask<FishTask.Phase> {
     private Action nextPickup() {
         collect.pickup = services.pickups().pickUpNewSince(collect.lootBefore);
         return collect.pickup;
-    }
-
-    /** 找不到钓位的三种说法各自分开，都带扫描范围；原地无落点不能说成附近没有水。 */
-    private String noSpotMessage(FishingSpot.Search search) {
-        return switch (search) {
-            case FishingSpot.Search.NoLandingFromHere no -> "站在干岸上，但从原地（水平 " + no.radius()
-                    + " 格、上下 " + no.vertical() + " 格）找不到能抛到的开阔水面；这里未必没有水，只是原地抛不出去";
-            case FishingSpot.Search.NoStanceWithWater no -> "半径 " + no.radius() + " 格、上下 " + no.vertical()
-                    + " 格里有可钓的水面，但没有一处「干站位加落点」的组合（核对过 " + no.checked() + " 个候选）";
-            case FishingSpot.Search.NoVisibleWater no -> "半径 " + no.radius() + " 格、垂直向下 " + no.vertical()
-                    + " 格内没看见可钓的水面；有界扫描不构成圈外没有水的证据";
-            case FishingSpot.Search.Found found -> "找到了钓位";
-        };
     }
 
     /** 等咬钩可以被打断；收竿或抛竿已提交、等游戏确认的那几刻停下不安全。 */

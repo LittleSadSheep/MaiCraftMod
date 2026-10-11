@@ -73,7 +73,7 @@ public final class FishModule implements AbilityModule {
 
     @Override public StepDecision decide(StepContext step) {
         PlayerContext current = context.get();
-        if (current == null || current.localPlayer() == null) {
+        if (current == null) {
             return StepDecision.NOT_READY;
         }
         // fish 不声明目标对象：给了地点或东西就是参数错误，要去别的水边先 travel，不悄悄从当前钓。

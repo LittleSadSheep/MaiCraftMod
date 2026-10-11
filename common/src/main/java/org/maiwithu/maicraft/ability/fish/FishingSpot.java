@@ -70,15 +70,19 @@ final class FishingSpot {
     private FishingSpot() {}
 
     /**
-     * 找一组钓位：已经在干岸上就只找原地落点，否则在圈内搜"站位加落点"组合，就近取。
+     * 找一组钓位：站在没受保护的干岸上就只找原地落点，否则在圈内搜"站位加落点"组合，就近取。
      * 试过失败的水面与站位从各自的排除集里剔除，同一处不撞两次。
      */
     static Search search(World world, BlockPos feet, Set<BlockPos> excludedStances,
                          Set<BlockPos> excludedLandings) {
-        if (world.dryStance(feet)) {
+        // 受保护的格不站：脚下就算站得稳也换圈内别的干站位组合。
+        if (world.dryStance(feet) && !world.protectedCell(feet)) {
             Optional<BlockPos> landing = landingFrom(world, feet, excludedLandings);
-            return landing.<Search>map(at -> new Search.Found(feet, at))
-                    .orElseGet(() -> new Search.NoLandingFromHere(feet, LANDING_RADIUS, LANDING_VERTICAL));
+            if (landing.isPresent()) return new Search.Found(feet, landing.get());
+            // 原地抛不出去：圈内还有别的水面才算"原地的问题"，整圈没水是另一种说法。
+            return anyVisibleWater(world, feet)
+                    ? new Search.NoLandingFromHere(feet, LANDING_RADIUS, LANDING_VERTICAL)
+                    : new Search.NoVisibleWater(STANCE_RADIUS, WATER_PROBE_VERTICAL);
         }
         List<BlockPos> stances = new ArrayList<>();
         int checked = 0;
@@ -137,6 +141,32 @@ final class FishingSpot {
     /** 这一格现在算不算一个可用的落点候选：已加载、是可抛水面、且没进排除集。 */
     private static boolean waterCandidate(World world, BlockPos pos, Set<BlockPos> excludedLandings) {
         return world.isLoaded(pos) && !excludedLandings.contains(pos) && world.castableWater(pos);
+    }
+
+    /** 站位搜索圈（垂直探得更深）里还有没有一处客观存在的水面：区分"原地抛不出去"与"圈里没水"。 */
+    private static boolean anyVisibleWater(World world, BlockPos from) {
+        for (int dy = -WATER_PROBE_VERTICAL; dy <= WATER_PROBE_VERTICAL; dy++) {
+            for (int dx = -STANCE_RADIUS; dx <= STANCE_RADIUS; dx++) {
+                for (int dz = -STANCE_RADIUS; dz <= STANCE_RADIUS; dz++) {
+                    BlockPos at = from.offset(dx, dy, dz);
+                    if (world.isLoaded(at) && world.castableWater(at)) return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** 找不到钓位的三种说法各自分开，都带扫描范围；原地无落点不能说成附近没有水。 */
+    static String messageOf(Search search) {
+        return switch (search) {
+            case Search.NoLandingFromHere no -> "站在干岸上，但从原地（水平 " + no.radius()
+                    + " 格、上下 " + no.vertical() + " 格）找不到能抛到的开阔水面；这里未必没有水，只是原地抛不出去";
+            case Search.NoStanceWithWater no -> "半径 " + no.radius() + " 格、上下 " + no.vertical()
+                    + " 格里有可钓的水面，但没有一处「干站位加落点」的组合（核对过 " + no.checked() + " 个候选）";
+            case Search.NoVisibleWater no -> "半径 " + no.radius() + " 格、垂直向下 " + no.vertical()
+                    + " 格内没看见可钓的水面；有界扫描不构成圈外没有水的证据";
+            case Search.Found found -> "找到了钓位";
+        };
     }
 
     /** 落点的偏好分：约六格远、高低差小、周围水面多的排前面（分越低越好）。 */

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.game.mixin;
 
 import net.minecraft.world.entity.projectile.FishingHook;
