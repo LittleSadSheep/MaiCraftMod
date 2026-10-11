@@ -5,121 +5,67 @@ import java.util.ArrayList;
 import java.util.List;
 
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
-import org.maiwithu.maicraft.behavior.combat.CloseCombat;
-import org.maiwithu.maicraft.behavior.combat.CombatStepping;
-import org.maiwithu.maicraft.behavior.combat.LiveCombatHands;
-import org.maiwithu.maicraft.behavior.combat.MeleeStrike;
+import org.maiwithu.maicraft.behavior.combat.Footwork;
+import org.maiwithu.maicraft.behavior.combat.LiveBattleMoves;
 import org.maiwithu.maicraft.behavior.combat.ModRangedWeapons;
-import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.game.world.DropConfirmations;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
-import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
-import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
- * 战斗动手的生产实现：原生攻击、走到、掉落物扫描与背包计数。
- *
- * <p>出手按游戏接口层的攻击交互走：充能够格才挥、换手当刻与目标无敌帧不挥。
- * 有主生物（有名字、被驯服、拴绳、围栏）的保护判断等处境视图接上后在许可检查点统一生效。
+ * 战斗动手的生产实现：打的那部分交给战斗引擎的生产动手（和自卫同一份），这里只加掉落物扫描与拾取确认。
  */
 public final class LiveFightMoves implements FightMoves {
 
-    private final WalkTo walks;
+    /** 出手、射箭、举盾、迈步、寻路：和自卫共用一份实现。 */
+    private final LiveBattleMoves battle;
 
     /** 掉落物的事实确认：拾荒按服务器的拾取包认东西进没进包。 */
     private final DropConfirmations confirmations;
 
-    /** 射箭、举盾、看身上有没有弓和剑斧：和自卫共用一份。 */
-    private final LiveCombatHands hands;
-
-    public LiveFightMoves(WalkTo walks, DropConfirmations confirmations, UseKeyProjection projection) {
-        this(walks, confirmations, projection, ModRangedWeapons.none());
-    }
-
     /** @param weapons 联动的远程武器（土豆加农炮）：点名战斗时也照样用 */
     public LiveFightMoves(WalkTo walks, DropConfirmations confirmations, UseKeyProjection projection,
             ModRangedWeapons weapons) {
-        this.walks = walks;
+        this.battle = new LiveBattleMoves(walks, projection, weapons);
         this.confirmations = confirmations;
-        this.hands = new LiveCombatHands(projection, weapons);
+    }
+
+    @Override public Action strike(TickContext context, int entityId) { return battle.strike(context, entityId); }
+    @Override public Action shoot(TickContext context, int entityId) { return battle.shoot(context, entityId); }
+    @Override public boolean canShoot(TickContext context) { return battle.canShoot(context); }
+    @Override public boolean hasMeleeWeapon(TickContext context) { return battle.hasMeleeWeapon(context); }
+    @Override public boolean attackReady(TickContext context) { return battle.attackReady(context); }
+
+    @Override
+    public void guard(TickContext context, double distance, boolean aboutToStrike) {
+        battle.guard(context, distance, aboutToStrike);
+    }
+
+    @Override public void lowerGuard() { battle.lowerGuard(); }
+    @Override public Footwork.Ground ground(TickContext context) { return battle.ground(context); }
+
+    @Override
+    public void step(TickContext context, int faceEntityId, Footwork.Step step) {
+        battle.step(context, faceEntityId, step);
     }
 
     @Override
-    public Action strike(TickContext context, int entityId) {
-        Entity target = entity(context, entityId);
-        var player = context.player();
-        if (target == null || player == null || player.interactionSender() == null) {
-            return TargetGone.INSTANCE;
-        }
-        // 先把挑好的近战武器拿到主手再挥：和自卫共用一套出手。
-        return new MeleeStrike(entityId);
+    public boolean standable(TickContext context, int x, int y, int z) {
+        return battle.standable(context, x, y, z);
     }
 
-    @Override
-    public void step(TickContext context, int entityId, float forward) {
-        // 面朝它往前凑或往后退一刻；那一步脚下没路就站住。和自卫同一套走位。
-        CombatStepping.step(context, entityId, forward);
-    }
+    @Override public String mainHand(TickContext context) { return battle.mainHand(context); }
 
-    @Override
-    public Action shoot(TickContext context, int entityId) {
-        return hands.shoot(entityId);
-    }
+    @Override public Action walk(GoalCompiler.Compiled goal) { return battle.walk(goal); }
 
-    @Override
-    public boolean canShoot(TickContext context) {
-        return hands.canShoot(context);
-    }
-
-    @Override
-    public boolean hasMeleeWeapon(TickContext context) {
-        return hands.hasMeleeWeapon(context);
-    }
-
-    @Override
-    public boolean attackReady(TickContext context) {
-        return hands.attackReady(context);
-    }
-
-    @Override
-    public CloseCombat.Ring ring(TickContext context, int entityId) {
-        // 打玩家按出刀节拍走位：充能好了凑进去出手，没好就退到它够不着的地方。
-        return hands.ring(context, entityId);
-    }
-
-    @Override
-    public void guard(TickContext context, int entityId, double distance, boolean aboutToStrike) {
-        hands.guard(context, distance, aboutToStrike);
-    }
-
-    @Override
-    public String mainHand(TickContext context) {
-        var self = context.player() == null ? null : context.player().localPlayer();
-        if (self == null || self.getMainHandItem().isEmpty()) return "空手";
-        return BuiltInRegistries.ITEM.getKey(self.getMainHandItem().getItem()).toString();
-    }
-
-    @Override
-    public Action walkTo(double x, double y, double z) {
-        return new WalkMove(walks, new double[] {x, y, z});
-    }
-
-    @Override
-    public double[] selfPosition(TickContext context) {
-        var self = context.player() == null ? null : context.player().localPlayer();
-        return self == null ? new double[] {0, 0, 0}
-                : new double[] {self.getX(), self.getY(), self.getZ()};
-    }
+    @Override public double[] selfPosition(TickContext context) { return battle.selfPosition(context); }
 
     @Override
     public List<Drop> dropsNear(TickContext context, double x, double y, double z, double radius) {
@@ -148,70 +94,8 @@ public final class LiveFightMoves implements FightMoves {
         return self == null || confirmations == null ? 0 : confirmations.pickedUpEntity(self, entityId, sinceCursor);
     }
 
-    private Entity entity(TickContext context, int entityId) {
-        ClientLevel level = level(context);
-        return level == null ? null : level.getEntity(entityId);
-    }
-
     private static ClientLevel level(TickContext context) {
         var player = context.player();
         return player == null ? null : player.level();
-    }
-
-
-    /** 第一刻才拿得到上下文的走到动作。 */
-    private static final class WalkMove implements Action {
-        private final WalkTo walks;
-        private final double[] target;
-        private Action walk;
-
-        private WalkMove(WalkTo walks, double[] target) {
-            this.walks = walks;
-            this.target = target;
-        }
-
-        @Override
-        public ActionStatus tick(TickContext context) {
-            if (walk == null) {
-                if (walks == null) {
-                    return ActionStatus.failed(Problem.of(Problem.Kind.UNSUPPORTED,
-                            "走到了还没接上，逼近不了目标"));
-                }
-                BlockPos cell = new BlockPos((int) Math.floor(target[0]), (int) Math.floor(target[1]),
-                        (int) Math.floor(target[2]));
-                walk = walks.start(GoalCompiler.near(cell, 1.0), TerrainPermit.WALK_ONLY);
-            }
-            return walk.tick(context);
-        }
-
-        @Override
-        public void pause() {
-            if (walk != null) walk.pause();
-        }
-
-        @Override
-        public void close() {
-            if (walk != null) walk.close();
-        }
-
-        @Override
-        public String describe() {
-            return walk == null ? "走向目标" : walk.describe();
-        }
-    }
-
-    /** 目标已不在：本动作立刻完成，不打空拳。 */
-    enum TargetGone implements Action {
-        INSTANCE;
-
-        @Override
-        public ActionStatus tick(TickContext context) {
-            return ActionStatus.done();
-        }
-
-        @Override
-        public String describe() {
-            return "目标已不在";
-        }
     }
 }

@@ -16,6 +16,8 @@ import java.util.UUID;
 
 import net.minecraft.world.entity.Entity;
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.behavior.combat.Footwork;
+import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.behavior.combat.CombatSenses;
 import org.maiwithu.maicraft.behavior.combat.ThreatAssessment;
 import org.maiwithu.maicraft.behavior.combat.WeaponChoice;
@@ -84,7 +86,16 @@ class FightAreaClearTest {
             return done();
         }
 
-        @Override public Action walkTo(double x, double y, double z) { return done(); }
+        @Override public Action walk(GoalCompiler.Compiled goal) { return done(); }
+        @Override public Action shoot(TickContext context, int entityId) { return done(); }
+        @Override public boolean canShoot(TickContext context) { return false; }
+        @Override public boolean hasMeleeWeapon(TickContext context) { return true; }
+        @Override public boolean attackReady(TickContext context) { return true; }
+        @Override public void guard(TickContext context, double distance, boolean aboutToStrike) {}
+        @Override public void lowerGuard() {}
+        @Override public Footwork.Ground ground(TickContext context) { return (dx, dz) -> Footwork.Footing.FLAT; }
+        @Override public void step(TickContext context, int faceEntityId, Footwork.Step step) {}
+        @Override public boolean standable(TickContext context, int x, int y, int z) { return true; }
 
         @Override public double[] selfPosition(TickContext context) { return new double[] {0, 64, 0}; }
 
@@ -153,7 +164,7 @@ class FightAreaClearTest {
         field.zombie(1, 2, true);
 
         TaskResult result = run(40, () -> {
-            field.zombie(4, 2, false);
+            field.zombie(4, 2, true);
             field.attackers.add(new CombatSenses.Attacker(new UUID(0, 4), "minecraft:zombie", tick, "mob_attack"));
         });
 

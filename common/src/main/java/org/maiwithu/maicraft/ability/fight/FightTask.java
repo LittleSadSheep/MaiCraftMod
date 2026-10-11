@@ -2,22 +2,26 @@
 package org.maiwithu.maicraft.ability.fight;
 
 import java.util.ArrayList;
-import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
 
-import org.maiwithu.maicraft.behavior.combat.BlastAvoidance;
+import net.minecraft.core.BlockPos;
+
+import org.maiwithu.maicraft.behavior.combat.Battle;
+import org.maiwithu.maicraft.behavior.combat.Battlefield;
 import org.maiwithu.maicraft.behavior.combat.CombatSenses;
 import org.maiwithu.maicraft.behavior.combat.ThreatAssessment;
-import org.maiwithu.maicraft.behavior.combat.CloseCombat;
-import org.maiwithu.maicraft.behavior.combat.RangedCombat;
 import org.maiwithu.maicraft.behavior.combat.WeaponChoice;
+import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.kernel.interrupt.ThreatResponder;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Change;
@@ -32,25 +36,19 @@ import org.maiwithu.maicraft.kernel.task.PhasedTask;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
- * 战斗任务：打点名目标，或清一片区域的敌对生物。
+ * 战斗任务：打点名目标，或清一片区域的敌对生物。怎么打全交给战斗引擎（{@link Battle}），和自卫是同一个；
+ * 这里只管目标解析、许可、开打前的评估、谁倒下了、拾荒和结果结算。
  *
- * <p>不点名时清的是开打那一刻 radius 内看得见的这一批，途中冲着角色来的一并处理；
- * 之后新刷出来的、墙后与地下看不见的不追，这一批打完、身边也没有在打我的就收手。
+ * <p>不点名时清的是开打那一刻 radius 内看得见的这一批，途中真打了角色的一并处理；之后新刷出来的、
+ * 墙后与地下看不见的不追，这一批打完、身边也没有在打我的就收手。点名时打点名的，途中真打了角色的也还手。
  *
- * <p>先评估再动手：打不过不开打，说清差在血、武器还是数量；血量跌破拒战线就撤，
- * 甩开所有追击的才算撤成，撤离了不冒充打赢。一场战斗内盯住同一个目标，不每刻重选。
- * 击败确认后就地捡一下掉落物，捡不到写进结果，不影响击败判定。
+ * <p>先评估再动手：打不过不开打，说清差在血、武器还是数量；打着打着血线破了引擎会撤，甩开所有追击的才算撤成，
+ * 撤离了不冒充打赢。击败确认后就地捡一下掉落物，捡不到写进结果，不影响击败判定。
  */
 final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatResponder {
 
-    /** 战斗的阶段：核实目标 → 评估 → 打 → 撤 → 捡。 */
-    enum Phase { CHECK, ASSESS, FIGHT, RETREAT, LOOT }
-
-    /** 视为贴脸、可以出手的距离（格）。 */
-    private static final double STRIKE_RANGE = 3.0;
-
-    /** 撤离寻路连续失败这么多次，才算退无可退（背水一战）。 */
-    private static final int LAST_STAND_AFTER_FAILURES = ThreatAssessment.ESCAPE_FAILURES_BEFORE_LAST_STAND;
+    /** 战斗的阶段：核实目标 → 评估 → 打（撤离在打的阶段里由引擎做）→ 捡。 */
+    enum Phase { CHECK, ASSESS, FIGHT, LOOT }
 
     /** 连续半分钟没打中也没走成才算卡住。 */
     private static final long STUCK_AFTER_TICKS = 20L * 30;
@@ -65,38 +63,26 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     private final List<SeenTargets.Locked> named = new ArrayList<>();
     /** 区域清扫要清的这一批：开打那一刻半径内看得见的敌对生物的实体编号；点名时为空。 */
     private final Set<Integer> batch = new HashSet<>();
-    /** 已确认击败的目标。 */
-    private final List<String> defeated = new ArrayList<>();
+    /** 打过的（批里的、途中还手的）：看它们有没有倒下。实体编号到类型。 */
+    private final Map<Integer, String> engaged = new HashMap<>();
+    /** 已确认击败的目标（"类型（实体 n）"）。 */
+    private final Set<String> defeated = new LinkedHashSet<>();
     /** 点名目标在确认击败前就不见了（走远、被别的东西打死）：不算击败，单独交代。 */
     private final List<String> lostTrack = new ArrayList<>();
-    /** 拾荒捡到的：物品与数量。 */
+    /** 拾荒捡到的：物品。 */
     private final List<String> lootGained = new ArrayList<>();
 
     private ThreatAssessment.Verdict verdict;
     private String weaponUsed = "空手";
-    /** 近身的走位环与出手：够得着就挥，凑近、后退和挥互不排斥。 */
-    private final CloseCombat closeCombat = new CloseCombat();
-    /** 用弓弩打：八到十二格的走位带，边拉边走。 */
-    private final RangedCombat ranged = new RangedCombat();
-    /** 走不到跟前的那一只（逼近的寻路失败了）：有弓就改射它。 */
-    private int unreachable = -1;
-    /** 上一次推进的动作是不是失败收场的。 */
-    private boolean lastStepFailed;
-    /** 打斗中盯住的目标；死亡或消失后换下一个。 */
-    private Tracked engaged;
+    private Battle battle;
     /** 最后一个目标倒下的位置：拾荒以它为中心。 */
     private double[] lastKillSpot;
-    /** 撤离寻路连续失败的次数；有真实移动就清零。 */
-    private int retreatFailures;
-    private Action current;
-    /** 当前动作在做哪件事（逼近谁、打谁、往哪撤、捡哪件）：同一件事沿用，不每刻重建。 */
-    private String currentKey;
-    /** 逼近动作出发时目标在哪：目标跑开超过几格才重新规划，不每刻重新寻路。 */
-    private final double[] approachGoal = new double[3];
-
-    /** 目标离逼近出发时的位置超过这么远（格）才重新规划路线。 */
-    private static final double REAPPROACH_AFTER = 3.0;
     private boolean fled;
+    private TickContext currentContext;
+
+    /** 拾荒正在做的那一步（走向某件掉落物）。 */
+    private Action current;
+    private String currentKey;
     /** 开始拾荒那一刻的掉落物确认序号：只认这之后本玩家的拾取。 */
     private long lootCursor;
     private List<FightMoves.Drop> pendingDrops = List.of();
@@ -126,7 +112,6 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
             case CHECK -> check();
             case ASSESS -> assess(context);
             case FIGHT -> fight(context);
-            case RETREAT -> retreat(context);
             case LOOT -> loot(context);
         };
     }
@@ -154,19 +139,20 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         if (named.isEmpty()) {
             // 区域清扫先认下这一批：此刻半径内看得见的；墙后、地下看不见的不算，之后新刷的也不算。
             for (CombatSenses.Threat threat : senses.threats(context, input.radius())) {
-                if (threat.visible() && wantedType(threat)) {
+                if (threat.visible() && (input.entityType() == null || threat.type().equals(input.entityType()))) {
                     batch.add(threat.entityId());
+                    engaged.put(threat.entityId(), threat.type());
                 }
             }
         }
-        ThreatAssessment.MySide mine = mySide(context);
-        List<ThreatAssessment.Foe> foes = foesOf(context, mine);
-        ThreatAssessment.Assessment assessment = ThreatAssessment.assess(mine, foes);
+        ThreatAssessment.Assessment assessment = ThreatAssessment.assess(mySide(context), foesOf(context));
         verdict = assessment.verdict();
         if (verdict == ThreatAssessment.Verdict.OUTMATCHED) {
-            // 点名目标已经死了就不必打：开始时已被击败，直接完成。
-            if (!named.isEmpty() && namedDeadSoFar() == named.size() && threatsUnarmedOnly(foes)) {
-                return Next.done(alreadyDone());
+            // 点名目标开始时已经倒下：不必打，直接收场。
+            noteDefeats(context);
+            if (!named.isEmpty() && remainingNamed().isEmpty() && lostTrack.isEmpty()) {
+                return Next.done(TaskResult.builder(TaskResult.Status.DONE, "开始时点名目标已被击败，不用打")
+                        .details(details()).build());
             }
             String gaps = assessment.gaps().isEmpty() ? "整体劣势" : String.join("、", assessment.gaps());
             return Next.fail(Problem.of(Problem.Kind.DANGER,
@@ -174,157 +160,116 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
                             + "；吃点东西回血、换把更好的武器，或减少同时面对的敌人再来",
                     "先解决血量与武器的问题再开战"));
         }
+        double radius = named.isEmpty() ? input.radius() : ThreatAssessment.VIGILANCE_RADIUS;
+        battle = new Battle(senses, moves, new Roster(), radius);
         return Next.go(Phase.FIGHT, verdict == ThreatAssessment.Verdict.RISKY
-                ? "有风险，保持在能进的距离" : "评估能赢，开打");
+                ? "有风险，打的时候盯着血线" : "评估能赢，开打");
     }
 
     private Next<Phase> fight(TickContext context) {
-        // 点着引信的苦力怕还在 7 格内：先躲到 9 格外等它熄了，压过点名目标和血线——不管它是不是要打的那只。
-        Optional<CombatSenses.Threat> bomb = BlastAvoidance.armedWithinFuseRange(
-                senses.threats(context, ThreatAssessment.VIGILANCE_RADIUS));
-        if (bomb.isPresent()) {
-            CombatSenses.Threat fuse = bomb.get();
-            keep("躲爆炸 " + fuse.entityId(), () -> {
-                double[] self = moves.selfPosition(context);
-                double[] away = BlastAvoidance.evadePoint(self[0], self[2], fuse.x(), fuse.z());
-                return moves.walkTo(away[0], self[1], away[1]);
-            });
-            stepCurrent(context, "躲开点着引信的 " + fuse.type());
-            return Next.stay();
+        noteDefeats(context);
+        if (!named.isEmpty() && remainingNamed().isEmpty()) {
+            // 点名目标都有了着落（打倒或跟丢）：就地捡一下掉落物再收场。
+            return lastKillSpot == null ? Next.done(settled()) : Next.go(Phase.LOOT, "点名的都打倒了，就地捡一下");
         }
-        // 血线破了先撤：护甲折算后的有效血量跌破拒战线，继续打就是送死。
-        if (ThreatAssessment.belowRetreatLine(mySide(context))) {
-            dropCurrent();
-            return Next.go(Phase.RETREAT, "血量跌破拒战线，先撤离");
-        }
-        Tracked target = pickTarget(context);
-        if (target == null) {
-            if (named.isEmpty()) {
-                // 区域清扫：这一批打完了，身边也没有在打我的。
-                return Next.go(Phase.LOOT, lastKillSpot == null ? "附近没有看得见的敌对生物" : "这一批清完了，就地捡一下");
+        Battle.Moment moment = battle.tick(context);
+        if (moment.struck() || moment.fired()) weaponUsed = moves.mainHand(context);
+        if (moment.targetId() >= 0 && moment.state() != Battle.State.EVADING) rememberEngaged(context, moment.targetId());
+        if (moment.progressed()) recordProgress(moment.doing());
+        return switch (moment.state()) {
+            case ESCAPED -> {
+                // 甩开了：撤离成功不等于任务成功，目标没死就以失败收场，写明为什么撤与出路。
+                fled = true;
+                yield Next.fail(Problem.of(Problem.Kind.DANGER,
+                        "撤离成功，甩开了追兵（" + moment.retreatWhy() + "），但目标没有击败——这一仗算没打赢",
+                        "吃点东西回血到拒战线以上，或换把武器再来"));
             }
-            // 点名目标全部确认死亡：就地捡一下掉落物再收场（打羊要羊肉、打僵尸要腐肉都靠这一步）。
-            return lastKillSpot == null ? Next.done(settled(context))
-                    : Next.go(Phase.LOOT, "点名的都打倒了，就地捡一下");
-        }
-        engaged = target;
-        double distance = target.distance;
-        // 能射就射：没有剑斧、对手是会炸的、走不到跟前、或离得远（七格外换弓），按弓的走位带打——
-        // 点着引信、在 7 格外的苦力怕也能射，不用干等它熄。
-        if (shootsAt(context, target)) return shoot(context, target);
-        ranged.close();
-        // 点着引信但在 7 格外的会炸物：不凑上去（凑近它接着膨胀），原地等它熄了再打。
-        if (armedExplosive(context, target.entityId)) {
-            dropCurrent();
-            recordProgress("等 " + target.type + " 的引信熄了再上");
-            return Next.stay();
-        }
-        // 近处看得见、差不多同一层：按走位环打——够得着就挥，离远了凑、太近了退，不交给寻路。
-        if (closeRange(context, target)) {
-            dropCurrent();
-            closeCombat.tick(context, moves, target.entityId, distance, STRIKE_RANGE, false);
-            weaponUsed = moves.mainHand(context);
-            noteIfDefeated(target);
-            return Next.stay();
-        }
-        closeCombat.close();
-        if (distance > STRIKE_RANGE) {
-            // 逼近：目标没跑开就沿用这一趟走到，跑开三格以上再重新规划。
-            if (Math.hypot(target.x - approachGoal[0], target.z - approachGoal[2]) > REAPPROACH_AFTER) {
-                dropCurrent();
-            }
-            keep("逼近 " + target.entityId, () -> {
-                approachGoal[0] = target.x;
-                approachGoal[1] = target.y;
-                approachGoal[2] = target.z;
-                return moves.walkTo(target.x, target.y, target.z);
-            });
-            stepCurrent(context, "逼近 " + target.type);
-            // 逼近的寻路失败了：走不到它跟前（悬崖上、隔着水），有弓下一刻就改射。
-            if (lastStepFailed) unreachable = target.entityId;
-            return Next.stay();
-        }
-        keep("攻击 " + target.entityId, () -> moves.strike(context, target.entityId));
-        stepCurrent(context, "攻击 " + target.type);
-        // 结果写手里实际拿着打的那件，不写挑中的（换不成时两者会不一样）。
-        weaponUsed = moves.mainHand(context);
-        SeenTargets.Observed after = seenTargets.observe(context, target.entityId);
-        if (after != null && after.dead()) {
-            defeated.add(target.type + "（实体 " + target.entityId + "）");
-            recordChange(Change.of(Change.Kind.ENTITY_AFFECTED, target.type, 1));
-            lastKillSpot = new double[] {target.x, target.y, target.z};
-            engaged = null;
-            recordProgress("击败了 " + target.type);
-        }
-        return Next.stay();
+            case FINISHED -> named.isEmpty()
+                    ? Next.go(Phase.LOOT, lastKillSpot == null ? "附近没有要打的了" : "这一批清完了，就地捡一下")
+                    : lastKillSpot == null ? Next.done(settled()) : Next.go(Phase.LOOT, "打完了，就地捡一下");
+            default -> Next.stay();
+        };
     }
 
-    private Next<Phase> retreat(TickContext context) {
-        double[] self = moves.selfPosition(context);
-        // 甩开以三十二格内没有追着自己的为准：和自卫的撤离同一个标准，附近只是游荡、隔着墙的不算。
-        List<CombatSenses.Threat> threats = senses.chasers(context, ThreatAssessment.FLEE_CLEAR_DISTANCE);
-        if (threats.isEmpty()) {
-            // 甩开了：撤离成功不等于任务成功，目标没死就以失败收场，写明拒战线与出路。
-            fled = true;
-            return Next.fail(Problem.of(Problem.Kind.DANGER,
-                    "撤离成功，甩开了追兵，但目标没有击败——这一仗算没打赢",
-                    "吃点东西回血到拒战线以上，或换把武器再来"));
+    // 名单：点名的（还没倒下、没跟丢）或清扫的这一批，外加途中真打了角色的；给了 count 打够了就只还手。
+    private final class Roster implements Battlefield.Roster {
+        @Override
+        public boolean wanted(CombatSenses.Threat threat, boolean attacker, boolean chasing) {
+            if (attacker) return true;
+            if (countReached()) return false;
+            if (!named.isEmpty()) return remainingNamed().contains(threat.entityId());
+            return batch.contains(threat.entityId());
         }
-        // 被追上了（够得着、看得见）：面朝它往后退、够得着就还手，拉开了再接着跑。
-        CombatSenses.Threat pursuer = nearest(threats);
-        if (pursuer.visible() && pursuer.distance() <= STRIKE_RANGE) {
-            dropCurrent();
-            closeCombat.tick(context, moves, pursuer.entityId(), pursuer.distance(), STRIKE_RANGE, true);
-            return Next.stay();
+
+        @Override
+        public boolean primary(CombatSenses.Threat threat) {
+            return named.isEmpty() ? batch.contains(threat.entityId()) : remainingNamed().contains(threat.entityId());
         }
-        closeCombat.close();
-        // 朝威胁的反方向撤：取威胁的重心，往相反方向跑。
-        double cx = 0;
-        double cz = 0;
-        for (CombatSenses.Threat threat : threats) {
-            cx += threat.x();
-            cz += threat.z();
+
+        @Override
+        public List<Integer> namedIds() {
+            return countReached() ? List.of() : remainingNamed();
         }
-        cx /= threats.size();
-        cz /= threats.size();
-        double dx = self[0] - cx;
-        double dz = self[2] - cz;
-        double norm = Math.hypot(dx, dz);
-        if (norm < 0.1) {
-            dx = 1;
-            dz = 0;
-        } else {
-            dx /= norm;
-            dz /= norm;
+    }
+
+    private boolean countReached() {
+        return input.count() != null && defeated.size() >= input.count();
+    }
+
+    // 点名目标里还没倒下、没跟丢的实体编号。
+    private List<Integer> remainingNamed() {
+        List<Integer> ids = new ArrayList<>();
+        for (SeenTargets.Locked locked : named) {
+            if (!defeated.contains(describeOf(locked)) && !lostTrack.contains(describeOf(locked))) ids.add(locked.entityId());
         }
-        double runX = self[0] + dx * ThreatAssessment.FLEE_CLEAR_DISTANCE;
-        double runZ = self[2] + dz * ThreatAssessment.FLEE_CLEAR_DISTANCE;
-        // 撤离：这一趟往反方向的走到没走完就接着走，走完或失败了再按此刻的威胁重新定方向。
-        keep("撤离", () -> moves.walkTo(runX, self[1], runZ));
-        ActionStatus status = current.tick(context);
-        if (status instanceof ActionStatus.Failed) {
-            retreatFailures++;
-            dropCurrent();
-            if (retreatFailures >= LAST_STAND_AFTER_FAILURES) {
-                // 退无可退：背水一战，回去打。
-                recordProgress("撤离路线连续失败，退无可退");
-                return Next.go(Phase.FIGHT, "退无可退，背水一战");
+        return ids;
+    }
+
+    // 谁倒下了：点名的逐个核对（不见了记跟丢），打过的逐个看有没有倒下；倒下的地方留给拾荒。
+    private void noteDefeats(TickContext context) {
+        for (SeenTargets.Locked locked : named) {
+            String name = describeOf(locked);
+            if (defeated.contains(name) || lostTrack.contains(name)) continue;
+            SeenTargets.Observed observed = seenTargets.observe(context, locked.entityId());
+            if (observed == null) {
+                // 消失的点名目标：不算击败，记进"跟丢了"，结果里按没打成交代。
+                lostTrack.add(name);
+            } else if (observed.dead()) {
+                markDefeated(name, locked.type(), observed);
             }
-            return Next.stay();
         }
-        if (status instanceof ActionStatus.Running running && running.progressed()) {
-            retreatFailures = 0;
-            recordProgress(current.describe());
+        for (var entry : List.copyOf(engaged.entrySet())) {
+            SeenTargets.Observed observed = seenTargets.observe(context, entry.getKey());
+            if (observed == null) {
+                engaged.remove(entry.getKey());
+            } else if (observed.dead()) {
+                engaged.remove(entry.getKey());
+                markDefeated(entry.getValue() + "（实体 " + entry.getKey() + "）", entry.getValue(), observed);
+            }
         }
-        if (status instanceof ActionStatus.Done) {
-            dropCurrent();
+    }
+
+    private void markDefeated(String name, String type, SeenTargets.Observed observed) {
+        if (!defeated.add(name)) return;
+        recordChange(Change.of(Change.Kind.ENTITY_AFFECTED, type, 1));
+        lastKillSpot = new double[] {observed.x(), observed.y(), observed.z()};
+        recordProgress("击败了 " + type);
+    }
+
+    // 打过的记下来看它倒没倒：点名的另有核对，这里收清扫批之外途中还手的那些。
+    private void rememberEngaged(TickContext context, int entityId) {
+        if (engaged.containsKey(entityId) || named.stream().anyMatch(locked -> locked.entityId() == entityId)) return;
+        senses.living(context, entityId).ifPresent(threat -> engaged.put(entityId, threat.type()));
+        if (!engaged.containsKey(entityId)) {
+            for (CombatSenses.Threat threat : senses.threats(context, ThreatAssessment.VIGILANCE_RADIUS)) {
+                if (threat.entityId() == entityId) engaged.put(entityId, threat.type());
+            }
         }
-        return Next.stay();
     }
 
     private Next<Phase> loot(TickContext context) {
         if (lastKillSpot == null) {
-            return Next.done(settled(context));
+            return Next.done(settled());
         }
         if (pendingDrops.isEmpty()) {
             // 抄一份自己逐件划掉，不改读端交来的清单。
@@ -332,26 +277,26 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
             lootCursor = moves.dropCursor(context);
             if (pendingDrops.isEmpty()) {
                 recordProgress("身边没有掉落物可捡");
-                return Next.done(settled(context));
+                return Next.done(settled());
             }
         }
         FightMoves.Drop drop = pendingDrops.get(0);
-        SeenTargets.Observed observed = dropObservation(context, drop);
         double[] self = moves.selfPosition(context);
         double distance = Math.hypot(self[0] - drop.x(), self[2] - drop.z());
-        // 走到跟前了而它还在地上：等一两刻让原版吸进包，再看背包多没多。
-        if (observed != null && distance <= 1.2 && ++lootWaited <= LOOT_SETTLE_TICKS) {
+        boolean stillThere = !moves.dropsNear(context, drop.x(), drop.y(), drop.z(), 0.5).isEmpty() || distance < 2.0;
+        // 走到跟前了而它还在地上：等一两刻让原版吸进包，再按拾取包结算。
+        if (stillThere && distance <= 1.2 && ++lootWaited <= LOOT_SETTLE_TICKS) {
             return Next.stay();
         }
-        if (observed == null || distance <= 1.2) {
-            // 它消失了或等够了：背包多了就是捡到，没多就是被抢或没捡着。
+        if (!stillThere || distance <= 1.2) {
             settleOneDrop(drop, context);
             pendingDrops.remove(0);
             lootWaited = 0;
             dropCurrent();
-            return pendingDrops.isEmpty() ? Next.done(settled(context)) : Next.stay();
+            return pendingDrops.isEmpty() ? Next.done(settled()) : Next.stay();
         }
-        keep("捡 " + drop.item() + " " + drop.x() + "," + drop.z(), () -> moves.walkTo(drop.x(), drop.y(), drop.z()));
+        keep("捡 " + drop.item() + " " + drop.x() + "," + drop.z(),
+                () -> moves.walk(GoalCompiler.near(BlockPos.containing(drop.x(), drop.y(), drop.z()), 1.0)));
         stepCurrent(context, "捡 " + drop.item());
         return Next.stay();
     }
@@ -367,103 +312,14 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         }
     }
 
-    // 拾荒阶段观察掉落物还在不在：观察编号体系之外，直接按实体编号查。
-    private SeenTargets.Observed dropObservation(TickContext context, FightMoves.Drop drop) {
-        double[] self = moves.selfPosition(context);
-        boolean stillThere = !moves.dropsNear(context, drop.x(), drop.y(), drop.z(), 0.5).isEmpty()
-                || Math.hypot(self[0] - drop.x(), self[2] - drop.z()) < 2.0;
-        return stillThere ? new SeenTargets.Observed(drop.x(), drop.y(), drop.z(), 0, false) : null;
-    }
-
-    /** 挑这一刻该打谁：点名目标优先（按给的顺序），区域清扫按威胁排序。 */
-    private Tracked pickTarget(TickContext context) {
-        if (!named.isEmpty()) {
-            for (SeenTargets.Locked locked : named) {
-                if (defeated.contains(describeOf(locked)) || lostTrack.contains(describeOf(locked))) {
-                    continue;
-                }
-                SeenTargets.Observed observed = seenTargets.observe(currentContext, locked.entityId());
-                if (observed == null) {
-                    // 消失的点名目标：不算击败，记进"跟丢了"，结果里按没打成交代。
-                    lostTrack.add(describeOf(locked));
-                    continue;
-                }
-                if (observed.dead()) {
-                    if (!defeated.contains(describeOf(locked))) {
-                        defeated.add(describeOf(locked));
-                        recordChange(Change.of(Change.Kind.ENTITY_AFFECTED, locked.type(), 1));
-                        lastKillSpot = moves.selfPosition(currentContext);
-                    }
-                    continue;
-                }
-                // 点名目标在哪按此刻的观察：逼近要朝它走，不是朝自己脚下走。
-                return new Tracked(locked.entityId(), locked.type(),
-                        observed.x(), observed.y(), observed.z(), observed.distance());
-            }
-            return null;
-        }
-        // 区域清扫：半径内的敌对威胁按威胁排序，盯住一个打完再换。
-        if (engaged != null) {
-            SeenTargets.Observed observed = seenTargets.observe(currentContext, engaged.entityId);
-            if (observed != null && !observed.dead()) {
-                return engaged;
-            }
-            if (observed != null && observed.dead()) {
-                defeated.add(engaged.type + "（实体 " + engaged.entityId + "）");
-                recordChange(Change.of(Change.Kind.ENTITY_AFFECTED, engaged.type, 1));
-                lastKillSpot = new double[] {engaged.x, engaged.y, engaged.z};
-                engaged = null;
-            }
-        }
-        // 只在这一批里挑，外加途中冲着角色来的（刚打过角色的、点着引信的苦力怕）；
-        // 每只敌人连同它的评估输入一起排序：同种同距离的两只不会被认成同一只。
-        Set<UUID> attackers = new HashSet<>();
-        for (CombatSenses.Attacker attacker : senses.recentAttackers(currentContext)) {
-            attackers.add(attacker.uuid());
-        }
-        List<CombatSenses.Threat> ordered = new ArrayList<>();
-        for (CombatSenses.Threat threat : senses.threats(currentContext, input.radius())) {
-            boolean comingAtMe = threat.comingAt(attackers);
-            // 点着引信的会炸物不当近战目标：近了躲（fight 开头），远了等它熄；没点的照常打。
-            if ((batch.contains(threat.entityId()) && wantedType(threat) || comingAtMe)
-                    && BlastAvoidance.meleeTarget(threat.kind(), threat.armed())) {
-                ordered.add(threat);
-            }
-        }
-        // 排序按"是不是冲着我来"：正追着砍我的排在闲逛的前面（原先只看引信，把追我的当成闲逛的）。
-        ordered.sort(Comparator.comparing(threat -> new ThreatAssessment.Foe(
-                threat.distance(), threat.kind(), threat.comingAt(attackers), threat.armed()), ThreatAssessment.BY_THREAT));
-        // 给了 count 就打够这么多只为止；剩下的敌人比要打的少时照样把剩下的打完，不提前收手。
-        if (ordered.isEmpty() || input.count() != null && defeated.size() >= input.count()) {
-            return null;
-        }
-        CombatSenses.Threat first = ordered.getFirst();
-        return new Tracked(first.entityId(), first.type(), first.x(), first.y(), first.z(), first.distance());
-    }
-
-    // 这只此刻是不是点着引信的会炸物：按实体编号在感观里找回它的引信状态。
-    private boolean armedExplosive(TickContext context, int entityId) {
-        for (CombatSenses.Threat threat : senses.threats(context, ThreatAssessment.VIGILANCE_RADIUS)) {
-            if (threat.entityId() == entityId) {
-                return !BlastAvoidance.meleeTarget(threat.kind(), threat.armed());
-            }
-        }
-        return false;
-    }
-
-    // 给了生物类型就只清这一种；冲着角色来的不管什么类型都处理。
-    private boolean wantedType(CombatSenses.Threat threat) {
-        return input.entityType() == null || threat.type().equals(input.entityType());
-    }
-
     private ThreatAssessment.MySide mySide(TickContext context) {
         CombatSenses.CombatProfile profile = senses.profile(context);
         int weaponScore = profile.weapon().map(picked -> WeaponChoice.scoreOf(picked.weapon())).orElse(0);
         return new ThreatAssessment.MySide(profile.health(), profile.armorPoints(),
-                weaponScore, profile.foodCount(), retreatFailures < LAST_STAND_AFTER_FAILURES);
+                weaponScore, profile.foodCount(), true);
     }
 
-    private List<ThreatAssessment.Foe> foesOf(TickContext context, ThreatAssessment.MySide ignored) {
+    private List<ThreatAssessment.Foe> foesOf(TickContext context) {
         List<ThreatAssessment.Foe> foes = new ArrayList<>();
         double radius = named.isEmpty() ? input.radius() : ThreatAssessment.VIGILANCE_RADIUS;
         Set<UUID> attackers = new HashSet<>();
@@ -479,38 +335,31 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         return ThreatAssessment.sortedByThreat(foes);
     }
 
-    private boolean threatsUnarmedOnly(List<ThreatAssessment.Foe> foes) {
-        return foes.isEmpty();
-    }
-
-    private int namedDeadSoFar() {
-        int dead = 0;
-        for (SeenTargets.Locked locked : named) {
-            if (defeated.contains(describeOf(locked))) {
-                dead++;
-            }
-        }
-        return dead;
-    }
-
-    private TaskResult alreadyDone() {
-        return TaskResult.builder(TaskResult.Status.DONE, "开始时点名目标已被击败，不用打")
-                .details(details()).build();
-    }
-
-    // 收场：点名目标有跟丢的就不算全打完——一个都没确认击败是没做成，打掉一部分是做成一部分。
-    private TaskResult settled(TickContext context) {
+    // 收场：点名目标有跟丢的、够不着的就不算全打完——一个都没确认击败是没做成，打掉一部分是做成一部分。
+    private TaskResult settled() {
         String summary = defeated.isEmpty() ? "打完了，没有确认击败的目标"
                 : "击败了 " + defeated.size() + " 个目标" + (lootGained.isEmpty() ? "，没捡到掉落物" : "，捡到 " + lootGained.size() + " 组掉落物");
-        if (lostTrack.isEmpty()) {
+        List<String> unreached = new ArrayList<>();
+        for (SeenTargets.Locked locked : named) {
+            if (remainingNamed().contains(locked.entityId())) unreached.add(describeOf(locked));
+        }
+        if (lostTrack.isEmpty() && unreached.isEmpty()) {
             return TaskResult.builder(TaskResult.Status.DONE, summary).details(details()).build();
         }
-        String lost = String.join("、", lostTrack);
-        return TaskResult.builder(defeated.isEmpty() ? TaskResult.Status.FAILED : TaskResult.Status.PARTIAL,
-                        summary + "；" + lost + " 在确认击败前不见了")
-                .problem(Problem.of(Problem.Kind.TARGET_GONE, lost + " 在确认击败前不见了（走远或被别的东西打死）",
-                        "重新 observe 看它还在不在，在的话用新的观察编号再打"))
-                .remaining(lostTrack)
+        TaskResult.Status status = defeated.isEmpty() ? TaskResult.Status.FAILED : TaskResult.Status.PARTIAL;
+        if (!lostTrack.isEmpty()) {
+            String lost = String.join("、", lostTrack);
+            return TaskResult.builder(status, summary + "；" + lost + " 在确认击败前不见了")
+                    .problem(Problem.of(Problem.Kind.TARGET_GONE, lost + " 在确认击败前不见了（走远或被别的东西打死）",
+                            "重新 observe 看它还在不在，在的话用新的观察编号再打"))
+                    .remaining(lostTrack)
+                    .details(details()).build();
+        }
+        String far = String.join("、", unreached);
+        return TaskResult.builder(status, summary + "；够不着 " + far)
+                .problem(Problem.of(Problem.Kind.UNREACHABLE, far + " 走不到跟前、也射不到（隔着悬崖、水或墙）",
+                        "带上弓和箭再来，或先搭路走到它那边"))
+                .remaining(unreached)
                 .details(details()).build();
     }
 
@@ -533,7 +382,6 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         }
     }
 
-    // 收尾并放下当前动作：旧的出手与寻路不能悬着。
     private void dropCurrent() {
         if (current != null) {
             current.close();
@@ -542,19 +390,15 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         currentKey = null;
     }
 
-    // 推进当前动作：做完或失败都收尾，下一刻重新决定走还是打。
+    // 推进当前动作：做完或失败都收尾，下一刻重新决定。
     private void stepCurrent(TickContext context, String what) {
         if (current == null) {
             return;
         }
         ActionStatus status = current.tick(context);
-        lastStepFailed = status instanceof ActionStatus.Failed;
         if (status instanceof ActionStatus.Done || status instanceof ActionStatus.Failed) {
-            if (status instanceof ActionStatus.Failed failed) {
-                recordProgress(what + "没成：" + failed.problem().message());
-            } else {
-                recordProgress(what + "：一轮结束");
-            }
+            recordProgress(status instanceof ActionStatus.Failed failed
+                    ? what + "没成：" + failed.problem().message() : what + "：一轮结束");
             dropCurrent();
         } else if (status instanceof ActionStatus.Running running && running.progressed()) {
             recordProgress(what);
@@ -563,44 +407,45 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
 
     @Override
     protected ResultDetails details() {
-        return new FightDetails(defeated, lostTrack, fled, verdictName(), weaponUsed, lootGained);
+        return new FightDetails(List.copyOf(defeated), lostTrack, fled, verdictName(), weaponUsed, lootGained);
     }
 
-    /** 正在打的仗自己接得住吗：评估不是"打不过"、血线也没破，被攻击的生存需求就让位。 */
+    /** 正在打的仗自己接得住吗：评估不是"打不过"、没在撤离，被攻击的生存需求就让位。 */
     @Override
     public boolean confidentAgainstCurrentThreats() {
-        return verdict != ThreatAssessment.Verdict.OUTMATCHED && !fled;
+        return verdict != ThreatAssessment.Verdict.OUTMATCHED && !fled && (battle == null || !battle.retreating());
     }
 
     @Override
     public Interruptibility interruptibility(TickContext context) {
-        return current != null ? current.interruptibility() : Interruptibility.WORKING;
+        if (current != null) return current.interruptibility();
+        return battle != null ? battle.interruptibility() : Interruptibility.WORKING;
     }
 
-    /** 把每刻在换的当前动作接进基类的暂停与收尾：基类持有的是这个外壳。 */
+    /** 引擎与拾荒的动作接进基类的暂停与收尾：基类持有的是这个外壳。 */
     private final class Driver implements Action {
         @Override
         public ActionStatus tick(TickContext context) {
-            return current == null ? ActionStatus.running() : current.tick(context);
+            return ActionStatus.running();
         }
 
         @Override
         public void pause() {
             if (current != null) current.pause();
+            if (battle != null) battle.pause();
         }
 
         @Override
         public void close() {
-            // 换阶段或任务结束时基类收尾外壳：当前动作一并收尾放下，换阶段后不会沿用已收尾的动作；
-            // 拉了一半的弓取消（切槽，不放箭），近身的出手收尾。
+            // 换阶段或任务结束时基类收尾外壳：拾荒的走到、引擎的出手与寻路、拉了一半的弓都收尾。
             dropCurrent();
-            closeCombat.close();
-            ranged.close();
+            if (battle != null) battle.close();
         }
 
         @Override
         public String describe() {
-            return current == null ? "观察战场" : current.describe();
+            if (current != null) return current.describe();
+            return battle == null ? "观察战场" : battle.describe();
         }
     }
 
@@ -613,68 +458,4 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
             lootGained = List.copyOf(lootGained);
         }
     }
-
-    /** 打斗中盯住的一个目标：编号、类型、位置、距离。 */
-    private record Tracked(int entityId, String type, double x, double y, double z, double distance) {}
-
-    // 近身：几格内、看得见、上下差不到一格半——走位环；隔着墙、在高处低处的交给寻路绕过去。
-    private boolean closeRange(TickContext context, Tracked target) {
-        double[] self = moves.selfPosition(context);
-        SeenTargets.Observed observed = seenTargets.observe(context, target.entityId);
-        return observed != null && observed.visible() && target.distance <= CloseCombat.CLOSE_RANGE
-                && Math.abs(target.y - self[1]) <= 1.5;
-    }
-
-    // 用弓打这一刻：近身的出手收起来，推进手上这一箭并按弓的走位带走位；射出去记一笔，倒下了记击败。
-    private Next<Phase> shoot(TickContext context, Tracked target) {
-        dropCurrent();
-        closeCombat.close();
-        if (ranged.tick(context, moves, target.entityId, target.distance, false)) {
-            recordProgress("朝 " + target.type + " 射了一箭");
-        }
-        weaponUsed = moves.mainHand(context);
-        noteIfDefeated(target);
-        return Next.stay();
-    }
-
-    // 用不用弓：看得见、二十格内，按弓与近战的取舍该射；连着射不出去就交回近战。
-    private boolean shootsAt(TickContext context, Tracked target) {
-        if (ranged.givenUp() || target.distance > RangedCombat.ENGAGE_RANGE) return false;
-        SeenTargets.Observed observed = seenTargets.observe(context, target.entityId);
-        if (observed == null || !observed.visible()) return false;
-        return RangedCombat.preferBow(moves.canShoot(context), moves.hasMeleeWeapon(context),
-                explosive(context, target.entityId), unreachable == target.entityId, target.distance,
-                ranged.shooting());
-    }
-
-    // 这只是不是会炸的（苦力怕）：能射就别凑近。
-    private boolean explosive(TickContext context, int entityId) {
-        for (CombatSenses.Threat threat : senses.threats(context, RangedCombat.ENGAGE_RANGE)) {
-            if (threat.entityId() == entityId) return threat.kind() == ThreatAssessment.Kind.EXPLOSIVE;
-        }
-        return false;
-    }
-
-    // 打着打着它倒下了：记一笔击败，就地拾荒用它倒下的地方。
-    private void noteIfDefeated(Tracked target) {
-        SeenTargets.Observed after = seenTargets.observe(currentContext, target.entityId);
-        if (after != null && after.dead()) {
-            defeated.add(target.type + "（实体 " + target.entityId + "）");
-            recordChange(Change.of(Change.Kind.ENTITY_AFFECTED, target.type, 1));
-            lastKillSpot = new double[] {target.x, target.y, target.z};
-            engaged = null;
-            closeCombat.close();
-            recordProgress("击败了 " + target.type);
-        }
-    }
-
-    private static CombatSenses.Threat nearest(List<CombatSenses.Threat> threats) {
-        CombatSenses.Threat best = threats.getFirst();
-        for (CombatSenses.Threat threat : threats) {
-            if (threat.distance() < best.distance()) best = threat;
-        }
-        return best;
-    }
-
-    private TickContext currentContext;
 }

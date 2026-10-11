@@ -14,6 +14,9 @@ import java.util.UUID;
 
 import net.minecraft.world.entity.Entity;
 import org.junit.jupiter.api.Test;
+import net.minecraft.core.BlockPos;
+import org.maiwithu.maicraft.behavior.combat.Footwork;
+import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.behavior.combat.CombatSenses;
 import org.maiwithu.maicraft.behavior.combat.ThreatAssessment;
 import org.maiwithu.maicraft.behavior.combat.WeaponChoice;
@@ -36,9 +39,13 @@ class FightTaskTest {
         }
     }
 
-    /** 感观替身：满血拿剑，周围没有别的威胁。 */
-    private static final class Senses implements CombatSenses {
+    /** 感观替身：满血拿剑，周围没有别的威胁；点名的僵尸按核对替身此刻的观察给身板。 */
+    private final class Senses implements CombatSenses {
         @Override public List<Threat> threats(TickContext context, double radius) { return List.of(); }
+
+        @Override public Optional<Threat> living(TickContext context, int entityId) {
+            return namedZombie(entityId);
+        }
 
         @Override public List<Attacker> recentAttackers(TickContext context) { return List.of(); }
 
@@ -81,9 +88,22 @@ class FightTaskTest {
             return action("打 " + entityId, ActionStatus.done());
         }
 
-        @Override public Action walkTo(double x, double y, double z) {
-            return action("走向 " + x + "," + z, ActionStatus.running());
+        @Override public Action walk(GoalCompiler.Compiled goal) {
+            BlockPos center = goal.goal().center();
+            return action("走向 " + center.getX() + "," + center.getZ(), ActionStatus.running());
         }
+
+        final List<Footwork.Step> steps = new ArrayList<>();
+
+        @Override public Action shoot(TickContext context, int entityId) { return action("射 " + entityId, ActionStatus.running()); }
+        @Override public boolean canShoot(TickContext context) { return false; }
+        @Override public boolean hasMeleeWeapon(TickContext context) { return true; }
+        @Override public boolean attackReady(TickContext context) { return true; }
+        @Override public void guard(TickContext context, double distance, boolean aboutToStrike) {}
+        @Override public void lowerGuard() {}
+        @Override public Footwork.Ground ground(TickContext context) { return (dx, dz) -> Footwork.Footing.FLAT; }
+        @Override public void step(TickContext context, int faceEntityId, Footwork.Step step) { steps.add(step); }
+        @Override public boolean standable(TickContext context, int x, int y, int z) { return true; }
 
         @Override public double[] selfPosition(TickContext context) { return new double[] {0, 64, 0}; }
 
@@ -110,6 +130,14 @@ class FightTaskTest {
     }
 
     private final Targets targets = new Targets();
+
+    // 点名的 7 号僵尸此刻的身板：核对替身说它在哪、看不看得见；倒下或不见了就不在场上。
+    private Optional<CombatSenses.Threat> namedZombie(int entityId) {
+        SeenTargets.Observed now = targets.now;
+        if (entityId != 7 || now == null || now.dead()) return Optional.empty();
+        return Optional.of(new CombatSenses.Threat(7, new UUID(0, 7), "minecraft:zombie", now.x(), now.y(), now.z(),
+                now.distance(), ThreatAssessment.Kind.MELEE, false, now.visible(), false));
+    }
     private final Moves moves = new Moves();
     /** 点名的二次确认：refusal 为空就是能打。 */
     private Optional<Problem> refusal = Optional.empty();
@@ -142,6 +170,7 @@ class FightTaskTest {
                         Optional.of(new WeaponChoice.Picked("minecraft:iron_sword", WeaponChoice.Weapon.SWORD_OR_AXE)), 4);
             }
             @Override public Entity entityById(TickContext context, int entityId) { return null; }
+            @Override public Optional<Threat> living(TickContext context, int entityId) { return namedZombie(entityId); }
         };
         FightTask fight = new FightTask(
                 new FightInput(List.of("e1"), null, FightInput.DEFAULT_RADIUS, null, Permissions.DEFAULT),
@@ -150,7 +179,8 @@ class FightTaskTest {
         fight.start(new Tick(0));
         for (long t = 0; t < 10; t++) fight.tick(new Tick(t));
 
-        assertEquals(List.of("走向 -9.0,0.0"), moves.started);
+        assertTrue(moves.started.isEmpty(), "先跑后算，不等寻路：" + moves.started);
+        assertTrue(moves.steps.get(0).sprint() && moves.steps.get(0).dx() < 0, "背离苦力怕疾跑：" + moves.steps);
     }
 
     @Test
@@ -159,7 +189,7 @@ class FightTaskTest {
         targets.now = new SeenTargets.Observed(12, 64, 5, 13, false);
         run(10);
 
-        assertEquals(List.of("走向 12.0,5.0"), moves.started);
+        assertEquals(List.of("走向 12,5"), moves.started);
         assertEquals(0, moves.closed);
     }
 
