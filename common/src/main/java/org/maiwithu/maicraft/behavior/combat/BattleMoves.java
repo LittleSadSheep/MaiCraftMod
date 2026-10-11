@@ -59,6 +59,19 @@ public interface BattleMoves {
     }
 
     /**
+     * 能不能就地垫高：白天、身上有三块以上能拿去垫的废料、头顶三格空着。撤不掉又打不过时用；
+     * 夜里不垫（交给夜晚需求的挖三填一）。没接上时不能。
+     */
+    default boolean canPillar(TickContext context) {
+        return false;
+    }
+
+    /** 就地往上垫三格，站到柱顶（只垫不挖，垫的是废料）。没接上时如实失败。 */
+    default Action pillarUp(TickContext context) {
+        return null;
+    }
+
+    /**
      * 身子此刻的姿势。
      *
      * @param falling 离地往下落：这时候砍是原版暴击（伤害 × 1.5）

@@ -61,6 +61,17 @@ class TacticTest {
     }
 
     @Test
+    void cornedAndOutmatchedPillarsUpUnlessSomethingShoots() {
+        Tactic.Memory stuck = new Tactic.Memory(-1, false, true, Set.of(), false, false, true, false);
+        assertInstanceOf(Tactic.PillarUp.class, decide(me(4, true, false), stuck, zombie(1, 3)),
+                "撤不掉又打不过：就地垫高");
+        assertInstanceOf(Tactic.Melee.class, decide(me(4, true, false), stuck, zombie(1, 3),
+                foe(2, 10, ThreatAssessment.Kind.RANGED, false, true)), "有骷髅在射：站高了更挨射，不垫");
+        Tactic.Memory perched = new Tactic.Memory(-1, false, true, Set.of(), false, false, true, true);
+        assertInstanceOf(Tactic.Melee.class, decide(me(4, true, false), perched, zombie(1, 3)), "已经在柱顶上：砍够得着的");
+    }
+
+    @Test
     void picksTheMostUrgentAndSticksToTheLockedOne() {
         // 近处的苦力怕比贴脸的僵尸还急。
         assertEquals(2, target(decide(me(20, true, false), Tactic.Memory.FRESH, zombie(1, 2), creeper(2, 6, false))));

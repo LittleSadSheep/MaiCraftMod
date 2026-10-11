@@ -62,6 +62,15 @@ class BattleTest {
         final List<GoalCompiler.Compiled> walks = new ArrayList<>();
         ActionStatus walkStatus = ActionStatus.progressed();
         BattleMoves.Posture posture = BattleMoves.Posture.GROUNDED;
+        boolean canPillar;
+        int pillars;
+
+        @Override public boolean canPillar(TickContext context) { return canPillar; }
+
+        @Override public Action pillarUp(TickContext context) {
+            pillars++;
+            return new Instant(ActionStatus::done);
+        }
 
         @Override public BattleMoves.Posture posture(TickContext context) { return posture; }
 
@@ -255,6 +264,28 @@ class BattleTest {
         assertTrue(Battle.meleeBand(me, player, false).inner() > 3.3);
         // 苦力怕守在点火距离（3 格）外砍。
         assertTrue(Battle.meleeBand(me, creeper(3.2, false), true).inner() > CombatGeometry.CREEPER_IGNITE);
+    }
+
+    @Test
+    void cornedAndOutmatchedPillarsUpThenStandsStillOnTop() {
+        Senses senses = new Senses();
+        senses.threats.add(zombie(1, 6));
+        senses.health = 4;
+        Moves moves = new Moves();
+        moves.walkStatus = ActionStatus.failed(Problem.of(Problem.Kind.UNREACHABLE, "死路"));
+        moves.canPillar = true;
+        Battle fight = battle(senses, moves);
+        for (int tick = 0; tick < 3; tick++) fight.tick(new Tick(tick));
+        assertTrue(fight.cornered());
+        Battle.Moment up = fight.tick(new Tick(3));
+        assertEquals(1, moves.pillars, "退无可退：就地垫高");
+        assertTrue(up.doing().contains("柱顶"), up.doing());
+        // 站在柱顶：僵尸贴上来也不挪脚，只砍够得着的。
+        senses.threats.set(0, zombie(1, 2.5));
+        moves.steps.clear();
+        fight.tick(new Tick(4));
+        assertTrue(moves.lastStep().standing(), "一挪就掉下去");
+        assertEquals(1, moves.strikes);
     }
 
     @Test

@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.combat;
 
+import java.util.HashMap;
+import java.util.Map;
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.Entity;
 
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
+import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
+import org.maiwithu.maicraft.behavior.navigation.ScaffoldBlocks;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
@@ -105,6 +110,53 @@ public final class LiveBattleMoves implements BattleMoves {
         var self = context.player() == null ? null : context.player().localPlayer();
         if (self == null || self.getMainHandItem().isEmpty()) return "空手";
         return BuiltInRegistries.ITEM.getKey(self.getMainHandItem().getItem()).toString();
+    }
+
+    @Override
+    public boolean canPillar(TickContext context) {
+        var self = context.player() == null ? null : context.player().localPlayer();
+        if (self == null || !self.level().isDay()) return false;
+        // 身上能拿去垫的废料够三块，头顶三格空着（垫上去不撞头）。
+        Map<String, Integer> carried = new HashMap<>();
+        for (var stack : self.getInventory().items) {
+            if (!stack.isEmpty()) carried.merge(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(), stack.getCount(), Integer::sum);
+        }
+        int blocks = 0;
+        for (String id : ScaffoldBlocks.usable(id -> carried.getOrDefault(id, 0), ItemsToKeep.NOTHING)) blocks += carried.get(id);
+        BlockPos feet = self.blockPosition();
+        for (int up = 2; up <= 4; up++) {
+            BlockPos cell = feet.above(up);
+            if (!self.level().getBlockState(cell).getCollisionShape(self.level(), cell).isEmpty()) return false;
+        }
+        return blocks >= 3;
+    }
+
+    @Override
+    public Action pillarUp(TickContext context) {
+        var self = context.player() == null ? null : context.player().localPlayer();
+        if (self == null || walks == null) return null;
+        // 交给走到：目标是脚下这一列往上三格，只垫不挖，寻路会原地起跳往脚下垫方块。
+        BlockPos top = self.blockPosition().above(3);
+        return new Action() {
+            private Action run;
+
+            @Override public ActionStatus tick(TickContext tick) {
+                if (run == null) run = walks.start(GoalCompiler.standOn(top), TerrainPermit.TEMPORARY);
+                return run.tick(tick);
+            }
+
+            @Override public void pause() {
+                if (run != null) run.pause();
+            }
+
+            @Override public void close() {
+                if (run != null) run.close();
+            }
+
+            @Override public String describe() {
+                return "就地往上垫三格";
+            }
+        };
     }
 
     @Override

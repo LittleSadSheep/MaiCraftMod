@@ -95,6 +95,11 @@ public final class Battle {
     /** 上一刻每只的距离：估它冲过来多快，拉弓的距离带按它留。 */
     private final Map<Integer, Double> lastDistance = new HashMap<>();
     private String doing = "观察战场";
+    /** 就地垫高：试过了没有（一仗只垫一次）、站没站上柱顶、柱顶多高。 */
+    private boolean pillarTried;
+    private boolean perched;
+    private double perchY;
+    private Action pillar;
     /** 连着想跳却没离地的刻数，与这之后不再试跳还剩多少刻。 */
     private int groundedJumps;
     private int noLeapTicks;
@@ -113,11 +118,20 @@ public final class Battle {
         Battlefield field = Battlefield.read(senses, moves, context,
                 retreating ? ThreatAssessment.FLEE_CLEAR_DISTANCE : radius, roster);
         if (retreating) retreat.noteChasers(field);
+        // 被打下柱顶（击退、柱子被炸）：不再算站在高处。
+        if (perched && field.me().y() < perchY - 0.5) perched = false;
+        boolean mayPillar = !pillarTried && cornered && moves.canPillar(context);
         Tactic.Plan plan = Tactic.decide(field, new Tactic.Memory(locked, retreating, cornered, unreachable,
-                bow.givenUp(), bow.shooting()));
+                bow.givenUp(), bow.shooting(), mayPillar || pillar != null, perched));
+        if (pillar != null && !(plan instanceof Tactic.PillarUp)) {
+            // 垫到一半处境变了（回了血、来了射手）：垫高收尾，按新打法来。
+            pillar.close();
+            pillar = null;
+        }
         Moment moment = switch (plan) {
             case Tactic.EvadeBlast evade -> evade(context, field, evade.bomb());
             case Tactic.Withdraw withdraw -> withdraw(context, field, withdraw.why());
+            case Tactic.PillarUp pillarUp -> pillarUp(context, field, pillarUp.why());
             case Tactic.Melee melee -> melee(context, field, melee.target());
             case Tactic.Shoot shoot -> shoot(context, field, shoot.target());
             case Tactic.KeepClear keep -> keepClear(context, field, keep.why());
@@ -137,8 +151,14 @@ public final class Battle {
         hazards.add(new Footwork.Hazard(bomb.threat().x(), bomb.threat().z(), bomb.blastClearance()));
         hazards.addAll(sideHazards(field, bomb.id(), 0));
         Footwork.Stance stance = new Footwork.Stance(null, hazards, true);
-        Footwork.Step step = Footwork.choose(me.x(), me.z(), stance, moves.ground(context));
         String what = "躲开点着引信的 " + bomb.threat().type();
+        if (perched) {
+            // 站在柱顶：跳下去更危险，原地举盾挡爆炸。
+            moves.step(context, bomb.id(), Footwork.Step.STAND);
+            moves.guard(context, bomb.distance(), false);
+            return new Moment(State.EVADING, what + "（在柱顶上举盾）", false, false, false, bomb.id(), null, cornered);
+        }
+        Footwork.Step step = Footwork.choose(me.x(), me.z(), stance, moves.ground(context));
         if (step.standing() && Footwork.exposed(me.x(), me.z(), stance)) {
             List<ThreatField.Threat> threats = new ArrayList<>(pathThreats(field, -1));
             threats.add(new ThreatField.Threat(bomb.threat().x(), bomb.threat().y(), bomb.threat().z(),
@@ -219,6 +239,30 @@ public final class Battle {
         return new Moment(State.RETREATING, "撤离：" + retreat.why(), moved, false, false, -1, retreat.why(), cornered);
     }
 
+    // 就地垫高：往上垫三格站到柱顶；垫不成就照旧背水一战，这一仗不再试。
+    private Moment pillarUp(TickContext context, Battlefield field, String why) {
+        dropStrike();
+        dropWalk();
+        bow.close();
+        if (pillar == null) {
+            pillarTried = true;
+            pillar = moves.pillarUp(context);
+            if (pillar == null) return new Moment(State.FIGHTING, "垫不了高，背水一战", false, false, false, -1, why, cornered);
+        }
+        ActionStatus status = pillar.tick(context);
+        if (status instanceof ActionStatus.Running running) {
+            return new Moment(State.FIGHTING, "就地往上垫", running.progressed(), false, false, -1, why, cornered);
+        }
+        pillar.close();
+        pillar = null;
+        if (status instanceof ActionStatus.Done) {
+            perched = true;
+            perchY = moves.selfPosition(context)[1];
+            return new Moment(State.FIGHTING, "垫高了三格，站在柱顶上打够得着的", true, false, false, -1, why, cornered);
+        }
+        return new Moment(State.FIGHTING, "垫不上去，背水一战", false, false, false, -1, why, cornered);
+    }
+
     // 近身打：手够得着就挥；脚近处按距离带挑步，远处交给寻路（带子 + 绕开每只怪）。
     private Moment melee(TickContext context, Battlefield field, Battlefield.Foe target) {
         if (bow.shooting()) bow.close();
@@ -248,7 +292,12 @@ public final class Battle {
         else moves.lowerGuard();
         Footwork.Band band = meleeBand(me, threat, me.attackReady());
         boolean moved;
-        if (near(me, threat, band.outer())) {
+        if (perched) {
+            // 站在柱顶：脚不动（一挪就掉下去），只砍够得着的。
+            dropWalk();
+            moves.step(context, target.id(), Footwork.Step.STAND);
+            moved = false;
+        } else if (near(me, threat, band.outer())) {
             dropWalk();
             Footwork.Step step = Footwork.choose(me.x(), me.z(),
                     new Footwork.Stance(band, sideHazards(field, target.id(), SIDE_MARGIN), false), moves.ground(context));
@@ -275,7 +324,7 @@ public final class Battle {
         CombatSenses.Threat threat = target.threat();
         boolean fired = bow.tick(context, moves, threat.entityId());
         boolean moved = false;
-        if (!bow.steady()) {
+        if (!bow.steady() && !perched) {
             double inner = bowInner(target);
             Footwork.Band band = new Footwork.Band(threat.x(), threat.z(), inner, inner + BOW_BAND_WIDTH);
             List<Footwork.Hazard> hazards = new ArrayList<>();
@@ -299,7 +348,7 @@ public final class Battle {
         bow.close();
         Battlefield.Me me = field.me();
         Battlefield.Foe nearest = nearestChaser(field);
-        Footwork.Step step = Footwork.choose(me.x(), me.z(),
+        Footwork.Step step = perched ? Footwork.Step.STAND : Footwork.choose(me.x(), me.z(),
                 new Footwork.Stance(null, sideHazards(field, -1, SIDE_MARGIN), false), moves.ground(context));
         moves.step(context, nearest == null ? -1 : nearest.id(), step);
         if (nearest != null) moves.guard(context, nearest.distance(), false);
@@ -437,10 +486,12 @@ public final class Battle {
         walkKey = null;
     }
 
-    /** 不打了：出手、寻路、拉了一半的弓都收尾，盾放下。 */
+    /** 不打了：出手、寻路、垫高、拉了一半的弓都收尾，盾放下。 */
     public void close() {
         dropStrike();
         dropWalk();
+        if (pillar != null) pillar.close();
+        pillar = null;
         bow.close();
         moves.lowerGuard();
     }
