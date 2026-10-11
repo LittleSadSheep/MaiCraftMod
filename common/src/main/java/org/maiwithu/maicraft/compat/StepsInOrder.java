@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.compat.create;
+package org.maiwithu.maicraft.compat;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -16,11 +16,11 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 几步按顺序做的一个动作：上一步做完才建下一步（下一步要按那一刻的现场建，例如点完第一根轴再看手里的东西），
  * 哪一步失败整个动作就按它的问题失败，后面的不做。装传送带"拿传送带 → 点第一根轴 → 点第二根轴"就是这样。
  */
-final class StepsInOrder implements Action {
+public final class StepsInOrder implements Action {
 
     /** 一步：给描述用的名字，和到时候才建的动作；建出 null 表示这一步此刻不用做。 */
-    record Step(String what, Supplier<Action> build) {
-        Step {
+    public record Step(String what, Supplier<Action> build) {
+        public Step {
             Objects.requireNonNull(what, "what");
             Objects.requireNonNull(build, "build");
         }
@@ -31,7 +31,7 @@ final class StepsInOrder implements Action {
     private Step step;
     private Action current;
 
-    StepsInOrder(String what, List<Step> steps) {
+    public StepsInOrder(String what, List<Step> steps) {
         this.what = Objects.requireNonNull(what, "what");
         this.left = new ArrayDeque<>(steps);
     }

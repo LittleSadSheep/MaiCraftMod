@@ -28,6 +28,7 @@ import org.maiwithu.maicraft.game.player.GearSlotName;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.compat.StepsInOrder;
 
 /**
  * 砂纸打磨当拿东西的一条途径（via=sandpaper）：要玫瑰石英磨成的磨制玫瑰石英这类东西时，

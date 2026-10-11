@@ -20,6 +20,8 @@ import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.compat.HandThenClick;
+import org.maiwithu.maicraft.compat.StepsInOrder;
 
 /**
  * 链条输送机之间的一条链：两台链条输送机，手持锁链先右键一台、再右键另一台；

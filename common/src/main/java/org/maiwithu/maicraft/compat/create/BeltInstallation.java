@@ -23,6 +23,8 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.maiwithu.maicraft.compat.HandThenClick;
+import org.maiwithu.maicraft.compat.StepsInOrder;
 
 /**
  * 传送带：两端各一根同轴向的轴，手持传送带先右键第一根、再右键第二根，Create 在两根轴之间铺出整条带

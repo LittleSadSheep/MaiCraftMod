@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.compat.HandThenClick;
 
 /**
  * 机械动力里"放东西的地方"怎么用：置物台手持东西右键顶面放上去一整叠（原有的先收回背包），空手右键顶面收回；

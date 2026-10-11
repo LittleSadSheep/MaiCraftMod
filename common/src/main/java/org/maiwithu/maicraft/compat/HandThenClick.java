@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.compat.create;
+package org.maiwithu.maicraft.compat;
 
 import java.util.Objects;
 import java.util.Optional;
@@ -24,7 +24,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * <p>手上要拿的东西由调用方给出办法（换到主手、腾空手）；已经备好时给空，直接走过去。
  * 走不到、点不中、等不到确认都把原因原样交回，不重点：游戏没确认的右键再点一次可能就是放了第二叠。
  */
-final class HandThenClick implements Action {
+public final class HandThenClick implements Action {
 
     private enum Stage { HAND, APPROACH, CLICK }
 
@@ -45,7 +45,7 @@ final class HandThenClick implements Action {
      * @param hand         备手的办法：给出要做的换手动作；手上已经对了给空
      * @param confirmation 出手前那一刻建确认条件：右键之后什么样才算做成（台上多了东西、手上少了东西）
      */
-    HandThenClick(PlayerServices services, String what, BlockPos cell, AABB face, Permissions permissions,
+    public HandThenClick(PlayerServices services, String what, BlockPos cell, AABB face, Permissions permissions,
             Supplier<Optional<Action>> hand, Supplier<InteractionConfirmation> confirmation) {
         this.services = Objects.requireNonNull(services, "services");
         this.what = Objects.requireNonNull(what, "what");

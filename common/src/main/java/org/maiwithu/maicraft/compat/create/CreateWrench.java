@@ -18,6 +18,7 @@ import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.compat.StepsInOrder;
 
 /**
  * 扳手拆机器：手持机械动力的扳手潜行右键一格 Create 的方块，它整块拆下、掉落物直接进背包，比挖快、不掉一地。
