@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat.create;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -89,6 +90,15 @@ class CreateShapesTest {
         assertTrue(ChainConveyorInstallation.shapeProblem(List.of(from, new BlockPos(40, 64, 0)),
                 Optional.of(32)).isPresent());
         assertTrue(ChainConveyorInstallation.shapeProblem(List.of(from), Optional.of(32)).isPresent());
+    }
+
+    @Test
+    void 第一下之后多出来的连接换回那一台的格子() {
+        BlockPos from = new BlockPos(0, 64, 0);
+        Set<BlockPos> before = Set.of(new BlockPos(4, 0, 0));
+        Set<BlockPos> after = Set.of(new BlockPos(4, 0, 0), new BlockPos(0, 0, -6));
+        assertEquals(List.of(new BlockPos(0, 64, -6)), ChainConveyorInstallation.newLinks(from, before, after));
+        assertTrue(ChainConveyorInstallation.newLinks(from, before, before).isEmpty());
     }
 
     @Test
