@@ -84,15 +84,22 @@ public interface VehicleDriver {
      * @param pressed  按下去了（输入发出去了）
      * @param released 松开了
      * @param response 一句话的反应：扣掉按之前的漂移，沿结构自己的轴挪了多少、转了多少；没按为空串
+     * @param effect   同一件事的数：沿结构自己的轴挪了多少、绕它们转了多少度；没按为 null
      * @param note     没按或中途停的原因；照常为空串
      * @param samples  每 5 刻的样本
      */
-    record Tried(String control, int ticks, boolean pressed, boolean released, String response, String note,
-                 List<Sample> samples) {
+    record Tried(String control, int ticks, boolean pressed, boolean released, String response, Effect effect,
+                 String note, List<Sample> samples) {
         public Tried {
             samples = List.copyOf(samples);
         }
     }
+
+    /**
+     * 按一个输入的效果，已经扣掉按之前的漂移：沿结构自己的 x、y、z 轴挪了多少格，绕它们各转了多少度。
+     * 结构自己的轴就是组装那一刻的世界轴。
+     */
+    record Effect(double x, double y, double z, double turnX, double turnY, double turnZ) {}
 
     /**
      * 一次驾驶的经过：动作成没成（按了没有、松开没有）和载具怎么动分开写。

@@ -48,6 +48,7 @@ import org.maiwithu.maicraft.ability.light.LightModule;
 import org.maiwithu.maicraft.ability.obtain.ObtainAbility;
 import org.maiwithu.maicraft.ability.vehicle.VehicleAssembleModule;
 import org.maiwithu.maicraft.ability.vehicle.VehicleDriveModule;
+import org.maiwithu.maicraft.ability.vehicle.api.VehicleControls;
 import org.maiwithu.maicraft.ability.quest.QuestModule;
 import org.maiwithu.maicraft.ability.remember.RememberAbility;
 import org.maiwithu.maicraft.ability.sequence.SequenceModule;
@@ -428,7 +429,7 @@ public final class AbilityCatalog {
                 deps.worldDocuments(), deps.worldKey(),
                 anchors(deps), Optional.of(designs), construction, deps.machineBlockLimits(),
                 deps.compat().placementRules(), deps.compat().itemSettings(shared.playerServices()),
-                new MachineVehicles(deps.compat().vehicleReaders(shared.playerServices()),
+                new MachineVehicles(deps.compat().vehicleReaders(shared.playerServices()), vehicleControls(deps),
                         id -> deps.scene().seen().structureOf(id)))) {
             registry.register(module);
         }
@@ -550,7 +551,15 @@ public final class AbilityCatalog {
                         : deps.context().get().localPlayer().blockPosition()));
         // 驾驶载具：坐上驾驶座接管控制件试按；不在车上先经出行上车，观察编号 s# 同样从场景的编号表换成结构身份。
         registry.register(new VehicleDriveModule(deps.compat().vehicleDrivers(services),
+                deps.compat().vehicleReaders(services), vehicleControls(deps),
                 new SceneSeenTargets(deps::scene), id -> deps.scene().seen().structureOf(id)));
+    }
+
+    /**
+     * 操纵表：按结构身份存在这个世界的文档库里。它不留状态，机器能力（看、改）与驾驶能力各拿一份读写同一处。
+     */
+    private static VehicleControls vehicleControls(Deps deps) {
+        return new VehicleControls(deps.worldDocuments(), deps.worldKey());
     }
 
     /** 聊天能力的一份：命令的完成依据（提交后聊天栏冒出的反馈行）与聊天回显同出一个聊天栏日志。 */

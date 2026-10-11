@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.ability.vehicle;
 
 import java.util.List;
 
+import org.maiwithu.maicraft.ability.vehicle.api.VehicleControls;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleDriver;
 import org.maiwithu.maicraft.kernel.result.ResultDetails;
 
@@ -15,16 +16,17 @@ import org.maiwithu.maicraft.kernel.result.ResultDetails;
  * @param released     本次按下的键都松开了
  * @param disconnected 控制件交还了
  * @param note         经过一句话
+ * @param controlMap   这次试按后的操纵表（推出来的、试过的、LLM 定的合在一起，带缺的必需角色）；没记为 null
  */
 record VehicleDriveDetails(String vehicle, String seat, List<VehicleDriver.Tried> inputs, boolean released,
-        boolean disconnected, String note) implements ResultDetails {
+        boolean disconnected, String note, VehicleControls.ControlMap controlMap) implements ResultDetails {
 
     VehicleDriveDetails {
         inputs = List.copyOf(inputs);
     }
 
-    static VehicleDriveDetails of(VehicleDriver.Report report) {
+    static VehicleDriveDetails of(VehicleDriver.Report report, VehicleControls.ControlMap controlMap) {
         return new VehicleDriveDetails(report.structureId(), report.seat(), report.tried(), report.released(),
-                report.disconnected(), report.note());
+                report.disconnected(), report.note(), controlMap);
     }
 }

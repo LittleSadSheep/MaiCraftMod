@@ -13,7 +13,9 @@ import com.google.gson.JsonObject;
 import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.ability.travel.api.TravelSteps;
+import org.maiwithu.maicraft.ability.vehicle.api.VehicleControls;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleDriver;
+import org.maiwithu.maicraft.ability.vehicle.spi.VehicleReader;
 import org.maiwithu.maicraft.behavior.travel.ReadsSeenTargets;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
@@ -48,13 +50,21 @@ public final class VehicleDriveModule implements AbilityModule {
     static final int MAX_INPUTS = 16;
 
     private final List<VehicleDriver> drivers;
+    private final List<VehicleReader> readers;
+    private final VehicleControls controls;
     private final ReadsSeenTargets seen;
     private final Function<String, Optional<String>> structures;
 
-    /** @param structures 观察编号 s# 换成结构身份 */
-    public VehicleDriveModule(List<VehicleDriver> drivers, ReadsSeenTargets seen,
-            Function<String, Optional<String>> structures) {
+    /**
+     * @param readers    读载具的办法：试按后认角色要知道种类
+     * @param controls   操纵表：试按认出的角色记进去
+     * @param structures 观察编号 s# 换成结构身份
+     */
+    public VehicleDriveModule(List<VehicleDriver> drivers, List<VehicleReader> readers, VehicleControls controls,
+            ReadsSeenTargets seen, Function<String, Optional<String>> structures) {
         this.drivers = List.copyOf(drivers);
+        this.readers = List.copyOf(readers);
+        this.controls = Objects.requireNonNull(controls, "controls");
         this.seen = Objects.requireNonNull(seen, "seen");
         this.structures = Objects.requireNonNull(structures, "structures");
     }
@@ -146,7 +156,8 @@ public final class VehicleDriveModule implements AbilityModule {
     }
 
     @Override public void registerTasks(TaskFactories factories) {
-        factories.register(VehicleDriveInput.class, input -> new VehicleDriveTask(input.request(), drivers));
+        factories.register(VehicleDriveInput.class, input -> new VehicleDriveTask(input.request(), drivers, readers,
+                controls));
     }
 
     private static StepDecision invalid(String why) {

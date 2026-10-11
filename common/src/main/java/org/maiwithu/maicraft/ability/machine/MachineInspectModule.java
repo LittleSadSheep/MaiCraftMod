@@ -85,6 +85,6 @@ final class MachineInspectModule implements AbilityModule {
 
     @Override public void registerTasks(TaskFactories factories) {
         factories.register(MachineInspectInput.class, input -> new MachineInspectTask(input, services));
-        factories.register(VehicleInspectTask.Input.class, input -> new VehicleInspectTask(input, vehicles.readers()));
+        factories.register(VehicleInspectTask.Input.class, input -> new VehicleInspectTask(input, vehicles));
     }
 }

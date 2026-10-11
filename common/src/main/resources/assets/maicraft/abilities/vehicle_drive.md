@@ -23,6 +23,7 @@
 3. 空手右键无线红石打字机接管，等服务器把它点亮（最多 10 秒）。已经被别人用着就不抢，照实结束。
 4. 每条输入：先什么都不按看 8 刻（记下本来的漂移）→ 按住给定刻数 → 松开再看 10 刻（从按键到收端、到桨叶转起来有延迟）；每 5 刻记一次结构挪了多少、转了多少。
 5. 全部按完交还无线红石打字机（和真人按 Esc 一样）。
+6. 按每条的效果认出角色记进操纵表（试过的）：绕竖轴转得最明显是偏航（车是转向），升降最明显是升力或下降，平着挪最明显是动力——车头还没定就把这个方向当车头，定了反着走是倒车；车头定了时斜了是俯仰或横滚；都太小记 `none`。你用 machine_configure 定过的那条不改。中途失败时已经按过的照样写进结果，但不记进操纵表。
 
 ## 边界与注意
 
@@ -34,4 +35,4 @@
 
 ## 结果
 
-结果细节：`vehicle`（结构身份）、`seat`（怎么坐的）、`inputs`（每条：`control`、`ticks`、`pressed` 按下去了、`released` 松开了、`response` 一句话的反应、`note` 没按或中途停的原因、`samples` 每 5 刻的 `tick`、`held`、`dx`、`dy`、`dz`、`turn_x`、`turn_y`、`turn_z`）、`released`（本次按下的键都松开了）、`disconnected`（无线红石打字机交还了）、`note`（经过一句话）。
+结果细节：`vehicle`（结构身份）、`seat`（怎么坐的）、`inputs`（每条：`control`、`ticks`、`pressed` 按下去了、`released` 松开了、`response` 一句话的反应、`effect` 同一件事的数（沿结构自己的 `x`、`y`、`z` 挪了几格，`turn_x`、`turn_y`、`turn_z` 转了几度，已扣掉漂移）、`note` 没按或中途停的原因、`samples` 每 5 刻的 `tick`、`held`、`dx`、`dy`、`dz`、`turn_x`、`turn_y`、`turn_z`）、`control_map`（试按后的整张操纵表与还缺的必需角色，同 machine_inspect）、`released`（本次按下的键都松开了）、`disconnected`（无线红石打字机交还了）、`note`（经过一句话）。

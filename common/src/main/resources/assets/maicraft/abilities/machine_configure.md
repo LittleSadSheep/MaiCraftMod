@@ -2,6 +2,8 @@
 
 改身上物品自己的设置（机械动力的过滤器、属性过滤器写规则）时给 `item`（物品 ID），不看 target：身上有几件时 `inventory_slot` 指改第几格那件（0~35，副手 40），不给改第一件。角色把那件拿到主手、右键打开它自己的界面、逐项改、关上；关上后读主手那件的数据核对，结果写明改的是原来哪一格那件（`changed`），改完它在主手。能写哪些键先 machine_inspect(item=...) 看。
 
+target 给物理结构的观察编号 `s#` 时改的是这辆载具的**操纵表**（不碰方块）：settings 的键写输入（`打字机:W`，取自 machine_inspect 的 `controls`）、值写角色——power 动力 / reverse 倒车 / brake 刹车 / lift 升力 / descend 下降 / yaw_left、yaw_right 左右偏航 / pitch_up、pitch_down 抬头低头 / roll_left、roll_right 左右横滚 / steer_left、steer_right 左右转向（车）/ none 不用它；键 `forward` 写车头朝结构自己的哪根水平轴（`+x` / `-x` / `+z` / `-z`，造的时候朝南那头是 `+z`）。你定的以你为准，之后试按不会盖掉；结果的 `control_map` 是合上推出来的、试过的之后的整张表，`missing` 写开这一类载具还缺哪个必需角色（飞艇要动力、升力、偏航，车要动力、转向，船要动力、偏航）。
+
 ## 结果怎么读
 
 - `applied[]`：每项的改前值与改后读回的值；本来就是要求的值也列出来，没有动手。

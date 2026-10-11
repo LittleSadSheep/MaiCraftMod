@@ -18,6 +18,7 @@ import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
 import org.maiwithu.maicraft.kernel.ability.Listing;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
+import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.TargetKind;
 import org.maiwithu.maicraft.kernel.param.ParamSpec;
 import org.maiwithu.maicraft.kernel.param.ParamSpecs;
@@ -35,6 +36,7 @@ import org.maiwithu.maicraft.kernel.task.TaskFactories;
 final class MachineConfigureModule implements AbilityModule {
 
     private final MachineServices services;
+    private final MachineVehicles vehicles;
     private final AbilitySpec spec = new AbilitySpec(
             ModIdentity.MOD_ID + ":machine_configure",
             "改一台机器的设置：侧面、过滤、模式、样板（按已装模组的机器类型）",
@@ -53,8 +55,9 @@ final class MachineConfigureModule implements AbilityModule {
             List.of(),
             Listing.LISTED);
 
-    MachineConfigureModule(MachineServices services) {
+    MachineConfigureModule(MachineServices services, MachineVehicles vehicles) {
         this.services = services;
+        this.vehicles = vehicles;
     }
 
     @Override public AbilitySpec spec() {
@@ -82,6 +85,10 @@ final class MachineConfigureModule implements AbilityModule {
                     .problem(Problem.of(Problem.Kind.INVALID_PARAMETER,
                             "settings 要是至少一项的对象，例如 {\"side.north\": \"output:items\"}")).build());
         }
+        // 指结构的观察编号 s#：改这辆载具的操纵表（每个输入的角色、车头朝哪），只写表，不碰方块。
+        if (step.goal().target() instanceof Target.Seen seen && seen.id().startsWith("s")) {
+            return VehicleControlsTask.decide(seen.id(), settings, vehicles);
+        }
         // 给了 item：改身上那件物品自己的设置（过滤器、属性过滤器），不碰 target 指的方块。
         if (step.goal().params().has("item")) {
             Integer slot = step.goal().params().has("inventory_slot")
@@ -97,5 +104,6 @@ final class MachineConfigureModule implements AbilityModule {
         factories.register(MachineConfigureInput.class, input -> new MachineConfigureTask(input, services));
         // 身上物品的设置：看（machine_inspect 给 item）与改共用一个任务。
         factories.register(ItemSettingsTask.Input.class, input -> new ItemSettingsTask(input, services));
+        factories.register(VehicleControlsTask.Input.class, input -> new VehicleControlsTask(input, vehicles));
     }
 }

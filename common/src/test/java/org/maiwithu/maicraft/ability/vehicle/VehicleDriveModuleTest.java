@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 
@@ -12,6 +13,7 @@ import com.google.gson.JsonParser;
 
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.ability.travel.JourneyInput;
+import org.maiwithu.maicraft.ability.vehicle.api.VehicleControls;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleDriver;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -20,10 +22,14 @@ import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
+import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /** 驾驶能力的决定：参数逐条核对；不在车上先跑一趟出行再回来；走过去还够不着如实结束；在车上就交给驾驶办法。 */
 class VehicleDriveModuleTest {
+
+    /** 测试里不会真去读写操纵表（决定阶段不碰它）。 */
+    private static final VehicleControls CONTROLS = new VehicleControls(new DocumentStore(Path.of("build", "unused.db")), "w");
 
     private static final String TEST = "{\"vehicle\":\"s3\",\"operation\":\"test\",\"inputs\":[{\"control\":\"打字机:W\",\"ticks\":20}]}";
 
@@ -36,7 +42,7 @@ class VehicleDriveModuleTest {
     }
 
     private static VehicleDriveModule module(List<VehicleDriver> drivers) {
-        return new VehicleDriveModule(drivers, id -> Optional.of(WorldPosition.here(5, 70, 5)),
+        return new VehicleDriveModule(drivers, List.of(), CONTROLS, id -> Optional.of(WorldPosition.here(5, 70, 5)),
                 id -> id.equals("s3") ? Optional.of("ship-uuid") : Optional.empty());
     }
 

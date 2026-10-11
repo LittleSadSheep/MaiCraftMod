@@ -199,7 +199,7 @@ final class TypewriterTrial implements VehicleDriver.Run {
         Planned input = planned.get(index);
         String skip = skipReason(input);
         if (skip != null) {
-            tried.add(new VehicleDriver.Tried(input.control(), input.ticks(), false, true, "", skip, List.of()));
+            tried.add(new VehicleDriver.Tried(input.control(), input.ticks(), false, true, "", null, skip, List.of()));
             index++;
             return go(Step.NEUTRAL, now);
         }
@@ -233,8 +233,9 @@ final class TypewriterTrial implements VehicleDriver.Run {
         boolean last = now - stepStart >= AFTER_TICKS;
         if ((now - pressedAt) % SAMPLE_EVERY == 0 || last) sample(now, false);
         if (!last) return ActionStatus.running();
+        VehicleDriver.Effect effect = effect(now - pressedAt);
         tried.add(new VehicleDriver.Tried(input.control(), input.ticks(), true, true,
-                response(now - pressedAt), "", samples));
+                response(effect, now - pressedAt), effect, "", samples));
         index++;
         return go(Step.NEUTRAL, now);
     }
@@ -275,20 +276,26 @@ final class TypewriterTrial implements VehicleDriver.Run {
                 round(change.turnDegrees().y, 10), round(change.turnDegrees().z, 10)));
     }
 
-    // 一句话的反应：扣掉按之前那 8 刻的漂移，沿结构自己的轴挪了多少、绕哪根轴转了多少；太小的不提。
-    private String response(long elapsed) {
+    // 这一条的效果：从按下到松开后看完，扣掉按之前那 8 刻的漂移，沿结构自己的轴挪了多少、绕它们转了多少。
+    private VehicleDriver.Effect effect(long elapsed) {
         StructureGeometry.Change total = StructureGeometry.change(pressPose, lastPose);
         StructureGeometry.Change drift = StructureGeometry.change(neutralPose, pressPose);
         double scale = (double) elapsed / NEUTRAL_TICKS;
         Vec3 moved = total.alongOwnAxes().subtract(drift.alongOwnAxes().scale(scale));
         Vec3 turned = total.turnDegrees().subtract(drift.turnDegrees().scale(scale));
+        return new VehicleDriver.Effect(round(moved.x, 100), round(moved.y, 100), round(moved.z, 100),
+                round(turned.x, 10), round(turned.y, 10), round(turned.z, 10));
+    }
+
+    // 一句话的反应：沿结构自己的轴挪了多少、绕哪根轴转了多少；太小的不提。
+    private static String response(VehicleDriver.Effect effect, long elapsed) {
         List<String> parts = new ArrayList<>();
-        axis(parts, "沿结构 ", "x", moved.x, 0.1, " 格");
-        axis(parts, "沿结构 ", "y", moved.y, 0.1, " 格");
-        axis(parts, "沿结构 ", "z", moved.z, 0.1, " 格");
-        axis(parts, "绕结构 ", "x 轴", turned.x, 0.5, "°");
-        axis(parts, "绕结构 ", "y 轴", turned.y, 0.5, "°");
-        axis(parts, "绕结构 ", "z 轴", turned.z, 0.5, "°");
+        axis(parts, "沿结构 ", "x", effect.x(), 0.1, " 格");
+        axis(parts, "沿结构 ", "y", effect.y(), 0.1, " 格");
+        axis(parts, "沿结构 ", "z", effect.z(), 0.1, " 格");
+        axis(parts, "绕结构 ", "x 轴", effect.turnX(), 0.5, "°");
+        axis(parts, "绕结构 ", "y 轴", effect.turnY(), 0.5, "°");
+        axis(parts, "绕结构 ", "z 轴", effect.turnZ(), 0.5, "°");
         String text = parts.isEmpty() ? "看不出动（挪不到 0.1 格、转不到 0.5°）" : String.join("，", parts);
         return text + "（" + elapsed + " 刻内，已扣掉按之前的漂移）";
     }

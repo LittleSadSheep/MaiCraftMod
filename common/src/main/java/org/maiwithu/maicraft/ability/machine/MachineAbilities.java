@@ -71,7 +71,7 @@ public final class MachineAbilities {
                 new LiveMachineInteractions(interactions), seenTargets, places, blockLimits, placementRules, itemSettings);
         MachineArchives archives = new MachineArchives(worldDocuments, worldKey);
         return List.of(new MachineInspectModule(services, archives, vehicles), new MachineReviewModule(services, designs),
-                new MachineConfigureModule(services), new MachineRunModule(services),
+                new MachineConfigureModule(services, vehicles), new MachineRunModule(services),
                 new MachineBuildModule(services, archives, anchors, designs, memory, construction),
                 new MachineConnectModule(services, archives, memory, construction));
     }
