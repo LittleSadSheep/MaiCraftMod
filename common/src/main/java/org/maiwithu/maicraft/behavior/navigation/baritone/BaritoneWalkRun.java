@@ -283,6 +283,9 @@ final class BaritoneWalkRun implements WalkRun {
         boolean sneak = input.isInputForcedDown(Input.SNEAK);
         boolean sprint = input.isInputForcedDown(Input.SPRINT);
         PlayerInput playerInput = context.input();
+        // 走不通：把起点那几格、手边的垫料、许可与附近的岩浆补进问题，LLM 据此调整，而不是只拿到一句"没有路"。
+        progress.explainFailure(problem -> WalkFailureFacts.enrich(problem, context.level(), player, permit,
+                owner.spareScaffold(player)));
         if (progress.done()) {
             // 运行结束：停挖、交还没等到确认的右键，松开全部按键，把身体交回给下一个动作或玩家。
             clicks.stop(context);

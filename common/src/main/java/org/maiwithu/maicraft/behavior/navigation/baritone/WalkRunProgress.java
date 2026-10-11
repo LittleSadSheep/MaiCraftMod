@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.navigation.baritone;
 
 import java.util.Objects;
+import java.util.function.UnaryOperator;
 
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.behavior.navigation.WalkArrival;
@@ -33,6 +34,8 @@ final class WalkRunProgress {
     private WalkReport report = WalkReport.planning();
     private boolean crossedWater;
     private boolean stopRequested;
+    /** 走不通的问题补过现场没有。 */
+    private boolean failureExplained;
 
     WalkRunProgress(NavGoal goal) {
         // 没有目标就无从判断到没到：这是调用方的程序错误，建的时候就拒绝，不在走的路上兜底。
@@ -72,6 +75,13 @@ final class WalkRunProgress {
     void fail(Problem problem, BlockPos feet) {
         if (done()) return;
         report = WalkReport.failed(problem, feet, crossedWater);
+    }
+
+    /** 已经走不通了：把问题换成补了现场的那一份；只补一次，后面的观察不再改它。 */
+    void explainFailure(UnaryOperator<Problem> explain) {
+        if (report.state() != WalkReport.State.FAILED || failureExplained) return;
+        failureExplained = true;
+        report = WalkReport.failed(explain.apply(report.problem()), report.feet(), report.crossedWater());
     }
 
     boolean done() {

@@ -11,6 +11,7 @@ import baritone.api.event.listener.AbstractGameEventListener;
 import baritone.behavior.PathingBehavior;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -222,6 +223,15 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
     private void chooseScaffold(PlayerContext context) {
         LocalPlayer self = context.localPlayer();
         if (self == null) return;
+        List<Item> usable = new ArrayList<>();
+        for (String itemId : spareScaffold(self).keySet()) {
+            usable.add(BuiltInRegistries.ITEM.get(ResourceLocation.parse(itemId)));
+        }
+        BaritoneAPI.getSettings().acceptableThrowawayItems.value = usable;
+    }
+
+    /** 手边能拿去垫的料，按先垫后垫排：件数是身上的减去正要用的；走不通时也拿它说手边有什么。 */
+    Map<String, Integer> spareScaffold(LocalPlayer self) {
         Map<String, Integer> carried = new HashMap<>();
         List<ItemStack> stacks = new ArrayList<>(self.getInventory().items);
         stacks.addAll(self.getInventory().offhand);
@@ -229,11 +239,11 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
             if (stack.isEmpty()) continue;
             carried.merge(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(), stack.getCount(), Integer::sum);
         }
-        List<Item> usable = new ArrayList<>();
+        Map<String, Integer> spare = new LinkedHashMap<>();
         for (String itemId : ScaffoldBlocks.usable(itemId -> carried.getOrDefault(itemId, 0), keeps)) {
-            usable.add(BuiltInRegistries.ITEM.get(ResourceLocation.parse(itemId)));
+            spare.put(itemId, carried.getOrDefault(itemId, 0) - keeps.keep(itemId));
         }
-        BaritoneAPI.getSettings().acceptableThrowawayItems.value = usable;
+        return spare;
     }
 
     private void engineWorld(IBaritone baritone, ClientLevel current) {

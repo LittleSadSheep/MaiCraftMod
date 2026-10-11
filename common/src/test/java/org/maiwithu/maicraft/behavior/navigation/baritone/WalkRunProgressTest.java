@@ -123,6 +123,23 @@ class WalkRunProgressTest {
     }
 
     @Test
+    void aFailureIsExplainedWithSiteFactsExactlyOnce() {
+        var progress = progressExact();
+        // 还在路上时没有失败可解释，补现场不改结果。
+        progress.observe(seen(ELSEWHERE, true, false, true, false));
+        progress.explainFailure(problem -> Problem.of(problem.kind(), "不该出现", null));
+        assertEquals(WalkReport.State.ON_THE_WAY, progress.report().state());
+        // 走不通后补一次现场：种类、位置不变，消息与建议换成补过的；第二次不再叠加。
+        progress.observe(seen(ELSEWHERE, true, false, false, true));
+        progress.explainFailure(problem -> Problem.of(problem.kind(), problem.message() + "；现场", "换条路"));
+        progress.explainFailure(problem -> Problem.of(problem.kind(), problem.message() + "；又一遍", null));
+        assertEquals(Problem.Kind.UNREACHABLE, progress.report().problem().kind());
+        assertEquals("没有能走到目标的路线；现场", progress.report().problem().message());
+        assertEquals("换条路", progress.report().problem().suggestion());
+        assertEquals(ELSEWHERE, progress.report().feet());
+    }
+
+    @Test
     void externalFailureIsRecordedOnlyOnce() {
         var progress = progressExact();
         progress.observe(seen(ELSEWHERE, true, false, true, false));
