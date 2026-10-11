@@ -18,7 +18,8 @@ import java.util.Locale;
 /**
  * observe(scene) 的样子：周围有什么、在哪个方位、多远，每样东西带观察编号，LLM 可以直接指着它下指令。
  *
- * <p>列表是完整的：场景模型给多少就交多少，数量很大时由场景模型在速写里按远近分组，这里不截断。
+ * <p>实体按场景模型的规矩交：敌对的、盯着角色的、有名字的、玩家逐只列，其他的只列三十二格以内，
+ * 远处的在 distant_entities 里按种类报只数。速写只是一句总览，不逐条复述列表。
  * 方位同时给相对朝向（前方、左侧……）和东南西北，LLM 用哪个说都行。
  */
 public final class SceneView {
@@ -38,8 +39,14 @@ public final class SceneView {
         }
         json.addProperty("summary", scene.summary());
         JsonArray entities = new JsonArray();
-        scene.entities().forEach(entity -> entities.add(entity(entity)));
+        scene.listedEntities().forEach(entity -> entities.add(entity(entity)));
         json.add("entities", entities);
+        // 远处不相干的只按种类计数：种类 → 只数。
+        if (!scene.distantCounts().isEmpty()) {
+            JsonObject distant = new JsonObject();
+            scene.distantCounts().forEach(distant::addProperty);
+            json.add("distant_entities", distant);
+        }
         JsonArray heard = new JsonArray();
         scene.heard().forEach(sound -> heard.add(sound(sound)));
         json.add("heard", heard);

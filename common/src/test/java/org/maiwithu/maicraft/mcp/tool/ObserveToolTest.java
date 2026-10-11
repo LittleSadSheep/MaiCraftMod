@@ -152,7 +152,11 @@ class ObserveToolTest {
         assertTrue(zombie.get("targeting_me").getAsBoolean());
         assertEquals("minecraft:chest", view.getAsJsonArray("facilities").get(0).getAsJsonObject()
                 .get("block").getAsString());
-        assertTrue(view.get("summary").getAsString().contains("e1"));
+        // 速写只是一句总览：数得出敌对、盯着角色的有几只，编号和方位只在列表里出现一次。
+        String summary = view.get("summary").getAsString();
+        assertTrue(summary.contains("盯着你的 1 只"), summary);
+        assertFalse(summary.contains("e1"), summary);
+        assertFalse(view.has("distant_entities"), "没有远处只计数的就不给这一栏");
     }
 
     @Test

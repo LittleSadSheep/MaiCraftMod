@@ -17,13 +17,15 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
  * 编号由 {@link #expire} 报失效，最后一次方位一并交代。亲眼看到的设施与产地顺路
  * 写进世界记忆，来源标"亲眼看到"；没见过的东西不写。
  *
- * <p>列表永远完整：数量真的很大时，速写里按远近分档给出总数，视图本身不截断——
- * 中间层悄悄删掉的每一条都可能是决策事实。
+ * <p>场景的列表永远完整；observe 交出去时，敌对的、盯着角色的、有名字的、玩家都逐只列，
+ * 其他的只列三十二格以内，远处的按种类报只数（所有者 10-11 定：一百多格外的蝙蝠、鱿鱼全列出来，
+ * 一次观察近三万字）。没列的也不是悄悄删掉：只数照报，要找用 find。
  */
 public final class Scene {
 
-    /** 实体多到这个数以上，速写就按远近分档报总数；结构化列表仍然全量。 */
-    public static final int GROUP_THRESHOLD = 40;
+    /** 不敌对、没名字的实体在这么远以内才逐只列出来，再远只按种类计数。 */
+    public static final int LISTED_RADIUS = 32;
+    private static final String PLAYER = "minecraft:player";
 
     private final SeenRegistry ids = new SeenRegistry();
     private final RemembersSightings memory;
@@ -216,62 +218,59 @@ public final class Scene {
     }
 
     /**
-     * 方位速写：按固定方位顺序，每个方位一行，写清这一方位上有什么。
-     * 和结构化视图出自同一份数据，可以直接复述给人听；实体太多时按远近分档报总数。
+     * observe 列出来的实体：敌对的、盯着角色的、有名字的、玩家，不论远近都列；其他的只列三十二格以内。
+     * 远处不相干的蝙蝠、鱿鱼、掉落物只按种类计数（见 {@link #distantCounts}），要找哪一种用 find。
+     * 场景自己的实体列表仍然完整，战斗、跟随、找东西照常从里面认编号。
+     */
+    public List<SceneEntity> listedEntities() {
+        return entities.stream().filter(Scene::listed).toList();
+    }
+
+    /** 没列出来的远处实体：种类 → 只数，多的在前。 */
+    public Map<String, Integer> distantCounts() {
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        for (SceneEntity entity : entities) {
+            if (!listed(entity)) counts.merge(entity.type(), 1, Integer::sum);
+        }
+        Map<String, Integer> sorted = new LinkedHashMap<>();
+        counts.entrySet().stream()
+                .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
+                .forEach(entry -> sorted.put(entry.getKey(), entry.getValue()));
+        return sorted;
+    }
+
+    // 要逐只列出来的：会威胁角色的、有主的、别的玩家，或者就在近处的。
+    private static boolean listed(SceneEntity entity) {
+        return entity.hostile() || entity.targetingMe() || entity.name() != null
+                || PLAYER.equals(entity.type()) || entity.distance() <= LISTED_RADIUS;
+    }
+
+    /**
+     * 一句话总览：附近列出几个实体（几只敌对、几只盯着角色）、几处设施、几处地形、听见几种声音，远处只计数的有几只。
+     * 每一条的方位、距离、编号都在结构化列表里，这里不再逐条复述——同样的内容写两遍只白占上下文。
      */
     public String summary() {
         if (self == null) {
             return "还没看清自己的位置。";
         }
-        Map<String, List<String>> byDirection = new LinkedHashMap<>();
-        for (String word : DirectionWords.relativeOrder()) {
-            byDirection.put(word, new ArrayList<>());
+        List<SceneEntity> listed = listedEntities();
+        long hostile = listed.stream().filter(SceneEntity::hostile).count();
+        long targeting = listed.stream().filter(SceneEntity::targetingMe).count();
+        List<String> parts = new ArrayList<>();
+        if (!listed.isEmpty()) {
+            String danger = hostile == 0 ? "" : "（敌对 " + hostile + " 只" + (targeting == 0 ? "" : "，盯着你的 " + targeting + " 只") + "）";
+            parts.add("附近列出 " + listed.size() + " 个实体" + danger);
         }
-        for (SceneEntity entity : entities) {
-            byDirection.get(entity.direction())
-                    .add("%s（%s，%d格）".formatted(entity.id(), entity.type(), entity.distance()));
+        if (!facilities.isEmpty()) parts.add("设施 " + facilities.size() + " 处");
+        if (!features.isEmpty()) parts.add("地形 " + features.size() + " 处");
+        if (!heard.isEmpty()) parts.add("听见 " + heard.size() + " 种声音");
+        int distant = distantCounts().values().stream().mapToInt(Integer::intValue).sum();
+        if (distant > 0) {
+            parts.add(LISTED_RADIUS + " 格外另有 " + distant + " 个不相干的只按种类计数（distant_entities），要找哪一种用 find");
         }
-        for (TerrainFeature feature : features) {
-            byDirection.get(feature.direction())
-                    .add("%s（%s，%d格）".formatted(feature.id(), feature.kind(), feature.distance()));
-        }
-        for (FacilitySighting facility : facilities) {
-            byDirection.get(facility.direction())
-                    .add("%s（%s，%d格）".formatted(facility.id(), facility.blockType(), facility.distance()));
-        }
-        for (HeardSound sound : heard) {
-            List<String> line = byDirection.get(sound.direction());
-            if (line != null) {
-                line.add("听见%s（%s）".formatted(sound.kind(), sound.nearness()));
-            }
-        }
-        StringBuilder text = new StringBuilder();
-        for (Map.Entry<String, List<String>> line : byDirection.entrySet()) {
-            if (line.getValue().isEmpty()) {
-                continue;
-            }
-            text.append(line.getKey()).append("：").append(String.join("；", line.getValue())).append("。\n");
-        }
-        if (entities.size() > GROUP_THRESHOLD) {
-            text.append("实体太多，按远近计：").append(countByDistance()).append("；上面的列表仍按条目全量给出。\n");
-        }
-        if (text.isEmpty()) {
+        if (parts.isEmpty()) {
             return "四周没什么可看的。";
         }
-        return text.toString();
-    }
-
-    // 按远近档位数一遍实体，给出"很近几只、近处几只"这样的总数；只数一遍，不重复列条目。
-    private String countByDistance() {
-        Map<String, Integer> counts = new LinkedHashMap<>();
-        for (SceneEntity entity : entities) {
-            String band = DirectionWords.distanceWord(entity.distance());
-            counts.merge(band, 1, Integer::sum);
-        }
-        List<String> parts = new ArrayList<>();
-        for (Map.Entry<String, Integer> count : counts.entrySet()) {
-            parts.add(count.getKey() + count.getValue() + "只");
-        }
-        return "共" + entities.size() + "只：" + String.join("，", parts);
+        return String.join("；", parts) + "。方位、距离、编号见各列表。";
     }
 }

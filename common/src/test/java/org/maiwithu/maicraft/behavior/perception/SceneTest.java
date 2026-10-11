@@ -108,31 +108,43 @@ class SceneTest {
     }
 
     @Test
-    void summaryListsEachDirectionOnItsOwnLineAndGroupsOnlyHugeCounts() {
+    void summaryCountsWithoutRepeatingTheLists() {
         scene.updateEntities(10, List.of(
                 new EntitySight.Observation(1, "minecraft:zombie", null,
-                        WorldPosition.here(0, 64, -8), true, true, false, Map.of()),
+                        WorldPosition.here(0, 64, -8), true, true, true, Map.of()),
                 new EntitySight.Observation(2, "minecraft:sheep", null,
                         WorldPosition.here(8, 64, 0), true, false, false, Map.of())));
         scene.updateFacilities(10, NOW, List.of(
                 new NearbyBlocksSight.BlockSighting(WorldPosition.here(0, 64, 6), "minecraft:crafting_table")));
         String summary = scene.summary();
-        assertTrue(summary.contains("前方：e1（minecraft:zombie，8格）"), summary);
-        assertTrue(summary.contains("右侧：e2（minecraft:sheep，8格）"), summary);
-        assertTrue(summary.contains("b1（minecraft:crafting_table，6格）"), summary);
-        assertFalse(summary.contains("按远近计"), "实体没多到分组阈值时不报总数");
+        assertTrue(summary.contains("附近列出 2 个实体（敌对 1 只，盯着你的 1 只）"), summary);
+        assertTrue(summary.contains("设施 1 处"), summary);
+        assertFalse(summary.contains("e1"), "编号、方位在列表里，速写不再逐条复述：" + summary);
     }
 
     @Test
-    void hugeEntityCountsGroupByDistanceBandsWithoutTruncatingTheList() {
+    void distantHarmlessEntitiesAreCountedByTypeWhileThreatsStayListed() {
         List<EntitySight.Observation> crowd = new ArrayList<>();
-        for (int i = 0; i < Scene.GROUP_THRESHOLD + 10; i++) {
-            crowd.add(new EntitySight.Observation(1000 + i, "minecraft:chicken", null,
-                    WorldPosition.here(i - 25, 64, 0), true, false, false, Map.of()));
+        for (int i = 0; i < 30; i++) {
+            crowd.add(new EntitySight.Observation(1000 + i, "minecraft:squid", null,
+                    WorldPosition.here(0, 50, -100 - i), false, false, false, Map.of()));
         }
+        crowd.add(new EntitySight.Observation(2000, "minecraft:bat", null,
+                WorldPosition.here(60, 40, 0), false, false, false, Map.of()));
+        crowd.add(new EntitySight.Observation(3000, "minecraft:skeleton", null,
+                WorldPosition.here(0, 64, -60), true, true, false, Map.of()));
+        crowd.add(new EntitySight.Observation(3001, "minecraft:wolf", "小白",
+                WorldPosition.here(50, 64, 0), true, false, false, Map.of()));
+        crowd.add(new EntitySight.Observation(3002, "minecraft:cow", null,
+                WorldPosition.here(5, 64, 0), true, false, false, Map.of()));
         scene.updateEntities(10, crowd);
-        assertEquals(Scene.GROUP_THRESHOLD + 10, scene.entities().size(), "列表永远完整，不悄悄截断");
-        assertTrue(scene.summary().contains("按远近计"), "速写里按远近分档报总数");
+        assertEquals(34, scene.entities().size(), "场景自己的列表照样完整");
+        List<String> listed = scene.listedEntities().stream().map(SceneEntity::type).toList();
+        assertEquals(List.of("minecraft:skeleton", "minecraft:wolf", "minecraft:cow"), listed,
+                "远处的敌对、有名字的照列，近处的照列");
+        assertEquals(Map.of("minecraft:squid", 30, "minecraft:bat", 1), scene.distantCounts());
+        assertEquals("minecraft:squid", scene.distantCounts().keySet().iterator().next(), "多的在前");
+        assertTrue(scene.summary().contains("32 格外另有 31 个"), scene.summary());
     }
 
     @Test

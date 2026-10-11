@@ -15,6 +15,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.animal.Sheep;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.item.ItemStack;
 
@@ -71,7 +72,7 @@ public final class ClientEntitySight implements EntitySight {
         return entity instanceof Mob mob && mob.getTarget() == player;
     }
 
-    /** 看得出来的特征：着火、幼年、羊的毛与剪毛、手持物、身上穿的盔甲。看不出来就不写。观察与找东西共用这一份。 */
+    /** 看得出来的特征：着火、幼年、羊的毛与剪毛、掉落物是什么几件、手持物、身上穿的盔甲。看不出来就不写。观察与找东西共用这一份。 */
     public static Map<String, String> traits(Entity entity) {
         Map<String, String> traits = new LinkedHashMap<>();
         if (entity.isOnFire()) {
@@ -86,6 +87,11 @@ public final class ClientEntitySight implements EntitySight {
             } else {
                 traits.put("毛色", sheep.getColor().getName());
             }
+        }
+        // 地上的掉落物：是什么、几件，LLM 才分得清先捡哪个、往哪走。
+        if (entity instanceof ItemEntity item && !item.getItem().isEmpty()) {
+            traits.put("物品", itemTypeId(item.getItem()));
+            traits.put("数量", String.valueOf(item.getItem().getCount()));
         }
         if (entity instanceof LivingEntity living) {
             if (!living.getMainHandItem().isEmpty()) {
