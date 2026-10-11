@@ -89,6 +89,7 @@ import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
 import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
 import org.maiwithu.maicraft.behavior.inventory.ClientGearChanges;
+import org.maiwithu.maicraft.behavior.interaction.LiveHoldsSneak;
 import org.maiwithu.maicraft.behavior.inventory.ClientDropPickup;
 import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
 import org.maiwithu.maicraft.behavior.inventory.ClientStepsAside;
@@ -320,7 +321,8 @@ public final class AbilityCatalog {
         // 联动能用的玩家行为：联动来源、机器类型、网络读取器进世界时都带着这一份建，
         // 走过去、点开、换手、缺东西去拿与自带能力是同一套。
         PlayerServices playerServices = new PlayerServices(deps.context(), bringsClose, deps.interactions(),
-                toMainhand, innerNeeds, deps.protection(), deps.itemTags(),
+                toMainhand, new ClientGearChanges(deps.context(), toMainhand),
+                new LiveHoldsSneak(deps.inputs(), deps.context()), innerNeeds, deps.protection(), deps.itemTags(),
                 deps.compat().menuLayouts(), deps.blockScans());
         // 丢弃落点避让与走开读端：丢弃能力与腾地方的丢弃共用同一份，
         // 谁丢的都登记进同一本账，走路时一并绕开，不把刚丢出去的又吸回来。

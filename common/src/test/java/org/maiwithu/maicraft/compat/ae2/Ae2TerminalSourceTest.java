@@ -26,6 +26,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
+import org.maiwithu.maicraft.behavior.inventory.GearChanges;
 import org.maiwithu.maicraft.behavior.menu.MenuLayout;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
 import org.maiwithu.maicraft.behavior.menu.MenuSlots;
@@ -36,10 +37,12 @@ import org.maiwithu.maicraft.compat.CompatModule;
 import org.maiwithu.maicraft.compat.SupportedMod;
 import org.maiwithu.maicraft.compat.VerifiedVersions;
 import org.maiwithu.maicraft.game.loader.LoaderEnvironment;
+import org.maiwithu.maicraft.game.player.GearSlotName;
 import org.maiwithu.maicraft.game.world.BlockScanService;
 import org.maiwithu.maicraft.game.world.FurnaceFuels;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.kernel.task.Action;
 
 /** ME 终端来源：联动入口交出终端界面的布局证明与途径 ae2 的来源；挑终端的结论如实写成报价。 */
 class Ae2TerminalSourceTest {
@@ -58,7 +61,7 @@ class Ae2TerminalSourceTest {
         Protection nobodyOwns = new Protection((dimension, x, y, z) -> Optional.empty(), List::of,
                 name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self");
         return new PlayerServices(() -> null, (target, permissions) -> null, new Interactions(null),
-                itemId -> Optional.empty(), (request, permissions) -> null, nobodyOwns,
+                itemId -> Optional.empty(), new NoGear(), inner -> inner, (request, permissions) -> null, nobodyOwns,
                 itemId -> Set.of(), MenuLayouts.VANILLA, new BlockScanService());
     }
 
@@ -175,5 +178,16 @@ class Ae2TerminalSourceTest {
             @Override public boolean isDevelopment() { return true; }
             @Override public FurnaceFuels furnaceFuels() { return stack -> 0; }
         };
+    }
+
+    /** 换不了装备的替身：这里的测试不穿卸、不放副手。 */
+    private static final class NoGear implements GearChanges {
+        @Override public Optional<Action> wear(String itemId, GearSlotName slot) {
+            return Optional.empty();
+        }
+
+        @Override public Optional<Action> takeOff(GearSlotName slot) {
+            return Optional.empty();
+        }
     }
 }

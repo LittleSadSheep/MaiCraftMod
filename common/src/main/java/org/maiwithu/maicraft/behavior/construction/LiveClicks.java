@@ -8,14 +8,12 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.InteractionHand;
 import org.maiwithu.maicraft.behavior.approach.PlacementSpots;
 import org.maiwithu.maicraft.behavior.interaction.AimAndInteract;
+import org.maiwithu.maicraft.behavior.interaction.HoldsSneak;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
+import org.maiwithu.maicraft.behavior.interaction.LiveHoldsSneak;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.InputDriver;
 import org.maiwithu.maicraft.game.player.PlayerContext;
-import org.maiwithu.maicraft.kernel.task.Action;
-import org.maiwithu.maicraft.kernel.task.ActionStatus;
-import org.maiwithu.maicraft.kernel.task.Interruptibility;
-import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 出手的生产实现：放方块是对着被点那一面的薄框瞄准再右键（交互动作自己转头、核对命中、提交、逐刻确认）；
@@ -24,18 +22,18 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 public final class LiveClicks implements ConstructionSeams.Clicks {
 
     private final Interactions interactions;
-    private final InputDriver inputs;
-    private final Supplier<PlayerContext> context;
+    /** 按住潜行：没有角色输入（离线测试）时为 null，这时照常点、不潜行。 */
+    private final HoldsSneak sneak;
 
     public LiveClicks(Interactions interactions, InputDriver inputs, Supplier<PlayerContext> context) {
         this.interactions = Objects.requireNonNull(interactions, "interactions");
-        this.inputs = inputs;
-        this.context = Objects.requireNonNull(context, "context");
+        this.sneak = inputs == null ? null : new LiveHoldsSneak(inputs, Objects.requireNonNull(context, "context"));
     }
 
     @Override public Click place(PlannedCell cell, PlacementPrediction.Placement placement, boolean sneak, PlacementConfirmation confirmation) {
         AimAndInteract use = interactions.useBlockPart(placement.clicked(), PlacementSpots.faceBox(placement.clicked(), placement.face()), confirmation);
-        return new Click(sneak && inputs != null ? new Sneaking(use) : use, use::result);
+        // 被点的箱子、工作台会把右键截走开界面：整个动作里按着潜行，手里的方块才放得下去。
+        return new Click(sneak && this.sneak != null ? this.sneak.sneaking(use) : use, use::result);
     }
 
     @Override public Click pour(PlannedCell cell, InteractionConfirmation confirmation) {
@@ -51,38 +49,5 @@ public final class LiveClicks implements ConstructionSeams.Clicks {
     @Override public Click use(BlockPos block, InteractionConfirmation confirmation) {
         AimAndInteract use = interactions.useBlock(block, confirmation);
         return new Click(use, use::result);
-    }
-
-    /** 整个动作里每刻按着潜行；结束时松开。被点的箱子、工作台才不会把右键截走开界面。 */
-    private final class Sneaking implements Action {
-        private final Action inner;
-
-        Sneaking(Action inner) {
-            this.inner = inner;
-        }
-
-        @Override public ActionStatus tick(TickContext tick) {
-            PlayerContext current = context.get();
-            if (current != null && current.localPlayer() != null) inputs.sneak(current.localPlayer(), true);
-            return inner.tick(tick);
-        }
-
-        @Override public void pause() {
-            inner.pause();
-        }
-
-        @Override public void close() {
-            PlayerContext current = context.get();
-            if (current != null && current.localPlayer() != null) inputs.sneak(current.localPlayer(), false);
-            inner.close();
-        }
-
-        @Override public Interruptibility interruptibility() {
-            return inner.interruptibility();
-        }
-
-        @Override public String describe() {
-            return "潜行着" + inner.describe();
-        }
     }
 }

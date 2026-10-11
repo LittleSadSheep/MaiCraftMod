@@ -16,4 +16,13 @@ public interface MovesToMainhand {
 
     /** 把这件物品换到主手的动作；接缝没接上或身上没有它时为 empty。 */
     Optional<Action> moveToMainhand(String itemId);
+
+    /**
+     * 腾出空手的动作：主手已经空着就是一个立刻做完的动作；不然选中一个空着的快捷栏格，
+     * 快捷栏没有空格就把主手的东西收进背包。空手右键置物台、工作盆是取东西，手里拿着东西就成了放东西。
+     * 接缝没接上、快捷栏与背包都没有空格时为 empty。
+     */
+    default Optional<Action> emptyMainhand() {
+        return Optional.empty();
+    }
 }

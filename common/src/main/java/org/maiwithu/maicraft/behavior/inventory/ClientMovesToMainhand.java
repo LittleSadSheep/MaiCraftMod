@@ -8,6 +8,7 @@ import java.util.function.Supplier;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 
 import org.maiwithu.maicraft.game.menu.MenuActions;
@@ -61,6 +62,24 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
         // 穿在身上的（盔甲格）不是这里换的：那是穿卸装备的事，如实给空不冒充换得了。
         if (source >= 36 && source <= 39) return Optional.empty();
         return Optional.of(new MoveAction("把 " + itemId + " 换到主手", source));
+    }
+
+    /**
+     * 腾出空手：主手已空就给一个立刻做完的选中（选中的还是这一格）；不然像真人滚一下滚轮切到空着的快捷栏格，
+     * 经原生选中、等服务端确认；快捷栏没有空格就把主手的东西收进背包；背包也满了给空。
+     */
+    @Override
+    public Optional<Action> emptyMainhand() {
+        PlayerContext context = contexts.get();
+        if (context == null || context.localPlayer() == null) return Optional.empty();
+        var inventory = context.localPlayer().getInventory();
+        if (inventory.getItem(inventory.selected).isEmpty()) {
+            return Optional.of(new HotbarSelection(inventory.selected));
+        }
+        for (int slot = 0; slot < Inventory.getSelectionSize(); slot++) {
+            if (inventory.getItem(slot).isEmpty()) return Optional.of(new HotbarSelection(slot));
+        }
+        return stowMainhand();
     }
 
     /**

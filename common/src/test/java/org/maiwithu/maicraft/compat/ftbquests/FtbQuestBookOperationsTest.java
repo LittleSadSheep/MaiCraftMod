@@ -7,6 +7,7 @@ import org.maiwithu.maicraft.ability.quest.spi.QuestBookOperations;
 import org.maiwithu.maicraft.ability.quest.spi.QuestView;
 import org.maiwithu.maicraft.behavior.acquire.LiveCarryReads;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
+import org.maiwithu.maicraft.behavior.inventory.GearChanges;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
 import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.Protection;
@@ -22,10 +23,12 @@ import org.maiwithu.maicraft.compat.ftbquests.QuestBook.RewardTable;
 import org.maiwithu.maicraft.compat.ftbquests.QuestBook.Snapshot;
 import org.maiwithu.maicraft.game.interaction.InteractionSender;
 import org.maiwithu.maicraft.game.menu.MenuActions;
+import org.maiwithu.maicraft.game.player.GearSlotName;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
 import org.maiwithu.maicraft.game.world.BlockScanService;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
+import org.maiwithu.maicraft.kernel.task.Action;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.player.LocalPlayer;
@@ -317,6 +320,7 @@ class FtbQuestBookOperationsTest {
                 itemId -> {
                     throw new UnsupportedOperationException("接线测试不换手");
                 },
+                new NoGear(), inner -> inner,
                 (request, permissions) -> {
                     throw new UnsupportedOperationException("接线测试不拿东西");
                 },
@@ -331,5 +335,16 @@ class FtbQuestBookOperationsTest {
         WorldMemory memory = new WorldMemory(new DocumentStore(tempDir.resolve("state.sqlite")), MEMORY_KEY);
         return new Protection((dimension, x, y, z) -> Optional.empty(), memory, memory,
                 GuessesPlayerMade.NOTHING, "00000000-0000-0000-0000-000000000000");
+    }
+
+    /** 换不了装备的替身：这里的测试不穿卸、不放副手。 */
+    private static final class NoGear implements GearChanges {
+        @Override public Optional<Action> wear(String itemId, GearSlotName slot) {
+            return Optional.empty();
+        }
+
+        @Override public Optional<Action> takeOff(GearSlotName slot) {
+            return Optional.empty();
+        }
     }
 }

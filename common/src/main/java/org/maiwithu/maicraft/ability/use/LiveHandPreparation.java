@@ -15,7 +15,6 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 
 import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
-import org.maiwithu.maicraft.behavior.inventory.HotbarSelection;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.result.Problem;
 
@@ -67,19 +66,13 @@ final class LiveHandPreparation implements UseSeams.PreparesHand {
                         carried.get() + " 在身上却换不到主手", null)));
     }
 
-    // 要空手：主手已空就成了；不然选一个空快捷栏格切过去；快捷栏没有空格就把主手的东西收进背包，
-    // 背包也满了才按腾不出交代。
+    // 要空手：主手已空就成了；不然交给换手读端腾空手（切到空快捷栏格，没有就把主手的东西收进背包），
+    // 背包也满了才按腾不出交代。腾空手的办法全仓只有换手读端这一份。
     private static UseSeams.HandPlan emptyHand(LocalPlayer player, ClientMovesToMainhand toMainhand) {
         if (player.getMainHandItem().isEmpty()) {
             return new UseSeams.HandPlan.Ready();
         }
-        for (int slot = 0; slot < Inventory.getSelectionSize(); slot++) {
-            if (player.getInventory().getItem(slot).isEmpty()) {
-                // 像真人滚一下滚轮切到空着的那一格：经原生选中，等服务端确认。
-                return new UseSeams.HandPlan.Move(new HotbarSelection(slot));
-            }
-        }
-        return toMainhand.stowMainhand()
+        return toMainhand.emptyMainhand()
                 .<UseSeams.HandPlan>map(UseSeams.HandPlan.Move::new)
                 .orElseGet(() -> new UseSeams.HandPlan.Cannot(Problem.of(Problem.Kind.INVENTORY_FULL,
                         "腾不出空手：快捷栏和背包都没有空格", "先存起或丢掉一件东西再试")));
