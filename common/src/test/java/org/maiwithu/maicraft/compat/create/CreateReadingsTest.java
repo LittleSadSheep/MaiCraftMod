@@ -201,4 +201,18 @@ class CreateReadingsTest {
         assertEquals(Optional.of(new StationHandling.TossSpot(at, StationHandling.MILLSTONE_RIM)),
                 StationHandling.spotFor(CreateMachineCatalog.Work.GRINDER, stone, at, cell -> false, cell -> stone));
     }
+
+    @Test
+    void 蓝图加农炮的读数_开着算干活_放了几格与缺什么() {
+        MachineState base = CreateReadings.still(List.of(), "");
+        MachineState cannon = CreateReadouts.schematic(base, Optional.of(new CreateSchematics.CannonReading(true, false,
+                "missingBlock", 12, 48, Optional.of("minecraft:stone"), 30)), Optional.empty());
+        assertEquals(MachineState.Activity.RUNNING, cannon.activity());
+        assertEquals("12/48", cannon.readings().get("placed"));
+        assertEquals("minecraft:stone", cannon.readings().get("missing"));
+        assertEquals(0.25, cannon.progress(), 1e-9);
+        MachineState table = CreateReadouts.schematic(base, Optional.empty(), Optional.of(0.5f));
+        assertEquals(MachineState.Activity.RUNNING, table.activity(), "蓝图桌在传算在干活");
+        assertEquals(0.5, table.progress(), 1e-6);
+    }
 }

@@ -223,7 +223,17 @@ class CreateCompatTest {
             @Override public Boxes boxes(ClientLevel level, BlockPos at) { return new Boxes(List.of(), List.of()); }
             @Override public void sendValue(BlockPos at, int netId, Direction side, int row, int value) { }
         };
-        return new CreateCompat(kinetics, belts, chains, stations, tools, values);
+        CreateSchematics schematics = new CreateSchematics() {
+            @Override public Optional<String> uploadProblem(String file) { return Optional.empty(); }
+            @Override public void startUpload(String file) { }
+            @Override public Optional<String> schematicFile(ItemStack stack) { return Optional.empty(); }
+            @Override public Optional<Placement> placement(ItemStack stack) { return Optional.empty(); }
+            @Override public void deploy(int slot, BlockPos anchor, int rotation) { }
+            @Override public Optional<CannonReading> cannon(ClientLevel level, BlockPos at) { return Optional.empty(); }
+            @Override public void pressCannon(String button) { }
+            @Override public Optional<Float> uploading(ClientLevel level, BlockPos at) { return Optional.empty(); }
+        };
+        return new CreateCompat(kinetics, belts, chains, stations, tools, values, schematics);
     }
 
     /** 不在世界里的玩家行为：角色为空，靠近与交互都碰不到；只够建出机器类型、回答"读不到"。 */

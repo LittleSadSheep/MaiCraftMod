@@ -86,6 +86,10 @@ final class CreateMachineType implements MachineType {
         if (kind.work() == CreateMachineCatalog.Work.STOCK_TICKER) {
             return stations.stockState(level, at);
         }
+        if (kind.work() == CreateMachineCatalog.Work.SCHEMATIC) {
+            // 蓝图加农炮、蓝图桌：读它们自己的状态（在放、放了几格、缺什么；在传、传了多少）。
+            return CreateReadouts.schematic(CreateReadings.still(shown, ""), compat.cannon(level, at), compat.uploading(level, at));
+        }
         if (!compat.kinetic(here)) {
             return withReadouts(CreateReadings.still(shown, ""), level, at);
         }

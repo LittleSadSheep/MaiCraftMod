@@ -35,9 +35,10 @@ public final class CreateCompat extends CompatModule {
     private final CreateStations stations;
     private final CreateTools tools;
     private final CreateValues values;
+    private final CreateSchematics schematics;
 
     public CreateCompat(CreateKinetics kinetics, CreateBelts belts, CreateChainConveyors chains,
-            CreateStations stations, CreateTools tools, CreateValues values) {
+            CreateStations stations, CreateTools tools, CreateValues values, CreateSchematics schematics) {
         super(MOD_ID, "机械动力");
         this.kinetics = Objects.requireNonNull(kinetics, "kinetics");
         this.belts = Objects.requireNonNull(belts, "belts");
@@ -45,6 +46,7 @@ public final class CreateCompat extends CompatModule {
         this.stations = Objects.requireNonNull(stations, "stations");
         this.tools = Objects.requireNonNull(tools, "tools");
         this.values = Objects.requireNonNull(values, "values");
+        this.schematics = Objects.requireNonNull(schematics, "schematics");
     }
 
     @Override public void contribute(CompatRegistry registry) {
@@ -54,6 +56,8 @@ public final class CreateCompat extends CompatModule {
         registry.itemSource(this, services -> new SandpaperSource(this, services));
         // 放方块的讲究：带漏斗拿漏斗放、等下面的带子，横着的齿轮箱拿竖直齿轮箱放，动力辊别被抬高一格。
         registry.placementRules(this, new CreatePlacementRules(this));
+        // 蓝图桌、蓝图加农炮的界面：证明了两侧怎么分，角色才能往里放空白蓝图、蓝图与火药。
+        registry.menuLayout(this, new CreateSchematicLayout());
         // 机器资料：每种机器的加工处、接转动的面、转速门槛与应力，挂到物品资料页的相关资料里。
         registry.knowledgeSource(this, new CreateMachineKnowledge(this));
     }
@@ -176,6 +180,46 @@ public final class CreateCompat extends CompatModule {
     /** 那一片粘上没有；见 {@link CreateTools#glued}。 */
     public boolean glued(ClientLevel level, BlockPos from, BlockPos to) {
         return call("读强力胶", () -> tools.glued(level, from, to));
+    }
+
+    /** 蓝图文件能不能传；见 {@link CreateSchematics#uploadProblem}。 */
+    public Optional<String> uploadProblem(String file) {
+        return call("看蓝图文件", () -> schematics.uploadProblem(file));
+    }
+
+    /** 照蓝图桌的上传按钮开传；见 {@link CreateSchematics#startUpload}。 */
+    public void startUpload(String file) {
+        run("上传蓝图", () -> schematics.startUpload(file));
+    }
+
+    /** 这件蓝图写的是哪份文件；见 {@link CreateSchematics#schematicFile}。 */
+    public Optional<String> schematicFile(ItemStack stack) {
+        return call("读蓝图文件名", () -> schematics.schematicFile(stack));
+    }
+
+    /** 这件蓝图摆在哪；见 {@link CreateSchematics#placement}。 */
+    public Optional<CreateSchematics.Placement> placement(ItemStack stack) {
+        return call("读蓝图位置", () -> schematics.placement(stack));
+    }
+
+    /** 把背包里的蓝图摆到一处；见 {@link CreateSchematics#deploy}。 */
+    public void deploy(int slot, BlockPos anchor, int rotation) {
+        run("摆蓝图", () -> schematics.deploy(slot, anchor, rotation));
+    }
+
+    /** 蓝图加农炮的读数；见 {@link CreateSchematics#cannon}。 */
+    public Optional<CreateSchematics.CannonReading> cannon(ClientLevel level, BlockPos at) {
+        return call("读蓝图加农炮", () -> schematics.cannon(level, at));
+    }
+
+    /** 按加农炮界面上的按钮；见 {@link CreateSchematics#pressCannon}。 */
+    public void pressCannon(String button) {
+        run("按加农炮的按钮", () -> schematics.pressCannon(button));
+    }
+
+    /** 蓝图桌在传时传了多少；见 {@link CreateSchematics#uploading}。 */
+    public Optional<Float> uploading(ClientLevel level, BlockPos at) {
+        return call("读蓝图桌", () -> schematics.uploading(level, at));
     }
 
     /** 是不是轨道；见 {@link CreateTools#track}。 */
