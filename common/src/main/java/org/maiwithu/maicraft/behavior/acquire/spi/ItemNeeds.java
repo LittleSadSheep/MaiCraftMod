@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.acquire.spi;
 
+import java.util.Optional;
+
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.WantedItem;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -37,5 +39,14 @@ public interface ItemNeeds {
      */
     default boolean knownUnobtainable(WantedItem wanted) {
         return false;
+    }
+
+    /**
+     * 问价不拿：问遍各来源，把这点东西弄进背包最近的一条路要走多远（格，按来源自报的代价里的距离算）。
+     * 来源排几种做法的先后时用：缺得一样多的做法，缺的原料近的先试，不为凑一块板跑去十格外。
+     * 各来源都给不了、或还有来源没看清现场时为空——问不出远近，排法退回原来的先后。
+     */
+    default Optional<Double> nearestDistanceBlocks(ItemRequest request, Permissions permissions) {
+        return Optional.empty();
     }
 }

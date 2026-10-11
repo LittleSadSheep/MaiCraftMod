@@ -142,8 +142,30 @@ public final class RecipeSource implements ItemSource {
             if (variants.size() >= MAX_VARIANTS) break;
             if (other != recipe && missingFor(other, request.count()) == missing) variants.add(other);
         }
+        // 缺得一样多的做法，缺的原料近的先试：补一块木板，手边有树就够了，不为它跑去十格外挖竹子；
+        // 问不出远近的做法排在问得出的后面，彼此先后不变（List.sort 稳定）。
+        if (variants.size() > 1) {
+            variants.sort(Comparator.comparingDouble(variant -> missingIngredientDistance(variant, request, context)));
+        }
         return Optional.of(variants.size() == 1 ? attempt(recipe, request, context)
                 : new Variants(request, variants, context));
+    }
+
+    // 这种做法缺的原料最近要走多远：逐样问引擎（只问价不拿），缺几样时最远的那样算远近；
+    // 有一样问不出（来源还没看清现场，或哪个来源都给不了）就整条按问不出算，排在问得出的后面。
+    private double missingIngredientDistance(WorkstationRecipe variant, ItemRequest request, SourceContext context) {
+        double farthest = 0;
+        for (WorkstationRecipe.IngredientStack ingredient : variant.ingredients()) {
+            int needed = ingredient.count() * timesNeeded(variant, request.count());
+            int carried = CarriedItems.matching(backpack, offhand, ingredient.item(), tags);
+            if (carried >= needed) continue;
+            Optional<Double> distance = needs.nearestDistanceBlocks(
+                    new ItemRequest(ingredient.item(), needed - carried, "补" + variant.result().describe() + "的原料"),
+                    context.permissions());
+            if (distance.isEmpty()) return Double.MAX_VALUE;
+            farthest = Math.max(farthest, distance.get());
+        }
+        return farthest;
     }
 
     // 用拿得到的配方排个先后，像玩家一样先看手头：原料身上缺得最少的那种优先（要"任意木板"、背包里有云杉原木，
@@ -271,12 +293,13 @@ public final class RecipeSource implements ItemSource {
             return steps.isEmpty() ? nothingToDo(recipe)
                     : new StepwiseActions("为「做" + recipe.result().describe() + "」备原料", steps.toArray(Action[]::new));
         }
-        steps.add(enoughForOne(recipe, shortfall));
+        steps.add(topUp(recipe, shortfall, times, context.permissions()));
         steps.add(shortfall.explaining(run.get()));
         return new StepwiseActions("备齐原料后在背包里做" + recipe.result().describe(), steps.toArray(Action[]::new));
     }
 
     // 备料的一整串：缺的原料逐项去弄，烧炼再备燃料，没有设施就先摆一个，最后到设施上做。
+    // 备齐后差一点就在关口再补一轮（见 topUp），不带着缺口去动手。
     private Action assemble(WorkstationRecipe recipe, WorldPosition station, int times, SourceContext context) {
         Permissions permissions = context.permissions();
         Shortfall shortfall = new Shortfall(recipe);
@@ -285,7 +308,7 @@ public final class RecipeSource implements ItemSource {
             fuelNeed(recipe, times).ifPresent(fuel -> steps.add(shortfall.tolerant(fuel, 0, permissions)));
         }
         // 备完料先看够不够做一份：一份都不够就不去摆设施、不走过去，以备料的原因收场。
-        steps.add(enoughForOne(recipe, shortfall));
+        steps.add(topUp(recipe, shortfall, times, permissions));
         if (station == null) {
             // 附近没有记住的设施：先去弄一个设施方块、在身边放下，再到新设施上做。
             // 动手那一步等摆完才认新设施的位置（它的记录是摆台这一步才写下的），少这一步就只剩摆台、不做东西。
@@ -346,19 +369,60 @@ public final class RecipeSource implements ItemSource {
         };
     }
 
-    // 备完料的关口：身上的料够做一份就往下走（有多少做多少）；一份都不够就失败，原因写弄不来的那几样。
-    private Action enoughForOne(WorkstationRecipe recipe, Shortfall shortfall) {
+    // 备完料的关口：身上的料够做一份就往下走；不够就把还缺的再备一轮——先备出来的中间产物被后面的
+    // 步骤用掉时（做木棍用掉镐头要的木板），差的那点在这里照实补上，手上的原料还有就先补，不说原料不够。
+    // 补一轮一件没多（缺的那样真弄不来）才以备料的原因收场，不围着同一处空转。
+    private Action topUp(WorkstationRecipe recipe, Shortfall shortfall, int times, Permissions permissions) {
         return new Action() {
-            @Override public ActionStatus tick(TickContext context) {
-                if (missingFor(recipe, recipe.resultCount()) == 0) return ActionStatus.done();
-                return ActionStatus.failed(shortfall.missing.isEmpty()
-                        ? Problem.of(Problem.Kind.NEED_ITEM, "身上的原料不够做一份" + recipe.result().describe())
-                        : shortfall.problem());
+            private Action round;
+            private int lastMissing = -1;
+
+            @Override public ActionStatus tick(TickContext tick) {
+                int missing = missingFor(recipe, recipe.resultCount());
+                if (missing == 0) return ActionStatus.done();
+                if (round == null) {
+                    // 上一轮备完还是缺这么多：缺的那样真弄不来，不再围着它空转。
+                    if (missing == lastMissing) {
+                        return ActionStatus.failed(gateProblem(recipe, shortfall));
+                    }
+                    lastMissing = missing;
+                    List<Action> steps = shortfall.ingredients(times, permissions);
+                    if (steps.isEmpty()) return ActionStatus.failed(gateProblem(recipe, shortfall));
+                    round = steps.size() == 1 ? steps.getFirst()
+                            : new StepwiseActions("再补一轮做" + recipe.result().describe() + "缺的原料",
+                                    steps.toArray(Action[]::new));
+                }
+                ActionStatus status = round.tick(tick);
+                if (status instanceof ActionStatus.Done) {
+                    round = null;
+                    return ActionStatus.progressed();
+                }
+                return status;
             }
+
+            @Override public void pause() {
+                if (round != null) round.pause();
+            }
+
+            @Override public void close() {
+                if (round != null) round.close();
+            }
+
+            @Override public Interruptibility interruptibility() {
+                return round == null ? Interruptibility.WORKING : round.interruptibility();
+            }
+
             @Override public String describe() {
-                return "看身上的料够不够做" + recipe.result().describe();
+                return round == null ? "看身上的料够不够做" + recipe.result().describe() : round.describe();
             }
         };
+    }
+
+    // 关口的失败说明：备料时记下过弄不来的就说缺哪几样；一步都没记过（步骤都做成了、量还是不够）就直说身上不够。
+    private Problem gateProblem(WorkstationRecipe recipe, Shortfall shortfall) {
+        return shortfall.missing.isEmpty()
+                ? Problem.of(Problem.Kind.NEED_ITEM, "身上的原料不够做一份" + recipe.result().describe())
+                : shortfall.problem();
     }
 
     /**

@@ -171,6 +171,21 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         return outermost != null && outermost.unobtainable.containsKey(wanted.specifier());
     }
 
+    // 问价不拿：照常问遍来源，只把最近一条路的距离报回去，不动手也不记任何事实。
+    // 只有点名才做的途径（交易）照旧不参与：没人点名买东西，问价也不问它。
+    @Override public Optional<Double> nearestDistanceBlocks(ItemRequest request, Permissions permissions) {
+        SourceContext context = new SourceContext(position.currentPosition(), permissions);
+        Optional<Double> nearest = Optional.empty();
+        for (ItemSource source : sources) {
+            if (!Scope.ALL.allows(source.via().name())) continue;
+            if (source.quote(request, context) instanceof SourceQuote.Offer offer) {
+                double distance = offer.cost().distanceBlocks();
+                if (nearest.isEmpty() || distance < nearest.get()) nearest = Optional.of(distance);
+            }
+        }
+        return nearest;
+    }
+
     /** 一场获取的执行：清点 → 问价挑路 → 腾格子 → 用一个来源 → 再清点，直到够数或路都走完。 */
     private final class Run implements Action {
 

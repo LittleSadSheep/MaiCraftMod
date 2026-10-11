@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.player.BackpackStack;
+import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -544,5 +545,104 @@ class RecipeSourceTest {
                 runToEnd(recipeSource.begin(request, offer, CONTEXT).orElseThrow()));
         assertTrue(failed.problem().message().contains("位置"), failed.problem().message());
         assertEquals(0, runs.crafted, "没认出位置就不动手");
+    }
+
+    /** 替身：备原料的动作照实改背包——做木板扣一根原木加四块板，做木棍扣两块板加四根棍；记下每回要了什么。 */
+    private final class MakesPlanksAndSticks implements ItemNeeds {
+        final List<String> asked = new ArrayList<>();
+
+        @Override public Action actionFor(ItemRequest request, Permissions permissions) {
+            asked.add(request.wanted().specifier() + "×" + request.count());
+            return new Action() {
+                @Override public ActionStatus tick(TickContext context) {
+                    String wanted = request.wanted().specifier();
+                    if (wanted.equals("minecraft:oak_planks")) {
+                        backpack.take("minecraft:oak_log", 1);
+                        backpack.add("minecraft:oak_planks", 4);
+                    } else if (wanted.equals("minecraft:stick")) {
+                        backpack.take("minecraft:oak_planks", 2);
+                        backpack.add("minecraft:stick", 4);
+                    }
+                    return ActionStatus.done();
+                }
+
+                @Override public String describe() {
+                    return "备" + request.wanted().describe();
+                }
+            };
+        }
+    }
+
+    @Test
+    void 先做的木棍吃掉了镐头要的木板_差一点回手再补_不说原料不够() {
+        // 实机（208 现象二前半）：空手做木镐，先做 4 块木板，又被木棍用掉 2 块，剩 2 块不够 3 块，
+        // 手上还有原木却报"身上的原料不够做一份"。关口现在把缺的再补一轮。
+        WorldMemory memory = memory();
+        memory.rememberWorkstationUsed(TABLE_AT, "minecraft:crafting_table", NOW);
+        MakesPlanksAndSticks needs = new MakesPlanksAndSticks();
+        RecipeSource recipeSource = new RecipeSource(wanted -> List.of(pickaxeRecipe()), memory,
+                itemId -> 0, FakeRuns.READY, backpack, offhand, tags, needs);
+        backpack.add("minecraft:oak_log", 3);
+        ItemRequest request = new ItemRequest(WantedItem.ofItem("minecraft:wooden_pickaxe"), 1, "开局");
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, recipeSource.quote(request, CONTEXT));
+
+        assertInstanceOf(ActionStatus.Done.class, runToEnd(recipeSource.begin(request, offer, CONTEXT).orElseThrow()));
+        assertEquals(List.of("minecraft:oak_planks×3", "minecraft:stick×2", "minecraft:oak_planks×1"),
+                needs.asked, "木棍用掉一块板后，缺的一块板回手补上");
+        assertEquals(1, countOf("minecraft:oak_log"), "补板用的还是手上的原木，不出门找替代");
+    }
+
+    @Test
+    void 缺得一样多的做法_缺的原料近的先试() {
+        // 实机（208 现象二后半）：补一块木板，1 格外就有丛林树、11 格外才有竹子，
+        // 两种做法缺料一样多时按原料远近排先后，不去十格外挖替代品。
+        tags.put("minecraft:jungle_planks", "minecraft:planks");
+        tags.put("minecraft:bamboo_planks", "minecraft:planks");
+        WorkstationRecipe bamboo = new WorkstationRecipe("minecraft:bamboo_planks", WorkstationRecipe.Kind.CRAFTING,
+                WantedItem.ofItem("minecraft:bamboo_planks"), 1,
+                List.of(new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:bamboo"), 2)), true);
+        WorkstationRecipe jungle = new WorkstationRecipe("minecraft:jungle_planks", WorkstationRecipe.Kind.CRAFTING,
+                WantedItem.ofItem("minecraft:jungle_planks"), 4,
+                List.of(new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:jungle_log"), 1)), true);
+        List<String> asked = new ArrayList<>();
+        // 问价：竹子 11 格，丛林原木 1 格；动手时竹子那一做法当场失败，丛林原木给一根。
+        ItemNeeds needs = new ItemNeeds() {
+            @Override public Optional<Double> nearestDistanceBlocks(ItemRequest request, Permissions permissions) {
+                return Optional.of(request.wanted().specifier().equals("minecraft:bamboo") ? 11d : 1d);
+            }
+
+            @Override public Action actionFor(ItemRequest request, Permissions permissions) {
+                asked.add(request.wanted().specifier());
+                boolean bambooRun = request.wanted().specifier().equals("minecraft:bamboo");
+                return new Action() {
+                    @Override public ActionStatus tick(TickContext context) {
+                        if (bambooRun) {
+                            return ActionStatus.failed(Problem.of(Problem.Kind.NOT_FOUND, "竹子够不着"));
+                        }
+                        backpack.add("minecraft:jungle_log", 1);
+                        return ActionStatus.done();
+                    }
+
+                    @Override public String describe() {
+                        return "备" + request.wanted().describe();
+                    }
+                };
+            }
+        };
+        // 竹板排在前面（模拟登记顺序），近的丛林树要排到它前面去。
+        RecipeSource recipeSource = new RecipeSource(wanted -> List.of(bamboo, jungle), memory(),
+                itemId -> 0, new InventoryRuns(), backpack, offhand, tags, needs);
+        ItemRequest request = new ItemRequest(WantedItem.ofTag("minecraft:planks"), 1, "补镐头的料");
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, recipeSource.quote(request, CONTEXT));
+
+        assertInstanceOf(ActionStatus.Done.class, runToEnd(recipeSource.begin(request, offer, CONTEXT).orElseThrow()));
+        assertEquals(List.of("minecraft:jungle_log"), asked, "先试原料近的做法，没去碰十格外的竹子");
+    }
+
+    private int countOf(String itemId) {
+        return backpack.stacks().stream()
+                .filter(stack -> stack.itemId().equals(itemId))
+                .mapToInt(BackpackStack::count)
+                .sum();
     }
 }
