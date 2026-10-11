@@ -280,6 +280,13 @@ class CreateCompatTest {
                     @Override public List<Station> stations(ClientLevel level) { return List.of(); }
                     @Override public List<Car> cars(ClientLevel level, Player viewer, AABB region) { return List.of(); }
                     @Override public void sit(int entityId, BlockPos seat) { }
+                    @Override public StationState station(ClientLevel level, BlockPos pos) { return null; }
+                    @Override public void assemblyMode(BlockPos pos, boolean on) { }
+                    @Override public void assembleTrain(BlockPos pos) { }
+                    @Override public void disassembleTrain(BlockPos pos) { }
+                    @Override public List<Integer> conductors(ClientLevel level, int carEntityId) { return List.of(); }
+                    @Override public Timetable heldTimetable(LocalPlayer player) { return null; }
+                    @Override public void writeTimetable(Timetable timetable) { }
                 });
     }
 

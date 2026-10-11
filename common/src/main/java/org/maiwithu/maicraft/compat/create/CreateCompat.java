@@ -98,6 +98,8 @@ public final class CreateCompat extends CompatModule {
         // 坐火车当一种出行方式（via=train，所有者 10-11 批）：时刻表只在服务端，经只读操作 create.trains 问。
         registry.serverRead(this, TRAINS_OPERATION, 1);
         registry.travelMode(this, services -> new TrainMode(this, services));
+        // 车站组车、拆车当组装载具的一种办法（载具规格，所有者 10-11 批）。
+        registry.vehicleAssembler(this, services -> new StationAssembly(this, services));
         // 观察里列出电梯（当前层、楼层表）、车站（站名、有没有车在站）、列车（车名、动没动、空座）。
         registry.modSight(this, new CreateModSight(this));
     }
@@ -115,6 +117,41 @@ public final class CreateCompat extends CompatModule {
     /** 坐到车厢的座位上；见 {@link CreateRailways#sit}。 */
     public void sitOnTrain(int entityId, BlockPos seat) {
         run("坐列车座位", () -> railways.sit(entityId, seat));
+    }
+
+    /** 车站的组车状态；见 {@link CreateRailways#station}。 */
+    CreateRailways.StationState station(ClientLevel level, BlockPos pos) {
+        return call("读车站的组车状态", () -> railways.station(level, pos));
+    }
+
+    /** 切车站的组车模式；见 {@link CreateRailways#assemblyMode}。 */
+    void assemblyMode(BlockPos pos, boolean on) {
+        run("切车站的组车模式", () -> railways.assemblyMode(pos, on));
+    }
+
+    /** 按组车；见 {@link CreateRailways#assembleTrain}。 */
+    void assembleTrain(BlockPos pos) {
+        run("车站组车", () -> railways.assembleTrain(pos));
+    }
+
+    /** 按拆车；见 {@link CreateRailways#disassembleTrain}。 */
+    void disassembleTrain(BlockPos pos) {
+        run("车站拆车", () -> railways.disassembleTrain(pos));
+    }
+
+    /** 操纵台座位上的生物；见 {@link CreateRailways#conductors}。 */
+    List<Integer> conductors(ClientLevel level, int carEntityId) {
+        return call("读列车长", () -> railways.conductors(level, carEntityId));
+    }
+
+    /** 主手那张时刻表；见 {@link CreateRailways#heldTimetable}。 */
+    CreateRailways.Timetable heldTimetable(LocalPlayer player) {
+        return call("读手里的时刻表", () -> railways.heldTimetable(player));
+    }
+
+    /** 写主手那张时刻表；见 {@link CreateRailways#writeTimetable}。 */
+    void writeTimetable(CreateRailways.Timetable timetable) {
+        run("写时刻表", () -> railways.writeTimetable(timetable));
     }
 
     /** 和一个区域沾边的电梯；见 {@link CreateElevators#elevators}。 */

@@ -39,8 +39,8 @@ import org.maiwithu.maicraft.kernel.task.TaskFactories;
  */
 public final class VehicleAssembleModule implements AbilityModule {
 
-    /** 需要的模组：物理组装器是 Simulated 的方块。 */
-    static final String REQUIRED_MOD = "simulated";
+    /** 需要的模组：物理组装器（Simulated，它本身要机械动力）与车站组车都要机械动力。 */
+    static final String REQUIRED_MOD = "create";
 
     private final List<VehicleAssembler> assemblers;
     private final ReadsSeenTargets seen;

@@ -1484,7 +1484,7 @@
       ],
       "mode": "controls_player",
       "required_mods": [
-        "simulated"
+        "create"
       ],
       "knowledge": [],
       "doc_resource": "assets/maicraft/abilities/vehicle_assemble.md"
