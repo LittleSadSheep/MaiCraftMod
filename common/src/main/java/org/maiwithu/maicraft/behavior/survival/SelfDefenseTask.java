@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.survival;
 
+import org.maiwithu.maicraft.behavior.combat.BlastAvoidance;
+import org.maiwithu.maicraft.behavior.combat.CloseCombat;
+import org.maiwithu.maicraft.behavior.combat.CombatSenses;
+import org.maiwithu.maicraft.behavior.combat.RangedCombat;
+import org.maiwithu.maicraft.behavior.combat.ThreatAssessment;
+import org.maiwithu.maicraft.behavior.combat.WeaponChoice;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;

@@ -14,9 +14,9 @@ import java.util.UUID;
 
 import net.minecraft.world.entity.Entity;
 import org.junit.jupiter.api.Test;
-import org.maiwithu.maicraft.behavior.survival.CombatSenses;
-import org.maiwithu.maicraft.behavior.survival.ThreatAssessment;
-import org.maiwithu.maicraft.behavior.survival.WeaponChoice;
+import org.maiwithu.maicraft.behavior.combat.CombatSenses;
+import org.maiwithu.maicraft.behavior.combat.ThreatAssessment;
+import org.maiwithu.maicraft.behavior.combat.WeaponChoice;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;

@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.survival;
 
+import org.maiwithu.maicraft.behavior.combat.CloseCombat;
+import org.maiwithu.maicraft.behavior.combat.CombatStepping;
+import org.maiwithu.maicraft.behavior.combat.LiveCombatHands;
+import org.maiwithu.maicraft.behavior.combat.MeleeStrike;
+import org.maiwithu.maicraft.behavior.combat.ModRangedWeapons;
+
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;

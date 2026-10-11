@@ -8,7 +8,7 @@ import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 
-import org.maiwithu.maicraft.behavior.survival.MeleeStrike;
+import org.maiwithu.maicraft.behavior.combat.MeleeStrike;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.game.world.InteractionRange;

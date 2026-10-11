@@ -3,7 +3,7 @@ package org.maiwithu.maicraft.ability.fight;
 
 import java.util.List;
 
-import org.maiwithu.maicraft.behavior.survival.RangedCombat;
+import org.maiwithu.maicraft.behavior.combat.RangedCombat;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 

@@ -5,8 +5,8 @@ import java.util.List;
 import java.util.Set;
 
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
-import org.maiwithu.maicraft.behavior.survival.CombatSenses;
-import org.maiwithu.maicraft.behavior.survival.WeaponChoice;
+import org.maiwithu.maicraft.behavior.combat.CombatSenses;
+import org.maiwithu.maicraft.behavior.combat.WeaponChoice;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilitySpec;

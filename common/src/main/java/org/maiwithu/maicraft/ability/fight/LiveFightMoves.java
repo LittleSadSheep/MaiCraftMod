@@ -12,11 +12,11 @@ import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
-import org.maiwithu.maicraft.behavior.survival.CloseCombat;
-import org.maiwithu.maicraft.behavior.survival.CombatStepping;
-import org.maiwithu.maicraft.behavior.survival.LiveCombatHands;
-import org.maiwithu.maicraft.behavior.survival.MeleeStrike;
-import org.maiwithu.maicraft.behavior.survival.ModRangedWeapons;
+import org.maiwithu.maicraft.behavior.combat.CloseCombat;
+import org.maiwithu.maicraft.behavior.combat.CombatStepping;
+import org.maiwithu.maicraft.behavior.combat.LiveCombatHands;
+import org.maiwithu.maicraft.behavior.combat.MeleeStrike;
+import org.maiwithu.maicraft.behavior.combat.ModRangedWeapons;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.game.world.DropConfirmations;

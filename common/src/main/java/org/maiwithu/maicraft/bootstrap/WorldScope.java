@@ -39,7 +39,7 @@ import org.maiwithu.maicraft.behavior.perception.ClientSubtitleEar;
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 import org.maiwithu.maicraft.behavior.perception.OverheadGrid;
 import org.maiwithu.maicraft.behavior.perception.Scene;
-import org.maiwithu.maicraft.behavior.survival.CombatSenses;
+import org.maiwithu.maicraft.behavior.combat.CombatSenses;
 import org.maiwithu.maicraft.behavior.survival.NativeBlockBreaking;
 import org.maiwithu.maicraft.behavior.travel.ClientTravelWorldView;
 import org.maiwithu.maicraft.behavior.travel.TravelProgress;

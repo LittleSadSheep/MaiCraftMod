@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.survival;
 
+import org.maiwithu.maicraft.behavior.combat.ThreatAssessment;
+
 import org.junit.jupiter.api.Test;
 
 import org.maiwithu.maicraft.kernel.result.TaskResult;

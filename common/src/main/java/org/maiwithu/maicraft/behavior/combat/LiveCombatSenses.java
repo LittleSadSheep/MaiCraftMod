@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.behavior.survival;
+package org.maiwithu.maicraft.behavior.combat;
+
+import org.maiwithu.maicraft.behavior.survival.FoodPicker;
 
 import java.util.ArrayList;
 import java.util.List;
