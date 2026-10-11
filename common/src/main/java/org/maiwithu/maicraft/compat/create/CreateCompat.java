@@ -21,7 +21,8 @@ import org.maiwithu.maicraft.compat.CompatRegistry;
  * 读动力读数与应力网、读传送带与链条输送机、读置物台与工作盆上的东西，每一下都经联动入口包一层，
  * 装的 Create 和编译时用的对不上时整个联动停用，不让 LinkageError 漏出去。
  *
- * <p>交给登记表的：每一种认得的机器、兜住附属模组动力方块的"其他动力方块"、应力网的网络读取器。
+ * <p>交给登记表的：每一种认得的机器、兜住附属模组动力方块的"其他动力方块"、应力网的网络读取器、
+ * 扳手（施工清障时拆 Create 的方块）、砂纸打磨（拿东西的一条途径）。
  * 机器类型要走过去、点、换手、缺东西去拿，进世界时由登记表带着联动能用的玩家行为建。
  */
 public final class CreateCompat extends CompatModule {
@@ -32,18 +33,23 @@ public final class CreateCompat extends CompatModule {
     private final CreateBelts belts;
     private final CreateChainConveyors chains;
     private final CreateStations stations;
+    private final CreateTools tools;
 
     public CreateCompat(CreateKinetics kinetics, CreateBelts belts, CreateChainConveyors chains,
-            CreateStations stations) {
+            CreateStations stations, CreateTools tools) {
         super(MOD_ID, "机械动力");
         this.kinetics = Objects.requireNonNull(kinetics, "kinetics");
         this.belts = Objects.requireNonNull(belts, "belts");
         this.chains = Objects.requireNonNull(chains, "chains");
         this.stations = Objects.requireNonNull(stations, "stations");
+        this.tools = Objects.requireNonNull(tools, "tools");
     }
 
     @Override public void contribute(CompatRegistry registry) {
         CreateMachines.contribute(this, registry);
+        // 扳手拆机器方块、砂纸打磨当拿东西的一条途径：都要走过去、换手、点，进世界时带着玩家行为建。
+        registry.dismantleTool(this, services -> new CreateWrench(this, services));
+        registry.itemSource(this, services -> new SandpaperSource(this, services));
     }
 
     /** 一格动力方块的读数；见 {@link CreateKinetics#reading}。 */
@@ -144,6 +150,16 @@ public final class CreateCompat extends CompatModule {
     /** 传送带上在送的东西；见 {@link CreateStations#beltItems}。 */
     public Optional<List<ItemStack>> beltItems(ClientLevel level, BlockPos at) {
         return call("读传送带上的东西", () -> stations.beltItems(level, at));
+    }
+
+    /** 能不能用扳手整块拆下；见 {@link CreateTools#wrenchable}。 */
+    public boolean wrenchable(BlockState state) {
+        return call("认扳手拆得下的方块", () -> tools.wrenchable(state));
+    }
+
+    /** 砂纸打磨的配方；见 {@link CreateTools#polishing}。 */
+    public List<CreateTools.Polishing> polishing(ClientLevel level) {
+        return call("读砂纸打磨的配方", () -> tools.polishing(level));
     }
 
     /** 库存请求器上次读到的现货；见 {@link CreateStations#stock}。 */

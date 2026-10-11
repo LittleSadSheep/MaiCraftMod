@@ -27,6 +27,9 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
+import org.maiwithu.maicraft.behavior.acquire.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
+import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.inventory.GearChanges;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
@@ -62,6 +65,30 @@ class CreateCompatTest {
         assertEquals("kinetic", readers.getFirst().kind().id());
         assertTrue(types.stream().anyMatch(type -> type.id().equals("create:mechanical_press")
                 && type.role() == MachineRole.PROCESSING));
+    }
+
+    @Test
+    void 扳手与砂纸打磨也交给登记表() {
+        CompatRegistry registry = CompatRegistry.load(List.of(supported()), loaderWith("6.0.11"));
+        assertEquals(1, registry.dismantleTools(offlineServices()).size());
+        List<ItemSource> sources = registry.itemSources(offlineServices());
+        assertEquals(1, sources.size());
+        assertEquals("sandpaper", sources.getFirst().via().name());
+    }
+
+    @Test
+    void 砂纸报价按产物找配方_磨几次要几张砂纸写进风险() {
+        CreateTools.Polishing quartz = new CreateTools.Polishing(List.of("create:rose_quartz"),
+                "create:polished_rose_quartz", 1);
+        assertTrue(SandpaperSource.recipeFor(WantedItem.ofItem("create:polished_rose_quartz"), List.of(quartz))
+                .isPresent());
+        assertTrue(SandpaperSource.recipeFor(WantedItem.ofItem("minecraft:stone"), List.of(quartz)).isEmpty());
+        SourceQuote.Offer offer = (SourceQuote.Offer) SandpaperSource.offerFor(quartz, 10);
+        assertEquals(10, offer.obtainableCount());
+        assertTrue(offer.risk().contains("2 张砂纸"), offer.risk());
+        assertEquals("create:rose_quartz", offer.hint());
+        // 一次出两件的配方，要五件磨三次就够。
+        assertEquals(3, SandpaperSource.roundsFor(new CreateTools.Polishing(List.of("a:b"), "a:c", 2), 5));
     }
 
     @Test
@@ -144,7 +171,11 @@ class CreateCompatTest {
             }
             @Override public Optional<StockSnapshot> stock(ClientLevel level, BlockPos at) { return Optional.empty(); }
         };
-        return new CreateCompat(kinetics, belts, chains, stations);
+        CreateTools tools = new CreateTools() {
+            @Override public boolean wrenchable(BlockState state) { return false; }
+            @Override public List<Polishing> polishing(ClientLevel level) { return List.of(); }
+        };
+        return new CreateCompat(kinetics, belts, chains, stations, tools);
     }
 
     /** 不在世界里的玩家行为：角色为空，靠近与交互都碰不到；只够建出机器类型、回答"读不到"。 */
