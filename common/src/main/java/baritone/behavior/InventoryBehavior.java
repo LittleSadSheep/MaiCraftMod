@@ -137,9 +137,21 @@ public final class InventoryBehavior extends Behavior implements Helper {
     }
 
     public boolean hasGenericThrowaway() {
-        // 算路时能看到主背包里的易拆余料，实际使用仍等待原生交换确认，不把“没在快捷栏”误判成完全缺料。
+        // 算路时能看到主背包里的易拆余料（快捷栏腾得出格子时）；真要垫之前由走到运行打开背包挪到快捷栏，
+        // 放的时候仍只从快捷栏和副手拿，不把"没在快捷栏"误判成完全缺料。
+        boolean backpack = BaritoneInternals.scaffoldWaitsInBackpack(ctx.player());
         for (Item item : Baritone.settings().acceptableThrowawayItems.value) {
-            if (throwaway(false, stack -> item.equals(stack.getItem()))) {
+            if (throwaway(false, stack -> item.equals(stack.getItem()), backpack)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 手上现在就拿得到的垫料（快捷栏与副手）：半空中临时补一块时只能用这些，来不及开背包挪。 */
+    public boolean hasThrowawayAtHand() {
+        for (Item item : Baritone.settings().acceptableThrowawayItems.value) {
+            if (throwaway(false, stack -> item.equals(stack.getItem()), false)) {
                 return true;
             }
         }

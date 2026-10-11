@@ -80,6 +80,17 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
         return Optional.empty();
     }
 
+    /**
+     * 把主背包这一格换到快捷栏指定的那一格：开背包界面、原生交换、关上界面，不改选中——
+     * 走路要垫方块时由寻路引擎自己选那一格。格号不在主背包或快捷栏范围时给空。
+     */
+    public Optional<Action> actionToHotbar(int sourceSlot, int hotbarSlot, String what) {
+        if (sourceSlot < FIRST_MAIN_SLOT || sourceSlot > LAST_MAIN_SLOT || hotbarSlot < 0 || hotbarSlot > 8) {
+            return Optional.empty();
+        }
+        return Optional.of(new MoveAction(what, sourceSlot, hotbarSlot));
+    }
+
     /** 主背包的格号范围（快捷栏之外、盔甲格之前）。 */
     private static final int FIRST_MAIN_SLOT = 9;
     private static final int LAST_MAIN_SLOT = 35;
@@ -110,14 +121,21 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
         private final String what;
         /** 身上那件东西现在的格号；副手是 40，随搬运推进更新。 */
         private int slot;
+        /** 换到快捷栏的哪一格；-1 表示选中的那一格，换完还要选中它（换到主手）。 */
+        private final int hotbarTarget;
         private Stage stage;
         private PendingMenuAction menuPending;
         private PendingInteraction selectPending;
         private Problem failure;
 
         MoveAction(String what, int sourceSlot) {
+            this(what, sourceSlot, -1);
+        }
+
+        MoveAction(String what, int sourceSlot, int hotbarTarget) {
             this.what = what;
             this.slot = sourceSlot;
+            this.hotbarTarget = hotbarTarget;
             // 已经在快捷栏的选中那一格就行；副手的先做原生交换（要关着界面），主背包的先开界面搬运。
             this.stage = sourceSlot == 40 ? Stage.OFFHAND_SWAP
                     : sourceSlot >= 0 && sourceSlot <= 8 ? Stage.SELECTING
@@ -142,7 +160,8 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
             if (menuPending == null) {
                 if (!actions.ensureVisible(player)) return ActionStatus.running();
                 // 换之前先把旧快捷栏物品的格冻结进确认条件：交换必须两端都对上调换才算数。
-                int hotbar = VanillaHotbar.swapTarget(player.localPlayer().getInventory().selected);
+                int hotbar = hotbarTarget >= 0 ? hotbarTarget
+                        : VanillaHotbar.swapTarget(player.localPlayer().getInventory().selected);
                 menuPending = actions.swapInventoryToHotbar(player, slot, hotbar, STEP_TIMEOUT_TICKS);
                 return ActionStatus.running();
             }
@@ -154,7 +173,8 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
                 return fail("换到快捷栏没能确认：" + menuPending.detail());
             }
             // 换完东西就在选中的快捷栏格了；把界面关上再回到世界操作。
-            slot = VanillaHotbar.swapTarget(player.localPlayer().getInventory().selected);
+            slot = hotbarTarget >= 0 ? hotbarTarget
+                    : VanillaHotbar.swapTarget(player.localPlayer().getInventory().selected);
             menuPending = actions.close(player, STEP_TIMEOUT_TICKS);
             stage = Stage.CLOSING;
             return ActionStatus.running();
@@ -170,6 +190,8 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
                 return fail("背包界面没能关上：" + menuPending.detail());
             }
             menuPending = null;
+            // 只是挪到快捷栏指定格的：界面关上就完了，选不选那一格交给要用它的人。
+            if (hotbarTarget >= 0) return ActionStatus.done();
             stage = Stage.SELECTING;
             return ActionStatus.running();
         }

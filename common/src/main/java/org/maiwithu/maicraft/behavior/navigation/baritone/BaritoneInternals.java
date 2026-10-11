@@ -230,6 +230,22 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
         BaritoneAPI.getSettings().acceptableThrowawayItems.value = usable;
     }
 
+    /** 垫料只在主背包时挪到快捷栏哪一格的打算；不用挪或挪不了为空。 */
+    Optional<ScaffoldStaging.Swap> scaffoldStaging(LocalPlayer self) {
+        var inventory = self.getInventory();
+        return ScaffoldStaging.plan(inventory.items, inventory.offhand.getFirst(), inventory.selected,
+                spareScaffold(self), keeps);
+    }
+
+    /**
+     * 引擎算路时问：主背包里的垫料算不算有。快捷栏腾得出格子给它才算——走到运行会在要垫之前停下来
+     * 打开背包把它挪过去；腾不出就不算，免得路线靠一块够不着的料。
+     */
+    public static boolean scaffoldWaitsInBackpack(LocalPlayer player) {
+        BaritoneInternals internals = ATTACHED.get();
+        return internals != null && player != null && internals.scaffoldStaging(player).isPresent();
+    }
+
     /** 手边能拿去垫的料，按先垫后垫排：件数是身上的减去正要用的；走不通时也拿它说手边有什么。 */
     Map<String, Integer> spareScaffold(LocalPlayer self) {
         Map<String, Integer> carried = new HashMap<>();

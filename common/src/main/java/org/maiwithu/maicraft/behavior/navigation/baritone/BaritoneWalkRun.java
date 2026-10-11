@@ -9,7 +9,9 @@ import baritone.api.utils.IInputOverrideHandler;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import baritone.api.utils.input.Input;
 import baritone.behavior.PathingBehavior;
+import baritone.pathing.movement.Movement;
 import baritone.pathing.path.PathExecutor;
+import baritone.utils.BlockStateInterface;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -28,6 +30,7 @@ import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
@@ -36,6 +39,7 @@ import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.game.player.PlayerInput;
+import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -73,6 +77,10 @@ final class BaritoneWalkRun implements WalkRun {
     private final EngineClicks clicks = new EngineClicks();
     /** 走路镜头的航向：偏差大才转、小修正不动、每刻最多转几度，不逐格点头。 */
     private final NavigationCameraCourse course = new NavigationCameraCourse();
+    /** 共用的换手：垫料只在主背包时经背包界面挪到快捷栏，引擎才垫得上。 */
+    private final ClientMovesToMainhand hands = new ClientMovesToMainhand(() -> this.lastContext);
+    /** 正在把垫料挪到快捷栏的动作；没在挪为 null。 */
+    private Action scaffoldMove;
     /** 人按 F8 收回角色时路线被撤了：交回后第一刻重新算路、进展计时重新起算。 */
     private boolean routeDropped;
     /** 最近一刻的角色上下文；暂停、放弃时用它停挖、交还没等到确认的右键。 */
@@ -232,6 +240,7 @@ final class BaritoneWalkRun implements WalkRun {
         var pathing = owner.pathing();
         IBaritone engine = owner.engine();
         resumeAfterHuman(engine, context);
+        if (stagingScaffold(context, player, pathing, engine)) return; // 垫料只在主背包：先挪到快捷栏再走
         boolean routePresent = pathing.getCurrent() != null;
         boolean calculating = pathing.getInProgress().isPresent();
 
@@ -423,6 +432,63 @@ final class BaritoneWalkRun implements WalkRun {
         engine.getCustomGoalProcess().setGoalAndPath(engineGoal);
     }
 
+    // 挪垫料：没在挪时，站在地上、路线这一两步要垫方块、垫料只在主背包才开始挪；挪的这几刻引擎不推进，角色站定。
+    // 挪不成（界面没确认）就如实走不通，写明是哪一步没确认；不在没挪成时让引擎去垫一块够不着的料。
+    private boolean stagingScaffold(PlayerContext context, LocalPlayer player, PathingBehavior pathing,
+                                    IBaritone engine) {
+        if (scaffoldMove == null) {
+            if (progress.done() || !player.onGround()) return false;
+            var swap = owner.scaffoldStaging(player);
+            if (swap.isEmpty() || !nextStepsPlace(engine, pathing)) return false;
+            scaffoldMove = hands.actionToHotbar(swap.get().sourceSlot(), swap.get().hotbarSlot(),
+                    "把垫脚的 " + swap.get().itemId() + " 挪到快捷栏").orElse(null);
+            if (scaffoldMove == null) return false;
+            engine.getInputOverrideHandler().clearAllKeys();
+        }
+        context.input().applyNavigationMovement(PlayerInput.Movement.STOPPED, context.clientTick());
+        ActionStatus status = scaffoldMove.tick(tickOf(context));
+        if (status instanceof ActionStatus.Running) return true;
+        scaffoldMove = null;
+        // 开背包挪料这几刻站着不动是正常的，不算进"长时间没有进展"。
+        displacement.restart(context.clientTick());
+        if (status instanceof ActionStatus.Failed failed) {
+            progress.fail(Problem.of(Problem.Kind.STUCK, "要垫方块而垫料在主背包里，挪到快捷栏时"
+                    + failed.problem().message(), null), player.blockPosition());
+        }
+        return false;
+    }
+
+    // 路线当前这一步和下一步要不要垫方块：引擎走完一步会在同一刻接着走下一步，只看当前一步会晚一刻。
+    private static boolean nextStepsPlace(IBaritone engine, PathingBehavior pathing) {
+        PathExecutor executor = pathing.getCurrent();
+        if (executor == null) return false;
+        var movements = executor.getPath().movements();
+        var blocks = new BlockStateInterface(engine.getPlayerContext());
+        int from = Math.max(0, executor.getPosition());
+        for (int index = from; index < Math.min(movements.size(), from + 2); index++) {
+            if (movements.get(index) instanceof Movement movement) {
+                movement.resetBlockCache();
+                if (!movement.toPlace(blocks).isEmpty()) return true;
+            }
+        }
+        return false;
+    }
+
+    // 换手动作要的本刻上下文：只在这一刻用，不留到下一刻。
+    private static TickContext tickOf(PlayerContext context) {
+        return new TickContext() {
+            @Override
+            public long gameTick() {
+                return context.level().getGameTime();
+            }
+
+            @Override
+            public PlayerContext player() {
+                return context;
+            }
+        };
+    }
+
     /**
      * 人按 F8 收回了角色：立刻撤掉路线、松开引擎按键、停挖，不让引擎自己的刻接着执行；
      * 这一趟不结算，人交回后从当时的位置重新算路接着走。
@@ -433,6 +499,8 @@ final class BaritoneWalkRun implements WalkRun {
         owner.engine().getInputOverrideHandler().clearAllKeys();
         clicks.stop(null);
         course.reset();
+        // 挪垫料挪到一半也放下：背包界面要是还开着，人自己关；交回后要垫时重新看一遍再挪。
+        scaffoldMove = null;
         routeDropped = true;
     }
 
