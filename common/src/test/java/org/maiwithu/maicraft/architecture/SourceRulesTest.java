@@ -84,6 +84,8 @@ class SourceRulesTest {
     private static Set<String> sizeExemptions;
     private static Map<String, String> bannedTypeWords;
     private static Map<String, String> retiredTerms;
+    /** 含着旧说法、但本身是正式名字的说法（模组方块的官方中文名）：先从这一行里去掉再查旧说法。 */
+    private static Map<String, String> keptPhrases;
 
     @BeforeAll
     static void load() {
@@ -93,6 +95,7 @@ class SourceRulesTest {
         sizeExemptions = readExemptions();
         bannedTypeWords = readNamingRules("word");
         retiredTerms = readNamingRules("term");
+        keptPhrases = readOptionalNamingRules("keep");
         assertTrue(!mainSources.isEmpty(), "没有找到主源码，检查测试的工作目录是否为 common 模块");
     }
 
@@ -286,8 +289,10 @@ class SourceRulesTest {
 
     private static void findRetiredTerms(Path path, List<String> lines, List<String> problems) {
         for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i);
+            for (String kept : keptPhrases.keySet()) line = line.replace(kept, "");
             for (Map.Entry<String, String> term : retiredTerms.entrySet()) {
-                if (lines.get(i).contains(term.getKey())) {
+                if (line.contains(term.getKey())) {
                     problems.add(relative(path) + ":" + (i + 1) + " 出现「" + term.getKey() + "」：" + term.getValue());
                 }
             }
@@ -358,6 +363,16 @@ class SourceRulesTest {
             if (parts.length == 3 && parts[0].equals("size")) paths.add(parts[1]);
         }
         return paths;
+    }
+
+    // 可以一条都没有的种类（keep：含着旧说法的正式名字）。
+    private static Map<String, String> readOptionalNamingRules(String kind) {
+        Map<String, String> rules = new LinkedHashMap<>();
+        for (String line : readLines(REPO.resolve("common/src/test/resources/naming-rules.txt"))) {
+            String[] parts = line.trim().split("\\s+", 3);
+            if (parts.length == 3 && parts[0].equals(kind)) rules.put(parts[1], parts[2]);
+        }
+        return rules;
     }
 
     // naming-rules.txt 每行"种类 词 原因"，种类是 word（类型名用词）或 term（旧说法）。

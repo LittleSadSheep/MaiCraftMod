@@ -108,6 +108,19 @@ repositories {
         }
         filter { includeGroup 'com.possible-triangle' }
     }
+    // Sable（物理结构）与它带的 sable-companion 从作者（ryanhcode）的官方 maven 取，免登录。
+    exclusiveContent {
+        forRepository {
+            maven {
+                name = 'RyanHCode'
+                url = 'https://maven.ryanhcode.dev/releases'
+            }
+        }
+        filter {
+            includeGroup 'dev.ryanhcode.sable'
+            includeGroup 'dev.ryanhcode.sable-companion'
+        }
+    }
     // FTB 任务与 FTB Library 从 FTB 的官方 maven 取，免登录。
     exclusiveContent {
         forRepository {
@@ -147,6 +160,9 @@ dependencies {
     // 喷气背包读服务器同步下来的耗气设置；开关状态与按键检查是它带的 FlightLib 的类（实例里打在喷气背包的 jar 里）。
     compileOnly("maven.modrinth:create-jetpack:${createjetpack_version}") { transitive = false }
     compileOnly("com.possible-triangle:flightlib-neoforge:${flightlib_version}") { transitive = false }
+    // Sable 读子世界的位姿、地块与角色被哪个子世界带着；位姿与包围盒是 sable-companion 的类（实例里打在 Sable 的 jar 里）。
+    compileOnly("dev.ryanhcode.sable:sable-neoforge-${minecraft_version}:${sable_version}") { transitive = false }
+    compileOnly("dev.ryanhcode.sable-companion:sable-companion-common-${minecraft_version}:${sable_companion_version}") { transitive = false }
     jarJar(implementation('org.xerial:sqlite-jdbc')) {
         version { strictly "[${sqlite_jdbc_version},4.0)"; prefer sqlite_jdbc_version }
     }

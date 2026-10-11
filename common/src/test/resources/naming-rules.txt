@@ -4,6 +4,8 @@
 #   自己声明的类型（类、接口、枚举、record）名字里不许出现这个词（按驼峰拆词后整词比较）。
 # term <中文说法> <原因与改法>
 #   Java 源码（含注释与字符串）和能力说明资源里不许再出现这个说法。
+# keep <中文说法> <原因>
+#   含着旧说法、本身却是正式名字的说法（模组方块的官方中文名）：查旧说法前先从那一行里去掉它。
 #
 # 新增一行前，先在术语表里写清"不看上下文会被理解成什么"和改用的说法。
 
@@ -85,6 +87,7 @@ allow mcp.transport.EmbeddedMcpService.handleInitialize 动词：处理 MCP 的 
 allow behavior.navigation.baritone.BaritoneWalkRun.handleStall 动词：处理卡住
 
 term 打字机 比喻叫法；这个行为说「逐字打字」，动作类型是 TypeChatDraft
+keep 无线红石打字机 Simulated 的方块 linked_typewriter 的官方中文名，载具的控制件，不是聊天打字的比喻
 
 # 钓鱼与附魔规格定下的说法
 term 附魔预算 不再有预算参数（费用由档位决定）：第 n 档固定扣 n 级 n 个青金石，选档用 tier
