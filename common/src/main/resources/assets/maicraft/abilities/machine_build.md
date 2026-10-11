@@ -3,7 +3,7 @@
 ## 参数
 
 - `blueprint` / `design_id` 二选一：机器蓝图正文（cells 逐格、parts 部件、installations 安装段 `{kind, offsets, roles}`、settings 装后设置）或已保存的设计编号；写错的地方一次报全，不进游戏。
-- 安装段与部件怎么写随模组不同（传送带两端写轴、链条写两台、机械合成器连入口写相邻两台、ME 线缆写成一段、终端装在线缆的某一面），先 lookup 查那种机器的资料（machine/create/index、machine/ae2/index、machine/mekanism/index）。安装段格上写了方块的（例如传送带两端的轴）先照常放好，再用模组自己的方式装段；压在安装段上的格（带漏斗、隧道压在传送带上）照常写进 cells，装完安装段再放。roles 可选，和 offsets 一一对应，说每一格在这一段里干什么（机械臂的取放点写 take 或 deposit），用不着的安装段不写。
+- 安装段与部件怎么写随模组不同（传送带两端写轴、链条写两台、机械合成器连入口写相邻两台、铺轨写两端的轨道、ME 线缆写成一段、终端装在线缆的某一面），先 lookup 查那种机器的资料（machine/create/index、machine/ae2/index、machine/mekanism/index）。安装段格上写了方块的（例如传送带两端的轴）先照常放好，再用模组自己的方式装段；压在安装段上的格（带漏斗、隧道压在传送带上）照常写进 cells，装完安装段再放。roles 可选，和 offsets 一一对应，说每一格在这一段里干什么（机械臂的取放点写 take 或 deposit），用不着的安装段不写。
 - 整台机器里某种方块的个数有上限（实例配置，默认链条输送机一台机器一个）：超了在下达时就说清。
 - `name`：新机器的档案名；不给就按锚点起"机器@x,y,z"。修改已有档案时不用给。
 - `operation`：`build`（默认）或 `remove`。

@@ -178,6 +178,21 @@ public final class CreateCompat extends CompatModule {
         return call("读强力胶", () -> tools.glued(level, from, to));
     }
 
+    /** 是不是轨道；见 {@link CreateTools#track}。 */
+    public boolean track(BlockState state) {
+        return call("认轨道", () -> tools.track(state));
+    }
+
+    /** 手里轨道记着的起点；见 {@link CreateTools#trackStart}。 */
+    public Optional<BlockPos> trackStart(ItemStack held) {
+        return call("读轨道起点", () -> tools.trackStart(held));
+    }
+
+    /** 两格轨道之间铺上没有；见 {@link CreateTools#trackConnected}。 */
+    public boolean trackConnected(ClientLevel level, BlockPos from, BlockPos to) {
+        return call("读铺轨", () -> tools.trackConnected(level, from, to));
+    }
+
     /** 库存请求器上次读到的现货；见 {@link CreateStations#stock}。 */
     public Optional<CreateStations.StockSnapshot> stock(ClientLevel level, BlockPos at) {
         return call("读库存请求器的现货", () -> stations.stock(level, at));

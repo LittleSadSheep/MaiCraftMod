@@ -176,6 +176,9 @@ final class CreateMachineKnowledge implements KnowledgeSource {
             case BASIN -> text.append("- machine_run：站到盆边把料扔进去，落在盆沿上也收；空手右键取出盆里的东西\n");
             case MOTION -> text.append("- 要一起动的方块用强力胶粘：machine_build 的安装段 `{kind: create:super_glue, offsets: [一角, 对角]}`，")
                     .append("两角之间的方块要连着、相距不到 25 格，身上要有强力胶；装置的轴转起来（或通电）时把粘着的一片推拉、转动、吊起\n");
+            case RAIL -> text.append("- 铺轨：两端各放一格轨道（写进 cells），machine_build 的安装段写 `{kind: create:track_connection, ")
+                    .append("offsets: [起点, 终点]}`，角色手持轨道点起点、点终点，Create 在两格之间铺出弯道或长直道、按长度扣轨道；")
+                    .append("转太急、坡太陡、太远（服务器配置，默认 32 格）时铺不上，结果里带着动作栏说的原因\n");
             case ARM -> text.append("- machine_build：机械臂那一格不写进 cells，写一段安装段 `{kind: create:mechanical_arm, ")
                     .append("offsets: [机械臂, 取放点...], roles: [arm, take 或 deposit...]}`；取放点（置物台、传送带、漏斗、工作盆……）")
                     .append("照常写进 cells。施工先放好取放点，再拿着机械臂物品挨个点（取点一下、放点两下），最后放下机械臂；")

@@ -143,4 +143,20 @@ class CreateShapesTest {
         assertFalse(ChainConveyorInstallation.linked(Optional.empty(), Optional.of(Set.of(from.subtract(to))),
                 from, to));
     }
+
+    @Test
+    void 铺轨写两端_隔开至少一格且不超过硬上限() {
+        assertTrue(TrackInstallation.shapeProblem(List.of(new BlockPos(0, 64, 0), new BlockPos(10, 64, 6))).isEmpty());
+        assertTrue(TrackInstallation.shapeProblem(List.of(new BlockPos(0, 64, 0))).isPresent(), "只写一端");
+        assertTrue(TrackInstallation.shapeProblem(List.of(new BlockPos(0, 64, 0), new BlockPos(1, 64, 0))).isPresent(),
+                "挨着的两格不用铺");
+        assertTrue(TrackInstallation.shapeProblem(List.of(new BlockPos(0, 64, 0), new BlockPos(200, 64, 0))).isPresent(),
+                "超过一次铺轨的硬上限");
+    }
+
+    @Test
+    void 铺轨备的轨道数按两端直线距离估() {
+        assertEquals(10, TrackInstallation.tracksFor(new BlockPos(0, 64, 0), new BlockPos(10, 64, 0)));
+        assertEquals(15, TrackInstallation.tracksFor(new BlockPos(0, 64, 0), new BlockPos(10, 64, 10)));
+    }
 }

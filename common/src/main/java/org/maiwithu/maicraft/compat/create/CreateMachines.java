@@ -58,6 +58,8 @@ final class CreateMachines {
             case ARM -> Optional.of(new ArmInstallation(compat, services));
             // 装置都会粘强力胶：谁先接下这一段谁来装，粘的是哪一片由安装段自己说。
             case MOTION -> Optional.of(new GlueInstallation(compat, services));
+            // 铁路方块都会铺轨：两端的轨道放好后手持轨道点起点、点终点。
+            case RAIL -> Optional.of(new TrackInstallation(compat, services));
             default -> Optional.empty();
         };
         return new CreateMachineType(kind, compat, services, state -> blocks.contains(state.getBlock()),

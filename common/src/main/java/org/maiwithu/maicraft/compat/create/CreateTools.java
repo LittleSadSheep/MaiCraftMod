@@ -3,14 +3,16 @@ package org.maiwithu.maicraft.compat.create;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 
 /**
  * 机械动力手持工具的模组读写接缝：哪些方块能用扳手潜行右键整块拆下，砂纸能把什么磨成什么，
- * 强力胶粘一片（照 Create 两下选区确认时发的那一包）与那一片粘上没有。
+ * 强力胶粘一片（照 Create 两下选区确认时发的那一包）与那一片粘上没有，铺轨的起点与两端铺上没有。
  * 砂纸的配方是游戏配方表里的一类（Create 自己的类型），客户端有同步过来的一份。
  * 只用 Minecraft 与 Java 的类型；读写端在 NeoForge 模块里，测试里用替身。
  */
@@ -27,6 +29,15 @@ public interface CreateTools {
 
     /** from 到 to 这一片现在有没有一块正好盖住它的胶。 */
     boolean glued(ClientLevel level, BlockPos from, BlockPos to);
+
+    /** 是不是轨道方块（铺轨的一端）。 */
+    boolean track(BlockState state);
+
+    /** 手里这件轨道记着的起点（右键过一格轨道之后）；没记为空。 */
+    Optional<BlockPos> trackStart(ItemStack held);
+
+    /** from 与 to 两格轨道之间有没有铺成的一段：两头的轨道都记着对方。 */
+    boolean trackConnected(ClientLevel level, BlockPos from, BlockPos to);
 
     /**
      * 一条砂纸打磨的配方：一次磨一件原料，出一份产物。
