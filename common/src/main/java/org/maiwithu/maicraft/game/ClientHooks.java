@@ -3,6 +3,9 @@ package org.maiwithu.maicraft.game;
 
 import java.util.concurrent.atomic.AtomicReference;
 import org.maiwithu.maicraft.game.player.PlayerControlBoundary;
+import org.maiwithu.maicraft.game.player.DamageObserver;
+import org.maiwithu.maicraft.game.player.EquipmentConfirmations;
+import org.maiwithu.maicraft.game.world.DropConfirmations;
 import org.maiwithu.maicraft.game.player.UseKeyHold;
 import org.maiwithu.maicraft.game.world.BlockScanService;
 import org.maiwithu.maicraft.game.menu.RenderedScreens;
@@ -21,6 +24,9 @@ public final class ClientHooks {
     private static final AtomicReference<SubtitleFeed> SUBTITLE_FEED = new AtomicReference<>();
     private static final AtomicReference<ChatLog> CHAT_LOG = new AtomicReference<>();
     private static final AtomicReference<RenderedScreens> RENDERED_SCREENS = new AtomicReference<>();
+    private static final AtomicReference<DropConfirmations> DROP_CONFIRMATIONS = new AtomicReference<>();
+    private static final AtomicReference<EquipmentConfirmations> EQUIPMENT_CONFIRMATIONS = new AtomicReference<>();
+    private static final AtomicReference<DamageObserver> DAMAGE_OBSERVER = new AtomicReference<>();
 
     private ClientHooks() {}
 
@@ -57,6 +63,33 @@ public final class ClientHooks {
     /** Mixin 类跨包读取：界面这一帧画完往哪里记；没登记时为 null。 */
     public static RenderedScreens renderedScreens() {
         return RENDERED_SCREENS.get();
+    }
+
+    /** 启动时登记掉落物确认：实体生成包与拾取包由 Mixin 转过来。传 null 表示停止。 */
+    public static void registerDropConfirmations(DropConfirmations confirmations) {
+        DROP_CONFIRMATIONS.set(confirmations);
+    }
+
+    /** 启动时登记装备耐久确认：装备同步包与打空事件由 Mixin 转过来。传 null 表示停止。 */
+    public static void registerEquipmentConfirmations(EquipmentConfirmations confirmations) {
+        EQUIPMENT_CONFIRMATIONS.set(confirmations);
+    }
+
+    /** 启动时登记伤害观察：本玩家挨打的伤害包由 Mixin 转过来。传 null 表示停止。 */
+    public static void registerDamageObserver(DamageObserver observer) {
+        DAMAGE_OBSERVER.set(observer);
+    }
+
+    public static DropConfirmations dropConfirmations() {
+        return DROP_CONFIRMATIONS.get();
+    }
+
+    public static EquipmentConfirmations equipmentConfirmations() {
+        return EQUIPMENT_CONFIRMATIONS.get();
+    }
+
+    public static DamageObserver damageObserver() {
+        return DAMAGE_OBSERVER.get();
     }
 
     /** Mixin 类跨包读取；这里是与 Mixin 之间唯一允许的静态通道。 */

@@ -53,6 +53,7 @@ import org.maiwithu.maicraft.behavior.acquire.ContainerSource;
 import org.maiwithu.maicraft.behavior.acquire.HarvestSource;
 import org.maiwithu.maicraft.behavior.acquire.ItemAcquisition;
 import org.maiwithu.maicraft.behavior.acquire.ItemsInUse;
+import org.maiwithu.maicraft.game.world.DropConfirmations;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.MenuContainerTakes;
@@ -197,7 +198,9 @@ public final class AbilityCatalog {
             /** 这个世界的身份编号：机器档案按它分开存。 */
             String worldKey,
             /** 正要用的东西：拿东西的引擎建好后接上，走路垫脚按它留够数。 */
-            ItemsInUse itemsInUse) {
+            ItemsInUse itemsInUse,
+            /** 掉落物的事实确认：捡掉落物、战斗拾荒按服务器的拾取包认东西进没进包。 */
+            DropConfirmations dropConfirmations) {
 
         public Deps {
             Objects.requireNonNull(context, "context");
@@ -215,6 +218,7 @@ public final class AbilityCatalog {
             Objects.requireNonNull(worldDocuments, "worldDocuments");
             Objects.requireNonNull(worldKey, "worldKey");
             Objects.requireNonNull(itemsInUse, "itemsInUse");
+            Objects.requireNonNull(dropConfirmations, "dropConfirmations");
         }
     }
 
@@ -303,7 +307,7 @@ public final class AbilityCatalog {
         ClientMovesToMainhand toMainhand = new ClientMovesToMainhand(deps.context());
         // 挖一格与捡掉落物共用一套：采集、拿东西时挖矿收庄稼、存东西挖开盖子，都是"走过去、挖掉、捡起这一下掉出来的"。
         LiveBlockDigging digging = new LiveBlockDigging(deps.digging());
-        ClientDropPickup drops = new ClientDropPickup(deps.context(), deps.walks());
+        ClientDropPickup drops = new ClientDropPickup(deps.context(), deps.walks(), deps.dropConfirmations());
         ClientCollectsBlocks collects = new ClientCollectsBlocks(bringsClose, digging, drops);
         // 拿到物品引擎的内需入口先建好：用东西缺了要用的东西去拿一件、来源备料缺原料缺工具，都回到同一个引擎，
         // 引擎在登记拿到物品时建好再接上。
@@ -417,7 +421,7 @@ public final class AbilityCatalog {
             PlayerServices services) {
         // 战斗：感观与生存需求共用一份，观察编号与动手都接在真实客户端上。
         registry.register(new FightModule(deps.senses(),
-                new LiveSeenTargets(deps.scene().seen()), new LiveFightMoves(deps.walks()), permission));
+                new LiveSeenTargets(deps.scene().seen()), new LiveFightMoves(deps.walks(), deps.dropConfirmations()), permission));
 
         // 跟随：常驻任务，目标从场景的观察编号找。
         registry.register(new FollowModule(deps.walks(), new LiveFollowView(deps.scene().seen())));
@@ -466,7 +470,7 @@ public final class AbilityCatalog {
     private static UseModule useModule(Deps deps, LiveApproaches bringsClose, ClientMovesToMainhand toMainhand,
             ItemNeeds needs, ClientGameRefusals refusals) {
         return UseModule.live(deps.context(), deps.interactions(), bringsClose, toMainhand, needs,
-                deps::scene, deps.blockScans(), refusals, deps.walks(), deps.memory(), deps::protection,
+                deps::scene, deps.blockScans(), refusals, deps.walks(), deps.dropConfirmations(), deps.memory(), deps::protection,
                 deps.creatures());
     }
 

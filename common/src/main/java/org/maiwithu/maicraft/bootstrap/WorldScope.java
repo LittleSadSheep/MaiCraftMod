@@ -36,6 +36,7 @@ import org.maiwithu.maicraft.behavior.travel.ClientTravelWorldView;
 import org.maiwithu.maicraft.behavior.travel.TravelProgress;
 import org.maiwithu.maicraft.behavior.travel.TravelProgressListener;
 import org.maiwithu.maicraft.behavior.acquire.ItemsInUse;
+import org.maiwithu.maicraft.game.world.DropConfirmations;
 import org.maiwithu.maicraft.behavior.acquire.LiveCarryReads;
 import org.maiwithu.maicraft.behavior.acquire.RegistryToolRequirements;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
@@ -101,7 +102,8 @@ public final class WorldScope {
             UseKeyProjection useKeyProjection, BaritoneInternals walks, CombatSenses senses,
             AbilityRegistry abilities, InteractionSender interactionSender, MenuActions menuActions,
             InstanceConfig instanceConfig, FurnaceFuels furnaceFuels, CompatRegistry compat,
-            NightRestWiring nightWiring, Path configDirectory, ShowsPreview preview, ItemsInUse itemsInUse) {
+            NightRestWiring nightWiring, Path configDirectory, ShowsPreview preview, ItemsInUse itemsInUse,
+            DropConfirmations dropConfirmations) {
         // 游戏接口层认出是哪个存档或服务器，内核的世界身份只拿编号与目录。
         SaveIdentity save = SaveIdentity.current(minecraft)
                 .orElseThrow(() -> new IllegalStateException("进了世界却识别不出世界身份，记忆无处安放"));
@@ -163,7 +165,7 @@ public final class WorldScope {
                 furnaceFuels,
                 compat,
                 kinds,
-                nightWiring, configDirectory, preview, documents, identity.key(), itemsInUse), abilities);
+                nightWiring, configDirectory, preview, documents, identity.key(), itemsInUse, dropConfirmations), abilities);
     }
 
     /**

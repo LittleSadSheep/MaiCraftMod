@@ -29,6 +29,9 @@ import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyHoldProjection;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
 import org.maiwithu.maicraft.behavior.acquire.ItemsInUse;
+import org.maiwithu.maicraft.kernel.event.TaskEvent;
+import org.maiwithu.maicraft.game.player.EquipmentConfirmations;
+import org.maiwithu.maicraft.game.world.DropConfirmations;
 import org.maiwithu.maicraft.behavior.acquire.LiveCarryReads;
 import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
@@ -261,6 +264,11 @@ public final class Bootstrap {
         // 正要用的东西一份：上一个目标拿到的、拿东西的引擎正在拿的；走路垫脚按它留够数，只垫多出来的。
         private final ItemsInUse itemsInUse = new ItemsInUse(LiveCarryReads.itemTags());
         private final BaritoneInternals walks = new BaritoneInternals(itemsInUse);
+        // 掉落物与装备耐久的事实确认：网络包经 Mixin 喂进来，捡掉落物、战斗拾荒、提醒都按它认事实。
+        private final DropConfirmations dropConfirmations = new DropConfirmations();
+        private EquipmentConfirmations equipmentConfirmations;
+        /** 伤害证据的记忆：自卫与提醒共用；服务器的伤害包经 Mixin 喂进来。 */
+        private CombatMemory combatMemory;
         private final UseKeyHold useKeyHold = new UseKeyHold();
         private final SubtitleFeed subtitles = new SubtitleFeed();
         private final McpConfig mcpConfig = McpConfig.localForProcess(8766);
@@ -344,6 +352,13 @@ public final class Bootstrap {
             ClientHooks.registerUseKeyHold(useKeyHold);
             ClientHooks.registerSubtitleFeed(subtitles);
             ClientHooks.registerChatLog(new ChatLog());
+            ClientHooks.registerDropConfirmations(dropConfirmations);
+            // 装备用坏了：发一条事件告诉 LLM 坏的是哪一件；不替它决定换不换。
+            equipmentConfirmations = new EquipmentConfirmations(broken -> taskEvents.publish(TaskEvent.Kind.GEAR_BROKEN,
+                    "装备用坏了：" + broken.slot() + " 的 " + broken.itemId() + " 耐久打空消灭了（满耐久 "
+                            + broken.maxDurability() + "，最后看到剩 " + broken.durabilityLastSeen() + "）"));
+            ClientHooks.registerEquipmentConfirmations(equipmentConfirmations);
+            ClientHooks.registerDamageObserver(combatMemory);
             // 目标执行与 MCP 工具：LLM 用 execute 下达的目标经目标运行表成为控制循环的主任务；
             // 目标处境与生存需求的事件都进同一条任务事件流，宿主用 events 读。
             // 没进世界时的占位存储：进世界时换成那个世界的存盘（见 enterWorld），不在世界里也下达不了目标。
@@ -426,7 +441,8 @@ public final class Bootstrap {
                     new ClientMovesToMainhand(() -> playerControl.activeContext().orElse(null)),
                     useKeyProjection);
             // 战斗感观一份：生存需求的自卫与战斗能力看的是同一份伤害证据。
-            combatSenses = new LiveCombatSenses(new CombatMemory(), foods);
+            combatMemory = new CombatMemory();
+            combatSenses = new LiveCombatSenses(combatMemory, foods);
             // 控制循环按急迫程度登记生存需求：必须立刻处理的先登记，同样急时它先插进来；
             // 生存需求的事件从同一条任务事件流出去。主任务由目标运行表挂上：LLM 用 execute 派了活，
             // 目标就成为主任务。
@@ -537,7 +553,7 @@ public final class Bootstrap {
                 WorldScope scope = new WorldScope(minecraft, playerControl, blockScans, session,
                         subtitles, interactions, useKeyProjection, walks, combatSenses,
                         abilities, interactionSender, menuActions, instanceConfig, furnaceFuels,
-                        compat, nightWiring, loader.configDirectory(), blueprintOverlay, itemsInUse);
+                        compat, nightWiring, loader.configDirectory(), blueprintOverlay, itemsInUse, dropConfirmations);
                 worldScope[0] = scope;
                 // 换了世界，任务事件流换一条新的，宿主手里的旧游标如实作废；再把这个世界上次没做完的目标
                 // 读回来，全部恢复为暂停，等 LLM 决定接不接着做。读回时的暂停事件进的是新的这条流。
@@ -591,6 +607,8 @@ public final class Bootstrap {
                 scope.observe(current, minecraft.level.getGameTime());
             }
             long gameTick = minecraft.level.getGameTime();
+            // 装备耐久的基准每刻扫一遍：打空事件到了才说得出坏的是哪一件。
+            if (equipmentConfirmations != null) equipmentConfirmations.observe(current.localPlayer());
             clientWork.drain(new ClientTickContext(gameTick, current));
             boolean owned = playerControl.input().automationOwnsControls();
             if (owned != automationOwned) {

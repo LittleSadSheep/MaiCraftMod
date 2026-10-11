@@ -87,6 +87,7 @@ final class PanelWords {
             case NEED_UNHANDLED -> "处理不了";
             case CHARACTER_DIED -> "角色死了";
             case DEATH_RECOVERY_APPLIED -> "死亡恢复";
+            case GEAR_BROKEN -> "装备用坏";
         };
     }
 

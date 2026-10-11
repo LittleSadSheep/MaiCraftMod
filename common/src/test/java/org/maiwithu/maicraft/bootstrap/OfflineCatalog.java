@@ -7,6 +7,7 @@ import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.acquire.ItemsInUse;
+import org.maiwithu.maicraft.game.world.DropConfirmations;
 import org.maiwithu.maicraft.behavior.acquire.LiveCarryReads;
 import org.maiwithu.maicraft.behavior.construction.ShowsPreview;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
@@ -122,6 +123,7 @@ final class OfflineCatalog {
                 ShowsPreview.NONE,
                 new DocumentStore(tempDir.resolve("state.sqlite")),
                 WORLD_KEY,
-                new ItemsInUse(LiveCarryReads.itemTags()));
+                new ItemsInUse(LiveCarryReads.itemTags()),
+                new DropConfirmations());
     }
 }

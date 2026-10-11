@@ -15,6 +15,7 @@ import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.behavior.interaction.InteractionAction;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
+import org.maiwithu.maicraft.game.world.DropConfirmations;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.game.interaction.Interaction;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -32,8 +33,12 @@ public final class LiveFightMoves implements FightMoves {
 
     private final WalkTo walks;
 
-    public LiveFightMoves(WalkTo walks) {
+    /** 掉落物的事实确认：拾荒按服务器的拾取包认东西进没进包。 */
+    private final DropConfirmations confirmations;
+
+    public LiveFightMoves(WalkTo walks, DropConfirmations confirmations) {
         this.walks = walks;
+        this.confirmations = confirmations;
     }
 
     @Override
@@ -76,16 +81,15 @@ public final class LiveFightMoves implements FightMoves {
     }
 
     @Override
-    public int carriedItemCount(TickContext context) {
+    public long dropCursor(TickContext context) {
         var self = context.player() == null ? null : context.player().localPlayer();
-        if (self == null) {
-            return 0;
-        }
-        int total = 0;
-        for (var stack : self.getInventory().items) {
-            total += stack.getCount();
-        }
-        return total + self.getOffhandItem().getCount();
+        return self == null || confirmations == null ? 0 : confirmations.cursor(self);
+    }
+
+    @Override
+    public int pickedUp(TickContext context, int entityId, long sinceCursor) {
+        var self = context.player() == null ? null : context.player().localPlayer();
+        return self == null || confirmations == null ? 0 : confirmations.pickedUpEntity(self, entityId, sinceCursor);
     }
 
     private Entity entity(TickContext context, int entityId) {

@@ -44,7 +44,9 @@ public record TaskEvent(long cursor, Kind kind, long goalRunId, String message, 
         /** 角色死了：血量见底进了死亡流程，循环停摆只报这一条，等重生。 */
         CHARACTER_DIED,
         /** 死亡恢复决策已经执行：重生或观战的请求发出去了，或任务已取消；做了什么在消息里。 */
-        DEATH_RECOVERY_APPLIED
+        DEATH_RECOVERY_APPLIED,
+        /** 在用的工具或盔甲耐久打空消灭了：坏的是哪一件、在哪个槽位、满耐久多少在消息里。 */
+        GEAR_BROKEN
     }
 
     public TaskEvent {

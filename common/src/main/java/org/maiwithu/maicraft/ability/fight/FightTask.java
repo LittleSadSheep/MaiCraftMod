@@ -87,7 +87,8 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     /** 目标离逼近出发时的位置超过这么远（格）才重新规划路线。 */
     private static final double REAPPROACH_AFTER = 3.0;
     private boolean fled;
-    private int carriedBeforeLoot = -1;
+    /** 开始拾荒那一刻的掉落物确认序号：只认这之后本玩家的拾取。 */
+    private long lootCursor;
     private List<FightMoves.Drop> pendingDrops = List.of();
     /** 走到掉落物跟前后等它被吸进包的刻数：原版拾取要一两刻，到了就结算会把捡得到的记成没捡到。 */
     private int lootWaited;
@@ -292,7 +293,7 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         if (pendingDrops.isEmpty()) {
             // 抄一份自己逐件划掉，不改读端交来的清单。
             pendingDrops = new ArrayList<>(moves.dropsNear(context, lastKillSpot[0], lastKillSpot[1], lastKillSpot[2], 4.0));
-            carriedBeforeLoot = moves.carriedItemCount(context);
+            lootCursor = moves.dropCursor(context);
             if (pendingDrops.isEmpty()) {
                 recordProgress("身边没有掉落物可捡");
                 return Next.done(settled(context));
@@ -319,12 +320,12 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         return Next.stay();
     }
 
+    // 捡到没捡到按服务器的拾取包认：说本玩家收了几件就是几件；没说就按没能确认记，不拿背包变多冒充。
     private void settleOneDrop(FightMoves.Drop drop, TickContext context) {
-        int carriedNow = moves.carriedItemCount(context);
-        if (carriedBeforeLoot >= 0 && carriedNow > carriedBeforeLoot) {
+        int got = moves.pickedUp(context, drop.entityId(), lootCursor);
+        if (got > 0) {
             lootGained.add(drop.item());
-            recordChange(Change.of(Change.Kind.ITEM_GAINED, drop.item(), carriedNow - carriedBeforeLoot));
-            carriedBeforeLoot = carriedNow;
+            recordChange(Change.of(Change.Kind.ITEM_GAINED, drop.item(), got));
         } else {
             recordUnconfirmed(Change.of(Change.Kind.ITEM_GAINED, drop.item(), 1));
         }

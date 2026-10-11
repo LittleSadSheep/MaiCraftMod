@@ -88,7 +88,9 @@ class FightAreaClearTest {
             return List.of();
         }
 
-        @Override public int carriedItemCount(TickContext context) { return 0; }
+        @Override public long dropCursor(TickContext context) { return 0; }
+
+        @Override public int pickedUp(TickContext context, int entityId, long sinceCursor) { return 0; }
 
         private static Action done() {
             return new Action() {

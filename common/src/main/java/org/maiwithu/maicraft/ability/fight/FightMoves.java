@@ -25,8 +25,11 @@ interface FightMoves {
     /** 掉落点附近的物品实体：就地捡战利品用。 */
     List<Drop> dropsNear(TickContext context, double x, double y, double z, double radius);
 
-    /** 随身物品总件数：拾荒前后对比，确认东西真的进了包。 */
-    int carriedItemCount(TickContext context);
+    /** 掉落物确认此刻的序号：拾荒前记一份，之后只认这之后本玩家的拾取。 */
+    long dropCursor(TickContext context);
+
+    /** 记下的序号之后本玩家从这件掉落物上收了几件：服务器说收了才算，背包多了不算。 */
+    int pickedUp(TickContext context, int entityId, long sinceCursor);
 
     /** 一个待捡的掉落物。 */
     record Drop(int entityId, String item, double x, double y, double z) {}

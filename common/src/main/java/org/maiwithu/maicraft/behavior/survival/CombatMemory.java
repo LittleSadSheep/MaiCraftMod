@@ -4,6 +4,10 @@ package org.maiwithu.maicraft.behavior.survival;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import org.maiwithu.maicraft.game.player.DamageObserver;
+import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.client.player.LocalPlayer;
+import java.util.Optional;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.entity.Entity;
@@ -24,10 +28,35 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 箭已经消失也能找到远处的骷髅。证据窗口 10 秒，过期即清；
  * 死亡、换世界、换身体时记忆清空，重生不继承上一具身体的敌人。
  */
-public final class CombatMemory {
+public final class CombatMemory implements DamageObserver {
 
     /** 一条证据：谁、类型、什么时候、什么伤害。 */
     public record Evidence(UUID attacker, String type, long tick, String damageKind) {}
+
+    /** 最近一次挨打：什么时候、什么伤、谁打的（没有实体来源为 null）、是不是敌对生物打的。 */
+    public record Hurt(long tick, String damageKind, String attackerType, boolean hostile) {}
+
+    private Hurt lastHurt;
+    /** 最近一次有服务器伤害包的刻：这一刻不再按血掉落猜最近的怪。 */
+    private long authoritativeTick = Long.MIN_VALUE;
+
+    /** 服务器的伤害包：是谁打的、什么伤都写清了，照实记，不猜。 */
+    @Override
+    public void hurt(LocalPlayer player, DamageSource source, long gameTick) {
+        Entity attacker = source.getEntity();
+        String kind = source.type().msgId();
+        boolean hostile = attacker instanceof Enemy;
+        lastHurt = new Hurt(gameTick, kind, attacker == null ? null : typeId(attacker), hostile);
+        if (attacker instanceof Mob mob) {
+            record(new Evidence(mob.getUUID(), typeId(mob), gameTick, kind));
+            authoritativeTick = gameTick;
+        }
+    }
+
+    /** 这一刻挨的那一下（服务器伤害包）；这一刻没挨打为空。 */
+    public Optional<Hurt> hurtAt(long tick) {
+        return lastHurt != null && lastHurt.tick() == tick ? Optional.of(lastHurt) : Optional.empty();
+    }
 
     /** 证据窗口：10 秒内真打过才算正在结仇。 */
     static final long EVIDENCE_TICKS = 200;
@@ -55,7 +84,8 @@ public final class CombatMemory {
         double health = self.getHealth();
         boolean hurtThisTick = self.hurtTime > 0 && lastHealth >= 0 && health < lastHealth;
         lastHealth = health;
-        if (hurtThisTick) {
+        // 这一刻服务器已经说了是谁打的：不再按血掉落猜最近的怪，免得记到旁边无辜的那只头上。
+        if (hurtThisTick && authoritativeTick != now) {
             // 找最近的敌对生物记一笔；伤害类型按血掉落当刻说不清来源，统一记"被攻击"。
             Mob nearest = null;
             for (Mob mob : level.getEntitiesOfClass(Mob.class,
@@ -100,6 +130,8 @@ public final class CombatMemory {
         evidence.clear();
         lastHealth = -1;
         lastLevel = null;
+        lastHurt = null;
+        authoritativeTick = Long.MIN_VALUE;
     }
 
     private void record(Evidence record) {

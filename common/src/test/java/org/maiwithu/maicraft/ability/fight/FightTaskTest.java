@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -65,7 +67,8 @@ class FightTaskTest {
         int closed;
         /** 地上的掉落物；测试摆，捡起时拿掉。 */
         final List<Drop> drops = new ArrayList<>();
-        int carried;
+        /** 服务器说本玩家从哪件上收了几件；测试摆。 */
+        final Map<Integer, Integer> pickedUp = new HashMap<>();
 
         @Override public Action strike(TickContext context, int entityId) {
             return action("打 " + entityId, ActionStatus.done());
@@ -81,7 +84,11 @@ class FightTaskTest {
             return drops.stream().filter(drop -> Math.hypot(drop.x() - x, drop.z() - z) <= radius).toList();
         }
 
-        @Override public int carriedItemCount(TickContext context) { return carried; }
+        @Override public long dropCursor(TickContext context) { return 0; }
+
+        @Override public int pickedUp(TickContext context, int entityId, long sinceCursor) {
+            return pickedUp.getOrDefault(entityId, 0);
+        }
 
         private Action action(String what, ActionStatus status) {
             started.add(what);
@@ -164,7 +171,7 @@ class FightTaskTest {
             // 走到跟前两刻后被原版吸进包：地上那件没了，背包多一件。
             if (t == 6) {
                 moves.drops.clear();
-                moves.carried = 1;
+                moves.pickedUp.put(42, 1);
             }
             if (task.tick(new Tick(t)) instanceof TickResult.Finished finished) result = finished.result();
         }

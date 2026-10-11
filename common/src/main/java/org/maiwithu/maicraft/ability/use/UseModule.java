@@ -15,6 +15,7 @@ import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.inventory.ClientDropPickup;
 import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
+import org.maiwithu.maicraft.game.world.DropConfirmations;
 import org.maiwithu.maicraft.behavior.perception.Scene;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.ModIdentity;
@@ -78,8 +79,8 @@ public final class UseModule implements AbilityModule {
      */
     public static UseModule live(Supplier<PlayerContext> context, Interactions interactions, BringsPlayerClose close,
             ClientMovesToMainhand toMainhand, ItemNeeds needs, Supplier<Scene> scene, BlockScanService scans,
-            ClientGameRefusals refusals, WalkTo walks, WorldMemory memory, Supplier<Protection> protection,
-            ReadsCreatureSituation creatures) {
+            ClientGameRefusals refusals, WalkTo walks, DropConfirmations confirmations, WorldMemory memory,
+            Supplier<Protection> protection, ReadsCreatureSituation creatures) {
         return new UseModule(new UseServices(
                 new LiveUseWorld(context),
                 new LiveUseInteractions(interactions, context),
@@ -90,7 +91,7 @@ public final class UseModule implements AbilityModule {
                 new LiveNearbySearcher(scans, context),
                 refusals::latestMessage,
                 new MenuSignEditors(),
-                new ClientDropPickup(context, walks),
+                new ClientDropPickup(context, walks, confirmations),
                 new LiveUseTravel(walks),
                 new LiveMenuLooks(context),
                 memory,

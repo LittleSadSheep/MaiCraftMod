@@ -19,7 +19,10 @@
     "ScreenVisibilityMixin",
     "InventoryScreenModeMixin",
     "MinecraftLevelSubtitleMixin",
-    "ChatComponentMessageMixin"
+    "ChatComponentMessageMixin",
+    "ItemEntityConfirmationMixin",
+    "EquipmentConfirmationMixin",
+    "DamageEventMixin"
   ],
   "server": [],
   "injectors": {

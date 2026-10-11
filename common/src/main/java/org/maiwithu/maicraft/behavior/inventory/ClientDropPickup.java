@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.world.DropConfirmations;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -42,10 +43,13 @@ public final class ClientDropPickup implements PicksUpDrops {
 
     private final Supplier<PlayerContext> context;
     private final WalkTo walks;
+    /** 掉落物的事实确认：服务器说本玩家收了才算捡到，地上那件不见了不等于进了自己的包。 */
+    private final DropConfirmations confirmations;
 
-    public ClientDropPickup(Supplier<PlayerContext> context, WalkTo walks) {
+    public ClientDropPickup(Supplier<PlayerContext> context, WalkTo walks, DropConfirmations confirmations) {
         this.context = Objects.requireNonNull(context, "context");
         this.walks = Objects.requireNonNull(walks, "walks");
+        this.confirmations = Objects.requireNonNull(confirmations, "confirmations");
     }
 
     @Override
@@ -82,6 +86,10 @@ public final class ClientDropPickup implements PicksUpDrops {
         private int waited;
         private int missed;
         private int picked;
+        /** 不见了但服务器没说是本玩家收的：被别人捡走、并进了别的堆或消失了。 */
+        private int vanished;
+        /** 开始捡那一刻的确认序号；只认这之后本玩家的拾取。 */
+        private Long cursor;
         /** 还没看到新东西冒出来时已经等了几刻：掉落物要过一两刻才同步到客户端。 */
         private int appearWaited;
 
@@ -95,11 +103,17 @@ public final class ClientDropPickup implements PicksUpDrops {
             if (player == null) {
                 return ActionStatus.failed(Problem.of(Problem.Kind.WRONG_TIME, "这一刻掌握不到角色，捡不了", null));
             }
+            if (cursor == null) cursor = confirmations.cursor(player);
             Entity drop = current == null ? null : player.clientLevel.getEntity(current);
             if (current != null && (drop == null || !drop.isAlive())) {
-                // 地上那件不在了：被原版吸进了包（也可能被别人拿走），接着捡下一件。
+                // 地上那件不在了：服务器的拾取包说是本玩家收的才算捡到；没说就是别人拿走或消失了，不冒充捡到。
+                if (confirmations.pickedUpEntity(player, current, cursor) > 0) {
+                    picked++;
+                } else {
+                    vanished++;
+                    missed++;
+                }
                 current = null;
-                picked++;
             } else if (current != null && ++waited > GIVE_UP_TICKS) {
                 skip.add(current);
                 missed++;
@@ -112,7 +126,9 @@ public final class ClientDropPickup implements PicksUpDrops {
                 }
                 stopWalking();
                 return missed == 0 ? ActionStatus.done() : ActionStatus.failed(Problem.of(Problem.Kind.STUCK,
-                        "有 " + missed + " 件掉出的东西走过去了还在地上，先不捡了", null));
+                        "有 " + (missed - vanished) + " 件掉出的东西走过去了还在地上"
+                                + (vanished > 0 ? "，" + vanished + " 件不见了但不是自己收的（被别人捡走或消失）" : "")
+                                + "，先不捡了", null));
             }
             return walkToward(player.clientLevel.getEntity(current), tick);
         }
