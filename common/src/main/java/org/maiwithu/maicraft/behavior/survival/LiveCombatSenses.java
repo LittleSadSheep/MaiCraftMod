@@ -29,11 +29,18 @@ public final class LiveCombatSenses implements CombatSenses {
 
     private final CombatMemory memory;
     private final ReadsFoodValues foods;
+    private final ModRangedWeapons weapons;
 
     /** @param foods 食物数值：数"带了几份口粮"时按游戏的食物组件认，不按物品名猜。 */
     public LiveCombatSenses(CombatMemory memory, ReadsFoodValues foods) {
+        this(memory, foods, ModRangedWeapons.none());
+    }
+
+    /** @param weapons 联动的远程武器：打不打得过也按真会拿来打的那件算 */
+    public LiveCombatSenses(CombatMemory memory, ReadsFoodValues foods, ModRangedWeapons weapons) {
         this.memory = memory;
         this.foods = Objects.requireNonNull(foods, "foods");
+        this.weapons = Objects.requireNonNull(weapons, "weapons");
     }
 
     @Override
@@ -88,6 +95,14 @@ public final class LiveCombatSenses implements CombatSenses {
         }
         // 打不打得过按真会拿来打的那件算：有弓有箭、有弩就算上远程（战斗里真的会拿来射），否则是剑斧里最好的。
         Optional<WeaponChoice.Picked> weapon = WeaponChoice.pick(carried, hasArrows, false);
+        // 联动的远程武器排在上了弦的弩之后：没有上弦的弩、它又能打时，按它算。
+        if (weapon.filter(picked -> picked.weapon() == WeaponChoice.Weapon.LOADED_CROSSBOW).isEmpty()) {
+            Optional<ModRangedWeapons.Ready> modded = weapons.ready(self, 0.0);
+            if (modded.isPresent()) {
+                weapon = Optional.of(new WeaponChoice.Picked(modded.get().weaponItem(), WeaponChoice.Weapon.MOD_RANGED,
+                        modded.get().weaponSlot()));
+            }
+        }
         return new CombatProfile(self.getHealth(), self.getArmorValue(), weapon, foodCount);
     }
 

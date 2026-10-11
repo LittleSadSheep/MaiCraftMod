@@ -18,7 +18,7 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * 箭往哪儿瞄：算上箭的下坠、空气减速和目标正在走的方向，先按公式猜几个发射方向，
+ * 箭（与联动的远程武器打出的弹）往哪儿瞄：算上下坠、空气减速和目标正在走的方向，先按公式猜几个发射方向，
  * 再逐刻模拟飞行，中途撞墙、撞到别的生物的方向不要，剩下的挑离目标身体中心近、少转头、飞得快的那个。
  * 算出来的是"照眼前的世界这样射能中"的预测；真射没射出去、中没中，由射箭的动作和战斗任务按事实认。
  * 一个方向都找不到就说没有弹道——不凭估计盲射。
@@ -27,6 +27,15 @@ public final class ArrowAim {
 
     /** 瞄的结果：往哪儿看（转头用）、发射方向、估计飞几刻。 */
     public record Aim(Vec3 lookPoint, Vec3 direction, double travelTicks) {}
+
+    /**
+     * 每刻怎么飞：重力、阻力，以及先加重力再减速（土豆弹）还是先减速再加重力（箭）。
+     */
+    record Physics(double gravity, double drag, boolean gravityBeforeDrag) {
+        Vec3 next(Vec3 motion) {
+            return gravityBeforeDrag ? motion.add(0.0, -gravity, 0.0).scale(drag) : motion.scale(drag).add(0.0, -gravity, 0.0);
+        }
+    }
 
     /** 原版箭每刻下坠与减速。 */
     static final double GRAVITY = 0.05;
@@ -38,6 +47,8 @@ public final class ArrowAim {
     public static final double CROSSBOW_SPEED = 3.15;
     /** 箭从眼睛下方这么多发出。 */
     private static final double EYE_OFFSET = 0.1;
+    /** 原版箭的飞法。 */
+    static final Physics ARROW = new Physics(GRAVITY, DRAG, false);
     private static final int MAX_FLIGHT_TICKS = 80;
     private static final double EPS = 1.0e-6;
 
@@ -59,28 +70,41 @@ public final class ArrowAim {
      */
     public static Optional<Aim> find(Level level, Entity shooter, Entity target, double speed,
             boolean inheritsMotion, double maxRange) {
-        if (speed <= EPS || target.isRemoved()) return Optional.empty();
         Vec3 start = new Vec3(shooter.getX(), shooter.getEyeY() - EYE_OFFSET, shooter.getZ());
+        Vec3 shooterMotion = inheritsMotion
+                ? new Vec3(shooter.getDeltaMovement().x, shooter.onGround() ? 0 : shooter.getDeltaMovement().y,
+                        shooter.getDeltaMovement().z)
+                : Vec3.ZERO;
+        return find(level, shooter, target, start, speed, shooterMotion, ARROW, maxRange);
+    }
+
+    /**
+     * 照联动武器给的弹道找一条打得中的：从 start（枪口）出膛，按它的重力、阻力与先后逐刻飞；不带射手自己的速度。
+     */
+    public static Optional<Aim> find(Level level, Entity shooter, Entity target, Vec3 start, double speed,
+            double gravity, double drag, boolean gravityBeforeDrag, double maxRange) {
+        return find(level, shooter, target, start, speed, Vec3.ZERO, new Physics(gravity, drag, gravityBeforeDrag), maxRange);
+    }
+
+    private static Optional<Aim> find(Level level, Entity shooter, Entity target, Vec3 start, double speed,
+            Vec3 shooterMotion, Physics physics, double maxRange) {
+        if (speed <= EPS || target.isRemoved()) return Optional.empty();
         AABB box = target.getBoundingBox();
         if (start.distanceToSqr(box.getCenter()) > maxRange * maxRange) return Optional.empty();
         Vec3 look = shooter.getViewVector(1.0f).normalize();
         // 目标按它此刻的速度往前走，不猜它转弯、起跳和被击退。
         Vec3 targetMotion = target.getDeltaMovement();
-        Vec3 shooterMotion = inheritsMotion
-                ? new Vec3(shooter.getDeltaMovement().x, shooter.onGround() ? 0 : shooter.getDeltaMovement().y,
-                        shooter.getDeltaMovement().z)
-                : Vec3.ZERO;
         List<Vec3> candidates = new ArrayList<>();
-        dragAwareCandidates(candidates, start, box, targetMotion, speed);
+        dragAwareCandidates(candidates, start, box, targetMotion, speed, physics);
         for (Vec3 point : samples(box.move(targetMotion.scale(Math.min(30, start.distanceTo(box.getCenter()) / speed))))) {
-            add(candidates, lowArc(start, point, speed));
+            add(candidates, lowArc(start, point, speed, physics.gravity()));
         }
         candidates.sort(Comparator.comparingDouble(direction -> angleDegrees(look, direction)));
         Aim best = null;
         double bestScore = Double.MAX_VALUE;
         Vec3 eye = shooter.getEyePosition();
         for (Vec3 direction : candidates) {
-            Flight hit = fly(level, shooter, target, targetMotion, start, direction.scale(speed).add(shooterMotion));
+            Flight hit = fly(level, shooter, target, targetMotion, start, direction.scale(speed).add(shooterMotion), physics);
             if (hit == null) continue;
             // 打得中的方向里，偏好离身体中心近、少转头、飞得快的。
             double score = hit.offCenter + angleDegrees(look, direction) * 0.03 + hit.ticks * 0.01;
@@ -101,15 +125,20 @@ public final class ArrowAim {
 
     /** 不计空气减速的低弧线：这个速度下够不着就给 null。 */
     static Vec3 lowArc(Vec3 start, Vec3 target, double speed) {
+        return lowArc(start, target, speed, GRAVITY);
+    }
+
+    static Vec3 lowArc(Vec3 start, Vec3 target, double speed, double gravity) {
         double dx = target.x - start.x;
         double dz = target.z - start.z;
         double horizontal = Math.sqrt(dx * dx + dz * dz);
         if (horizontal < EPS) return target.subtract(start).normalize();
         double y = target.y - start.y;
         double speedSquared = speed * speed;
-        double root = speedSquared * speedSquared - GRAVITY * (GRAVITY * horizontal * horizontal + 2.0 * y * speedSquared);
+        if (gravity <= EPS) return target.subtract(start).normalize();
+        double root = speedSquared * speedSquared - gravity * (gravity * horizontal * horizontal + 2.0 * y * speedSquared);
         if (root < 0.0) return null;
-        double tan = (speedSquared - Math.sqrt(root)) / (GRAVITY * horizontal);
+        double tan = (speedSquared - Math.sqrt(root)) / (gravity * horizontal);
         Vec3 direction = new Vec3(dx, tan * horizontal, dz);
         return direction.lengthSqr() < EPS ? null : direction.normalize();
     }
@@ -119,13 +148,20 @@ public final class ArrowAim {
      * 结果的长度接近 1 才说明这个速度真能这样飞到。
      */
     static Vec3 directionByTime(Vec3 start, Vec3 target, double ticks, double speed) {
+        return directionByTime(start, target, ticks, speed, ARROW);
+    }
+
+    // 先加重力再减速的飞法每刻多减一次重力的速，近似当作重力乘了阻力；只当候选的种子，真飞由逐刻模拟判。
+    static Vec3 directionByTime(Vec3 start, Vec3 target, double ticks, double speed, Physics physics) {
         if (ticks <= EPS || speed <= EPS) return null;
-        double decay = Math.pow(DRAG, ticks);
-        double resistance = DRAG - 1.0;
+        double drag = physics.drag();
+        double gravity = physics.gravityBeforeDrag() ? physics.gravity() * drag : physics.gravity();
+        double decay = Math.pow(drag, ticks);
+        double resistance = drag - 1.0;
         double distanceTerm = decay - 1.0;
-        if (Math.abs(distanceTerm) < EPS) return null;
+        if (Math.abs(distanceTerm) < EPS || Math.abs(resistance) < EPS) return null;
         double horizontal = resistance / (speed * distanceTerm);
-        double fall = GRAVITY * (decay - DRAG * ticks + ticks - 1.0) / (speed * resistance * distanceTerm);
+        double fall = gravity * (decay - drag * ticks + ticks - 1.0) / (speed * resistance * distanceTerm);
         Vec3 direction = new Vec3((target.x - start.x) * horizontal, (target.y - start.y) * horizontal + fall,
                 (target.z - start.z) * horizontal);
         return Double.isFinite(direction.x) && Double.isFinite(direction.y) && Double.isFinite(direction.z)
@@ -133,11 +169,12 @@ public final class ArrowAim {
     }
 
     // 先找让"倒推方向长度正好为 1"的飞行时间，再对目标那时的中心和身体几处各算一个方向。
-    private static void dragAwareCandidates(List<Vec3> out, Vec3 start, AABB box, Vec3 targetMotion, double speed) {
+    private static void dragAwareCandidates(List<Vec3> out, Vec3 start, AABB box, Vec3 targetMotion, double speed,
+            Physics physics) {
         Vec3 center = box.getCenter();
         double longest = Math.max(1.0, Math.min(MAX_FLIGHT_TICKS, start.distanceTo(center) / speed * 1.75));
         DoubleUnaryOperator error = ticks -> {
-            Vec3 direction = directionByTime(start, center.add(targetMotion.scale(ticks)), ticks, speed);
+            Vec3 direction = directionByTime(start, center.add(targetMotion.scale(ticks)), ticks, speed, physics);
             return direction == null ? Double.MAX_VALUE : Math.abs(direction.length() - 1.0);
         };
         double ticks = minimum(0.05, longest, error);
@@ -145,7 +182,7 @@ public final class ArrowAim {
         AABB then = box.move(targetMotion.scale(ticks));
         for (double flight : new double[] {ticks, Math.max(1.0, Math.rint(ticks))}) {
             for (Vec3 point : samples(then)) {
-                Vec3 direction = directionByTime(start, point, flight, speed);
+                Vec3 direction = directionByTime(start, point, flight, speed, physics);
                 if (direction != null && Math.abs(direction.length() - 1.0) <= 0.15) add(out, direction);
             }
         }
@@ -166,7 +203,8 @@ public final class ArrowAim {
     private record Flight(double ticks, double offCenter) {}
 
     // 逐刻飞：这一小段先碰到目标就算中；先碰到方块或别的生物就不要这个方向。
-    private static Flight fly(Level level, Entity shooter, Entity target, Vec3 targetMotion, Vec3 start, Vec3 velocity) {
+    private static Flight fly(Level level, Entity shooter, Entity target, Vec3 targetMotion, Vec3 start, Vec3 velocity,
+            Physics physics) {
         Vec3 position = start;
         Vec3 motion = velocity;
         for (int tick = 1; tick <= MAX_FLIGHT_TICKS; tick++) {
@@ -184,8 +222,8 @@ public final class ArrowAim {
             }
             if (toWall < Double.MAX_VALUE || toOther < Double.MAX_VALUE) return null;
             position = next;
-            // 飞完这一刻先按比例减速，再往下掉一点。
-            motion = motion.scale(DRAG).add(0.0, -GRAVITY, 0.0);
+            // 飞完这一刻按这种弹的飞法减速、往下掉一点（箭先减速再掉，土豆弹先掉再减速）。
+            motion = physics.next(motion);
         }
         return null;
     }

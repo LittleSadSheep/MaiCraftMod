@@ -22,6 +22,8 @@ public final class WeaponChoice {
         READY_BOW,
         /** 没上弦的弩，身上有箭可以装：装一下再射。 */
         CROSSBOW,
+        /** 联动模组的远程武器（土豆加农炮）：点一下就发，排在上了弦的弩之后、弓之前；挑法见 {@link ModRangedWeapons}。 */
+        MOD_RANGED,
         /** 剑或斧：近战。对手举盾时优先斧。 */
         SWORD_OR_AXE,
         /** 空手。 */
@@ -116,7 +118,7 @@ public final class WeaponChoice {
     public static int scoreOf(Weapon weapon) {
         return switch (weapon) {
             case LOADED_CROSSBOW -> 7;
-            case READY_BOW, CROSSBOW -> 6;
+            case READY_BOW, CROSSBOW, MOD_RANGED -> 6;
             case SWORD_OR_AXE -> 5;
             case BARE_HANDS -> 0;
         };

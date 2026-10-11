@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
 import org.maiwithu.maicraft.ability.quest.spi.QuestBookOperations;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.construction.spi.PlacementRules;
+import org.maiwithu.maicraft.behavior.survival.spi.RangedWeapon;
 import org.maiwithu.maicraft.behavior.inventory.spi.CarriedBackpack;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
 import org.maiwithu.maicraft.behavior.menu.spi.MenuLayoutProof;
@@ -30,7 +31,7 @@ import org.slf4j.LoggerFactory;
 /**
  * 联动登记表：启动时按联动清单逐行检查，收集登记了的联动入口交来的 spi 接口实现，
  * 再由启动交给玩家行为层与能力（拿到物品的来源、机器类型、网络读取器、任务书操作、腾背包的随身背包、
- * 查资料的知识来源、查配方的配方查看器、认得出的模组界面、施工的放置规则）。不是 Minecraft 的注册表。
+ * 查资料的知识来源、查配方的配方查看器、认得出的模组界面、施工的放置规则、战斗的远程武器）。不是 Minecraft 的注册表。
  *
  * <p>要用进了世界才有的玩家行为（走过去、点开、保护判断）的，存的是建法，进世界时带着联动能用的玩家行为再建；
  * 建出来的都包一层：模组停用、碰到模组接口对不上时如实回答"用不了"，不让它变成任务的内部错误。
@@ -55,10 +56,11 @@ public final class CompatRegistry {
     private final List<RecipeViewer> recipeViewers = new ArrayList<>();
     private final List<ClientOperation> serverReads = new ArrayList<>();
     private final List<PlacementRules> placementRules = new ArrayList<>();
+    private final List<RangedWeapon> rangedWeapons = new ArrayList<>();
     /** 全部的槽：一个模组交接到一半出错时，按交接前的长度一起撤回。新加槽时把它的列表加进来。 */
     private final List<List<?>> slots = List.of(itemSources, machineTypes, networkReaders, questBooks,
             breakAccelerators, dismantleTools, menuLayouts, carriedBackpacks, knowledgeSources, recipeViewers,
-            serverReads, placementRules);
+            serverReads, placementRules, rangedWeapons);
     private final List<String> decisions = new ArrayList<>();
 
     private CompatRegistry() {}
@@ -194,6 +196,14 @@ public final class CompatRegistry {
         placementRules.add(new CompatPlacementRules(module, rules));
     }
 
+    /**
+     * 联动入口交一种远程武器（土豆加农炮）的事实：不用玩家行为，启动时就交给战斗；
+     * 登记表包一层，模组停用后什么都不认，战斗只用弓弩。
+     */
+    public void rangedWeapon(CompatModule module, RangedWeapon weapon) {
+        rangedWeapons.add(new CompatRangedWeapon(module, weapon));
+    }
+
     /** 联动入口交一个随身背包。腾背包还没有接上调用方，接上时要像物品来源一样包一层，停用后回答放不下。 */
     public void carriedBackpack(CarriedBackpack backpack) {
         carriedBackpacks.add(Objects.requireNonNull(backpack, "backpack"));
@@ -279,6 +289,11 @@ public final class CompatRegistry {
     /** 联动模组的放置规则，按联动清单的顺序；施工取第一个非空的答案。 */
     public List<PlacementRules> placementRules() {
         return Collections.unmodifiableList(placementRules);
+    }
+
+    /** 联动模组的远程武器，按联动清单的顺序。 */
+    public List<RangedWeapon> rangedWeapons() {
+        return Collections.unmodifiableList(rangedWeapons);
     }
 
     /** 联动模组声明的只读操作：启动时登记进客户端的请求路由。 */

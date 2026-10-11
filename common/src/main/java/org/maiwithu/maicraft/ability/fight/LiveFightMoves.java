@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.behavior.survival.CloseCombat;
 import org.maiwithu.maicraft.behavior.survival.CombatStepping;
 import org.maiwithu.maicraft.behavior.survival.LiveCombatHands;
 import org.maiwithu.maicraft.behavior.survival.MeleeStrike;
+import org.maiwithu.maicraft.behavior.survival.ModRangedWeapons;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.game.world.DropConfirmations;
@@ -42,9 +43,15 @@ public final class LiveFightMoves implements FightMoves {
     private final LiveCombatHands hands;
 
     public LiveFightMoves(WalkTo walks, DropConfirmations confirmations, UseKeyProjection projection) {
+        this(walks, confirmations, projection, ModRangedWeapons.none());
+    }
+
+    /** @param weapons 联动的远程武器（土豆加农炮）：点名战斗时也照样用 */
+    public LiveFightMoves(WalkTo walks, DropConfirmations confirmations, UseKeyProjection projection,
+            ModRangedWeapons weapons) {
         this.walks = walks;
         this.confirmations = confirmations;
-        this.hands = new LiveCombatHands(projection);
+        this.hands = new LiveCombatHands(projection, weapons);
     }
 
     @Override

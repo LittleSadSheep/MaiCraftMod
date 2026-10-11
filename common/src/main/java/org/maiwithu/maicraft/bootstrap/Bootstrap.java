@@ -45,6 +45,7 @@ import org.maiwithu.maicraft.behavior.lighting.LightRegion;
 import org.maiwithu.maicraft.behavior.lighting.LiveLightingWorld;
 import org.maiwithu.maicraft.behavior.lighting.LightingWorld;
 import org.maiwithu.maicraft.behavior.survival.BreathNeed;
+import org.maiwithu.maicraft.behavior.survival.ModRangedWeapons;
 import org.maiwithu.maicraft.behavior.survival.DarknessNeed;
 import org.maiwithu.maicraft.behavior.survival.LiveDarkView;
 import org.maiwithu.maicraft.behavior.survival.LiveTorchMoves;
@@ -241,7 +242,8 @@ public final class Bootstrap {
             CombatSenses combatSenses, WalkTo walks,
             EatSoonTask.FoodMoves foodMoves, ReadsFoodValues foods, LiveBurrow burrow, LiveCeilingDigs ceilings,
             NightRestWiring nightWiring, ItemsToKeep keeps, Supplier<Protection> protection,
-            FollowLighting followLighting, ReadsLightLevels lightLevels, ClientMovesToMainhand hands) {
+            FollowLighting followLighting, ReadsLightLevels lightLevels, ClientMovesToMainhand hands,
+            ModRangedWeapons ranged) {
         // 角色死亡这类循环自身的处境变化也从同一条事件流出去；死亡决策从挂载口交给目标运行表。
         return new ControlLoop(List.of(
                 new DigOutNeed(new SurvivalSituation.FromPlayer(),
@@ -249,7 +251,7 @@ public final class Bootstrap {
                 new BreathNeed(new SurvivalSituation.FromPlayer(), ceilings, new LiveAirRoutes()),
                 new FallNeed(new SurvivalSituation.FromPlayer(), EmergencyLanding::findToSaveLife,
                         BaritoneInternals::landingInProgress),
-                new SelfDefenseNeed(combatSenses, new LiveCombatMoves(walks, interactions.heldProjection()), events),
+                new SelfDefenseNeed(combatSenses, new LiveCombatMoves(walks, interactions.heldProjection(), ranged), events),
                 new HungerNeed(new LiveHungerView(foods, keeps), foodMoves, events),
                 new DarknessNeed(new LiveDarkView(lightLevels),
                         new LiveTorchMoves(interactions, hands, protection, Set.of()), followLighting),
@@ -480,7 +482,9 @@ public final class Bootstrap {
                     useKeyProjection, itemsInUse);
             // 战斗感观一份：生存需求的自卫与战斗能力看的是同一份伤害证据。
             combatMemory = new CombatMemory();
-            combatSenses = new LiveCombatSenses(combatMemory, foods);
+            // 联动的远程武器（土豆加农炮）：登记表在启动完成时才定，这里给取表的办法；口粮不当弹药按同一份食物数值认。
+            ModRangedWeapons ranged = new ModRangedWeapons(() -> compat.rangedWeapons(), foods);
+            combatSenses = new LiveCombatSenses(combatMemory, foods, ranged);
             // 控制循环按急迫程度登记生存需求：必须立刻处理的先登记，同样急时它先插进来；
             // 生存需求的事件从同一条任务事件流出去。主任务由目标运行表挂上：LLM 用 execute 派了活，
             // 目标就成为主任务。
@@ -495,7 +499,7 @@ public final class Bootstrap {
                     protection);
             controlLoop = withSurvivalNeeds(taskEvents, deathDecisions, interactionSender, menuActions, interactions,
                     combatSenses, walks, foodMoves, foods, burrow, new LiveCeilingDigs(diggings, protection),
-                    nightWiring, itemsInUse, protection, followLighting, lightLevels, hands);
+                    nightWiring, itemsInUse, protection, followLighting, lightLevels, hands, ranged);
         }
 
         /**

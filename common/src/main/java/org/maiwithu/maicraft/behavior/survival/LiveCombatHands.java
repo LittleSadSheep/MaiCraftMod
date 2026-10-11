@@ -20,20 +20,27 @@ public final class LiveCombatHands {
 
     private final UseKeyProjection projection;
     private final ShieldGuard shield;
+    private final ModRangedWeapons weapons;
 
     public LiveCombatHands(UseKeyProjection projection) {
-        this.projection = projection;
-        this.shield = new ShieldGuard(projection);
+        this(projection, ModRangedWeapons.none());
     }
 
-    /** 冲这一只射一箭。 */
+    /** @param weapons 联动的远程武器（土豆加农炮）：上了弦的弩之后、弓之前用 */
+    public LiveCombatHands(UseKeyProjection projection, ModRangedWeapons weapons) {
+        this.projection = projection;
+        this.shield = new ShieldGuard(projection);
+        this.weapons = weapons;
+    }
+
+    /** 冲这一只射一箭（或用联动的远程武器打一发）。 */
     public Action shoot(int entityId) {
-        return new RangedShot(entityId, projection);
+        return new RangedShot(entityId, projection, weapons);
     }
 
     public boolean canShoot(TickContext context) {
         LocalPlayer self = self(context);
-        return self != null && RangedShot.canShoot(self);
+        return self != null && RangedShot.canShoot(self, weapons);
     }
 
     public boolean hasMeleeWeapon(TickContext context) {

@@ -26,8 +26,13 @@ public final class LiveCombatMoves implements SelfDefenseTask.CombatMoves {
     private final LiveCombatHands hands;
 
     public LiveCombatMoves(WalkTo walks, UseKeyProjection projection) {
+        this(walks, projection, ModRangedWeapons.none());
+    }
+
+    /** @param weapons 联动的远程武器：自卫时也照样用 */
+    public LiveCombatMoves(WalkTo walks, UseKeyProjection projection, ModRangedWeapons weapons) {
         this.walks = walks;
-        this.hands = new LiveCombatHands(projection);
+        this.hands = new LiveCombatHands(projection, weapons);
     }
 
     @Override

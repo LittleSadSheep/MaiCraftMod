@@ -53,6 +53,9 @@ public final class RangedShot implements Action {
 
     private final int targetId;
     private final UseKeyProjection projection;
+    private final ModRangedWeapons weapons;
+    /** 挑中联动的远程武器时，这一发整个交给它。 */
+    private ModShot modShot;
     private PlayerContext current;
     private final ClientMovesToMainhand hands = new ClientMovesToMainhand(() -> this.current);
     private Stage stage = Stage.ARM;
@@ -66,23 +69,34 @@ public final class RangedShot implements Action {
     private Problem failure;
 
     public RangedShot(int targetId, UseKeyProjection projection) {
+        this(targetId, projection, ModRangedWeapons.none());
+    }
+
+    public RangedShot(int targetId, UseKeyProjection projection, ModRangedWeapons weapons) {
         this.targetId = targetId;
         this.projection = projection;
+        this.weapons = weapons;
     }
 
     /** 这一箭射出去了（游戏确认了放箭或弩发射）。 */
     public boolean fired() {
-        return fired;
+        return modShot != null ? modShot.fired() : fired;
     }
 
     /** 正在转头对准、快要放了：走位这几刻站住，别把准星带偏。 */
     public boolean aiming() {
+        if (modShot != null) return modShot.aiming();
         return stage == Stage.AIM || stage == Stage.DRAW && held >= FULL_DRAW_TICKS - AIM_LEAD_TICKS;
     }
 
     /** 身上有没有能射的：有箭的弓、上了弦或有箭可装的弩。 */
     public static boolean canShoot(LocalPlayer self) {
-        return pick(self).isPresent();
+        return canShoot(self, ModRangedWeapons.none());
+    }
+
+    /** 同上，再算上联动的远程武器（有能打的非口粮弹药）。 */
+    public static boolean canShoot(LocalPlayer self, ModRangedWeapons weapons) {
+        return pick(self).isPresent() || weapons.ready(self, 0.0).isPresent();
     }
 
     private static Optional<WeaponChoice.Picked> pick(LocalPlayer self) {
@@ -94,6 +108,7 @@ public final class RangedShot implements Action {
     public ActionStatus tick(TickContext context) {
         PlayerContext player = context.player();
         current = player;
+        if (modShot != null) return modShot.tick(context);
         if (failure != null) return ActionStatus.failed(failure);
         if (stage == Stage.DONE) return ActionStatus.done();
         if (player == null || player.localPlayer() == null || player.interactionSender() == null) {
@@ -113,7 +128,7 @@ public final class RangedShot implements Action {
             }
         }
         return switch (stage) {
-            case ARM -> arm(context, player);
+            case ARM -> arm(context, player, target);
             case START -> start(player);
             case DRAW -> draw(player, target);
             case LOAD -> load(player);
@@ -124,11 +139,19 @@ public final class RangedShot implements Action {
         };
     }
 
-    // 拿到手上：挑弩（上了弦的先）还是弓按远程挑选；已经在主手就不动，换不成如实失败。
-    private ActionStatus arm(TickContext context, PlayerContext player) {
+    // 拿到手上：上了弦的弩先；没有就看联动的远程武器（点一下就发，排在弓之前），挑中了整发交给它；
+    // 再是弓、有箭可装的弩。已经在主手就不动，换不成如实失败。
+    private ActionStatus arm(TickContext context, PlayerContext player, Entity target) {
         LocalPlayer self = player.localPlayer();
         if (arming == null) {
             Optional<WeaponChoice.Picked> weapon = pick(self);
+            boolean loadedCrossbow = weapon.filter(picked -> picked.weapon() == WeaponChoice.Weapon.LOADED_CROSSBOW).isPresent();
+            Optional<ModRangedWeapons.Ready> modded = loadedCrossbow ? Optional.empty()
+                    : weapons.ready(self, self.distanceTo(target));
+            if (modded.isPresent()) {
+                modShot = new ModShot(targetId, weapons, modded.get());
+                return modShot.tick(context);
+            }
             if (weapon.isEmpty()) return fail("身上没有能射的：没有弓和箭，也没有弩");
             crossbow = weapon.get().weapon() != WeaponChoice.Weapon.READY_BOW;
             if (weapon.get().slot() != self.getInventory().selected) {
@@ -287,24 +310,34 @@ public final class RangedShot implements Action {
 
     @Override
     public void pause() {
+        if (modShot != null) {
+            modShot.pause();
+            return;
+        }
         if (arming != null) arming.pause();
         cancelDraw(current);
     }
 
     @Override
     public void close() {
+        if (modShot != null) {
+            modShot.close();
+            return;
+        }
         if (arming != null) arming.close();
         cancelDraw(current);
     }
 
     @Override
     public Interruptibility interruptibility() {
+        if (modShot != null) return modShot.interruptibility();
         return stage == Stage.FIRING || stage == Stage.LOADING_RELEASE ? Interruptibility.UNSAFE_TO_STOP
                 : Interruptibility.WORKING;
     }
 
     @Override
     public String describe() {
+        if (modShot != null) return modShot.describe();
         return switch (stage) {
             case ARM -> "把弓弩拿到手上";
             case START, DRAW -> "拉弓（" + held + " 刻）";
