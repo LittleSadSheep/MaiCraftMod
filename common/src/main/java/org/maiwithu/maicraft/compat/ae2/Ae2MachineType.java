@@ -2,7 +2,9 @@
 package org.maiwithu.maicraft.compat.ae2;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -13,6 +15,8 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -41,6 +45,8 @@ final class Ae2MachineType implements MachineType {
     private final PlayerServices services;
     private final Set<Block> blocks;
     private final MeCables cables;
+    /** 每台样板供应器上次打开界面时样板格里样板的产出：样板格只在开着界面时同步。 */
+    private final Map<BlockPos, List<String>> patternsSeen = new HashMap<>();
 
     Ae2MachineType(Ae2MachineCatalog.Kind kind, Ae2Compat compat, PlayerServices services, Set<Block> blocks) {
         this.kind = Objects.requireNonNull(kind, "kind");
@@ -125,12 +131,38 @@ final class Ae2MachineType implements MachineType {
         return level != null && isCableBus() && cables.mounted(level, part);
     }
 
+    // 样板供应器里放哪些样板：身上带着的与上次打开界面时看见的都列出来；别的设备没有可改的设置。
     @Override public List<MachineSetting> settings(BlockPos at) {
-        return List.of();
+        if (!isPatternProvider()) return List.of();
+        return PatternSettings.of(Optional.ofNullable(patternsSeen.get(at)), carriedPatterns());
     }
 
+    // 改一项：pattern.产出物品 写 in 放进去、out 拿回背包，开界面快速移动那张样板；别的键不认。
     @Override public Optional<Action> change(BlockPos at, String key, String value, Permissions permissions) {
-        return Optional.empty();
+        if (!isPatternProvider()) return Optional.empty();
+        Optional<String> output = PatternSettings.outputOf(key);
+        if (output.isEmpty() || !(value.equals(PatternSettings.IN) || value.equals(PatternSettings.OUT))) {
+            return Optional.empty();
+        }
+        return Optional.of(new PatternChange(compat, services, at, output.get(), value.equals(PatternSettings.IN),
+                permissions, patternsSeen));
+    }
+
+    private boolean isPatternProvider() {
+        return kind.id().equals("ae2:pattern_provider");
+    }
+
+    // 身上带着的样板各产出什么：背包里每一件编码过的样板都解一下。
+    private Set<String> carriedPatterns() {
+        PlayerContext current = services.context().get();
+        if (current == null || current.localPlayer() == null || current.level() == null) return Set.of();
+        Set<String> outputs = new LinkedHashSet<>();
+        Inventory inventory = current.localPlayer().getInventory();
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (!stack.isEmpty()) compat.patternOutput(stack, current.level()).ifPresent(outputs::add);
+        }
+        return outputs;
     }
 
     @Override public Optional<Action> feed(BlockPos at, String itemId, int count, Permissions permissions) {

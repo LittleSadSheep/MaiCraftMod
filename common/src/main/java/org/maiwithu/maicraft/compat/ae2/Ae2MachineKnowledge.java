@@ -40,6 +40,11 @@ final class Ae2MachineKnowledge implements KnowledgeSource {
                 .append("- 网络要有电：能源接收器接外面的电、能源元件存电。\n")
                 .append("- `machine_inspect` 看网络：控制器、频道用量与上限、能量、存储总量要服务器装了 MaiCraft 才读得到；")
                 .append("部件亮不亮（有电、有频道）客户端就看得见。`machine_connect network=me` 会用福鲁伊克斯玻璃线缆接到最近的网。\n\n");
+        text.append("## 样板供应器\n\n")
+                .append("- `machine_configure` 的键写 `pattern.产出物品`，值写 in（放进供应器）或 out（拿回背包），")
+                .append("例如 `{\"pattern.minecraft:iron_block\": \"in\"}`：角色空着手点开它的界面，把产出那样东西的样板快速移动过去。\n")
+                .append("- 能写的键是身上带着的样板与上次打开界面时看见的样板；供应器里有什么要开着界面才看得见，")
+                .append("没打开过读作 unknown。样板要事先编好，编码样板这里不做。\n\n");
         text.append("## 认得的设备\n\n");
         for (Ae2MachineCatalog.Kind kind : Ae2MachineCatalog.kinds()) {
             text.append("- ").append(kind.name()).append("（`").append(kind.id()).append("`）")

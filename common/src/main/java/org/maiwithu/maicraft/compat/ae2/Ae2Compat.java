@@ -14,6 +14,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
 
 import org.maiwithu.maicraft.compat.CompatModule;
@@ -38,16 +39,25 @@ public final class Ae2Compat extends CompatModule {
     private final Ae2Terminals terminals;
     private final Ae2TerminalMenu menus;
     private final Ae2Grid grid;
+    private final Ae2Patterns patterns;
 
+    /** 没有样板读写端时：认不出样板，样板供应器的界面也不认。 */
     public Ae2Compat(Ae2Terminals terminals, Ae2TerminalMenu menus, Ae2Grid grid) {
+        this(terminals, menus, grid, Ae2Patterns.NONE);
+    }
+
+    public Ae2Compat(Ae2Terminals terminals, Ae2TerminalMenu menus, Ae2Grid grid, Ae2Patterns patterns) {
         super(MOD_ID, "应用能源2");
         this.terminals = Objects.requireNonNull(terminals, "terminals");
         this.menus = Objects.requireNonNull(menus, "menus");
         this.grid = Objects.requireNonNull(grid, "grid");
+        this.patterns = Objects.requireNonNull(patterns, "patterns");
     }
 
     @Override public void contribute(CompatRegistry registry) {
         registry.menuLayout(this, new Ae2TerminalLayout());
+        // 样板供应器的界面：只认放样板的那几格，放进、拿出样板都经它。
+        registry.menuLayout(this, new Ae2PatternProviderLayout(this));
         registry.itemSource(this, services -> {
             SeenNetworkStock seen = new SeenNetworkStock();
             return new Ae2TerminalSource(this, services, new MenuTerminalTakes(this, services, seen, Instant::now),
@@ -125,5 +135,15 @@ public final class Ae2Compat extends CompatModule {
     /** 发一次把光标上的东西放回网络；见 {@link Ae2TerminalMenu#putBack}。 */
     public void putBack(AbstractContainerMenu menu) {
         run("把光标上的东西放回 ME 网络", () -> menus.putBack(menu));
+    }
+
+    /** 打开着的样板供应器界面里放样板的格号；见 {@link Ae2Patterns#openPatternSlots}。 */
+    public Set<Integer> openPatternSlots() {
+        return call("认样板供应器的样板格", patterns::openPatternSlots);
+    }
+
+    /** 一件样板主要产出的物品；见 {@link Ae2Patterns#patternOutput}。 */
+    public Optional<String> patternOutput(ItemStack stack, ClientLevel level) {
+        return call("解样板", () -> patterns.patternOutput(stack, level));
     }
 }
