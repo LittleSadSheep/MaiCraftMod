@@ -14,6 +14,7 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
+import org.maiwithu.maicraft.ability.machine.spi.NetworkLoad;
 import org.maiwithu.maicraft.ability.machine.spi.PartCell;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -56,6 +57,10 @@ public final class CompatMachineType implements MachineType {
         } catch (ModApiMismatch broken) {
             return MachineState.unknown(broken.getMessage());
         }
+    }
+
+    @Override public Optional<NetworkLoad> load(BlockState state) {
+        return ask(() -> type.load(state), Optional.empty());
     }
 
     @Override public Optional<String> installationProblem(Installation installation) {

@@ -17,6 +17,7 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
+import org.maiwithu.maicraft.ability.machine.spi.NetworkLoad;
 import org.maiwithu.maicraft.ability.machine.spi.PartCell;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -86,6 +87,15 @@ final class CreateMachineType implements MachineType {
             return CreateReadings.still(shown, "");
         }
         return CreateReadings.kinetic(compat.kineticReading(level, at), compat.minimumSpeed(here), shown);
+    }
+
+    // 应力：每转吃多少、给多少都读 Create 的应力表；两样都是 0 的（置物台、漏斗）不算在应力网上。
+    @Override public Optional<NetworkLoad> load(BlockState state) {
+        if (!compat.kinetic(state)) return Optional.empty();
+        double impact = compat.stressImpact(state.getBlock());
+        double capacity = compat.stressCapacity(state.getBlock());
+        if (impact <= 0 && capacity <= 0) return Optional.empty();
+        return Optional.of(new NetworkLoad(KineticNetworkReader.KIND.id(), impact, capacity, "每转应力"));
     }
 
     @Override public Optional<String> installationProblem(Installation wanted) {

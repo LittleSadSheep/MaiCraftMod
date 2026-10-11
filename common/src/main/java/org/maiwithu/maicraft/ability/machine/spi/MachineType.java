@@ -42,6 +42,14 @@ public interface MachineType {
     MachineState state(BlockPos at);
 
     /**
+     * 这种方块在它那种网上吃多少、给多少（每转应力、频道）：审阅估算整份蓝图够不够用。
+     * 只作估计，不拦施工；没有这类读数给空。
+     */
+    default Optional<NetworkLoad> load(BlockState state) {
+        return Optional.empty();
+    }
+
+    /**
      * 这段原生安装段的形状合不合规则（直线、长度不超模组配置、两端是不是该有的方块）；合规则给空，
      * 不合给一句说明。只用来审阅与计划阶段报错，不拦施工：形状不对的段照样可以试着装，结果如实报。
      */

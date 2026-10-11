@@ -51,8 +51,8 @@ final class MachineReview {
         }
     }
 
-    private static final String POWER_UNREADABLE = "估不出：消费与容量的应力数值要装了 Create 的联动才读得到";
-    private static final String CHANNELS_UNREADABLE = "估不出：频道用量要 ME 网络的服务端读数，现在读不到";
+    private static final String POWER_UNREADABLE = "估不出：蓝图里没有认得应力数值的方块（要装了 Create 的联动）";
+    private static final String CHANNELS_UNREADABLE = "估不出：蓝图里没有认得频道用量的方块（要装了 AE2 的联动）";
 
     private MachineReview() {
     }
@@ -64,7 +64,42 @@ final class MachineReview {
         reviewInstallations(blueprint, services, issues);
         reviewProcesses(blueprint, services, issues);
         reviewPower(blueprint, services, issues);
-        return new Report(issues, materials(blueprint, backpack), POWER_UNREADABLE, CHANNELS_UNREADABLE);
+        Map<String, double[]> loads = loads(blueprint, services);
+        return new Report(issues, materials(blueprint, backpack), power(loads.get("kinetic")),
+                channels(loads.get("me")));
+    }
+
+    // 每种网把蓝图里每格的吃与给加起来：[吃, 给]。
+    private static Map<String, double[]> loads(MachineBlueprint blueprint, MachineServices services) {
+        Map<String, double[]> sums = new LinkedHashMap<>();
+        for (PlannedCell cell : blueprint.cells()) {
+            MachineType type = services.claiming(cell.state());
+            if (type == null) continue;
+            type.load(cell.state()).ifPresent(load -> {
+                double[] sum = sums.computeIfAbsent(load.network(), key -> new double[2]);
+                sum[0] += load.draw();
+                sum[1] += load.supply();
+            });
+        }
+        return sums;
+    }
+
+    // 应力按每转算：同一转速下消费不超过容量才转得动；齿轮变速会改这笔账，只作估计。
+    private static String power(double[] kinetic) {
+        if (kinetic == null) return POWER_UNREADABLE;
+        String line = "按同一转速算：消费 " + round(kinetic[0]) + "、容量 " + round(kinetic[1])
+                + "（每转应力，转速 n 时都乘 n）；消费不超过容量才转得动，变速齿轮会改这笔账";
+        return kinetic[1] <= 0 ? line + "；蓝图里没有动力源，容量要靠接现场的网" : line;
+    }
+
+    private static String channels(double[] me) {
+        if (me == null) return CHANNELS_UNREADABLE;
+        return "要用 " + Math.round(me[0]) + " 个频道，蓝图里的控制器能给 " + Math.round(me[1])
+                + " 个（没有控制器的网最多 8 个）；只作估计";
+    }
+
+    private static double round(double value) {
+        return Math.round(value * 10.0) / 10.0;
     }
 
     // 部件：宿主要在蓝图里，且要有机器类型说装得上那一面。
@@ -88,7 +123,7 @@ final class MachineReview {
             }
             if (!refusals.isEmpty()) {
                 issues.add(new Issue(where(part.offset()), "没有机器类型肯把 " + part.itemId()
-                        + " 装在这格宿主的" + part.side().getName() + "面：" + String.join("；", refusals),
+                        + " 装在这格宿主的" + part.side().getName() + "面" + reasons(refusals, part.itemId()),
                         "对照宿主方块与部件物品，或装上对应模组的联动再看"));
             }
         }
@@ -112,7 +147,7 @@ final class MachineReview {
                 boolean noneRegistered = services.machineTypes().isEmpty();
                 issues.add(new Issue(where(segment.offsets().get(0)),
                         noneRegistered ? "这个实例没有登记任何机器联动，认不出安装段 " + segment.kind()
-                                : "没有机器类型认这段 " + segment.kind() + "：" + String.join("；", refusals),
+                                : "没有机器类型认这段 " + segment.kind() + reasons(refusals, segment.kind()),
                         "装了对应模组的联动后施工时才能装这段；形状规则以它为准"));
             }
         }
@@ -160,7 +195,8 @@ final class MachineReview {
             MachineType type = services.claiming(host.get());
             if (type != null) {
                 for (ExchangePoint point : type.exchangePoints(host.get(), at)) {
-                    if (point.flow() != ExchangePoint.Flow.OUTPUT) {
+                    // 投料口只看东西能进来的面：物品、流体、化学品；接转动、接电、接 ME 的面不算。
+                    if (point.flow() != ExchangePoint.Flow.OUTPUT && carriesMaterial(point.medium())) {
                         return true;
                     }
                 }
@@ -184,12 +220,14 @@ final class MachineReview {
         Map<BlockPos, MachineRole> roles = new LinkedHashMap<>();
         for (PlannedCell cell : blueprint.cells()) {
             MachineType type = services.claiming(cell.state());
-            if (type != null && switch (type.role()) {
-                case POWER_SOURCE, TRANSMISSION, PROCESSING -> true;
+            if (type == null) continue;
+            // 加工机器只有吃转动的才要接动力：注液器、Mekanism 的机器、烈焰人燃烧室不靠轴。
+            boolean counts = switch (type.role()) {
+                case POWER_SOURCE, TRANSMISSION -> true;
+                case PROCESSING -> takesRotation(type, cell);
                 default -> false;
-            }) {
-                roles.put(cell.pos(), type.role());
-            }
+            };
+            if (counts) roles.put(cell.pos(), type.role());
         }
         if (!roles.containsValue(MachineRole.PROCESSING)) {
             return;
@@ -209,6 +247,17 @@ final class MachineReview {
                         "在蓝图里补上传动（轴、齿轮），或建好后用 machine_connect 接动力"));
             }
         }
+    }
+
+    private static boolean carriesMaterial(ExchangePoint.Medium medium) {
+        return medium == ExchangePoint.Medium.ITEM || medium == ExchangePoint.Medium.FLUID
+                || medium == ExchangePoint.Medium.CHEMICAL;
+    }
+
+    private static boolean takesRotation(MachineType type, PlannedCell cell) {
+        return type.exchangePoints(cell.state(), cell.pos()).stream()
+                .anyMatch(point -> point.medium() == ExchangePoint.Medium.ROTATION
+                        && point.flow() != ExchangePoint.Flow.OUTPUT);
     }
 
     // 沿传动与相邻动力源深搜：消费者经过传动方块（或直接贴着动力源）能不能够到动力。
@@ -253,6 +302,13 @@ final class MachineReview {
             out.add(new MachineReview.Material(item, count, have, Math.max(0, count - have)));
         });
         return out;
+    }
+
+    /** 拒绝的理由只列同一个模组的机器类型说的（别的模组的机器本来就不管它），没有就不列。 */
+    private static String reasons(List<String> refusals, String id) {
+        String namespace = id.contains(":") ? id.substring(0, id.indexOf(':') + 1) : "";
+        List<String> own = refusals.stream().filter(line -> line.startsWith(namespace)).toList();
+        return own.isEmpty() ? "" : "：" + String.join("；", own);
     }
 
     private static String where(BlockPos at) {

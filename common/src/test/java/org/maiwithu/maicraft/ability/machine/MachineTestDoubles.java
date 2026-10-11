@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 
@@ -22,6 +23,7 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkKind;
+import org.maiwithu.maicraft.ability.machine.spi.NetworkLoad;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkSummary;
 import org.maiwithu.maicraft.ability.machine.spi.PartCell;
@@ -122,6 +124,8 @@ final class MachineTestDoubles {
         /** 动手顺序的流水：施工、装段、装部件、改设置谁先谁后从这里看。 */
         final List<String> touched = new ArrayList<>();
         List<ExchangePoint> ports = List.of();
+        /** 这种机器在它那种网上吃多少、给多少：审阅估算用；默认没有。 */
+        Function<BlockState, Optional<NetworkLoad>> load = state -> Optional.empty();
 
         FakeMachineType(String id, String name, MachineRole role, Predicate<BlockState> covers) {
             this.id = id;
@@ -156,6 +160,10 @@ final class MachineTestDoubles {
 
         @Override public MachineState state(BlockPos at) {
             return state.get();
+        }
+
+        @Override public Optional<NetworkLoad> load(BlockState blockState) {
+            return load.apply(blockState);
         }
 
         @Override public Optional<String> installationProblem(Installation installation) {

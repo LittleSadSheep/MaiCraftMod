@@ -19,6 +19,8 @@ import net.minecraft.world.level.block.Blocks;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
+import org.maiwithu.maicraft.ability.machine.spi.NetworkLoad;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.behavior.construction.CellKind;
@@ -54,10 +56,14 @@ class MachineReviewTest {
                 List.of(), List.of(ShownStack.item("test:plate", "铁板", 1)), null);
     }
 
-    /** 审阅用的机器类型：认领熔炉，是台要动力的加工机器。 */
+    /** 审阅用的机器类型：认领熔炉，是台要动力的加工机器（上面接转动，每转吃 4 应力）。 */
     private static MachineTestDoubles.FakeMachineType pressType() {
-        return new MachineTestDoubles.FakeMachineType("test:press", "测试压机",
+        MachineTestDoubles.FakeMachineType press = new MachineTestDoubles.FakeMachineType("test:press", "测试压机",
                 MachineRole.PROCESSING, state -> state.is(Blocks.FURNACE));
+        press.ports = List.of(new ExchangePoint(PRESS, Direction.UP, ExchangePoint.Medium.ROTATION,
+                ExchangePoint.Flow.INPUT, "接转动"));
+        press.load = state -> Optional.of(new NetworkLoad("kinetic", 4, 0, "每转应力"));
+        return press;
     }
 
     /** 只有一台压机的蓝图。 */
@@ -190,6 +196,30 @@ class MachineReviewTest {
     }
 
     @Test
+    void 应力估计按每转把消费与容量加起来_没有认得的方块就说估不出() {
+        MachineTestDoubles.FakeMachineType wheel = new MachineTestDoubles.FakeMachineType("test:wheel", "水车",
+                MachineRole.POWER_SOURCE, state -> state.is(Blocks.LODESTONE));
+        wheel.load = state -> Optional.of(new NetworkLoad("kinetic", 0, 16, "每转应力"));
+        MachineBlueprint blueprint = new MachineBlueprint(
+                List.of(PlannedCell.block(PRESS, Blocks.FURNACE.defaultBlockState(), Set.of()),
+                        PlannedCell.block(PRESS.above(), Blocks.LODESTONE.defaultBlockState(), Set.of())),
+                List.of(), List.of(), List.of(), List.of());
+        MachineServices services = new MachineServices(() -> null, new MachineTestDoubles.FakeWorld(),
+                List.of(wheel, pressType()), List.of(), new MachineTestDoubles.FakeArea(),
+                new RecipeLookup(List.of(), new GameRecipeTable(Optional::empty)),
+                new MachineTestDoubles.FakeNeeds(), new MachineTestDoubles.FakeClose(),
+                new MachineTestDoubles.FakeClicks(), new MachineTestDoubles.FakeSeen(),
+                new MachineTestDoubles.FakePlaces());
+        MachineReview.Report report = MachineReview.review(blueprint, services, backpack());
+        assertTrue(report.power().contains("消费 4.0、容量 16.0"), report.power());
+        assertTrue(report.channels().startsWith("估不出"), report.channels());
+        MachineBlueprint plain = new MachineBlueprint(
+                List.of(PlannedCell.block(PRESS, Blocks.STONE.defaultBlockState(), Set.of())),
+                List.of(), List.of(), List.of(), List.of());
+        assertTrue(MachineReview.review(plain, services, backpack()).power().startsWith("估不出"));
+    }
+
+    @Test
     void 材料账给要几件身上几件缺几件() {
         MachineBlueprint blueprint = new MachineBlueprint(
                 List.of(PlannedCell.block(PRESS, Blocks.FURNACE.defaultBlockState(), Set.of()),
@@ -205,7 +235,8 @@ class MachineReviewTest {
         assertEquals(0, byItem.get("minecraft:stone").missing());
         assertEquals(1, byItem.get("test:terminal").needed());
         assertEquals(1, byItem.get("test:terminal").missing());
-        assertEquals("估不出：消费与容量的应力数值要装了 Create 的联动才读得到", report.power());
+        assertTrue(report.power().contains("消费 4.0、容量 0.0"), report.power());
+        assertTrue(report.power().contains("没有动力源"), report.power());
     }
 
     private static JsonElement json(String text) {
