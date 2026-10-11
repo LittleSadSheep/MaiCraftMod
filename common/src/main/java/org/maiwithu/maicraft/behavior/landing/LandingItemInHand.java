@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.landing;
 import java.util.function.Supplier;
 
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.Item;
 
@@ -41,9 +42,9 @@ final class LandingItemInHand {
     private InteractionHand hand = InteractionHand.MAIN_HAND;
     private String detail = "正在把落地要用的东西拿到手上";
 
-    LandingItemInHand(LandingAid aid, Supplier<PlayerContext> contexts) {
-        this.item = aid.item();
-        this.itemId = aid.itemId();
+    LandingItemInHand(Item item, Supplier<PlayerContext> contexts) {
+        this.item = item;
+        this.itemId = BuiltInRegistries.ITEM.getKey(item).toString();
         this.hands = new ClientMovesToMainhand(contexts);
     }
 

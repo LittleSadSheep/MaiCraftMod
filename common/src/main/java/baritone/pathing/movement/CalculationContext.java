@@ -55,6 +55,8 @@ import org.maiwithu.maicraft.behavior.landing.WaterLandingWindow;
 import org.maiwithu.maicraft.behavior.landing.LandingPlan;
 import org.maiwithu.maicraft.behavior.landing.LandingOptions;
 import org.maiwithu.maicraft.behavior.landing.LandingGeometry;
+import org.maiwithu.maicraft.behavior.landing.BoatOptions;
+import org.maiwithu.maicraft.behavior.landing.BoatPlan;
 import org.maiwithu.maicraft.behavior.landing.LandingAid;
 import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationProtection;
 import org.maiwithu.maicraft.behavior.navigation.baritone.PhysicalObstacleSnapshot;
@@ -105,6 +107,8 @@ public class CalculationContext {
     public final NavigationProtection.Snapshot maicraftPolicy;
     /** 这次算路能用的落地办法：出发前取一份，搜索全程一致；会摔伤的一跳只有落点接得住人才收。 */
     public final LandingOptions landingOptions;
+    /** 用船接住的条件：身上带着哪种船、附近停着哪些空船、够得着的距离；不许用落地办法时为 null。 */
+    private final BoatOptions boatOptions;
     /** 有计划地往下跳时，留不留得出倒水的那一刻。 */
     private final WaterLandingWindow waterLandingWindow;
 
@@ -255,6 +259,7 @@ public class CalculationContext {
         this.maicraftPolicy = Objects.requireNonNull(frozenPolicy, "frozenPolicy");
         this.landingOptions = LandingOptions.capture(player,
                 forceTerrainMutation || Baritone.settings().allowWaterBucketFall.value);
+        this.boatOptions = landingOptions.allowed() ? BoatOptions.capture(player) : null;
         this.waterLandingWindow = new WaterLandingWindow(fallDamageBudget.gravity(), player.blockInteractionRange(),
                 player.getEyeHeight(), Math.max(0, -player.getDeltaMovement().y));
         this.portalEntryCells = portalEntryCells(
@@ -370,6 +375,19 @@ public class CalculationContext {
             usable.add(plan);
         }
         return usable;
+    }
+
+    /**
+     * 放东西都接不住时用船：站在出发点就够得着落点的，放好船直接坐进去；否则边掉边放、边掉边坐，
+     * 要留得出放船、上船、等确认的那几刻。都不行为 null。
+     */
+    public BoatPlan landingBoat(BlockPos source, BlockPos feet, int drop) {
+        if (boatOptions == null || isPossiblyProtected(feet.getX(), feet.getY(), feet.getZ())) return null;
+        Predicate<BlockPos> loaded = pos -> bsi.worldContainsLoadedChunk(pos.getX(), pos.getZ());
+        BoatPlan fromEdge = boatOptions.fromEdge(bsi.access, source, feet, loaded);
+        if (fromEdge != null) return fromEdge;
+        BoatPlan midair = boatOptions.midair(bsi.access, feet, loaded);
+        return midair != null && boatOptions.airborneWindow(drop, fallDamageBudget.gravity(), 0) ? midair : null;
     }
 
     public double placeBucketCost() {

@@ -4,7 +4,7 @@ package org.maiwithu.maicraft.behavior.survival;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 
-import org.maiwithu.maicraft.behavior.landing.LandingRescue;
+import org.maiwithu.maicraft.behavior.landing.CatchesFall;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.interrupt.SurvivalNeed;
 import org.maiwithu.maicraft.kernel.task.Task;
@@ -19,11 +19,11 @@ public final class FallNeed implements SurvivalNeed {
 
     private final SurvivalSituation.SituationReader reader;
     /** 就地找落点与办法，交给一次空中救援；救不了为 null。 */
-    private final Function<PlayerContext, LandingRescue> rescues;
+    private final Function<PlayerContext, CatchesFall> rescues;
     /** 走路自己正在跑落地救援。 */
     private final BooleanSupplier walkHandlesFall;
 
-    public FallNeed(SurvivalSituation.SituationReader reader, Function<PlayerContext, LandingRescue> rescues,
+    public FallNeed(SurvivalSituation.SituationReader reader, Function<PlayerContext, CatchesFall> rescues,
                     BooleanSupplier walkHandlesFall) {
         this.reader = reader;
         this.rescues = rescues;

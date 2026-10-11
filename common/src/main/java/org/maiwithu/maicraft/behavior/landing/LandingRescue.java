@@ -38,10 +38,7 @@ import org.maiwithu.maicraft.game.world.BucketWater;
  * 拿走后站不住，就把东西留在原地如实说。成功认定：干草允许减伤后活着（要真踩在干草上）；
  * 其余要求没掉血，水还要真碰到水、摔落清零。
  */
-public final class LandingRescue {
-
-    /** 救援改了哪一格：放下时 before 是原来的样子，收回时 after 是收完的样子。 */
-    public record Change(BlockPos position, BlockState before, BlockState after) {}
+public final class LandingRescue implements CatchesFall {
 
     /** 落地后最多花这么久收回自己放的；过了就留在原地。 */
     private static final long RECOVERY_LIMIT_TICKS = 80;
@@ -105,18 +102,30 @@ public final class LandingRescue {
     private void bindTo(int index) {
         cursor = index;
         plan = candidates.get(index);
-        item = plan.existing() ? null : new LandingItemInHand(plan.aid(), () -> current);
+        item = plan.existing() ? null : new LandingItemInHand(plan.aid().item(), () -> current);
     }
 
     public LandingPlan plan() {
         return plan;
     }
 
+    @Override
+    public String itemId() {
+        return plan.aid().itemId();
+    }
+
+    @Override
+    public BlockPos landingFeet() {
+        return plan.feet();
+    }
+
+    @Override
     public boolean complete() {
         return complete;
     }
 
     /** 没救成：放不成、落到别处、或说是免伤却掉了血。干草减伤后活着不算失败。 */
+    @Override
     public boolean failed() {
         return failed || complete && damageObserved && plan.aid() != LandingAid.HAY;
     }
@@ -127,6 +136,7 @@ public final class LandingRescue {
     }
 
     /** 收尾到哪一步、为什么没成，说给 LLM 听的一句话。 */
+    @Override
     public String detail() {
         return detail;
     }
@@ -136,6 +146,7 @@ public final class LandingRescue {
     }
 
     /** 取走到现在为止改了的格子（放下的、收回的）。 */
+    @Override
     public List<Change> drainChanges() {
         var result = List.copyOf(changes);
         changes.clear();
@@ -146,6 +157,7 @@ public final class LandingRescue {
      * 站在出发点每刻调一次：落点还放得下、东西拿到手上了才返回 true，可以离地。
      * 落点变了（被挖、被放了东西、被划进保护）就失败，不往下跳。
      */
+    @Override
     public boolean prepare(PlayerContext context) {
         current = context;
         LocalPlayer player = context.localPlayer();
@@ -177,6 +189,7 @@ public final class LandingRescue {
     }
 
     /** 离地以后（意外掉下去时从第一刻起）每刻调一次。同一刻调多次只算一次。 */
+    @Override
     public void tick(PlayerContext context) {
         if (complete || lastTick == context.clientTick()) return;
         lastTick = context.clientTick();
@@ -205,6 +218,7 @@ public final class LandingRescue {
     }
 
     /** 离过地、现在又落回地上（或落进水里停住）了：之后的站稳、收回由救援占着身体。 */
+    @Override
     public boolean touchedDown(PlayerContext context) {
         LocalPlayer player = context.localPlayer();
         return airborneObserved && (player.onGround() || player.isInWater() && player.fallDistance == 0);
@@ -233,6 +247,7 @@ public final class LandingRescue {
     }
 
     /** 这一刻往落点推的按键：落地后、收水时站定。 */
+    @Override
     public PlayerInput.Movement steering(PlayerContext context, float yaw) {
         LocalPlayer player = context.localPlayer();
         boolean sneak = wantsSneak(context);
@@ -243,6 +258,7 @@ public final class LandingRescue {
     }
 
     /** 被别的事打断（任务结束、换世界）：没确认的放置交还等待、挖了一半的停手、打开的背包关上。 */
+    @Override
     public void stop(PlayerContext context, String reason) {
         if (complete) return;
         current = context;

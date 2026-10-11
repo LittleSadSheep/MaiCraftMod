@@ -42,6 +42,7 @@ import net.minecraft.world.level.block.LadderBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.WaterFluid;
 import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.behavior.landing.BoatPlan;
 import org.maiwithu.maicraft.behavior.landing.LandingPlan;
 
 public class MovementFall extends Movement {
@@ -68,6 +69,16 @@ public class MovementFall extends Movement {
                 context.get(dest.x, src.y - 2, dest.z), result);
         if (!assisted || result.y != dest.y) return List.of();
         return context.landingPlans(dest, src.y - dest.y);
+    }
+
+    /** 放东西接不住时用船接住这一跳的打算；不会摔伤、或用船也不行时为 null。按此刻重算。 */
+    public BoatPlan landingBoat() {
+        CalculationContext context = new CalculationContext(baritone);
+        MutableMoveResult result = new MutableMoveResult();
+        boolean assisted = MovementDescend.dynamicFallCost(context, src.x, src.y, src.z, dest.x, dest.z, 0,
+                context.get(dest.x, src.y - 2, dest.z), result);
+        if (!assisted || result.y != dest.y) return null;
+        return context.landingBoat(src, dest, src.y - dest.y);
     }
 
     @Override

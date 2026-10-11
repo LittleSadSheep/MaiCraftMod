@@ -19,7 +19,7 @@ import org.maiwithu.maicraft.game.player.FallDamage;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /**
- * 意外掉下去时就地找落点救：先看正下方，再看周围两格内空中推得过去的落点，水优先。
+ * 意外掉下去时就地找落点救：先看正下方，再看周围两格内空中推得过去的落点，水优先；放东西都用不上时再用船。
  * 救命不看任务许可；只按已加载、看得懂的碰撞面找，读不懂的（未加载、射线结果对不上世界坐标）当没有。
  */
 public final class EmergencyLanding {
@@ -46,15 +46,19 @@ public final class EmergencyLanding {
     }
 
     /** 找一个落点和那里能用的办法，交给一次空中救援；哪里都救不了时为 null。 */
-    public static LandingRescue find(PlayerContext context, Predicate<BlockPos> protectedCell, LongSet noEntryCells) {
+    public static CatchesFall find(PlayerContext context, Predicate<BlockPos> protectedCell, LongSet noEntryCells) {
         BlockPos ground = groundBelow(context.localPlayer());
         if (ground == null) return null;
         List<LandingPlan> plans = bestPlans(context, ground.above(), protectedCell, noEntryCells);
-        return plans.isEmpty() ? null : LandingRescue.airborne(plans, protectedCell, noEntryCells);
+        if (!plans.isEmpty()) return LandingRescue.airborne(plans, protectedCell, noEntryCells);
+        // 方块、水都用不上：落点那里停着空船、或身上带着船，就边掉边放、边掉边坐。
+        BoatPlan boat = protectedCell.test(ground.above()) ? null : BoatOptions.capture(context.localPlayer())
+                .catchFalling(context.level(), ground.above(), context.level()::isLoaded);
+        return boat == null ? null : BoatRescue.airborne(boat);
     }
 
     /** 生存反射救命用：不看任务许可与走路的保护格，身体禁入格也不算。 */
-    public static LandingRescue findToSaveLife(PlayerContext context) {
+    public static CatchesFall findToSaveLife(PlayerContext context) {
         return find(context, cell -> false, LongSets.EMPTY_SET);
     }
 

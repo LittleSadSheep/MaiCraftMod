@@ -223,8 +223,10 @@ public class MovementDescend extends Movement {
             // 多算一次放东西的代价，由走路在出发点备好、空中放下、落地收回；没有东西接就不让角色白挨摔，路线另找下法。
             if (reachedMinimum && !context.canLandWithoutDamage(x, y, z, effectiveStartHeight,
                     destX, newY, destZ, ontoBlock)) {
-                if (!context.landingPlans(new BlockPos(destX, newY + 1, destZ), effectiveStartHeight - newY - 1)
-                        .isEmpty()) {
+                BlockPos landing = new BlockPos(destX, newY + 1, destZ);
+                int drop = effectiveStartHeight - newY - 1;
+                if (!context.landingPlans(landing, drop).isEmpty()
+                        || context.landingBoat(new BlockPos(x, y, z), landing, drop) != null) {
                     res.x = destX;
                     res.y = newY + 1;
                     res.z = destZ;

@@ -7,7 +7,7 @@ import java.util.function.Function;
 
 import net.minecraft.core.BlockPos;
 
-import org.maiwithu.maicraft.behavior.landing.LandingRescue;
+import org.maiwithu.maicraft.behavior.landing.CatchesFall;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Change;
@@ -34,10 +34,10 @@ public final class FallGuardTask extends PhasedTask<FallGuardTask.Phase> {
 
     private final SurvivalSituation.SituationReader reader;
     /** 就地找落点与办法，交给一次空中救援；救不了为 null。 */
-    private final Function<PlayerContext, LandingRescue> rescues;
-    private LandingRescue rescue;
+    private final Function<PlayerContext, CatchesFall> rescues;
+    private CatchesFall rescue;
 
-    public FallGuardTask(SurvivalSituation.SituationReader reader, Function<PlayerContext, LandingRescue> rescues) {
+    public FallGuardTask(SurvivalSituation.SituationReader reader, Function<PlayerContext, CatchesFall> rescues) {
         super("落地防护", Phase.FIND, new ProgressTracker(20L * 30, 20L * 60));
         this.reader = reader;
         this.rescues = rescues;
@@ -65,18 +65,17 @@ public final class FallGuardTask extends PhasedTask<FallGuardTask.Phase> {
                     "这一掉会掉血，可身上没有能接住自己的东西（水桶、干草、黏液块、蛛网……），落点附近也没有现成的水；落地伤害由游戏结算",
                     "高处干活时身上带一桶水（或干草、黏液块），掉下去时就能接住自己"));
         }
-        return Next.go(Phase.CATCH, "用" + rescue.plan().aid().itemId() + "接住，落点 "
-                + rescue.plan().feet().toShortString());
+        return Next.go(Phase.CATCH, "用" + rescue.itemId() + "接住，落点 " + rescue.landingFeet().toShortString());
     }
 
     // 接住这一掉收场：留在原地没收回的格子记进变化；救没救成按救援自己的认定。
     private Next<Phase> concluded() {
         List<BlockPos> leftInPlace = new ArrayList<>();
-        for (LandingRescue.Change change : rescue.drainChanges()) {
+        for (CatchesFall.Change change : rescue.drainChanges()) {
             if (!leftInPlace.remove(change.position())) leftInPlace.add(change.position());
         }
         for (BlockPos cell : leftInPlace) {
-            recordChange(new Change(Change.Kind.BLOCK_PLACED, rescue.plan().aid().itemId(), 1,
+            recordChange(new Change(Change.Kind.BLOCK_PLACED, rescue.itemId(), 1,
                     "落地救援放在 " + cell.toShortString() + "，没收回，还留在那里"));
         }
         if (rescue.failed()) return Next.fail(Problem.of(Problem.Kind.DANGER, rescue.detail()));
@@ -99,10 +98,10 @@ public final class FallGuardTask extends PhasedTask<FallGuardTask.Phase> {
 
     /** 接住这一掉的动作：每刻推进救援、按它的意思往落点推；被打断时救援收手（没确认的放置交还、打开的背包关上）。 */
     private static final class CatchFall implements Action {
-        private final LandingRescue rescue;
+        private final CatchesFall rescue;
         private PlayerContext last;
 
-        CatchFall(LandingRescue rescue) {
+        CatchFall(CatchesFall rescue) {
             this.rescue = rescue;
         }
 
