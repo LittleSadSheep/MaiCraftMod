@@ -86,6 +86,11 @@ public final class RangedCombat {
         return shot != null;
     }
 
+    /** 正在快放手对准的那几刻：脚要站住、不转头，迈步会把准星带偏。 */
+    public boolean steady() {
+        return shot instanceof RangedShot ranged && ranged.aiming();
+    }
+
     /** 连着几箭没射出去：该交回近战了。 */
     public boolean givenUp() {
         return misfires >= MAX_MISFIRES;

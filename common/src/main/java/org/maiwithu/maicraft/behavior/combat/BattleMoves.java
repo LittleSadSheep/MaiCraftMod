@@ -30,7 +30,7 @@ public interface BattleMoves {
     void guard(TickContext context, double distance, boolean aboutToStrike);
 
     /** 不打了：盾放下。 */
-    void lowerGuard(TickContext context);
+    void lowerGuard();
 
     /** 当刻脚下的路：走位挑方向用。 */
     Footwork.Ground ground(TickContext context);
