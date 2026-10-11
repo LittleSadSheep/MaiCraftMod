@@ -166,4 +166,12 @@ class CreateShapesTest {
         assertEquals(8, ToolboxSource.halfStack(16));
         assertEquals(1, ToolboxSource.halfStack(1));
     }
+
+    @Test
+    void 属性过滤器的写法按分号拆成一条条_clear是清空() {
+        assertEquals(List.of("minecraft:oak_log minecraft:logs", "minecraft:diamond_sword !附魔"),
+                CreateFilterSettings.attributeEntries("minecraft:oak_log minecraft:logs； minecraft:diamond_sword !附魔"));
+        assertTrue(CreateFilterSettings.attributeEntries("clear").isEmpty());
+        assertTrue(CreateFilterSettings.attributeEntries("  ").isEmpty());
+    }
 }

@@ -98,6 +98,14 @@ final class CreateMachineKnowledge implements KnowledgeSource {
                 .append("- 横着的齿轮箱（axis 写 x 或 z）拿竖直齿轮箱物品放，放下后按旁边伸过来的轴定轴向：")
                 .append("只有一个水平方向有轴伸过来时取和它垂直的方向，施工会先放好两侧的轴。\n")
                 .append("- 动力辊放下那一格的正下方是实心顶面时会被抬高一格：动力辊正下方要空着（下面再是地面也行）。\n\n");
+        text.append("## 过滤器与属性过滤器（物品）\n\n")
+                .append("- 过滤器写规则是物品自己的界面：machine_inspect(item=create:filter) 看身上每一件现在是什么，")
+                .append("machine_configure(item=..., settings=...) 改，身上有几件时 inventory_slot 指哪一件。\n")
+                .append("- 过滤器：filter.1 ~ filter.18 写物品 ID（empty 清空），filter.mode 写 allow / deny，")
+                .append("filter.match_components 写 true / false（连物品组件一起比）。\n")
+                .append("- 属性过滤器：attribute.mode 写 any（满足任一条）/ all（全部满足）/ deny；attributes 写\"样本物品 属性文字片段\"，")
+                .append("几条用分号隔开，片段前加 ! 取反，clear 清空；片段在样本物品的属性说法里找，找不到时结果会列出它有哪些说法。\n")
+                .append("- 配好的过滤器放进漏斗、智能溜槽这类的过滤格：machine_configure 的 filter 写这件过滤器的物品 ID。\n\n");
         text.append("## 设置框（过滤格、件数、数值、选项）\n\n")
                 .append("- 方块上画着小框的都能用 machine_configure 改；machine_inspect 或 machine_configure 先看这台有哪些键。\n")
                 .append("- 过滤格 `filter`（黄铜隧道每面一格写 `filter.north` 这样）：写物品 ID，角色手持那样东西点那一格；")

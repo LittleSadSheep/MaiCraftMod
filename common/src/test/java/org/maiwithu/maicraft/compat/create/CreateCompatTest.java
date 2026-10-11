@@ -13,6 +13,7 @@ import java.util.Set;
 
 import net.minecraft.SharedConstants;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.Bootstrap;
@@ -237,7 +238,18 @@ class CreateCompatTest {
             @Override public void pressCannon(String button) { }
             @Override public Optional<Float> uploading(ClientLevel level, BlockPos at) { return Optional.empty(); }
         };
-        return new CreateCompat(kinetics, belts, chains, stations, tools, values, schematics);
+        CreateFilters filters = new CreateFilters() {
+            @Override public Optional<FilterRules> filter(ItemStack stack) { return Optional.empty(); }
+            @Override public Optional<AttributeRules> attributeFilter(ItemStack stack) { return Optional.empty(); }
+            @Override public boolean filterMenuOpen(LocalPlayer player) { return false; }
+            @Override public void setFilterSlot(int slot, String itemId) { }
+            @Override public void pressFilterButton(String button) { }
+            @Override public Optional<List<String>> addAttribute(String sampleItem, String fragment, boolean inverted) {
+                return Optional.empty();
+            }
+            @Override public void clearFilter() { }
+        };
+        return new CreateCompat(kinetics, belts, chains, stations, tools, values, schematics, filters);
     }
 
     /** 不在世界里的玩家行为：角色为空，靠近与交互都碰不到；只够建出机器类型、回答"读不到"。 */

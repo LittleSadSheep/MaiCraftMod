@@ -7,6 +7,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.entity.player.Player;
@@ -37,9 +38,11 @@ public final class CreateCompat extends CompatModule {
     private final CreateTools tools;
     private final CreateValues values;
     private final CreateSchematics schematics;
+    private final CreateFilters filters;
 
     public CreateCompat(CreateKinetics kinetics, CreateBelts belts, CreateChainConveyors chains,
-            CreateStations stations, CreateTools tools, CreateValues values, CreateSchematics schematics) {
+            CreateStations stations, CreateTools tools, CreateValues values, CreateSchematics schematics,
+            CreateFilters filters) {
         super(MOD_ID, "机械动力");
         this.kinetics = Objects.requireNonNull(kinetics, "kinetics");
         this.belts = Objects.requireNonNull(belts, "belts");
@@ -48,6 +51,7 @@ public final class CreateCompat extends CompatModule {
         this.tools = Objects.requireNonNull(tools, "tools");
         this.values = Objects.requireNonNull(values, "values");
         this.schematics = Objects.requireNonNull(schematics, "schematics");
+        this.filters = Objects.requireNonNull(filters, "filters");
     }
 
     @Override public void contribute(CompatRegistry registry) {
@@ -59,6 +63,8 @@ public final class CreateCompat extends CompatModule {
         registry.itemSource(this, services -> new ToolboxSource(this, services));
         // 土豆加农炮当远程武器（所有者定 C5）：只交事实，挑、换手、瞄、出手由战斗做。
         registry.rangedWeapon(this, new CreatePotatoCannon(this));
+        // 过滤器、属性过滤器写规则：machine_configure 对手上物品设置（所有者定 C5）。
+        registry.itemSettings(this, services -> new CreateFilterSettings(this, services));
         // 放方块的讲究：带漏斗拿漏斗放、等下面的带子，横着的齿轮箱拿竖直齿轮箱放，动力辊别被抬高一格。
         registry.placementRules(this, new CreatePlacementRules(this));
         // 蓝图桌、蓝图加农炮的界面：证明了两侧怎么分，角色才能往里放空白蓝图、蓝图与火药。
@@ -185,6 +191,41 @@ public final class CreateCompat extends CompatModule {
     /** 那一片粘上没有；见 {@link CreateTools#glued}。 */
     public boolean glued(ClientLevel level, BlockPos from, BlockPos to) {
         return call("读强力胶", () -> tools.glued(level, from, to));
+    }
+
+    /** 列表过滤器的规则；见 {@link CreateFilters#filter}。 */
+    public Optional<CreateFilters.FilterRules> filterRules(ItemStack stack) {
+        return call("读过滤器", () -> filters.filter(stack));
+    }
+
+    /** 属性过滤器的规则；见 {@link CreateFilters#attributeFilter}。 */
+    public Optional<CreateFilters.AttributeRules> attributeRules(ItemStack stack) {
+        return call("读属性过滤器", () -> filters.attributeFilter(stack));
+    }
+
+    /** 开着的是不是过滤器界面；见 {@link CreateFilters#filterMenuOpen}。 */
+    public boolean filterMenuOpen(LocalPlayer player) {
+        return call("看过滤器界面", () -> filters.filterMenuOpen(player));
+    }
+
+    /** 过滤器的一格设成什么；见 {@link CreateFilters#setFilterSlot}。 */
+    public void setFilterSlot(int slot, String itemId) {
+        run("设过滤器的格", () -> filters.setFilterSlot(slot, itemId));
+    }
+
+    /** 按过滤器界面的按钮；见 {@link CreateFilters#pressFilterButton}。 */
+    public void pressFilterButton(String button) {
+        run("按过滤器的按钮", () -> filters.pressFilterButton(button));
+    }
+
+    /** 给属性过滤器加一条；见 {@link CreateFilters#addAttribute}。 */
+    public Optional<List<String>> addAttribute(String sampleItem, String fragment, boolean inverted) {
+        return call("加属性", () -> filters.addAttribute(sampleItem, fragment, inverted));
+    }
+
+    /** 清空过滤器；见 {@link CreateFilters#clearFilter}。 */
+    public void clearFilter() {
+        run("清空过滤器", filters::clearFilter);
     }
 
     /** 蓝图文件能不能传；见 {@link CreateSchematics#uploadProblem}。 */
