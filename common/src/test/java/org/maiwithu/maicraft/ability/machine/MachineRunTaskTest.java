@@ -185,6 +185,21 @@ class MachineRunTaskTest {
                 && INGOT.equals(change.what()) && change.count() == 1));
     }
 
+    @Test
+    void 出口在界面里看不见_投料后就收手_不说做好了() {
+        Rig rig = new Rig();
+        rig.machineRunsAtFullSpeed();
+        rig.type.outputVisible = false;
+        TaskResult result = rig.run(new MachineRunInput(positionOf(CELL), PLATE, 2, true, 5,
+                Permissions.DEFAULT));
+        assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
+        assertEquals(Problem.Kind.UNSUPPORTED, result.problem().kind());
+        MachineRunDetails details = (MachineRunDetails) result.details();
+        assertEquals(2, details.fed().get(0).count(), "料照样投进去了");
+        assertEquals(0, details.collected(), "看不见的出口不去收");
+        assertTrue(details.notes().stream().anyMatch(note -> note.contains("use 打开")));
+    }
+
     /** 交得出实情的投料动作替身：一刻做完，报进去几件与说明。 */
     private static final class ReportedFeed implements Action, FeedReport {
         private final int delivered;

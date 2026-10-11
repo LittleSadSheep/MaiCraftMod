@@ -36,6 +36,12 @@ public interface MekanismReads {
     void nextConfiguratorMode();
 
     /**
+     * 此刻打开着的界面里，背后真是 Mekanism 机器物品格的那些格号（输入、输出、电池、附加格）；
+     * 升级、配方显示这类虚拟格与只看不存的格不算。没打开界面或不是 Mekanism 的界面给空集。
+     */
+    Set<Integer> openMachineSlots();
+
+    /**
      * 一台机器的侧面配置。
      *
      * @param facing  机器朝向（侧面配置按相对朝向存，这里已经换成世界方向）

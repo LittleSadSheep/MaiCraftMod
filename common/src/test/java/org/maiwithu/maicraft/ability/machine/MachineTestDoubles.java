@@ -112,6 +112,8 @@ final class MachineTestDoubles {
         final Deque<Action> takeActions = new ArrayDeque<>();
         /** 出口读数：测试随时间改这份表。 */
         final Map<String, Integer> output = new LinkedHashMap<>();
+        /** 出口站在外面看不看得见；格子在界面里的机器看不见。 */
+        boolean outputVisible = true;
         Supplier<MachineState> state = () -> MachineState.unknown("读不到");
         Predicate<Installation> installationOk = installation -> false;
         Predicate<PartCell> partOk = part -> false;
@@ -211,6 +213,10 @@ final class MachineTestDoubles {
 
         @Override public Optional<Action> feed(BlockPos at, String itemId, int count, Permissions permissions) {
             return Optional.ofNullable(feedActions.poll());
+        }
+
+        @Override public boolean outputVisible(BlockPos at) {
+            return outputVisible;
         }
 
         @Override public List<MachineState.Shown> output(BlockPos at) {

@@ -140,11 +140,11 @@ final class ContainerTransfer implements Action {
         Deque<Click> clicks = new ArrayDeque<>();
         int maxStack = source.stack().getMaxStackSize();
         if (left >= source.count()) {
-            if (!hasRoom(reading.containerSnapshots(), source, 1)) return Optional.empty();
+            if (!hasRoom(reading, source, 1)) return Optional.empty();
             clicks.add(new Click(sourceSlot, true, 0, false));
             return Optional.of(clicks);
         }
-        int targetIndex = roomyTarget(reading.containerSnapshots(), source, left);
+        int targetIndex = roomyTarget(reading, source, left);
         if (targetIndex < 0) return Optional.empty();
         int targetSlot = reading.containerSlotIds().get(targetIndex);
         for (TransferPlan.Step step : TransferPlan.exactAmount(source.count(), left, maxStack).steps()) {
@@ -199,20 +199,27 @@ final class ContainerTransfer implements Action {
     }
 
     // 容器里放不放得下这么多：有空格，或同种同组件的堆还没满。
-    private static boolean hasRoom(List<SlotSnapshot> container, SlotSnapshot item, int amount) {
+    // 只看收这样东西的格：熔炉产出格、模组机器的输出格空着也不算有地方。
+    private static boolean hasRoom(MenuContent.Reading reading, SlotSnapshot item, int amount) {
         int max = item.stack().getMaxStackSize();
-        for (SlotSnapshot slot : container) {
+        List<SlotSnapshot> container = reading.containerSnapshots();
+        for (int i = 0; i < container.size(); i++) {
+            SlotSnapshot slot = container.get(i);
+            if (!reading.channel().accepts(reading.containerSlotIds().get(i), item.stack())) continue;
             if (slot.isEmpty() || slot.sameIdentity(item) && slot.count() + amount <= max) return true;
         }
         return false;
     }
 
     // 只放一部分时挑一格放得下全部的：先并进同种的堆，再占空格。
-    private static int roomyTarget(List<SlotSnapshot> container, SlotSnapshot item, int amount) {
+    // 不收这样东西的格（产出格、输出格、电池格）跳过，免得拆出来的半堆放不下、卡在光标上。
+    private static int roomyTarget(MenuContent.Reading reading, SlotSnapshot item, int amount) {
         int max = item.stack().getMaxStackSize();
         int empty = -1;
+        List<SlotSnapshot> container = reading.containerSnapshots();
         for (int i = 0; i < container.size(); i++) {
             SlotSnapshot slot = container.get(i);
+            if (!reading.channel().accepts(reading.containerSlotIds().get(i), item.stack())) continue;
             if (slot.isEmpty()) {
                 if (empty < 0) empty = i;
             } else if (slot.sameIdentity(item) && slot.count() + amount <= max) {

@@ -12,6 +12,7 @@ import java.util.function.Predicate;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
@@ -22,6 +23,7 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.PartCell;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
+import org.maiwithu.maicraft.compat.MenuFeed;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -142,8 +144,17 @@ final class MekanismMachineType implements MachineType {
         return SideSettings.parse(key).map(parsed -> configurator.once(at, parsed, permissions));
     }
 
+    // 投料：走过去点开机器的界面，把料从背包搬进去，机器自己把它放进收它的格；能量立方、管道这类不加工的不收料。
     @Override public Optional<Action> feed(BlockPos at, String itemId, int count, Permissions permissions) {
-        return Optional.empty();
+        ClientLevel level = level();
+        if (level == null || kind.role() != MachineRole.PROCESSING) return Optional.empty();
+        String blockId = BuiltInRegistries.BLOCK.getKey(level.getBlockState(at).getBlock()).toString();
+        return Optional.of(new MenuFeed(services, kind.name(), at, blockId, itemId, count, permissions));
+    }
+
+    // 机器的格子在界面里，站在外面看不见：做没做好要打开界面看。
+    @Override public boolean outputVisible(BlockPos at) {
+        return false;
     }
 
     @Override public List<MachineState.Shown> output(BlockPos at) {

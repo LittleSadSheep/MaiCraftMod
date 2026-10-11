@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.IntStream;
 
 import net.minecraft.SharedConstants;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -28,7 +29,9 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.inventory.GearChanges;
+import org.maiwithu.maicraft.behavior.menu.MenuLayout;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
+import org.maiwithu.maicraft.behavior.menu.MenuSlots;
 import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
@@ -57,6 +60,7 @@ class MekanismCompatTest {
     /** 读写端替身：按测试摆的管道回答，没有机器。 */
     private static final class StubReads implements MekanismReads {
         final Map<BlockPos, Transmitter> pipes = new HashMap<>();
+        Set<Integer> machineSlots = Set.of();
 
         @Override public Optional<SideConfig> sideConfig(ClientLevel level, BlockPos at) { return Optional.empty(); }
         @Override public boolean configurable(BlockState state) { return false; }
@@ -65,6 +69,7 @@ class MekanismCompatTest {
         }
         @Override public Optional<String> configuratorMode(ItemStack stack) { return Optional.empty(); }
         @Override public void nextConfiguratorMode() { }
+        @Override public Set<Integer> openMachineSlots() { return machineSlots; }
     }
 
     @Test
@@ -118,6 +123,25 @@ class MekanismCompatTest {
         assertEquals(1, found.machines());
         assertEquals("energy@0,64,0", found.id());
         assertTrue(reader.lineMaterials().isEmpty(), "注册表里没有 Mekanism 的线缆方块时不给线材");
+    }
+
+    @Test
+    void 机器界面只认真的机器格_一格都没有就证明不了() {
+        StubReads reads = new StubReads();
+        MekanismMachineLayout layout = new MekanismMachineLayout(new MekanismCompat(reads));
+        MenuSlots slots = new MenuSlots() {
+            @Override public String menuTypeId() { return "mekanism:enrichment_chamber"; }
+            @Override public int slotCount() { return 40; }
+            @Override public boolean playerBacked(int slot) { return slot >= 4; }
+        };
+        List<Integer> player = IntStream.range(4, 40).boxed().toList();
+        // 0、1 是输入与输出格，2 是电池格，3 是升级那一页的虚拟格：读写端只认前三格。
+        reads.machineSlots = Set.of(0, 1, 2);
+        MenuLayout.Layout supported = layout.classify(slots, player, List.of(0, 1, 2, 3));
+        assertEquals(List.of(0, 1, 2), ((MenuLayout.Supported) supported).containerSlots());
+        reads.machineSlots = Set.of();
+        assertTrue(layout.classify(slots, player, List.of(0, 1, 2, 3)) instanceof MenuLayout.Unsupported);
+        assertTrue(MekanismMachineLayout.MACHINE_MENUS.contains("mekanism:metallurgic_infuser"));
     }
 
     private static PlayerServices offline() {

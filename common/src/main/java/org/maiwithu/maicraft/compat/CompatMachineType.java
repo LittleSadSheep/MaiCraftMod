@@ -103,6 +103,10 @@ public final class CompatMachineType implements MachineType {
         return ask(() -> type.output(at), List.of());
     }
 
+    @Override public boolean outputVisible(BlockPos at) {
+        return ask(() -> type.outputVisible(at), true);
+    }
+
     @Override public Optional<Action> take(BlockPos at, String itemId, int count, Permissions permissions) {
         return act(() -> type.take(at, itemId, count, permissions));
     }

@@ -34,6 +34,10 @@ final class MekanismMachineKnowledge implements KnowledgeSource {
                 .append("值写模式名，例如 `{\"side.north.item\": \"output\"}`。化学品与热只看不改。\n")
                 .append("- 改的时候角色手持配置器、调到那种介质的模式、潜行右键那一面，每点一下往后换一种，读回对上为止；")
                 .append("身上没有配置器会先去拿。\n\n");
+        text.append("## 投料\n\n")
+                .append("- `machine_run` 对加工机器会走过去点开界面，把料搬进去；格子在界面里，站在外面看不见出口，")
+                .append("投完就收手，做没做好用 `use` 打开它看。\n")
+                .append("- 能开界面看、存取的：加工机器、能量立方与各级工厂；升级、配方显示这类虚拟格不点。\n\n");
         text.append("## 管网\n\n")
                 .append("- 通用线缆送电、机械管道送流体、物流传输管道送物品、加压管道送化学品；管道贴着管道、贴着机器能收发的那一面就连上。\n")
                 .append("- `machine_connect` 的 `network` 写 energy、fluid 或 item，会用基础那一级的线缆、管道、导管接；")

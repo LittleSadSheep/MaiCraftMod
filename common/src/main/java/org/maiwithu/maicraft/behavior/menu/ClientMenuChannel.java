@@ -6,6 +6,7 @@ import java.util.function.Supplier;
 
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.item.ItemStack;
 
 import org.maiwithu.maicraft.game.menu.MenuActions;
 import org.maiwithu.maicraft.game.menu.MenuConfirmation;
@@ -75,6 +76,13 @@ public final class ClientMenuChannel implements MenuChannel {
     public boolean cursorCarrying() {
         AbstractContainerMenu menu = currentIfStillClaimed();
         return menu != null && !menu.getCarried().isEmpty();
+    }
+
+    // 认领的界面还在、格号在界面里时，按那一格自己的 mayPlace 回答；界面已经不是这一份就当不收。
+    @Override
+    public boolean accepts(int slot, ItemStack stack) {
+        AbstractContainerMenu menu = currentIfStillClaimed();
+        return menu != null && slot >= 0 && slot < menu.slots.size() && menu.getSlot(slot).mayPlace(stack);
     }
 
     @Override

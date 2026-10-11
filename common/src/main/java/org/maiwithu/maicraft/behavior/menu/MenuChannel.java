@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.menu;
 
+import net.minecraft.world.item.ItemStack;
+
 /**
  * 界面通道：界面会话观察与关闭一份界面的接缝；实现接在游戏接口层的菜单入口上，测试用替身。
  *
@@ -34,6 +36,14 @@ public interface MenuChannel {
      * 本刻发出去了返回真；本刻发不了返回假，什么都没做，下一刻再试。
      */
     boolean selectTradeOffer(int offerIndex);
+
+    /**
+     * 这一格收不收这样东西（原版槽位的 mayPlace）：熔炉产出格、模组机器的输出格与电池格不收，
+     * 只放一部分时挑目标格先问它，不往不收的格里塞，免得东西卡在光标上。默认都收。
+     */
+    default boolean accepts(int slot, ItemStack stack) {
+        return true;
+    }
 
     /** 请游戏关闭这份界面；界面真的从画面上消失（{@link #stillOpen} 为假）才算关上。 */
     void requestClose();

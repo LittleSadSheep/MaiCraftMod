@@ -53,6 +53,8 @@ public final class MekanismCompat extends CompatModule {
             registry.networkReader(this, services -> new PipeNetworkReader(medium, this, services));
         }
         registry.knowledgeSource(this, new MekanismMachineKnowledge());
+        // 机器的界面：认出哪几格是真的机器格，投料、开界面看、存取都认得它。
+        registry.menuLayout(this, new MekanismMachineLayout(this));
     }
 
     /** 注册 ID 换成方块对象；注册表里没有的不算进来。 */
@@ -83,6 +85,11 @@ public final class MekanismCompat extends CompatModule {
     /** 配置器的模式；见 {@link MekanismReads#configuratorMode}。 */
     public Optional<String> configuratorMode(ItemStack stack) {
         return call("读配置器模式", () -> reads.configuratorMode(stack));
+    }
+
+    /** 此刻打开着的界面里真是机器物品格的格号；见 {@link MekanismReads#openMachineSlots}。 */
+    public Set<Integer> openMachineSlots() {
+        return call("认机器界面的物品格", reads::openMachineSlots);
     }
 
     /** 把主手配置器的模式往后拨一格；见 {@link MekanismReads#nextConfiguratorMode}。 */

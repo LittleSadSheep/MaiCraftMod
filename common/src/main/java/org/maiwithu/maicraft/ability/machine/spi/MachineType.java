@@ -76,11 +76,22 @@ public interface MachineType {
     /** 把一项设置改成要的值：手持配置器点面、开界面加规则；改完由调用方读回核对。这种机器没有这一项时给空。 */
     Optional<Action> change(BlockPos at, String key, String value, Permissions permissions);
 
-    /** 往这台机器投料：置物台是手持右键顶面、盆是右键、带界面的放进输入槽。这种机器不收料时给空。 */
+    /**
+     * 往这台机器投料：置物台是手持右键顶面，工作盆、石磨这类扔上去，带界面的点开界面放进去。这种机器不收料时给空。
+     * 投法不一定件件都进时，动作再实现 {@link FeedReport} 交出实情。
+     */
     Optional<Action> feed(BlockPos at, String itemId, int count, Permissions permissions);
 
     /** 这台机器出口现在有什么：置物台台面、出口箱、传送带末端；只列看得见的。 */
     List<MachineState.Shown> output(BlockPos at);
+
+    /**
+     * 站在外面看不看得见出口：置物台、工作盆上的东西画出来了看得见；格子在界面里的（通用机械的机器）看不见，
+     * 做没做好要打开界面看。看不见时 machine_run 投料开机后就收手，不对着看不见的出口干等。
+     */
+    default boolean outputVisible(BlockPos at) {
+        return true;
+    }
 
     /** 从出口把东西拿进背包；出口没有这种东西或这种机器不出东西时给空。 */
     Optional<Action> take(BlockPos at, String itemId, int count, Permissions permissions);

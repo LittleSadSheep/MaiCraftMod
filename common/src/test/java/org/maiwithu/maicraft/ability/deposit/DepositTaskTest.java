@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.ability.deposit;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -86,6 +87,19 @@ class DepositTaskTest {
         assertEquals(10, chest.total(DIRT));
         assertEquals(22, rig.carried(DIRT));
         assertEquals(10, stored(result));
+    }
+
+    @Test
+    void 只存一部分时跳过不收这样东西的格_放进下一格() {
+        Rig rig = new Rig();
+        rig.carry(DIRT, 32);
+        FakeChest chest = rig.chest(NEAR, false);
+        chest.refusing.add(0);
+        TaskResult result = rig.run(rig.input(null, List.of(DIRT), 10));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertTrue(chest.slots.get(0).isEmpty(), "第一格不收，空着");
+        assertEquals(10, chest.total(DIRT));
+        assertEquals(22, rig.carried(DIRT));
     }
 
     @Test
@@ -356,6 +370,8 @@ class DepositTaskTest {
         int notReadyClicks;
         /** 实际发出去的点击（含快速移动）次数。 */
         int sentClicks;
+        /** 不收东西的格（箱子侧第几格）：像熔炉产出格、机器的输出格。 */
+        final Set<Integer> refusing = new HashSet<>();
 
         FakeChest(Rig rig, WorldPosition at, boolean someoneElses) {
             this.rig = rig;
@@ -393,7 +409,17 @@ class DepositTaskTest {
                 chestIds.add(36 + i);
                 chestSnapshots.add(snapshot(slots.get(i)));
             }
-            return Optional.of(new MenuContent.Reading(CHANNEL, SLOTS, chestIds, playerIds, chestSnapshots,
+            // 收不收东西按这只箱子自己的设定回答，其余照共用的替身通道。
+            MenuChannel channel = new MenuChannel() {
+                @Override public boolean stillOpen() { return CHANNEL.stillOpen(); }
+                @Override public boolean cursorCarrying() { return CHANNEL.cursorCarrying(); }
+                @Override public boolean click(int slot, int button) { return CHANNEL.click(slot, button); }
+                @Override public boolean quickMove(int slot) { return CHANNEL.quickMove(slot); }
+                @Override public boolean selectTradeOffer(int offerIndex) { return CHANNEL.selectTradeOffer(offerIndex); }
+                @Override public void requestClose() { CHANNEL.requestClose(); }
+                @Override public boolean accepts(int slot, ItemStack stack) { return !refusing.contains(slot - 36); }
+            };
+            return Optional.of(new MenuContent.Reading(channel, SLOTS, chestIds, playerIds, chestSnapshots,
                     playerSnapshots));
         }
 

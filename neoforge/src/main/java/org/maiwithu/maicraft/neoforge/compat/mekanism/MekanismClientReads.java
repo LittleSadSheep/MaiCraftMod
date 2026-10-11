@@ -15,6 +15,9 @@ import java.util.Set;
 import mekanism.api.RelativeSide;
 import mekanism.common.block.attribute.Attribute;
 import mekanism.common.block.attribute.AttributeSideConfig;
+import mekanism.common.inventory.container.slot.ContainerSlotType;
+import mekanism.common.inventory.container.slot.IVirtualSlot;
+import mekanism.common.inventory.container.slot.InventoryContainerSlot;
 import mekanism.common.item.ItemConfigurator;
 import mekanism.common.lib.transmitter.TransmissionType;
 import mekanism.common.network.PacketUtils;
@@ -23,10 +26,13 @@ import mekanism.common.tile.component.config.ConfigInfo;
 import mekanism.common.tile.component.config.DataType;
 import mekanism.common.tile.interfaces.ISideConfiguration;
 import mekanism.common.tile.transmitter.TileEntityTransmitter;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
@@ -98,5 +104,21 @@ public final class MekanismClientReads implements MekanismReads {
 
     @Override public void nextConfiguratorMode() {
         PacketUtils.sendToServer(new PacketModeChange(EquipmentSlot.MAINHAND, false));
+    }
+
+    // 打开着的界面里逐格看：背后是 Mekanism 机器物品格、又不是虚拟格、不是只看不存的格，才算真机器格。
+    @Override public Set<Integer> openMachineSlots() {
+        LocalPlayer player = Minecraft.getInstance().player;
+        if (player == null) return Set.of();
+        AbstractContainerMenu menu = player.containerMenu;
+        Set<Integer> found = new LinkedHashSet<>();
+        for (int index = 0; index < menu.slots.size(); index++) {
+            if (menu.slots.get(index) instanceof InventoryContainerSlot slot && !(slot instanceof IVirtualSlot)
+                    && slot.getSlotType() != ContainerSlotType.IGNORED
+                    && slot.getSlotType() != ContainerSlotType.VALIDITY) {
+                found.add(index);
+            }
+        }
+        return Set.copyOf(found);
     }
 }
