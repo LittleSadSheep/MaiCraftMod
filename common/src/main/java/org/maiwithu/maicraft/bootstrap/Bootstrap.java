@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.bootstrap;
 
 import com.google.gson.JsonObject;
 import java.io.IOException;
+import java.util.function.Function;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -37,7 +38,8 @@ import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.game.player.EquipmentConfirmations;
 import org.maiwithu.maicraft.game.world.DropConfirmations;
 import org.maiwithu.maicraft.behavior.acquire.LiveCarryReads;
-import org.maiwithu.maicraft.behavior.landing.EmergencyLanding;
+import org.maiwithu.maicraft.behavior.landing.CatchesFall;
+import org.maiwithu.maicraft.behavior.landing.FallRescues;
 import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.lighting.FollowLighting;
@@ -245,13 +247,13 @@ public final class Bootstrap {
             EatSoonTask.FoodMoves foodMoves, ReadsFoodValues foods, LiveBurrow burrow, LiveCeilingDigs ceilings,
             NightRestWiring nightWiring, ItemsToKeep keeps, Supplier<Protection> protection,
             FollowLighting followLighting, ReadsLightLevels lightLevels, ClientMovesToMainhand hands,
-            ModRangedWeapons ranged) {
+            ModRangedWeapons ranged, Function<PlayerContext, CatchesFall> fallRescues) {
         // 角色死亡这类循环自身的处境变化也从同一条事件流出去；死亡决策从挂载口交给目标运行表。
         return new ControlLoop(List.of(
                 new DigOutNeed(new SurvivalSituation.FromPlayer(),
                         () -> new NativeBlockBreaking(interactionSender, menuActions)),
                 new BreathNeed(new SurvivalSituation.FromPlayer(), ceilings, new LiveAirRoutes()),
-                new FallNeed(new SurvivalSituation.FromPlayer(), EmergencyLanding::findToSaveLife,
+                new FallNeed(new SurvivalSituation.FromPlayer(), fallRescues,
                         BaritoneInternals::landingInProgress),
                 new SelfDefenseNeed(combatSenses, new LiveCombatMoves(walks, interactions.heldProjection(), ranged), events),
                 new HungerNeed(new LiveHungerView(foods, keeps), foodMoves, events),
@@ -510,7 +512,9 @@ public final class Bootstrap {
                     protection);
             controlLoop = withSurvivalNeeds(taskEvents, deathDecisions, interactionSender, menuActions, interactions,
                     combatSenses, walks, foodMoves, foods, burrow, new LiveCeilingDigs(diggings, protection),
-                    nightWiring, itemsInUse, protection, followLighting, lightLevels, hands, ranged);
+                    nightWiring, itemsInUse, protection, followLighting, lightLevels, hands, ranged,
+                    // 意外往下掉：先问联动的刹车（穿着有气的喷气背包开悬停），刹不住再就地找落点放东西接住。
+                    FallRescues.withBrakes(() -> compat.fallBrakes()));
         }
 
         /**
