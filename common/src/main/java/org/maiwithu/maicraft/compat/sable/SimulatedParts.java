@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.compat.sable;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -44,6 +45,22 @@ public interface SimulatedParts {
             receivers = List.copyOf(receivers);
         }
     }
+
+    /**
+     * 一台无线红石打字机每个绑了频率的键往哪一对频率发：键码 → 两格频率物品的 ID（空着为 minecraft:air）。
+     * 那一格不是无线红石打字机、没加载为 null。
+     *
+     * @param structureId 在哪个结构上；在世界里（还没组装）为 null，这时 local 就是世界坐标
+     */
+    Map<Integer, List<String>> typewriterBindings(ClientLevel level, String structureId, BlockPos local);
+
+    /**
+     * 存一台无线红石打字机的整张键表：和在它的绑键界面里改好保存时发的一样（原样换掉整张表，所以要带上旧的键）。
+     *
+     * @param structureId 在哪个结构上；在世界里为 null
+     * @param bindings    键码 → 两格频率物品的 ID；空表就是全清掉
+     */
+    void typewriterBind(ClientLevel level, String structureId, BlockPos local, Map<Integer, List<String>> bindings);
 
     /** 结构上那台无线红石打字机此刻是不是这个玩家在用（客户端看到的）。 */
     boolean typewriterUsedBy(ClientLevel level, String structureId, BlockPos local, UUID player);

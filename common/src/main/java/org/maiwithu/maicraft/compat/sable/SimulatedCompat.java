@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.compat.sable;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -45,6 +46,8 @@ public final class SimulatedCompat extends CompatModule implements StructureRead
         registry.vehicleDriver(this, services -> new TypewriterDriver(this, services));
         // 读载具（machine_inspect 指 s# 时的 vehicle 一节）：座位、无线红石打字机每个键接到谁、种类、姿态与接地。
         registry.vehicleReader(this, services -> new VehicleReading(this, services));
+        // 无线红石打字机当一种机器：machine_configure 给它绑键（键 → 两格频率物品），组装前在世界里绑。
+        registry.machineType(this, services -> new TypewriterMachine(this, services));
     }
 
     /** 角色附近这个编号的物理结构；不在附近为空。 */
@@ -92,6 +95,16 @@ public final class SimulatedCompat extends CompatModule implements StructureRead
     /** 无线红石打字机是不是这个玩家在用；见 {@link SimulatedParts#typewriterUsedBy}。 */
     boolean typewriterUsedBy(ClientLevel level, String structureId, BlockPos local, UUID player) {
         return call("读无线红石打字机谁在用", () -> parts.typewriterUsedBy(level, structureId, local, player));
+    }
+
+    /** 无线红石打字机的整张键表；见 {@link SimulatedParts#typewriterBindings}。 */
+    Map<Integer, List<String>> typewriterBindings(ClientLevel level, String structureId, BlockPos local) {
+        return call("读无线红石打字机的键表", () -> parts.typewriterBindings(level, structureId, local));
+    }
+
+    /** 存无线红石打字机的整张键表；见 {@link SimulatedParts#typewriterBind}。 */
+    void typewriterBind(ClientLevel level, String structureId, BlockPos local, Map<Integer, List<String>> bindings) {
+        run("给无线红石打字机绑键", () -> parts.typewriterBind(level, structureId, local, bindings));
     }
 
     /** 按下或松开无线红石打字机的一个键；见 {@link SimulatedParts#typewriterKey}。 */

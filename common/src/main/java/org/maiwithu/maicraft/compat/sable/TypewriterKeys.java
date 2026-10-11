@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat.sable;
 
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -54,6 +56,15 @@ final class TypewriterKeys {
         }
         Integer named = NAMED.get(name.toLowerCase(Locale.ROOT));
         return named == null ? UNKNOWN : named;
+    }
+
+    /** 能写名字的键（字母、数字、空格、方向键……），按键码排：给无线红石打字机的设置项逐个列。 */
+    static List<Integer> nameable() {
+        List<Integer> keys = new ArrayList<>();
+        for (char letter = 'A'; letter <= 'Z'; letter++) keys.add((int) letter);
+        for (char digit = '0'; digit <= '9'; digit++) keys.add((int) digit);
+        keys.addAll(NAMES.keySet().stream().sorted().toList());
+        return keys;
     }
 
     /** 键码的名字：字母数字就是它自己，别的用中文名；认不出写"键码 N"。 */

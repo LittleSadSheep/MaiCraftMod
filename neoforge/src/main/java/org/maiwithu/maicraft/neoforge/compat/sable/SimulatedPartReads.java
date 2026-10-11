@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.neoforge.compat.sable;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -17,10 +18,13 @@ import dev.simulated_team.simulated.content.blocks.redstone.linked_typewriter.Li
 import dev.simulated_team.simulated.network.packets.AssemblePacket;
 import dev.simulated_team.simulated.network.packets.linked_typewriter.TypewriterDisconnectUser;
 import dev.simulated_team.simulated.network.packets.linked_typewriter.TypewriterKeyInteractionPacket;
+import dev.simulated_team.simulated.network.packets.linked_typewriter.TypewriterKeySavePacket;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.createmod.catnip.data.Couple;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -73,6 +77,34 @@ public final class SimulatedPartReads implements SimulatedParts {
         return links;
     }
 
+    @Override public Map<Integer, List<String>> typewriterBindings(ClientLevel level, String structureId, BlockPos local) {
+        LinkedTypewriterBlockEntity typewriter = typewriter(level, structureId, local);
+        if (typewriter == null) return null;
+        Map<Integer, List<String>> bindings = new LinkedHashMap<>();
+        for (Map.Entry<Integer, LinkedTypewriterEntries.KeyboardEntry> entry
+                : typewriter.getTypewriterEntries().getKeyMap().entrySet()) {
+            Couple<RedstoneLinkNetworkHandler.Frequency> key = entry.getValue().getNetworkKey();
+            bindings.put(entry.getKey(), List.of(id(key.getFirst()), id(key.getSecond())));
+        }
+        return bindings;
+    }
+
+    @Override public void typewriterBind(ClientLevel level, String structureId, BlockPos local,
+            Map<Integer, List<String>> bindings) {
+        // 整张表一起存：和绑键界面保存时一样，服务端先清空再换上这一张。
+        Map<Integer, LinkedTypewriterEntries.KeyboardEntry> entries = new HashMap<>();
+        for (Map.Entry<Integer, List<String>> binding : bindings.entrySet()) {
+            entries.put(binding.getKey(), LinkedTypewriterEntries.KeyboardEntry.createFromCodec(stack(binding.getValue().get(0)),
+                    stack(binding.getValue().get(1)), binding.getKey()));
+        }
+        PacketDistributor.sendToServer(new TypewriterKeySavePacket(entries, local, entries.isEmpty()));
+    }
+
+    private static ItemStack stack(String itemId) {
+        ResourceLocation key = ResourceLocation.tryParse(itemId);
+        return key == null ? ItemStack.EMPTY : new ItemStack(BuiltInRegistries.ITEM.get(key));
+    }
+
     @Override public boolean typewriterUsedBy(ClientLevel level, String structureId, BlockPos local, UUID player) {
         LinkedTypewriterBlockEntity typewriter = typewriter(level, structureId, local);
         return typewriter != null && typewriter.checkUser(player);
@@ -95,7 +127,12 @@ public final class SimulatedPartReads implements SimulatedParts {
         return BuiltInRegistries.ITEM.getKey(frequency.getStack().getItem()).toString();
     }
 
+    // 结构上的读地块里那一块；在世界里（还没组装）直接读那一格。
     private static LinkedTypewriterBlockEntity typewriter(ClientLevel level, String structureId, BlockPos local) {
+        if (structureId == null) {
+            return level.isLoaded(local) && level.getBlockEntity(local) instanceof LinkedTypewriterBlockEntity typewriter
+                    ? typewriter : null;
+        }
         LevelChunk chunk = SableStructureReads.plotChunk(level, structureId, local);
         return chunk != null && chunk.getBlockEntity(local) instanceof LinkedTypewriterBlockEntity typewriter
                 ? typewriter : null;
