@@ -9,6 +9,7 @@ import org.maiwithu.maicraft.compat.SupportedMod;
 import org.maiwithu.maicraft.compat.VerifiedVersions;
 import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
 import org.maiwithu.maicraft.compat.backpack.BackpackCompat;
+import org.maiwithu.maicraft.compat.createjetpack.CreateJetpackCompat;
 import org.maiwithu.maicraft.compat.create.CreateCompat;
 import org.maiwithu.maicraft.compat.emi.EmiCompat;
 import org.maiwithu.maicraft.compat.ftbquests.FtbQuestsCompat;
@@ -23,6 +24,7 @@ import org.maiwithu.maicraft.neoforge.compat.backpack.SophisticatedBackpackItems
 import org.maiwithu.maicraft.neoforge.compat.backpack.SophisticatedBackpackMenus;
 import org.maiwithu.maicraft.neoforge.compat.create.CreateBeltReads;
 import org.maiwithu.maicraft.neoforge.compat.create.CreateChainConveyorReads;
+import org.maiwithu.maicraft.neoforge.compat.createjetpack.JetpackReads;
 import org.maiwithu.maicraft.neoforge.compat.create.CreateContraptionReads;
 import org.maiwithu.maicraft.neoforge.compat.create.CreateElevatorReads;
 import org.maiwithu.maicraft.neoforge.compat.create.CreateKineticReads;
@@ -82,6 +84,9 @@ public final class ClientCompatCatalog {
                                 new CreateChainConveyorReads(), new CreateStationReads(), new CreateToolReads(),
                                 new CreateValueReads(), new CreateSchematicReads(), new CreateFilterReads(),
                                 new CreateLogisticsReads(), new CreateContraptionReads(), new CreateElevatorReads())),
+                // 机械动力：喷气背包：按 5.1.2 编译（带的 FlightLib 是 3.2.1），实测实例装的就是它；装了 5.2 及以上不登记。
+                new SupportedMod<>(CreateJetpackCompat.MOD_ID, "机械动力：喷气背包", new VerifiedVersions("5.1.2", "5.2"),
+                        () -> new CreateJetpackCompat(new JetpackReads())),
                 // 通用机械：按 10.7.19 编译，实测实例装的是 10.7.19.85；装了 10.8 及以上不登记，实测通过后再放宽。
                 new SupportedMod<>(MekanismCompat.MOD_ID, "通用机械", new VerifiedVersions("10.7.19", "10.8"),
                         () -> new MekanismCompat(new MekanismClientReads())));

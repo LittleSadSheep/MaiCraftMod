@@ -97,6 +97,17 @@ repositories {
         }
         filter { includeGroup 'mekanism' }
     }
+    // 喷气背包用的 FlightLib 从作者（Possible_triangle）的官方 maven 取，免登录；只放行 com.possible-triangle 这个组。
+    // 喷气背包本体 5.1.2 不在官方 maven 上（只有 5.1.1、5.1.3），从 Modrinth 取。
+    exclusiveContent {
+        forRepository {
+            maven {
+                name = 'PossibleTriangle'
+                url = 'https://registry.somethingcatchy.net/repository/maven-public/'
+            }
+        }
+        filter { includeGroup 'com.possible-triangle' }
+    }
     // FTB 任务与 FTB Library 从 FTB 的官方 maven 取，免登录。
     exclusiveContent {
         forRepository {
@@ -133,6 +144,9 @@ dependencies {
     // FTB 任务的类里用到 FTB Library 的类型（三态开关等），编译时两者都要在。
     compileOnly("dev.ftb.mods:ftb-quests-neoforge:${ftbquests_version}") { transitive = false }
     compileOnly("dev.ftb.mods:ftb-library-neoforge:${ftblibrary_version}") { transitive = false }
+    // 喷气背包读服务器同步下来的耗气设置；开关状态与按键检查是它带的 FlightLib 的类（实例里打在喷气背包的 jar 里）。
+    compileOnly("maven.modrinth:create-jetpack:${createjetpack_version}") { transitive = false }
+    compileOnly("com.possible-triangle:flightlib-neoforge:${flightlib_version}") { transitive = false }
     jarJar(implementation('org.xerial:sqlite-jdbc')) {
         version { strictly "[${sqlite_jdbc_version},4.0)"; prefer sqlite_jdbc_version }
     }
