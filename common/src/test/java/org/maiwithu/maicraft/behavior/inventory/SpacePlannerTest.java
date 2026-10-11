@@ -88,6 +88,21 @@ class SpacePlannerTest {
     }
 
     @Test
+    void 三废石和泥土先丢_圆石最后丢() {
+        // 一样都是垃圾：先丢安山岩、泥土这类没用的，开局要做石器的圆石排最后。
+        List<BackpackStack> stacks = List.of(
+                junk("minecraft:cobblestone", 64),
+                junk("minecraft:cobblestone", 20),
+                junk("minecraft:andesite", 40),
+                junk("minecraft:dirt", 30),
+                stack("minecraft:rotten_flesh", 5));
+        SpacePlanner.Plan plan = SpacePlanner.plan(scene(stacks, 0, 3, false, List.of()));
+        assertEquals(List.of(new SpaceMove.DropStack(stack("minecraft:rotten_flesh", 5)),
+                new SpaceMove.DropStack(junk("minecraft:dirt", 30)),
+                new SpaceMove.DropStack(junk("minecraft:andesite", 40))), plan.moves());
+    }
+
+    @Test
     void 贵重品和装备永远不进计划() {
         BackpackStack sword = new BackpackStack("minecraft:iron_sword", 1, 1, true, false, false, false);
         BackpackStack pearl = new BackpackStack("minecraft:ender_pearl", 2, 16, false, false, true, false);

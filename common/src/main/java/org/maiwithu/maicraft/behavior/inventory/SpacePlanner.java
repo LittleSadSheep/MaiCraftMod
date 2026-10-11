@@ -135,19 +135,22 @@ final class SpacePlanner {
         }
     }
 
-    // 能自动挪的堆：贵重、装备与任务留用的都不动；从垃圾排起，同级的保持背包里的格子顺序。
+    // 能自动挪的堆：贵重、装备与任务留用的都不动；从垃圾排起，垃圾里按先丢后丢（腐肉、泥土、三废石……圆石最后），
+    // 其余同级的保持背包里的格子顺序。
     private static List<BackpackStack> movableStacksWorthLeastFirst(Scene scene) {
         Map<String, Integer> totals = totalsInBackpack(scene.stacks());
-        record Entry(BackpackStack stack, int worthRank) {}
+        record Entry(BackpackStack stack, int worthRank, int junkOrder) {}
         List<Entry> entries = new ArrayList<>();
         for (BackpackStack stack : scene.stacks()) {
             Worth worth = ItemWorth.of(stack, scene.reservedItemIds(), totals);
             if (!worth.tooValuableToDrop() && worth != Worth.TASK_RESERVED) {
-                entries.add(new Entry(stack, worth.ordinal()));
+                entries.add(new Entry(stack, worth.ordinal(),
+                        worth == Worth.JUNK ? JunkItems.dropOrder(stack.itemId()) : 0));
             }
         }
         // 稳定排序：同级之间不动格子顺序，计划才可复现、测试才说得清。
-        entries.sort((a, b) -> Integer.compare(b.worthRank, a.worthRank));
+        entries.sort((a, b) -> a.worthRank != b.worthRank ? Integer.compare(b.worthRank, a.worthRank)
+                : Integer.compare(a.junkOrder, b.junkOrder));
         return entries.stream().map(Entry::stack).toList();
     }
 

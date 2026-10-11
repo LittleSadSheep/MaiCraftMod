@@ -5,6 +5,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.ToIntFunction;
 
+import org.maiwithu.maicraft.behavior.inventory.JunkItems;
+
 /**
  * 垫脚挑料：路上要垫方块（搭路、爬坡、垫柱子出坑）时拿什么垫。先垫随处可见又没什么用的——
  * 泥土、下界岩、安山岩闪长岩花岗岩这三样废石、凝灰岩、深板岩圆石、沙砾；圆石排在最后，
@@ -15,19 +17,8 @@ import java.util.function.ToIntFunction;
  */
 public final class ScaffoldBlocks {
 
-    /** 垫脚的料，按先垫后垫排。 */
-    static final List<String> JUNK = List.of(
-            "minecraft:dirt",
-            "minecraft:coarse_dirt",
-            "minecraft:rooted_dirt",
-            "minecraft:netherrack",
-            "minecraft:andesite",
-            "minecraft:diorite",
-            "minecraft:granite",
-            "minecraft:tuff",
-            "minecraft:cobbled_deepslate",
-            "minecraft:gravel",
-            "minecraft:cobblestone");
+    /** 垫脚的料，按先垫后垫排：就是全仓那一份垃圾方块。 */
+    static final List<String> JUNK = JunkItems.BLOCKS;
 
     /** 正要用的东西每种留几件；不在用的给 0。 */
     public interface Keeps {
