@@ -66,7 +66,7 @@ class FightAreaClearTest {
 
         @Override public CombatProfile profile(TickContext context) {
             return new CombatProfile(20, 10,
-                    Optional.of(new WeaponChoice.Picked("minecraft:iron_sword", WeaponChoice.Weapon.SWORD_OR_AXE)), 4);
+                    Optional.of(new WeaponChoice.Picked("minecraft:iron_sword", WeaponChoice.Weapon.MELEE)), 4);
         }
 
         @Override public Entity entityById(TickContext context, int entityId) { return null; }

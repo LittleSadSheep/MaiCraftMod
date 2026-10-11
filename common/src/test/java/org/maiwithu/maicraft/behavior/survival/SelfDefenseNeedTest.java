@@ -73,7 +73,7 @@ class SelfDefenseNeedTest {
 
     private static CombatSenses.CombatProfile profile(double health) {
         return new CombatSenses.CombatProfile(health, 0,
-                Optional.of(new WeaponChoice.Picked("minecraft:iron_sword", WeaponChoice.Weapon.SWORD_OR_AXE)),
+                Optional.of(new WeaponChoice.Picked("minecraft:iron_sword", WeaponChoice.Weapon.MELEE)),
                 0);
     }
 

@@ -10,9 +10,16 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.tags.ItemTags;
 import net.minecraft.world.item.ArrowItem;
+import net.minecraft.world.item.AxeItem;
 import net.minecraft.world.item.CrossbowItem;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.MaceItem;
+import net.minecraft.world.item.ProjectileWeaponItem;
+import net.minecraft.world.item.SwordItem;
+import net.minecraft.world.item.TridentItem;
 import net.minecraft.world.item.component.ItemAttributeModifiers;
 
 /**
@@ -73,7 +80,21 @@ public final class WeaponCarriedReader {
             if (entry.attribute().is(Attributes.ATTACK_DAMAGE)) damage += entry.modifier().amount();
             if (entry.attribute().is(Attributes.ATTACK_SPEED)) speed += entry.modifier().amount();
         }
-        return new WeaponChoice.Carried(id, stack.getCount(), charged, slot, damage, Math.max(0.1, speed));
+        return new WeaponChoice.Carried(id, stack.getCount(), charged, slot, damage, Math.max(0.1, speed), gearOf(stack));
+    }
+
+    // 是哪种兵器：按物品类与物品标签认，不按名字猜。弩先认（它也是远程武器），其余远程武器当弓；
+    // 斧按斧类或斧标签；剑、重锤、三叉戟按各自的类或剑标签；镐铲锄与其余东西不算兵器。
+    static WeaponChoice.Gear gearOf(ItemStack stack) {
+        Item item = stack.getItem();
+        if (item instanceof CrossbowItem) return WeaponChoice.Gear.CROSSBOW;
+        if (item instanceof ProjectileWeaponItem) return WeaponChoice.Gear.BOW;
+        if (item instanceof AxeItem || stack.is(ItemTags.AXES)) return WeaponChoice.Gear.AXE;
+        if (item instanceof SwordItem || item instanceof MaceItem || item instanceof TridentItem
+                || stack.is(ItemTags.SWORDS)) {
+            return WeaponChoice.Gear.BLADE;
+        }
+        return WeaponChoice.Gear.OTHER;
     }
 
     private static boolean isArrow(ItemStack stack) {

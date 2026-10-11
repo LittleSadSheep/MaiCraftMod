@@ -316,7 +316,7 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
 
     private ThreatAssessment.MySide mySide(TickContext context) {
         CombatSenses.CombatProfile profile = senses.profile(context);
-        int weaponScore = profile.weapon().map(picked -> WeaponChoice.scoreOf(picked.weapon())).orElse(0);
+        int weaponScore = profile.weapon().map(WeaponChoice::scoreOf).orElse(0);
         return new ThreatAssessment.MySide(profile.health(), profile.armorPoints(),
                 weaponScore, profile.foodCount(), true);
     }

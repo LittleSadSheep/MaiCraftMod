@@ -121,7 +121,7 @@ public record Battlefield(Me me, List<Foe> foes) {
                                    double radius, Roster roster) {
         CombatSenses.CombatProfile profile = senses.profile(context);
         double[] at = moves.selfPosition(context);
-        int weaponScore = profile.weapon().map(picked -> WeaponChoice.scoreOf(picked.weapon())).orElse(0);
+        int weaponScore = profile.weapon().map(WeaponChoice::scoreOf).orElse(0);
         Me me = new Me(at[0], at[1], at[2], PLAYER_HALF_WIDTH, profile.health(), profile.armorPoints(),
                 profile.reach(), moves.attackReady(context), moves.hasMeleeWeapon(context),
                 moves.canShoot(context), weaponScore, profile.foodCount());
