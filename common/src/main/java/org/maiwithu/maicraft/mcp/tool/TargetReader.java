@@ -66,8 +66,8 @@ final class TargetReader {
         String id = check.text(object, "id", path + ".id", true);
         if (id == null) return null;
         String normalized = id.toLowerCase(Locale.ROOT);
-        if (!normalized.matches("[efb][0-9]+")) {
-            check.error(path + ".id", "观察编号 " + id + " 写法不对", "observe 给出的编号，例如 e12、f3、b5");
+        if (!normalized.matches("[efbs][0-9]+")) {
+            check.error(path + ".id", "观察编号 " + id + " 写法不对", "observe 给出的编号，例如 e12、f3、b5、s2");
             return null;
         }
         return new Target.Seen(normalized);

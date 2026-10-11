@@ -22,6 +22,7 @@ import org.maiwithu.maicraft.behavior.travel.spi.TravelMode;
 import org.maiwithu.maicraft.behavior.navigation.spi.ObstacleSource;
 import org.maiwithu.maicraft.behavior.landing.spi.FallBrake;
 import org.maiwithu.maicraft.behavior.perception.spi.ModSight;
+import org.maiwithu.maicraft.ability.vehicle.spi.VehicleAssembler;
 import org.maiwithu.maicraft.behavior.inventory.spi.CarriedBackpack;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
 import org.maiwithu.maicraft.behavior.menu.spi.MenuLayoutProof;
@@ -36,7 +37,7 @@ import org.slf4j.LoggerFactory;
 /**
  * 联动登记表：启动时按联动清单逐行检查，收集登记了的联动入口交来的 spi 接口实现，
  * 再由启动交给玩家行为层与能力（拿到物品的来源、机器类型、网络读取器、任务书操作、腾背包的随身背包、
- * 查资料的知识来源、查配方的配方查看器、认得出的模组界面、施工的放置规则、战斗的远程武器、出行方式、寻路的障碍来源、落地防护的刹车、场景里模组的东西）。不是 Minecraft 的注册表。
+ * 查资料的知识来源、查配方的配方查看器、认得出的模组界面、施工的放置规则、战斗的远程武器、出行方式、寻路的障碍来源、落地防护的刹车、场景里模组的东西、组装载具的办法）。不是 Minecraft 的注册表。
  *
  * <p>要用进了世界才有的玩家行为（走过去、点开、保护判断）的，存的是建法，进世界时带着联动能用的玩家行为再建；
  * 建出来的都包一层：模组停用、碰到模组接口对不上时如实回答"用不了"，不让它变成任务的内部错误。
@@ -67,10 +68,11 @@ public final class CompatRegistry {
     private final List<ObstacleSource> obstacleSources = new ArrayList<>();
     private final List<FallBrake> fallBrakes = new ArrayList<>();
     private final List<ModSight> modSights = new ArrayList<>();
+    private final List<ToBuild<VehicleAssembler>> vehicleAssemblers = new ArrayList<>();
     /** 全部的槽：一个模组交接到一半出错时，按交接前的长度一起撤回。新加槽时把它的列表加进来。 */
     private final List<List<?>> slots = List.of(itemSources, machineTypes, networkReaders, questBooks,
             breakAccelerators, dismantleTools, menuLayouts, carriedBackpacks, knowledgeSources, recipeViewers,
-            serverReads, placementRules, rangedWeapons, itemSettings, travelModes, obstacleSources, fallBrakes, modSights);
+            serverReads, placementRules, rangedWeapons, itemSettings, travelModes, obstacleSources, fallBrakes, modSights, vehicleAssemblers);
     private final List<String> decisions = new ArrayList<>();
 
     private CompatRegistry() {}
@@ -224,6 +226,11 @@ public final class CompatRegistry {
         rangedWeapons.add(new CompatRangedWeapon(module, weapon));
     }
 
+    /** 联动入口交一种组装载具的办法（物理组装器）的建法：进世界时建，包一层后交给 vehicle_assemble。 */
+    public void vehicleAssembler(CompatModule module, Function<PlayerServices, VehicleAssembler> build) {
+        vehicleAssemblers.add(new ToBuild<>(module, build));
+    }
+
     /** 联动入口交一种观察（电梯、车站、列车、物理结构在 observe 里的样子）：包一层后交给场景；模组停用后不再报。 */
     public void modSight(CompatModule module, ModSight sight) {
         modSights.add(new CompatModSight(module, sight));
@@ -282,6 +289,11 @@ public final class CompatRegistry {
     /** 进世界时建联动模组的出行方式；规矩同物品来源。 */
     public List<TravelMode> travelModes(PlayerServices services) {
         return build(travelModes, services, "出行方式", CompatTravelMode::new);
+    }
+
+    /** 进世界时建联动模组的组装载具办法；规矩同物品来源。 */
+    public List<VehicleAssembler> vehicleAssemblers(PlayerServices services) {
+        return build(vehicleAssemblers, services, "组装载具的办法", CompatVehicleAssembler::new);
     }
 
     /** 进世界时建联动模组的挖掘加速；规矩同物品来源。 */

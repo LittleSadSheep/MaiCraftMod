@@ -14,7 +14,7 @@
           },
           "id": {
             "type": "string",
-            "description": "只在 what=detail 时用：观察编号（e12、f3、b5）或地标名"
+            "description": "只在 what=detail 时用：观察编号（e12、f3、b5、s2）或地标名"
           },
           "grid": {
             "type": "boolean",

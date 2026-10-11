@@ -12,6 +12,8 @@ import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
+import net.minecraft.core.BlockPos;
+
 import org.maiwithu.maicraft.ability.build.BuildModule;
 import org.maiwithu.maicraft.ability.machine.MachineAbilities;
 import org.maiwithu.maicraft.ability.chat.ChatAbility;
@@ -43,6 +45,7 @@ import org.maiwithu.maicraft.ability.gather.LiveSceneTargets;
 import org.maiwithu.maicraft.ability.gather.LiveSpotReads;
 import org.maiwithu.maicraft.ability.light.LightModule;
 import org.maiwithu.maicraft.ability.obtain.ObtainAbility;
+import org.maiwithu.maicraft.ability.vehicle.VehicleAssembleModule;
 import org.maiwithu.maicraft.ability.quest.QuestModule;
 import org.maiwithu.maicraft.ability.remember.RememberAbility;
 import org.maiwithu.maicraft.ability.sequence.SequenceModule;
@@ -536,6 +539,11 @@ public final class AbilityCatalog {
 
         // 任务书：提交、勾选、领奖经登记表交来的任务书操作做；FTB 任务没装时能力不登记。
         registry.register(new QuestModule(deps.compat().questBooks(services)));
+        // 组装载具：物理组装器拉一次杆组装或拆回；观察编号 s# 从场景的编号表换成结构身份。
+        registry.register(new VehicleAssembleModule(deps.compat().vehicleAssemblers(services),
+                new SceneSeenTargets(deps::scene), id -> deps.scene().seen().structureOf(id), deps.memory(),
+                () -> deps.context().get() == null || deps.context().get().localPlayer() == null ? BlockPos.ZERO
+                        : deps.context().get().localPlayer().blockPosition()));
     }
 
     /** 聊天能力的一份：命令的完成依据（提交后聊天栏冒出的反馈行）与聊天回显同出一个聊天栏日志。 */

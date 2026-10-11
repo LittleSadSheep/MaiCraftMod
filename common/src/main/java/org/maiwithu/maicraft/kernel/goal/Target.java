@@ -21,13 +21,13 @@ public sealed interface Target {
     }
 
     /**
-     * 观察时看到的东西，用观察编号指定：e 开头是实体，f 开头是地形特征，b 开头是方块或设施，例如 e12。
+     * 观察时看到的东西，用观察编号指定：e 开头是实体，f 开头是地形特征，b 开头是方块或设施，s 开头是物理结构（飞艇、船），例如 e12。
      * 编号对应的东西不在了（走远、被拆）时，能力以 TARGET_GONE 结束。
      */
     record Seen(String id) implements Target {
         public Seen {
-            if (id == null || !id.matches("[efb][0-9]+")) {
-                throw new IllegalArgumentException("观察编号应形如 e12、f3、b5：" + id);
+            if (id == null || !id.matches("[efbs][0-9]+")) {
+                throw new IllegalArgumentException("观察编号应形如 e12、f3、b5、s2：" + id);
             }
         }
 

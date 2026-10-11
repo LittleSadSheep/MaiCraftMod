@@ -5,7 +5,7 @@ import java.util.Optional;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 /**
- * 读观察编号的只读接缝：按观察编号（e12、f3、b5）查"当时看到的东西在哪"。
+ * 读观察编号的只读接缝：按观察编号（e12、f3、b5、s2）查"当时看到的东西在哪"。
  * 感知模型建起场景表后由它实现；在接上之前，出行对 seen 目标以"东西不在了"如实收场。
  */
 public interface ReadsSeenTargets {

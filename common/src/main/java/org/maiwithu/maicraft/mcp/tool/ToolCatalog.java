@@ -48,7 +48,7 @@ public final class ToolCatalog {
                         + "每条有证据数值与可以考虑的做法；提醒不会自己动角色。",
                 properties(
                         field("what", "string", "看什么：self、scene（默认）、detail、world_memory", "scene"),
-                        field("id", "string", "只在 what=detail 时用：观察编号（e12、f3、b5）或地标名", null),
+                        field("id", "string", "只在 what=detail 时用：观察编号（e12、f3、b5、s2）或地标名", null),
                         field("grid", "boolean", "只在 what=scene 时用：true 时附带近处的俯视网格", null)),
                 new String[0]));
         tools.add(tool(LOOKUP, "查资料，只读，不动角色：能力列表与能力说明；资料（随包的机制常识、物品资料页、思索、任务书）；配方。"

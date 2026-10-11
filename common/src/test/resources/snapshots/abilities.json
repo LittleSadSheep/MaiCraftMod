@@ -282,6 +282,17 @@
         "parameters": "operation: string, quest: string, requirement?: string, reward?: string, choice?: string",
         "targets": [],
         "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:vehicle_assemble",
+        "summary": "把建好胶好的方块组装成会动的结构（物理组装器拉一次杆），或拆回方块",
+        "parameters": "operation: string = assemble",
+        "targets": [
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "controls_player"
       }
     ]
   },
@@ -1438,6 +1449,34 @@
       ],
       "knowledge": [],
       "doc_resource": "assets/maicraft/abilities/quest.md"
+    },
+    {
+      "ability": "maicraft:vehicle_assemble",
+      "summary": "把建好胶好的方块组装成会动的结构（物理组装器拉一次杆），或拆回方块",
+      "parameters": [
+        {
+          "name": "operation",
+          "type": "string",
+          "required": false,
+          "doc": "assemble 组装（默认）/ disassemble 拆回方块",
+          "default": "assemble",
+          "choices": [
+            "assemble",
+            "disassemble"
+          ]
+        }
+      ],
+      "targets": [
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [
+        "simulated"
+      ],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/vehicle_assemble.md"
     }
   ]
 }
