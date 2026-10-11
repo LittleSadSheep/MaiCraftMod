@@ -9,6 +9,7 @@ target 给物理结构的观察编号 `s#`（装了 Simulated 时）就是看一
 - `controls[]`：无线红石打字机每个绑了频率的键——`control` 就是 `vehicle_drive` 的 `inputs` 里写的名字（`打字机:W`），`frequency` 两格频率物品，`receivers` 结构上收这个频率的收端几个，`drives` 收端旁边接着的执行件，`role` 推出来的角色（`power` 动力、`lift` 升力、`steer` 转向，左右要试按）与 `basis` 依据；隔着离合器、齿轮、红石线的推不出，是 `unknown`，用 `vehicle_drive(test)` 试按看它让船怎么动。
 - `state`：`moving`、`speed` 每秒几格、`heading` 结构自己的 +z（造的时候朝南那头）此刻朝哪（0 南、90 西、180 北、270 东）、`pitch` 与 `roll` 绕自己的 x、z 轴斜了几度、`contact` 底面压着地面 `grounded` / 悬空 `airborne` / 底下有格没加载 `unknown`、`driving` 谁在驾驶（`self` 角色坐在驾驶座上、`other` 别人在用无线红石打字机）。
 - `control_map`：操纵表——每个输入一行（`role` 角色、`source` 来源：`inferred` 推出来的 / `tested` 试按过的 / `llm` 你定的，以后者为准、`note` 依据），`forward` 车头朝结构自己的哪根水平轴（试按动力时看出来或你定的），`missing` 开这一类载具还缺的必需角色；角色推错了或想换用 machine_configure 对同一个 `s#` 改。
+- `balance`（参数 `balance=forces` 或 `ballast` 时才有，要服务端也装了 MaiCraft）：受力。`cases` 是两种静态情况——`开着动力`（此刻记到的全部力，动力没开时没有这一种）与 `关着动力`（去掉推进）——各自绕结构自己的 x、z 轴的角加速度（`tilt_x`、`tilt_z`，度每二次方秒）、`steady` 稳不稳、`tendency` 往哪头倒；`lift_ratio` 升力（不算推进）比重量，1 就是刚好托住；`mass` 质量。`balance=ballast` 时 `ballast` 给几处放一块铁块能让两种情况都倒得慢的位置（世界坐标、`before` / `after` 放前放后最坏的那种情况），重心跟着挪也算了；不自动放，要放用 `machine_build`，起飞前放，不在天上加。这是静态预测，不是实飞：阻力跟着速度走没算，开着动力那种要在开着时看；实飞用 `vehicle_drive` 验。服务端第一次被问时才开始记各处的力，所以第一次要多等几刻。
 - `complete` 为 false 时种类与回路只按读到的部分；`note` 写明没读的部分（舵轮、油门拉杆的回路、外面同频的发射端）。
 
 ## 结果怎么读

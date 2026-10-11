@@ -23,6 +23,8 @@ import org.maiwithu.maicraft.compat.CompatRegistry;
 public final class SableCompat extends CompatModule implements StructureReads {
 
     public static final String MOD_ID = "sable";
+    /** 服务端只读操作：一个物理结构的受力。 */
+    public static final String FORCES_OPERATION = "sable.body";
     private final SableStructures structures;
     private final StructureScans scans = new StructureScans();
 
@@ -37,6 +39,8 @@ public final class SableCompat extends CompatModule implements StructureReads {
         registry.modSight(this, new SableSight(this));
         // 上下船（via=board）：站在船上先下船、目的地在船上先上船，寻路看不见船上的方块，这一段非它不可。
         registry.travelMode(this, services -> new DeckMode(this, services));
+        // 受力只在服务端：看载具的受力经只读操作 sable.body 问（质量、重心、各处的力，两种情况与配重建议）。
+        registry.serverRead(this, FORCES_OPERATION, 1);
     }
 
     /** 和一个区域沾边的物理结构；见 {@link SableStructures#near}。 */

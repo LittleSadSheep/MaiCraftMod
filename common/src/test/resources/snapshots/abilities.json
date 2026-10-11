@@ -113,7 +113,7 @@
       {
         "ability": "maicraft:machine_inspect",
         "summary": "看一台机器或一片机器区：组成、运行状态、进出口、挂在哪些网络上；指档案名时再和档案整机比对（只读）",
-        "parameters": "radius: integer = 16, item?: string",
+        "parameters": "radius: integer = 16, item?: string, balance?: string",
         "targets": [
           "here",
           "landmark",
@@ -790,6 +790,16 @@
           "type": "string",
           "required": false,
           "doc": "看身上物品自己的设置（过滤器的规则）时写物品 ID：每一件分别列出在哪一格、现在是什么规则"
+        },
+        {
+          "name": "balance",
+          "type": "string",
+          "required": false,
+          "doc": "看载具（target 给 s#）时要不要受力：forces 开着与关着动力两种情况往哪边倒、升力比重量；ballast 再给几处放配重的位置",
+          "choices": [
+            "forces",
+            "ballast"
+          ]
         }
       ],
       "targets": [

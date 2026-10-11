@@ -20,6 +20,56 @@ public interface VehicleReader {
     }
 
     /**
+     * 问受力（服务端答，要几刻）：给一次询问，逐刻 poll，答上之前为空。不是这种联动认得的结构为空。
+     *
+     * @param ballast 再要配重建议
+     */
+    default Optional<BalanceQuery> balance(String structureId, boolean ballast) {
+        return Optional.empty();
+    }
+
+    /** 一次受力的询问：逐刻 poll，答上之前为空；答不了也给一份 known 为假的受力，写明原因。 */
+    interface BalanceQuery {
+        Optional<Balance> poll();
+    }
+
+    /**
+     * 受力：开着动力（此刻记到的全部力）与关着动力（去掉推进）两种静态情况往哪边倒、倒得多快，升力比重量，可附配重建议。
+     *
+     * @param known     读到了；服务端答不了时为假
+     * @param why       读不到的原因；读到了为空串
+     * @param mass      质量
+     * @param liftRatio 升力（不算推进与阻力）比重量
+     * @param powered   此刻动力开着（记到了推进力）
+     * @param cases     各种情况；动力没开时只有"关着动力"
+     * @param ballast   配重建议（没要或没有能改善的为空）
+     * @param note      没算的部分、预测不是实飞这类一句话
+     */
+    record Balance(boolean known, String why, double mass, double liftRatio, boolean powered, List<Case> cases,
+                   List<Ballast> ballast, String note) {
+        public Balance {
+            cases = List.copyOf(cases);
+            ballast = List.copyOf(ballast);
+        }
+    }
+
+    /**
+     * 一种情况。
+     *
+     * @param name     开着动力 / 关着动力
+     * @param tiltX    绕结构自己的 x 轴的角加速度（度每二次方秒）
+     * @param tiltZ    绕结构自己的 z 轴的角加速度
+     * @param steady   两根水平轴都慢到可以不管
+     * @param tendency 一句话：稳着，或往哪头倒、倒得多快
+     */
+    record Case(String name, double tiltX, double tiltZ, boolean steady, String tendency) {}
+
+    /**
+     * 一处配重：放在世界里哪一格（此刻的位置）、放什么、多重，放之前与之后两种情况里最坏的那个（两根水平轴角加速度之和）。
+     */
+    record Ballast(double x, double y, double z, String block, double mass, double before, double after) {}
+
+    /**
      * 一辆载具此刻的样子。
      *
      * @param structureId 结构身份

@@ -35,6 +35,15 @@ final class VehicleReading implements VehicleReader {
         this.services = Objects.requireNonNull(services, "services");
     }
 
+    // 受力只在服务端：结构在附近才问（不是这种联动认得的结构不答）。
+    @Override public Optional<BalanceQuery> balance(String structureId, boolean ballast) {
+        PlayerContext context = services.context().get();
+        ClientLevel level = context == null ? null : context.level();
+        LocalPlayer player = context == null ? null : context.localPlayer();
+        if (level == null || player == null || compat.structure(level, player, structureId).isEmpty()) return Optional.empty();
+        return Optional.of(new ServerBalanceQuery(services, structureId, ballast));
+    }
+
     @Override public Optional<String> carrying() {
         PlayerContext context = services.context().get();
         ClientLevel level = context == null ? null : context.level();

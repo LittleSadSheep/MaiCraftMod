@@ -43,7 +43,10 @@ final class MachineInspectModule implements AbilityModule {
                     ParamSpec.of("radius", ParamType.INTEGER).range(1, 32).defaultValue(16)
                             .doc("看多大范围，单位格；给了目标就是以它为中心，没给以角色为中心").build(),
                     ParamSpec.of("item", ParamType.ITEM_OR_TAG)
-                            .doc("看身上物品自己的设置（过滤器的规则）时写物品 ID：每一件分别列出在哪一格、现在是什么规则").build()),
+                            .doc("看身上物品自己的设置（过滤器的规则）时写物品 ID：每一件分别列出在哪一格、现在是什么规则").build(),
+                    ParamSpec.of("balance", ParamType.CHOICE).choices("forces", "ballast")
+                            .doc("看载具（target 给 s#）时要不要受力：forces 开着与关着动力两种情况往哪边倒、升力比重量；"
+                                    + "ballast 再给几处放配重的位置").build()),
             Set.of(TargetKind.HERE, TargetKind.SEEN, TargetKind.LANDMARK, TargetKind.POSITION),
             ExecutionMode.READ_ONLY,
             Set.of(),
@@ -74,7 +77,8 @@ final class MachineInspectModule implements AbilityModule {
                 return new StepDecision.Finish(TaskResult.failed("指的结构不在了", Problem.of(Problem.Kind.TARGET_GONE,
                         "观察编号 " + seen.id() + " 指的结构已经不在了", "重新 observe 再指")));
             }
-            return new StepDecision.Run(new VehicleInspectTask.Input(structure.get(), seen.id()));
+            String balance = step.goal().params().has("balance") ? step.goal().params().text("balance") : null;
+            return new StepDecision.Run(new VehicleInspectTask.Input(structure.get(), seen.id(), balance));
         }
         int radius = (int) (step.goal().params().has("radius") ? step.goal().params().integer("radius") : 16);
         MachineArchive archive = step.goal().target() instanceof Target.Landmark landmark
