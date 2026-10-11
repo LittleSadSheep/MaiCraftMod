@@ -9,6 +9,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.Set;
 import java.util.stream.IntStream;
 
@@ -173,5 +174,20 @@ class CreateShapesTest {
                 CreateFilterSettings.attributeEntries("minecraft:oak_log minecraft:logs； minecraft:diamond_sword !附魔"));
         assertTrue(CreateFilterSettings.attributeEntries("clear").isEmpty());
         assertTrue(CreateFilterSettings.attributeEntries("  ").isEmpty());
+    }
+
+    @Test
+    void 取货口_上次用过的地址优先_否则离请求器最近的写了地址收包裹的() {
+        CreateLogistics.Ticker ticker = new CreateLogistics.Ticker(new BlockPos(0, 64, 0), OptionalInt.of(1), "home",
+                Map.of(), 0);
+        CreateLogistics.Pickup near = new CreateLogistics.Pickup(new BlockPos(2, 64, 0), "shop", true, List.of());
+        CreateLogistics.Pickup home = new CreateLogistics.Pickup(new BlockPos(9, 64, 0), "home", true, List.of());
+        CreateLogistics.Pickup closed = new CreateLogistics.Pickup(new BlockPos(1, 64, 0), "home", false, List.of());
+        CreateLogistics.Pickup blank = new CreateLogistics.Pickup(new BlockPos(1, 64, 1), "", true, List.of());
+        assertEquals(home, StockTickerSource.pickupFor(ticker, List.of(near, home, closed, blank)).orElseThrow());
+        CreateLogistics.Ticker fresh = new CreateLogistics.Ticker(new BlockPos(0, 64, 0), OptionalInt.of(1), "",
+                Map.of(), 0);
+        assertEquals(near, StockTickerSource.pickupFor(fresh, List.of(near, home, closed, blank)).orElseThrow());
+        assertTrue(StockTickerSource.pickupFor(fresh, List.of(closed, blank)).isEmpty(), "没写地址、不收包裹的不选");
     }
 }

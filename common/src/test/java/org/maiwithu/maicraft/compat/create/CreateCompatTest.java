@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -86,7 +87,7 @@ class CreateCompatTest {
         CompatRegistry registry = CompatRegistry.load(List.of(supported()), loaderWith("6.0.11"));
         assertEquals(1, registry.dismantleTools(offlineServices()).size());
         List<ItemSource> sources = registry.itemSources(offlineServices());
-        assertEquals(List.of("sandpaper", "toolbox"), sources.stream().map(source -> source.via().name()).toList());
+        assertEquals(List.of("sandpaper", "toolbox", "stock_ticker"), sources.stream().map(source -> source.via().name()).toList());
     }
 
     @Test
@@ -249,7 +250,14 @@ class CreateCompatTest {
             }
             @Override public void clearFilter() { }
         };
-        return new CreateCompat(kinetics, belts, chains, stations, tools, values, schematics, filters);
+        CreateLogistics logistics = new CreateLogistics() {
+            @Override public List<Ticker> tickers(ClientLevel level, BlockPos center, int radius) { return List.of(); }
+            @Override public List<Pickup> pickups(ClientLevel level, BlockPos center, int radius) { return List.of(); }
+            @Override public Optional<Parcel> parcel(ItemStack stack) { return Optional.empty(); }
+            @Override public boolean requestMenuOpen(LocalPlayer player) { return false; }
+            @Override public void order(BlockPos ticker, Map<String, Integer> items, String address) { }
+        };
+        return new CreateCompat(kinetics, belts, chains, stations, tools, values, schematics, filters, logistics);
     }
 
     /** 不在世界里的玩家行为：角色为空，靠近与交互都碰不到；只够建出机器类型、回答"读不到"。 */

@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.compat.create;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -39,10 +40,11 @@ public final class CreateCompat extends CompatModule {
     private final CreateValues values;
     private final CreateSchematics schematics;
     private final CreateFilters filters;
+    private final CreateLogistics logistics;
 
     public CreateCompat(CreateKinetics kinetics, CreateBelts belts, CreateChainConveyors chains,
             CreateStations stations, CreateTools tools, CreateValues values, CreateSchematics schematics,
-            CreateFilters filters) {
+            CreateFilters filters, CreateLogistics logistics) {
         super(MOD_ID, "机械动力");
         this.kinetics = Objects.requireNonNull(kinetics, "kinetics");
         this.belts = Objects.requireNonNull(belts, "belts");
@@ -52,6 +54,7 @@ public final class CreateCompat extends CompatModule {
         this.values = Objects.requireNonNull(values, "values");
         this.schematics = Objects.requireNonNull(schematics, "schematics");
         this.filters = Objects.requireNonNull(filters, "filters");
+        this.logistics = Objects.requireNonNull(logistics, "logistics");
     }
 
     @Override public void contribute(CompatRegistry registry) {
@@ -65,6 +68,9 @@ public final class CreateCompat extends CompatModule {
         registry.rangedWeapon(this, new CreatePotatoCannon(this));
         // 过滤器、属性过滤器写规则：machine_configure 对手上物品设置（所有者定 C5）。
         registry.itemSettings(this, services -> new CreateFilterSettings(this, services));
+        // 库存请求器下单取包裹：拿东西的一条途径，取货口的界面要先证明两侧怎么分。
+        registry.itemSource(this, services -> new StockTickerSource(this, services));
+        registry.menuLayout(this, new CreatePickupLayout());
         // 放方块的讲究：带漏斗拿漏斗放、等下面的带子，横着的齿轮箱拿竖直齿轮箱放，动力辊别被抬高一格。
         registry.placementRules(this, new CreatePlacementRules(this));
         // 蓝图桌、蓝图加农炮的界面：证明了两侧怎么分，角色才能往里放空白蓝图、蓝图与火药。
@@ -191,6 +197,31 @@ public final class CreateCompat extends CompatModule {
     /** 那一片粘上没有；见 {@link CreateTools#glued}。 */
     public boolean glued(ClientLevel level, BlockPos from, BlockPos to) {
         return call("读强力胶", () -> tools.glued(level, from, to));
+    }
+
+    /** 附近的库存请求器；见 {@link CreateLogistics#tickers}。 */
+    public List<CreateLogistics.Ticker> tickers(ClientLevel level, BlockPos center, int radius) {
+        return call("读库存请求器", () -> logistics.tickers(level, center, radius));
+    }
+
+    /** 附近的包裹端口；见 {@link CreateLogistics#pickups}。 */
+    public List<CreateLogistics.Pickup> pickups(ClientLevel level, BlockPos center, int radius) {
+        return call("读包裹端口", () -> logistics.pickups(level, center, radius));
+    }
+
+    /** 一件包裹里装着什么；见 {@link CreateLogistics#parcel}。 */
+    public Optional<CreateLogistics.Parcel> parcel(ItemStack stack) {
+        return call("读包裹", () -> logistics.parcel(stack));
+    }
+
+    /** 开着的是不是请求界面；见 {@link CreateLogistics#requestMenuOpen}。 */
+    public boolean requestMenuOpen(LocalPlayer player) {
+        return call("看请求界面", () -> logistics.requestMenuOpen(player));
+    }
+
+    /** 在请求界面里下单；见 {@link CreateLogistics#order}。 */
+    public void order(BlockPos ticker, Map<String, Integer> items, String address) {
+        run("下单", () -> logistics.order(ticker, items, address));
     }
 
     /** 列表过滤器的规则；见 {@link CreateFilters#filter}。 */
