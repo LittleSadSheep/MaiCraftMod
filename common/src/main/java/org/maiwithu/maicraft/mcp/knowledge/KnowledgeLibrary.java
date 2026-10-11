@@ -52,7 +52,7 @@ public final class KnowledgeLibrary {
             {"food", "食物与饥饿", "饥饿与回血规则、食物从哪来、耕地保湿",
                     "food eat 食物 吃 饿 饥饿 饱和度 saturation 回血 饿死 打猎 狩猎 生肉 熟食 烧熟 耕种 耕地 锄头 种植 小麦 胡萝卜 马铃薯 甜菜 面包 骨粉"},
             {"sleep-night", "睡眠与夜晚", "黑暗处刷怪、床跳夜与重设重生点、同色羊毛、3 天不睡刷幻翼",
-                    "sleep bed 睡觉 床 幻翼 phantom 夜晚 晚上 night 刷怪 spawn 羊毛 wool 剪羊毛 shears 染料 dye 同色 重生点 respawn 跳夜 封顶"},
+                    "sleep bed 睡觉 床 幻翼 phantom 夜晚 晚上 night 刷怪 spawn 羊毛 wool 剪羊毛 shears 染料 dye 同色 重生点 respawn 跳夜 封顶 过夜 熬夜 挖三填一"},
             {"tunneling", "往下挖与地下通行", "不要垂直往下挖；阶梯式下降和两格高的通道更安全",
                     "dig down staircase tunnel 往下挖 竖井 阶梯 下矿 通道 两格高 矿洞 迷路 入口"},
             {"tick-rate", "世界刻速与失焦", "游戏窗口失焦时世界可能停住或变慢；任务变慢先想到它",
