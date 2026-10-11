@@ -86,8 +86,9 @@ public interface MachineType {
     List<MachineState.Shown> output(BlockPos at);
 
     /**
-     * 站在外面看不看得见出口：置物台、工作盆上的东西画出来了看得见；格子在界面里的（通用机械的机器）看不见，
-     * 做没做好要打开界面看。看不见时 machine_run 投料开机后就收手，不对着看不见的出口干等。
+     * 出口读不读得到：置物台、工作盆上的东西画出来了读得到；格子在界面里的（通用机械的机器）、
+     * 东西留在机器肚子里或做好后掉在地上的（石磨、锯、粉碎轮）读不到，做没做好要打开看或到出口那边找。
+     * 读不到时 machine_run 投料开机后就收手，不对着读不到的出口干等。
      */
     default boolean outputVisible(BlockPos at) {
         return true;

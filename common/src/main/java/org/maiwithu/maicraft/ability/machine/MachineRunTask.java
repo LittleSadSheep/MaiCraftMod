@@ -346,13 +346,15 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
     }
 
     // 收尾：出了要的量算完成，差一点按部分完成，机器读数与网络读数一起给。
-    // 出口在界面里看不见：投料开机到此为止，不对着看不见的出口干等，也不说做好了；做没做好交给 LLM 之后打开界面看。
+    // 出口读不到（东西在机器里、或掉在别处）：投料开机到此为止，不对着读不到的出口干等，也不说做好了；
+    // 做没做好交给 LLM 之后打开界面看、或到出口那边找。
     private Next<Phase> unseenOutput() {
-        notes.add(describeMachine() + "的格子在界面里，站在外面看不见出口：料投进去了，做没做好要用 use 打开它看");
-        if (input.collect()) notes.add("出口看不见，这次没收产物");
+        notes.add(describeMachine() + "的出口这里读不到（东西在机器里，或做好后掉在了别处）：料投进去了，"
+                + "做没做好之后用 use 打开它看，或到出口那边找");
+        if (input.collect()) notes.add("出口读不到，这次没收产物");
         return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL,
-                        "料投进了" + describeMachine() + "，出口看不见，没等产物")
-                .problem(Problem.of(Problem.Kind.UNSUPPORTED, describeMachine() + "的出口站在外面看不见，等不了产物；"
+                        "料投进了" + describeMachine() + "，出口读不到，没等产物")
+                .problem(Problem.of(Problem.Kind.UNSUPPORTED, describeMachine() + "的出口这里读不到，等不了产物；"
                         + "机器读数：" + describeState(type.state(cell)) + describeNetworks()))
                 .build());
     }

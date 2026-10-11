@@ -70,6 +70,13 @@ class CreateCompatTest {
         assertEquals("kinetic", readers.getFirst().kind().id());
         assertTrue(types.stream().anyMatch(type -> type.id().equals("create:mechanical_press")
                 && type.role() == MachineRole.PROCESSING));
+        // 石磨的产物留在肚子里、锯做好的东西掉在地上：出口读不到；压机下面的置物台、工作盆读得到。
+        assertFalse(types.stream().filter(type -> type.id().equals("create:millstone")).findFirst().orElseThrow()
+                .outputVisible(BlockPos.ZERO));
+        assertFalse(types.stream().filter(type -> type.id().equals("create:mechanical_saw")).findFirst().orElseThrow()
+                .outputVisible(BlockPos.ZERO));
+        assertTrue(types.stream().filter(type -> type.id().equals("create:mechanical_press")).findFirst().orElseThrow()
+                .outputVisible(BlockPos.ZERO));
     }
 
     @Test

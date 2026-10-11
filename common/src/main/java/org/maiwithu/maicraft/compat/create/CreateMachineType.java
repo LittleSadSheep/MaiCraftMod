@@ -142,6 +142,11 @@ final class CreateMachineType implements MachineType {
         return stations.feed(kind.work(), level, level.getBlockState(at), at, itemId, count, permissions);
     }
 
+    // 石磨的产物留在肚子里、锯与粉碎轮做好的东西掉在地上：这里都读不到，投完料就收手。
+    @Override public boolean outputVisible(BlockPos at) {
+        return kind.work() != CreateMachineCatalog.Work.SAW && kind.work() != CreateMachineCatalog.Work.GRINDER;
+    }
+
     @Override public List<MachineState.Shown> output(BlockPos at) {
         ClientLevel level = level();
         if (level == null || !level.isLoaded(at)) return List.of();
