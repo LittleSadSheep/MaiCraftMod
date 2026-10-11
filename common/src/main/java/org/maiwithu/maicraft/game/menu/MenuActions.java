@@ -48,6 +48,16 @@ public interface MenuActions {
         throw new UnsupportedOperationException("native menu buttons are not supported");
     }
 
+    /**
+     * 交易界面里点选一条报价。原版点报价列表发的不是按钮包而是选择报价的包，跟着做原版界面做的事：
+     * 先在本地改选这条报价并让游戏按库存把付款摆进付款格，再发包请服务器做同样的事。
+     * 当前界面不是交易界面时按没生效收场，不发包。
+     */
+    default PendingMenuAction selectTradeOffer(PlayerContext context, int offerIndex,
+                                               MenuConfirmation confirmation, int timeoutTicks) {
+        throw new UnsupportedOperationException("trade offer selection is not supported");
+    }
+
     PendingMenuAction swapInventoryToHotbar(
             PlayerContext context,
             int sourceInventorySlot,

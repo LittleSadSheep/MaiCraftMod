@@ -23,6 +23,18 @@ public interface MenuChannel {
      */
     boolean click(int slot, int button);
 
+    /**
+     * 把这一格整堆快速移动到另一侧，落在哪一格由游戏挑。
+     * 本刻发出去了返回真；发不了（没有交互机会、上一下没结清、界面刚刷新还没画好）返回假，什么都没做。
+     */
+    boolean quickMove(int slot);
+
+    /**
+     * 交易界面里点选一条报价：不是点格子，走选择报价的包（游戏会照报价把付款从背包摆进付款格）。
+     * 本刻发出去了返回真；本刻发不了返回假，什么都没做，下一刻再试。
+     */
+    boolean selectTradeOffer(int offerIndex);
+
     /** 请游戏关闭这份界面；界面真的从画面上消失（{@link #stillOpen} 为假）才算关上。 */
     void requestClose();
 }

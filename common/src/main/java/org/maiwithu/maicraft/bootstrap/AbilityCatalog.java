@@ -47,7 +47,9 @@ import org.maiwithu.maicraft.ability.use.UseModule;
 import org.maiwithu.maicraft.ability.wait.WaitModule;
 import org.maiwithu.maicraft.behavior.acquire.ClientCropReplanting;
 import org.maiwithu.maicraft.behavior.acquire.ClientCollectsBlocks;
+import org.maiwithu.maicraft.behavior.acquire.ClientMerchantScans;
 import org.maiwithu.maicraft.behavior.acquire.ClientStairsDown;
+import org.maiwithu.maicraft.behavior.acquire.ClientTradeMenuReads;
 import org.maiwithu.maicraft.behavior.acquire.DigsStairsDown;
 import org.maiwithu.maicraft.behavior.acquire.LiveStairsSite;
 import org.maiwithu.maicraft.behavior.acquire.ClientWorkstationPlacer;
@@ -56,6 +58,7 @@ import org.maiwithu.maicraft.behavior.acquire.ContainerSource;
 import org.maiwithu.maicraft.behavior.acquire.HarvestSource;
 import org.maiwithu.maicraft.behavior.acquire.ItemAcquisition;
 import org.maiwithu.maicraft.behavior.acquire.ItemsInUse;
+import org.maiwithu.maicraft.behavior.acquire.MerchantTradeTakes;
 import org.maiwithu.maicraft.game.world.DropConfirmations;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
@@ -70,9 +73,9 @@ import org.maiwithu.maicraft.behavior.acquire.MenuRecipeRuns;
 import org.maiwithu.maicraft.behavior.acquire.ReadsToolRequirements;
 import org.maiwithu.maicraft.behavior.acquire.RecipeRuns;
 import org.maiwithu.maicraft.behavior.acquire.RecipeSource;
+import org.maiwithu.maicraft.behavior.acquire.TradeSource;
 import org.maiwithu.maicraft.behavior.acquire.WorkstationRecipe;
 import org.maiwithu.maicraft.behavior.acquire.RegistryRecipeReads;
-import org.maiwithu.maicraft.behavior.acquire.TradeSource;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.approach.LiveApproachWorld;
 import org.maiwithu.maicraft.behavior.approach.LiveApproaches;
@@ -504,8 +507,8 @@ public final class AbilityCatalog {
 
     /**
      * 拿到物品能力的一份：身上的不算来源（引擎开场就清点），登记的是身外的途径——
-     * 记得的箱子与现场容器、合成（含石切台）、烧炼、挖矿、收熟作物；交易还没实现，
-     * 问价如实回答不支持。来源备料缺原料缺工具时回到引擎自己再问一遍，
+     * 记得的箱子与现场容器、合成（含石切台）、烧炼、挖矿、收熟作物、和村民交易。
+     * 来源备料缺原料缺工具时回到引擎自己再问一遍，
      * 引擎要等来源清单建好才建得出来，所以内需入口先接住、引擎建好后接上。
      */
     private static AbilityModule obtainModule(Deps deps, PlayerServices playerServices, LiveApproaches bringsClose,
@@ -530,9 +533,13 @@ public final class AbilityCatalog {
                 permission, deps.backpack(), deps.offhand(), innerNeeds);
         HarvestSource harvestSource = new HarvestSource(yieldScans, collects, permission,
                 new ClientCropReplanting(toMainhand, deps.interactions(), deps.context()));
+        MerchantTradeTakes tradeTakes = new MerchantTradeTakes(deps.context(), bringsClose, deps.interactions(),
+                deps.itemTags(), new ClientTradeMenuReads(deps.context()), deps.backpack(), deps.offhand(), innerNeeds);
         // 自带的来源在前，联动模组登记的在后：装了才有，停用后由登记表那一层回答不支持。
         List<ItemSource> sources = new ArrayList<>(List.of(
-                containerSource, craftSource, smeltSource, miningSource, harvestSource, new TradeSource()));
+                containerSource, craftSource, smeltSource, miningSource, harvestSource,
+                new TradeSource(new ClientMerchantScans(deps.context()), deps.creatures(), deps.memory(),
+                        deps.protection(), tradeTakes)));
         // 联动来源进世界时带着这一份玩家行为建：缺东西去拿也回到同一个引擎（内需入口），许可原样传下去。
         sources.addAll(deps.compat().itemSources(playerServices));
         ItemAcquisition acquisition = new ItemAcquisition(sources,

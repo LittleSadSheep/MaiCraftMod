@@ -8,8 +8,10 @@ import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.multiplayer.MultiPlayerGameMode;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
+import net.minecraft.network.protocol.game.ServerboundSelectTradePacket;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.inventory.MerchantMenu;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import org.slf4j.Logger;
@@ -250,6 +252,38 @@ public final class DefaultMenuActions implements MenuActions {
         } catch (RuntimeException failure) {
             // 原生校验或发包途中异常时无法证明是否执行，保留不确定结果供上层收尾，不能自动再点一次。
             pending.finish(PendingMenuAction.Status.UNCERTAIN, "menu button threw after entering the client transaction path");
+        }
+        return pending;
+    }
+
+    @Override
+    public PendingMenuAction selectTradeOffer(PlayerContext context, int offerIndex,
+                                              MenuConfirmation confirmation, int timeoutTicks) {
+        // 与点按钮同一套排队规矩：旧事务结清、界面画过，再发选择报价的包；确认条件由调用方给。
+        requireSubmission(context);
+        requireIdle();
+        requireVisible(context);
+        if (offerIndex < 0) throw new IllegalArgumentException("trade offer index must be nonnegative");
+        if (timeoutTicks < 1) throw new IllegalArgumentException("timeoutTicks must be positive");
+        Objects.requireNonNull(confirmation, "trade offer selection requires an exact postcondition");
+        AbstractContainerMenu menu = context.localPlayer().containerMenu;
+        PendingMenuAction pending = create(PendingMenuAction.Kind.BUTTON, context, menu, offerIndex, timeoutTicks, false, confirmation);
+        try {
+            // 交易菜单没有按钮校验这一步：原版界面点报价行是本地改选并按库存自动付款，再发选择报价的包。
+            if (!(menu instanceof MerchantMenu merchant)) {
+                pending.finish(PendingMenuAction.Status.CONFIRMED_NOT_APPLIED,
+                        "the open menu is not a trade menu");
+                return pending;
+            }
+            merchant.setSelectionHint(offerIndex);
+            merchant.tryMoveItems(offerIndex);
+            pending.awaitButtonSynchronization(menu.getStateId());
+            connection(context).send(new ServerboundSelectTradePacket(offerIndex));
+            interactionSubmitted(context);
+        } catch (RuntimeException failure) {
+            // 本地改选或发包途中异常时无法证明是否执行，保留不确定结果供上层收尾，不能自动再点一次。
+            pending.finish(PendingMenuAction.Status.UNCERTAIN,
+                    "trade offer selection threw after entering the client transaction path");
         }
         return pending;
     }

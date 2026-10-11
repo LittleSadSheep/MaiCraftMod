@@ -507,6 +507,8 @@ class DepositTaskTest {
         @Override public boolean stillOpen() { return true; }
         @Override public boolean cursorCarrying() { return false; }
         @Override public boolean click(int slot, int button) { return true; }
+        @Override public boolean quickMove(int slot) { return true; }
+        @Override public boolean selectTradeOffer(int offerIndex) { return true; }
         @Override public void requestClose() {}
     };
 

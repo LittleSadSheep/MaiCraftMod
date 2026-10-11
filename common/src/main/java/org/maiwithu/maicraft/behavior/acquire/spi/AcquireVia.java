@@ -29,8 +29,8 @@ public record AcquireVia(String name, String description) {
     public static final AcquireVia MINE = new AcquireVia("mine", "挖掉会掉出它的方块");
     /** 收成熟的作物。 */
     public static final AcquireVia HARVEST = new AcquireVia("harvest", "收成熟的作物");
-    /** 和村民交易；还没接入，问价一律回答不支持。 */
-    public static final AcquireVia TRADE = new AcquireVia("trade", "和村民交易（还没接入，问价一律回答不支持）");
+    /** 和附近已加载的村民与流浪商人买（付款收什么他摆什么，不还价）。 */
+    public static final AcquireVia TRADE = new AcquireVia("trade", "和村民交易");
 
 
     public AcquireVia {

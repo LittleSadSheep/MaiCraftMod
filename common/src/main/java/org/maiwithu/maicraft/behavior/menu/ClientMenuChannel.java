@@ -86,6 +86,26 @@ public final class ClientMenuChannel implements MenuChannel {
         return true;
     }
 
+    // 快速移动与点格子同一条就绪判断；搬没搬成由调用方按两侧内容的前后对照核对。
+    @Override
+    public boolean quickMove(int slot) {
+        PlayerContext context = contexts.get();
+        if (!readyForAction(context)) return false;
+        context.menuActions().click(context, slot, 0, ClickType.QUICK_MOVE, MenuConfirmation.stateChanged(),
+                CLOSE_TIMEOUT_TICKS);
+        return true;
+    }
+
+    // 点选报价：与点格子同一条就绪判断；按什么价成交由调用方按界面上的报价核对。
+    @Override
+    public boolean selectTradeOffer(int offerIndex) {
+        PlayerContext context = contexts.get();
+        if (!readyForAction(context)) return false;
+        context.menuActions().selectTradeOffer(context, offerIndex, MenuConfirmation.stateChanged(),
+                CLOSE_TIMEOUT_TICKS);
+        return true;
+    }
+
     /**
      * 本刻能不能对这份界面动手：界面还是认领的那一份、本刻还有交互机会、上一下已经结清、界面画过一帧。
      * 点格子、快速移动、模组自己的操作都按这一条判断，规矩不分叉。每次操作后界面要再画一帧才算准备好，

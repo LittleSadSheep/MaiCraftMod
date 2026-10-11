@@ -47,6 +47,16 @@ public interface OpenedMenu {
         throw new UnsupportedOperationException("这份界面不支持经模组协议操作");
     }
 
+    /**
+     * 点界面上的一枚按钮（交易界面里点选一条报价这类）：不是点格子，走按钮的排队规矩，
+     * 与点格子同一条——这份界面还开着、上一下已经结清、界面画过一帧、本刻还有交互机会才发。
+     * 本刻发不了时给空，下一刻再试。
+     */
+    default Optional<PendingMenuAction> pressMenuButton(int button, MenuConfirmation confirmation,
+                                                        int timeoutTicks) {
+        throw new UnsupportedOperationException("这份界面不支持点按钮");
+    }
+
     /** 光标上的东西是从这一格拿起的：关界面前先放回这里。 */
     void noteCursorTakenFrom(int slotId);
 

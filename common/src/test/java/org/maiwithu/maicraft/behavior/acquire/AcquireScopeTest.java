@@ -25,6 +25,8 @@ import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
+import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
+import org.maiwithu.maicraft.behavior.permission.Protection;
 
 /**
  * 带限定的一次拿东西：via 只走指定途径、距离上限把太远的报价挡下、半径原样传给来源、
@@ -173,11 +175,16 @@ class AcquireScopeTest {
     }
 
     @Test
-    void 交易来源如实回答不支持() {
-        TradeSource trade = new TradeSource();
+    void 交易来源认交易这条途径() {
+        // 交易已经接入：来源自报 trade，问价按现场（附近有没有合格村民）如实回答。
+        TradeSource trade = new TradeSource((center, radius) -> List.of(),
+                uuid -> Optional.empty(), List::of,
+                new Protection((dimension, x, y, z) -> Optional.empty(), List::of, name -> Optional.empty(),
+                        GuessesPlayerMade.NOTHING, "self"),
+                (candidates, request, permissions) -> Optional.empty());
         SourceQuote quote = trade.quote(
                 new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), 1, "测试"), CONTEXT);
-        assertInstanceOf(SourceQuote.Unsupported.class, quote);
+        assertInstanceOf(SourceQuote.Unavailable.class, quote);
         assertEquals(AcquireVia.TRADE, trade.via());
     }
 

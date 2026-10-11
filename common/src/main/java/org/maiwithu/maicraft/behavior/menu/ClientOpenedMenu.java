@@ -67,6 +67,14 @@ final class ClientOpenedMenu implements OpenedMenu {
         return Optional.of(context.menuActions().submitModAction(context, what, send, confirmation, timeoutTicks));
     }
 
+    // 点界面上的按钮（交易界面里点选一条报价）：与模组协议的一下同一条就绪判断，发的是选择报价的包。
+    @Override public Optional<PendingMenuAction> pressMenuButton(int button, MenuConfirmation confirmation,
+            int timeoutTicks) {
+        PlayerContext context = contexts.get();
+        if (!channel.readyForAction(context)) return Optional.empty();
+        return Optional.of(context.menuActions().selectTradeOffer(context, button, confirmation, timeoutTicks));
+    }
+
     @Override public boolean click(int slotId, int button) {
         return channel.click(slotId, button);
     }
