@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.ToIntFunction;
 
+import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.behavior.inventory.JunkItems;
 
 /**
@@ -20,15 +21,6 @@ public final class ScaffoldBlocks {
     /** 垫脚的料，按先垫后垫排：就是全仓那一份垃圾方块。 */
     static final List<String> JUNK = JunkItems.BLOCKS;
 
-    /** 正要用的东西每种留几件；不在用的给 0。 */
-    public interface Keeps {
-
-        /** 什么都不留：没有接上"正要用的东西"时的默认。 */
-        Keeps NOTHING = itemId -> 0;
-
-        int keep(String itemId);
-    }
-
     private ScaffoldBlocks() {}
 
     /**
@@ -38,7 +30,7 @@ public final class ScaffoldBlocks {
      * @param carried 身上（主背包、快捷栏与副手）每种物品一共几件
      * @param keeps   正要用的东西每种留几件
      */
-    public static List<String> usable(ToIntFunction<String> carried, Keeps keeps) {
+    public static List<String> usable(ToIntFunction<String> carried, ItemsToKeep keeps) {
         List<String> usable = new ArrayList<>();
         for (String itemId : JUNK) {
             if (carried.applyAsInt(itemId) > keeps.keep(itemId)) usable.add(itemId);

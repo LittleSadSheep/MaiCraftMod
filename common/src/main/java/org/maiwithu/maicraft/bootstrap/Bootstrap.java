@@ -13,6 +13,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.Camera;
 import net.minecraft.client.gui.GuiGraphics;
 import org.joml.Matrix4f;
+import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.debug.BlueprintOverlay;
 import org.maiwithu.maicraft.debug.DebugPanel;
 import org.maiwithu.maicraft.debug.PanelSettings;
@@ -228,7 +229,7 @@ public final class Bootstrap {
             InteractionSender interactionSender, MenuActions menuActions, Interactions interactions,
             CombatSenses combatSenses, WalkTo walks,
             EatSoonTask.FoodMoves foodMoves, ReadsFoodValues foods, LiveBurrow burrow, LiveCeilingDigs ceilings,
-            NightRestWiring nightWiring) {
+            NightRestWiring nightWiring, ItemsToKeep keeps) {
         // 角色死亡这类循环自身的处境变化也从同一条事件流出去；死亡决策从挂载口交给目标运行表。
         return new ControlLoop(List.of(
                 new DigOutNeed(new SurvivalSituation.FromPlayer(),
@@ -237,7 +238,7 @@ public final class Bootstrap {
                 new FallNeed(new SurvivalSituation.FromPlayer(), EmergencyLanding::findToSaveLife,
                         BaritoneInternals::landingInProgress),
                 new SelfDefenseNeed(combatSenses, new LiveCombatMoves(walks), events),
-                new HungerNeed(new LiveHungerView(foods), foodMoves, events),
+                new HungerNeed(new LiveHungerView(foods, keeps), foodMoves, events),
                 new NightfallNeed(new LiveNightView(combatSenses),
                         LiveNightAndEdgeMoves.burrow(burrow, events), nightWiring, nightWiring),
                 new EdgeProximityNeed(new LiveEdgeView(),
@@ -455,7 +456,7 @@ public final class Bootstrap {
                     PlayerViews.backpack(() -> playerControl.activeContext().orElse(null)),
                     foods,
                     new ClientMovesToMainhand(() -> playerControl.activeContext().orElse(null)),
-                    useKeyProjection);
+                    useKeyProjection, itemsInUse);
             // 战斗感观一份：生存需求的自卫与战斗能力看的是同一份伤害证据。
             combatMemory = new CombatMemory();
             combatSenses = new LiveCombatSenses(combatMemory, foods);
@@ -473,7 +474,7 @@ public final class Bootstrap {
                     protection);
             controlLoop = withSurvivalNeeds(taskEvents, deathDecisions, interactionSender, menuActions, interactions,
                     combatSenses, walks, foodMoves, foods, burrow, new LiveCeilingDigs(diggings, protection),
-                    nightWiring);
+                    nightWiring, itemsInUse);
         }
 
         /**

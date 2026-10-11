@@ -8,6 +8,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
 
+import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
 import org.maiwithu.maicraft.behavior.interaction.SustainedUse;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
@@ -34,19 +35,28 @@ public final class EatsCarriedFood implements EatSoonTask.FoodMoves {
     private final ReadsFoodValues foods;
     private final MovesToMainhand toMainhand;
     private final UseKeyProjection projection;
+    /** 正要用的东西：饿了顺手吃不吃它们。 */
+    private final ItemsToKeep keeps;
 
     public EatsCarriedFood(BackpackView backpack, ReadsFoodValues foods,
             MovesToMainhand toMainhand, UseKeyProjection projection) {
+        this(backpack, foods, toMainhand, projection, ItemsToKeep.NOTHING);
+    }
+
+    public EatsCarriedFood(BackpackView backpack, ReadsFoodValues foods,
+            MovesToMainhand toMainhand, UseKeyProjection projection, ItemsToKeep keeps) {
         this.backpack = Objects.requireNonNull(backpack, "backpack");
         this.foods = Objects.requireNonNull(foods, "foods");
         this.toMainhand = Objects.requireNonNull(toMainhand, "toMainhand");
         this.projection = projection;
+        this.keeps = Objects.requireNonNull(keeps, "keeps");
     }
 
     @Override
     public Action eating(HungerNeed.Facts hunger) {
-        // 按饥饿处境挑：平时只吃补得刚好的普通食物，饱食度见底在掉血才什么都吃。
-        return FoodPicker.forHunger(FoodPicker.carried(backpack.stacks(), foods), hunger.food(), hunger.losingHealth())
+        // 按饥饿处境挑：平时只吃补得刚好的普通食物，饱食度见底在掉血才什么都吃；正要用的那几件不算口粮。
+        return FoodPicker.forHunger(FoodPicker.carried(backpack.stacks(), foods, keeps), hunger.food(),
+                        hunger.losingHealth())
                 .map(food -> (Action) new BiteAction(food))
                 .orElse(null);
     }

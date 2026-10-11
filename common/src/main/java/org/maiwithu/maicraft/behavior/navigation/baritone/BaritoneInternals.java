@@ -26,6 +26,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.behavior.navigation.ScaffoldBlocks;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
@@ -63,7 +64,7 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
     /** 上一次运行里的落地救援经过；运行交出身体后结算方还要读得到。 */
     private List<String> lastLandings = List.of();
     /** 正要用的东西每种留几件：垫脚只用多出来的。 */
-    private final ScaffoldBlocks.Keeps keeps;
+    private final ItemsToKeep keeps;
     /** 镜头离引擎要的精确瞄点差这么多度以内算转到位：平滑镜头收敛到 0.3° 吸附，留点余量。 */
     private static final float AIM_SETTLED_DEGREES = 3.0f;
     /** 本刻引擎要的精确瞄点（挖、放）；没要为 null。走到运行按它判断镜头转到位没有，没到位左右键不出手。 */
@@ -73,11 +74,11 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
 
     /** 不知道什么正要用（离线清单、测试）：垃圾方块照先后垫，什么都不留。 */
     public BaritoneInternals() {
-        this(ScaffoldBlocks.Keeps.NOTHING);
+        this(ItemsToKeep.NOTHING);
     }
 
     /** @param keeps 正要用的东西每种留几件：上一个目标刚拿到的、手上这件事正在拿的 */
-    public BaritoneInternals(ScaffoldBlocks.Keeps keeps) {
+    public BaritoneInternals(ItemsToKeep keeps) {
         this.keeps = keeps;
     }
 

@@ -16,7 +16,7 @@ import net.minecraft.world.item.Items;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.maiwithu.maicraft.behavior.navigation.ScaffoldBlocks;
+import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.behavior.navigation.baritone.ScaffoldStaging.Holding;
 
 /**
@@ -66,7 +66,7 @@ class ScaffoldStagingTest {
         items.set(20, new ItemStack(Items.COBBLESTONE, 32));
         items.set(30, new ItemStack(Items.DIRT, 10));
         var swap = ScaffoldStaging.plan(items, ItemStack.EMPTY, 0,
-                spare("minecraft:dirt", "minecraft:cobblestone"), ScaffoldBlocks.Keeps.NOTHING);
+                spare("minecraft:dirt", "minecraft:cobblestone"), ItemsToKeep.NOTHING);
         // 泥土先垫：主背包第 30 格的泥土换到放木棍的第 4 格，镐子一把不动。
         assertEquals(new ScaffoldStaging.Swap(30, 4, "minecraft:dirt"), swap.orElseThrow());
     }
@@ -77,7 +77,7 @@ class ScaffoldStagingTest {
         items.set(20, new ItemStack(Items.DIRT, 10));
         items.set(3, new ItemStack(Items.COBBLESTONE, 5));
         assertTrue(ScaffoldStaging.plan(items, ItemStack.EMPTY, 0,
-                spare("minecraft:dirt", "minecraft:cobblestone"), ScaffoldBlocks.Keeps.NOTHING).isEmpty());
+                spare("minecraft:dirt", "minecraft:cobblestone"), ItemsToKeep.NOTHING).isEmpty());
         // 快捷栏全是工具、吃的、水桶、火把：腾不出格子，不挪。
         items.set(3, ItemStack.EMPTY);
         List<ItemStack> keep = List.of(new ItemStack(Items.IRON_PICKAXE), new ItemStack(Items.IRON_SWORD),
@@ -86,7 +86,7 @@ class ScaffoldStagingTest {
                 new ItemStack(Items.SHIELD));
         for (int slot = 0; slot < 9; slot++) items.set(slot, keep.get(slot));
         assertTrue(ScaffoldStaging.plan(items, ItemStack.EMPTY, 0,
-                spare("minecraft:dirt"), ScaffoldBlocks.Keeps.NOTHING).isEmpty());
+                spare("minecraft:dirt"), ItemsToKeep.NOTHING).isEmpty());
         // 正要用的东西也不挪走：木棍是这次要拿的。
         items.set(8, new ItemStack(Items.STICK, 3));
         assertTrue(ScaffoldStaging.plan(items, ItemStack.EMPTY, 0, spare("minecraft:dirt"),

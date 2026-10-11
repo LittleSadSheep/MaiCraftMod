@@ -8,7 +8,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.function.Supplier;
 
-import org.maiwithu.maicraft.behavior.navigation.ScaffoldBlocks;
+import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.kernel.result.Change;
 
 /**
@@ -18,7 +18,7 @@ import org.maiwithu.maicraft.kernel.result.Change;
  * <p>只留拿到的那么多件，多出来的照样能垫；下一个目标结束就换成那个目标拿到的。
  * 要的是标签（"任一石质工具材料"）时，挂着这个标签的料都按这个数留。只在客户端线程读写。
  */
-public final class ItemsInUse implements ScaffoldBlocks.Keeps {
+public final class ItemsInUse implements ItemsToKeep {
 
     private final ReadsItemTags tags;
     /** 上一个目标拿到的：物品或 #标签 → 件数。 */

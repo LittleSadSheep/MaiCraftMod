@@ -5,6 +5,7 @@ import java.util.Objects;
 
 import net.minecraft.client.player.LocalPlayer;
 
+import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.game.player.ReadsFoodValues;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -17,6 +18,14 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 public final class LiveHungerView implements HungerNeed.ReadsFacts {
 
     private final ReadsFoodValues foods;
+
+    /** 正要用的东西：趁空当吃看的口粮不算它们。 */
+    private ItemsToKeep keeps = ItemsToKeep.NOTHING;
+
+    public LiveHungerView(ReadsFoodValues foods, ItemsToKeep keeps) {
+        this(foods);
+        this.keeps = Objects.requireNonNull(keeps, "keeps");
+    }
 
     public LiveHungerView(ReadsFoodValues foods) {
         this.foods = Objects.requireNonNull(foods, "foods");
@@ -32,7 +41,7 @@ public final class LiveHungerView implements HungerNeed.ReadsFacts {
         // 身上补得最少的一件普通食物：按游戏的食物组件认，和吃饭任务挑吃的用同一条规则；
         // 趁空当吃要看它能不能整份补进去。
         BackpackView backpack = context.player().backpack();
-        int smallest = backpack == null ? 0 : FoodPicker.carried(backpack.stacks(), foods).stream()
+        int smallest = backpack == null ? 0 : FoodPicker.carried(backpack.stacks(), foods, keeps).stream()
                 .filter(candidate -> FoodPicker.plain(candidate.value()))
                 .mapToInt(candidate -> candidate.value().nutrition())
                 .min().orElse(0);

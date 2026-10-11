@@ -10,7 +10,8 @@ import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.ItemStack;
 
-import org.maiwithu.maicraft.behavior.navigation.ScaffoldBlocks;
+
+import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 
 /**
  * 垫料只在主背包时挪到快捷栏的打算：寻路引擎只从快捷栏和副手拿垫块，主背包里的料它够不着，
@@ -41,7 +42,7 @@ final class ScaffoldStaging {
      * @param spare    能垫的料，按先垫后垫排（正要用的已经扣掉）
      */
     static Optional<Swap> plan(List<ItemStack> items, ItemStack offhand, int selected,
-                               Map<String, Integer> spare, ScaffoldBlocks.Keeps keeps) {
+                               Map<String, Integer> spare, ItemsToKeep keeps) {
         if (spare.isEmpty()) return Optional.empty();
         List<Holding> hotbar = new ArrayList<>();
         for (int slot = 0; slot < HOTBAR_SIZE; slot++) {
@@ -83,7 +84,7 @@ final class ScaffoldStaging {
     }
 
     // 有耐久的（工具、武器、盔甲、盾、打火石）、能吃的、桶、火把、不死图腾、正要用的不挪；别的零碎可以换进背包。
-    private static Holding holding(ItemStack stack, ScaffoldBlocks.Keeps keeps) {
+    private static Holding holding(ItemStack stack, ItemsToKeep keeps) {
         if (stack.isEmpty()) return Holding.EMPTY;
         String id = itemId(stack);
         boolean keep = stack.isDamageableItem() || stack.has(DataComponents.FOOD)

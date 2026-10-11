@@ -8,6 +8,8 @@ import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
+import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
+
 /** 垫脚挑料：垃圾方块先垫，圆石最后；正要用的留够数，多出来的才垫。 */
 class ScaffoldBlocksTest {
 
@@ -17,13 +19,13 @@ class ScaffoldBlocksTest {
                 "minecraft:andesite", 3, "minecraft:oak_planks", 30, "minecraft:gravel", 2);
 
         assertEquals(List.of("minecraft:dirt", "minecraft:andesite", "minecraft:gravel", "minecraft:cobblestone"),
-                ScaffoldBlocks.usable(itemId -> carried.getOrDefault(itemId, 0), ScaffoldBlocks.Keeps.NOTHING));
+                ScaffoldBlocks.usable(itemId -> carried.getOrDefault(itemId, 0), ItemsToKeep.NOTHING));
     }
 
     @Test
     void 刚挖来要用的三块圆石不垫_多出来的才垫() {
         // 实机：挖了三块圆石做石镐，爬上来时又把这三块垫了下去。
-        ScaffoldBlocks.Keeps keepThree = itemId -> itemId.equals("minecraft:cobblestone") ? 3 : 0;
+        ItemsToKeep keepThree = itemId -> itemId.equals("minecraft:cobblestone") ? 3 : 0;
 
         assertEquals(List.of(), ScaffoldBlocks.usable(
                 itemId -> itemId.equals("minecraft:cobblestone") ? 3 : 0, keepThree));

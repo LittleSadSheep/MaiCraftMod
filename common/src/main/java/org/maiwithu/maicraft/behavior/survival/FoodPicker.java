@@ -5,8 +5,11 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.Optional;
 
+import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.behavior.acquire.ReadsItemTags;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.ReadsFoodValues;
@@ -41,11 +44,21 @@ public final class FoodPicker {
 
     /** 把身上的物品堆按游戏的食物组件筛成能吃的；不是食物的跳过。 */
     public static List<Carried> carried(Collection<BackpackStack> stacks, ReadsFoodValues foods) {
+        return carried(stacks, foods, ItemsToKeep.NOTHING);
+    }
+
+    /**
+     * 同上，但正要用的那几件不算口粮：身上的件数减去要留的，减完不剩就整种跳过。
+     * 饿了顺手吃不能把目标要交的熟海带、要做菜的土豆吃掉。
+     */
+    public static List<Carried> carried(Collection<BackpackStack> stacks, ReadsFoodValues foods, ItemsToKeep keeps) {
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        for (BackpackStack stack : stacks) counts.merge(stack.itemId(), stack.count(), Integer::sum);
         List<Carried> candidates = new ArrayList<>();
-        for (BackpackStack stack : stacks) {
-            foods.of(stack.itemId()).ifPresent(value ->
-                    candidates.add(new Carried(stack.itemId(), stack.count(), value)));
-        }
+        counts.forEach((itemId, count) -> {
+            int spare = count - keeps.keep(itemId);
+            if (spare > 0) foods.of(itemId).ifPresent(value -> candidates.add(new Carried(itemId, spare, value)));
+        });
         return candidates;
     }
 

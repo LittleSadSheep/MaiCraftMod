@@ -10,6 +10,9 @@ import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.acquire.ReadsItemTags;
+import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
+import org.maiwithu.maicraft.game.player.BackpackStack;
+import org.maiwithu.maicraft.game.player.ReadsFoodValues;
 import org.maiwithu.maicraft.game.player.ReadsFoodValues.FoodEffect;
 import org.maiwithu.maicraft.game.player.ReadsFoodValues.FoodValue;
 
@@ -105,5 +108,18 @@ class FoodPickerTest {
         assertEquals(Optional.of("minecraft:bread"),
                 FoodPicker.named(carried, "#minecraft:foods", tags));
         assertTrue(FoodPicker.autoPick(List.of()).isEmpty());
+    }
+
+    @Test
+    void 目标正要用的吃的不当口粮() {
+        // 目标要交 8 块熟海带：身上 10 块只有 2 块算口粮；土豆整份都留着就不算口粮。
+        var stacks = List.of(new BackpackStack("minecraft:dried_kelp", 10, 64, false, true, false, false),
+                new BackpackStack("minecraft:baked_potato", 3, 64, false, true, false, false));
+        ReadsFoodValues foods = id -> Optional.of(food(id, id.endsWith("kelp") ? 1 : 5, 1.0f));
+        ItemsToKeep keeps = id -> id.equals("minecraft:dried_kelp") ? 8 : id.equals("minecraft:baked_potato") ? 3 : 0;
+        List<FoodPicker.Carried> spare = FoodPicker.carried(stacks, foods, keeps);
+        assertEquals(1, spare.size());
+        assertEquals("minecraft:dried_kelp", spare.getFirst().itemId());
+        assertEquals(2, spare.getFirst().count());
     }
 }
