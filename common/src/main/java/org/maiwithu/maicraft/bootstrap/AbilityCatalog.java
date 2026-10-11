@@ -49,6 +49,8 @@ import org.maiwithu.maicraft.behavior.acquire.ClientCropReplanting;
 import org.maiwithu.maicraft.behavior.acquire.ClientCollectsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.ClientMerchantScans;
 import org.maiwithu.maicraft.behavior.acquire.ClientStairsDown;
+import org.maiwithu.maicraft.behavior.acquire.ClientCreatureScans;
+import org.maiwithu.maicraft.behavior.acquire.ClientCreatureSight;
 import org.maiwithu.maicraft.behavior.acquire.ClientTradeMenuReads;
 import org.maiwithu.maicraft.behavior.acquire.DigsStairsDown;
 import org.maiwithu.maicraft.behavior.acquire.LiveStairsSite;
@@ -56,6 +58,9 @@ import org.maiwithu.maicraft.behavior.acquire.ClientWorkstationPlacer;
 import org.maiwithu.maicraft.behavior.acquire.ClientYieldScans;
 import org.maiwithu.maicraft.behavior.acquire.ContainerSource;
 import org.maiwithu.maicraft.behavior.acquire.HarvestSource;
+import org.maiwithu.maicraft.behavior.acquire.HuntSource;
+import org.maiwithu.maicraft.behavior.acquire.LiveHuntMoves;
+import org.maiwithu.maicraft.behavior.acquire.LiveHunts;
 import org.maiwithu.maicraft.behavior.acquire.ItemAcquisition;
 import org.maiwithu.maicraft.behavior.acquire.ItemsInUse;
 import org.maiwithu.maicraft.behavior.acquire.MerchantTradeTakes;
@@ -277,7 +282,7 @@ public final class AbilityCatalog {
                         deps.memory(), deps.context(), deps.compat().menuLayouts()));
         registry.register(obtainModule(deps, shared.playerServices(), shared.bringClose(), shared.toMainhand(),
                 shared.permission(), shared.innerNeeds(), shared.collects(), stairs, shared.space(),
-                containerSource));
+                containerSource, shared.drops()));
 
         // 存东西：找容器把现场扫描与世界记忆并起来，打开容器、逐笔搬运与挖盖子都接上了。
         registry.register(depositModule(deps, shared.storing(), shared.collects()));
@@ -513,7 +518,8 @@ public final class AbilityCatalog {
      */
     private static AbilityModule obtainModule(Deps deps, PlayerServices playerServices, LiveApproaches bringsClose,
             ClientMovesToMainhand toMainhand, PermissionCheck permission, DeferredInnerNeeds innerNeeds,
-            ClientCollectsBlocks collects, DigsStairsDown stairs, InventorySpace space, ContainerSource containerSource) {
+            ClientCollectsBlocks collects, DigsStairsDown stairs, InventorySpace space, ContainerSource containerSource,
+            ClientDropPickup drops) {
         RegistryRecipeReads recipeReads = new RegistryRecipeReads(deps.context(), deps.itemTags(), deps.furnaceFuels());
         // 在工作站上动手：熔炉添燃料时按同一份燃料表挑身上烧得最久的。
         RecipeRuns recipeRuns = new MenuRecipeRuns(bringsClose, deps.interactions(),
@@ -535,11 +541,17 @@ public final class AbilityCatalog {
                 new ClientCropReplanting(toMainhand, deps.interactions(), deps.context()));
         MerchantTradeTakes tradeTakes = new MerchantTradeTakes(deps.context(), bringsClose, deps.interactions(),
                 deps.itemTags(), new ClientTradeMenuReads(deps.context()), deps.backpack(), deps.offhand(), innerNeeds);
+        // 狩猎的出手与走位走战斗同一条攻击事实（游戏接口层的攻击交互），狩猎只管选目标与收掉落。
+        LiveHunts hunts = new LiveHunts(new LiveHuntMoves(deps.walks()), drops,
+                new ClientCreatureSight(deps.context()), deps.creatures(),
+                deps.backpack(), deps.offhand(), deps.itemTags());
         // 自带的来源在前，联动模组登记的在后：装了才有，停用后由登记表那一层回答不支持。
         List<ItemSource> sources = new ArrayList<>(List.of(
                 containerSource, craftSource, smeltSource, miningSource, harvestSource,
                 new TradeSource(new ClientMerchantScans(deps.context()), deps.creatures(), deps.memory(),
-                        deps.protection(), tradeTakes)));
+                        deps.protection(), tradeTakes),
+                new HuntSource(new ClientCreatureScans(deps.context()), deps.creatures(), permission,
+                        deps.itemTags(), hunts)));
         // 联动来源进世界时带着这一份玩家行为建：缺东西去拿也回到同一个引擎（内需入口），许可原样传下去。
         sources.addAll(deps.compat().itemSources(playerServices));
         ItemAcquisition acquisition = new ItemAcquisition(sources,

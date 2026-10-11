@@ -261,9 +261,8 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         // 问遍所有来源：给得了的按代价排队，给不了的记下原因，超出许可的原样带问题。
         private ActionStatus consult(int carried) {
             int stillNeeded = target - carried;
-            SourceContext context = scope.radiusBlocks() == null
-                    ? new SourceContext(position.currentPosition(), permissions)
-                    : new SourceContext(position.currentPosition(), permissions, scope.radiusBlocks());
+            SourceContext context = new SourceContext(position.currentPosition(), permissions,
+                    scope.radiusBlocks(), scope.maxDistanceBlocks());
             List<Planned> offers = new ArrayList<>();
             List<SourceQuote> refusals = new ArrayList<>();
             boolean stillLooking = false;
@@ -384,9 +383,8 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         }
 
         private ActionStatus startStep() {
-            SourceContext context = scope.radiusBlocks() == null
-                    ? new SourceContext(position.currentPosition(), permissions)
-                    : new SourceContext(position.currentPosition(), permissions, scope.radiusBlocks());
+            SourceContext context = new SourceContext(position.currentPosition(), permissions,
+                    scope.radiusBlocks(), scope.maxDistanceBlocks());
             Planned planned = plan.getFirst();
             int stillNeeded = target - CarriedItems.matching(backpack, offhand, request, tags);
             Optional<Action> begun = planned.source()

@@ -31,6 +31,8 @@ public record AcquireVia(String name, String description) {
     public static final AcquireVia HARVEST = new AcquireVia("harvest", "收成熟的作物");
     /** 和附近已加载的村民与流浪商人买（付款收什么他摆什么，不还价）。 */
     public static final AcquireVia TRADE = new AcquireVia("trade", "和村民交易");
+    /** 打掉会掉出它的动物或生物：动物照 kill_animals、敌对生物照 fight 判许可。 */
+    public static final AcquireVia HUNT = new AcquireVia("hunt", "打掉会掉出它的动物或生物");
 
 
     public AcquireVia {
