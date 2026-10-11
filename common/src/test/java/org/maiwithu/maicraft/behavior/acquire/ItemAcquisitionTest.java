@@ -3,6 +3,8 @@ package org.maiwithu.maicraft.behavior.acquire;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -18,10 +20,12 @@ import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.inventory.InventorySpace;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.CollectedRecords;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -237,6 +241,87 @@ class ItemAcquisitionTest {
                 new ItemRequest(WantedItem.ofItem("minecraft:crafting_table"), 1, "开局"), PERMISSIONS));
         assertInstanceOf(ActionStatus.Done.class, status);
         assertTrue(countOf("minecraft:crafting_table") >= 1, "照常拿到了工作台");
+    }
+
+    @Test
+    void 来源动手时拿到任务的记账口_自制中间产物逐笔进结果_要的那件不重复记() {
+        // 合成的现场动作自制了木板、木棍这类中间产物，也做出了点名要的东西：
+        // 交给来源的记账口滤掉点名那件的入包（它由发起的任务按净拿到几件结算），其余原样进结果。
+        CollectedRecords reported = new CollectedRecords();
+        List<TaskRecords> handed = new ArrayList<>();
+        ItemSource crafting = new ItemSource() {
+            @Override public String describe() {
+                return "自己做";
+            }
+            @Override public AcquireVia via() {
+                return AcquireVia.CRAFT;
+            }
+            @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
+                return new SourceQuote.Offer("自己做", request.count(), new AcquisitionCost(0, 4), null);
+            }
+            @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer,
+                    SourceContext context) {
+                handed.add(context.records());
+                TaskRecords records = context.records();
+                return Optional.of(new Action() {
+                    @Override public ActionStatus tick(TickContext tick) {
+                        if (records != null) {
+                            records.change(Change.of(Change.Kind.ITEM_GAINED, "minecraft:stick", 4));
+                            records.change(Change.of(Change.Kind.ITEM_GAINED, request.wanted().specifier(), 1));
+                        }
+                        backpack.add("minecraft:stick", 4);
+                        backpack.add(request.wanted().specifier(), 1);
+                        return ActionStatus.done();
+                    }
+                    @Override public String describe() {
+                        return "在工作台上做一次";
+                    }
+                });
+            }
+        };
+        ActionStatus status = runToSettlement(engine(crafting).need(
+                new ItemRequest(WantedItem.ofItem("minecraft:wooden_pickaxe"), 1, "开局"), PERMISSIONS,
+                ItemAcquisition.Scope.ALL, null, reported));
+        assertEquals(ActionStatus.done(), status);
+        assertNotNull(handed.getFirst(), "来源动手时拿到发起任务的记账口");
+        assertEquals(List.of("minecraft:stick"), reported.changes.stream()
+                        .filter(change -> change.kind() == Change.Kind.ITEM_GAINED)
+                        .map(Change::what).toList(),
+                "自制中间产物逐笔进了 changes，点名那件不在来源的账上");
+    }
+
+    @Test
+    void 发起时没给记账口_来源拿到的是空_做了什么都不记() {
+        List<TaskRecords> handed = new ArrayList<>();
+        ItemSource crafting = new ItemSource() {
+            @Override public String describe() {
+                return "自己做";
+            }
+            @Override public AcquireVia via() {
+                return AcquireVia.CRAFT;
+            }
+            @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
+                return new SourceQuote.Offer("自己做", request.count(), new AcquisitionCost(0, 4), null);
+            }
+            @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer,
+                    SourceContext context) {
+                handed.add(context.records());
+                return Optional.of(new Action() {
+                    @Override public ActionStatus tick(TickContext tick) {
+                        backpack.add(request.wanted().specifier(), 1);
+                        return ActionStatus.done();
+                    }
+                    @Override public String describe() {
+                        return "在工作台上做一次";
+                    }
+                });
+            }
+        };
+        ActionStatus status = runToSettlement(engine(crafting).need(
+                new ItemRequest(WantedItem.ofItem("minecraft:oak_planks"), 4, "施工备料"), PERMISSIONS,
+                ItemAcquisition.Scope.ALL, what -> { }));
+        assertEquals(ActionStatus.done(), status);
+        assertNull(handed.getFirst(), "没接记账口的执行不记账");
     }
 
     @Test

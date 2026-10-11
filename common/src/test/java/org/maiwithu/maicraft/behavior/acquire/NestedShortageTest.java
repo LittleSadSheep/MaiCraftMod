@@ -25,6 +25,7 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -122,15 +123,15 @@ class NestedShortageTest {
     /** 替身：在背包合成格里做，扣原料、加成品。 */
     private final class Crafts implements RecipeRuns {
         @Override public Optional<Action> run(WorkstationRecipe recipe, WorldPosition station, int times,
-                Permissions permissions) {
-            return runInInventory(recipe, times);
+                Permissions permissions, TaskRecords records) {
+            return runInInventory(recipe, times, records);
         }
 
         @Override public boolean craftsInInventory() {
             return true;
         }
 
-        @Override public Optional<Action> runInInventory(WorkstationRecipe recipe, int times) {
+        @Override public Optional<Action> runInInventory(WorkstationRecipe recipe, int times, TaskRecords records) {
             return Optional.of(new Action() {
                 @Override public ActionStatus tick(TickContext context) {
                     for (WorkstationRecipe.IngredientStack ingredient : recipe.ingredients()) {

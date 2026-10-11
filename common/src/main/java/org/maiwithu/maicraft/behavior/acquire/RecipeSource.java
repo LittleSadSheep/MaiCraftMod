@@ -23,6 +23,7 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 
@@ -288,7 +289,7 @@ public final class RecipeSource implements ItemSource {
     private Action assembleInInventory(WorkstationRecipe recipe, int times, SourceContext context) {
         Shortfall shortfall = new Shortfall(recipe);
         List<Action> steps = shortfall.ingredients(times, context.permissions());
-        Optional<Action> run = runs.runInInventory(recipe, times);
+        Optional<Action> run = runs.runInInventory(recipe, times, context.records());
         if (run.isEmpty()) {
             return steps.isEmpty() ? nothingToDo(recipe)
                     : new StepwiseActions("为「做" + recipe.result().describe() + "」备原料", steps.toArray(Action[]::new));
@@ -313,11 +314,11 @@ public final class RecipeSource implements ItemSource {
             // 附近没有记住的设施：先去弄一个设施方块、在身边放下，再到新设施上做。
             // 动手那一步等摆完才认新设施的位置（它的记录是摆台这一步才写下的），少这一步就只剩摆台、不做东西。
             steps.addAll(placeSteps(recipe, permissions));
-            steps.add(shortfall.explaining(runAtPlacedStation(recipe, times, permissions)));
+            steps.add(shortfall.explaining(runAtPlacedStation(recipe, times, permissions, context.records())));
             return new StepwiseActions("就地摆下" + workstationName(recipe.kind()) + "再做"
                     + recipe.result().describe(), steps.toArray(Action[]::new));
         }
-        Optional<Action> run = runs.run(recipe, station, times, permissions);
+        Optional<Action> run = runs.run(recipe, station, times, permissions, context.records());
         if (run.isEmpty()) {
             // 备齐了也动不了手（设施没了、界面进不去）：整串放弃，由引擎换别的路。
             return steps.isEmpty()
@@ -332,14 +333,15 @@ public final class RecipeSource implements ItemSource {
 
     // 到刚摆下的那台设施上做：动手时才从世界记忆里认它的位置。附近本来没有这台设施，
     // 它的记录是摆台那一步做完才写下的；串动作还没开始跑时就查，查到的永远是空，
-    // 于是只剩摆台、不做东西，回执还像做完了。认不出位置（摆台的动作没记下）就如实失败，由引擎换路。
-    private Action runAtPlacedStation(WorkstationRecipe recipe, int times, Permissions permissions) {
+    // 于是只剩摆台、不做东西，结果还像做完了。认不出位置（摆台的动作没记下）就如实失败，由引擎换路。
+    private Action runAtPlacedStation(WorkstationRecipe recipe, int times, Permissions permissions,
+            TaskRecords records) {
         return new Action() {
             private Action run;
 
             @Override public ActionStatus tick(TickContext tick) {
                 if (run == null) {
-                    run = runs.runAtRememberedStation(recipe, times, permissions).orElse(null);
+                    run = runs.runAtRememberedStation(recipe, times, permissions, records).orElse(null);
                     if (run == null) {
                         return ActionStatus.failed(Problem.of(Problem.Kind.STUCK,
                                 workstationName(recipe.kind()) + "摆下了，但记忆里没有它的位置，做不了"

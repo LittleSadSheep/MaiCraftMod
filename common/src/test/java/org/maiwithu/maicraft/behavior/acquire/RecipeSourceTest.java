@@ -28,6 +28,8 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.CollectedRecords;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -69,7 +71,7 @@ class RecipeSourceTest {
         static final FakeRuns READY = new FakeRuns();
 
         @Override public Optional<Action> run(WorkstationRecipe recipe, WorldPosition station, int times,
-                Permissions permissions) {
+                Permissions permissions, TaskRecords records) {
             return Optional.of(new Action() {
                 @Override public ActionStatus tick(TickContext context) {
                     return ActionStatus.done();
@@ -124,14 +126,16 @@ class RecipeSourceTest {
         assertTrue(offer.risk().contains("×1"), "做一次要一根木头");
     }
 
-    /** 替身：会在背包合成格里做的现场动作，记下有没有走背包这条路。 */
+    /** 替身：会在背包合成格里做的现场动作，记下有没有走背包这条路、拿到了谁的记账口。 */
     private static final class InventoryRuns implements RecipeRuns {
         int inInventory;
         int atStation;
+        TaskRecords recordsSeen;
 
         @Override public Optional<Action> run(WorkstationRecipe recipe, WorldPosition station, int times,
-                Permissions permissions) {
+                Permissions permissions, TaskRecords records) {
             atStation++;
+            recordsSeen = records;
             return Optional.of(done("在工作台上做"));
         }
 
@@ -139,8 +143,9 @@ class RecipeSourceTest {
             return true;
         }
 
-        @Override public Optional<Action> runInInventory(WorkstationRecipe recipe, int times) {
+        @Override public Optional<Action> runInInventory(WorkstationRecipe recipe, int times, TaskRecords records) {
             inInventory++;
+            recordsSeen = records;
             return Optional.of(done("在背包里做"));
         }
 
@@ -180,6 +185,26 @@ class RecipeSourceTest {
         assertEquals(1, needs.asked.size(), "原料照样回引擎去弄");
         assertTrue(needs.asked.stream().noneMatch(ask -> ask.wanted().specifier().equals("minecraft:crafting_table")),
                 "不去弄工作台");
+    }
+
+    @Test
+    void 动手时把发起任务的记账口交给现场动作() {
+        // 自制了几件东西由现场动作逐笔记进发起任务的结果（要的那件引擎已替它滤掉），结果里的变化能和背包净变化对得上。
+        WorldMemory memory = memory();
+        memory.rememberWorkstationUsed(TABLE_AT, "minecraft:crafting_table", NOW);
+        InventoryRuns runs = new InventoryRuns();
+        RecipeSource recipeSource = new RecipeSource(wanted -> List.of(plankRecipe()), memory,
+                itemId -> 0, runs, backpack, offhand, tags, new CapturingNeeds());
+        CollectedRecords records = new CollectedRecords();
+        SourceContext booked = new SourceContext(WorldPosition.here(0, 64, 0), Permissions.DEFAULT, null, null,
+                records);
+        ItemRequest planks = new ItemRequest(WantedItem.ofItem("minecraft:oak_planks"), 8, "施工备料");
+        backpack.add("minecraft:oak_log", 2);
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, recipeSource.quote(planks, CONTEXT));
+
+        assertInstanceOf(ActionStatus.Done.class,
+                runToEnd(recipeSource.begin(planks, offer, booked).orElseThrow()));
+        assertEquals(records, runs.recordsSeen, "现场动作拿到的就是发起任务的那份记账口");
     }
 
     @Test
@@ -331,15 +356,15 @@ class RecipeSourceTest {
     /** 替身：在背包里做木板——身上有哪种原木就扣一根、加四块那种木板，没有就说缺料。 */
     private record MakesPlanks(FakeBackpack backpack) implements RecipeRuns {
         @Override public Optional<Action> run(WorkstationRecipe recipe, WorldPosition station, int times,
-                Permissions permissions) {
-            return runInInventory(recipe, times);
+                Permissions permissions, TaskRecords records) {
+            return runInInventory(recipe, times, records);
         }
 
         @Override public boolean craftsInInventory() {
             return true;
         }
 
-        @Override public Optional<Action> runInInventory(WorkstationRecipe recipe, int times) {
+        @Override public Optional<Action> runInInventory(WorkstationRecipe recipe, int times, TaskRecords records) {
             return Optional.of(new Action() {
                 @Override public ActionStatus tick(TickContext context) {
                     String log = recipe.ingredients().getFirst().item().itemId();
@@ -472,12 +497,12 @@ class RecipeSourceTest {
         }
 
         @Override public Optional<Action> run(WorkstationRecipe recipe, WorldPosition station, int times,
-                Permissions permissions) {
+                Permissions permissions, TaskRecords records) {
             return Optional.of(craftAction());
         }
 
         @Override public Optional<Action> runAtRememberedStation(WorkstationRecipe recipe, int times,
-                Permissions permissions) {
+                Permissions permissions, TaskRecords records) {
             boolean remembered = memory.allRecords().stream()
                     .anyMatch(record -> record.kind() == MemoryKind.WORKSTATION
                             && MenuRecipeRuns.workstationBlockType(WorkstationRecipe.Kind.CRAFTING)
@@ -510,7 +535,7 @@ class RecipeSourceTest {
     @Test
     void 就地摆下的台子_摆完才认位置_照着做() {
         // 实机（208 现象一）：身上有台子、附近没有记过的台子，串动作还没跑就把"到新台上做"解析了，
-        // 那时记忆里还没有这台台子，解析出来是空，于是只剩摆台、不做东西，回执还说做完了。
+        // 那时记忆里还没有这台台子，解析出来是空，于是只剩摆台、不做东西，结果还说做完了。
         WorldMemory memory = memory();
         MemoryBackedRuns runs = new MemoryBackedRuns(memory);
         PlacesWorkstation placer = new PlacesWorkstation(memory, true);

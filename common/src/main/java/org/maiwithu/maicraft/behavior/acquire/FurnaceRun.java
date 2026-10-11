@@ -28,10 +28,12 @@ import org.maiwithu.maicraft.game.menu.MenuConfirmation;
 import org.maiwithu.maicraft.game.menu.PendingMenuAction;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -113,6 +115,8 @@ final class FurnaceRun implements Action {
     private int waited;
     /** 背包里实际多出来的成品件数：每次收货按收货前后背包里的数量差记。 */
     private int produced;
+    /** 发起任务的记账口：每收一次货记一笔烧出来的东西，结果里的变化能和背包净变化对得上；null 不记。 */
+    private final TaskRecords records;
     private int unexpectedCloses;
     private boolean closedByPause;
     /** 自己放进燃料槽的是什么：收拾时只收回这一种，炉子里原有的燃料不拿走。 */
@@ -135,7 +139,7 @@ final class FurnaceRun implements Action {
     private String splitWhat = "";
 
     FurnaceRun(RecipeHolder<?> holder, WorkstationRecipe recipe, WorldPosition station, int times,
-            Supplier<StationVisit> visits, ReadsFuels fuels, WorldMemory memory) {
+            Supplier<StationVisit> visits, ReadsFuels fuels, WorldMemory memory, TaskRecords records) {
         this.holder = Objects.requireNonNull(holder, "holder");
         this.recipe = Objects.requireNonNull(recipe, "recipe");
         this.station = Objects.requireNonNull(station, "station");
@@ -143,6 +147,7 @@ final class FurnaceRun implements Action {
         this.visits = Objects.requireNonNull(visits, "visits");
         this.fuels = Objects.requireNonNull(fuels, "fuels");
         this.memory = Objects.requireNonNull(memory, "memory");
+        this.records = records;
         this.targetItems = times * recipe.resultCount();
         this.cookTicks = holder.value() instanceof AbstractCookingRecipe cooking && cooking.getCookingTime() > 0
                 ? cooking.getCookingTime() : DEFAULT_COOK_TICKS;
@@ -325,12 +330,17 @@ final class FurnaceRun implements Action {
     }
 
     // 收成品：产出格整堆收进背包，收到几件按收货前后背包里这件东西的数量差记，不按产出格上写的数猜。
+    // 真烧出来几件就记几件：自制的东西逐笔记进发起任务的结果，结果里的变化能和背包净变化对得上。
     private ActionStatus takeOutput(TickContext tick, MenuContent.Reading open) {
         int before = carriedResults(open);
         int slotId = open.containerSlotIds().get(OUTPUT);
         return click(tick, slotId, 0, ClickType.QUICK_MOVE, resultTaken(before), status -> {
             int gained = openReading().map(now -> carriedResults(now) - before).orElse(0);
-            produced += Math.max(0, gained);
+            gained = Math.max(0, gained);
+            produced += gained;
+            if (gained > 0 && records != null) {
+                records.change(Change.of(Change.Kind.ITEM_GAINED, recipe.result().itemId(), gained));
+            }
             if (gained <= 0 && status != PendingMenuAction.Status.CONFIRMED_APPLIED) {
                 return finish(Problem.of(Problem.Kind.INVENTORY_FULL,
                         "产出格的" + recipe.result().describe() + "收不进背包，背包可能满了"));

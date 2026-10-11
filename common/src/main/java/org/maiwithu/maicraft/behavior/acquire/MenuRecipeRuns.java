@@ -28,10 +28,12 @@ import org.maiwithu.maicraft.game.menu.PendingMenuAction;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -85,7 +87,8 @@ public final class MenuRecipeRuns implements RecipeRuns {
     }
 
     @Override
-    public Optional<Action> run(WorkstationRecipe recipe, WorldPosition station, int times, Permissions permissions) {
+    public Optional<Action> run(WorkstationRecipe recipe, WorldPosition station, int times, Permissions permissions,
+            TaskRecords records) {
         PlayerContext current = context.get();
         ClientLevel level = current == null ? null : current.level();
         if (level == null) {
@@ -98,8 +101,9 @@ public final class MenuRecipeRuns implements RecipeRuns {
         }
         // 烧炼要关着界面等炉子、烧好再回来取，单独一个动作；合成与石切台站在跟前一口气做完。
         return level.getRecipeManager().byKey(id).map(holder -> recipe.kind() == WorkstationRecipe.Kind.SMELTING
-                ? new FurnaceRun(holder, recipe, station, times, () -> visit(recipe, station, permissions), fuels, memory)
-                : new WorkAction(holder, recipe, station, times, permissions));
+                ? new FurnaceRun(holder, recipe, station, times, () -> visit(recipe, station, permissions), fuels,
+                        memory, records)
+                : new WorkAction(holder, recipe, station, times, permissions, records));
     }
 
     // 到设施跟前点开界面的一趟：站位、点开、等同步、认界面类型，做配方和烧炉子共用。
@@ -127,18 +131,20 @@ public final class MenuRecipeRuns implements RecipeRuns {
 
     // 摆得进 2×2 的合成在背包合成格里做：按注册 ID 认回游戏自己的配方对象，配方簿只认它。
     @Override
-    public Optional<Action> runInInventory(WorkstationRecipe recipe, int times) {
+    public Optional<Action> runInInventory(WorkstationRecipe recipe, int times, TaskRecords records) {
         PlayerContext current = context.get();
         ClientLevel level = current == null ? null : current.level();
         ResourceLocation id = ResourceLocation.tryParse(recipe.id());
         if (level == null || id == null || !recipe.fitsInInventory()) {
             return Optional.empty();
         }
-        return level.getRecipeManager().byKey(id).map(holder -> new InventoryCrafting(holder, recipe, times, context));
+        return level.getRecipeManager().byKey(id).map(holder -> new InventoryCrafting(holder, recipe, times, context,
+                records));
     }
 
     @Override
-    public Optional<Action> runAtRememberedStation(WorkstationRecipe recipe, int times, Permissions permissions) {
+    public Optional<Action> runAtRememberedStation(WorkstationRecipe recipe, int times, Permissions permissions,
+            TaskRecords records) {
         // 刚就地摆下的那台就是最新记下的：按方块类型从记忆里找记录时刻最新的工作站。
         String blockType = workstationBlockType(recipe.kind());
         return memory.allRecords().stream()
@@ -146,7 +152,7 @@ public final class MenuRecipeRuns implements RecipeRuns {
                 .filter(record -> blockType.equals(record.blockType()))
                 .sorted((a, b) -> b.recordedAt().compareTo(a.recordedAt()))
                 .findFirst()
-                .flatMap(record -> run(recipe, record.position(), times, permissions));
+                .flatMap(record -> run(recipe, record.position(), times, permissions, records));
     }
 
     /** 一下点击确认之后要做的结算；拿到的是这下点击最后的状态。 */
@@ -168,6 +174,8 @@ public final class MenuRecipeRuns implements RecipeRuns {
         private final WorldPosition station;
         /** 想做出的总件数：按配方的单次产出与次数估。 */
         private final int targetItems;
+        /** 发起任务的记账口：每取一次货记一笔做出的东西；null 不记。 */
+        private final TaskRecords records;
 
         private Stage stage = Stage.VISIT;
         /** 走到跟前点开的这一趟；界面被关掉要重开时换新的一趟。 */
@@ -190,12 +198,13 @@ public final class MenuRecipeRuns implements RecipeRuns {
         private int feedLeft;
 
         WorkAction(RecipeHolder<?> holder, WorkstationRecipe recipe, WorldPosition station, int batches,
-                Permissions permissions) {
+                Permissions permissions, TaskRecords records) {
             this.permissions = permissions;
             this.holder = holder;
             this.recipe = recipe;
             this.station = station;
             this.targetItems = batches * recipe.resultCount();
+            this.records = records;
         }
 
         @Override
@@ -283,12 +292,19 @@ public final class MenuRecipeRuns implements RecipeRuns {
         }
 
         // 取货：整堆收进背包；收到几件按取货前后背包里这件东西的数量差记，不按产出格上写的数猜。
+        // 真收进来几件就记几件：自制的东西逐笔记进发起任务的结果，结果里的变化能和背包净变化对得上。
         private ActionStatus takeOutput(TickContext tick, MenuContent.Reading open, int output) {
             int before = carriedResults(open);
             int slotId = open.containerSlotIds().get(output);
             ItemStack shown = open.containerSnapshots().get(output).stack().copy();
             return click(tick, slotId, 0, ClickType.QUICK_MOVE, slotChanged(slotId, shown), (status, later) -> {
-                openReading().ifPresent(now -> produced += Math.max(0, carriedResults(now) - before));
+                openReading().ifPresent(now -> {
+                    int gained = Math.max(0, carriedResults(now) - before);
+                    produced += gained;
+                    if (gained > 0 && records != null) {
+                        records.change(Change.of(Change.Kind.ITEM_GAINED, recipe.result().itemId(), gained));
+                    }
+                });
                 if (status == PendingMenuAction.Status.CONFIRMED_NOT_APPLIED) {
                     return fail(Problem.Kind.INVENTORY_FULL,
                             "产出格的" + recipe.result().describe() + "收不进背包，背包可能满了");

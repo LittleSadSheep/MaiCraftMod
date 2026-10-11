@@ -14,10 +14,12 @@ import net.minecraft.world.item.crafting.RecipeHolder;
 import org.maiwithu.maicraft.game.menu.MenuConfirmation;
 import org.maiwithu.maicraft.game.menu.PendingMenuAction;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -51,6 +53,8 @@ final class InventoryCrafting implements Action {
     private final WorkstationRecipe recipe;
     private final int targetItems;
     private final Supplier<PlayerContext> contexts;
+    /** 发起任务的记账口：每取一次货记一笔做出的东西，结果里的变化能和背包净变化对得上；null 不记。 */
+    private final TaskRecords records;
 
     private Stage stage = Stage.OPEN;
     private int waited;
@@ -64,12 +68,15 @@ final class InventoryCrafting implements Action {
      * @param recipe 这条配方的只读快照（产出、单次产出件数）
      * @param times  要做几次
      * @param contexts 当刻的角色：被打断、收尾时没有本刻上下文，从这里取来请游戏关背包
+     * @param records 发起任务的记账口；null 表示这次执行不接，做了什么都不记
      */
-    InventoryCrafting(RecipeHolder<?> holder, WorkstationRecipe recipe, int times, Supplier<PlayerContext> contexts) {
+    InventoryCrafting(RecipeHolder<?> holder, WorkstationRecipe recipe, int times, Supplier<PlayerContext> contexts,
+            TaskRecords records) {
         this.holder = Objects.requireNonNull(holder, "holder");
         this.recipe = Objects.requireNonNull(recipe, "recipe");
         this.targetItems = times * recipe.resultCount();
         this.contexts = Objects.requireNonNull(contexts, "contexts");
+        this.records = records;
     }
 
     @Override
@@ -124,7 +131,12 @@ final class InventoryCrafting implements Action {
             ItemStack shown = output.copy();
             return submit(player.menuActions().click(player, RESULT_SLOT, 0, ClickType.QUICK_MOVE,
                     resultChanged(shown), CLICK_TIMEOUT_TICKS), status -> {
-                        produced += Math.max(0, carriedResults(player) - before);
+                        // 真收进来几件就记几件：自制的东西逐笔记进发起任务的结果，结果里的变化能和背包净变化对得上。
+                        int gained = Math.max(0, carriedResults(player) - before);
+                        produced += gained;
+                        if (gained > 0 && records != null) {
+                            records.change(Change.of(Change.Kind.ITEM_GAINED, recipe.result().itemId(), gained));
+                        }
                         if (status == PendingMenuAction.Status.CONFIRMED_NOT_APPLIED) {
                             return giveUp(player, Problem.of(Problem.Kind.INVENTORY_FULL,
                                     "产出格的" + recipe.result().describe() + "收不进背包，背包可能满了"));

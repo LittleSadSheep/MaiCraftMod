@@ -437,9 +437,20 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             }
         }
 
+        /**
+         * 来源动手时拿到的记账口：任务发起的那一份，但最外层要的东西进背包的那一笔滤掉——
+         * 它由发起的任务按这次净拿到几件统一结算，来源动作再记就重了。自制中间产物没有别人记，
+         * 原样放过去，结果里的变化才能和背包净变化对上。没有记账口时给 null，来源做了什么都不记。
+         */
+        private TaskRecords bookedRecords() {
+            if (records == null) return null;
+            Run outermost = advancing.peekLast();
+            return outermost == null ? records : new ExceptOutermostGain(records, outermost.request.wanted());
+        }
+
         private ActionStatus startStep() {
             SourceContext context = new SourceContext(position.currentPosition(), permissions,
-                    scope.radiusBlocks(), scope.maxDistanceBlocks());
+                    scope.radiusBlocks(), scope.maxDistanceBlocks(), bookedRecords());
             Planned planned = plan.getFirst();
             int stillNeeded = target - CarriedItems.matching(backpack, offhand, request, tags);
             Optional<Action> begun = planned.source()
@@ -540,4 +551,30 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
 
     /** 计划里的一项：报价连同报价的来源，执行时按它找动手的人。 */
     private record Planned(ItemSource source, SourceQuote.Offer offer) {}
+
+    /** 记账口的一层过滤：最外层要的东西的入包不记，其余照传。 */
+    private final class ExceptOutermostGain implements TaskRecords {
+        private final TaskRecords delegate;
+        private final WantedItem wanted;
+
+        ExceptOutermostGain(TaskRecords delegate, WantedItem wanted) {
+            this.delegate = delegate;
+            this.wanted = wanted;
+        }
+
+        @Override public void change(Change change) {
+            if (change.kind() == Change.Kind.ITEM_GAINED && wanted.matches(change.what(), tags.tagsOf(change.what()))) {
+                return;
+            }
+            delegate.change(change);
+        }
+
+        @Override public void unconfirmed(Change change) {
+            delegate.unconfirmed(change);
+        }
+
+        @Override public void attempt(String tried, String whatHappened) {
+            delegate.attempt(tried, whatHappened);
+        }
+    }
 }
