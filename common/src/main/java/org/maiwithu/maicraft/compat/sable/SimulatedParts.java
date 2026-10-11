@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat.sable;
 
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
@@ -21,6 +22,28 @@ public interface SimulatedParts {
 
     /** 结构上一台无线红石打字机绑了频率的键（GLFW 键码）；那一格不是无线红石打字机、地块没加载为 null。 */
     Set<Integer> typewriterKeys(ClientLevel level, String structureId, BlockPos local);
+
+    /**
+     * 结构上那台无线红石打字机每个绑了频率的键：往哪一对频率发，给的收端候选里哪几格收这一对。
+     * 机械动力的无线红石链路只算切到接收的。那一格不是无线红石打字机、地块没加载为 null。
+     *
+     * @param receivers 结构上的收端候选（地块坐标）
+     */
+    List<KeyLink> typewriterLinks(ClientLevel level, String structureId, BlockPos local, List<BlockPos> receivers);
+
+    /**
+     * 一个键的频率与收它的收端。
+     *
+     * @param key       键码
+     * @param first     第一格频率物品的 ID（空着为 minecraft:air）
+     * @param second    第二格频率物品的 ID
+     * @param receivers 收这一对频率的收端所在格（地块坐标）
+     */
+    record KeyLink(int key, String first, String second, List<BlockPos> receivers) {
+        public KeyLink {
+            receivers = List.copyOf(receivers);
+        }
+    }
 
     /** 结构上那台无线红石打字机此刻是不是这个玩家在用（客户端看到的）。 */
     boolean typewriterUsedBy(ClientLevel level, String structureId, BlockPos local, UUID player);

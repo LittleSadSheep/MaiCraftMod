@@ -28,9 +28,6 @@ final class StructureGeometry {
     /** 每刻挪不到这么远（格）、转不到这么多（弧度）当它停着。 */
     static final double STILL_BLOCKS = 1e-3;
     static final double STILL_RADIANS = 1e-3;
-    /** 认作控制件的方块：Simulated 的无线红石打字机、舵轮、油门拉杆。 */
-    static final Set<String> CONTROLS = Set.of("simulated:linked_typewriter",
-            "simulated:steering_wheel", "simulated:throttle_lever");
     /** Simulated 的物理组装器。 */
     static final String ASSEMBLER = "simulated:physics_assembler";
     /** Simulated 的无线红石打字机：接管后按键就往绑的频率发信号。 */
@@ -39,34 +36,39 @@ final class StructureGeometry {
     private StructureGeometry() {}
 
     /**
-     * 一次逐格读的结果（地块坐标，和位姿无关，结构不改方块就一直对）：读全没有、碰撞盒、方块数、座位、控制件。
+     * 一次逐格读的结果（地块坐标，和位姿无关，结构不改方块就一直对）：读全没有、碰撞盒、方块数、座位、认得的部件。
      *
      * @param complete 读全了：格数没超、没有没加载的格
      * @param boxes    逐格碰撞盒（地块坐标）
      * @param blocks   不是空气的方块数
      * @param seats    座位所在的格
-     * @param controls 控制件（无线红石打字机、舵轮、油门拉杆）：所在的格与方块 ID
+     * @param parts    认得的部件（控制件、收端、执行件、浮力源）：所在的格与方块 ID
      * @param assemblers 物理组装器所在的格（拆回时拉它）
      */
-    record Scan(boolean complete, List<AABB> boxes, int blocks, List<BlockPos> seats, List<Part> controls,
+    record Scan(boolean complete, List<AABB> boxes, int blocks, List<BlockPos> seats, List<Part> parts,
                 List<BlockPos> assemblers) {
 
-        /** 某一种控制件所在的格。 */
-        List<BlockPos> controlsOf(String id) {
-            return controls.stream().filter(part -> part.id().equals(id)).map(Part::local).toList();
+        /** 控制件（无线红石打字机、舵轮、油门拉杆）。 */
+        List<Part> controls() {
+            return parts.stream().filter(part -> VehicleParts.CONTROLS.contains(part.id())).toList();
+        }
+
+        /** 某一种部件所在的格。 */
+        List<BlockPos> partsOf(String id) {
+            return parts.stream().filter(part -> part.id().equals(id)).map(Part::local).toList();
         }
     }
 
     /** 结构上的一个部件：地块里的格与方块 ID。 */
     record Part(BlockPos local, String id) {}
 
-    /** 地块里逐格读一遍：每格自己的碰撞形状、座位、控制件；格数超了或有没加载的格就是没读全。 */
+    /** 地块里逐格读一遍：每格自己的碰撞形状、座位、认得的部件；格数超了或有没加载的格就是没读全。 */
     static Scan scan(SableStructures.Structure structure, Function<BlockPos, BlockState> read) {
         List<AABB> boxes = new ArrayList<>();
         List<BlockPos> seats = new ArrayList<>();
-        List<Part> controls = new ArrayList<>();
+        List<Part> parts = new ArrayList<>();
         List<BlockPos> assemblers = new ArrayList<>();
-        if (cells(structure) > MAX_CELLS) return new Scan(false, boxes, 0, seats, controls, assemblers);
+        if (cells(structure) > MAX_CELLS) return new Scan(false, boxes, 0, seats, parts, assemblers);
         boolean complete = true;
         int blocks = 0;
         for (BlockPos local : BlockPos.betweenClosed(structure.localMin(), structure.localMax())) {
@@ -79,12 +81,12 @@ final class StructureGeometry {
             blocks++;
             String id = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
             if (id.endsWith("_seat")) seats.add(local.immutable());
-            if (CONTROLS.contains(id)) controls.add(new Part(local.immutable(), id));
+            if (VehicleParts.known(id)) parts.add(new Part(local.immutable(), id));
             if (ASSEMBLER.equals(id)) assemblers.add(local.immutable());
             VoxelShape shape = state.getCollisionShape(EmptyBlockGetter.INSTANCE, local);
             for (AABB part : shape.toAabbs()) boxes.add(part.move(local));
         }
-        return new Scan(complete, boxes, blocks, seats, controls, assemblers);
+        return new Scan(complete, boxes, blocks, seats, parts, assemblers);
     }
 
     /**

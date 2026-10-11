@@ -18,7 +18,7 @@ import org.maiwithu.maicraft.compat.CompatRegistry;
 
 /**
  * Simulated（Create Aeronautics 一套里的载具部件：物理组装器、无线红石打字机、舵轮、油门拉杆）的联动入口。
- * 交给登记表：用物理组装器组装与拆回载具的办法，接管无线红石打字机试按的驾驶办法。
+ * 交给登记表：用物理组装器组装与拆回载具的办法，接管无线红石打字机试按的驾驶办法，读载具的座位、回路与姿态。
  * 组装出来的是 Sable 的子世界，所以这里也读 Sable 的结构（和 Sable 的联动用同一个读端，读写端放在一起）。
  * 每一下都经联动入口包一层。
  */
@@ -43,6 +43,8 @@ public final class SimulatedCompat extends CompatModule {
         registry.vehicleAssembler(this, services -> new PhysicsAssembly(this, services));
         // 坐上驾驶座接管无线红石打字机试按（同一份规格）：要坐下、右键接管、逐条按住再松开，同样进世界时建。
         registry.vehicleDriver(this, services -> new TypewriterDriver(this, services));
+        // 读载具（machine_inspect 指 s# 时的 vehicle 一节）：座位、无线红石打字机每个键接到谁、种类、姿态与接地。
+        registry.vehicleReader(this, services -> new VehicleReading(this, services));
     }
 
     /** 角色附近这个编号的物理结构；不在附近为空。 */
@@ -79,6 +81,12 @@ public final class SimulatedCompat extends CompatModule {
     /** 无线红石打字机绑了频率的键；见 {@link SimulatedParts#typewriterKeys}。 */
     Set<Integer> typewriterKeys(ClientLevel level, String structureId, BlockPos local) {
         return call("读无线红石打字机绑的键", () -> parts.typewriterKeys(level, structureId, local));
+    }
+
+    /** 无线红石打字机每个键往哪对频率发、谁收；见 {@link SimulatedParts#typewriterLinks}。 */
+    List<SimulatedParts.KeyLink> typewriterLinks(ClientLevel level, String structureId, BlockPos local,
+            List<BlockPos> receivers) {
+        return call("读无线红石打字机的回路", () -> parts.typewriterLinks(level, structureId, local, receivers));
     }
 
     /** 无线红石打字机是不是这个玩家在用；见 {@link SimulatedParts#typewriterUsedBy}。 */

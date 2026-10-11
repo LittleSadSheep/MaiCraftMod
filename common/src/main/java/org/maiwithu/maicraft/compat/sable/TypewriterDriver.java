@@ -83,7 +83,7 @@ final class TypewriterDriver implements VehicleDriver {
     private Optional<Station> station(ClientLevel level, LocalPlayer player, SableStructures.Structure ship) {
         StructureGeometry.Scan scan = compat.scan(level, ship);
         Vec3 eye = player.getEyePosition();
-        return scan.controlsOf(StructureGeometry.TYPEWRITER).stream()
+        return scan.partsOf(StructureGeometry.TYPEWRITER).stream()
                 .min(Comparator.comparingDouble(local -> ship.pose().toWorld(Vec3.atCenterOf(local)).distanceToSqr(eye)))
                 .map(typewriter -> new Station(typewriter, scan.seats().stream()
                         .filter(seat -> Vec3.atCenterOf(seat).distanceTo(Vec3.atCenterOf(typewriter)) <= SEAT_REACH)
