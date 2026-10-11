@@ -22,7 +22,7 @@ import org.maiwithu.maicraft.compat.CompatRegistry;
  * 装的 Create 和编译时用的对不上时整个联动停用，不让 LinkageError 漏出去。
  *
  * <p>交给登记表的：每一种认得的机器、兜住附属模组动力方块的"其他动力方块"、应力网的网络读取器、
- * 扳手（施工清障时拆 Create 的方块）、砂纸打磨（拿东西的一条途径）。
+ * 扳手（施工清障时拆 Create 的方块）、砂纸打磨（拿东西的一条途径）、放置规则（施工放带漏斗、竖直齿轮箱、动力辊）。
  * 机器类型要走过去、点、换手、缺东西去拿，进世界时由登记表带着联动能用的玩家行为建。
  */
 public final class CreateCompat extends CompatModule {
@@ -52,6 +52,8 @@ public final class CreateCompat extends CompatModule {
         // 扳手拆机器方块、砂纸打磨当拿东西的一条途径：都要走过去、换手、点，进世界时带着玩家行为建。
         registry.dismantleTool(this, services -> new CreateWrench(this, services));
         registry.itemSource(this, services -> new SandpaperSource(this, services));
+        // 放方块的讲究：带漏斗拿漏斗放、等下面的带子，横着的齿轮箱拿竖直齿轮箱放，动力辊别被抬高一格。
+        registry.placementRules(this, new CreatePlacementRules(this));
         // 机器资料：每种机器的加工处、接转动的面、转速门槛与应力，挂到物品资料页的相关资料里。
         registry.knowledgeSource(this, new CreateMachineKnowledge(this));
     }

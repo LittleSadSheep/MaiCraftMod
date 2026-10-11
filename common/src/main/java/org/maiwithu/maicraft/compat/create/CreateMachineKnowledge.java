@@ -92,6 +92,12 @@ final class CreateMachineKnowledge implements KnowledgeSource {
                 .append("- 每台机器里链条输送机的个数有上限（实例配置，默认 1）：近处能用传动杆接上的就别用链条。\n")
                 .append("- 手摇曲柄只适合手动做几件东西（置物台上压几块板），长期生产线接真正的动力源。\n")
                 .append("- 过载时整张网停转：看 machine_inspect 里那张网的 stress 与 stress_capacity。\n\n");
+        text.append("## 放方块的讲究\n\n")
+                .append("- 漏斗挂在传送带上：cells 里写带漏斗 create:andesite_belt_funnel 或 create:brass_belt_funnel（朝向 horizontal_facing），")
+                .append("角色拿对应的漏斗放；它压在传送带上，施工会先装好传送带再放它。隧道也压在传送带上，同样装好带子再放。\n")
+                .append("- 横着的齿轮箱（axis 写 x 或 z）拿竖直齿轮箱物品放，放下后按旁边伸过来的轴定轴向：")
+                .append("只有一个水平方向有轴伸过来时取和它垂直的方向，施工会先放好两侧的轴。\n")
+                .append("- 动力辊放下那一格的正下方是实心顶面时会被抬高一格：动力辊正下方要空着（下面再是地面也行）。\n\n");
         text.append("## 设置框（过滤格、件数、数值、选项）\n\n")
                 .append("- 方块上画着小框的都能用 machine_configure 改；machine_inspect 或 machine_configure 先看这台有哪些键。\n")
                 .append("- 过滤格 `filter`（黄铜隧道每面一格写 `filter.north` 这样）：写物品 ID，角色手持那样东西点那一格；")
