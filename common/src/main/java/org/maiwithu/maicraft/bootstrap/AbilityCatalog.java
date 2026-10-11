@@ -420,7 +420,8 @@ public final class AbilityCatalog {
                 recipes, shared.innerNeeds(), shared.bringClose(), deps.interactions(),
                 new SceneSeenTargets(deps::scene), deps.memory(), deps.memory(),
                 deps.worldDocuments(), deps.worldKey(),
-                anchors(deps), Optional.of(designs), construction, deps.machineBlockLimits())) {
+                anchors(deps), Optional.of(designs), construction, deps.machineBlockLimits(),
+                deps.compat().placementRules())) {
             registry.register(module);
         }
     }

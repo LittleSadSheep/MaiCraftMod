@@ -24,6 +24,7 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.PartCell;
 import org.maiwithu.maicraft.behavior.construction.Blueprint;
 import org.maiwithu.maicraft.behavior.construction.BlueprintCheck;
+import org.maiwithu.maicraft.behavior.construction.CellPlacements;
 import org.maiwithu.maicraft.behavior.construction.CellState;
 import org.maiwithu.maicraft.behavior.construction.ConstructionDetails;
 import org.maiwithu.maicraft.behavior.construction.ConstructionInput;
@@ -53,7 +54,8 @@ import org.maiwithu.maicraft.kernel.task.TickResult;
  * 改装后设置（用 machine_configure 的同一套任务），最后整机比对并把补丁并进档案。
  *
  * <p>安装段占的格：蓝图写了方块的（传送带两端的轴、中间要清空的格）先交给引擎放好，这是装段的前提；
- * 没写的标成"由机器放"，引擎不放不清；已经装成的整段交给机器，不让引擎把带子拆回轴。整机比对时安装段与部件的格
+ * 没写的标成"由机器放"，引擎不放不清；已经装成的整段交给机器，不让引擎把带子拆回轴。联动放置规则说要等安装段的格
+ * （带漏斗、隧道压在传送带上）第一遍不放，装完安装段再走一遍施工放它们。整机比对时安装段与部件的格
  * 一律出"由机器核对"，由认领它们的机器类型按最终结构核对。拆整台是把档案范围换成全清空
  * 交给同一个引擎逐格挖。施工子任务失败按它的问题结束，已放的不回滚；机器条目做不成的不
  * 拦住其余部分，各记各的结局。
@@ -83,6 +85,10 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
     /** 正在推进的子任务（施工或一项设置）；一次一个。 */
     private ChildTaskRunner runner;
     private TaskResult constructionResult;
+    /** 压在还没装的安装段上的格（带漏斗、隧道压在传送带上）：第一遍施工不放，装完安装段再放。 */
+    private List<PlannedCell> afterInstall = List.of();
+    /** 第二遍施工（装完安装段后放压在上面的格）的结果；没有第二遍为 null。 */
+    private TaskResult laterConstruction;
     private Problem carriedProblem;
 
     private final Deque<MachineBlueprint.Segment> toInstall = new ArrayDeque<>();
@@ -149,23 +155,34 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
     }
 
     // 施工：普通格与流体整段交给施工引擎这个子任务；它的核对、备料、清障、倒桶、验收、收临时方块都在里面。
+    // 第一遍放普通格；装完安装段后若有压在段上的格（带漏斗、隧道），再走第二遍只放它们。
     private Next<Phase> construct(TickContext context) {
+        boolean later = constructionResult != null;
         if (runner == null) {
+            Optional<Blueprint> site = input.remove() ? Optional.of(removal) : later ? afterInstallPlan() : Optional.of(sitePlan());
+            if (site.isEmpty()) {
+                laterConstruction = TaskResult.done("压着的安装段都没装成，没有能放的格");
+                return Next.go(nextWorkPhase(), "压在安装段上的格都放不了");
+            }
             runner = new ChildTaskRunner(ChildTaskRunner.NO_LIMIT);
-            Blueprint site = input.remove() ? removal : sitePlan();
-            runner.begin(new ConstructionTask(new ConstructionInput(site, input.permissions(), purpose()),
+            runner.begin(new ConstructionTask(new ConstructionInput(site.get(), input.permissions(), purpose()),
                     constructionServices.apply(input.permissions())), context);
             return Next.stay();
         }
         if (runner.tick(context) instanceof TickResult.Finished finished) {
-            constructionResult = finished.result();
-            copyFacts(constructionResult);
-            runner = null;
-            if (constructionResult.status() == TaskResult.Status.FAILED) {
-                return Next.fail(constructionResult.problem());
+            TaskResult result = finished.result();
+            if (later) {
+                laterConstruction = result;
+            } else {
+                constructionResult = result;
             }
-            if (constructionResult.status() == TaskResult.Status.PARTIAL) {
-                carriedProblem = constructionResult.problem();
+            copyFacts(result);
+            runner = null;
+            if (result.status() == TaskResult.Status.FAILED) {
+                return Next.fail(result.problem());
+            }
+            if (result.status() == TaskResult.Status.PARTIAL && carriedProblem == null) {
+                carriedProblem = result.problem();
             }
             return Next.go(nextWorkPhase(), "现场做完，" + (nothingLeft() ? "整机比对" : "装机器自己的部分"));
         }
@@ -416,13 +433,15 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
                 segmentResults, partResults, settingResults, String.join("；", notes));
     }
 
-    /** 施工子任务结果里的每格结局计数；没跑到施工（例如已满足提前收场）给空表。 */
+    /** 施工子任务结果里的每格结局计数，两遍施工加在一起；没跑到施工（例如已满足提前收场）给空表。 */
     private Map<String, Integer> constructionCells() {
-        if (constructionResult == null
-                || !(constructionResult.details() instanceof ConstructionDetails construction)) {
-            return Map.of();
+        Map<String, Integer> cells = new LinkedHashMap<>();
+        for (TaskResult result : new TaskResult[]{constructionResult, laterConstruction}) {
+            if (result != null && result.details() instanceof ConstructionDetails construction) {
+                construction.cells().forEach((ending, count) -> cells.merge(ending, count, Integer::sum));
+            }
         }
-        return construction.cells();
+        return cells;
     }
 
     @Override protected String describePhase(Phase value) {
@@ -440,10 +459,14 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
         return input.remove() ? REMOVE_PURPOSE : BUILD_PURPOSE;
     }
 
-    /** 还剩哪一步：施工之后按安装段 → 部件 → 设置 → 比对的顺序挑下一个有人要做的阶段。 */
+    /** 还剩哪一步：施工之后按安装段 → 压在段上的格 → 部件 → 设置 → 比对的顺序挑下一个有人要做的阶段。 */
     private Phase nextWorkPhase() {
         if (!toInstall.isEmpty()) {
             return Phase.INSTALL;
+        }
+        // 安装段装完了：压在上面的格（带漏斗、隧道压在传送带上）这时才放得上，再走一遍施工。
+        if (!afterInstall.isEmpty() && constructionResult != null && laterConstruction == null) {
+            return Phase.CONSTRUCT;
         }
         if (!toMount.isEmpty()) {
             return Phase.MOUNT;
@@ -466,16 +489,47 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
         Blueprint laid = Blueprint.at(input.anchor().dimension(), anchor, Rotation.NONE, input.blueprint().cells());
         Set<BlockPos> settled = installedCells();
         Set<BlockPos> undeclared = installationCells();
+        Set<BlockPos> notInstalled = installationCells();
+        notInstalled.removeAll(settled);
+        CellPlacements placements = placements();
+        List<PlannedCell> held = new ArrayList<>();
         List<PlannedCell> adjusted = new ArrayList<>();
         for (PlannedCell cell : laid.cells()) {
             undeclared.remove(cell.pos());
+            // 联动放置规则说要等的格落在还没装的安装段上（带漏斗等下面的带子）：这一遍不放，装完安装段再放。
+            if (placements.waitsFor(cell).stream().anyMatch(notInstalled::contains)) {
+                held.add(cell);
+                continue;
+            }
             adjusted.add(settled.contains(cell.pos()) ? cell.byMachine() : cell);
         }
+        afterInstall = List.copyOf(held);
         for (BlockPos left : undeclared) {
             // 蓝图没逐格声明的安装段格：照样标给机器，引擎不碰，核对时由机器认。
             adjusted.add(PlannedCell.air(left).byMachine());
         }
         return new Blueprint(laid.dimension(), anchor, adjusted);
+    }
+
+    /** 第二遍施工的蓝图：压在安装段上的格，压着的段装成了才放；段没装成的照实记下不放，全都放不了为空。 */
+    private Optional<Blueprint> afterInstallPlan() {
+        Set<BlockPos> notInstalled = installationCells();
+        notInstalled.removeAll(installedCells());
+        CellPlacements placements = placements();
+        List<PlannedCell> ready = new ArrayList<>();
+        for (PlannedCell cell : afterInstall) {
+            if (placements.waitsFor(cell).stream().anyMatch(notInstalled::contains)) {
+                recordAttempt("放 " + cell.pos().toShortString(), "压着的安装段没装成，这一格没放");
+            } else {
+                ready.add(cell);
+            }
+        }
+        return ready.isEmpty() ? Optional.empty() : Optional.of(new Blueprint(input.anchor().dimension(), anchor, ready));
+    }
+
+    /** 联动的放置规则：哪些格要等别的格先放好，和施工引擎问的是同一张表。 */
+    private CellPlacements placements() {
+        return CellPlacements.of(constructionServices.apply(input.permissions()).placementRules());
     }
 
     /** 此刻已经按要求装成的安装段占的格：这些格整段由机器管。 */
@@ -545,9 +599,10 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
         return line.toString();
     }
 
-    /** 施工子任务做全了没有：没跑到施工（已满足提前收场）或全部做成算过。 */
+    /** 施工子任务做全了没有：没跑到施工（已满足提前收场）或两遍都做成算过。 */
     private boolean constructionDone() {
-        return constructionResult == null || constructionResult.status() != TaskResult.Status.PARTIAL;
+        return (constructionResult == null || constructionResult.status() != TaskResult.Status.PARTIAL)
+                && (laterConstruction == null || laterConstruction.status() != TaskResult.Status.PARTIAL);
     }
 
     /** 还有没有没做成的机器条目：已满足判断用。 */

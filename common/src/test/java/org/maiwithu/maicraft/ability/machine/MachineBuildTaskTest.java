@@ -40,6 +40,8 @@ import org.maiwithu.maicraft.behavior.construction.ConstructionServices;
 import org.maiwithu.maicraft.behavior.construction.PlacementConfirmation;
 import org.maiwithu.maicraft.behavior.construction.PlacementPrediction;
 import org.maiwithu.maicraft.behavior.construction.PlannedCell;
+import org.maiwithu.maicraft.behavior.construction.ReadsBlocks;
+import org.maiwithu.maicraft.behavior.construction.spi.PlacementRules;
 import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.recipe.GameRecipeTable;
@@ -237,6 +239,67 @@ Rig rig = new Rig(tempDir);
     }
 
     @Test
+    void 压在安装段上的格_装完段再放() {
+        Rig rig = new Rig(tempDir);
+        BlockPos first = new BlockPos(0, 0, 0);
+        BlockPos middle = new BlockPos(1, 0, 0);
+        BlockPos last = new BlockPos(2, 0, 0);
+        BlockPos onBelt = new BlockPos(1, 1, 0);
+        BlockState shaft = Blocks.OAK_LOG.defaultBlockState();
+        // 带漏斗的替身：玻璃压在带子中间那格上，联动放置规则说它要等下面那格先好。
+        rig.site.rules.add(new PlacementRules() {
+            @Override public Optional<Placement> placementFor(BlockState state, BlockPos at, ReadsBlocks world) {
+                return Optional.empty();
+            }
+
+            @Override public List<BlockPos> placeAfter(BlockState state) {
+                return state.is(Blocks.GLASS) ? List.of(new BlockPos(0, -1, 0)) : List.of();
+            }
+        });
+        MachineBlueprint.Segment segment = new MachineBlueprint.Segment("test:belt", List.of(first, middle, last));
+        MachineBlueprint plan = new MachineBlueprint(List.of(PlannedCell.block(first, shaft, Set.of()),
+                PlannedCell.block(last, shaft, Set.of()), PlannedCell.block(onBelt, Blocks.GLASS.defaultBlockState(), Set.of())),
+                List.of(), List.of(segment), List.of(), List.of());
+        rig.type.installationOk = installation -> true;
+        rig.type.installActions.add(new MachineTestDoubles.Scripted(1, () -> {
+            assertFalse(rig.world.blocks.containsKey(ANCHOR.offset(onBelt)), "装段前压在上面的格还没放");
+            rig.world.blocks.put(ANCHOR.offset(middle), Blocks.STONE.defaultBlockState());
+            rig.type.installedOk = installation -> true;
+        }));
+        TaskResult result = rig.run(buildInput(plan, null, "带子"));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary() + " / 问题:" + result.problem());
+        assertEquals(Blocks.GLASS.defaultBlockState(), rig.world.blocks.get(ANCHOR.offset(onBelt)), "装完段后放上了");
+    }
+
+    @Test
+    void 压着的安装段没装成_上面的格不放照实记下() {
+        Rig rig = new Rig(tempDir);
+        BlockPos first = new BlockPos(0, 0, 0);
+        BlockPos last = new BlockPos(2, 0, 0);
+        BlockPos onBelt = new BlockPos(1, 1, 0);
+        rig.site.rules.add(new PlacementRules() {
+            @Override public Optional<Placement> placementFor(BlockState state, BlockPos at, ReadsBlocks world) {
+                return Optional.empty();
+            }
+
+            @Override public List<BlockPos> placeAfter(BlockState state) {
+                return state.is(Blocks.GLASS) ? List.of(new BlockPos(0, -1, 0)) : List.of();
+            }
+        });
+        MachineBlueprint.Segment segment = new MachineBlueprint.Segment("test:belt",
+                List.of(first, new BlockPos(1, 0, 0), last));
+        MachineBlueprint plan = new MachineBlueprint(List.of(PlannedCell.block(first, Blocks.OAK_LOG.defaultBlockState(), Set.of()),
+                PlannedCell.block(onBelt, Blocks.GLASS.defaultBlockState(), Set.of())),
+                List.of(), List.of(segment), List.of(), List.of());
+        rig.type.installationOk = installation -> true;
+        rig.type.installActions.add(new MachineTestDoubles.Scripted(1, () -> { }));
+        TaskResult result = rig.run(buildInput(plan, null, "带子"));
+        assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
+        assertFalse(rig.world.blocks.containsKey(ANCHOR.offset(onBelt)), "带子没装成，压在上面的格不放");
+        assertTrue(result.attempts().stream().anyMatch(attempt -> attempt.result().contains("压着的安装段没装成")));
+    }
+
+    @Test
     void 没有联动认安装段_照实记下不冒充建成() {
         Rig rig = new Rig(tempDir);
         MachineBlueprint.Segment segment = new MachineBlueprint.Segment("test:belt", List.of(new BlockPos(0, 1, 0)));
@@ -257,6 +320,7 @@ Rig rig = new Rig(tempDir);
         final Map<BlockPos, BlockState> world;
         final Map<String, Integer> carried = new HashMap<>();
         final List<BlockPos> temporaries = new ArrayList<>();
+        final List<PlacementRules> rules = new ArrayList<>();
         boolean fail;
 
         FakeSite(Map<BlockPos, BlockState> sharedWorld) {
@@ -340,7 +404,7 @@ Rig rig = new Rig(tempDir);
         }
 
         ConstructionServices services() {
-            return new ConstructionServices(this, this, this, this, this, this, this, this, this, null);
+            return new ConstructionServices(this, this, this, this, this, this, this, this, this, null, List.of(), List.of(), rules);
         }
     }
 

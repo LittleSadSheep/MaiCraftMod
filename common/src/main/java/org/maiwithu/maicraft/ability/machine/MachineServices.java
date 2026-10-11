@@ -13,6 +13,7 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
+import org.maiwithu.maicraft.behavior.construction.spi.PlacementRules;
 import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
 import org.maiwithu.maicraft.behavior.recipe.RecipeLookup;
 import org.maiwithu.maicraft.behavior.travel.ReadsSeenTargets;
@@ -36,11 +37,13 @@ import org.maiwithu.maicraft.kernel.result.Problem;
  * @param seenTargets    观察编号查位置；b# 指的机器组成格靠它落实
  * @param places         按名字查记过的地点；档案还没有接入，地标先按记过的地点找
  * @param blockLimits    每台机器里某种方块最多几个（实例配置，方块 ID → 上限），例如链条输送机默认 1 个
+ * @param placementRules 联动的放置规则：审蓝图算材料时带漏斗算漏斗、横着的齿轮箱算竖直齿轮箱，和施工拿的一样
  */
 record MachineServices(Supplier<PlayerContext> context, MachineWorldView world, List<MachineType> machineTypes,
                        List<NetworkReader> networkReaders, ReadsMachineArea area, RecipeLookup recipes,
                        ItemNeeds needs, BringsPlayerClose close, MachineInteractions interactions,
-                       ReadsSeenTargets seenTargets, ReadsRememberedPlaces places, Map<String, Integer> blockLimits) {
+                       ReadsSeenTargets seenTargets, ReadsRememberedPlaces places, Map<String, Integer> blockLimits,
+                       List<PlacementRules> placementRules) {
 
     MachineServices {
         Objects.requireNonNull(context, "context");
@@ -52,6 +55,7 @@ record MachineServices(Supplier<PlayerContext> context, MachineWorldView world, 
         Objects.requireNonNull(seenTargets, "seenTargets");
         Objects.requireNonNull(places, "places");
         blockLimits = Map.copyOf(blockLimits);
+        placementRules = placementRules == null ? List.of() : List.copyOf(placementRules);
     }
 
     /** 不限任何方块个数的一份：离线测试与没有实例配置时用。 */
@@ -60,7 +64,7 @@ record MachineServices(Supplier<PlayerContext> context, MachineWorldView world, 
             BringsPlayerClose close, MachineInteractions interactions, ReadsSeenTargets seenTargets,
             ReadsRememberedPlaces places) {
         this(context, world, machineTypes, networkReaders, area, recipes, needs, close, interactions, seenTargets,
-                places, Map.of());
+                places, Map.of(), List.of());
     }
 
     /** 认领一格的机器类型：按登记顺序问，最先认领的算数；都没有为 null。 */

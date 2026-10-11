@@ -15,6 +15,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.construction.AnchorResolver;
 import org.maiwithu.maicraft.behavior.construction.ConstructionServices;
+import org.maiwithu.maicraft.behavior.construction.spi.PlacementRules;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
 import org.maiwithu.maicraft.behavior.recipe.RecipeLookup;
@@ -40,13 +41,15 @@ public final class MachineAbilities {
      * 机器档案按世界存在给定的文档库里，键是这个世界的身份编号。
      *
      * @param blockLimits 每台机器里某种方块最多几个（实例配置，方块 ID → 上限）
+     * @param placementRules 联动的放置规则，审蓝图算材料用，和施工拿的是同一张表
      */
     public static List<AbilityModule> all(Supplier<PlayerContext> context, List<MachineType> machineTypes,
             List<NetworkReader> networkReaders, RecipeLookup recipes, ItemNeeds needs,
             BringsPlayerClose close, Interactions interactions, ReadsSeenTargets seenTargets,
             ReadsRememberedPlaces places, WorldMemory memory, DocumentStore worldDocuments, String worldKey,
             AnchorResolver anchors, Optional<DesignStore> designs,
-            Function<Permissions, ConstructionServices> construction, Map<String, Integer> blockLimits) {
+            Function<Permissions, ConstructionServices> construction, Map<String, Integer> blockLimits,
+            List<PlacementRules> placementRules) {
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(recipes, "recipes");
         Objects.requireNonNull(needs, "needs");
@@ -62,7 +65,7 @@ public final class MachineAbilities {
         Objects.requireNonNull(construction, "construction");
         MachineServices services = new MachineServices(context, new LiveMachineWorld(context), machineTypes,
                 networkReaders, new LiveMachineArea(context), recipes, needs, close,
-                new LiveMachineInteractions(interactions), seenTargets, places, blockLimits);
+                new LiveMachineInteractions(interactions), seenTargets, places, blockLimits, placementRules);
         MachineArchives archives = new MachineArchives(worldDocuments, worldKey);
         return List.of(new MachineInspectModule(services, archives), new MachineReviewModule(services, designs),
                 new MachineConfigureModule(services), new MachineRunModule(services),

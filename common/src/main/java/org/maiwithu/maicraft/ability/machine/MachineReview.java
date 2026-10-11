@@ -20,6 +20,7 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.PartCell;
 import org.maiwithu.maicraft.behavior.construction.Blueprint;
+import org.maiwithu.maicraft.behavior.construction.CellPlacements;
 import org.maiwithu.maicraft.behavior.construction.PlannedCell;
 import org.maiwithu.maicraft.behavior.recipe.RecipeLookup;
 import org.maiwithu.maicraft.behavior.recipe.ShownRecipe;
@@ -65,7 +66,7 @@ final class MachineReview {
         reviewProcesses(blueprint, services, issues);
         reviewPower(blueprint, services, issues);
         Map<String, double[]> loads = loads(blueprint, services);
-        return new Report(issues, materials(blueprint, backpack), power(loads.get("kinetic")),
+        return new Report(issues, materials(blueprint, backpack, CellPlacements.of(services.placementRules())), power(loads.get("kinetic")),
                 channels(loads.get("me")));
     }
 
@@ -284,10 +285,12 @@ final class MachineReview {
         return false;
     }
 
-    // 材料账：逐格清单按计划格算，部件一件一件算，安装段按格数估；身上有多少从背包读。
-    private static List<MachineReview.Material> materials(MachineBlueprint blueprint, BackpackView backpack) {
+    // 材料账：逐格清单按计划格算（联动放置规则说拿别的物品放的按那件算，带漏斗算漏斗），
+    // 部件一件一件算，安装段按格数估；身上有多少从背包读。
+    private static List<MachineReview.Material> materials(MachineBlueprint blueprint, BackpackView backpack,
+            CellPlacements placements) {
         Map<String, Integer> needed = new LinkedHashMap<>();
-        needed.putAll(Blueprint.materialsOf(blueprint.cells()));
+        needed.putAll(Blueprint.materialsOf(placements.withItems(blueprint.cells())));
         for (MachineBlueprint.Part part : blueprint.parts()) {
             needed.merge(part.itemId(), 1, Integer::sum);
         }
