@@ -97,6 +97,16 @@ class VehicleDriveModuleTest {
     }
 
     @Test
+    void 只按遥控器可以不指哪辆() {
+        VehicleDriveModule module = module(List.of(driver(Optional.empty())), controls());
+        StepDecision.Run run = assertInstanceOf(StepDecision.Run.class, module.decide(step(
+                "{\"operation\":\"test\",\"inputs\":[{\"control\":\"遥控器:上\",\"ticks\":20}]}", null, List.of())));
+        assertEquals("", assertInstanceOf(VehicleDriveInput.class, run.input()).test().structureId());
+        assertEquals(Problem.Kind.INVALID_PARAMETER, failed(module.decide(step(
+                "{\"operation\":\"test\",\"inputs\":[{\"control\":\"打字机:W\",\"ticks\":20}]}", null, List.of()))));
+    }
+
+    @Test
     void 在车上就交给驾驶办法试按() {
         StepDecision.Run run = assertInstanceOf(StepDecision.Run.class,
                 module(List.of(driver(Optional.empty())), controls()).decide(step(TEST, null, List.of())));

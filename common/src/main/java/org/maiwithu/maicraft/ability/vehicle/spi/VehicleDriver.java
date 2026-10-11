@@ -34,8 +34,8 @@ public interface VehicleDriver {
     /**
      * 一次试按的请求：逐条按住给定刻数，看载具怎么动，再松开。
      *
-     * @param structureId 哪辆（结构身份）
-     * @param near        它大概在哪（世界坐标）
+     * @param structureId 哪辆（结构身份）；只按遥控器、不指哪辆时为空串
+     * @param near        它大概在哪（世界坐标）；不指哪辆时是角色脚下
      * @param inputs      逐条按的输入
      * @param permissions 这次的许可：别人的载具点名即许可
      */

@@ -45,8 +45,8 @@ import org.maiwithu.maicraft.kernel.task.TaskFactories;
  */
 public final class VehicleDriveModule implements AbilityModule {
 
-    /** 需要的模组：现在能开的只有 Simulated 无线红石打字机控制的载具。 */
-    static final String REQUIRED_MOD = "simulated";
+    /** 需要的模组：无线红石打字机（Simulated，它本身要机械动力）与遥控器都要机械动力。 */
+    static final String REQUIRED_MOD = "create";
     /** 一条输入最多按住多少刻（10 秒）。 */
     static final int MAX_PRESS_TICKS = 200;
     /** 一次最多试几条输入。 */
@@ -84,8 +84,8 @@ public final class VehicleDriveModule implements AbilityModule {
                 "坐上驾驶座开载具：drive 开到一个地方停稳，test 逐条按住控制件看它怎么动再松开",
                 AbilityDoc.forAbility("vehicle_drive"),
                 ParamSpecs.of(
-                        ParamSpec.of("vehicle", ParamType.TEXT).required()
-                                .doc("开哪辆：物理结构的观察编号 s#（observe 的 mod_things.structure）").build(),
+                        ParamSpec.of("vehicle", ParamType.TEXT)
+                                .doc("开哪辆：物理结构的观察编号 s#（observe 的 mod_things.structure）；只用遥控器试按时可以不给").build(),
                         ParamSpec.of("operation", ParamType.CHOICE).choices("drive", "test").defaultValue("drive")
                                 .doc("drive 开到 target（默认）/ test 逐条按 inputs 看反应").build(),
                         ParamSpec.of("inputs", ParamType.JSON_ARRAY)
@@ -107,6 +107,18 @@ public final class VehicleDriveModule implements AbilityModule {
             return new StepDecision.Finish(TaskResult.failed("开不了", Problem.of(Problem.Kind.UNSUPPORTED,
                     "没有接上驾驶的联动（Simulated 装了，但它的联动没登记成功）")));
         }
+        // 只用遥控器试按（开门、开闸也行）：不用指哪辆，也不用上车，按完就是。
+        if (!goal.params().has("vehicle") && "test".equals(goal.params().text("operation"))) {
+            List<VehicleDriver.Press> inputs = new ArrayList<>();
+            String wrong = inputs(goal, inputs);
+            if (wrong != null) return invalid(wrong);
+            if (!inputs.stream().allMatch(press -> press.control().startsWith("遥控器"))) {
+                return invalid("不给 vehicle 时只能按遥控器（遥控器:上 这样）；按无线红石打字机要给结构的 s#");
+            }
+            return new StepDecision.Run(new VehicleDriveInput(new VehicleDriver.TestRequest("", feet.get(), inputs,
+                    goal.permissions()), null));
+        }
+        if (!goal.params().has("vehicle")) return invalid("要给 vehicle：物理结构的观察编号 s#");
         String vehicle = goal.params().text("vehicle").trim();
         if (!vehicle.matches("s[0-9]+")) {
             return invalid("vehicle 给物理结构的观察编号 s#（observe 的 mod_things.structure 里看），收到的是「" + vehicle + "」");

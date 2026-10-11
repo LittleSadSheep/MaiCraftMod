@@ -297,7 +297,7 @@
       {
         "ability": "maicraft:vehicle_drive",
         "summary": "坐上驾驶座开载具：drive 开到一个地方停稳，test 逐条按住控制件看它怎么动再松开",
-        "parameters": "vehicle: string, operation: string = drive, inputs?: array, cruise_altitude?: integer",
+        "parameters": "vehicle?: string, operation: string = drive, inputs?: array, cruise_altitude?: integer",
         "targets": [
           "direction",
           "landmark",
@@ -1506,8 +1506,8 @@
         {
           "name": "vehicle",
           "type": "string",
-          "required": true,
-          "doc": "开哪辆：物理结构的观察编号 s#（observe 的 mod_things.structure）"
+          "required": false,
+          "doc": "开哪辆：物理结构的观察编号 s#（observe 的 mod_things.structure）；只用遥控器试按时可以不给"
         },
         {
           "name": "operation",
@@ -1542,7 +1542,7 @@
       ],
       "mode": "controls_player",
       "required_mods": [
-        "simulated"
+        "create"
       ],
       "knowledge": [],
       "doc_resource": "assets/maicraft/abilities/vehicle_drive.md"

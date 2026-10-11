@@ -115,6 +115,8 @@ final class TypewriterDriver implements VehicleDriver {
     }
 
     @Override public Optional<Run> test(TestRequest request) {
+        // 一条无线红石打字机的输入都没有（只按遥控器）：不是这种办法管的。
+        if (request.inputs().stream().noneMatch(press -> TypewriterKeys.addressed(press.control()))) return Optional.empty();
         PlayerContext context = services.context().get();
         ClientLevel level = context == null ? null : context.level();
         LocalPlayer player = context == null ? null : context.localPlayer();

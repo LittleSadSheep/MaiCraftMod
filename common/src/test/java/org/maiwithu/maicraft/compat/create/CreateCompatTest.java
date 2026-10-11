@@ -237,6 +237,7 @@ class CreateCompatTest {
             @Override public int toolboxRange() { return 10; }
             @Override public void equipFromToolbox(BlockPos box, int compartment, int hotbarSlot) { }
             @Override public Optional<PotatoAmmo> potatoAmmo(Player player, ItemStack ammo) { return Optional.empty(); }
+            @Override public void remoteButtons(List<Integer> buttons, boolean press) { }
         };
         CreateValues values = new CreateValues() {
             @Override public Boxes boxes(ClientLevel level, BlockPos at) { return new Boxes(List.of(), List.of()); }

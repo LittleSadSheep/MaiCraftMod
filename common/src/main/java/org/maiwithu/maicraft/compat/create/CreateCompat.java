@@ -101,6 +101,8 @@ public final class CreateCompat extends CompatModule {
         // 车站组车、拆车当组装载具的一种办法；给列车写时刻表交给列车长（载具规格，所有者 10-11 批）。
         registry.vehicleAssembler(this, services -> new StationAssembly(this, services));
         registry.trainScheduler(this, services -> new TrainTimetable(this, services));
+        // 遥控器按键当 vehicle_drive 试按的一种控制件：拿在手里按住几刻再松开，遥控的是什么都行（载具、门、闸）。
+        registry.vehicleDriver(this, services -> new RemoteButtons(this, services));
         // 观察里列出电梯（当前层、楼层表）、车站（站名、有没有车在站）、列车（车名、动没动、空座）。
         registry.modSight(this, new CreateModSight(this));
     }
@@ -118,6 +120,11 @@ public final class CreateCompat extends CompatModule {
     /** 坐到车厢的座位上；见 {@link CreateRailways#sit}。 */
     public void sitOnTrain(int entityId, BlockPos seat) {
         run("坐列车座位", () -> railways.sit(entityId, seat));
+    }
+
+    /** 按下或松开遥控器的按键；见 {@link CreateTools#remoteButtons}。 */
+    void remoteButtons(List<Integer> buttons, boolean press) {
+        run(press ? "按下遥控器的键" : "松开遥控器的键", () -> tools.remoteButtons(buttons, press));
     }
 
     /** 车站的组车状态；见 {@link CreateRailways#station}。 */

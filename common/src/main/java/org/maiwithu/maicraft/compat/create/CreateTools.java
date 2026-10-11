@@ -95,4 +95,12 @@ public interface CreateTools {
             Objects.requireNonNull(result, "result");
         }
     }
+
+    /**
+     * 按下或松开手里遥控器（机械动力的无线遥控器）的按键：和遥控器启用后按方向键、跳跃、潜行时发的一样。
+     * 按住期间要每隔几刻再发一次"还按着"，不然收端过一会儿当松开了。
+     *
+     * @param buttons 按键序号：0 前、1 后、2 左、3 右、4 跳、5 潜行
+     */
+    void remoteButtons(List<Integer> buttons, boolean press);
 }

@@ -101,6 +101,7 @@ final class VehicleDriveTask extends PhasedTask<VehicleDriveTask.Phase> {
 
     // 每条按过的认出角色，记进操纵表（试过的）；车头没定时按认成动力的那一条定。读不到种类按飞艇的叫法记偏航。
     private String record(VehicleDriver.Report report) {
+        if (report.structureId().isEmpty()) return "";
         Optional<VehicleReader.View> view = readers.stream().map(reader -> reader.read(report.structureId()))
                 .flatMap(Optional::stream).findFirst();
         String kind = view.map(VehicleReader.View::kind).orElse("unknown");

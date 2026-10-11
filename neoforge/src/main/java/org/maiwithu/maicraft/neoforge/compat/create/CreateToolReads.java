@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.neoforge.compat.create;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.core.BlockPos;
 import net.createmod.catnip.platform.CatnipServices;
+import com.simibubi.create.content.redstone.link.controller.LinkedControllerInputPacket;
 import com.simibubi.create.content.contraptions.glue.SuperGlueSelectionPacket;
 import com.simibubi.create.content.contraptions.glue.SuperGlueEntity;
 import java.util.ArrayList;
@@ -144,5 +145,9 @@ public final class CreateToolReads implements CreateTools {
                     return new PotatoAmmo(type.reloadTicks(), type.split(), type.drag(), type.velocityMultiplier(),
                             type.gravityMultiplier());
                 });
+    }
+
+    @Override public void remoteButtons(List<Integer> buttons, boolean press) {
+        CatnipServices.NETWORK.sendToServer(new LinkedControllerInputPacket(buttons, press));
     }
 }
