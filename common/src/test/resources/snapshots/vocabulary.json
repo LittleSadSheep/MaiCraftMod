@@ -12,6 +12,7 @@
     "condition": "要等到的条件：elapsed / day / night / health_full / not_hungry",
     "count": "这次要多做多少：拿东西就是再多拿几件（不是背包里的总数），做动作就是做几次",
     "coverage": "验收范围档：all 全部样本达标 / most 九成达标 / crops 只按作物与耕地验收（全部达标）",
+    "cruise_altitude": "飞艇巡航高度（船底的世界 y）",
     "design_id": "设计编号：design 创建或修改图纸后返回的 UUID",
     "direction": "扇形朝向：forward / backward / left / right / north / south / east / west；探索用，出发时按当时朝向固定",
     "distance": "保持的距离，单位格，例如跟随时与目标相隔几格",

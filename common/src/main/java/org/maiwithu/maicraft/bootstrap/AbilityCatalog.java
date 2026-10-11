@@ -549,10 +549,13 @@ public final class AbilityCatalog {
                 new SceneSeenTargets(deps::scene), id -> deps.scene().seen().structureOf(id), deps.memory(),
                 () -> deps.context().get() == null || deps.context().get().localPlayer() == null ? BlockPos.ZERO
                         : deps.context().get().localPlayer().blockPosition()));
-        // 驾驶载具：坐上驾驶座接管控制件试按；不在车上先经出行上车，观察编号 s# 同样从场景的编号表换成结构身份。
+        // 驾驶载具：坐上驾驶座接管控制件试按或开到某处；不在车上先经出行上车，观察编号 s# 同样从场景的编号表换成结构身份，
+        // 去记过的地点按世界记忆找，坐标没给 y、按方向开多远从角色脚下算。
         registry.register(new VehicleDriveModule(deps.compat().vehicleDrivers(services),
                 deps.compat().vehicleReaders(services), vehicleControls(deps),
-                new SceneSeenTargets(deps::scene), id -> deps.scene().seen().structureOf(id)));
+                new SceneSeenTargets(deps::scene), id -> deps.scene().seen().structureOf(id), deps.memory(),
+                () -> deps.context().get() == null || deps.context().get().localPlayer() == null ? BlockPos.ZERO
+                        : deps.context().get().localPlayer().blockPosition()));
     }
 
     /**

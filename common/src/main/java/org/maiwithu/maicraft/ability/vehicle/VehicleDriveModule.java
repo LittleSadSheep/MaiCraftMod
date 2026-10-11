@@ -7,6 +7,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -16,6 +17,7 @@ import org.maiwithu.maicraft.ability.travel.api.TravelSteps;
 import org.maiwithu.maicraft.ability.vehicle.api.VehicleControls;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleDriver;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleReader;
+import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
 import org.maiwithu.maicraft.behavior.travel.ReadsSeenTargets;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
@@ -36,9 +38,10 @@ import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 
 /**
- * vehicle_drive：坐到驾驶座上开载具。test 逐条按住控制件看载具怎么动，再松开交还；drive（开到一个地方停稳）还没做。
- * 能力只落实"开哪辆、按什么"，角色不在车上时先用出行把人送上去（上船那一段出行方式接手），
- * 怎么坐、怎么接管、怎么按由联动模组的驾驶办法做。
+ * vehicle_drive：坐到驾驶座上开载具。test 逐条按住控制件看载具怎么动，再松开交还；drive 开到一个地方停稳。
+ * 能力只落实"开哪辆、按什么、去哪"：drive 先查操纵表齐不齐（缺必需角色就开不了，如实说缺哪个）、车头定了没有；
+ * 角色不在车上时先用出行把人送上去（上船那一段出行方式接手），跑完回来再决定。
+ * 怎么坐、怎么接管、怎么按、飞控怎么飞由联动模组的驾驶办法做。
  */
 public final class VehicleDriveModule implements AbilityModule {
 
@@ -54,33 +57,42 @@ public final class VehicleDriveModule implements AbilityModule {
     private final VehicleControls controls;
     private final ReadsSeenTargets seen;
     private final Function<String, Optional<String>> structures;
+    private final ReadsRememberedPlaces places;
+    private final Supplier<BlockPos> feet;
 
     /**
-     * @param readers    读载具的办法：试按后认角色要知道种类
-     * @param controls   操纵表：试按认出的角色记进去
+     * @param readers    读载具的办法：试按后认角色、开之前查操纵表要知道种类与回路
+     * @param controls   操纵表：试按认出的角色记进去，开的时候按它按键
      * @param structures 观察编号 s# 换成结构身份
+     * @param places     记过的地点：drive 的 target 给地点名时用
+     * @param feet       角色此刻脚下：坐标没给 y、按方向开多远时用
      */
     public VehicleDriveModule(List<VehicleDriver> drivers, List<VehicleReader> readers, VehicleControls controls,
-            ReadsSeenTargets seen, Function<String, Optional<String>> structures) {
+            ReadsSeenTargets seen, Function<String, Optional<String>> structures, ReadsRememberedPlaces places,
+            Supplier<BlockPos> feet) {
         this.drivers = List.copyOf(drivers);
         this.readers = List.copyOf(readers);
         this.controls = Objects.requireNonNull(controls, "controls");
         this.seen = Objects.requireNonNull(seen, "seen");
         this.structures = Objects.requireNonNull(structures, "structures");
+        this.places = Objects.requireNonNull(places, "places");
+        this.feet = Objects.requireNonNull(feet, "feet");
     }
 
     @Override public AbilitySpec spec() {
         return new AbilitySpec("maicraft:vehicle_drive",
-                "坐上驾驶座开载具：test 逐条按住控制件看它怎么动再松开（开到某处的 drive 还没做）",
+                "坐上驾驶座开载具：drive 开到一个地方停稳，test 逐条按住控制件看它怎么动再松开",
                 AbilityDoc.forAbility("vehicle_drive"),
                 ParamSpecs.of(
                         ParamSpec.of("vehicle", ParamType.TEXT).required()
                                 .doc("开哪辆：物理结构的观察编号 s#（observe 的 mod_things.structure）").build(),
                         ParamSpec.of("operation", ParamType.CHOICE).choices("drive", "test").defaultValue("drive")
-                                .doc("drive 开到一个地方（默认，还没做）/ test 逐条按 inputs 看反应").build(),
+                                .doc("drive 开到 target（默认）/ test 逐条按 inputs 看反应").build(),
                         ParamSpec.of("inputs", ParamType.JSON_ARRAY)
                                 .doc("test 逐条按的输入：[{\"control\": \"打字机:W\", \"ticks\": 20}]；control 写控制件和键，"
-                                        + "ticks 按住几刻（1～" + MAX_PRESS_TICKS + "），最多 " + MAX_INPUTS + " 条").build()),
+                                        + "ticks 按住几刻（1～" + MAX_PRESS_TICKS + "），最多 " + MAX_INPUTS + " 条").build(),
+                        ParamSpec.of("cruise_altitude", ParamType.INTEGER).range(-64, 320)
+                                .doc("只对飞艇：巡航高度（船底的世界 y）；不给按当前与目的地高的那个 + 32").build()),
                 Set.of(TargetKind.POSITION, TargetKind.LANDMARK, TargetKind.DIRECTION),
                 ExecutionMode.CONTROLS_PLAYER,
                 Set.of(RequiredMod.of(REQUIRED_MOD)),
@@ -88,7 +100,7 @@ public final class VehicleDriveModule implements AbilityModule {
                 Listing.LISTED);
     }
 
-    // 落实开哪辆、按什么 → 不在车上先去上车（出行跑完回来再决定）→ 交给驾驶办法试按。
+    // 落实开哪辆 → test 读 inputs、drive 查操纵表与目的地 → 不在车上先去上车（出行跑完回来再决定）→ 交给驾驶办法。
     @Override public StepDecision decide(StepContext step) {
         Goal goal = step.goal();
         if (drivers.isEmpty()) {
@@ -105,13 +117,32 @@ public final class VehicleDriveModule implements AbilityModule {
             return new StepDecision.Finish(TaskResult.failed("指的载具不在了", Problem.of(Problem.Kind.TARGET_GONE,
                     "观察编号 " + vehicle + " 指的结构已经不在了", "重新 observe 再指")));
         }
-        if (!"test".equals(goal.params().text("operation"))) {
-            return new StepDecision.Finish(TaskResult.failed("开到某处还没做", Problem.of(Problem.Kind.UNSUPPORTED,
-                    "vehicle_drive 的 drive（开到一个地方停稳）还没做好", "先用 operation=test 逐条试按，看每个键让它怎么动")));
+        VehicleDriveInput input;
+        if ("test".equals(goal.params().text("operation"))) {
+            List<VehicleDriver.Press> inputs = new ArrayList<>();
+            String wrong = inputs(goal, inputs);
+            if (wrong != null) return invalid(wrong);
+            BlockPos near = new BlockPos(at.get().x(), at.get().y(), at.get().z());
+            input = new VehicleDriveInput(new VehicleDriver.TestRequest(structure.get(), near, inputs, goal.permissions()),
+                    null);
+        } else {
+            DrivePlan.Destination destination = DrivePlan.destination(goal.target(), places, feet.get());
+            if (destination.problem() != null) return new StepDecision.Finish(TaskResult.failed("去哪说不清", destination.problem()));
+            Optional<VehicleReader.View> view = readers.stream().map(reader -> reader.read(structure.get()))
+                    .flatMap(Optional::stream).findFirst();
+            if (view.isEmpty()) {
+                return new StepDecision.Finish(TaskResult.failed("读不了这辆", Problem.of(Problem.Kind.NOT_FOUND,
+                        "读不了 " + vehicle + "：离得太远，或没有能读它的联动", "离近一点重新 observe 再指")));
+            }
+            VehicleControls.ControlMap map = VehicleControls.merge(view.get().kind(), view.get().controls(),
+                    controls.stored(structure.get()));
+            Problem notReady = DrivePlan.notReady(map);
+            if (notReady != null) return new StepDecision.Finish(TaskResult.failed("开不了这辆", notReady));
+            Integer cruise = goal.params().has("cruise_altitude") ? (int) goal.params().integer("cruise_altitude") : null;
+            input = new VehicleDriveInput(null, new VehicleDriver.DriveRequest(structure.get(), destination.at(),
+                    destination.heightKnown(), cruise, view.get().kind(), map.forward(), DrivePlan.roles(map),
+                    goal.permissions()));
         }
-        List<VehicleDriver.Press> inputs = new ArrayList<>();
-        String wrong = inputs(goal, inputs);
-        if (wrong != null) return invalid(wrong);
         // 人必须在车上：不在就先把人送到驾驶座旁（目的地在船上，上船那一段由出行方式接手），跑完回来再决定。
         for (VehicleDriver driver : drivers) {
             Optional<WorldPosition> board = driver.boardAt(structure.get());
@@ -125,9 +156,7 @@ public final class VehicleDriveModule implements AbilityModule {
             }
             return new StepDecision.Run(TravelSteps.journeyTo(board.get(), 1.0, goal.permissions()), true);
         }
-        BlockPos near = new BlockPos(at.get().x(), at.get().y(), at.get().z());
-        return new StepDecision.Run(new VehicleDriveInput(new VehicleDriver.TestRequest(structure.get(), near, inputs,
-                goal.permissions())));
+        return new StepDecision.Run(input);
     }
 
     // 逐条读 inputs：每条要有 control 文字和 1～200 的 ticks；有错返回一句为什么，全对返回 null。
@@ -156,8 +185,7 @@ public final class VehicleDriveModule implements AbilityModule {
     }
 
     @Override public void registerTasks(TaskFactories factories) {
-        factories.register(VehicleDriveInput.class, input -> new VehicleDriveTask(input.request(), drivers, readers,
-                controls));
+        factories.register(VehicleDriveInput.class, input -> new VehicleDriveTask(input, drivers, readers, controls));
     }
 
     private static StepDecision invalid(String why) {

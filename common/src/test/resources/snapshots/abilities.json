@@ -296,8 +296,8 @@
       },
       {
         "ability": "maicraft:vehicle_drive",
-        "summary": "坐上驾驶座开载具：test 逐条按住控制件看它怎么动再松开（开到某处的 drive 还没做）",
-        "parameters": "vehicle: string, operation: string = drive, inputs?: array",
+        "summary": "坐上驾驶座开载具：drive 开到一个地方停稳，test 逐条按住控制件看它怎么动再松开",
+        "parameters": "vehicle: string, operation: string = drive, inputs?: array, cruise_altitude?: integer",
         "targets": [
           "direction",
           "landmark",
@@ -1491,7 +1491,7 @@
     },
     {
       "ability": "maicraft:vehicle_drive",
-      "summary": "坐上驾驶座开载具：test 逐条按住控制件看它怎么动再松开（开到某处的 drive 还没做）",
+      "summary": "坐上驾驶座开载具：drive 开到一个地方停稳，test 逐条按住控制件看它怎么动再松开",
       "parameters": [
         {
           "name": "vehicle",
@@ -1503,7 +1503,7 @@
           "name": "operation",
           "type": "string",
           "required": false,
-          "doc": "drive 开到一个地方（默认，还没做）/ test 逐条按 inputs 看反应",
+          "doc": "drive 开到 target（默认）/ test 逐条按 inputs 看反应",
           "default": "drive",
           "choices": [
             "drive",
@@ -1515,6 +1515,14 @@
           "type": "array",
           "required": false,
           "doc": "test 逐条按的输入：[{\"control\": \"打字机:W\", \"ticks\": 20}]；control 写控制件和键，ticks 按住几刻（1～200），最多 16 条"
+        },
+        {
+          "name": "cruise_altitude",
+          "type": "integer",
+          "required": false,
+          "doc": "只对飞艇：巡航高度（船底的世界 y）；不给按当前与目的地高的那个 + 32",
+          "min": -64,
+          "max": 320
         }
       ],
       "targets": [

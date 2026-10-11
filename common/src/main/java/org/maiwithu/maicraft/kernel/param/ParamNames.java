@@ -46,6 +46,7 @@ public final class ParamNames {
             Map.entry("floor", "坐电梯去哪一层：楼层名，或 top / bottom / up / down"),
             Map.entry("vehicle", "开哪辆载具：物理结构的观察编号 s#"),
             Map.entry("inputs", "试按载具时逐条按的输入：[{control, ticks}]，control 是控制件和键，ticks 按住几刻"),
+            Map.entry("cruise_altitude", "飞艇巡航高度（船底的世界 y）"),
             Map.entry("properties", "只放一格时要求的方块状态属性（JSON 对象），例如 {\"facing\":\"north\"}"),
             Map.entry("quest", "任务书里任务的编号（16 位十六进制，FTB 任务）"),
             Map.entry("requirement", "任务里一条要求的编号（任务书资料的条目页里给的）"),
