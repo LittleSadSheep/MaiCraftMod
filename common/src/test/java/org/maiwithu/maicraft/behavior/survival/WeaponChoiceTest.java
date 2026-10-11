@@ -52,6 +52,25 @@ class WeaponChoiceTest {
     }
 
     @Test
+    void meleePicksTheHighestDamageRateAndPrefersTheHotbarOnTies() {
+        // 铁剑 6 伤害 × 1.6 攻速 = 9.6，铁斧 9 × 0.9 = 8.1：平时拿剑；木剑最差。
+        var ironSword = new WeaponChoice.Carried("minecraft:iron_sword", 1, false, 20, 6, 1.6);
+        var ironAxe = new WeaponChoice.Carried("minecraft:iron_axe", 1, false, 2, 9, 0.9);
+        var woodenSword = new WeaponChoice.Carried("minecraft:wooden_sword", 1, false, 0, 4, 1.6);
+        var picked = WeaponChoice.pickMelee(List.of(woodenSword, ironAxe, ironSword), false);
+        assertEquals("minecraft:iron_sword", picked.itemId());
+        assertEquals(20, picked.slot());
+        // 对手举盾：斧能破盾，斧优先。
+        assertEquals("minecraft:iron_axe", WeaponChoice.pickMelee(List.of(ironSword, ironAxe), true).itemId());
+        // 一样好的两把剑：快捷栏里那把先，不用开背包。
+        var sameInHotbar = new WeaponChoice.Carried("minecraft:iron_sword", 1, false, 3, 6, 1.6);
+        assertEquals(3, WeaponChoice.pickMelee(List.of(ironSword, sameInHotbar), false).slot());
+        // 镐不是近战武器：只有镐就空手（交给手里现有的打）。
+        var pickaxe = new WeaponChoice.Carried("minecraft:iron_pickaxe", 1, false, 0, 4, 1.2);
+        assertEquals(WeaponChoice.Weapon.BARE_HANDS, WeaponChoice.pickMelee(List.of(pickaxe), false).weapon());
+    }
+
+    @Test
     void rangedWeaponsScoreHigherThanSword() {
         assertTrue(WeaponChoice.scoreOf(WeaponChoice.Weapon.LOADED_CROSSBOW)
                 > WeaponChoice.scoreOf(WeaponChoice.Weapon.SWORD_OR_AXE));

@@ -2,15 +2,11 @@
 package org.maiwithu.maicraft.behavior.survival;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntityType;
 
-import org.maiwithu.maicraft.behavior.interaction.InteractionAction;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
-import org.maiwithu.maicraft.game.interaction.Interaction;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -37,10 +33,8 @@ public final class LiveCombatMoves implements SelfDefenseTask.CombatMoves {
             // 目标已经不在或这一刻交不出交互：返回一个立刻结束的空动作，下一刻重新决定。
             return AlreadyOver.INSTANCE;
         }
-        var player = context.player();
-        Interaction attack = Interaction.attackEntity(player,
-                player.interactionSender(), player.menuActions(), player.input(), target);
-        return new InteractionAction(attack, "攻击 " + typeId(target));
+        // 先把挑好的近战武器拿到主手再挥：和战斗共用一套出手。
+        return new MeleeStrike(entityId);
     }
 
     @Override
@@ -61,9 +55,6 @@ public final class LiveCombatMoves implements SelfDefenseTask.CombatMoves {
                 ? null : context.player().level().getEntity(entityId);
     }
 
-    private static String typeId(Entity entity) {
-        return EntityType.getKey(entity.getType()).toString();
-    }
 
     /** 第一刻才拿得到上下文的走到动作：把当刻上下文带进来再开走。 */
     private final class WalkMove implements Action {

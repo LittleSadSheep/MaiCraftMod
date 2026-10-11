@@ -8,16 +8,14 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.phys.AABB;
 
-import org.maiwithu.maicraft.behavior.interaction.InteractionAction;
+import org.maiwithu.maicraft.behavior.survival.MeleeStrike;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.game.world.DropConfirmations;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
-import org.maiwithu.maicraft.game.interaction.Interaction;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -48,9 +46,15 @@ public final class LiveFightMoves implements FightMoves {
         if (target == null || player == null || player.interactionSender() == null) {
             return TargetGone.INSTANCE;
         }
-        Interaction attack = Interaction.attackEntity(player, player.interactionSender(),
-                player.menuActions(), player.input(), target);
-        return new InteractionAction(attack, "攻击 " + typeId(target));
+        // 先把挑好的近战武器拿到主手再挥：和自卫共用一套出手。
+        return new MeleeStrike(entityId);
+    }
+
+    @Override
+    public String mainHand(TickContext context) {
+        var self = context.player() == null ? null : context.player().localPlayer();
+        if (self == null || self.getMainHandItem().isEmpty()) return "空手";
+        return BuiltInRegistries.ITEM.getKey(self.getMainHandItem().getItem()).toString();
     }
 
     @Override
@@ -102,9 +106,6 @@ public final class LiveFightMoves implements FightMoves {
         return player == null ? null : player.level();
     }
 
-    private static String typeId(Entity entity) {
-        return EntityType.getKey(entity.getType()).toString();
-    }
 
     /** 第一刻才拿得到上下文的走到动作。 */
     private static final class WalkMove implements Action {

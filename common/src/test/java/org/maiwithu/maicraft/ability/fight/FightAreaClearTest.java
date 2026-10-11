@@ -41,6 +41,10 @@ class FightAreaClearTest {
 
     /** 战场替身：哪些敌人在、哪些看得见、谁刚打过角色，由测试摆；出手一下对面就倒。 */
     private static final class Field implements CombatSenses, SeenTargets, FightMoves {
+        @Override public String mainHand(TickContext context) {
+            return "minecraft:iron_sword";
+        }
+
         final Map<Integer, Threat> alive = new HashMap<>();
         final Set<Integer> dead = new HashSet<>();
         final List<Attacker> attackers = new ArrayList<>();

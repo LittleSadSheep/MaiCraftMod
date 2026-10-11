@@ -5,7 +5,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.UUID;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.entity.Entity;
@@ -13,7 +12,6 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.monster.Enemy;
-import net.minecraft.world.entity.monster.Slime;
 import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.game.player.ReadsFoodValues;
@@ -88,7 +86,8 @@ public final class LiveCombatSenses implements CombatSenses {
                 foodCount += stack.count();
             }
         }
-        Optional<WeaponChoice.Picked> weapon = WeaponChoice.pick(carried, hasArrows, false);
+        // 打不打得过按真会拿来打的那件算：近战挑剑斧里最好的。
+        Optional<WeaponChoice.Picked> weapon = Optional.of(WeaponChoice.pickMelee(carried, false));
         return new CombatProfile(self.getHealth(), self.getArmorValue(), weapon, foodCount);
     }
 

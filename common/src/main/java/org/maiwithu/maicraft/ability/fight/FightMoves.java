@@ -13,8 +13,11 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  */
 interface FightMoves {
 
-    /** 对这只生物出手一次（原生攻击，充能够格才挥、逐刻确认）。 */
+    /** 对这只生物出手一次：先把挑好的近战武器拿到主手，再原生攻击（充能够格才挥、逐刻确认）。 */
     Action strike(TickContext context, int entityId);
+
+    /** 此刻主手里拿着什么（物品 ID，空手为"空手"）：结果里写真正用来打的那件。 */
+    String mainHand(TickContext context);
 
     /** 朝一个位置走过去（只走不改）。 */
     Action walkTo(double x, double y, double z);

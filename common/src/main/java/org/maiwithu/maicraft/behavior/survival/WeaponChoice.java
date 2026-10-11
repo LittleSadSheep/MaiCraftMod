@@ -26,11 +26,25 @@ public final class WeaponChoice {
         BARE_HANDS
     }
 
-    /** 挑选的结论：用哪一件（物品注册 ID），属于哪一类。 */
-    public record Picked(String itemId, Weapon weapon) {}
+    /**
+     * 挑选的结论：用哪一件（物品注册 ID）、属于哪一类、在背包哪一格（0~8 快捷栏，9~35 主背包，40 副手，空手为 -1）。
+     */
+    public record Picked(String itemId, Weapon weapon, int slot) {
+        public Picked(String itemId, Weapon weapon) {
+            this(itemId, weapon, -1);
+        }
+    }
 
-    /** 随身的一件东西：物品注册 ID 与数量；弩是否已上弦由读的一侧给。 */
-    public record Carried(String item, int count, boolean crossbowCharged) {}
+    /**
+     * 随身的一件东西：物品注册 ID、数量、弩是否已上弦、在背包哪一格，以及拿在主手时的攻击伤害与攻击速度
+     * （按物品自己的攻击属性算，读不到时按空手的 1 点伤害、每秒 4 次）。
+     */
+    public record Carried(String item, int count, boolean crossbowCharged, int slot, double attackDamage,
+                          double attackSpeed) {
+        public Carried(String item, int count, boolean crossbowCharged) {
+            this(item, count, crossbowCharged, -1, 1.0, 4.0);
+        }
+    }
 
     /**
      * 从随身的东西里挑武器。
@@ -50,20 +64,35 @@ public final class WeaponChoice {
                 return Optional.of(new Picked(stack.item(), Weapon.READY_BOW));
             }
         }
-        // 对手举盾优先斧：斧是原版里能破盾的近战武器。
-        if (opponentShielding) {
-            for (Carried stack : carried) {
-                if (isAxe(stack.item()) && stack.count() > 0) {
-                    return Optional.of(new Picked(stack.item(), Weapon.SWORD_OR_AXE));
-                }
-            }
-        }
+        return Optional.of(pickMelee(carried, opponentShielding));
+    }
+
+    /**
+     * 近战挑哪件：剑和斧里每秒伤害最高的（攻击伤害 × 攻击速度：满充能才挥，挥得快的剑常比斧划算）；
+     * 一样好时快捷栏里的先（不用开背包）。对手举着盾时斧优先，斧是原版里能破盾的近战武器。都没有就空手。
+     */
+    public static Picked pickMelee(List<Carried> carried, boolean opponentShielding) {
+        Carried best = null;
         for (Carried stack : carried) {
-            if ((isSword(stack.item()) || isAxe(stack.item())) && stack.count() > 0) {
-                return Optional.of(new Picked(stack.item(), Weapon.SWORD_OR_AXE));
-            }
+            if (stack.count() <= 0 || !(isSword(stack.item()) || isAxe(stack.item()))) continue;
+            if (best == null || better(stack, best, opponentShielding)) best = stack;
         }
-        return Optional.of(new Picked(null, Weapon.BARE_HANDS));
+        return best == null ? new Picked(null, Weapon.BARE_HANDS, -1)
+                : new Picked(best.item(), Weapon.SWORD_OR_AXE, best.slot());
+    }
+
+    // 举盾的对手面前斧压过剑；同类里比每秒伤害，再比是不是在快捷栏。
+    private static boolean better(Carried candidate, Carried current, boolean opponentShielding) {
+        if (opponentShielding && isAxe(candidate.item()) != isAxe(current.item())) return isAxe(candidate.item());
+        double candidateRate = candidate.attackDamage() * candidate.attackSpeed();
+        double currentRate = current.attackDamage() * current.attackSpeed();
+        if (Math.abs(candidateRate - currentRate) > 1.0E-6) return candidateRate > currentRate;
+        return inHotbar(candidate.slot()) && !inHotbar(current.slot());
+    }
+
+    /** 这一格是不是快捷栏（0~8）：快捷栏里的拿起来只是按一下数字键。 */
+    public static boolean inHotbar(int slot) {
+        return slot >= 0 && slot <= 8;
     }
 
     /** 简化武器分：进威胁评估用；弓弩不走近战路，分数里已把远程的优势算进去。 */

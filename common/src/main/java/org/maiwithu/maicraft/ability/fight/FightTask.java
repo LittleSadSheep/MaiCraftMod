@@ -221,6 +221,8 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         }
         keep("攻击 " + target.entityId, () -> moves.strike(context, target.entityId));
         stepCurrent(context, "攻击 " + target.type);
+        // 结果写手里实际拿着打的那件，不写挑中的（换不成时两者会不一样）。
+        weaponUsed = moves.mainHand(context);
         SeenTargets.Observed after = seenTargets.observe(context, target.entityId);
         if (after != null && after.dead()) {
             defeated.add(target.type + "（实体 " + target.entityId + "）");
@@ -422,10 +424,6 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     private ThreatAssessment.MySide mySide(TickContext context) {
         CombatSenses.CombatProfile profile = senses.profile(context);
         int weaponScore = profile.weapon().map(picked -> WeaponChoice.scoreOf(picked.weapon())).orElse(0);
-        if (profile.weapon().isPresent()) {
-            WeaponChoice.Picked picked = profile.weapon().get();
-            weaponUsed = picked.weapon() == WeaponChoice.Weapon.BARE_HANDS ? "空手" : picked.itemId();
-        }
         return new ThreatAssessment.MySide(profile.health(), profile.armorPoints(),
                 weaponScore, profile.foodCount(), retreatFailures < LAST_STAND_AFTER_FAILURES);
     }

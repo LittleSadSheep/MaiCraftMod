@@ -63,6 +63,13 @@ class FightTaskTest {
 
     /** 走位替身：走到一直在走，出手一下就完；记下起了哪些动作、收尾了几次。 */
     private static final class Moves implements FightMoves {
+        /** 此刻主手里拿着什么；测试摆。 */
+        String held = "minecraft:iron_sword";
+
+        @Override public String mainHand(TickContext context) {
+            return held;
+        }
+
         final List<String> started = new ArrayList<>();
         int closed;
         /** 地上的掉落物；测试摆，捡起时拿掉。 */
