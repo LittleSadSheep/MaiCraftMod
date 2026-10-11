@@ -6,6 +6,7 @@ import java.util.OptionalDouble;
 import java.util.function.Supplier;
 import net.minecraft.core.BlockPos;
 
+import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -17,7 +18,7 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
  *
  * <p>距离数值每刻从角色的属性读（交互距离被装备撑大后站位判断跟着变）；
  * 走过去的代价在寻路接缝上回答不了时按直线距离排——靠近只靠它挑先试哪个站位，
- * 走不走得到由真的走路决定。站位补救没有接上，候选站位全不过时如实以"到不了"收场。
+ * 走不走得到由真的走路决定。候选站位全不过时，站位补救为只是被一两格挡住视线的位置挖开遮挡（许可允许时）。
  */
 public final class LiveApproaches implements BringsPlayerClose {
 
@@ -27,11 +28,14 @@ public final class LiveApproaches implements BringsPlayerClose {
     private final Supplier<PlayerContext> context;
     private final ApproachWorldView world;
     private final WalkTo walks;
+    private final PermissionCheck permission;
 
-    public LiveApproaches(Supplier<PlayerContext> context, ApproachWorldView world, WalkTo walks) {
+    public LiveApproaches(Supplier<PlayerContext> context, ApproachWorldView world, WalkTo walks,
+                          PermissionCheck permission) {
         this.context = Objects.requireNonNull(context, "context");
         this.world = Objects.requireNonNull(world, "world");
         this.walks = Objects.requireNonNull(walks, "walks");
+        this.permission = Objects.requireNonNull(permission, "permission");
     }
 
     @Override
@@ -42,9 +46,14 @@ public final class LiveApproaches implements BringsPlayerClose {
     @Override
     public Action toward(ApproachTarget target, Permissions permissions, ProtectedCells avoid) {
         // 每个靠近动作各走各的一份：路上能动多少地形按这次任务的许可来，暂停与收尾互不牵连。
-        // 站位补救留空；调用方不许踩的格（放方块时的目标格）并进受保护格判断，能不能挖某一格由走到实现方把关。
-        return new Approach(target, reachNow(), world, LiveApproaches::straightCost,
-                avoid, new LiveSpotWalks(walks, TerrainPermit.of(permissions)), null, permissions);
+        // 调用方不许踩的格（放方块时的目标格）并进受保护格判断，能不能挖某一格由走到实现方把关；
+        // 站位补救另走一份，挖开遮挡前过许可检查点。
+        ReachRules reach = reachNow();
+        TerrainPermit permit = TerrainPermit.of(permissions);
+        StandOpener opener = new LiveStandOpener(context, permission, permissions, reach,
+                new LiveSpotWalks(walks, permit), avoid);
+        return new Approach(target, reach, world, LiveApproaches::straightCost,
+                avoid, new LiveSpotWalks(walks, permit), opener, permissions);
     }
 
     /** 当刻的距离数值：交互距离读角色属性，眼高按当时姿态取。 */

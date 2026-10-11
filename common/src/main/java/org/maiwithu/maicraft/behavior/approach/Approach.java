@@ -12,6 +12,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Deque;
 import java.util.List;
 import java.util.Optional;
@@ -166,7 +167,11 @@ public final class Approach implements Action {
         if (blocked == null || !mayChangeBlocks || opener == null) {
             return giveUp(blocked, mayChangeBlocks);
         }
-        Optional<Action> rescue = opener.rescue(blocked, target);
+        Optional<Action> rescue = Optional.empty();
+        for (RejectedSpot spot : rescueOrder()) {
+            rescue = opener.rescue(spot, target);
+            if (rescue.isPresent()) break;
+        }
         if (rescue.isEmpty()) return giveUp(blocked, true);
         rescueAction = rescue.get();
         stage = Stage.OPENING;
@@ -194,6 +199,20 @@ public final class Approach implements Action {
     // 头顶没空间、落差太深、泡在液体里、旁边有岩浆、受保护的格子，挖与垫都救不回来或不应去救。
     private static final Set<String> RESCUABLE = Set.of("看不见", "够不着", "到不了", "脚下悬空");
 
+    /** 一次补救最多试这么多个位置，免得几百个被拒位置挨个算视线。 */
+    private static final int RESCUE_TRIES = 24;
+
+    // 补救先试只是被挡住视线的位置（站得稳、够得着），离人近的先试；其余能救的排后面。
+    private List<RejectedSpot> rescueOrder() {
+        BlockPos here = world.currentFeet();
+        return rejected.stream()
+                .filter(spot -> RESCUABLE.contains(spot.failedItem()))
+                .sorted(Comparator.<RejectedSpot>comparingInt(spot -> "看不见".equals(spot.failedItem()) ? 0 : 1)
+                        .thenComparingDouble(spot -> here == null ? 0 : spot.feet().distSqr(here)))
+                .limit(RESCUE_TRIES)
+                .toList();
+    }
+
     private RejectedSpot pickBlocked() {
         return rejected.stream()
                 .filter(spot -> RESCUABLE.contains(spot.failedItem()))
@@ -206,8 +225,7 @@ public final class Approach implements Action {
         if (!tried.isEmpty()) {
             message.append("，试过 ").append(tried.size()).append(" 个位置").append(summary());
         } else if (!rejected.isEmpty()) {
-            message.append("，附近 ").append(rejected.size()).append(" 个候选位置都被拒，主要败在")
-                    .append(mainFailure());
+            message.append("，附近 ").append(rejected.size()).append(" 个候选位置都被拒：").append(breakdown());
         }
         String suggestion = blocked != null && !mayChangeBlocks
                 ? "允许挖开遮挡或垫方块的话，" + blocked.feet().toShortString() + " 附近也许能过去"
@@ -224,13 +242,38 @@ public final class Approach implements Action {
         return text.toString();
     }
 
-    /** 被拒位置里最多的那项失败，让结果一眼能看出是够不着还是被挡住。 */
-    private String mainFailure() {
-        return rejected.stream()
-                .map(RejectedSpot::failedItem)
-                .distinct()
-                .max((a, b) -> Long.compare(countFailures(a), countFailures(b)))
-                .orElse("未知原因");
+    /**
+     * 站位检查从前往后的顺序：站得稳的几项、正背面、够不够得着、看不看得见、走不走得到。
+     * 败在越后面的离能用越近，失败说明按这个顺序倒着列，最接近能用的排最前。
+     */
+    private static final List<String> CHECK_ORDER = List.of("受保护", "脚下悬空", "头顶没空间", "落差太深",
+            "泡在液体里", "旁边有岩浆", "背面", "够不着", "看不见", "到不了");
+
+    /**
+     * 被拒位置各败在哪一项、各几个，离能用最近的先说，并举一个最接近的位置。
+     * 原先只说最多的那项：地下的格子全是"头顶没空间"、空中的全是"脚下悬空"，
+     * 真正有用的那几格地面位败在"看不见"，这个原因被淹掉，LLM 照着去找"头顶有空间"的地方白跑。
+     */
+    private String breakdown() {
+        List<String> parts = new ArrayList<>();
+        RejectedSpot closest = null;
+        int closestRank = -1;
+        for (RejectedSpot spot : rejected) {
+            int rank = CHECK_ORDER.indexOf(spot.failedItem());
+            if (rank > closestRank) {
+                closestRank = rank;
+                closest = spot;
+            }
+        }
+        List<String> items = new ArrayList<>(CHECK_ORDER);
+        rejected.stream().map(RejectedSpot::failedItem).distinct().filter(item -> !items.contains(item)).forEach(items::add);
+        for (int i = items.size() - 1; i >= 0; i--) {
+            long count = countFailures(items.get(i));
+            if (count > 0) parts.add(items.get(i) + " " + count + " 个");
+        }
+        String text = String.join("、", parts);
+        return closest == null ? text
+                : text + "；最接近能用的是 " + closest.feet().toShortString() + "（" + closest.failedItem() + "）";
     }
 
     private long countFailures(String item) {

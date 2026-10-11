@@ -1,16 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.approach;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.function.Supplier;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.LiquidBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
+import org.maiwithu.maicraft.game.interaction.FirstPersonInteractionTargeting;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /**
@@ -106,6 +113,12 @@ public final class LiveApproachWorld implements ApproachWorldView {
         return false;
     }
 
+    /**
+     * 从这只眼睛看不看得见目标，和真瞄准、真动手用同一套判断：方块试形状中心再试六个面内侧，
+     * 射线先碰到的就是目标格才算（部件只在部件框里试）；目标那格是空气或液体（地上的掉落物、要放东西的空格）
+     * 按视线有没有被挡在半路判断；实体试包围盒中心、偏上处与八个内缩角，有一条没被挡住就算。
+     * 原先只从眼睛打一条射线到方块中心：中心被一片树叶挡住就算看不见，砍树、捡东西的站位大片被拒。
+     */
     @Override
     public boolean visibleFrom(Vec3 eye, ApproachTarget target) {
         Level level = level();
@@ -113,15 +126,46 @@ public final class LiveApproachWorld implements ApproachWorldView {
         if (level == null || current == null || current.localPlayer() == null) {
             return false;
         }
-        // 沿视线打一条方块射线：先撞到的方块就是视线被挡住；方块目标撞到的正是目标格才算看得见。
-        var hit = level.clip(new ClipContext(eye, target.center(),
-                ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, current.localPlayer()));
-        if (target.block() != null) {
-            return hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(target.block());
+        var player = current.localPlayer();
+        if (target.kind() == InteractionKind.ENTITY) {
+            return entityVisible(level, player, eye, target.bounds());
         }
-        // 实体目标：撞到的方块比目标中心近，就是被墙挡住了。
+        BlockPos cell = target.block();
+        BlockState state = level.getBlockState(cell);
+        if (state.isAir() || state.getBlock() instanceof LiquidBlock) {
+            return pointVisible(level, player, eye, target.center());
+        }
+        // 触及距离由够得着规则单独判，这里只问视线：给一个刚好盖过这段距离的上限。
+        double reach = eye.distanceTo(target.center()) + 2;
+        AABB cellBox = new AABB(cell);
+        boolean part = !target.bounds().equals(cellBox);
+        return part ? FirstPersonInteractionTargeting.visiblePartHit(level, player, eye, cell, reach, target.bounds()) != null
+                : FirstPersonInteractionTargeting.visibleBlockHit(level, player, eye, cell, reach) != null;
+    }
+
+    // 实体：包围盒中心、偏上（头部附近）与八个内缩角，有一条视线没在半路被方块挡住就算看得见。
+    private static boolean entityVisible(Level level, Entity viewer, Vec3 eye, AABB box) {
+        List<Vec3> points = new ArrayList<>();
+        points.add(box.getCenter());
+        points.add(new Vec3(box.getCenter().x, box.minY + box.getYsize() * 0.85, box.getCenter().z));
+        AABB inset = box.deflate(Math.min(0.05, box.getXsize() / 4), Math.min(0.05, box.getYsize() / 4),
+                Math.min(0.05, box.getZsize() / 4));
+        for (double x : new double[] {inset.minX, inset.maxX}) {
+            for (double y : new double[] {inset.minY, inset.maxY}) {
+                for (double z : new double[] {inset.minZ, inset.maxZ}) points.add(new Vec3(x, y, z));
+            }
+        }
+        for (Vec3 point : points) {
+            if (pointVisible(level, viewer, eye, point)) return true;
+        }
+        return false;
+    }
+
+    // 一个点：沿视线打一条方块射线（按选取外形，和准星一样），没碰到东西、或碰到的比这个点还远，就是没被挡。
+    private static boolean pointVisible(Level level, Entity viewer, Vec3 eye, Vec3 point) {
+        var hit = level.clip(new ClipContext(eye, point, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, viewer));
         return hit.getType() == HitResult.Type.MISS
-                || hit.getLocation().distanceToSqr(eye) >= target.center().distanceToSqr(eye);
+                || hit.getLocation().distanceToSqr(eye) >= point.distanceToSqr(eye) - 1.0E-6;
     }
 
     private Level level() {

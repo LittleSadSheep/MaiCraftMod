@@ -124,9 +124,12 @@ class ApproachTest {
         approach.tick(new StubTick(1));
         ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, approach.tick(new StubTick(2)));
         assertEquals(Problem.Kind.UNREACHABLE, failed.problem().kind());
-        assertEquals(1, opener.asked.size());
-        // 没走过任何候选：问题里交代附近被拒的候选位置。
+        // 一个位置救不了就换下一个只是被挡住的位置再问，但有上限，不把几百个被拒位置挨个算一遍。
+        assertTrue(opener.asked.size() > 1 && opener.asked.size() <= 24, "问了 " + opener.asked.size() + " 个");
+        assertTrue(opener.asked.stream().allMatch(spot -> spot.failedItem().equals("看不见")));
+        // 没走过任何候选：问题里交代附近被拒的候选位置，各败在哪一项、最接近能用的是哪一个。
         assertTrue(failed.problem().message().contains("候选位置"));
+        assertTrue(failed.problem().message().contains("最接近能用的是"), failed.problem().message());
     }
 
     @Test

@@ -301,8 +301,10 @@ public final class AbilityCatalog {
     /** 把共用的现场部件一次建好：世界记忆之外的每刻现场都从这里出。 */
     private static Shared sharedOf(Deps deps) {
         // 靠近与走向站位：站位判断问当刻的世界，走路交给走到（内嵌 Baritone）。
+        // 许可检查点：保护判断是这个世界的那一份（生存需求挖三填一也用它），来源、采集、站位补救都用这一份。
+        PermissionCheck permission = new PermissionCheck(deps.protection(), deps.creatures());
         LiveApproaches bringsClose = new LiveApproaches(deps.context(),
-                new LiveApproachWorld(deps.context()), deps.walks());
+                new LiveApproachWorld(deps.context()), deps.walks(), permission);
         // 换手读端提前建好：用东西的备手、进食的换手、装备的穿卸共用同一套界面搬运。
         ClientMovesToMainhand toMainhand = new ClientMovesToMainhand(deps.context());
         // 挖一格与捡掉落物共用一套：采集、拿东西时挖矿收庄稼、存东西挖开盖子，都是"走过去、挖掉、捡起这一下掉出来的"。
@@ -315,8 +317,6 @@ public final class AbilityCatalog {
         // 游戏拒绝读端：用东西与睡觉共一份（动作栏提示语同出一个来源）。
         ClientGameRefusals refusals = new ClientGameRefusals(new OverlayMessages(),
                 () -> deps.session().confirmations().recent(), deps.clientTicks());
-        // 许可检查点：保护判断是这个世界的那一份（生存需求挖三填一也用它），来源与采集都用这一份。
-        PermissionCheck permission = new PermissionCheck(deps.protection(), deps.creatures());
         // 联动能用的玩家行为：联动来源、机器类型、网络读取器进世界时都带着这一份建，
         // 走过去、点开、换手、缺东西去拿与自带能力是同一套。
         PlayerServices playerServices = new PlayerServices(deps.context(), bringsClose, deps.interactions(),
