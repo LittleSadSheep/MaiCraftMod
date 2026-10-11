@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat.sable;
 
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -20,18 +18,13 @@ import org.maiwithu.maicraft.compat.CompatRegistry;
  * （结构的逐格碰撞换到世界、装在上面的螺旋桨这类装置也算，自己站着的那艘不当墙），
  * 观察（物理结构领 s#：名字、动没动、几格方块、几个座位、是不是载具），和上下船这种出行方式。每一下读都经联动入口包一层。
  *
- * <p>逐格读一艘船要读很多格：读一次按地块坐标记下来（和位姿无关），两百刻后再重读，换位姿只换算不重读。
+ * <p>逐格读一艘船要读很多格：读一次按地块坐标记下来（{@link StructureScans}），换位姿只换算不重读。
  */
 public final class SableCompat extends CompatModule {
 
     public static final String MOD_ID = "sable";
-    /** 逐格读的结果多久重读一次（刻）：方块改了（加配重、被炸）这么久以内会看出来。 */
-    static final int SCAN_FRESH_TICKS = 200;
-
     private final SableStructures structures;
-    private final Map<String, Scanned> scans = new HashMap<>();
-
-    private record Scanned(long at, StructureGeometry.Scan scan) {}
+    private final StructureScans scans = new StructureScans();
 
     public SableCompat(SableStructures structures) {
         super(MOD_ID, "Sable 物理结构");
@@ -61,14 +54,8 @@ public final class SableCompat extends CompatModule {
         return call("读物理结构上的装置", () -> structures.attachedEntities(level, id));
     }
 
-    /** 一个结构的逐格读结果：两百刻内复用，过了重读；不在了的结构顺手丢掉。 */
+    /** 一个结构的逐格读结果；见 {@link StructureScans}。 */
     StructureGeometry.Scan scan(ClientLevel level, SableStructures.Structure structure) {
-        long now = level.getGameTime();
-        Scanned cached = scans.get(structure.id());
-        if (cached != null && now - cached.at() < SCAN_FRESH_TICKS) return cached.scan();
-        StructureGeometry.Scan scan = StructureGeometry.scan(structure, local -> block(level, structure.id(), local));
-        scans.entrySet().removeIf(entry -> now - entry.getValue().at() > SCAN_FRESH_TICKS * 10L);
-        scans.put(structure.id(), new Scanned(now, scan));
-        return scan;
+        return scans.scan(level.getGameTime(), structure, local -> block(level, structure.id(), local));
     }
 }

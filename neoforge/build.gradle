@@ -119,6 +119,7 @@ repositories {
         filter {
             includeGroup 'dev.ryanhcode.sable'
             includeGroup 'dev.ryanhcode.sable-companion'
+            includeGroup 'dev.simulated_team.simulated'
         }
     }
     // FTB 任务与 FTB Library 从 FTB 的官方 maven 取，免登录。
@@ -163,6 +164,8 @@ dependencies {
     // Sable 读子世界的位姿、地块与角色被哪个子世界带着；位姿与包围盒是 sable-companion 的类（实例里打在 Sable 的 jar 里）。
     compileOnly("dev.ryanhcode.sable:sable-neoforge-${minecraft_version}:${sable_version}") { transitive = false }
     compileOnly("dev.ryanhcode.sable-companion:sable-companion-common-${minecraft_version}:${sable_companion_version}") { transitive = false }
+    // Simulated（Create Aeronautics 一套里的载具部件）：拉物理组装器的杆发它自己的组装包。
+    compileOnly("dev.simulated_team.simulated:simulated-neoforge-${minecraft_version}:${simulated_version}") { transitive = false }
     jarJar(implementation('org.xerial:sqlite-jdbc')) {
         version { strictly "[${sqlite_jdbc_version},4.0)"; prefer sqlite_jdbc_version }
     }

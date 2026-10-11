@@ -29,6 +29,8 @@ final class StructureGeometry {
     /** 认作控制件的方块：Simulated 的无线红石打字机、舵轮、油门拉杆。 */
     static final Set<String> CONTROLS = Set.of("simulated:linked_typewriter",
             "simulated:steering_wheel", "simulated:throttle_lever");
+    /** Simulated 的物理组装器。 */
+    static final String ASSEMBLER = "simulated:physics_assembler";
 
     private StructureGeometry() {}
 
@@ -40,15 +42,18 @@ final class StructureGeometry {
      * @param blocks   不是空气的方块数
      * @param seats    座位所在的格
      * @param controls 控制件（无线红石打字机、舵轮、油门拉杆）的方块 ID
+     * @param assemblers 物理组装器所在的格（拆回时拉它）
      */
-    record Scan(boolean complete, List<AABB> boxes, int blocks, List<BlockPos> seats, List<String> controls) {}
+    record Scan(boolean complete, List<AABB> boxes, int blocks, List<BlockPos> seats, List<String> controls,
+                List<BlockPos> assemblers) {}
 
     /** 地块里逐格读一遍：每格自己的碰撞形状、座位、控制件；格数超了或有没加载的格就是没读全。 */
     static Scan scan(SableStructures.Structure structure, Function<BlockPos, BlockState> read) {
         List<AABB> boxes = new ArrayList<>();
         List<BlockPos> seats = new ArrayList<>();
         List<String> controls = new ArrayList<>();
-        if (cells(structure) > MAX_CELLS) return new Scan(false, boxes, 0, seats, controls);
+        List<BlockPos> assemblers = new ArrayList<>();
+        if (cells(structure) > MAX_CELLS) return new Scan(false, boxes, 0, seats, controls, assemblers);
         boolean complete = true;
         int blocks = 0;
         for (BlockPos local : BlockPos.betweenClosed(structure.localMin(), structure.localMax())) {
@@ -62,10 +67,11 @@ final class StructureGeometry {
             String id = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
             if (id.endsWith("_seat")) seats.add(local.immutable());
             if (CONTROLS.contains(id)) controls.add(id);
+            if (ASSEMBLER.equals(id)) assemblers.add(local.immutable());
             VoxelShape shape = state.getCollisionShape(EmptyBlockGetter.INSTANCE, local);
             for (AABB part : shape.toAabbs()) boxes.add(part.move(local));
         }
-        return new Scan(complete, boxes, blocks, seats, controls);
+        return new Scan(complete, boxes, blocks, seats, controls, assemblers);
     }
 
     /**
