@@ -13,6 +13,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
+import org.maiwithu.maicraft.ability.machine.spi.FullRun;
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
@@ -20,6 +21,7 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkLoad;
 import org.maiwithu.maicraft.ability.machine.spi.PartCell;
+import org.maiwithu.maicraft.ability.machine.spi.RunRequest;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -188,6 +190,17 @@ final class CreateMachineType implements MachineType {
         ClientLevel level = level();
         if (level == null) return Optional.empty();
         return stations.take(kind.work(), level, level.getBlockState(at), at, permissions);
+    }
+
+    // 蓝图桌写蓝图、蓝图加农炮照蓝图施工：给了蓝图文件才归它们自己做；蓝图桌要的产物只能是写好的蓝图。
+    @Override public Optional<FullRun> fullRun(BlockPos at, RunRequest request, Permissions permissions) {
+        if (kind.work() != CreateMachineCatalog.Work.SCHEMATIC || request.file() == null) return Optional.empty();
+        if (kind.id().equals(CreateMachineCatalog.MOD_ID + ":schematic_table")) {
+            if (request.item() != null && !request.item().equals(SchematicannonRun.SCHEMATIC)) return Optional.empty();
+            return Optional.of(new SchematicTableRun(compat, services, at, request.file(), request.maxSeconds(), permissions));
+        }
+        return Optional.of(new SchematicannonRun(compat, services, at, request.file(), request.anchor(), request.rotation(),
+                request.maxSeconds(), permissions));
     }
 
     private ClientLevel level() {

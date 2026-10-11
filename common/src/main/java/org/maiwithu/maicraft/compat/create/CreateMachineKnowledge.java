@@ -176,6 +176,12 @@ final class CreateMachineKnowledge implements KnowledgeSource {
             case BASIN -> text.append("- machine_run：站到盆边把料扔进去，落在盆沿上也收；空手右键取出盆里的东西\n");
             case MOTION -> text.append("- 要一起动的方块用强力胶粘：machine_build 的安装段 `{kind: create:super_glue, offsets: [一角, 对角]}`，")
                     .append("两角之间的方块要连着、相距不到 25 格，身上要有强力胶；装置的轴转起来（或通电）时把粘着的一片推拉、转动、吊起\n");
+            case SCHEMATIC -> text.append("- 蓝图桌：machine_run 给 file（schematics 目录下的 .nbt，和 build 的 file 同一个目录），")
+                    .append("角色拿一张空白蓝图放进去、照上传按钮传上去，写好的蓝图拿回背包。\n")
+                    .append("- 蓝图加农炮：machine_run 给 file 与 anchor（蓝图原点落在哪一格，rotation 可转 90 度的倍数），")
+                    .append("角色把写着这份文件的蓝图摆到原点、放进加农炮、没火药时放火药、按开动，再看它放；")
+                    .append("料从贴着加农炮的箱子里拿，缺什么、太远、没火药都在结果里写明，到时限时它接着放。")
+                    .append("自己动手照结构文件施工用 build(file=...)，两条路随便挑\n");
             case RAIL -> text.append("- 铺轨：两端各放一格轨道（写进 cells），machine_build 的安装段写 `{kind: create:track_connection, ")
                     .append("offsets: [起点, 终点]}`，角色手持轨道点起点、点终点，Create 在两格之间铺出弯道或长直道、按长度扣轨道；")
                     .append("转太急、坡太陡、太远（服务器配置，默认 32 格）时铺不上，结果里带着动作栏说的原因\n");
