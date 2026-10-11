@@ -34,8 +34,8 @@ final class EngineClicks {
     /** 一次右键等游戏确认的上限。 */
     private static final int USE_CONFIRM_TICKS = 20;
 
-    /** 这一刻动手的结果：没动手、正在动（挖掘推进或等确认）、真改了一格。 */
-    enum Doing { NOTHING, WORKING, CHANGED_A_BLOCK }
+    /** 这一刻动手的结果：没动手、正在动（挖掘推进或等确认）、真改了一格（垫上、开关门）、挖开了一格。 */
+    enum Doing { NOTHING, WORKING, CHANGED_A_BLOCK, BROKE_A_BLOCK }
 
     private BlockDigger digger;
     /** 挖掘器认的那个角色对象；重生或换世界后角色换了，挖掘器跟着换。 */
@@ -71,7 +71,7 @@ final class EngineClicks {
         BlockPos digging = digger.current();
         if (digging != null && context.level().getBlockState(digging).isAir()) {
             return switch (digger.settleGone(context, true)) {
-                case BROKE_TARGET, BROKE_OCCLUDER -> Doing.CHANGED_A_BLOCK;
+                case BROKE_TARGET, BROKE_OCCLUDER -> Doing.BROKE_A_BLOCK;
                 case PROGRESSING -> Doing.WORKING;
                 case NO_SHOT -> Doing.NOTHING;
             };
@@ -130,7 +130,7 @@ final class EngineClicks {
             return digger.hasPendingBreak() ? Doing.WORKING : Doing.NOTHING;
         }
         return switch (digger.digStep(context, hit)) {
-            case BROKE_TARGET, BROKE_OCCLUDER -> Doing.CHANGED_A_BLOCK;
+            case BROKE_TARGET, BROKE_OCCLUDER -> Doing.BROKE_A_BLOCK;
             case PROGRESSING -> Doing.WORKING;
             case NO_SHOT -> Doing.NOTHING;
         };

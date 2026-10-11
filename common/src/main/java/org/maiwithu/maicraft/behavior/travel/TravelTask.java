@@ -180,8 +180,9 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> {
                 ? new WorldPosition(feet.getX(), feet.getY(), feet.getZ(), destination.position().dimension())
                 : null;
         // 落地救援的经过原样带上：放了什么、收没收回、掉没掉血，LLM 据此决定要不要回去收拾。
+        // 卡坑自动脱困的经过也带上：没等许可动了哪些地形，LLM 知道这次为什么多了垫块、少了土。
         settlement = new TravelSettlement(arrivedAt, arrived ? null : remaining, placed,
-                placedBlocks.landingsDuringCurrentWalk(), crossedWater);
+                placedBlocks.landingsDuringCurrentWalk(), placedBlocks.trapEscapesDuringCurrentWalk(), crossedWater);
     }
 
     private RemainingDistance measureFrom(WalkReport report) {

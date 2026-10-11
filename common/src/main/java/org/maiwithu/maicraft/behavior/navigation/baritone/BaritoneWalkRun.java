@@ -85,6 +85,8 @@ final class BaritoneWalkRun implements WalkRun {
     private final WalkLanding landing = new WalkLanding();
     /** 不许挖时走不通的只读复算："假如允许挖垫有没有路、要动哪些格"，只进说明不执行。 */
     private final TerrainProbe probe;
+    /** 卡坑自动脱困：没路又困在坑里时按"搭 → 挖"临时升许可，出坑降回。 */
+    private final TrapEscape escape;
     /** 人按 F8 收回角色时路线被撤了：交回后第一刻重新算路、进展计时重新起算。 */
     private boolean routeDropped;
     /** 最近一刻的角色上下文；暂停、放弃时用它停挖、交还没等到确认的右键。 */
@@ -111,14 +113,21 @@ final class BaritoneWalkRun implements WalkRun {
         this.engineGoal = new MaiCraftGoalAdapter(goal);
         this.progress = new WalkRunProgress(goal);
         this.probe = new TerrainProbe(engineGoal, permit);
+        this.escape = new TrapEscape(permit);
     }
 
     NavGoal goal() {
         return goal;
     }
 
+    /** 此刻生效的地形许可：卡坑脱困中是临时升过的那一档。 */
     TerrainPermit permit() {
-        return permit;
+        return escape.effective();
+    }
+
+    /** 这段路上每次卡坑脱困的经过。 */
+    List<String> trapEscapes() {
+        return escape.notes();
     }
 
     LongSet sacredCells() {
@@ -140,7 +149,8 @@ final class BaritoneWalkRun implements WalkRun {
      * 垫了什么如实进结算结果，收不收回由 LLM 决定。
      */
     private void recordPlaced(BlockPos position) {
-        if (permit.changes() == Permissions.BlockChanges.NONE) return;
+        if (escape.effective().changes() == Permissions.BlockChanges.NONE) return;
+        escape.notePlaced();
         if (!placements.contains(position)) {
             placements.add(position.immutable());
         }
@@ -272,6 +282,7 @@ final class BaritoneWalkRun implements WalkRun {
         calculating = pathing.getInProgress().isPresent();
         BlockPos feet = player.blockPosition();
         handleStall(pathing, engine, context.level(), feet);
+        restoreAfterEscape(context, player, feet);
         boolean onGround = player.onGround();
         boolean inWater = player.isInWater();
 
@@ -286,8 +297,8 @@ final class BaritoneWalkRun implements WalkRun {
 
         // 走不通：把起点那几格、手边的垫料、许可与附近的岩浆补进问题，LLM 据此调整，而不是只拿到一句"没有路"。
         var spare = owner.spareScaffold(player);
-        progress.explainFailure(problem -> WalkFailureFacts.enrich(probe.explain(problem, !spare.isEmpty()),
-                context.level(), player, permit, spare));
+        progress.explainFailure(problem -> WalkFailureFacts.enrich(
+                escape.explain(probe.explain(problem, !spare.isEmpty())), context.level(), player, permit, spare));
         if (progress.done()) {
             finishRun(context, player, engine, pathing);
             return;
@@ -372,6 +383,8 @@ final class BaritoneWalkRun implements WalkRun {
         boolean aimed = owner.precisionAimSettled(context.localPlayer(), context.clientTick());
         EngineClicks.Doing doing = clicks.tick(context, left, right, aimed);
         clicks.takePlaced().ifPresent(this::recordPlaced);
+        // 挖开了一格：卡坑脱困中记一笔挖开了几格。
+        if (doing == EngineClicks.Doing.BROKE_A_BLOCK) escape.noteDug();
         if (doing != EngineClicks.Doing.NOTHING) {
             displacement.confirm(context.clientTick());
         }
@@ -500,6 +513,9 @@ final class BaritoneWalkRun implements WalkRun {
             return false;
         }
         if (!engineFailedPath && !probe.waiting()) return false;
+        // 卡在坑里：不等复算也不等 LLM 放宽许可，按"搭 → 挖"升一级重新算路；已经升到头还是没路就按走不通收场。
+        if (!probe.waiting() && raiseToEscape(engine, feet, tick)) return false;
+        if (escape.active()) return true;
         return switch (probe.step(engine, feet, tick)) {
             case NOT_NEEDED, CONCLUDED -> true;
             case WAITING -> false;
@@ -509,6 +525,29 @@ final class BaritoneWalkRun implements WalkRun {
                 yield false;
             }
         };
+    }
+
+    // 升一级脱困：只在任务许可低于挖天然方块、人又困在封死的坑里时；新开关写进引擎、从原地重新算路。
+    private boolean raiseToEscape(IBaritone engine, BlockPos feet, long tick) {
+        ClientLevel level = lastContext == null ? null : lastContext.level();
+        if (level == null || !escape.raise(() -> TrapCheck.trapped(new LiveTrapCells(level), feet), tick)) {
+            return false;
+        }
+        LOG.info("卡在坑里（{}），地形许可临时升到 {} 脱困", feet.toShortString(), escape.effective().changes());
+        owner.applyTerrain(this);
+        engineFailedPath = false;
+        engine.getCustomGoalProcess().setGoalAndPath(engineGoal);
+        displacement.restart(tick);
+        return true;
+    }
+
+    // 脱困中隔几刻看一眼：站在地上、从这里只走已经出得去了，就降回任务原来的许可，站稳后按原许可重新算路。
+    private void restoreAfterEscape(PlayerContext context, LocalPlayer player, BlockPos feet) {
+        if (!escape.dueCheck(context.clientTick()) || !player.onGround() || context.level() == null) return;
+        if (TrapCheck.trapped(new LiveTrapCells(context.level()), feet)) return;
+        escape.restore();
+        owner.applyTerrain(this);
+        replanWhenSafe = true;
     }
 
     // 挪垫料：没在挪时，站在地上、路线这一两步要垫方块、垫料只在主背包才开始挪；挪的这几刻引擎不推进，角色站定。

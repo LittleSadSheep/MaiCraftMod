@@ -63,6 +63,7 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
     private List<BlockPos> lastPlacements = List.of();
     /** 上一次运行里的落地救援经过；运行交出身体后结算方还要读得到。 */
     private List<String> lastLandings = List.of();
+    private List<String> lastTrapEscapes = List.of();
     /** 正要用的东西每种留几件：垫脚只用多出来的。 */
     private final ItemsToKeep keeps;
     /** 镜头离引擎要的精确瞄点差这么多度以内算转到位：平滑镜头收敛到 0.3° 吸附，留点余量。 */
@@ -153,6 +154,7 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
         // 垫块清单跟着运行走：运行结算后结算方读的是上一段路的清单。
         lastPlacements = List.copyOf(run.placements());
         lastLandings = run.landings();
+        lastTrapEscapes = run.trapEscapes();
         active = null;
     }
 
@@ -168,6 +170,18 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
     public List<String> landingsDuringCurrentWalk() {
         BaritoneWalkRun current = active;
         return current != null ? current.landings() : lastLandings;
+    }
+
+    /** 这段走到（或刚结束的一段）里每次卡坑脱困的经过。 */
+    @Override
+    public List<String> trapEscapesDuringCurrentWalk() {
+        BaritoneWalkRun current = active;
+        return current != null ? current.trapEscapes() : lastTrapEscapes;
+    }
+
+    /** 走到中途地形许可变了（卡坑脱困升级、出坑降回）：按它此刻生效的许可重写引擎开关。 */
+    void applyTerrain(BaritoneWalkRun run) {
+        if (active == run) configureTerrain(BaritoneAPI.getSettings(), run.permit());
     }
 
     /** 寻路引擎问：此刻在走的这一趟是不是正在落地救援（空中放东西、等确认、收回）。 */

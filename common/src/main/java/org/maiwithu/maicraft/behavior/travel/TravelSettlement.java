@@ -14,13 +14,16 @@ import java.util.List;
  * @param remaining    没走到时的剩余水平与垂直距离、八向方位；走到时为 null
  * @param placedBlocks 这次垫上的临时方块格子（短坐标写法）；没垫过为空
  * @param landings     这次每次落地救援的经过（放了什么、收没收回、掉没掉血）；没有为空
+ * @param trapEscapes  这次每次卡坑自动脱困的经过（没等许可垫方块或挖天然方块出坑，垫了几块、挖开几格）；没有为空
  * @param crossedWater 这段行程有没有泅渡
  */
 public record TravelSettlement(WorldPosition arrivedAt, RemainingDistance remaining,
-        List<String> placedBlocks, List<String> landings, boolean crossedWater) implements ResultDetails {
+        List<String> placedBlocks, List<String> landings, List<String> trapEscapes, boolean crossedWater)
+        implements ResultDetails {
 
     public TravelSettlement {
         placedBlocks = List.copyOf(placedBlocks);
         landings = List.copyOf(landings);
+        trapEscapes = List.copyOf(trapEscapes);
     }
 }

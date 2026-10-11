@@ -18,4 +18,9 @@ public interface ReadsPlacedBlocks {
     default List<String> landingsDuringCurrentWalk() {
         return List.of();
     }
+
+    /** 当前这段走到里每次卡坑自动脱困的经过（怎么脱的、垫了几块、挖开几格）；没有给空列表。 */
+    default List<String> trapEscapesDuringCurrentWalk() {
+        return List.of();
+    }
 }
