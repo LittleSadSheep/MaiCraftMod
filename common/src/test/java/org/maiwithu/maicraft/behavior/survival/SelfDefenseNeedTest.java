@@ -25,7 +25,7 @@ import org.maiwithu.maicraft.kernel.task.TickResult;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
-/** 被攻击的自卫分流：SOON 报急、血线破升 NOW、主任务自己在打且接得住时让位。 */
+/** 被攻击的自卫分流：SOON 报急；怪贴脸、引信点着、血线破升 NOW；主任务自己在打且接得住时让位。 */
 class SelfDefenseNeedTest {
 
     /** 刻号替身。 */
@@ -93,6 +93,12 @@ class SelfDefenseNeedTest {
                 10, 64, 10, distance, ThreatAssessment.Kind.EXPLOSIVE, false, visible, false);
     }
 
+    /** 点着引信、看得见的苦力怕。 */
+    private static CombatSenses.Threat armedCreeper(double distance) {
+        return new CombatSenses.Threat(4, UUID.randomUUID(), "minecraft:creeper",
+                10, 64, 10, distance, ThreatAssessment.Kind.EXPLOSIVE, true, true, false);
+    }
+
     private static Urgency urgencyWith(List<CombatSenses.Threat> threats, List<CombatSenses.Attacker> attackers) {
         return new SelfDefenseNeed(new FakeSenses(threats, attackers, profile(20)), null, null).urgency(TICK, null);
     }
@@ -146,6 +152,31 @@ class SelfDefenseNeedTest {
         assertEquals(Urgency.SOON, urgencyWith(List.of(creeper(6, true)), List.of()));
         assertNull(urgencyWith(List.of(creeper(6, false)), List.of()), "墙后的苦力怕不提前动手");
         assertNull(urgencyWith(List.of(creeper(12, true)), List.of()), "8 格外看得见的苦力怕先不管");
+    }
+
+    @Test
+    void aZombieAboutToHitMeIsHandledNow() {
+        // 僵尸贴到它的危险半径（约 2 格）再加一格半以内：马上要挨打，施工停不下来也先顾命。
+        assertEquals(Urgency.NOW, urgencyWith(List.of(zombie(3)), List.of()));
+        assertEquals(Urgency.SOON, urgencyWith(List.of(zombie(5)), List.of()), "五格外还来得及等手上的活停");
+        // 主任务自己在打且接得住：贴脸的它自己处理（同一套走位会退开），不插自卫。
+        SelfDefenseNeed need = new SelfDefenseNeed(
+                new FakeSenses(List.of(zombie(3)), List.of(), profile(20)), null, null);
+        assertNull(need.urgency(TICK, CONFIDENT_FIGHT));
+    }
+
+    @Test
+    void anArmedCreeperWithinSevenBlocksIsHandledNow() {
+        // 引信 1.5 秒就炸：进了 7 格（出了 7 格引信才会熄）立刻躲，不等手上的活。
+        assertEquals(Urgency.NOW, urgencyWith(List.of(armedCreeper(6)), List.of()));
+        assertEquals(Urgency.SOON, urgencyWith(List.of(armedCreeper(8)), List.of()), "7 格外引信会自己熄");
+    }
+
+    @Test
+    void attackedDoesNotWaitAfterAFailedDefense() {
+        SelfDefenseNeed need = new SelfDefenseNeed(
+                new FakeSenses(List.of(), List.of(), profile(20)), null, null);
+        assertEquals(false, need.waitsAfterFailure(), "自卫没做成也不缓，下一下挨打照样响应");
     }
 
     @Test

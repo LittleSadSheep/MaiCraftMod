@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.combat;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -55,20 +56,60 @@ public interface CombatSenses {
     }
 
     /**
-     * 一只敌对生物：位置供追击与出手。
+     * 一只敌对生物：位置供追击与出手，身板与够不够得着按战斗几何算好（{@link CombatGeometry}）。
      *
-     * @param armed      苦力怕已经膨胀或开始闪白（引信点着了）
-     * @param visible    角色看得见它：从眼睛到它之间没有方块挡着
-     * @param aggressive 原版同步给客户端的攻击标记：僵尸、骷髅这类锁定了攻击目标、正要动手时亮起
+     * @param distance     两边脚下中心的距离（格）
+     * @param armed        苦力怕已经膨胀或开始闪白（引信点着了）
+     * @param visible      角色看得见它：从眼睛到它之间没有方块挡着
+     * @param aggressive   原版同步给客户端的攻击标记：僵尸、骷髅这类锁定了攻击目标、正要动手时亮起
+     * @param halfWidth    它半个身宽（格）
+     * @param reachGap     我眼睛到它碰撞箱最近点的距离（格）：不超过我的交互距离就够得着
+     * @param canHitMe     它此刻打不打得到我：原版攻击框与我的碰撞箱相交（只算近战）
+     * @param dangerRadius 它从任何方位都够不着我的水平中心距（格）
+     * @param powered      闪电劈过的苦力怕：爆炸范围翻倍
      */
     record Threat(int entityId, UUID uuid, String type, double x, double y, double z,
                   double distance, ThreatAssessment.Kind kind, boolean armed, boolean visible,
-                  boolean aggressive) {}
+                  boolean aggressive, double halfWidth, double reachGap, boolean canHitMe,
+                  double dangerRadius, boolean powered) {
+
+        /** 身板按僵尸估的一只（离线替身用；生产实现按真实碰撞箱算）。 */
+        public Threat(int entityId, UUID uuid, String type, double x, double y, double z,
+                      double distance, ThreatAssessment.Kind kind, boolean armed, boolean visible,
+                      boolean aggressive) {
+            this(entityId, uuid, type, x, y, z, distance, kind, armed, visible, aggressive,
+                    0.3, Math.max(0, distance - 0.3),
+                    distance < CombatGeometry.mobDangerRadius(0.3, 0.3) / Math.sqrt(2.0),
+                    CombatGeometry.mobDangerRadius(0.3, 0.3), false);
+        }
+
+        /** 我此刻够不够得着它。 */
+        public boolean withinReach(double myRange) {
+            return reachGap <= myRange;
+        }
+
+        /**
+         * 它是不是冲着我来的：十秒内真打过我的、引信点着的、看得见我又亮着攻击标记的。
+         * 原先点名战斗只看引信，正追着砍我的僵尸被当成闲逛的，排序与"打不打得过"都算轻了。
+         */
+        public boolean comingAt(Collection<UUID> attackers) {
+            return attackers.contains(uuid) || armed || aggressive && visible;
+        }
+    }
 
     /** 一条伤害证据：谁、什么时候（游戏刻）、什么类型的伤害。 */
     record Attacker(UUID uuid, String type, long tick, String damageKind) {}
 
-    /** 角色的战斗资质。 */
+    /**
+     * 角色的战斗资质。
+     *
+     * @param reach 实体交互距离属性（默认 3；药水、模组改了跟着变）
+     */
     record CombatProfile(double health, int armorPoints,
-                         Optional<WeaponChoice.Picked> weapon, int foodCount) {}
+                         Optional<WeaponChoice.Picked> weapon, int foodCount, double reach) {
+
+        public CombatProfile(double health, int armorPoints, Optional<WeaponChoice.Picked> weapon, int foodCount) {
+            this(health, armorPoints, weapon, foodCount, CombatGeometry.DEFAULT_PLAYER_REACH);
+        }
+    }
 }

@@ -423,15 +423,16 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         }
         List<CombatSenses.Threat> ordered = new ArrayList<>();
         for (CombatSenses.Threat threat : senses.threats(currentContext, input.radius())) {
-            boolean comingAtMe = attackers.contains(threat.uuid()) || threat.armed();
+            boolean comingAtMe = threat.comingAt(attackers);
             // 点着引信的会炸物不当近战目标：近了躲（fight 开头），远了等它熄；没点的照常打。
             if ((batch.contains(threat.entityId()) && wantedType(threat) || comingAtMe)
                     && BlastAvoidance.meleeTarget(threat.kind(), threat.armed())) {
                 ordered.add(threat);
             }
         }
+        // 排序按"是不是冲着我来"：正追着砍我的排在闲逛的前面（原先只看引信，把追我的当成闲逛的）。
         ordered.sort(Comparator.comparing(threat -> new ThreatAssessment.Foe(
-                threat.distance(), threat.kind(), threat.armed(), threat.armed()), ThreatAssessment.BY_THREAT));
+                threat.distance(), threat.kind(), threat.comingAt(attackers), threat.armed()), ThreatAssessment.BY_THREAT));
         // 给了 count 就打够这么多只为止；剩下的敌人比要打的少时照样把剩下的打完，不提前收手。
         if (ordered.isEmpty() || input.count() != null && defeated.size() >= input.count()) {
             return null;
@@ -465,10 +466,15 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     private List<ThreatAssessment.Foe> foesOf(TickContext context, ThreatAssessment.MySide ignored) {
         List<ThreatAssessment.Foe> foes = new ArrayList<>();
         double radius = named.isEmpty() ? input.radius() : ThreatAssessment.VIGILANCE_RADIUS;
+        Set<UUID> attackers = new HashSet<>();
+        for (CombatSenses.Attacker attacker : senses.recentAttackers(context)) {
+            attackers.add(attacker.uuid());
+        }
         for (CombatSenses.Threat threat : senses.threats(context, radius)) {
             // 区域清扫只评估要清的这一批：看不见的、不是这一种的不算进对面的人数。
             if (named.isEmpty() && !batch.contains(threat.entityId())) continue;
-            foes.add(new ThreatAssessment.Foe(threat.distance(), threat.kind(), threat.armed(), threat.armed()));
+            // 追着我的按真的在追算（打过我、点着引信、看得见我亮着攻击标记），"打不打得过"才不偏轻。
+            foes.add(new ThreatAssessment.Foe(threat.distance(), threat.kind(), threat.comingAt(attackers), threat.armed()));
         }
         return ThreatAssessment.sortedByThreat(foes);
     }

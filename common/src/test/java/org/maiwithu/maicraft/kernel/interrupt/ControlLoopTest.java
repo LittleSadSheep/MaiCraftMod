@@ -312,6 +312,26 @@ class ControlLoopTest {
     }
 
     @Test
+    void needThatDoesNotWaitAfterFailureTakesOverAgainRightAway() {
+        // 施工时被僵尸打：自卫没追上（失败）也不缓，下一刻还在挨打就接着插，不让角色站着挨打。
+        FakeTask main = new FakeTask("施工", Interruptibility.WORKING);
+        FakeNeed attacked = new FakeNeed("自卫", new Urgency[] {Urgency.SOON},
+                () -> new FailingTask("自卫临时")) {
+            @Override public boolean waitsAfterFailure() {
+                return false;
+            }
+        };
+        ControlLoop loop = new ControlLoop(List.of(attacked));
+        loop.setMainTask(main);
+
+        for (long tick = 0; tick < 6; tick++) {
+            loop.tick(new TestContext(tick));
+        }
+
+        assertTrue(attacked.created >= 2, "没做成后立刻重来，实际只建了 " + attacked.created + " 次");
+    }
+
+    @Test
     void mainTaskThatTurnedSurvivalNeedsOffIsNeverInterrupted() {
         // 寻死这类任务把 survival_needs 关掉：快淹死也不插换气，手上的事照常推进。
         FakeTask main = new SurvivalOffTask();
@@ -559,14 +579,14 @@ class ControlLoopTest {
     }
 
     /** 生存需求替身：按调用次序回答急迫程度，脚本用完后重复最后一个（null 表示不再需要处理）。 */
-    static final class FakeNeed implements SurvivalNeed {
+    static class FakeNeed implements SurvivalNeed {
         private final String name;
         private final Urgency[] script;
         private final Supplier<Task> factory;
         private int calls;
         int created;
 
-        private FakeNeed(String name, Urgency[] script, Supplier<Task> factory) {
+        FakeNeed(String name, Urgency[] script, Supplier<Task> factory) {
             this.name = name;
             this.script = script;
             this.factory = factory;

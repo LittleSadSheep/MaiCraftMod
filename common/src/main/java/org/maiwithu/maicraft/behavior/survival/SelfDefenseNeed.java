@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.survival;
 
 import org.maiwithu.maicraft.behavior.combat.CombatSenses;
+import org.maiwithu.maicraft.behavior.combat.CombatGeometry;
 import org.maiwithu.maicraft.behavior.combat.ThreatAssessment;
 
 import java.util.ArrayList;
@@ -16,12 +17,17 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.Urgency;
 
 /**
- * 被攻击这项生存需求：有东西在威胁角色（正在攻击、锁定、近处点着引信）就尽快处理，
- * 血线跌破拒战线且还在挨打就是立刻处理；派自卫临时任务——那是战斗能力的一个无差别实例，
- * 不按名单，谁构成威胁打谁。
+ * 被攻击这项生存需求：有东西在威胁角色（正在攻击、锁定、近处点着引信）就处理；派自卫临时任务——
+ * 那是战斗能力的一个无差别实例，不按名单，谁构成威胁打谁。
  *
- * <p>主任务自己就是打仗的活、且评估不是"打不过"时让位给它（任务通过威胁应答的特征接口声明）；
- * 血线破了则本能说了算，自卫照插。
+ * <p>多急：点着引信的苦力怕进了 7 格（引信 1.5 秒就炸）、有怪已经贴到快够得着我的地方（它的危险半径再加
+ * 一格半）、血线跌破拒战线还在挨打——这三种立刻处理，手上的活停不停得下都先顾命；其余尽快处理。
+ * 原先只有血线破了才算立刻，施工、走路这类一时停不下来的活会让僵尸贴着打、苦力怕贴着炸。
+ *
+ * <p>主任务自己就是打仗的活、且评估不是"打不过"时让位给它（任务通过威胁应答的特征接口声明），
+ * 怪贴脸、苦力怕点着它自己会处理；只有血线破了本能说了算，自卫照插。
+ *
+ * <p>自卫没做成（比如追不上、打不出去）也不缓：每一下新挨的打都是新的处境，缓着就是站着挨打。
  */
 public final class SelfDefenseNeed implements SurvivalNeed {
 
@@ -51,14 +57,34 @@ public final class SelfDefenseNeed implements SurvivalNeed {
         if (situation.foes().isEmpty()) {
             return null;
         }
-        Urgency urgency = ThreatAssessment.belowRetreatLine(situation.mine())
-                ? Urgency.NOW : Urgency.SOON;
-        // 主任务自己在打仗且接得住：让位；血线破了则不打折，NOW 照样打断一切。
-        if (urgency == Urgency.SOON && currentTask instanceof ThreatResponder responder
+        boolean belowLine = ThreatAssessment.belowRetreatLine(situation.mine());
+        // 主任务自己在打仗且接得住：让位（贴脸的、点着引信的它自己处理）；血线破了则不打折，本能接管。
+        if (!belowLine && currentTask instanceof ThreatResponder responder
                 && responder.confidentAgainstCurrentThreats()) {
             return null;
         }
-        return urgency;
+        return belowLine || imminent(situation) ? Urgency.NOW : Urgency.SOON;
+    }
+
+    /** 贴脸边上再加这么多（格）就算马上要挨打：僵尸一步就跨过来了。 */
+    static final double IMMINENT_MARGIN = 1.5;
+
+    /** 马上就要出事：点着引信的会炸物进了熄火距离，或有怪贴到它的危险半径再加一格半以内。 */
+    static boolean imminent(SelfDefenseTask.ThreatSituation situation) {
+        for (SelfDefenseTask.Tracked foe : situation.foes()) {
+            if (foe.foe().kind() == ThreatAssessment.Kind.EXPLOSIVE) {
+                if (foe.foe().armed() && foe.distance() <= CombatGeometry.CREEPER_DEFUSE) return true;
+                continue;
+            }
+            if (foe.canHitMe() || foe.distance() <= foe.dangerRadius() + IMMINENT_MARGIN) return true;
+        }
+        return false;
+    }
+
+    /** 被攻击不缓：自卫没做成后下一刻处境还在就接着插，不让角色站着挨打。 */
+    @Override
+    public boolean waitsAfterFailure() {
+        return false;
     }
 
     @Override

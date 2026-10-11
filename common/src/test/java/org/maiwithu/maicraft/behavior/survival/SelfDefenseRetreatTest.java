@@ -30,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 自卫的兜底撤离：攻击推进连续两次 600 刻没有真实进展（攻击通道失灵，出手一直没被确认），
- * 或血量跌破拒战线，就从"再打"升级为"撤离"，以"打不出去，已撤离"如实收场。
+ * 或血量跌破拒战线，就从"再打"升级为"撤离"，甩开后写明为什么撤、撤了多远收场。
  * 一条撤离路线走不通不算没有退路：换方向、隔一秒再试；连续走不通到上限才承认退无可退，
  * 回去背水一战——不再把一次寻路失败当成整场撤离的死刑。
  */
@@ -57,11 +57,12 @@ class SelfDefenseRetreatTest {
         assertTrue(moves.walkCalls >= 1, "撤离阶段真的迈开腿走了");
         assertTrue(moves.strikeTicks > STALL_TICKS, "撤离之前确实一直在试着出手");
         assertTrue(result instanceof TickResult.Finished finished, "撤离后任务收场，实际 " + result);
-        assertEquals(TaskResult.Status.FAILED, ((TickResult.Finished) result).result().status());
+        assertEquals(TaskResult.Status.DONE, ((TickResult.Finished) result).result().status(),
+                "甩开了追兵就是这次被攻击处理好了");
         assertTrue(((TickResult.Finished) result).result().summary().contains("已撤离"),
                 "收场说明里带着撤离事实");
         assertTrue(task.cannotResumeInPlace(), "人已经不在开打的原地，主任务不能在原地接着做");
-        assertTrue(events.messages.stream().anyMatch(m -> m.contains("打不出去，已撤离")),
+        assertTrue(events.messages.stream().anyMatch(m -> m.contains("已撤离") && m.contains("攻击一直打不出去")),
                 "事件里如实报告：" + events.messages);
     }
 

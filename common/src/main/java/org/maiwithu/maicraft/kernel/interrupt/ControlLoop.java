@@ -6,6 +6,7 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.child.ChildTaskRunner;
+import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
@@ -340,8 +341,11 @@ public final class ControlLoop {
                 && stack.getFirst().task instanceof KeepsTempTaskFacts keeps) {
             keeps.keepTempTaskFacts(finished.result());
         }
-        if (frame.from != null && finished.result().status() != TaskResult.Status.DONE) {
+        if (frame.from != null && finished.result().status() != TaskResult.Status.DONE
+                && (frame.from.waitsAfterFailure() || programError(finished.result()))) {
             // 自救没做成：处境不更急就先缓一阵再插，让主任务有机会动；做没做成都不影响主任务。
+            // 声明不缓的需求（被攻击）不按住：每一下新挨的打都要接着处理，不让它站着挨打；
+            // 但程序出错照样缓，免得一个坏掉的临时任务每刻重建、把主任务停停走走。
             holdBack(frame.from, frame.urgency, context, failureOf(finished.result()));
         } else if (frame.from != null) {
             // 做成了一次：之前接连没做成的次数清零，下次再出事从五秒等起。
@@ -379,6 +383,11 @@ public final class ControlLoop {
             }
             return null;
         }
+    }
+
+    // 临时任务是不是因为程序出错没做成：不是游戏里的处境，重来也一样错。
+    private static boolean programError(TaskResult result) {
+        return result.problem() != null && result.problem().kind() == Problem.Kind.INTERNAL_ERROR;
     }
 
     // 记一次没做成：这个需求先缓一阵，接连没做成就缓得更久；为什么没做成一并记下，面板上照实说。

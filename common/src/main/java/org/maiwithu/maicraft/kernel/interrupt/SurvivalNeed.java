@@ -30,4 +30,13 @@ public interface SurvivalNeed {
 
     /** 需要处理时，创建这一次的临时任务。 */
     Task createTask(TickContext context);
+
+    /**
+     * 临时任务没做成后，要不要先缓一阵再插。默认要：弄不到吃的、找不到床这类，接连重试只会空转。
+     * 被攻击这类不缓：每一下新挨的打都是新的处境，缓着就是站着挨打（原先自卫没做成一次就按住
+     * 5 秒到 5 分钟，施工时被打怎么也没反应）。
+     */
+    default boolean waitsAfterFailure() {
+        return true;
+    }
 }

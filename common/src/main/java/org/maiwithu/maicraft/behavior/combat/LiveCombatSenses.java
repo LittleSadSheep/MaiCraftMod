@@ -11,12 +11,20 @@ import java.util.Optional;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.FlyingMob;
+import net.minecraft.world.entity.monster.Blaze;
 import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.monster.Enemy;
+import net.minecraft.world.entity.monster.Evoker;
+import net.minecraft.world.entity.monster.Guardian;
+import net.minecraft.world.entity.monster.RangedAttackMob;
+import net.minecraft.world.entity.monster.Shulker;
+import net.minecraft.world.entity.monster.breeze.Breeze;
 import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.game.player.ReadsFoodValues;
+import org.maiwithu.maicraft.game.world.InteractionRange;
 import org.maiwithu.maicraft.game.world.ObservationVisibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
@@ -60,10 +68,17 @@ public final class LiveCombatSenses implements CombatSenses {
                 continue;
             }
             // 看不看得见按视线判断，地下、墙后的怪不算看得见；攻击标记读原版同步的那一位。
+            // 够不够得着按战斗几何：我这边是眼睛到它碰撞箱，它那边是原版攻击框与我的碰撞箱，不按固定格数猜。
+            double halfWidth = hostile.getBbWidth() / 2.0;
+            boolean explosive = hostile instanceof Creeper;
             threats.add(new Threat(hostile.getId(), hostile.getUUID(), typeId(hostile),
                     hostile.getX(), hostile.getY(), hostile.getZ(), distance,
                     kindOf(hostile), armed(hostile), ObservationVisibility.entity(self, hostile),
-                    hostile.isAggressive()));
+                    hostile.isAggressive(), halfWidth,
+                    CombatGeometry.distanceToBox(self.getEyePosition(), hostile.getBoundingBox()),
+                    !explosive && CombatGeometry.mobReaches(hostile.getBoundingBox(), self.getBoundingBox()),
+                    CombatGeometry.mobDangerRadius(halfWidth, self.getBbWidth() / 2.0),
+                    hostile instanceof Creeper creeper && creeper.isPowered()));
         }
         return threats;
     }
@@ -105,7 +120,8 @@ public final class LiveCombatSenses implements CombatSenses {
                         modded.get().weaponSlot()));
             }
         }
-        return new CombatProfile(self.getHealth(), self.getArmorValue(), weapon, foodCount);
+        return new CombatProfile(self.getHealth(), self.getArmorValue(), weapon, foodCount,
+                InteractionRange.entityReach(self));
     }
 
     @Override
@@ -114,14 +130,19 @@ public final class LiveCombatSenses implements CombatSenses {
         return level == null ? null : level.getEntity(entityId);
     }
 
-    // 危险种类：会飞的（恶魂、幻翼这类，不受重力悬在空中）高一线，
-    // 会炸的按引信分，剩下的按近战算分量。
-    private static ThreatAssessment.Kind kindOf(Entity entity) {
+    // 危险种类按实体类认，不按名字猜：会炸的（苦力怕）；会飞的（恶魂、幻翼这类飞行怪，或不受重力悬着的恼鬼）；
+    // 远程的（原版远程攻击接口的骷髅、流浪者、沼骸、掠夺者、女巫，以及自己写射击的烈焰人、守卫者、潜影贝、
+    // 唤魔者、旋风人）；剩下的按近战。原先只认会炸与无重力两种，骷髅群一律当近战怪评估。
+    static ThreatAssessment.Kind kindOf(Entity entity) {
         if (entity instanceof Creeper) {
             return ThreatAssessment.Kind.EXPLOSIVE;
         }
-        if (entity.isNoGravity()) {
+        if (entity instanceof FlyingMob || entity.isNoGravity()) {
             return ThreatAssessment.Kind.FLYING;
+        }
+        if (entity instanceof RangedAttackMob || entity instanceof Blaze || entity instanceof Guardian
+                || entity instanceof Shulker || entity instanceof Evoker || entity instanceof Breeze) {
+            return ThreatAssessment.Kind.RANGED;
         }
         return ThreatAssessment.Kind.MELEE;
     }
