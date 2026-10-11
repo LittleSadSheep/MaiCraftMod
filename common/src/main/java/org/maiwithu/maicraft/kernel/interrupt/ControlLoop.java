@@ -9,6 +9,7 @@ import org.maiwithu.maicraft.kernel.child.ChildTaskRunner;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
+import org.maiwithu.maicraft.kernel.task.KeepsTempTaskFacts;
 import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
@@ -333,6 +334,12 @@ public final class ControlLoop {
         }
         LOG.info("任务结束：{}（{}）", frame.task.describe(), finished.result().summary());
         stack.remove(frame);
+        // 临时任务做成的事发生在主任务身上：插了一支灯、垫了一块料，把交代的结果递给主任务记账，
+        // 不让变化跟着临时任务的结果一起消失。
+        if (frame.from != null && !stack.isEmpty()
+                && stack.getFirst().task instanceof KeepsTempTaskFacts keeps) {
+            keeps.keepTempTaskFacts(finished.result());
+        }
         if (frame.from != null && finished.result().status() != TaskResult.Status.DONE) {
             // 自救没做成：处境不更急就先缓一阵再插，让主任务有机会动；做没做成都不影响主任务。
             holdBack(frame.from, frame.urgency, context, failureOf(finished.result()));

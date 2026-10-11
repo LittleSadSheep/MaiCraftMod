@@ -3,15 +3,18 @@ package org.maiwithu.maicraft.kernel.interrupt;
 
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
+import org.maiwithu.maicraft.kernel.task.KeepsTempTaskFacts;
 import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 import org.maiwithu.maicraft.kernel.task.Urgency;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
 
@@ -402,6 +405,52 @@ class ControlLoopTest {
         assertEquals("砍树收尾", ended.summary(), "还没推进过的主任务也要收尾交代");
         assertEquals(CloseReason.CANCELLED, second.closeReason);
         assertSame(ControlLoop.Decision.IDLE, loop.tick(TICK));
+    }
+
+    @Test
+    void tempTaskFactsReachTheMainTaskSoChangesStayAuditable() {
+        // 出行路上顺手插了一支火把：临时任务做成的事递给主任务，收尾时 changes 里对得上账，
+        // 不因为临时任务自己有结果就从目标的结果里消失。
+        RecordingMain main = new RecordingMain();
+        ControlLoop loop = new ControlLoop(List.of(FakeNeed.of("太暗",
+                TorchPlacingTask::new, Urgency.SOON, null)));
+        loop.setMainTask(main);
+        assertAdvancedIsTempTask(loop.tick(TICK), "太暗");
+
+        assertAdvanced(loop.tick(TICK));
+        assertEquals(1, main.received.size());
+        assertEquals(TaskResult.Status.DONE, main.received.getFirst().status());
+        assertTrue(main.received.getFirst().changes().stream()
+                .anyMatch(change -> change.kind() == Change.Kind.BLOCK_PLACED
+                        && "minecraft:torch".equals(change.what())));
+    }
+
+    /** 会收临时任务事实的主任务替身。 */
+    static final class RecordingMain extends FakeTask implements KeepsTempTaskFacts {
+        final List<TaskResult> received = new ArrayList<>();
+
+        RecordingMain() {
+            super("出行", Interruptibility.WORKING);
+        }
+
+        @Override public void keepTempTaskFacts(TaskResult result) {
+            received.add(result);
+        }
+    }
+
+    /** 顺手插一支火把的临时任务替身：推进一刻、第二刻做成并交代一条方块变化。 */
+    static final class TorchPlacingTask extends FakeTask {
+        TorchPlacingTask() {
+            super("顺手插火把", Interruptibility.WORKING);
+        }
+
+        @Override public TickResult tick(TickContext context) {
+            ticks++;
+            if (ticks < 2) return TickResult.RUNNING;
+            return TickResult.finished(TaskResult.builder(TaskResult.Status.DONE, "顺手插了一支火把照亮脚下")
+                    .change(new Change(Change.Kind.BLOCK_PLACED, "minecraft:torch", 1, "顺手插在 (1, 64, 1)"))
+                    .build());
+        }
     }
 
     @Test

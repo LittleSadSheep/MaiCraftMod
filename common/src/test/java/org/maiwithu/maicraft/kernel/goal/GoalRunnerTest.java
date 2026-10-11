@@ -116,6 +116,27 @@ class GoalRunnerTest {
     }
 
     @Test
+    void tempTaskFactsAreMergedIntoTheGoalResult() {
+        // 出行路上随行补光顺手插了一支火把：临时任务交代的结果由目标收下，收尾时 changes 对得上账。
+        GoalTestAbility ability = new GoalTestAbility("maicraft:test");
+        ability.next(new StepDecision.Finish(TaskResult.done("走到了目的地")));
+        GoalRunner runner = launch(Goal.of("maicraft:test", null, null), ability,
+                new InMemoryGoalRunStore(), new TestMemory());
+        runner.keepTempTaskFacts(TaskResult.builder(TaskResult.Status.DONE, "顺手插了一支火把照亮脚下")
+                .change(new Change(Change.Kind.BLOCK_PLACED, "minecraft:torch", 1, "顺手插在 (1, 64, 1)"))
+                .build());
+
+        TaskResult result = drive(runner, 10);
+
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertTrue(result.changes().stream()
+                        .anyMatch(change -> change.kind() == Change.Kind.BLOCK_PLACED
+                                && "minecraft:torch".equals(change.what())),
+                "临时任务插的火把进目标的结果");
+        assertEquals("走到了目的地", result.summary(), "结论还是目标自己的");
+    }
+
+    @Test
     void stepFailurePropagatesAsGoalFailure() {
         GoalTestAbility ability = new GoalTestAbility("maicraft:test");
         ability.ending("修水泵", TaskResult.failed("缺扳手",

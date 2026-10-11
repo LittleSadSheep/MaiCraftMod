@@ -9,6 +9,7 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
+import org.maiwithu.maicraft.kernel.task.KeepsTempTaskFacts;
 import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TaskInput;
 import org.maiwithu.maicraft.kernel.task.TaskProgress;
@@ -44,7 +45,7 @@ import java.util.function.Supplier;
  * <p>推进的记录 {@link GoalRun} 每次处境变化都存进目标运行存储；重启后从存储读回还没结束的
  * 记录，恢复为暂停，明确恢复后从当前步骤重新决定（进行中的任务不能跨重启恢复，能力会重新看现场）。
  */
-public final class GoalRunner implements Task, SurvivalNeedsOff {
+public final class GoalRunner implements Task, SurvivalNeedsOff, KeepsTempTaskFacts {
     private static final Logger LOG = LoggerFactory.getLogger(GoalRunner.class);
 
     private final Goal goal;
@@ -69,6 +70,8 @@ public final class GoalRunner implements Task, SurvivalNeedsOff {
     private GoalRunner stepRunner;
     /** 已经结束的任务的结果，按先后；sequence 时是已经结束的各步骤的结果，下标就是第几步。 */
     private final List<TaskResult> finishedResults = new ArrayList<>();
+    /** 临时任务在目标身上做成的事：插灯、垫料这类变化随主任务的结果一起交代。 */
+    private final List<TaskResult> tempTaskFacts = new ArrayList<>();
     /** 结束后的结果；没结束时为 null。 */
     private TaskResult result;
 
@@ -80,6 +83,15 @@ public final class GoalRunner implements Task, SurvivalNeedsOff {
     public boolean survivalNeedsOff() {
         if (stepRunner != null) return stepRunner.survivalNeedsOff();
         return goal.permissions().survivalNeeds() == Permissions.SurvivalNeeds.OFF;
+    }
+
+    /**
+     * 生存需求的临时任务在这条目标身上做成的事（顺手插的火把、垫的料）：它自己的结果没有别人再看，
+     * 变化与没能确认的交互记到这里，目标收尾时随最终结果一起交代。
+     */
+    @Override
+    public void keepTempTaskFacts(TaskResult tempResult) {
+        tempTaskFacts.add(tempResult);
     }
 
     private GoalRunner(GoalRun run, AbilityRegistry registry, GoalRunStore store, RemembersPlaces remembers) {
@@ -568,9 +580,11 @@ public final class GoalRunner implements Task, SurvivalNeedsOff {
         return closed;
     }
 
-    /** 结束目标：把前面已经结束的任务的事实并进结论，记录随之存盘，之后本推进封存。 */
+    /** 结束目标：把临时任务与前面已经结束的任务的事实并进结论，记录随之存盘，之后本推进封存。 */
     private TickResult settle(TaskResult ending, TickContext context) {
-        result = ending.withFactsBefore(finishedResults);
+        List<TaskResult> earlier = new ArrayList<>(tempTaskFacts);
+        earlier.addAll(finishedResults);
+        result = ending.withFactsBefore(earlier);
         run.finish(result, context == null ? -1 : context.gameTick());
         save();
         LOG.info("目标 {} 结束：{}", run.id(), result.summary());
