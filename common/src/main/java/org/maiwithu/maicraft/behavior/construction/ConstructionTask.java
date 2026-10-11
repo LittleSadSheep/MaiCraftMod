@@ -46,7 +46,11 @@ public final class ConstructionTask extends PhasedTask<ConstructionTask.Phase> {
         super("施工", Phase.CHECK, new ProgressTracker(20L * 60, 20L * 60 * 120));
         this.input = input;
         this.services = services;
-        this.site = new ConstructionSite(input.blueprint());
+        // 开工前按联动放置规则换好每格的物品（带漏斗拿漏斗放），备料、换手、记账都认换过的物品。
+        CellPlacements placements = CellPlacements.of(services.placementRules());
+        Blueprint blueprint = input.blueprint();
+        this.site = new ConstructionSite(new Blueprint(blueprint.dimension(), blueprint.anchor(),
+                placements.withItems(blueprint.cells())), placements);
     }
 
     @Override protected Action enter(Phase phase) {

@@ -7,6 +7,7 @@ import java.util.List;
 import org.maiwithu.maicraft.behavior.acquire.DigsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
+import org.maiwithu.maicraft.behavior.construction.spi.PlacementRules;
 
 /**
  * 施工引擎的协作服务：启动时把玩家行为模型与接缝实现从这里递进来，测试用替身。
@@ -24,6 +25,7 @@ import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
  * @param travel       走到没加载的那一片；没接上时没加载的格记"未知"
  * @param accelerators 联动的挖掘加速（连锁挖）；没有就逐格挖
  * @param dismantlers  联动的拆卸工具（扳手拆机器件）；没有就照原来的挖
+ * @param placementRules 联动的放置规则（带漏斗拿漏斗放、等下面的带子）；没有就一律按原版默认放
  */
 public record ConstructionServices(
         ConstructionSeams.ReadsSite site,
@@ -37,11 +39,13 @@ public record ConstructionServices(
         ConstructionSeams.Ledger ledger,
         ConstructionSeams.Travels travel,
         List<BreakAccelerator> accelerators,
-        List<DismantleTool> dismantlers) {
+        List<DismantleTool> dismantlers,
+        List<PlacementRules> placementRules) {
 
     public ConstructionServices {
         accelerators = accelerators == null ? List.of() : List.copyOf(accelerators);
         dismantlers = dismantlers == null ? List.of() : List.copyOf(dismantlers);
+        placementRules = placementRules == null ? List.of() : List.copyOf(placementRules);
         if (site == null) throw new IllegalArgumentException("工地读数不能为空");
         if (close == null) throw new IllegalArgumentException("靠近不能为空");
         if (placements == null) throw new IllegalArgumentException("放置预测不能为空");
@@ -51,10 +55,18 @@ public record ConstructionServices(
         if (ledger == null) throw new IllegalArgumentException("记账不能为空");
     }
 
+    /** 没有联动的放置规则：一律按原版默认放。 */
+    public ConstructionServices(ConstructionSeams.ReadsSite site, BringsPlayerClose close, ConstructionSeams.PlansPlacement placements,
+            ConstructionSeams.Clicks clicks, DigsBlocks digs, ItemNeeds needs, ConstructionSeams.HoldsItem hand,
+            ConstructionSeams.Guards guards, ConstructionSeams.Ledger ledger, ConstructionSeams.Travels travel,
+            List<BreakAccelerator> accelerators, List<DismantleTool> dismantlers) {
+        this(site, close, placements, clicks, digs, needs, hand, guards, ledger, travel, accelerators, dismantlers, List.of());
+    }
+
     /** 没有联动的拆方块办法：清障一律逐格挖。 */
     public ConstructionServices(ConstructionSeams.ReadsSite site, BringsPlayerClose close, ConstructionSeams.PlansPlacement placements,
             ConstructionSeams.Clicks clicks, DigsBlocks digs, ItemNeeds needs, ConstructionSeams.HoldsItem hand,
             ConstructionSeams.Guards guards, ConstructionSeams.Ledger ledger, ConstructionSeams.Travels travel) {
-        this(site, close, placements, clicks, digs, needs, hand, guards, ledger, travel, List.of(), List.of());
+        this(site, close, placements, clicks, digs, needs, hand, guards, ledger, travel, List.of(), List.of(), List.of());
     }
 }

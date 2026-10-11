@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.ability.chat.ReadsChatEcho;
 import org.maiwithu.maicraft.ability.enchant.EnchantModule;
 import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import org.maiwithu.maicraft.behavior.interaction.spi.DismantleTool;
+import org.maiwithu.maicraft.behavior.construction.spi.PlacementRules;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.ability.deposit.DepositModule;
@@ -459,20 +460,22 @@ public final class AbilityCatalog {
 
     /**
      * 施工服务按每次任务的许可拼一份：现场、靠近、放置、点击、挖掘、内需、备手、许可、记账、走到，
-     * 联动的连锁挖与扳手拆机器件也在内；建造与机器施工都用这一个。联动的两样进世界时建一次，
+     * 联动的连锁挖、扳手拆机器件与放置规则也在内；建造与机器施工都用这一个。联动的两样进世界时建一次，
      * 每次施工共用，没装就是空表、清障逐格挖。
      */
     private static Function<Permissions, ConstructionServices> constructionServices(Deps deps, Shared shared) {
         List<BreakAccelerator> accelerators = deps.compat().breakAccelerators(shared.playerServices());
         List<DismantleTool> dismantlers = deps.compat().dismantleTools(shared.playerServices());
+        // 放置规则不用玩家行为：登记表里的整张表原样交给施工（换物品、对着哪格放、等哪几格）与放置预测（放下后自改）。
+        List<PlacementRules> placementRules = deps.compat().placementRules();
         return permissions -> {
             LiveSite site = new LiveSite(deps.context());
-            return new ConstructionServices(site, shared.bringClose(), new LivePlacements(deps.context()),
+            return new ConstructionServices(site, shared.bringClose(), new LivePlacements(deps.context(), placementRules),
                     new LiveClicks(deps.interactions(), deps.inputs(), deps.context()),
                     shared.digging(), shared.innerNeeds(), new LiveHolds(shared.toMainhand(), deps.context()),
                     new PermissionGuards(() -> shared.permission(), permissions, site::dimension),
                     new MemoryLedger(deps.memory(), site::dimension), new LiveTravels(deps.walks()),
-                    accelerators, dismantlers);
+                    accelerators, dismantlers, placementRules);
         };
     }
 

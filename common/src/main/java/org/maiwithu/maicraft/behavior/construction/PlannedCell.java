@@ -74,6 +74,11 @@ public record PlannedCell(BlockPos pos, CellKind kind, BlockState state, Item it
         return new PlannedCell(pos, kind, state, item, required, PlacedBy.MACHINE);
     }
 
+    /** 同一格换一种物品放：联动的放置规则说带漏斗要拿漏斗放、横着的齿轮箱要拿竖直齿轮箱放。 */
+    public PlannedCell withItem(Item other) {
+        return new PlannedCell(pos, kind, state, other, required, placedBy);
+    }
+
     /** 从空位建成这一格要几件物品：门上半、床头不计费，双层半砖两件，雪层按层数。 */
     public int materialCount() {
         return kind == CellKind.BLOCK ? BlockStateRules.materialCount(state) : kind == CellKind.FLUID_SOURCE ? 1 : 0;

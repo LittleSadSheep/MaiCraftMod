@@ -1,17 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.game.world;
 
-import net.minecraft.world.item.StandingAndWallBlockItem;
-import net.minecraft.world.level.block.Block;
-import org.maiwithu.maicraft.game.mixin.StandingAndWallBlockItemAccessor;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.context.BlockPlaceContext;
+import net.minecraft.world.level.block.state.BlockState;
+import org.maiwithu.maicraft.game.mixin.BlockItemAccessor;
 
-/** 放置用的物品事实：火把、告示牌这类物品贴墙时放的是哪种方块，原版把它藏在物品里，这里读出来。 */
+/**
+ * 放置用的物品事实：右键放方块时放成什么由物品自己定（火把对着实墙放成墙式、Create 的漏斗放在传送带上变成带漏斗），
+ * 原版把它藏在物品的受保护方法里，这里照原样问出来，放置预测和真的右键走同一条路。
+ */
 public final class PlacementItems {
 
     private PlacementItems() {}
 
-    /** 这件立式/墙式共用的物品贴墙时放的方块。 */
-    public static Block wallBlock(StandingAndWallBlockItem item) {
-        return ((StandingAndWallBlockItemAccessor) item).maicraft$getWallBlock();
+    /** 这件方块物品在这个放置上下文里会放成什么；物品说放不下（被占、站不住）为 null。 */
+    public static BlockState placementState(BlockItem item, BlockPlaceContext context) {
+        return ((BlockItemAccessor) item).maicraft$getPlacementState(context);
     }
 }

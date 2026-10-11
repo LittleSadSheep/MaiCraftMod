@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.construction;
 
 import java.util.Comparator;
+import java.util.function.Predicate;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.EmptyBlockGetter;
@@ -33,12 +34,20 @@ public final class BuildOrder {
     private BuildOrder() {}
 
     /** 低层先，同层清空 → 骨架 → 贴附件，再按排蛇形走。 */
-    public static final Comparator<PlannedCell> LOW_TO_HIGH = Comparator
-            .comparingInt((PlannedCell cell) -> cell.pos().getY())
-            .thenComparingInt(cell -> needsSupport(cell.state()) ? 1 : 0)
-            .thenComparingInt(BuildOrder::stage)
-            .thenComparingInt(cell -> cell.pos().getZ())
-            .thenComparingInt(cell -> (cell.pos().getZ() & 1) == 0 ? cell.pos().getX() : -cell.pos().getX());
+    public static final Comparator<PlannedCell> LOW_TO_HIGH = lowToHigh(cell -> false);
+
+    /**
+     * 同一个顺序，另把联动放置规则说"要等别的格先放好"的格也当贴附件排在同层骨架之后
+     * （带漏斗等下面的带子、无线红石等背后贴的那块）；等的格在上层时由砌筑先放一放、回头再试。
+     */
+    public static Comparator<PlannedCell> lowToHigh(Predicate<PlannedCell> waits) {
+        return Comparator
+                .comparingInt((PlannedCell cell) -> cell.pos().getY())
+                .thenComparingInt(cell -> needsSupport(cell.state()) || waits.test(cell) ? 1 : 0)
+                .thenComparingInt(BuildOrder::stage)
+                .thenComparingInt(cell -> cell.pos().getZ())
+                .thenComparingInt(cell -> (cell.pos().getZ() & 1) == 0 ? cell.pos().getX() : -cell.pos().getX());
+    }
 
     /**
      * 要先有别的方块才挂得住的东西：挂着的灯笼与告示牌、梯子、火把、牌、压力板、铁轨、红石元件、红石线、

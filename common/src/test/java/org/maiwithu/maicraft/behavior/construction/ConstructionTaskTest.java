@@ -5,6 +5,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.Item;
 import org.maiwithu.maicraft.behavior.interaction.spi.DismantleTool;
 import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
+import org.maiwithu.maicraft.behavior.construction.spi.PlacementRules;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -72,6 +73,10 @@ class ConstructionTaskTest {
         final List<String> siteNotes = new ArrayList<>();
         final List<BreakAccelerator> accelerators = new ArrayList<>();
         final List<DismantleTool> dismantlers = new ArrayList<>();
+        final List<PlacementRules> rules = new ArrayList<>();
+        /** 每次放的放法与放到的格，按出手顺序。 */
+        final List<PlacementPrediction.Placement> clicks = new ArrayList<>();
+        final List<BlockPos> placedOrder = new ArrayList<>();
         int digCalls;
         BlockPos feet = new BlockPos(5, 64, 5);
 
@@ -101,6 +106,8 @@ class ConstructionTaskTest {
 
         @Override public Click place(PlannedCell cell, PlacementPrediction.Placement placement, boolean sneak, PlacementConfirmation confirmation) {
             return click(() -> {
+                clicks.add(placement);
+                placedOrder.add(cell.pos());
                 world.put(cell.pos(), placement.predicted());
                 for (var effect : PlacementPrediction.generatedBy(cell.pos(), placement.predicted())) world.put(effect.pos(), effect.expected());
                 carried.merge(BuiltInRegistries.ITEM.getKey(cell.item()).toString(), -1, Integer::sum);
@@ -143,7 +150,7 @@ class ConstructionTaskTest {
         @Override public Action toward(ApproachTarget target, Permissions permissions) { return new Immediate(() -> { }); }
 
         ConstructionServices services() {
-            return new ConstructionServices(this, this, this, this, this, this, this, this, this, null, accelerators, dismantlers);
+            return new ConstructionServices(this, this, this, this, this, this, this, this, this, null, accelerators, dismantlers, rules);
         }
     }
 
@@ -353,5 +360,79 @@ class ConstructionTaskTest {
         assertEquals(0, fake.digCalls, "认领了就用工具拆，不挖");
         assertEquals(1, count(result, Change.Kind.BLOCK_BROKEN));
         assertEquals(1, fake.carried("minecraft:dirt"), "拆下的东西进了背包");
+    }
+
+    /** 放置规则替身：认一种方块，说拿什么放、对着哪一格放、要等哪几格。 */
+    private record Rule(BlockState block, Item item, BlockPos placeAtOffset, List<BlockPos> after) implements PlacementRules {
+        @Override public Optional<Placement> placementFor(BlockState state, BlockPos at, ReadsBlocks world) {
+            return state.is(block.getBlock()) ? Optional.of(new Placement(item, at.offset(placeAtOffset))) : Optional.empty();
+        }
+        @Override public List<BlockPos> placeAfter(BlockState state) {
+            return state.is(block.getBlock()) ? after : List.of();
+        }
+    }
+
+    @Test
+    void 规则说拿别的物品放_备料换手记账都认它() {
+        Fake fake = new Fake().ground(63);
+        fake.rules.add(new Rule(Blocks.TINTED_GLASS.defaultBlockState(), Items.GLASS, BlockPos.ZERO, List.of()));
+        fake.carried.put("minecraft:glass", 1);
+        TaskResult result = run(fake, wall(Blocks.TINTED_GLASS.defaultBlockState(), new BlockPos(0, 64, 0)));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(Blocks.TINTED_GLASS, fake.state(new BlockPos(0, 64, 0)).getBlock());
+        assertEquals(1, details(result).materialsUsed().get("minecraft:glass"));
+        assertEquals(0, fake.carried("minecraft:glass"));
+    }
+
+    @Test
+    void 要等的格先放_等它的格回头再放() {
+        Fake fake = new Fake().ground(63);
+        // 木板要等东边的火把先放好：照常的顺序木板是骨架、先放，有了规则就先放一放。
+        fake.rules.add(new Rule(Blocks.OAK_PLANKS.defaultBlockState(), Items.OAK_PLANKS, BlockPos.ZERO, List.of(new BlockPos(1, 0, 0))));
+        fake.carried.put("minecraft:oak_planks", 1);
+        fake.carried.put("minecraft:torch", 1);
+        List<PlannedCell> cells = List.of(PlannedCell.block(new BlockPos(0, 64, 0), Blocks.OAK_PLANKS.defaultBlockState(), Set.of()),
+                PlannedCell.block(new BlockPos(1, 64, 0), Blocks.TORCH.defaultBlockState(), Set.of()));
+        TaskResult result = run(fake, new Blueprint(DIM, new BlockPos(0, 64, 0), cells));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(List.of(new BlockPos(1, 64, 0), new BlockPos(0, 64, 0)), fake.placedOrder);
+    }
+
+    @Test
+    void 等的格没放成_等它的格如实记下() {
+        Fake fake = new Fake().ground(63);
+        fake.rules.add(new Rule(Blocks.OAK_PLANKS.defaultBlockState(), Items.OAK_PLANKS, BlockPos.ZERO, List.of(new BlockPos(1, 0, 0))));
+        fake.carried.put("minecraft:oak_planks", 1);
+        fake.unobtainable.add("minecraft:torch");
+        List<PlannedCell> cells = List.of(PlannedCell.block(new BlockPos(0, 64, 0), Blocks.OAK_PLANKS.defaultBlockState(), Set.of()),
+                PlannedCell.block(new BlockPos(1, 64, 0), Blocks.TORCH.defaultBlockState(), Set.of()));
+        TaskResult result = run(fake, new Blueprint(DIM, new BlockPos(0, 64, 0), cells));
+        assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
+        assertTrue(fake.placedOrder.isEmpty(), "等的火把没有，木板也没放");
+        assertTrue(details(result).problems().stream().anyMatch(group -> group.reason().equals("要等别的格先放好，那些格没放成")));
+    }
+
+    @Test
+    void 规则说对着下面一格放_点的是再下面那格的顶面() {
+        Fake fake = new Fake().ground(63);
+        // 像动力辊：落在 y=65，要对着 y=64 那一格放（原版以为放在那里，物品自己抬高一格），点的是地面的顶面。
+        fake.rules.add(new Rule(Blocks.OAK_PLANKS.defaultBlockState(), Items.OAK_PLANKS, new BlockPos(0, -1, 0), List.of()));
+        fake.carried.put("minecraft:oak_planks", 1);
+        TaskResult result = run(fake, wall(Blocks.OAK_PLANKS.defaultBlockState(), new BlockPos(0, 65, 0)));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(new BlockPos(0, 63, 0), fake.clicks.getFirst().clicked());
+        assertEquals(Direction.UP, fake.clicks.getFirst().face());
+        assertEquals(AIR, fake.state(new BlockPos(0, 64, 0)), "对着放的那一格还空着");
+    }
+
+    @Test
+    void 对着放的那一格被占着_记做不了不出手() {
+        Fake fake = new Fake().ground(64);
+        fake.rules.add(new Rule(Blocks.OAK_PLANKS.defaultBlockState(), Items.OAK_PLANKS, new BlockPos(0, -1, 0), List.of()));
+        fake.carried.put("minecraft:oak_planks", 1);
+        TaskResult result = run(fake, wall(Blocks.OAK_PLANKS.defaultBlockState(), new BlockPos(0, 65, 0)));
+        assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
+        assertTrue(fake.clicks.isEmpty());
+        assertEquals(1, details(result).cells().get("impossible"));
     }
 }

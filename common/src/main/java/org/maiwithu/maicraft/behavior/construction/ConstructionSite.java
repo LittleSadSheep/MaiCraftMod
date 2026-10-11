@@ -23,6 +23,7 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 final class ConstructionSite {
 
     private final Blueprint blueprint;
+    private final CellPlacements placements;
     private final Map<BlockPos, CellEnding> endings = new LinkedHashMap<>();
     private final Map<String, List<BlockPos>> problems = new LinkedHashMap<>();
     private final Map<String, Integer> materialsUsed = new LinkedHashMap<>();
@@ -30,12 +31,22 @@ final class ConstructionSite {
     private final Set<BlockPos> excluded = new HashSet<>();
 
     ConstructionSite(Blueprint blueprint) {
+        this(blueprint, CellPlacements.none());
+    }
+
+    /** 带联动放置规则的工地：每格的物品已按规则换过，排顺序与等别的格都问它。 */
+    ConstructionSite(Blueprint blueprint, CellPlacements placements) {
         this.blueprint = blueprint;
+        this.placements = placements;
         for (PlannedCell cell : blueprint.cells()) endings.put(cell.pos(), CellEnding.UNKNOWN);
     }
 
     Blueprint blueprint() {
         return blueprint;
+    }
+
+    CellPlacements placements() {
+        return placements;
     }
 
     /** 对图核一遍，更新每格的结局；这次放过、清过、倒过的仍记原来的结局。返回没加载的格。 */
@@ -110,7 +121,7 @@ final class ConstructionSite {
             if (cell.kind() != CellKind.BLOCK || !needsWork(cell.pos()) || BlockStateRules.isSecondaryHalf(cell.state())) continue;
             out.add(cell);
         }
-        out.sort(BuildOrder.LOW_TO_HIGH);
+        out.sort(BuildOrder.lowToHigh(placements::waits));
         return out;
     }
 

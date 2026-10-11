@@ -53,6 +53,14 @@ public final class ConstructionSeams {
     public interface PlansPlacement {
         Optional<PlacementPrediction.Placement> predict(PlannedCell cell, BlockPos clicked, Direction face);
 
+        /**
+         * 对着 placeAt 放这一格（联动规则说的那一格，动力辊对着下面那一格放）：原版以为在放 placeAt，
+         * 预测出来的是落到目标格的样子。不关心对着哪一格放的替身照目标格算。
+         */
+        default Optional<PlacementPrediction.Placement> predict(PlannedCell cell, BlockPos placeAt, BlockPos clicked, Direction face) {
+            return predict(cell, clicked, face);
+        }
+
         /** 被点的方块自己有右键行为时要潜行再点。 */
         boolean requiresSneak(BlockPos clicked);
     }

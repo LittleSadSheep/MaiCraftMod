@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.construction;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
@@ -11,25 +12,38 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.util.Mth;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.behavior.construction.spi.PlacementRules;
 import org.maiwithu.maicraft.game.interaction.FirstPersonInteractionTargeting;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.InteractionRange;
 
 /**
  * 放置预测的生产实现：从角色现在的眼睛位置找被点那一面看得见的点，算出看向它的角度，
- * 再用原版的放置规则试算这一下会放成什么。只算不动手；真的转头与点击交给交互动作。
+ * 再用原版的放置规则试算这一下会放成什么；物品放下以后自己再改的（竖直齿轮箱定轴向）按联动的放置规则补上。
+ * 只算不动手；真的转头与点击交给交互动作。
  */
 public final class LivePlacements implements ConstructionSeams.PlansPlacement {
 
     private final Supplier<PlayerContext> context;
+    private final CellPlacements placements;
 
     public LivePlacements(Supplier<PlayerContext> context) {
+        this(context, List.of());
+    }
+
+    public LivePlacements(Supplier<PlayerContext> context, List<PlacementRules> rules) {
         this.context = Objects.requireNonNull(context, "context");
+        this.placements = CellPlacements.of(rules);
     }
 
     @Override public Optional<PlacementPrediction.Placement> predict(PlannedCell cell, BlockPos clicked, Direction face) {
+        return predict(cell, cell.pos(), clicked, face);
+    }
+
+    @Override public Optional<PlacementPrediction.Placement> predict(PlannedCell cell, BlockPos placeAt, BlockPos clicked, Direction face) {
         PlayerContext current = context.get();
         if (current == null || current.localPlayer() == null || current.level() == null) return Optional.empty();
         LocalPlayer player = current.localPlayer();
@@ -43,7 +57,11 @@ public final class LivePlacements implements ConstructionSeams.PlansPlacement {
         float yaw = (float) (Mth.atan2(delta.z, delta.x) * Mth.RAD_TO_DEG) - 90.0f;
         float pitch = (float) -(Mth.atan2(delta.y, horizontal) * Mth.RAD_TO_DEG);
         boolean sneak = requiresSneak(clicked);
-        return Optional.ofNullable(PlacementPrediction.predict(player, new ItemStack(cell.item()), hit, yaw, pitch, sneak, cell.pos()));
+        // 原版以为在放 placeAt；落下来以后物品自己再改的样子（朝向这一下的水平方向定）由放置规则补上，再拿去和蓝图比。
+        PlacementPrediction.Placement predicted = PlacementPrediction.predict(player, new ItemStack(cell.item()), hit, yaw, pitch, sneak, placeAt);
+        if (predicted == null || predicted.predicted() == null) return Optional.ofNullable(predicted);
+        BlockState settled = placements.afterPlacing(cell.item(), predicted.predicted(), level, cell.pos(), Direction.fromYRot(yaw));
+        return Optional.of(new PlacementPrediction.Placement(predicted.clicked(), predicted.face(), settled));
     }
 
     @Override public boolean requiresSneak(BlockPos clicked) {

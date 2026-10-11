@@ -86,12 +86,23 @@ final class PlacingWork extends ConstructionWork {
                 if (!temporary) site.exclude(cell.pos(), CellEnding.PROTECTED, refused.get().message());
                 continue;
             }
-            List<PlacementAttempt.Candidate> candidates = PlacementAttempt.candidates(services.site(), cell);
+            // 联动规则说要等别的格先放好（带漏斗等下面的带子）：等的格还没好就先放一放，做别的再回头。
+            if (!waiting(cell).isEmpty()) {
+                deferred.add(cell);
+                continue;
+            }
+            // 对着哪一格放：多数就是它自己；规则说要对着别的格放而那一格被占着，怎么点都落不到这里。
+            BlockPos placeAt = site.placements().placeAt(cell, services.site());
+            if (!placeAt.equals(cell.pos()) && occupied(placeAt)) {
+                site.exclude(cell.pos(), CellEnding.IMPOSSIBLE, "要对着另一格放才落得到这里（动力辊这类会被下面的实心面抬高一格），那一格被占着");
+                continue;
+            }
+            List<PlacementAttempt.Candidate> candidates = PlacementAttempt.candidates(services.site(), cell, placeAt);
             if (candidates.isEmpty()) {
                 deferred.add(cell);
                 continue;
             }
-            attempt = new PlacementAttempt(cell, temporary, candidates);
+            attempt = new PlacementAttempt(cell, placeAt, temporary, candidates);
             return tryNextCandidate();
         }
     }
@@ -105,7 +116,14 @@ final class PlacingWork extends ConstructionWork {
             progressThisRound = false;
             return true;
         }
-        PlannedCell stuck = deferred.remove(0);
+        // 没进展：先挑第一个不是在等别的格的放不上的格去垫；剩下全在等别的格，等的那些格都没放成，如实记下。
+        PlannedCell stuck = deferred.stream().filter(cell -> waiting(cell).isEmpty()).findFirst().orElse(null);
+        if (stuck == null) {
+            for (PlannedCell cell : deferred) site.unreachable(cell.pos(), "要等别的格先放好，那些格没放成");
+            deferred.clear();
+            return true;
+        }
+        deferred.remove(stuck);
         List<BlockPos> chain = permissions.changeBlocks() == Permissions.BlockChanges.NONE ? List.of()
                 : TemporaryBlocks.chain(services.site(), stuck.pos(), this::mayPlaceTemporary, pos -> true);
         Optional<String> material = services.site().temporaryMaterial();
@@ -121,6 +139,19 @@ final class PlacingWork extends ConstructionWork {
         queue.add(stuck);
         records.attempt("为 " + stuck.pos().toShortString() + " 垫临时方块", "找到一条 " + chain.size() + " 块的链");
         return true;
+    }
+
+    // 这一格要等的、蓝图里写了而且还没做好的格。
+    private List<BlockPos> waiting(PlannedCell cell) {
+        return site.placements().waitsFor(cell).stream()
+                .filter(pos -> site.declared().contains(pos) && site.needsWork(pos)).toList();
+    }
+
+    // 对着放的那一格被不可替换的东西占着（空气、水、草这类能直接放进去的不算）。
+    private boolean occupied(BlockPos pos) {
+        if (!services.site().loaded(pos)) return false;
+        BlockState live = services.site().state(pos);
+        return !live.isAir() && !live.canBeReplaced();
     }
 
     // 临时方块只能垫在蓝图没声明的格上，而且许可与保护都放行。
@@ -147,7 +178,8 @@ final class PlacingWork extends ConstructionWork {
     // 到了：用原版的放置规则试算这一下会放成什么；不是要的样子就换一面。
     private ActionStatus arrived() {
         PlacementAttempt.Candidate candidate = attempt.current();
-        Optional<PlacementPrediction.Placement> predicted = services.placements().predict(attempt.cell, candidate.clicked(), candidate.face());
+        Optional<PlacementPrediction.Placement> predicted = services.placements().predict(attempt.cell, attempt.placeAt,
+                candidate.clicked(), candidate.face());
         BlockState live = services.site().loaded(attempt.cell.pos()) ? services.site().state(attempt.cell.pos()) : null;
         boolean acceptable = predicted.isPresent() && predicted.get().predicted() != null && live != null
                 && (PlacementPrediction.complete(attempt.cell, predicted.get().predicted())

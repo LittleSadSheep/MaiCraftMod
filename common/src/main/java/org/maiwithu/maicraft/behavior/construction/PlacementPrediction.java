@@ -9,7 +9,6 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.StandingAndWallBlockItem;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
@@ -156,7 +155,8 @@ public final class PlacementPrediction {
 
     /**
      * 用原版的放置上下文试算：视角与潜行换成候选的值，落点仍由原版决定——物品会放到别的格时不强解释成目标格。
-     * 对着实墙点贴附物品（火把、告示牌）时原版放的是墙式，预测也按墙式。算不出来返回 null。
+     * 放成什么问物品自己（火把对着实墙放成墙式、漏斗放在传送带上变成带漏斗），和真的右键走同一条路；
+     * 那一格被占着、物品说放不下时预测为空。算不出来返回 null。
      */
     public static Placement predict(LocalPlayer player, ItemStack stack, BlockHitResult hit, float yaw, float pitch,
                                     boolean sneak, BlockPos target) {
@@ -190,12 +190,11 @@ public final class PlacementPrediction {
             };
             // 点同类半砖可能补成被点格的双层砖而不是放到邻格：落点也要和这次的目标格对上。
             BlockPos destination = context.getClickedPos();
-            if (!destination.equals(target)) return new Placement(hit.getBlockPos(), hit.getDirection(), null);
-            BlockState placed = blockItem.getBlock().getStateForPlacement(context);
-            if (placed != null && hit.getDirection().getAxis().isHorizontal() && blockItem instanceof StandingAndWallBlockItem wallItem) {
-                BlockState wall = PlacementItems.wallBlock(wallItem).getStateForPlacement(context);
-                if (wall != null) placed = wall;
-            }
+            if (!destination.equals(target) || !context.canPlace()) return new Placement(hit.getBlockPos(), hit.getDirection(), null);
+            // 原版右键放方块的顺序：物品先改放置上下文（脚手架往外续），再由物品自己定放成什么。
+            BlockPlaceContext placing = blockItem.updatePlacementContext(context);
+            if (placing == null || !placing.getClickedPos().equals(target)) return new Placement(hit.getBlockPos(), hit.getDirection(), null);
+            BlockState placed = PlacementItems.placementState(blockItem, placing);
             return new Placement(hit.getBlockPos(), hit.getDirection(), placed);
         } catch (RuntimeException unavailable) {
             return null;
