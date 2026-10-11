@@ -18,6 +18,7 @@ import org.maiwithu.maicraft.ability.quest.spi.QuestBookOperations;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.construction.spi.PlacementRules;
 import org.maiwithu.maicraft.behavior.survival.spi.RangedWeapon;
+import org.maiwithu.maicraft.behavior.travel.spi.TravelMode;
 import org.maiwithu.maicraft.behavior.inventory.spi.CarriedBackpack;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
 import org.maiwithu.maicraft.behavior.menu.spi.MenuLayoutProof;
@@ -32,7 +33,7 @@ import org.slf4j.LoggerFactory;
 /**
  * 联动登记表：启动时按联动清单逐行检查，收集登记了的联动入口交来的 spi 接口实现，
  * 再由启动交给玩家行为层与能力（拿到物品的来源、机器类型、网络读取器、任务书操作、腾背包的随身背包、
- * 查资料的知识来源、查配方的配方查看器、认得出的模组界面、施工的放置规则、战斗的远程武器）。不是 Minecraft 的注册表。
+ * 查资料的知识来源、查配方的配方查看器、认得出的模组界面、施工的放置规则、战斗的远程武器、出行方式）。不是 Minecraft 的注册表。
  *
  * <p>要用进了世界才有的玩家行为（走过去、点开、保护判断）的，存的是建法，进世界时带着联动能用的玩家行为再建；
  * 建出来的都包一层：模组停用、碰到模组接口对不上时如实回答"用不了"，不让它变成任务的内部错误。
@@ -52,6 +53,7 @@ public final class CompatRegistry {
     private final List<ToBuild<BreakAccelerator>> breakAccelerators = new ArrayList<>();
     private final List<ToBuild<DismantleTool>> dismantleTools = new ArrayList<>();
     private final List<ToBuild<ItemSettings>> itemSettings = new ArrayList<>();
+    private final List<ToBuild<TravelMode>> travelModes = new ArrayList<>();
     private final List<MenuLayoutProof> menuLayouts = new ArrayList<>();
     private final List<CarriedBackpack> carriedBackpacks = new ArrayList<>();
     private final List<KnowledgeSource> knowledgeSources = new ArrayList<>();
@@ -62,7 +64,7 @@ public final class CompatRegistry {
     /** 全部的槽：一个模组交接到一半出错时，按交接前的长度一起撤回。新加槽时把它的列表加进来。 */
     private final List<List<?>> slots = List.of(itemSources, machineTypes, networkReaders, questBooks,
             breakAccelerators, dismantleTools, menuLayouts, carriedBackpacks, knowledgeSources, recipeViewers,
-            serverReads, placementRules, rangedWeapons, itemSettings);
+            serverReads, placementRules, rangedWeapons, itemSettings, travelModes);
     private final List<String> decisions = new ArrayList<>();
 
     private CompatRegistry() {}
@@ -151,6 +153,11 @@ public final class CompatRegistry {
     /** 联动入口交一种物品设置（过滤器写规则）的建法：进世界时建，包一层后交给机器能力；模组停用后不再认物品。 */
     public void itemSettings(CompatModule module, Function<PlayerServices, ItemSettings> build) {
         itemSettings.add(new ToBuild<>(module, build));
+    }
+
+    /** 联动入口交一种出行方式（电梯、喷气背包、火车）的建法：进世界时建，包一层后交给出行；模组停用后报价答用不了。 */
+    public void travelMode(CompatModule module, Function<PlayerServices, TravelMode> build) {
+        travelModes.add(new ToBuild<>(module, build));
     }
 
     /** 联动入口交一个挖掘加速（连锁挖）的建法：进世界时建，包一层后交给施工的清障；模组停用后给不出批，退回逐格挖。 */
@@ -249,6 +256,11 @@ public final class CompatRegistry {
     /** 进世界时建联动模组的物品设置；规矩同物品来源。 */
     public List<ItemSettings> itemSettings(PlayerServices services) {
         return build(itemSettings, services, "物品设置", CompatItemSettings::new);
+    }
+
+    /** 进世界时建联动模组的出行方式；规矩同物品来源。 */
+    public List<TravelMode> travelModes(PlayerServices services) {
+        return build(travelModes, services, "出行方式", CompatTravelMode::new);
     }
 
     /** 进世界时建联动模组的挖掘加速；规矩同物品来源。 */

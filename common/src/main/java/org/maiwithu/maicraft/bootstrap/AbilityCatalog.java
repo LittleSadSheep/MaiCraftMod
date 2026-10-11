@@ -503,6 +503,7 @@ public final class AbilityCatalog {
 
         // 出行：目的地解析用当刻的世界、记住的地点与场景里的观察编号；走到由内嵌 Baritone 执行，
         // 路上垫的方块从走到实现方读回。跨维度的现场部件一次拼好：找门、进门、建门与末地门房间共用。
+        // 联动登记的出行方式（电梯、喷气背包、火车）进世界时建好交给出行：远处或走不通时比它们的报价。
         registry.register(new TravelAbility(deps.walks(),
                 new DestinationResolver(deps.travelWorld(), deps.memory(), new SceneSeenTargets(deps::scene)),
                 deps.walkInternals(), deps.travelProgress(),
@@ -512,7 +513,8 @@ public final class AbilityCatalog {
                         deps.context(),
                         deps.walks(), shared.innerNeeds(), shared.toMainhand(),
                         new LiveBlockUses(deps.interactions()), construction,
-                        deps.memory(), deps.walkInternals(), deps.travelProgress())));
+                        deps.memory(), deps.walkInternals(), deps.travelProgress()),
+                deps.travelWorld(), deps.compat().travelModes(services)));
 
         // 寻找：方块与实体扫已加载区，结构查记过的产地线索；命中直接在场景的观察编号表上领编号。
         registry.register(FindModule.live(deps.context(), deps.blockScans(), deps.creatures(),

@@ -16,6 +16,12 @@ import org.maiwithu.maicraft.behavior.travel.TravelDestination;
 import org.maiwithu.maicraft.behavior.travel.TravelProgress;
 import org.maiwithu.maicraft.behavior.travel.TravelTask;
 import org.maiwithu.maicraft.behavior.travel.TravelWorldView;
+import org.maiwithu.maicraft.behavior.travel.spi.OfferSink;
+import org.maiwithu.maicraft.behavior.travel.spi.TravelLeg;
+import org.maiwithu.maicraft.behavior.travel.spi.TravelMode;
+import org.maiwithu.maicraft.behavior.travel.spi.TravelOffer;
+import org.maiwithu.maicraft.behavior.travel.spi.TravelRequest;
+import org.maiwithu.maicraft.behavior.travel.spi.TravelVia;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
@@ -184,6 +190,44 @@ class TravelAbilityTest {
                 return List.of(answer);
             }
         };
+    }
+
+    @Test
+    void viaAppearsOnlyWithTravelModesAndRoutesToJourney() {
+        // 装了出行方式才有 via；不给或指定别的方式交给行程，指定只走路照旧是出行任务。
+        TravelMode elevator = new TravelMode() {
+            @Override public TravelVia via() {
+                return new TravelVia("elevator", "坐 Create 电梯换楼层");
+            }
+
+            @Override public void offer(TravelRequest request, OfferSink sink) {
+                sink.decline("没有电梯", true);
+            }
+
+            @Override public TravelLeg start(TravelOffer offer) {
+                throw new AssertionError("决定阶段不开跑");
+            }
+        };
+        TravelAbility withModes = new TravelAbility(walks,
+                new DestinationResolver(new StubWorld(), name -> Optional.empty(), id -> Optional.empty()),
+                List::of, progress -> {}, null, new StubWorld(), List.of(elevator));
+        assertFalse(ability.spec().paramSpecs().parse(JsonParser.parseString("{\"via\":\"walk\"}")
+                .getAsJsonObject()).ok(), "没有出行方式时参数表里没有 via");
+        ParseResult parsed = withModes.spec().paramSpecs().parse(JsonParser.parseString("{\"via\":\"elevator\"}")
+                .getAsJsonObject());
+        assertTrue(parsed.ok(), "装了电梯就能指定 elevator：" + parsed.errors());
+
+        Goal far = new Goal("maicraft:travel", null, new Target.Position(5, 120, 5, null), parsed.params(),
+                Permissions.DEFAULT, List.of(), null);
+        StepDecision.Run run = assertInstanceOf(StepDecision.Run.class, withModes.decide(step(far)));
+        JourneyInput journey = assertInstanceOf(JourneyInput.class, run.input());
+        assertEquals("elevator", journey.journey().via());
+
+        ParseResult walkOnly = withModes.spec().paramSpecs().parse(JsonParser.parseString("{\"via\":\"walk\"}")
+                .getAsJsonObject());
+        Goal walk = new Goal("maicraft:travel", null, new Target.Position(5, 120, 5, null), walkOnly.params(),
+                Permissions.DEFAULT, List.of(), null);
+        assertInstanceOf(TravelInput.class, assertInstanceOf(StepDecision.Run.class, withModes.decide(step(walk))).input());
     }
 
     /** 能力决定阶段不会开始走到；真走了说明薄皮越界。 */
