@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat.create;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -39,6 +40,7 @@ final class CreateMachineType implements MachineType {
     private final Predicate<BlockState> covers;
     private final StationHandling stations;
     private final Optional<CreateInstallation> installation;
+    private final ValueChanges values;
 
     /**
      * @param covers       这一格算不算这种机器：目录里的按方块认，兜底的"其他动力方块"按是不是动力方块认
@@ -52,6 +54,7 @@ final class CreateMachineType implements MachineType {
         this.covers = Objects.requireNonNull(covers, "covers");
         this.stations = Objects.requireNonNull(stations, "stations");
         this.installation = Objects.requireNonNull(installation, "installation");
+        this.values = new ValueChanges(compat, services);
     }
 
     @Override public String id() { return kind.id(); }
@@ -131,17 +134,22 @@ final class CreateMachineType implements MachineType {
         return false;
     }
 
-    // 能改的设置：机械手手里拿什么与模式；别的机器暂时没有可改的。
+    // 能改的设置：方块上的设置框（过滤格、件数、数值、选项），机械手再加手里拿什么与模式。
     @Override public List<MachineSetting> settings(BlockPos at) {
         ClientLevel level = level();
-        if (level == null || kind.work() != CreateMachineCatalog.Work.DEPLOYER) return List.of();
-        return DeployerSettings.of(compat.deployer(level, at));
+        if (level == null || !level.isLoaded(at)) return List.of();
+        List<MachineSetting> settings = new ArrayList<>(CreateValueSettings.of(compat.valueBoxes(level, at)));
+        if (kind.work() == CreateMachineCatalog.Work.DEPLOYER) settings.addAll(DeployerSettings.of(compat.deployer(level, at)));
+        return settings;
     }
 
     @Override public Optional<Action> change(BlockPos at, String key, String value, Permissions permissions) {
         ClientLevel level = level();
-        if (level == null || kind.work() != CreateMachineCatalog.Work.DEPLOYER) return Optional.empty();
-        return stations.changeDeployer(level.getBlockState(at), at, key, value, permissions);
+        if (level == null || !level.isLoaded(at)) return Optional.empty();
+        if (kind.work() == CreateMachineCatalog.Work.DEPLOYER && key.startsWith("deployer.")) {
+            return stations.changeDeployer(level.getBlockState(at), at, key, value, permissions);
+        }
+        return values.change(level, at, key, value, permissions);
     }
 
     @Override public Optional<Action> feed(BlockPos at, String itemId, int count, Permissions permissions) {

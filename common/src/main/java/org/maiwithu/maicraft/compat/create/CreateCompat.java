@@ -34,15 +34,17 @@ public final class CreateCompat extends CompatModule {
     private final CreateChainConveyors chains;
     private final CreateStations stations;
     private final CreateTools tools;
+    private final CreateValues values;
 
     public CreateCompat(CreateKinetics kinetics, CreateBelts belts, CreateChainConveyors chains,
-            CreateStations stations, CreateTools tools) {
+            CreateStations stations, CreateTools tools, CreateValues values) {
         super(MOD_ID, "机械动力");
         this.kinetics = Objects.requireNonNull(kinetics, "kinetics");
         this.belts = Objects.requireNonNull(belts, "belts");
         this.chains = Objects.requireNonNull(chains, "chains");
         this.stations = Objects.requireNonNull(stations, "stations");
         this.tools = Objects.requireNonNull(tools, "tools");
+        this.values = Objects.requireNonNull(values, "values");
     }
 
     @Override public void contribute(CompatRegistry registry) {
@@ -167,6 +169,16 @@ public final class CreateCompat extends CompatModule {
     /** 库存请求器上次读到的现货；见 {@link CreateStations#stock}。 */
     public Optional<CreateStations.StockSnapshot> stock(ClientLevel level, BlockPos at) {
         return call("读库存请求器的现货", () -> stations.stock(level, at));
+    }
+
+    /** 这一格方块上的设置框；见 {@link CreateValues#boxes}。 */
+    public CreateValues.Boxes valueBoxes(ClientLevel level, BlockPos at) {
+        return call("读设置框", () -> values.boxes(level, at));
+    }
+
+    /** 改一个数值或选项；见 {@link CreateValues#sendValue}。 */
+    public void sendValue(BlockPos at, int netId, Direction side, int row, int value) {
+        run("改设置框的值", () -> values.sendValue(at, netId, side, row, value));
     }
 
     /** 分液池上的那一件；见 {@link CreateStations#drainItems}。 */

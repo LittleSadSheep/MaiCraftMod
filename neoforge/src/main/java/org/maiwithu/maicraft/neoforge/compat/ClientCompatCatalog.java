@@ -26,6 +26,7 @@ import org.maiwithu.maicraft.neoforge.compat.create.CreateChainConveyorReads;
 import org.maiwithu.maicraft.neoforge.compat.create.CreateKineticReads;
 import org.maiwithu.maicraft.neoforge.compat.create.CreateStationReads;
 import org.maiwithu.maicraft.neoforge.compat.create.CreateToolReads;
+import org.maiwithu.maicraft.neoforge.compat.create.CreateValueReads;
 import org.maiwithu.maicraft.neoforge.compat.emi.EmiClientReads;
 import org.maiwithu.maicraft.neoforge.compat.ftbquests.FtbQuestsClientReads;
 import org.maiwithu.maicraft.neoforge.compat.ftbquests.FtbQuestsClientSends;
@@ -73,7 +74,8 @@ public final class ClientCompatCatalog {
                 // 机械动力：按 6.0.11 编译，实测实例装的就是它；装了 6.1 及以上不登记，实测通过后再放宽。
                 new SupportedMod<>(CreateCompat.MOD_ID, "机械动力", new VerifiedVersions("6.0.11", "6.1"),
                         () -> new CreateCompat(new CreateKineticReads(), new CreateBeltReads(),
-                                new CreateChainConveyorReads(), new CreateStationReads(), new CreateToolReads())),
+                                new CreateChainConveyorReads(), new CreateStationReads(), new CreateToolReads(),
+                                new CreateValueReads())),
                 // 通用机械：按 10.7.19 编译，实测实例装的是 10.7.19.85；装了 10.8 及以上不登记，实测通过后再放宽。
                 new SupportedMod<>(MekanismCompat.MOD_ID, "通用机械", new VerifiedVersions("10.7.19", "10.8"),
                         () -> new MekanismCompat(new MekanismClientReads())));

@@ -203,7 +203,11 @@ class CreateCompatTest {
             @Override public boolean wrenchable(BlockState state) { return false; }
             @Override public List<Polishing> polishing(ClientLevel level) { return List.of(); }
         };
-        return new CreateCompat(kinetics, belts, chains, stations, tools);
+        CreateValues values = new CreateValues() {
+            @Override public Boxes boxes(ClientLevel level, BlockPos at) { return new Boxes(List.of(), List.of()); }
+            @Override public void sendValue(BlockPos at, int netId, Direction side, int row, int value) { }
+        };
+        return new CreateCompat(kinetics, belts, chains, stations, tools, values);
     }
 
     /** 不在世界里的玩家行为：角色为空，靠近与交互都碰不到；只够建出机器类型、回答"读不到"。 */

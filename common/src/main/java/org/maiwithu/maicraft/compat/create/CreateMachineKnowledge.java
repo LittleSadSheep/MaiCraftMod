@@ -92,6 +92,12 @@ final class CreateMachineKnowledge implements KnowledgeSource {
                 .append("- 每台机器里链条输送机的个数有上限（实例配置，默认 1）：近处能用传动杆接上的就别用链条。\n")
                 .append("- 手摇曲柄只适合手动做几件东西（置物台上压几块板），长期生产线接真正的动力源。\n")
                 .append("- 过载时整张网停转：看 machine_inspect 里那张网的 stress 与 stress_capacity。\n\n");
+        text.append("## 设置框（过滤格、件数、数值、选项）\n\n")
+                .append("- 方块上画着小框的都能用 machine_configure 改；machine_inspect 或 machine_configure 先看这台有哪些键。\n")
+                .append("- 过滤格 `filter`（黄铜隧道每面一格写 `filter.north` 这样）：写物品 ID，角色手持那样东西点那一格；")
+                .append("写 empty 空着手点，清空。漏斗、智能溜槽这类还有 `filter.amount`：any、<=N 最多 N 件、=N 正好 N 件。\n")
+                .append("- 数值 `value`（转速控制器的转速带正负，脉冲计时器这类按刻写）、选项 `option`（写名字）：")
+                .append("角色走近后照 Create 设置界面那样改，读回对上为止。同一种有好几个时第二个起是 `value.2` 这样。\n\n");
         text.append("## 认得的机器\n\n");
         for (CreateMachineCatalog.Kind kind : CreateMachineCatalog.kinds()) {
             text.append("- ").append(kind.name()).append("（`").append(kind.id()).append("`）：")
