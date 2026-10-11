@@ -59,6 +59,7 @@ public final class Ae2Compat extends CompatModule {
         }
         registry.networkReader(this, services -> new MeNetworkReader(this, services));
         registry.serverRead(this, NETWORK_OPERATION, 1);
+        registry.knowledgeSource(this, new Ae2MachineKnowledge());
     }
 
     /** 注册 ID 换成方块对象；注册表里没有的不算进来。 */

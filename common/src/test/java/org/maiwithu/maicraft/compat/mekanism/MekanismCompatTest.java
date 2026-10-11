@@ -75,6 +75,10 @@ class MekanismCompatTest {
         List<NetworkReader> readers = registry.networkReaders(offline());
         assertEquals(List.of("energy", "fluid", "item", "chemical"),
                 readers.stream().map(reader -> reader.kind().id()).toList());
+        // 侧面配置与配置器的写法挂到机器的物品资料页上。
+        assertTrue(registry.knowledgeSources().getFirst().entriesAbout("mekanism:metallurgic_infuser").size() == 1);
+        assertTrue(registry.knowledgeSources().getFirst().read(MekanismMachineKnowledge.INDEX).text()
+                .contains("side.north.item"));
     }
 
     @Test

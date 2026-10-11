@@ -52,6 +52,7 @@ public final class MekanismCompat extends CompatModule {
         for (String medium : List.of("energy", "fluid", "item", "chemical")) {
             registry.networkReader(this, services -> new PipeNetworkReader(medium, this, services));
         }
+        registry.knowledgeSource(this, new MekanismMachineKnowledge());
     }
 
     /** 注册 ID 换成方块对象；注册表里没有的不算进来。 */
