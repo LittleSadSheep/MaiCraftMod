@@ -196,6 +196,16 @@ public final class CreateCompat extends CompatModule {
         return call("找机械合成器能连的面", () -> stations.crafterLinkFaces(level, at, toward));
     }
 
+    /** 机械臂记着的取放点；见 {@link CreateStations#armPoints}。 */
+    public List<CreateStations.ArmPoint> armPoints(ClientLevel level, BlockPos at) {
+        return call("读机械臂的取放点", () -> stations.armPoints(level, at));
+    }
+
+    /** 机械臂取放点离它最远多远；见 {@link CreateStations#armRange}。 */
+    public int armRange() {
+        return call("读机械臂的范围", stations::armRange);
+    }
+
     /** 这一格里装着的流体；见 {@link CreateStations#fluids}。 */
     public List<CreateStations.FluidReading> fluids(ClientLevel level, BlockPos at) {
         return call("读流体", () -> stations.fluids(level, at));

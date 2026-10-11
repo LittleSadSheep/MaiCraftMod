@@ -71,6 +71,20 @@ public interface CreateStations {
         }
     }
 
+    /** 放好的机械臂记着的取放点：每一点的位置与取还是放；不是机械臂给空表。 */
+    List<ArmPoint> armPoints(ClientLevel level, BlockPos at);
+
+    /** 机械臂的取放点离它最远多远（服务器配置）；读不到给 0。 */
+    int armRange();
+
+    /** 机械臂的一个取放点：位置（世界坐标）、take 取还是 deposit 放。 */
+    record ArmPoint(BlockPos pos, String mode) {
+        public ArmPoint {
+            Objects.requireNonNull(pos, "pos");
+            Objects.requireNonNull(mode, "mode");
+        }
+    }
+
     /** 一格流体：流体 ID、多少毫桶、能装多少（读不到容量为 0）。 */
     record FluidReading(String fluidId, int amount, int capacity) {
         public FluidReading {

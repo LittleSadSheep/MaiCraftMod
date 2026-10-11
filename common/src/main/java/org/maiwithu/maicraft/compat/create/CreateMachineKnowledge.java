@@ -168,6 +168,10 @@ final class CreateMachineKnowledge implements KnowledgeSource {
             case MIXER -> text.append("- machine_run：料扔进正下方第二格的工作盆里（站到盆边扔），产物留在盆里，")
                     .append("空手右键工作盆取出\n");
             case BASIN -> text.append("- machine_run：站到盆边把料扔进去，落在盆沿上也收；空手右键取出盆里的东西\n");
+            case ARM -> text.append("- machine_build：机械臂那一格不写进 cells，写一段安装段 `{kind: create:mechanical_arm, ")
+                    .append("offsets: [机械臂, 取放点...], roles: [arm, take 或 deposit...]}`；取放点（置物台、传送带、漏斗、工作盆……）")
+                    .append("照常写进 cells。施工先放好取放点，再拿着机械臂物品挨个点（取点一下、放点两下），最后放下机械臂；")
+                    .append("取放点要在服务器配置的范围以内（默认 5 格）\n");
             case CRAFTER -> text.append("- 几台连成一片按配方形状摆好（方块状态 pointing 定箭头，料顺着箭头送到出口那一台），")
                     .append("machine_build 的 installations 写 `{kind: create:crafter_link, offsets: [台 A, 台 B]}` 把相邻两台的入口连成一组")
                     .append("（拿扳手点背面靠另一台的那条边）；machine_configure 每台的 crafter.slot 写这一格的料，")

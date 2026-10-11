@@ -8,6 +8,7 @@ MaiCraft 按版本记录玩家和 Agent 能感受到的变化。版本号即 `gr
 
 ### 新增
 
+- 会放机械臂并选好取放点了（装了机械动力才有）：`machine_build` 的安装段 `create:mechanical_arm` 写 `offsets: [机械臂, 取放点...]`、`roles: [arm, take/deposit...]`，机械臂那一格不写进 cells；施工先放好取放点，再拿着机械臂挨个点（取点一下、放点两下），最后放下机械臂，放下后它记着的点和要的一样才算装成。
 - 机器蓝图的安装段多一个可选字段 `roles`：和 `offsets` 一一对应，说每一格在这一段里干什么（机械臂的取放点写 take / deposit），别的安装段不用写；机械动力、AE2 机器资料里安装段的写法改对成 `offsets`（原来误写成 cells）。
 - 会用机械合成器了（装了机械动力才有）：`machine_build` 的安装段 `create:crafter_link` 拿扳手点背面靠邻居那条边，把相邻两台的入口连成一组；`machine_configure` 每台的 `crafter.slot` 写这一格放什么（格里已有别的先空着手取出再放），`crafter.pointing` 拿扳手点正面转箭头；`machine_inspect` 读得出每台格里放着什么、箭头朝哪。
 - `machine_inspect` 读得出机械动力方块更多看得见的东西了（装了机械动力才有）：储罐、注液器、分液池、工作盆里的流体（`fluids`），辉光管、翻牌显示板显示的字和告示框里的东西（`text`），轴承、活塞、滑轮在不在动（`moving`），无线红石信号终端的两个频率与收发（`frequency`、`link_mode`、`powered`）；`machine_configure` 会给无线红石换频率（`link.frequency.1` / `.2` 写物品 ID，手持它点那一格）和收发（`link.mode`，走到跟前空着手潜行右键）。

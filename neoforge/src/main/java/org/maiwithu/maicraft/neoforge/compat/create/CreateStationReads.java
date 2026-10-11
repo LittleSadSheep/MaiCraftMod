@@ -13,6 +13,7 @@ import com.simibubi.create.content.contraptions.piston.LinearActuatorBlockEntity
 import com.simibubi.create.content.decoration.placard.PlacardBlockEntity;
 import com.simibubi.create.content.fluids.drain.ItemDrainBlockEntity;
 import com.simibubi.create.content.kinetics.crafter.CrafterHelper;
+import com.simibubi.create.content.kinetics.mechanicalArm.ArmBlockEntity;
 import com.simibubi.create.content.kinetics.crafter.MechanicalCrafterBlock;
 import com.simibubi.create.content.kinetics.crafter.MechanicalCrafterBlockEntity;
 import com.simibubi.create.content.fluids.tank.FluidTankBlockEntity;
@@ -40,6 +41,9 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.NbtUtils;
+import net.minecraft.nbt.Tag;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
@@ -192,6 +196,27 @@ public final class CreateStationReads implements CreateStations {
             if (EdgeInteractionHandler.getConnectiveSides(level, at, face, edges).contains(toward)) faces.add(face);
         }
         return faces;
+    }
+
+    // 机械臂：取放点写在同步给客户端的数据 InteractionPoints 里，位置相对机械臂，模式是 TAKE / DEPOSIT。
+    @Override public List<ArmPoint> armPoints(ClientLevel level, BlockPos at) {
+        if (!level.isLoaded(at) || !(level.getBlockEntity(at) instanceof ArmBlockEntity arm)) return List.of();
+        List<ArmPoint> points = new ArrayList<>();
+        ListTag list = arm.getUpdateTag(level.registryAccess()).getList("InteractionPoints", Tag.TAG_COMPOUND);
+        for (int i = 0; i < list.size(); i++) {
+            CompoundTag point = list.getCompound(i);
+            NbtUtils.readBlockPos(point, "Pos").ifPresent(relative -> points.add(
+                    new ArmPoint(at.offset(relative), point.getString("Mode").toLowerCase(Locale.ROOT))));
+        }
+        return points;
+    }
+
+    @Override public int armRange() {
+        try {
+            return ArmBlockEntity.getRange();
+        } catch (RuntimeException configNotLoaded) {
+            return 0;
+        }
     }
 
     // 装置在不在动：轴承问它自己，活塞与滑轮看公开字段 running。

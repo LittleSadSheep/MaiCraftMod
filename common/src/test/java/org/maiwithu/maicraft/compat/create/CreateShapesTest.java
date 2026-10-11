@@ -15,6 +15,7 @@ import java.util.stream.IntStream;
 import net.minecraft.core.BlockPos;
 
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.ability.machine.spi.Installation;
 
 /** 传送带与链条输送机的形状规则、装成没有的核对：按 Create 自己的规矩，纯函数。 */
 class CreateShapesTest {
@@ -90,6 +91,28 @@ class CreateShapesTest {
         assertTrue(ChainConveyorInstallation.shapeProblem(List.of(from, new BlockPos(40, 64, 0)),
                 Optional.of(32)).isPresent());
         assertTrue(ChainConveyorInstallation.shapeProblem(List.of(from), Optional.of(32)).isPresent());
+    }
+
+    @Test
+    void 机械臂第一格是它自己_取放点写take或deposit_不重复不出范围() {
+        BlockPos arm = new BlockPos(0, 64, 0);
+        BlockPos depot = arm.east(2);
+        BlockPos belt = arm.west(3);
+        assertTrue(ArmInstallation.shapeProblem(List.of(arm, depot, belt), List.of("arm", "take", "deposit"), 5).isEmpty());
+        assertTrue(ArmInstallation.shapeProblem(List.of(arm), List.of("arm"), 5).isPresent(), "没有取放点");
+        assertTrue(ArmInstallation.shapeProblem(List.of(arm, depot), List.of(), 5).isPresent(), "没写 roles");
+        assertTrue(ArmInstallation.shapeProblem(List.of(arm, depot), List.of("arm", "both"), 5).isPresent());
+        assertTrue(ArmInstallation.shapeProblem(List.of(arm, depot, depot), List.of("arm", "take", "take"), 5).isPresent());
+        assertTrue(ArmInstallation.shapeProblem(List.of(arm, arm.east(6)), List.of("arm", "take"), 5).isPresent(), "出了范围");
+        assertTrue(ArmInstallation.shapeProblem(List.of(arm, arm.east(6)), List.of("arm", "take"), 0).isEmpty(),
+                "读不到范围时不查远近");
+        var wanted = new Installation(ArmInstallation.KIND,
+                List.of(arm, depot, belt), List.of("arm", "take", "deposit"));
+        assertTrue(ArmInstallation.matches(List.of(new CreateStations.ArmPoint(depot, "take"),
+                new CreateStations.ArmPoint(belt, "deposit")), wanted));
+        assertFalse(ArmInstallation.matches(List.of(new CreateStations.ArmPoint(depot, "deposit"),
+                new CreateStations.ArmPoint(belt, "deposit")), wanted), "取放弄反了不算");
+        assertFalse(ArmInstallation.matches(List.of(new CreateStations.ArmPoint(depot, "take")), wanted), "少了一个点");
     }
 
     @Test

@@ -47,6 +47,8 @@ final class CreateMachineCatalog {
         SPOUT,
         /** 分液池：东西扔上去或送进去，倒出里面的流体；空手右键取回。 */
         DRAIN,
+        /** 机械臂：转起来在选好的取放点之间搬东西；放下之前选点，选点与放下是一个安装段。 */
+        ARM,
         /** 机械合成器：几台连成一片，每台放一格料，凑成配方形状一起做。 */
         CRAFTER,
         /** 装置：转起来或通电时把一片方块推拉、转动、吊起，停下落回方块。 */
@@ -187,7 +189,7 @@ final class CreateMachineCatalog {
                 kind("brass_tunnel", "黄铜隧道", MachineRole.LOGISTICS, Work.STILL),
                 kind("chute", "溜槽", MachineRole.LOGISTICS, Work.STILL),
                 kind("smart_chute", "智能溜槽", MachineRole.LOGISTICS, Work.STILL),
-                kind("mechanical_arm", "动力臂", MachineRole.LOGISTICS, Work.TURNING),
+                kind("mechanical_arm", "动力臂", MachineRole.LOGISTICS, Work.ARM),
                 kind("mechanical_pump", "动力泵", MachineRole.LOGISTICS, Work.TURNING),
                 kind("hose_pulley", "软管滑轮", MachineRole.LOGISTICS, Work.TURNING),
                 kind("portable_fluid_interface", "移动式流体接口", MachineRole.LOGISTICS, Work.STILL),

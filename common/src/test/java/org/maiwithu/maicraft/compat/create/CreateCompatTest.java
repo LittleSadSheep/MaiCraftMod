@@ -203,6 +203,8 @@ class CreateCompatTest {
             @Override public Optional<LinkReading> link(ClientLevel level, BlockPos at) { return Optional.empty(); }
             @Override public Optional<Boolean> moving(ClientLevel level, BlockPos at) { return Optional.empty(); }
             @Override public Optional<CrafterReading> crafter(ClientLevel level, BlockPos at) { return Optional.empty(); }
+            @Override public List<ArmPoint> armPoints(ClientLevel level, BlockPos at) { return List.of(); }
+            @Override public int armRange() { return 5; }
             @Override public boolean craftersConnected(ClientLevel level, BlockPos first, BlockPos second) { return false; }
             @Override public List<Direction> crafterLinkFaces(ClientLevel level, BlockPos at, Direction toward) {
                 return List.of();
