@@ -32,6 +32,24 @@ final class CastTrajectory {
     }
 
     /**
+     * 抛这一竿时镜头该看向的点：视线沿落点方向伸向 16 格外，俯仰按解出的抛投角压低。
+     * 视角转向这个点后，按这个俯仰角抛出的钩子才会落到目标水面。
+     */
+    static Vec3 aimPoint(Vec3 eye, BlockPos landing) {
+        double tx = landing.getX() + 0.5;
+        double tz = landing.getZ() + 0.5;
+        double dx = tx - eye.x;
+        double dz = tz - eye.z;
+        double horizontal = Math.sqrt(dx * dx + dz * dz);
+        if (horizontal < 1.0e-6) return new Vec3(tx, landing.getY() + WATER_SURFACE_OFFSET, tz);
+        double pitch = Math.toRadians(pitchDegrees(eye, landing));
+        double scale = 16.0 / horizontal;
+        return new Vec3(eye.x + dx * scale,
+                eye.y - Math.tan(pitch) * 16.0,
+                eye.z + dz * scale);
+    }
+
+    /**
      * 从眼睛抛到一格水面的俯仰角：水平距离扣掉浮标前置量，解出到达水面的角度。
      * 眼睛与落点几乎同列时按原地正下方处理。
      */

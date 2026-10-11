@@ -26,6 +26,7 @@ import org.maiwithu.maicraft.ability.drop.DropModule;
 import org.maiwithu.maicraft.ability.eat.EatModule;
 import org.maiwithu.maicraft.ability.equip.EquipModule;
 import org.maiwithu.maicraft.ability.fight.FightModule;
+import org.maiwithu.maicraft.ability.fish.FishModule;
 import org.maiwithu.maicraft.ability.fight.LiveFightMoves;
 import org.maiwithu.maicraft.ability.fight.LiveSeenTargets;
 import org.maiwithu.maicraft.ability.follow.FollowModule;
@@ -128,6 +129,7 @@ import org.maiwithu.maicraft.game.player.ReadsEquipment;
 import org.maiwithu.maicraft.game.player.ReadsFoodValues;
 import org.maiwithu.maicraft.game.player.ReadsGearFit;
 import org.maiwithu.maicraft.game.player.ReadsHunger;
+import org.maiwithu.maicraft.game.player.ClientFishingHookFacts;
 import org.maiwithu.maicraft.game.serverlink.ServerLinkSession;
 import org.maiwithu.maicraft.game.serverlink.SessionServerReads;
 import org.maiwithu.maicraft.game.world.BlockScanService;
@@ -290,7 +292,7 @@ public final class AbilityCatalog {
 
         registerMachineAbilities(registry, deps, designs, shared, construction);
 
-        registerStandalone(registry, deps, shared.permission(), shared.playerServices());
+        registerStandalone(registry, deps, shared, shared.permission(), shared.playerServices());
         return registry;
     }
 
@@ -423,9 +425,9 @@ public final class AbilityCatalog {
         };
     }
 
-    /** 不和别的能力共用现场部件的那些能力：战斗、跟随、等待、出行、聊天、记地点、按顺序做事、任务书。 */
-    private static void registerStandalone(AbilityRegistry registry, Deps deps, PermissionCheck permission,
-            PlayerServices services) {
+    /** 不和别的能力共用现场部件的那些能力：战斗、跟随、等待、钓鱼、出行、聊天、记地点、按顺序做事、任务书。 */
+    private static void registerStandalone(AbilityRegistry registry, Deps deps, Shared shared,
+            PermissionCheck permission, PlayerServices services) {
         // 战斗：感观与生存需求共用一份，观察编号与动手都接在真实客户端上。
         registry.register(new FightModule(deps.senses(),
                 new LiveSeenTargets(deps.scene().seen()), new LiveFightMoves(deps.walks(), deps.dropConfirmations(), deps.useKeyProjection()), permission));
@@ -435,6 +437,10 @@ public final class AbilityCatalog {
 
         // 等待：只看世界，不依赖接缝。
         registry.register(new WaitModule());
+
+        // 钓鱼：钓位几何与咬钩收竿都接上了；缺竿回到拿到物品的内需入口，捡钓获用顺手捡起同一套。
+        registry.register(new FishModule(deps.context(), shared.innerNeeds(), shared.toMainhand(),
+                deps.walks(), shared.drops(), shared.space(), new ClientFishingHookFacts(deps.context())));
 
         // 出行：目的地解析用当刻的世界、记住的地点与场景里的观察编号；
         // 走到由内嵌 Baritone 执行，路上垫的方块从走到实现方读回。
