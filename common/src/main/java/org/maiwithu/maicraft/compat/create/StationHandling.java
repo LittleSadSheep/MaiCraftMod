@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.function.IntSupplier;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 
@@ -18,17 +19,23 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
+import org.maiwithu.maicraft.ability.machine.spi.FeedReport;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
+import org.maiwithu.maicraft.behavior.inventory.SplitsToHand;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
+import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.compat.HandThenClick;
+import org.maiwithu.maicraft.compat.StepsInOrder;
 import org.maiwithu.maicraft.compat.TossFeed;
 
 /**
- * 机械动力里"放东西的地方"怎么用：置物台手持东西右键顶面放上去一整叠（原有的先收回背包），空手右键顶面收回；
+ * 机械动力里"放东西的地方"怎么用：置物台手持东西右键顶面放上去手上那一叠（原有的先收回背包），投料时手上先只留要投的件数，空手右键顶面收回；
  * 工作盆空手右键取出盆里的东西。压机、机械手、鼓风机以它们加工处的置物台为投料口与出口，
  * 搅拌器以正下方第二格的工作盆为出口。
  *
@@ -74,7 +81,7 @@ final class StationHandling {
     Optional<Action> feed(CreateMachineCatalog.Work work, ClientLevel level, BlockState state, BlockPos at,
             String itemId, int count, Permissions permissions) {
         Optional<BlockPos> depot = depotFor(work, level, state, at);
-        if (depot.isPresent()) return Optional.of(putOnDepot(level, depot.get(), itemId, permissions));
+        if (depot.isPresent()) return Optional.of(putOnDepot(level, depot.get(), itemId, count, permissions));
         return tossSpot(work, level, state, at).map(spot -> new TossFeed(services, itemId, count, spot.cell(),
                 spot.catchHeight(), permissions));
     }
@@ -192,11 +199,16 @@ final class StationHandling {
                 .orElse(List.of());
     }
 
-    // 放上置物台：先把这样东西换到主手，走到看得见顶面的地方，对准顶面右键；
-    // 台上出现了这样东西、手上那叠不在了才算放上去（原生会先把台上原有的收回背包，再放手上这一整叠）。
-    private Action putOnDepot(ClientLevel level, BlockPos depot, String itemId, Permissions permissions) {
-        return new HandThenClick(services, "把 " + itemId + " 放上置物台", depot, topFace(level, depot), permissions,
-                () -> holding(itemId) ? Optional.empty() : services.toMainhand().moveToMainhand(itemId),
+    // 放上置物台：先把这样东西换到主手、主手只留要投的件数（多放的会被压机、机械手一起加工掉），
+    // 走到看得见顶面的地方，对准顶面右键；台上出现了这样东西、手上那叠不在了才算放上去
+    // （原生会先把台上原有的收回背包，再放手上这一整叠）。做完按台上实际的件数记。
+    private Action putOnDepot(ClientLevel level, BlockPos depot, String itemId, int count, Permissions permissions) {
+        Action place = new HandThenClick(services, "把 " + itemId + " ×" + count + " 放上置物台", depot,
+                topFace(level, depot), permissions,
+                () -> Optional.of(new StepsInOrder("备好 " + count + " 件 " + itemId, List.of(
+                        new StepsInOrder.Step("换到主手", () -> holding(itemId) ? null
+                                : services.toMainhand().moveToMainhand(itemId).orElse(null)),
+                        new StepsInOrder.Step("主手只留 " + count + " 件", () -> new SplitsToHand(count))))),
                 () -> context -> {
                     boolean onDepot = compat.depotItems(context.level(), depot).orElse(List.of()).stream()
                             .anyMatch(stack -> idOf(stack).equals(itemId));
@@ -204,6 +216,56 @@ final class StationHandling {
                     return onDepot && leftHand ? InteractionConfirmation.Verdict.APPLIED
                             : InteractionConfirmation.Verdict.PENDING;
                 });
+        return new DepotFeed(place, itemId, count, () -> compat.depotItems(level, depot).orElse(List.of()).stream()
+                .filter(stack -> idOf(stack).equals(itemId)).mapToInt(ItemStack::getCount).sum());
+    }
+
+    /** 放上置物台的投料：放好后读台上这样东西有几件，按台上的件数记（置物台一次只放得下手上那一叠）。 */
+    private static final class DepotFeed implements Action, FeedReport {
+
+        private final Action place;
+        private final String itemId;
+        private final int asked;
+        private final IntSupplier onDepot;
+        private int delivered;
+
+        DepotFeed(Action place, String itemId, int asked, IntSupplier onDepot) {
+            this.place = place;
+            this.itemId = itemId;
+            this.asked = asked;
+            this.onDepot = onDepot;
+        }
+
+        @Override public ActionStatus tick(TickContext context) {
+            ActionStatus status = place.tick(context);
+            if (status instanceof ActionStatus.Done) delivered = Math.min(asked, onDepot.getAsInt());
+            return status;
+        }
+
+        @Override public int delivered() {
+            return delivered;
+        }
+
+        @Override public List<String> notes() {
+            return delivered < asked ? List.of("置物台上放了 " + delivered + " 件 " + itemId + "，要的是 " + asked
+                    + " 件：一次只放得下手上那一叠") : List.of();
+        }
+
+        @Override public void pause() {
+            place.pause();
+        }
+
+        @Override public void close() {
+            place.close();
+        }
+
+        @Override public Interruptibility interruptibility() {
+            return place.interruptibility();
+        }
+
+        @Override public String describe() {
+            return place.describe();
+        }
     }
 
     // 空手取：先腾空手（手里拿着东西右键就成了放），走过去对准顶面右键；那一格的东西少了才算取到。

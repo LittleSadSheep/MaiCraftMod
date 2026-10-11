@@ -151,7 +151,8 @@ final class CreateMachineKnowledge implements KnowledgeSource {
             case SAW -> text.append("- machine_run：锯齿朝上时站到旁边把料扔到锯面上；锯没转时料停在上面，转起来再锯\n");
             case GRINDER -> text.append("- machine_run：石磨站到旁边把料扔到顶上；粉碎轮扔进两只轮子中间那一格，")
                     .append("那一格要朝下送料（两只轮子对着往里转）\n");
-            case DEPOT -> text.append("- machine_run：手持料右键顶面放一整叠；空手右键顶面收回\n");
+            case DEPOT -> text.append("- machine_run：手持料右键顶面放上去，手上先只留要投的件数（一次最多一叠）；")
+                    .append("空手右键顶面收回\n");
             case BELT -> text.append("- machine_build：installations 写 `{kind: create:belt, cells: [从一端到另一端]}`；")
                     .append("cells 里两端写与带子垂直的 `create:shaft`（不能用机壳传动杆），中间不写或写 air；")
                     .append("沿东西或南北走，可以上下斜四十五度或竖直，两端距离小于服务器配置（默认 20）。")
