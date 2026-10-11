@@ -33,6 +33,14 @@ public interface CombatSenses {
     Entity entityById(TickContext context, int entityId);
 
     /**
+     * 按实体编号读任意一只活物的身板与几何（点名的动物、玩家不在敌对列表里）：玩家的危险半径按他的交互距离算，
+     * 会打人的按原版攻击框算，不会打人的（鸡牛羊）危险半径为 0，走上去打就是。不在附近为空。
+     */
+    default Optional<Threat> living(TickContext context, int entityId) {
+        return Optional.empty();
+    }
+
+    /**
      * 这么远内正追着角色的：十秒内真打过她的、引信点着的苦力怕、看得见她又亮着攻击标记的、看得见的近处苦力怕。
      * 自卫与点名战斗撤离时甩没甩开都按它算（三十二格内一只都没有），只在附近游荡、隔着墙的不算。
      */

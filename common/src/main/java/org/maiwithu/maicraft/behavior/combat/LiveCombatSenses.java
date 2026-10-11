@@ -4,14 +4,19 @@ package org.maiwithu.maicraft.behavior.combat;
 import org.maiwithu.maicraft.behavior.survival.FoodPicker;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.FlyingMob;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.monster.Blaze;
 import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.Mob;
@@ -21,6 +26,7 @@ import net.minecraft.world.entity.monster.Guardian;
 import net.minecraft.world.entity.monster.RangedAttackMob;
 import net.minecraft.world.entity.monster.Shulker;
 import net.minecraft.world.entity.monster.breeze.Breeze;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.game.player.ReadsFoodValues;
@@ -61,26 +67,61 @@ public final class LiveCombatSenses implements CombatSenses {
         }
         var self = context.player().localPlayer();
         AABB box = self.getBoundingBox().inflate(radius);
+        // 敌对生物之外，十秒内真打过她的中立生物（被惹毛的狼、铁傀儡、僵尸猪灵）也算威胁：打起人来一样疼。
+        Set<UUID> attackers = new HashSet<>();
+        for (CombatMemory.Evidence evidence : memory == null ? List.<CombatMemory.Evidence>of()
+                : memory.recent(context.gameTick())) {
+            attackers.add(evidence.attacker());
+        }
         List<Threat> threats = new ArrayList<>();
-        for (Mob hostile : level.getEntitiesOfClass(Mob.class, box, mob -> mob instanceof Enemy)) {
-            double distance = self.distanceTo(hostile);
-            if (distance > radius) {
+        for (Mob hostile : level.getEntitiesOfClass(Mob.class, box,
+                mob -> mob instanceof Enemy || attackers.contains(mob.getUUID()))) {
+            if (self.distanceTo(hostile) > radius) {
                 continue;
             }
-            // 看不看得见按视线判断，地下、墙后的怪不算看得见；攻击标记读原版同步的那一位。
-            // 够不够得着按战斗几何：我这边是眼睛到它碰撞箱，它那边是原版攻击框与我的碰撞箱，不按固定格数猜。
-            double halfWidth = hostile.getBbWidth() / 2.0;
-            boolean explosive = hostile instanceof Creeper;
-            threats.add(new Threat(hostile.getId(), hostile.getUUID(), typeId(hostile),
-                    hostile.getX(), hostile.getY(), hostile.getZ(), distance,
-                    kindOf(hostile), armed(hostile), ObservationVisibility.entity(self, hostile),
-                    hostile.isAggressive(), halfWidth,
-                    CombatGeometry.distanceToBox(self.getEyePosition(), hostile.getBoundingBox()),
-                    !explosive && CombatGeometry.mobReaches(hostile.getBoundingBox(), self.getBoundingBox()),
-                    CombatGeometry.mobDangerRadius(halfWidth, self.getBbWidth() / 2.0),
-                    hostile instanceof Creeper creeper && creeper.isPowered()));
+            threats.add(threatOf(self, hostile));
         }
         return threats;
+    }
+
+    @Override
+    public Optional<Threat> living(TickContext context, int entityId) {
+        ClientLevel level = level(context);
+        var self = level == null ? null : context.player().localPlayer();
+        if (self == null || !(level.getEntity(entityId) instanceof LivingEntity living)
+                || !living.isAlive() || living == self) {
+            return Optional.empty();
+        }
+        return Optional.of(threatOf(self, living));
+    }
+
+    // 一只活物的身板与几何。看不看得见按视线判断，地下、墙后的不算看得见；攻击标记读原版同步的那一位。
+    // 够不够得着按战斗几何：我这边是眼睛到它碰撞箱；它那边玩家按他的交互距离，会打人的怪按原版攻击框，
+    // 苦力怕按点火距离，不会打人的（鸡牛羊、没惹毛的中立生物）危险半径为 0——走上去打就是，不必保持距离。
+    private static Threat threatOf(LocalPlayer self, LivingEntity other) {
+        double halfWidth = other.getBbWidth() / 2.0;
+        double myHalf = self.getBbWidth() / 2.0;
+        boolean aggressive = other instanceof Mob mob && mob.isAggressive();
+        boolean canHitMe;
+        double dangerRadius;
+        if (other instanceof Player player) {
+            double theirReach = InteractionRange.entityReach(player);
+            canHitMe = CombatGeometry.playerReaches(player.getEyePosition(), self.getBoundingBox(), theirReach);
+            dangerRadius = CombatGeometry.playerDangerRadius(theirReach, myHalf);
+        } else if (other instanceof Creeper || !(other instanceof Enemy) && !aggressive) {
+            canHitMe = false;
+            // 苦力怕不挥手，它的"够得着"是点火距离：进了 3 格它就开始膨胀。
+            dangerRadius = other instanceof Creeper ? CombatGeometry.CREEPER_IGNITE : 0;
+        } else {
+            canHitMe = CombatGeometry.mobReaches(other.getBoundingBox(), self.getBoundingBox());
+            dangerRadius = CombatGeometry.mobDangerRadius(halfWidth, myHalf);
+        }
+        return new Threat(other.getId(), other.getUUID(), typeId(other),
+                other.getX(), other.getY(), other.getZ(), self.distanceTo(other),
+                kindOf(other), armed(other), ObservationVisibility.entity(self, other),
+                aggressive, halfWidth,
+                CombatGeometry.distanceToBox(self.getEyePosition(), other.getBoundingBox()),
+                canHitMe, dangerRadius, other instanceof Creeper creeper && creeper.isPowered());
     }
 
     @Override

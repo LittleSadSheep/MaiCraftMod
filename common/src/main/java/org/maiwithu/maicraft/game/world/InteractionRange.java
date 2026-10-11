@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.game.world;
 
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.player.Player;
 
 /**
  * 交互距离：角色够得着多远，全仓只有这一处实现。
@@ -42,8 +43,8 @@ public final class InteractionRange {
         return player.getAttributeValue(Attributes.BLOCK_INTERACTION_RANGE);
     }
 
-    /** 近战攻击实体的触及距离：原版生存模式为 3 格，同样读属性。 */
-    public static double entityReach(LocalPlayer player) {
+    /** 近战攻击实体的触及距离：原版生存模式为 3 格，同样读属性；别的玩家的也读得到（属性同步给周围的人）。 */
+    public static double entityReach(Player player) {
         return player.getAttributeValue(Attributes.ENTITY_INTERACTION_RANGE);
     }
 }
