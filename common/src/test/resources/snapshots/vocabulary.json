@@ -154,7 +154,9 @@
     "death_recovery_applied",
     "gear_broken",
     "reminder",
-    "discovered"
+    "discovered",
+    "hurt",
+    "dimension_changed"
   ],
   "chat_kinds": [
     "player",

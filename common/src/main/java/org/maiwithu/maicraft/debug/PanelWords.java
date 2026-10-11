@@ -90,6 +90,8 @@ final class PanelWords {
             case GEAR_BROKEN -> "装备用坏";
             case REMINDER -> "提醒";
             case DISCOVERED -> "发现";
+            case HURT -> "挨打";
+            case DIMENSION_CHANGED -> "换维度";
         };
     }
 

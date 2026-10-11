@@ -50,7 +50,14 @@ public record TaskEvent(long cursor, Kind kind, long goalRunId, String message, 
         /** 角色身上有事要 LLM 知道（快溺水、装备快坏、黑暗里反复挨打……），或这条提醒撤下了；证据在 observe(self) 的 reminders。 */
         REMINDER,
         /** 探索途中的发现：看见什么、在哪，一句话在消息里；同一条发现只发一条，完整的清单在探索结果里。 */
-        DISCOVERED
+        DISCOVERED,
+        /**
+         * 刚才挨了一阵打：同一个来源（攻击者或伤害类型）连着挨的算一段，不分开始结束，一段一条；
+         * 谁、什么伤、几下、掉了多少、还剩多少在消息里，没收到伤害包的写明只看到血掉了。
+         */
+        HURT,
+        /** 换了维度：从哪到哪、落在哪在消息里（走门过去、重生到另一个维度都算）。 */
+        DIMENSION_CHANGED
     }
 
     public TaskEvent {

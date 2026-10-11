@@ -75,6 +75,12 @@ public final class SeenRegistry {
         return Optional.ofNullable(entries.get(id));
     }
 
+    /** 游戏实体这会儿的观察编号：在册才有，没登记过或已失效给空。挨打的事件用它告诉 LLM 是哪一只。 */
+    public Optional<String> idOfEntity(int entityId) {
+        String id = entityIds.get(entityId);
+        return id != null && entries.containsKey(id) ? Optional.of(id) : Optional.empty();
+    }
+
     /** 观察编号对应的游戏实体编号；编号不是在册实体时给空。跟随这类能力用它找回真实的实体。 */
     public Optional<Integer> gameEntityOf(String id) {
         return entityIds.entrySet().stream()

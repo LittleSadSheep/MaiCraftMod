@@ -99,6 +99,9 @@ final class Timeline {
             case ASKED, PAUSED, TEMPORARY_TASK_STARTED, NEED_UNHANDLED, REMINDER -> PanelColor.WAITING;
             // 人死了和装备用坏了都是已经发生的损失，用问题色提醒
             case CHARACTER_DIED, GEAR_BROKEN -> PanelColor.PROBLEM;
+            // 挨打是正在发生的麻烦，用等待色提醒主播看一眼；换维度只是一个经过
+            case HURT -> PanelColor.WAITING;
+            case DIMENSION_CHANGED -> PanelColor.MINOR;
             case STEP_FINISHED, TEMPORARY_TASK_FINISHED, DEATH_RECOVERY_APPLIED -> PanelColor.MINOR;
             case DISCOVERED -> PanelColor.MINOR;
             case FINISHED -> event.status() == null ? PanelColor.MINOR : switch (event.status()) {

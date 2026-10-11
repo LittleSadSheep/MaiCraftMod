@@ -44,6 +44,8 @@ import org.maiwithu.maicraft.behavior.lighting.FollowLighting;
 import org.maiwithu.maicraft.behavior.lighting.LightRegion;
 import org.maiwithu.maicraft.behavior.lighting.LiveLightingWorld;
 import org.maiwithu.maicraft.behavior.lighting.LightingWorld;
+import org.maiwithu.maicraft.behavior.perception.DimensionChanges;
+import org.maiwithu.maicraft.behavior.perception.HurtEpisodes;
 import org.maiwithu.maicraft.behavior.survival.BreathNeed;
 import org.maiwithu.maicraft.behavior.survival.ModRangedWeapons;
 import org.maiwithu.maicraft.behavior.survival.DarknessNeed;
@@ -303,6 +305,9 @@ public final class Bootstrap {
         private final List<SupportedMod<CompatModule>> compatCatalog;
         /** 联动登记表：启动完成前是空的，之后是按清单检查过的那份；进世界建能力清单时把登记的来源交进去。 */
         private CompatRegistry compat = CompatRegistry.empty();
+        /** 挨打的片段与换维度：每刻看一眼，到点发事件。 */
+        private HurtEpisodes hurtEpisodes;
+        private DimensionChanges dimensionChanges;
         // MCP 请求线程排工作、客户端刻里做：下达、暂停、回答与控制循环推进在同一个线程上。
         private final ClientTickWork clientWork = new ClientTickWork();
         // 任务事件流一份：目标处境变化与生存需求的事件都进它，events 工具从这里读。
@@ -393,9 +398,15 @@ public final class Bootstrap {
             // 一次伤害包两处要：自卫的伤害证据，与提醒（黑暗里挨打、战斗压力）。
             CombatMemory memory = combatMemory;
             PlayerReminders playerReminders = reminders;
+            // 挨打的片段与换维度两种事件：主播从 events 里知道角色挨了打、换了维度；挨打的攻击者看得见时带观察编号。
+            hurtEpisodes = new HurtEpisodes(taskEvents, entityId -> worldScope[0] == null ? Optional.empty()
+                    : worldScope[0].scene().seen().idOfEntity(entityId));
+            dimensionChanges = new DimensionChanges(taskEvents);
+            HurtEpisodes hurts = hurtEpisodes;
             ClientHooks.registerDamageObserver((player, source, tick) -> {
                 memory.hurt(player, source, tick);
                 playerReminders.hurt(player, source, tick);
+                hurts.hurt(player, source, tick);
             });
             // 目标执行与 MCP 工具：LLM 用 execute 下达的目标经目标运行表成为控制循环的主任务；
             // 目标处境与生存需求的事件都进同一条任务事件流，宿主用 events 读。
@@ -618,6 +629,9 @@ public final class Bootstrap {
         // 最后丢掉现场；不让目标跟进下一个世界接着跑。方块扫描索引按维度名分开，不清空的话
         // 下一个世界的同名维度会读到上一个世界的命中。
         private void leaveWorld() {
+            // 换世界、断线：没发出的挨打片段丢掉，维度基准重来。
+            if (hurtEpisodes != null) hurtEpisodes.forget();
+            if (dimensionChanges != null) dimensionChanges.forget();
             if (worldScope[0] != null) {
                 goals.leaveWorld();
                 worldScope[0].leave();
@@ -658,6 +672,9 @@ public final class Bootstrap {
             if (equipmentConfirmations != null) equipmentConfirmations.observe(current.localPlayer());
             // 提醒每刻看一遍角色：人自己玩的时候也照样看，LLM 该知道的事不因控制权换手断掉。
             if (reminders != null) reminders.tick(current);
+            // 挨打的片段到点发、维度变了发：人自己玩的时候也照样发。
+            if (hurtEpisodes != null) hurtEpisodes.tick(current);
+            if (dimensionChanges != null) dimensionChanges.tick(current);
             clientWork.drain(new ClientTickContext(gameTick, current));
             boolean owned = playerControl.input().automationOwnsControls();
             if (owned != automationOwned) {
