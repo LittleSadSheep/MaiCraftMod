@@ -6,6 +6,7 @@ import java.util.Optional;
 import java.util.function.Function;
 import java.util.function.IntSupplier;
 
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.behavior.acquire.ReadsCharacterPosition;
@@ -22,7 +23,7 @@ import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
- * 丢东西的整套做法：朝面前远处看过去，把要丢的一堆换到主手原生抛出（{@link ThrowsItems}），
+ * 丢东西的整套做法：挑一个开阔的方向（别落在必经的走廊上）看过去，把要丢的一堆换到主手原生抛出（{@link ThrowsItems}），
  * 主手这堆丢完还要丢就换下一堆，丢够或身上没有了为止；丢完把落点登记进本会话的寻路避让，
  * 再走出拾取范围，不让自己两秒后把东西吸回来。丢弃能力和腾地方都用这一份。
  *
@@ -35,6 +36,8 @@ public final class DropsItems implements Action {
 
     /** 抛出落点按面前几格估计：整份一抛不会落在脚边，避让登记取这个近似，半径在避让里放宽。 */
     private static final double LANDING_DISTANCE = 6.0;
+    /** 眼睛比脚高多少：从眼睛位置推回脚下那一格。 */
+    private static final double EYE_HEIGHT = 1.62;
     /** 抛掷前把视线抬高一点，物品沿视线飞出去更远。 */
     private static final double LOOK_UP = 3.0;
     /** 等镜头转到位的耐心（刻）；转不过去也照样丢，方向差一点不碍事。 */
@@ -140,7 +143,10 @@ public final class DropsItems implements Action {
         FirstPersonScene scene = parts.scenes().apply(player);
         if (lookTarget == null) {
             player.input().halt(player.localPlayer());
-            throwDirection = horizontalForward(scene);
+            // 往开阔的地方丢：别让东西落在一格宽的走廊、楼梯、门口，回头路过又被吸回来。
+            BlockPos feet = BlockPos.containing(scene.eyePosition().x, scene.eyePosition().y - EYE_HEIGHT,
+                    scene.eyePosition().z);
+            throwDirection = DropSpot.direction(scene::blockAt, feet, horizontalForward(scene));
             lookTarget = scene.eyePosition().add(throwDirection.scale(10.0)).add(0.0, LOOK_UP, 0.0);
         }
         player.input().lookAt(player.localPlayer(), lookTarget);

@@ -280,7 +280,8 @@ class DropTaskTest {
         Rig rig = Rig.create(30, 30);
         rig.autoConfirm = false;
         rig.sender.next(PendingInteraction.Status.UNCERTAIN);
-        TickResult result = rig.run(rig.task(5), 60);
+        // 整堆丢的那一下没等到确认（只丢一部分时走背包分堆，另有测试）。
+        TickResult result = rig.run(rig.task(30), 60);
         TaskResult partial = result instanceof TickResult.Finished finished ? finished.result() : null;
         assertTrue(partial != null, () -> "结果没出来：" + result);
         assertEquals(1, partial.unconfirmed().size(), () -> "partial：" + partial.summary());

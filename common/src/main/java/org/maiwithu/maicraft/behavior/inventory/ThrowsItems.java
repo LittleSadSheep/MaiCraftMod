@@ -21,7 +21,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 /**
  * 原生丢出的动作：手里握着要丢的东西，用原生的 Q 投掷逐份丢出去，每一份都等游戏确认扣减。
  *
- * <p>一整格都该丢时整份一抛，剩下的零头一件一件丢——原生的部分投掷一次只出手一件。
+ * <p>一整格都该丢时整份一抛（Ctrl+Q）；只丢这一格里的一部分时打开背包分出这几件再整份丢，
+ * 不一件一件按 Q——原先零头一件一件丢，丢四十件就是四十下。
  * 抛掷没有等到确认就收尾（超时或被顶掉）时如实报告"没能确认"，把计划丢的件数交给调用方
  * 记进没确认的交互里；丢弃不可逆，没等到确认不等于确定没丢，也不盲目再丢一次。
  * 主手上不是要丢的东西时按缺料失败：换到主手是调用方的前置阶段。
@@ -42,6 +43,8 @@ public final class ThrowsItems implements Action {
     /** 这次提交时计划丢出的件数：整份抛是一格的数量，零头抛是 1。 */
     private int plannedThisThrow;
     private Problem failure;
+    /** 只丢一部分时的分堆丢：打开背包分出这几件一次丢掉。 */
+    private MenuDropBatch batch;
 
     /**
      * @param itemId 要丢的物品注册 ID
@@ -90,6 +93,9 @@ public final class ThrowsItems implements Action {
         if (pending != null) {
             return awaitConfirmation(player);
         }
+        if (batch != null) {
+            return awaitBatch(context);
+        }
         if (remaining <= 0) {
             return ActionStatus.done();
         }
@@ -106,6 +112,12 @@ public final class ThrowsItems implements Action {
         // 丢一下也是一次交互：本刻机会已经用掉（或角色不归自动化控制）就等下一刻。
         if (!player.canInteractThisTick()) {
             return ActionStatus.running();
+        }
+        if (held.getCount() > remaining && remaining > 1 && player.localPlayer() != null) {
+            // 只丢这一格里的一部分：打开背包分出这几件，一次整份丢掉。
+            plannedThisThrow = remaining;
+            batch = new MenuDropBatch(player.localPlayer().getInventory().selected, remaining);
+            return ActionStatus.progressed();
         }
         plannedThisThrow = held.getCount() <= remaining ? held.getCount() : 1;
         ItemStack before = held.copy();
@@ -140,6 +152,23 @@ public final class ThrowsItems implements Action {
         };
     }
 
+    // 分堆丢推进：丢出去了按这几件记账；最后丢的那一下没等到确认，照实记成没能确认。
+    private ActionStatus awaitBatch(TickContext context) {
+        ActionStatus status = batch.tick(context);
+        if (status instanceof ActionStatus.Running) return status;
+        MenuDropBatch finished = batch;
+        batch = null;
+        if (finished.thrown()) {
+            remaining -= plannedThisThrow;
+            return remaining <= 0 ? ActionStatus.done() : ActionStatus.progressed();
+        }
+        if (finished.throwUncertain()) unconfirmed = plannedThisThrow;
+        Problem problem = status instanceof ActionStatus.Failed failed ? failed.problem()
+                : Problem.of(Problem.Kind.STUCK, "分堆丢东西没做完");
+        failure = new Problem(problem.kind(), problem.message() + "；还剩 " + remaining + " 件没确认丢出", null);
+        return ActionStatus.failed(failure);
+    }
+
     private Problem stuck(String message) {
         failure = new Problem(Problem.Kind.STUCK, message + "；还剩 " + remaining + " 件没确认丢出", null);
         return failure;
@@ -162,6 +191,7 @@ public final class ThrowsItems implements Action {
 
     @Override
     public Interruptibility interruptibility() {
+        if (batch != null) return batch.interruptibility();
         return pending != null && !pending.terminal()
                 ? Interruptibility.UNSAFE_TO_STOP
                 : Interruptibility.WORKING;
