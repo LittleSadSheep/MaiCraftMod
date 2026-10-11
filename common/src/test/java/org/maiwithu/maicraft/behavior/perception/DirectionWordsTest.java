@@ -37,7 +37,7 @@ class DirectionWordsTest {
 
     @Test
     void facingWordComesFromYaw() {
-        // 与 compassOf 同一套八扇区：视角角 180 是北，0 是南。
+        // 与 compassOf 同一套八向：视角角 180 是北，0 是南。
         String facing = DirectionWords.compassOf(
                 -Math.sin(Math.toRadians(180f)), Math.cos(Math.toRadians(180f)));
         assertEquals("北", facing);

@@ -65,6 +65,10 @@ term 清册 改说"旧逻辑清单"
 term 换芯 改说"重写"
 word Navigator 已改名：对外的寻路入口叫 WalkTo（走到），一次运行叫 WalkRun（走到运行）
 term 导航器 已改名：对外的寻路入口叫走到（WalkTo），一次运行叫走到运行（WalkRun）
+term 扇区 已改名：探索候选的范围约束叫扇形（ExplorationSector）；指罗盘八向的一段时说"方位"或"八向"
+term 前沿腿 已改名：探索里一段一段的走路叫航点与走行段
+term 航段 已改名：探索里一段一段的走路叫走行段
+term 换锚 已改名：探索走不动时横移重来叫换出发点
 
 # 成员名里词的本义正好就是要说的，逐个放行（MemberNamesTest 读）
 allow mcp.transport.McpConfig.port MCP 服务真的在监听这个网络端口

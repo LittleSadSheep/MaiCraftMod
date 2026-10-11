@@ -38,7 +38,7 @@ public final class DirectionWords {
         double[] forward = forwardVector(facingYawDegrees);
         int facing = sector(Math.atan2(forward[0], -forward[1]));
         int target = sector(Math.atan2(dx, -dz));
-        // 方位角顺时针增大，转过的扇区数就是往右偏了多少。
+        // 方位角顺时针增大，转过的方位数就是往右偏了多少。
         return RELATIVE[Math.floorMod(target - facing, 8)];
     }
 
@@ -70,7 +70,7 @@ public final class DirectionWords {
         return new double[]{-Math.sin(radians), Math.cos(radians)};
     }
 
-    // 方位角（从北顺时针的度数）换成八扇区序号，跨圈取模。
+    // 方位角（从北顺时针的度数）换成八向序号，跨圈取模。
     private static int sector(double radians) {
         int index = (int) Math.round(Math.toDegrees(radians) / 45.0);
         return Math.floorMod(index, 8);
