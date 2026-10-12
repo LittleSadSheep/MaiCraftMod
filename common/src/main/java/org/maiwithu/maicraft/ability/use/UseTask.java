@@ -72,6 +72,9 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     private String openedMenu;
     private String riding;
     private List<String> signLines = List.of();
+    /** 连着点到哪一刻为止（第一下出手时定）；不连着点为 -1。 */
+    private long keepTryingUntil = -1;
+    private long now;
 
     UseTask(UseInput input, UseServices services) {
         super("用东西", Phase.RESOLVE, new ProgressTracker(200, 20L * 60 * 10));
@@ -118,8 +121,8 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     }
 
     private Next<Phase> found(ResolvedTarget resolved) {
-        // 指定了点哪一面：靠近与出手都只认方块朝这一面的表面。
-        target = resolved.facing(input.face());
+        // 指定了点哪一面：靠近与出手都只认方块朝这一面的表面；要连着点的每一下只等几刻。
+        target = resolved.facing(input.face()).quickly(input.keepTrying() > 0);
         if (target.isEntity()) {
             if (services.world().riding(target.entityId())) {
                 riding = target.typeId();
@@ -261,6 +264,8 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
 
     // 交互有了结论就结算；没出手就失败的（瞄不准、目标没了）按站位问题处理。
     private Next<Phase> interact(TickContext context) {
+        now = context.gameTick();
+        if (keepTryingUntil < 0 && input.keepTrying() > 0) keepTryingUntil = now + 20L * input.keepTrying();
         return switch (runAction(context)) {
             case ActionStatus.Running running -> Next.stay();
             case ActionStatus.Done done -> settle(interactionResult());
@@ -309,6 +314,9 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
                 yield Next.done(TaskResult.done("确认生效了 " + appliedTimes + " 次；最后这一下现场出乎预料："
                         + unexpected.scene()));
             }
+            // 要求了连着点、还没到时候：这一下没点中（传送带上的东西刚好不在点的那一格），接着点。
+            case UseDecider.Settlement.Unconfirmed unconfirmed when now < keepTryingUntil -> interactNow();
+            case UseDecider.Settlement.NotApplied notApplied when now < keepTryingUntil -> interactNow();
             case UseDecider.Settlement.Unconfirmed unconfirmed -> {
                 recordUnconfirmed(new Change(Change.Kind.OTHER, describeWhat(), 1, unconfirmed.scene()));
                 yield Next.done(UseDecider.unconfirmed(appliedTimes, unconfirmed.scene()));

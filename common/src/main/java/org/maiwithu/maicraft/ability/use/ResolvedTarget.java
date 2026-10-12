@@ -17,11 +17,12 @@ import net.minecraft.core.Direction;
  * @param typeId   方块或实体此刻的类型注册 ID（读现场得到，不是参数里的筛选）
  * @param describe 给日志与结果的一句话
  * @param face     只点方块朝这一面（用扳手转机器）；不指定为 null
+ * @param quick    连着点：每一下只等几刻看有没有反应，没反应接着点（抓传送带上跑着的东西）
  */
-record ResolvedTarget(BlockPos cell, Integer entityId, String typeId, String describe, Direction face) {
+record ResolvedTarget(BlockPos cell, Integer entityId, String typeId, String describe, Direction face, boolean quick) {
 
     ResolvedTarget(BlockPos cell, Integer entityId, String typeId, String describe) {
-        this(cell, entityId, typeId, describe, null);
+        this(cell, entityId, typeId, describe, null, false);
     }
 
     ResolvedTarget {
@@ -47,11 +48,18 @@ record ResolvedTarget(BlockPos cell, Integer entityId, String typeId, String des
 
     /** 方块目标只点朝 face 的那一面；实体目标不变。 */
     ResolvedTarget facing(Direction face) {
-        return face == null || isEntity() ? this : new ResolvedTarget(cell, null, typeId, describe + " 的 " + face.getName() + " 面", face);
+        return face == null || isEntity() ? this
+                : new ResolvedTarget(cell, null, typeId, describe + " 的 " + face.getName() + " 面", face, quick);
+    }
+
+    /** 连着点：每一下只等几刻。 */
+    ResolvedTarget quickly(boolean on) {
+        return on == quick ? this : new ResolvedTarget(cell, entityId, typeId, describe, face, on);
     }
 
     /** 换成同一种流体的另一格（空桶点到流动的水，改舀附近的源格）。 */
     ResolvedTarget movedTo(BlockPos other, String why) {
-        return new ResolvedTarget(other.immutable(), null, typeId, typeId + " " + other.toShortString() + "（" + why + "）");
+        return new ResolvedTarget(other.immutable(), null, typeId, typeId + " " + other.toShortString() + "（" + why + "）",
+                face, quick);
     }
 }

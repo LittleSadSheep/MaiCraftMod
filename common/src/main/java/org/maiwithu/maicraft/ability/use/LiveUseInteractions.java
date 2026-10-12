@@ -135,6 +135,7 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
         AimAndInteract use = bucket
                 ? interactions.useHeldItemToward(aim.effectCell(), InteractionHand.MAIN_HAND, confirmation)
                 : faced ? interactions.useBlockFace(cell, target.face(), confirmation)
+                : target.quick() ? interactions.useBlockQuickly(aim.clickCell(), confirmation)
                 : interactions.useBlock(aim.clickCell(), confirmation);
         return new UseSeams.Built.Ready(use, use::result, gesture, held, menuBefore, aim.effectCell());
     }

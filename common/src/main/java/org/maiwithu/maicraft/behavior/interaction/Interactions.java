@@ -51,6 +51,14 @@ public final class Interactions {
     }
 
     /**
+     * 右键一格，只等几刻看有没有反应：连着点抓传送带上跑着的东西时用，没点中马上点下一下，不等满一秒。
+     */
+    public AimAndInteract useBlockQuickly(BlockPos target, InteractionConfirmation confirmation) {
+        return new AimAndInteract(new InteractionTarget.BlockTarget(target), AimAndInteract.Gesture.USE,
+                InteractionHand.MAIN_HAND, confirmation, FirstPersonScene::of, AimAndInteract.QUICK_CONFIRM_TICKS);
+    }
+
+    /**
      * 点方块外形上朝 face 的那一面（放方块）：瞄准点在外形每个框朝这个方向的面上找，准星点中这一格、面朝对了才提交。
      */
     public AimAndInteract useBlockFace(BlockPos target, Direction face, InteractionConfirmation confirmation) {

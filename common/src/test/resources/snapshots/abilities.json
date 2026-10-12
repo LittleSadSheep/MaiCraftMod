@@ -4,7 +4,7 @@
       {
         "ability": "maicraft:use",
         "summary": "对一个方块或实体用一下手上的东西（开门、按钮、拉杆、开箱看看、骑乘、剪毛、点火……）",
-        "parameters": "item?: string, block?: string, entity?: string, count: integer = 1, radius: integer = 32, text?: string, face?: string",
+        "parameters": "item?: string, block?: string, entity?: string, count: integer = 1, radius: integer = 32, text?: string, keep_trying: integer = 0, face?: string",
         "targets": [
           "here",
           "landmark",
@@ -355,6 +355,15 @@
           "type": "string",
           "required": false,
           "doc": "写到告示牌上的文字，用换行分行，最多 4 行；给了 text 就必须空手"
+        },
+        {
+          "name": "keep_trying",
+          "type": "integer",
+          "required": false,
+          "doc": "点下去没反应时接着点，最多这么多秒：传送带上跑着的东西要连着点才抓得到。不给就点一下没反应就停（不重复点，免得做两次）",
+          "default": 0,
+          "min": 0,
+          "max": 10
         },
         {
           "name": "face",

@@ -44,6 +44,8 @@ public final class AimAndInteract implements Action {
 
     /** 等游戏确认的期限；超过就按没能确认收尾，不无限等。 */
     private static final int CONFIRM_TIMEOUT_TICKS = 20;
+    /** 连着点时每一下等确认的期限：抓传送带上跑着的东西，没点中马上点下一下。 */
+    public static final int QUICK_CONFIRM_TICKS = 4;
     /** 镜头转向目标的耐心上限；原地转不过去说明视角被什么占住，按到不了收尾。 */
     private static final int TURN_PATIENCE_TICKS = 40;
     /** 转到位后准星点到了别的东西时，最多重新瞄几次；真人换个角度再试一次就够了。 */
@@ -56,6 +58,7 @@ public final class AimAndInteract implements Action {
     private final Gesture gesture;
     private final InteractionHand hand;
     private final InteractionConfirmation confirmation;
+    private final int confirmTicks;
     private final Function<PlayerContext, FirstPersonScene> scenes;
     /** 这一次瞄准的点；重新瞄准时清空，按当时的位置重新找。 */
     private Vec3 aimPoint;
@@ -82,6 +85,14 @@ public final class AimAndInteract implements Action {
      */
     public AimAndInteract(InteractionTarget target, Gesture gesture, InteractionHand hand,
                           InteractionConfirmation confirmation, Function<PlayerContext, FirstPersonScene> scenes) {
+        this(target, gesture, hand, confirmation, scenes, CONFIRM_TIMEOUT_TICKS);
+    }
+
+    /** @param confirmTicks 等游戏确认的期限（刻） */
+    public AimAndInteract(InteractionTarget target, Gesture gesture, InteractionHand hand,
+                          InteractionConfirmation confirmation, Function<PlayerContext, FirstPersonScene> scenes,
+                          int confirmTicks) {
+        this.confirmTicks = confirmTicks;
         if (gesture == Gesture.USE_HELD_ITEM && !(target instanceof InteractionTarget.BlockTarget)) {
             throw new IllegalArgumentException("朝目标使用手里的物品只能对着一格方块");
         }
@@ -175,16 +186,16 @@ public final class AimAndInteract implements Action {
         if (gesture == Gesture.USE_HELD_ITEM) {
             // 物品按自己的射线作用：发的是"使用手里的物品"，不是右键准星指着的方块。
             targetStateAtSubmission = scene.blockAt(((InteractionTarget.BlockTarget) target).pos());
-            pending = player.interactionSender().useItem(player, hand, confirmation, CONFIRM_TIMEOUT_TICKS);
+            pending = player.interactionSender().useItem(player, hand, confirmation, confirmTicks);
         } else if (target instanceof InteractionTarget.BlockTarget block) {
             targetStateAtSubmission = scene.blockAt(block.pos());
             pending = player.interactionSender().useBlock(
-                    player, hand, (BlockHitResult) hit, confirmation, CONFIRM_TIMEOUT_TICKS);
+                    player, hand, (BlockHitResult) hit, confirmation, confirmTicks);
         } else {
             // 实体目标走右键实体的原生入口：剪毛、挤奶、骑乘、交易都是这一下。
             pending = player.interactionSender().interact(
                     player, ((InteractionTarget.EntityTarget) target).entity(), hand,
-                    confirmation, CONFIRM_TIMEOUT_TICKS);
+                    confirmation, confirmTicks);
         }
         stage = Stage.CONFIRMING;
         return ActionStatus.progressed();

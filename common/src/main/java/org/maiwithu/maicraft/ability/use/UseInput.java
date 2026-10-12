@@ -22,14 +22,22 @@ import org.maiwithu.maicraft.kernel.task.TaskInput;
  * @param textLines  要写到告示牌上的字，逐行；不写字为空列表
  * @param permissions 这次任务的许可
  * @param face       点方块朝哪一面；不指定为 null，点看得见的任一面
+ * @param keepTrying 点下去没反应时接着点最多几秒；0 是点一下没反应就停
  */
 record UseInput(Target target, String item, String block, String entity,
-        long count, long radius, List<String> textLines, Permissions permissions, Direction face) implements TaskInput {
+        long count, long radius, List<String> textLines, Permissions permissions, Direction face,
+        int keepTrying) implements TaskInput {
 
-    /** 不指定点哪一面。 */
+    /** 不指定点哪一面，没反应就停。 */
     UseInput(Target target, String item, String block, String entity,
             long count, long radius, List<String> textLines, Permissions permissions) {
-        this(target, item, block, entity, count, radius, textLines, permissions, null);
+        this(target, item, block, entity, count, radius, textLines, permissions, null, 0);
+    }
+
+    /** 没反应就停。 */
+    UseInput(Target target, String item, String block, String entity,
+            long count, long radius, List<String> textLines, Permissions permissions, Direction face) {
+        this(target, item, block, entity, count, radius, textLines, permissions, face, 0);
     }
 
     UseInput {

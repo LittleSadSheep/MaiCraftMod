@@ -64,6 +64,9 @@ public final class UseModule implements AbilityModule {
                             .doc("按 block、entity 找目标的范围（格）").build(),
                     ParamSpec.of("text", ParamType.TEXT)
                             .doc("写到告示牌上的文字，用换行分行，最多 4 行；给了 text 就必须空手").build(),
+                    ParamSpec.of("keep_trying", ParamType.INTEGER).range(0, 10).defaultValue(0)
+                            .doc("点下去没反应时接着点，最多这么多秒：传送带上跑着的东西要连着点才抓得到。"
+                                    + "不给就点一下没反应就停（不重复点，免得做两次）").build(),
                     ParamSpec.of("face", ParamType.CHOICE)
                             .choices("up", "down", "north", "south", "east", "west")
                             .doc("点方块朝哪一面（方块外形上朝这边的表面都算）；不给就点看得见的任一面。"
@@ -137,8 +140,9 @@ public final class UseModule implements AbilityModule {
         long radius = params.has("radius") ? params.integer("radius") : 32;
         // 点哪一面：只对方块有意义，对实体给了也不用。
         Direction face = params.has("face") ? Direction.byName(params.text("face")) : null;
+        int keepTrying = params.has("keep_trying") ? (int) params.integer("keep_trying") : 0;
         return new StepDecision.Run(new UseInput(step.goal().target(), lower(item), lower(block), lower(entity),
-                count, radius, textLines, step.goal().permissions(), face));
+                count, radius, textLines, step.goal().permissions(), face, keepTrying));
     }
 
     @Override public void registerTasks(TaskFactories factories) {

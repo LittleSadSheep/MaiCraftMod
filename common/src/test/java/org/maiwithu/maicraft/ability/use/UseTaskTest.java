@@ -76,6 +76,32 @@ class UseTaskTest {
     }
 
     @Test
+    void 要求连着点时_没点中就接着点_点中就停() {
+        // 抓传送带上跑着的东西：前两下没点中（没反应、说不清），第三下手里有了。
+        Rig rig = new Rig();
+        rig.world.blocks.put(LEVER, "minecraft:lever");
+        rig.interactions.outcome(InteractionResult.notApplied("没反应"), () -> { });
+        rig.interactions.outcome(InteractionResult.unconfirmed("说不清"), () -> { });
+        rig.interactions.applied("手里有了");
+        TaskResult result = rig.run(new UseInput(position(LEVER), null, "minecraft:lever", null, 1, 32,
+                List.of(), Permissions.DEFAULT, null, 3));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(1L, ((UseDetails) result.details()).appliedTimes());
+        assertEquals(3, rig.interactions.builds);
+        assertTrue(rig.interactions.lastTarget.quick(), "连着点的每一下只等几刻");
+    }
+
+    @Test
+    void 不要求连着点时_没反应就停() {
+        Rig rig = new Rig();
+        rig.world.blocks.put(LEVER, "minecraft:lever");
+        rig.interactions.outcome(InteractionResult.notApplied("没反应"), () -> { });
+        rig.interactions.applied("不该点到这一下");
+        rig.run(rig.input(position(LEVER), null, "minecraft:lever", null, 1));
+        assertEquals(1, rig.interactions.builds);
+    }
+
+    @Test
     void 方块不对_按目标没了并写明应为与现为() {
         Rig rig = new Rig();
         rig.world.blocks.put(LEVER, "minecraft:barrel");
