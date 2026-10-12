@@ -36,6 +36,8 @@ final class StepBackTask extends PhasedTask<StepBackTask.Phase> {
     private final StepBackTask.Moves moves;
     private final TaskEventSink events;
     private final double[] safeSpot;
+    /** 还没推进过：第一刻就到了落点说明这一步退不出东西来。 */
+    private boolean firstTick = true;
 
     /** 退怎么走：生产用走到，测试换替身。 */
     interface Moves {
@@ -57,6 +59,12 @@ final class StepBackTask extends PhasedTask<StepBackTask.Phase> {
     protected Next<Phase> tick(Phase phase, TickContext context) {
         double[] self = moves.selfPosition(context);
         double remaining = Math.hypot(self[0] - safeSpot[0], self[2] - safeSpot[2]);
+        // 一插进来就已经站在落点上：退这一步什么都没变，人还贴着边（落点旁边另有一道深落差，挖楼梯时常这样）。
+        // 算没退成，让控制循环缓一阵再看；原先每刻插一次、立刻"站回了安全处"，一秒刷二十条。
+        if (firstTick && remaining <= ARRIVED_WITHIN) {
+            return Next.fail(walkProblem(Problem.of(Problem.Kind.STUCK, "已经站在退回的落点上，旁边还有落差")));
+        }
+        firstTick = false;
         if (remaining <= ARRIVED_WITHIN) {
             if (events != null) {
                 events.publish(TaskEvent.Kind.TEMPORARY_TASK_FINISHED, "退回了安全处，继续干活");
