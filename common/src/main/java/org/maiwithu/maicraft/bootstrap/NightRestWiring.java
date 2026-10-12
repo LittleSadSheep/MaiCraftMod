@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.bootstrap;
 
 import java.util.Objects;
 
+import org.maiwithu.maicraft.behavior.survival.AutoSleep;
 import org.maiwithu.maicraft.behavior.survival.NightfallNeed;
 import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -16,6 +17,12 @@ final class NightRestWiring implements NightfallNeed.ReadsBedAvailability, Night
 
     private NightfallNeed.ReadsBedAvailability beds;
     private NightfallNeed.NightRestMoves nightRest;
+    /** 夜里自动去睡的开关：夜晚需求读它，睡觉能力改它，两边拿的是同一份。 */
+    private final AutoSleep autoSleep = new AutoSleep();
+
+    AutoSleep autoSleep() {
+        return autoSleep;
+    }
 
     /** 睡觉能力登记好后接上：找床读端与夜间休息的落地都来自它。 */
     void attach(NightfallNeed.ReadsBedAvailability beds, NightfallNeed.NightRestMoves nightRest) {

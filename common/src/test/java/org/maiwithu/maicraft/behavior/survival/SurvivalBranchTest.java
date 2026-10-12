@@ -57,6 +57,25 @@ class SurvivalBranchTest {
     }
 
     @Test
+    void nightWithAutoSleepOffDoesNotGoToBed() {
+        // 有人说"晚上别睡"：自动去睡关掉后有床也不去睡；露天打不过照旧挖坑自保。打开后恢复。
+        AutoSleep autoSleep = new AutoSleep();
+        NightfallNeed.Facts night = new NightfallNeed.Facts(true, false, ThreatAssessment.Verdict.WINNABLE, 20, 15);
+        NightfallNeed.Facts danger = new NightfallNeed.Facts(true, false, ThreatAssessment.Verdict.OUTMATCHED, 20, 15);
+        NightfallNeed.Facts[] now = {night};
+        NightfallNeed need = new NightfallNeed(context -> now[0], () -> null, context -> true, context -> null, autoSleep);
+        TickContext tick = TickContext.of(0, null);
+        assertEquals(Urgency.LATER, need.urgency(tick));
+        autoSleep.disable();
+        assertNull(need.urgency(tick), "关掉后有床也不去睡");
+        now[0] = danger;
+        assertEquals(Urgency.SOON, need.urgency(tick), "露天打不过照旧挖坑");
+        now[0] = night;
+        autoSleep.enable();
+        assertEquals(Urgency.LATER, need.urgency(tick));
+    }
+
+    @Test
     void edgeOnlyWhenCloseToDeepDrop() {
         assertTrue(EdgeProximityNeed.atRisk(new EdgeProximityNeed.Facts(0.2, 5, new double[] {0, 0, 0})));
         // 离边远：不算。

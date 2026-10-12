@@ -17,6 +17,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
+import org.maiwithu.maicraft.behavior.survival.AutoSleep;
 import org.maiwithu.maicraft.behavior.survival.NightfallNeed;
 import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
 import org.maiwithu.maicraft.behavior.travel.DestinationResolver;
@@ -36,7 +37,9 @@ import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.TargetKind;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.kernel.param.ParamSpec;
 import org.maiwithu.maicraft.kernel.param.ParamSpecs;
+import org.maiwithu.maicraft.kernel.param.ParamType;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Task;
@@ -64,6 +67,8 @@ public final class SleepModule implements AbilityModule, NightfallNeed.NightRest
     private final DestinationResolver destinations;
     private final Supplier<Optional<String>> refusalTexts;
     private final Interactions interactions;
+    /** 夜里自动去睡的开关：operation=auto_off / auto_on 改它，夜晚生存需求读它。 */
+    private final AutoSleep autoSleep;
     /** 可睡窗口的读缝：生产实现读本地玩家的世界。 */
     private final SleepTask.ReadsSleepWindow sleepWindow =
             moment -> moment.player() != null && WorldTime.canAttemptSleep(moment.player().level());
@@ -76,6 +81,17 @@ public final class SleepModule implements AbilityModule, NightfallNeed.NightRest
             Interactions interactions, BringsPlayerClose approaches, CollectsBlocks collects,
             ReadsRememberedPlaces rememberedPlaces, DestinationResolver destinations,
             ItemNeeds obtain, Supplier<Optional<String>> refusalTexts) {
+        this(context, scans, protection, backpack, offhand, interactions, approaches, collects, rememberedPlaces,
+                destinations, obtain, refusalTexts, new AutoSleep());
+    }
+
+    /** @param autoSleep 夜里自动去睡的开关，与夜晚生存需求共用一份 */
+    public SleepModule(Supplier<PlayerContext> context, BlockScanService scans, Protection protection,
+            BackpackView backpack, OffhandContents offhand,
+            Interactions interactions, BringsPlayerClose approaches, CollectsBlocks collects,
+            ReadsRememberedPlaces rememberedPlaces, DestinationResolver destinations,
+            ItemNeeds obtain, Supplier<Optional<String>> refusalTexts, AutoSleep autoSleep) {
+        this.autoSleep = Objects.requireNonNull(autoSleep, "autoSleep");
         this.context = Objects.requireNonNull(context, "context");
         this.beds = new LiveBedFinder(context, scans, protection, backpack, offhand);
         this.interactions = Objects.requireNonNull(interactions, "interactions");
@@ -91,9 +107,14 @@ public final class SleepModule implements AbilityModule, NightfallNeed.NightRest
 
     @Override
     public AbilitySpec spec() {
-        return new AbilitySpec("maicraft:sleep", "找一张床躺下睡觉，白天会先备好今晚的床再报告睡不了",
+        return new AbilitySpec("maicraft:sleep", "找一张床躺下睡觉，白天会先备好今晚的床再报告睡不了；"
+                        + "也能开、关、查夜里自动去睡（默认开）",
                 AbilityDoc.forAbility("sleep"),
-                ParamSpecs.of(),
+                ParamSpecs.of(
+                        ParamSpec.of("operation", ParamType.CHOICE).defaultValue("sleep")
+                                .choices("sleep", "auto_on", "auto_off", "auto_status")
+                                .doc("sleep 现在去睡（默认）/ auto_off 关掉夜里自动去睡（有人说晚上别睡时用）"
+                                        + " / auto_on 打开 / auto_status 查开没开").build()),
                 Set.of(TargetKind.HERE, TargetKind.LANDMARK, TargetKind.POSITION, TargetKind.SEEN),
                 ExecutionMode.CONTROLS_PLAYER,
                 Set.of(), List.of(), Listing.LISTED);
@@ -101,6 +122,24 @@ public final class SleepModule implements AbilityModule, NightfallNeed.NightRest
 
     @Override
     public StepDecision decide(StepContext step) {
+        // 开关夜里自动去睡：当场改好就结束，不用进游戏动手；已经躺下的不叫醒，只管以后的夜里。
+        String operation = step.goal().params().has("operation") ? step.goal().params().text("operation") : "sleep";
+        switch (operation) {
+            case "auto_off" -> {
+                autoSleep.disable();
+                return finished(TaskResult.done("夜里自动去睡已关：天黑了不会自己找床睡，露天打不过照旧挖坑自保；"
+                        + "要睡时下达 sleep，或用 auto_on 打开"));
+            }
+            case "auto_on" -> {
+                autoSleep.enable();
+                return finished(TaskResult.done("夜里自动去睡已开：天黑了有床就在干活间隙自己去睡"));
+            }
+            case "auto_status" -> {
+                return finished(TaskResult.done(autoSleep.enabled() ? "夜里自动去睡开着" : "夜里自动去睡关着"));
+            }
+            default -> {
+            }
+        }
         PlayerContext current = context.get();
         if (current == null || current.level() == null) {
             return StepDecision.NOT_READY;

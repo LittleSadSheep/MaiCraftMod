@@ -268,7 +268,7 @@ public final class Bootstrap {
                 new DarknessNeed(new LiveDarkView(lightLevels),
                         new LiveTorchMoves(interactions, hands, protection, Set.of()), followLighting),
                 new NightfallNeed(new LiveNightView(combatSenses),
-                        LiveNightAndEdgeMoves.burrow(burrow, events), nightWiring, nightWiring),
+                        LiveNightAndEdgeMoves.burrow(burrow, events), nightWiring, nightWiring, nightWiring.autoSleep()),
                 new EdgeProximityNeed(new LiveEdgeView(),
                         LiveNightAndEdgeMoves.retreat(walks, events)),
                 // 刚重生、身上的东西撒在死的地方：五分钟内跑回去捡。
@@ -636,6 +636,8 @@ public final class Bootstrap {
                 worldScope[0] = scope;
                 // 随行补光的会话设置回默认：开关与阈值不跨世界残留，仍暗的路线格作废。
                 followLighting.reset();
+                // 夜里自动去睡回默认（开）：上个世界里有人说"晚上别睡"，不带到这个世界。
+                nightWiring.autoSleep().reset();
                 // 换了世界，任务事件流换一条新的，宿主手里的旧游标如实作废；再把这个世界上次没做完的目标
                 // 读回来，全部恢复为暂停，等 LLM 决定接不接着做。读回时的暂停事件进的是新的这条流。
                 taskEvents.restart();

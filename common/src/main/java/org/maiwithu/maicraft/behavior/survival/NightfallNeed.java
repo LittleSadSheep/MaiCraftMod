@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.kernel.task.Urgency;
 /**
  * 夜晚这项生存需求：到了能睡的时间，能弄到床就找空当去睡（夜间休息）；
  * 弄不到床时看处境——安全处或打得过就接着干活，露天又打不过才挖坑封顶熬到天亮。
+ * 夜里自动去睡被 LLM 关掉时（{@link AutoSleep}）按弄不到床对待：不去睡，其余照旧。
  */
 public final class NightfallNeed implements SurvivalNeed {
 
@@ -68,13 +69,21 @@ public final class NightfallNeed implements SurvivalNeed {
     private final BurrowMoves burrow;
     private final ReadsBedAvailability beds;
     private final NightRestMoves nightRest;
+    private final AutoSleep autoSleep;
 
     public NightfallNeed(ReadsNight reader, BurrowMoves burrow,
             ReadsBedAvailability beds, NightRestMoves nightRest) {
+        this(reader, burrow, beds, nightRest, new AutoSleep());
+    }
+
+    /** @param autoSleep 夜里自动去睡的开关：关着时不去找床 */
+    public NightfallNeed(ReadsNight reader, BurrowMoves burrow,
+            ReadsBedAvailability beds, NightRestMoves nightRest, AutoSleep autoSleep) {
         this.reader = reader;
         this.burrow = burrow;
         this.beds = beds;
         this.nightRest = nightRest;
+        this.autoSleep = autoSleep;
     }
 
     @Override public String name() { return "夜晚"; }
@@ -85,7 +94,8 @@ public final class NightfallNeed implements SurvivalNeed {
         if (facts == null) {
             return null;
         }
-        return branch(facts, beds.bedReady(context));
+        // 夜里自动去睡被关掉（例如多人游戏有人说"晚上别睡"）：当作弄不到床，不去睡；露天打不过照旧挖坑。
+        return branch(facts, autoSleep.enabled() && beds.bedReady(context));
     }
 
     @Override
