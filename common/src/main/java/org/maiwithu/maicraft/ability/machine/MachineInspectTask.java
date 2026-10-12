@@ -16,6 +16,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
+import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
@@ -242,19 +243,21 @@ final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
         return "";
     }
 
-    // 一台机器的查看视图：组成按角色分组，进出口并起来，运行状态每种机器读一格，网络逐张汇总。
+    // 一台机器的查看视图：组成按角色分组，进出口并起来，运行状态逐格读、同种机器读数一模一样的只列一格，网络逐张汇总。
     private MachineDetails.MachineView view(MachineGrouping.Machine machine) {
         List<MachineDetails.RoleGroup> roles = rolesOf(machine);
         List<ExchangePoint> ports = new ArrayList<>();
         for (MachineGrouping.Claimed cell : cellsOf(machine)) {
             ports.addAll(cell.type().exchangePoints(claimedStates.get(cell.pos()), cell.pos()));
         }
+        // 同种机器读数不一样的都列出来：原先每种只读第一格，三台机械手手里各拿什么、各剩多少，
+        // 测试员只看得到第一台，第二台没料了也不知道。读数一模一样的（一排同转速的轴）只列一格。
         List<MachineDetails.TypedState> running = new ArrayList<>();
-        Set<String> reported = new LinkedHashSet<>();
+        Set<List<Object>> reported = new LinkedHashSet<>();
         for (MachineGrouping.Claimed cell : cellsOf(machine)) {
-            if (reported.add(cell.type().id())) {
-                running.add(new MachineDetails.TypedState(cell.type().id(), cell.pos(),
-                        cell.type().state(cell.pos())));
+            MachineState state = cell.type().state(cell.pos());
+            if (reported.add(List.of(cell.type().id(), state))) {
+                running.add(new MachineDetails.TypedState(cell.type().id(), cell.pos(), state));
             }
         }
         List<MachineDetails.NetworkView> networks = networksOf(machine);
