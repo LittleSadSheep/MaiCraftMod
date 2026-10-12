@@ -65,4 +65,15 @@ class DropSpotTest {
         Vec3 north = new Vec3(0, 0, -1);
         assertEquals(north, DropSpot.direction(at -> read(world, at), new BlockPos(0, 64, 0), north));
     }
+
+    @Test
+    void aContainerAheadIsNotWhereThingsGetThrown() {
+        // 面前两格有个箱子（带方块实体、会收东西）：不朝它丢，换开阔的方向。
+        Map<BlockPos, BlockState> world = floor();
+        world.put(new BlockPos(0, 64, -2), Blocks.CHEST.defaultBlockState());
+        Vec3 north = new Vec3(0, 0, -1);
+        assertEquals(-1, DropSpot.openness(at -> read(world, at), new BlockPos(0, 64, 0), north));
+        Vec3 chosen = DropSpot.direction(at -> read(world, at), new BlockPos(0, 64, 0), north);
+        assertTrue(chosen.z > -0.9, "不朝箱子丢：" + chosen);
+    }
 }

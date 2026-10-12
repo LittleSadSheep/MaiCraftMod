@@ -10,7 +10,8 @@ import net.minecraft.world.phys.Vec3;
 /**
  * 往哪个方向丢：丢出去的东西别落在必经的走廊上——一格宽的隧道、楼梯、门口落了一地，回头路过又被吸回包里。
  * 围着转一圈看十六个方向，估一估东西大概落在哪（往前几格，撞墙就停在墙前），落点周围能站人的空地越多越好，
- * 脚下是液体、深坑的方向不丢；都差不多时朝面前丢，不为丢东西转一大圈。只挑方向，不挖坑、不点火。
+ * 脚下是液体、深坑的方向不丢；路上、落点脚下有会收东西的方块（置物台、传送带、箱子、漏斗这类带方块实体的）也不丢——
+ * 实机往置物台那边丢多余的金板，全落到台上被收了进去。都差不多时朝面前丢，不为丢东西转一大圈。只挑方向，不挖坑、不点火。
  */
 final class DropSpot {
 
@@ -54,6 +55,8 @@ final class DropSpot {
         for (int step = 1; step <= THROW_REACH; step++) {
             BlockPos next = BlockPos.containing(feet.getX() + 0.5 + direction.x * step, feet.getY(),
                     feet.getZ() + 0.5 + direction.z * step);
+            // 挡住去路的、飞过的地面上是会收东西的方块：东西落上去会被收走，这个方向不丢。
+            if (catches(blocks, next) || catches(blocks, next.below())) return -1;
             if (!passable(blocks, next) || !passable(blocks, next.above())) break;
             landing = next;
         }
@@ -72,6 +75,12 @@ final class DropSpot {
         BlockState below = blocks.apply(at.below());
         return passable(blocks, at) && passable(blocks, at.above())
                 && below != null && below.getFluidState().isEmpty() && below.isSolid();
+    }
+
+    // 会收东西的方块：带方块实体的（置物台、传送带、箱子、漏斗、工作盆）。
+    private static boolean catches(Function<BlockPos, BlockState> blocks, BlockPos at) {
+        BlockState state = blocks.apply(at);
+        return state != null && state.hasBlockEntity();
     }
 
     private static boolean passable(Function<BlockPos, BlockState> blocks, BlockPos at) {
