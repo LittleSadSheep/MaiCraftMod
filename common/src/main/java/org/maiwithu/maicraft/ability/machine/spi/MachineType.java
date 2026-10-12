@@ -64,6 +64,16 @@ public interface MachineType {
     /** 这一段现在是不是按要求装成了；按最终结构核对，给整机比对用。 */
     boolean installed(Installation installation);
 
+    /**
+     * 拆整台时这段安装段里要跟着拆的格：这一段自己放下的方块（机械臂、一格格接上的 ME 线缆）。
+     * 两头本来就在的方块不算：链条输送机、传送带两头的轴写在蓝图 cells 里随整台拆；机械臂的取放点、
+     * 链条连到的另一台可能是别的机器或主城原有的东西，拆这一台不能拆到它们。
+     * 不认这种安装段时给空，认但这一段没放方块时给空表。
+     */
+    default Optional<List<BlockPos>> placedBy(Installation installation) {
+        return Optional.empty();
+    }
+
     /** 手持部件右键宿主的那一面把它装上；这种机器不管这种部件时给空。 */
     Optional<Action> mount(PartCell part, Permissions permissions);
 

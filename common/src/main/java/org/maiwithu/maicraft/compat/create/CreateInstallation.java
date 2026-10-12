@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat.create;
 
+import java.util.List;
 import java.util.Optional;
 
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -26,4 +28,12 @@ interface CreateInstallation {
 
     /** 这一段现在是不是按要求装成了，按最终结构核对。 */
     boolean installed(ClientLevel level, Installation installation);
+
+    /**
+     * 拆整台时跟着拆的格：这一段自己放下的方块。传送带、链条、轨道、合成器连接、强力胶都只连两头写在 cells 里的方块，
+     * 两头随整台拆、连接跟着断，这里给空表；连到的另一头可能是别的机器，不能拆。
+     */
+    default List<BlockPos> placedCells(Installation installation) {
+        return List.of();
+    }
 }

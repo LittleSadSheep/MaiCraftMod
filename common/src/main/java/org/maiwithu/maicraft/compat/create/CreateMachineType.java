@@ -140,6 +140,11 @@ final class CreateMachineType implements MachineType {
                 && installation.get().installed(level, wanted);
     }
 
+    @Override public Optional<List<BlockPos>> placedBy(Installation wanted) {
+        if (installation.isEmpty() || !installation.get().kind().equals(wanted.kind())) return Optional.empty();
+        return Optional.of(installation.get().placedCells(wanted));
+    }
+
     @Override public Optional<Action> mount(PartCell part, Permissions permissions) {
         return Optional.empty();
     }

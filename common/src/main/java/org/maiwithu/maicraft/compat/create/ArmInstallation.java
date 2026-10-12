@@ -107,6 +107,11 @@ final class ArmInstallation implements CreateInstallation {
         return new StepsInOrder("放机械臂 " + arm.toShortString(), steps);
     }
 
+    // 机械臂那一格不写进 cells、由这一段放下：拆整台时跟着拆；取放点是别的方块（置物台、别的机器），不拆。
+    @Override public List<BlockPos> placedCells(Installation installation) {
+        return List.of(installation.cells().getFirst());
+    }
+
     @Override public boolean installed(ClientLevel level, Installation installation) {
         return matches(compat.armPoints(level, installation.cells().getFirst()), installation);
     }

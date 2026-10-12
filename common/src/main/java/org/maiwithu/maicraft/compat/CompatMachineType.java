@@ -81,6 +81,10 @@ public final class CompatMachineType implements MachineType {
         return ask(() -> type.installed(installation), false);
     }
 
+    @Override public Optional<List<BlockPos>> placedBy(Installation installation) {
+        return ask(() -> type.placedBy(installation), Optional.empty());
+    }
+
     @Override public Optional<Action> mount(PartCell part, Permissions permissions) {
         return act(() -> type.mount(part, permissions));
     }

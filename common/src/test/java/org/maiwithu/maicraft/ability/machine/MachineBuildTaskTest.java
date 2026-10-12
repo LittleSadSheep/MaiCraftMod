@@ -181,6 +181,31 @@ Rig rig = new Rig(tempDir);
     }
 
     @Test
+    void 拆整台_安装段连到的另一头不拆_这一段自己放的跟着拆() {
+        // 链条连到主城那台、机械臂的取放点：不是这台机器的，拆整台不能拆到；机械臂、线缆这类这一段自己放下的跟着拆。
+        Rig rig = new Rig(tempDir);
+        BlockPos far = new BlockPos(5, 0, 0);
+        BlockPos arm = new BlockPos(0, 1, 0);
+        MachineBlueprint plan = blueprint(null, new MachineBlueprint.Segment("test:chain", List.of(BlockPos.ZERO, far)), null);
+        MachineBlueprint withArm = new MachineBlueprint(plan.cells(), plan.parts(), List.of(plan.installations().getFirst(),
+                new MachineBlueprint.Segment("test:arm", List.of(arm, far))), plan.settings(), plan.processes());
+        rig.world.blocks.put(ANCHOR, FURNACE);
+        rig.world.blocks.put(ANCHOR.offset(far), Blocks.STONE.defaultBlockState());
+        rig.world.blocks.put(ANCHOR.offset(arm), Blocks.STONE.defaultBlockState());
+        rig.type.placed = installation -> installation.kind().equals("test:arm")
+                ? Optional.of(List.of(installation.cells().getFirst())) : Optional.of(List.of());
+        MachineArchive archive = MachineArchive.fresh("接线", DIM, ANCHOR, withArm, null);
+        rig.archives.save(archive);
+        TaskResult result = rig.run(new MachineBuildInput(true, null,
+                new WorldPosition(ANCHOR.getX(), ANCHOR.getY(), ANCHOR.getZ(), DIM), "接线", archive,
+                Permissions.DEFAULT, "拆掉接线"));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertTrue(rig.world.blocks.get(ANCHOR).isAir(), "cells 里的格被挖掉");
+        assertTrue(rig.world.blocks.get(ANCHOR.offset(arm)).isAir(), "这一段自己放的机械臂跟着拆");
+        assertEquals(Blocks.STONE.defaultBlockState(), rig.world.blocks.get(ANCHOR.offset(far)), "另一头不是这台的，留着");
+    }
+
+    @Test
     void 补丁并进已有档案_按档案锚点施工() {
         Rig rig = new Rig(tempDir);
         MachineBlueprint original = blueprint(null, null, null);

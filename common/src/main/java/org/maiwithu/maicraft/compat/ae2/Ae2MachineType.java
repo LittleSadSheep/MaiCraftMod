@@ -121,6 +121,12 @@ final class Ae2MachineType implements MachineType {
                 && cables.installed(level, installation);
     }
 
+    // ME 线缆是这一段一格格接上的：拆整台时跟着拆。
+    @Override public Optional<List<BlockPos>> placedBy(Installation installation) {
+        if (!isCableBus() || !compat.cableItem(installation.kind())) return Optional.empty();
+        return Optional.of(installation.cells());
+    }
+
     @Override public Optional<Action> mount(PartCell part, Permissions permissions) {
         if (!isCableBus() || !compat.partItem(part.itemId())) return Optional.empty();
         return Optional.of(cables.mount(part, permissions));

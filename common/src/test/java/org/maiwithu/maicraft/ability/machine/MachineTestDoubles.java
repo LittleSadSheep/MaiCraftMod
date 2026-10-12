@@ -121,6 +121,8 @@ final class MachineTestDoubles {
         Predicate<PartCell> partOk = part -> false;
         /** 这段现在装成了没有、这个部件装上没有：测试在动作效果里翻转。 */
         Predicate<Installation> installedOk = installation -> false;
+        /** 拆整台时这一段自己放下的格；默认不认这种安装段。 */
+        Function<Installation, Optional<List<BlockPos>>> placed = installation -> Optional.empty();
         Predicate<PartCell> mountedOk = part -> false;
         /** 装安装段与装部件的动作脚本：每次调用弹一个；空了给空，按"这种机器不给装"对待。 */
         final Deque<Action> installActions = new ArrayDeque<>();
@@ -188,6 +190,10 @@ final class MachineTestDoubles {
 
         @Override public boolean installed(Installation installation) {
             return installedOk.test(installation);
+        }
+
+        @Override public Optional<List<BlockPos>> placedBy(Installation installation) {
+            return placed.apply(installation);
         }
 
         @Override public Optional<Action> mount(PartCell part, Permissions permissions) {

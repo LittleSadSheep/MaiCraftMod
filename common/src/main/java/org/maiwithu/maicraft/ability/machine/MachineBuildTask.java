@@ -561,7 +561,10 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
         return cells;
     }
 
-    /** 拆整台的施工蓝图：档案范围逐格换成清空（含安装段占的格），交给施工引擎挖。 */
+    /**
+     * 拆整台的施工蓝图：档案 cells 逐格换成清空，安装段只加上它自己放下的格（机械臂、ME 线缆），交给施工引擎挖。
+     * 安装段连到的另一头不拆：实机拆一份只为拉链条的档案，把链条另一头主城竖轴顶上的链条输送机也拆了，主城断了动力。
+     */
     private Blueprint removalPlan() {
         MachineBlueprint from = existingArchive().blueprint();
         Set<BlockPos> declared = new LinkedHashSet<>();
@@ -571,14 +574,22 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
             declared.add(anchor.offset(cell.pos()));
         }
         for (MachineBlueprint.Segment segment : from.installations()) {
-            for (BlockPos offset : segment.offsets()) {
-                BlockPos at = anchor.offset(offset);
+            for (BlockPos at : placedBy(absolute(segment))) {
                 if (declared.add(at)) {
                     cells.add(PlannedCell.air(at));
                 }
             }
         }
         return new Blueprint(input.anchor().dimension(), anchor, cells);
+    }
+
+    // 问遍机器类型，认这种安装段的第一家说这一段自己放了哪些格；都不认（模组停用了）就一格不拆，宁可留下也不拆错。
+    private List<BlockPos> placedBy(Installation installation) {
+        for (MachineType type : services.machineTypes()) {
+            Optional<List<BlockPos>> placed = type.placedBy(installation);
+            if (placed.isPresent()) return placed.get();
+        }
+        return List.of();
     }
 
     private BlueprintCheck.Result compareNow() {
