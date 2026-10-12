@@ -344,7 +344,8 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
     private Next<Phase> keepPace(TickContext context, FollowView.Sighting him) {
         double gap = him.groundGap();
         if (gap <= input.distance() + HYSTERESIS) {
-            // 跟上了：跟不过去的计时清零，算一次真实进展。
+            // 跟上了：之前跟不过去的话说一声，计时清零，算一次真实进展。
+            if (blockedSince >= 0) tell("又跟上了，接着跟");
             blockedSince = -1;
             recordProgress("跟着他，相距 " + round(him.distance()) + " 格");
         }
@@ -460,9 +461,9 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
             Next<Phase> settled = stepWalk(context);
             if (settled != null) return Next.stay();
             if (walk != null && walk.report().state() == WalkReport.State.ON_THE_WAY) {
-                // 再试的这一趟走起来了：回到跟着，路上他再挪就换目标点。
-                tell("又跟上了，接着跟");
-                return Next.go(Phase.KEEP, "路走通了，接着跟");
+                // 再试的这一趟走起来了：回到跟着，路上他再挪就换目标点。引擎可能先走一段半截路线，
+                // 真走到他跟前才算跟上、才说"又跟上了"；半路又走不通就回来接着等，跟不过去的计时不清零。
+                return Next.go(Phase.KEEP, "路走起来了，接着跟");
             }
             if (walk != null) return Next.stay();
         }

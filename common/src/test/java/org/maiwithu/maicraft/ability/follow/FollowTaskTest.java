@@ -400,10 +400,13 @@ class FollowTaskTest {
         clock += FollowTask.RETRY_GAP_TICKS;
         run(follow, 3);
         FakeWalk retry = walks.last();
-        assertTrue(events.said("又跟上了"));
+        assertFalse(events.said("又跟上了"), "路走起来了还没到他跟前：不说跟上了");
         assertFalse(retry.closed, "换阶段不收掉正在走的路");
         step(follow);
         assertFalse(retry.closed);
+        view.him.gap = 4;
+        step(follow);
+        assertTrue(events.said("又跟上了"), "真到他跟前了才说跟上了");
     }
 
     @Test
