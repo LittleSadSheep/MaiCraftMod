@@ -93,6 +93,12 @@ final class ItemSettingsTask extends PhasedTask<ItemSettingsTask.Phase> {
     private Integer changed;
     private Map<String, String> before = Map.of();
     private Action prepared;
+    /** 改的那一套动作做完了没有、它交回的问题（做成为 null），与关上界面后等读回等了几刻。 */
+    private boolean editFinished;
+    private Problem editProblem;
+    private int readbackWaited;
+    /** 关上界面后等服务器把改好的物品同步回来的期限（刻）：Create 在关界面时才把规则写进物品，同步回来要一两刻。 */
+    private static final int READBACK_TICKS = 20;
 
     ItemSettingsTask(Input input, MachineServices services) {
         super(input.settings().isEmpty() ? "看物品设置" : "改物品设置", Phase.RESOLVE, new ProgressTracker(600, 2400));
@@ -166,13 +172,32 @@ final class ItemSettingsTask extends PhasedTask<ItemSettingsTask.Phase> {
         return Next.go(Phase.CHANGE, "开它的界面改 " + pending.size() + " 项");
     }
 
-    // 改完（界面已关上）读主手那件核对：一项一项比，对上的算改好。
+    // 改完（界面已关上）读主手那件核对：一项一项比，对上的算改好。关上界面那一刻服务器才写进物品，
+    // 同步回来要一两刻：对上了马上收，没对上等满一秒再下结论。原先关上就读，规则明明写进去了也读回"没改"。
     private Next<Phase> change(TickContext context) {
-        return switch (runAction(context)) {
-            case ActionStatus.Running running -> Next.stay();
-            case ActionStatus.Done done -> settle(null);
-            case ActionStatus.Failed failed -> settle(failed.problem());
-        };
+        if (!editFinished) {
+            switch (runAction(context)) {
+                case ActionStatus.Running running -> {
+                    return Next.stay();
+                }
+                case ActionStatus.Done done -> editFinished = true;
+                case ActionStatus.Failed failed -> {
+                    editFinished = true;
+                    editProblem = failed.problem();
+                }
+            }
+        }
+        if (!heldMatches() && ++readbackWaited < READBACK_TICKS) return Next.stay();
+        return settle(editProblem);
+    }
+
+    // 主手那件是不是已经读得出要的每一项。
+    private boolean heldMatches() {
+        PlayerContext current = services.context().get();
+        if (current == null || current.localPlayer() == null) return false;
+        ItemStack held = current.localPlayer().getMainHandItem();
+        if (!idOf(held).equals(input.item())) return false;
+        return input.settings().entrySet().stream().allMatch(entry -> settings.holds(held, entry.getKey(), entry.getValue()));
     }
 
     private Next<Phase> settle(Problem problem) {
