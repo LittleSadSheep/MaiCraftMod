@@ -29,6 +29,8 @@ public final class SeenNetworkStock {
     public static final Duration FRESH_FOR = Duration.ofMinutes(5);
 
     private final Map<TerminalAt, Sighting> sightings = new HashMap<>();
+    /** 身上的无线终端上次打开时看到的样子：无线终端连的就是绑定的那张网，不分在哪儿打开。 */
+    private Sighting wireless;
 
     /**
      * 点开一台终端、网络存货同步过来之后记一笔，盖掉这台终端以前的记录。
@@ -41,6 +43,21 @@ public final class SeenNetworkStock {
      */
     public void saw(String dimension, Ae2Terminals.Terminal terminal, boolean linked,
             List<Ae2TerminalMenu.StockEntry> stock, Instant when) {
+        sightings.put(TerminalAt.of(dimension, terminal), sighting(linked, stock, when));
+    }
+
+    /** 打开身上的无线终端、存货同步过来之后记一笔，盖掉以前的记录。 */
+    public void sawWireless(boolean linked, List<Ae2TerminalMenu.StockEntry> stock, Instant when) {
+        wireless = sighting(linked, stock, when);
+    }
+
+    /** 身上的无线终端上次打开时的样子；没开过或已经过了 {@link #FRESH_FOR} 都给空。 */
+    public Optional<Sighting> lastSeenWireless(Instant now) {
+        if (wireless == null || wireless.seenAt().plus(FRESH_FOR).isBefore(now)) return Optional.empty();
+        return Optional.of(wireless);
+    }
+
+    private static Sighting sighting(boolean linked, List<Ae2TerminalMenu.StockEntry> stock, Instant when) {
         Map<String, Long> storedByItem = new LinkedHashMap<>();
         for (Ae2TerminalMenu.StockEntry entry : stock) {
             if (entry.stored() <= 0) continue;
@@ -48,7 +65,7 @@ public final class SeenNetworkStock {
             String itemId = BuiltInRegistries.ITEM.getKey(entry.sample().getItem()).toString();
             storedByItem.merge(itemId, entry.stored(), Long::sum);
         }
-        sightings.put(TerminalAt.of(dimension, terminal), new Sighting(linked, Map.copyOf(storedByItem), when));
+        return new Sighting(linked, Map.copyOf(storedByItem), when);
     }
 
     /** 这台终端上次看到的样子；没看过或已经过了 {@link #FRESH_FOR} 都给空。 */

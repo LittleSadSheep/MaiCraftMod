@@ -7,6 +7,7 @@ import java.util.Objects;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.AABB;
 
 /**
@@ -24,6 +25,14 @@ public interface Ae2Terminals {
 
     /** 这一格的这一面现在还装着 ME 终端没有；格子没加载算没有。到了跟前、点开之前用它核对记忆有没有过时。 */
     boolean stillThere(ClientLevel level, BlockPos block, Direction side);
+
+    /**
+     * 这件物品是不是无线终端（无线终端、无线合成终端，以及模组里照它做的同类），而且已经绑在一台无线访问点上。
+     * 没绑的拿出来也打不开网络，不算。
+     */
+    default boolean linkedWirelessTerminal(ItemStack stack) {
+        return false;
+    }
 
     /**
      * 装在某一格某一面上的一台 ME 终端。

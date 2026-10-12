@@ -36,11 +36,15 @@ import org.maiwithu.maicraft.kernel.task.Action;
  * 上次看不行（没连上网络、没有这样东西）的排在最后，旧记录只拿来排先后、不拿来拒绝。
  * 网络里的东西一直在变，记下的数只当线索，到了终端跟前以现场为准。
  * 动手前再核对终端还在、还能取用，然后交给从终端取货的动作。网络能合成但现货不够时不下单。
+ *
+ * <p>身上带着绑过访问点的无线终端时先用它：不用走路，拿到主手右键打开就是同一张网；
+ * 超出访问点范围、没电时界面上写着原因，如实收场，引擎再去找附近装着的终端。
  */
 public final class Ae2TerminalSource implements ItemSource {
 
     /** 这条途径：via 取 ae2 就只从 ME 终端取。 */
-    public static final AcquireVia VIA = new AcquireVia("ae2", "从附近的 ME 终端取网络里已有的（装了 AE2 才有）");
+    public static final AcquireVia VIA = new AcquireVia("ae2",
+            "从 ME 网络取网络里已有的：身上带着绑过的无线终端就直接拿出来开，不然去附近的 ME 终端（装了 AE2 才有）");
 
     /** 找终端的半径：与找箱子的一样，再远就不算顺手能拿。 */
     public static final int SEARCH_RADIUS_BLOCKS = 64;
@@ -75,6 +79,11 @@ public final class Ae2TerminalSource implements ItemSource {
         PlayerContext player = services.context().get();
         if (player == null || player.level() == null) {
             return new SourceQuote.Unavailable(describe(), "角色不在世界里，找不了终端");
+        }
+        // 身上的无线终端：带在身上就能开，比走去任何一台装着的终端都近，先报它。
+        Optional<String> wireless = carriedWirelessTerminal(player);
+        if (wireless.isPresent()) {
+            return wirelessQuote(wireless.get(), request, clock.get());
         }
         ClientLevel level = player.level();
         String dimension = level.dimension().location().toString();
@@ -117,6 +126,11 @@ public final class Ae2TerminalSource implements ItemSource {
     @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
         PlayerContext player = services.context().get();
         if (player == null || player.level() == null) return Optional.empty();
+        // 报的是身上的无线终端：动手前再看一眼它还在身上，就拿出来打开。
+        if (offer.hint().startsWith(WIRELESS_HINT)) {
+            String itemId = offer.hint().substring(WIRELESS_HINT.length());
+            return carriedWirelessTerminal(player).filter(itemId::equals).flatMap(id -> takes.takeWireless(id, request));
+        }
         ClientLevel level = player.level();
         String dimension = level.dimension().location().toString();
         TerminalAt at = TerminalAt.parse(offer.hint());
@@ -133,6 +147,46 @@ public final class Ae2TerminalSource implements ItemSource {
             return Optional.empty();
         }
         return takes.take(terminal.get(), dimension, request, context.permissions());
+    }
+
+    /** 报价线索里标明"用身上的无线终端"的前缀，后面跟物品 ID。 */
+    static final String WIRELESS_HINT = "wireless:";
+    /** 拿出无线终端、右键、取、关上，大约几个动作：不用走路。 */
+    private static final int ACTIONS_WITH_WIRELESS = 3;
+
+    // 身上（主背包、快捷栏、副手）第一件绑过访问点的无线终端的物品 ID。
+    private Optional<String> carriedWirelessTerminal(PlayerContext player) {
+        var inventory = player.localPlayer().getInventory();
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            var stack = inventory.getItem(slot);
+            if (!stack.isEmpty() && compat.linkedWirelessTerminal(stack)) {
+                return Optional.of(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString());
+            }
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * 身上无线终端的报价：上次打开时记得网络里有货就报明确数量，没开过或记录过时报不知道有多少；
+     * 上次没连上（超出范围、没电）照样报，写明上次的情况——人可能已经走回范围里了。
+     */
+    static SourceQuote wirelessQuote(String itemId, ItemRequest request, Optional<SeenNetworkStock.Sighting> lastTime,
+            Predicate<String> wanted) {
+        AcquisitionCost cost = new AcquisitionCost(0, ACTIONS_WITH_WIRELESS);
+        String source = "身上的无线终端";
+        if (lastTime.isPresent() && lastTime.get().linked() && lastTime.get().count(wanted) > 0) {
+            return new SourceQuote.Offer(source, (int) Math.min(lastTime.get().count(wanted), request.count()), cost,
+                    "记的是上次打开无线终端时看到的数，打开后以界面里为准", WIRELESS_HINT + itemId);
+        }
+        String note = lastTime.isEmpty() ? "身上的无线终端这次还没打开过，不知道网络里有什么"
+                : !lastTime.get().linked() ? "上次打开时没连上网络（超出范围或没电），不知道现在好了没有，打开看一眼"
+                : "上次打开时网络里没有这样东西，不知道现在有没有，打开看一眼";
+        return new SourceQuote.Offer(source, SourceQuote.Offer.UNKNOWN_COUNT, cost, note, WIRELESS_HINT + itemId);
+    }
+
+    private SourceQuote wirelessQuote(String itemId, ItemRequest request, Instant now) {
+        Predicate<String> wanted = id -> request.wanted().matches(id, services.itemTags().tagsOf(id));
+        return wirelessQuote(itemId, request, seen.lastSeenWireless(now), wanted);
     }
 
     // 能不能取用：问保护判断里"存储能不能取用"那一条，自己或自家人放的才行，归属没问清的不用。

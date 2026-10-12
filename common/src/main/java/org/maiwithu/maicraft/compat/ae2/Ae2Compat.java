@@ -107,6 +107,21 @@ public final class Ae2Compat extends CompatModule {
         return call("核对 ME 终端还在不在", () -> terminals.stillThere(level, block, side));
     }
 
+    /** 这件物品是不是绑过无线访问点的无线终端；见 {@link Ae2Terminals#linkedWirelessTerminal}。 */
+    public boolean linkedWirelessTerminal(ItemStack stack) {
+        return call("认无线终端", () -> terminals.linkedWirelessTerminal(stack));
+    }
+
+    /** 点开的界面是不是身上的无线终端打开的；见 {@link Ae2TerminalMenu#wirelessMenu}。 */
+    public boolean wirelessMenu(AbstractContainerMenu menu) {
+        return call("核对点开的是不是无线终端", () -> menus.wirelessMenu(menu));
+    }
+
+    /** 终端没连上网络时界面上写的原因；见 {@link Ae2TerminalMenu#unlinkedWhy}。 */
+    public Optional<String> unlinkedWhy(AbstractContainerMenu menu) {
+        return call("读 ME 终端没连上的原因", () -> menus.unlinkedWhy(menu));
+    }
+
     /** 点开的界面是不是这台终端的；见 {@link Ae2TerminalMenu#belongsTo}。 */
     public boolean menuBelongsTo(AbstractContainerMenu menu, ClientLevel level, BlockPos block, Direction side) {
         return call("核对点开的是不是这台 ME 终端", () -> menus.belongsTo(menu, level, block, side));

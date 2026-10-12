@@ -8,11 +8,13 @@ import java.util.Map;
 import appeng.api.parts.IPart;
 import appeng.api.parts.IPartHost;
 import appeng.parts.BusCollisionHelper;
+import appeng.items.tools.powered.WirelessTerminalItem;
 import appeng.parts.reporting.AbstractTerminalPart;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.phys.AABB;
@@ -60,6 +62,11 @@ public final class AppliedEnergisticsTerminals implements Ae2Terminals {
         if (!level.isLoaded(block)) return false;
         return level.getBlockEntity(block) instanceof IPartHost host
                 && host.getPart(side) instanceof AbstractTerminalPart;
+    }
+
+    // 无线终端（及照它做的同类）且绑过无线访问点：绑定位置是物品上的组件，客户端读得到。
+    @Override public boolean linkedWirelessTerminal(ItemStack stack) {
+        return stack.getItem() instanceof WirelessTerminalItem wireless && wireless.getLinkedPosition(stack) != null;
     }
 
     // 面板范围用部件自己报的形状：AE2 按装在哪一面把部件坐标转成方块内坐标，再挪到世界坐标。

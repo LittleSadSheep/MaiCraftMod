@@ -23,4 +23,13 @@ public interface TerminalTakes {
      */
     Optional<Action> take(Ae2Terminals.Terminal terminal, String dimension, ItemRequest request,
             Permissions permissions);
+
+    /**
+     * 拿出身上的无线终端取货：换到主手右键打开，其余与在终端前取一样。不用走路。
+     *
+     * @param terminalItemId 身上那件无线终端的物品 ID
+     */
+    default Optional<Action> takeWireless(String terminalItemId, ItemRequest request) {
+        return Optional.empty();
+    }
 }

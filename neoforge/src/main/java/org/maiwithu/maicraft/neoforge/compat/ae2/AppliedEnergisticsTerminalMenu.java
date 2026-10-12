@@ -8,6 +8,7 @@ import java.util.Optional;
 import appeng.api.parts.IPartHost;
 import appeng.api.stacks.AEItemKey;
 import appeng.helpers.InventoryAction;
+import appeng.helpers.WirelessTerminalMenuHost;
 import appeng.menu.me.common.GridInventoryEntry;
 import appeng.menu.me.common.IClientRepo;
 import appeng.menu.me.common.MEStorageMenu;
@@ -30,6 +31,18 @@ public final class AppliedEnergisticsTerminalMenu implements Ae2TerminalMenu {
                 && level.getBlockEntity(block) instanceof IPartHost host
                 && host.getPart(side) != null
                 && storage.getHost() == host.getPart(side);
+    }
+
+    // 背后是拿在手里的无线终端（含无线合成终端）才算：主机就是那件物品的界面主机。
+    @Override public boolean wirelessMenu(AbstractContainerMenu menu) {
+        return menu instanceof MEStorageMenu storage && storage.getHost() instanceof WirelessTerminalMenuHost<?>;
+    }
+
+    // 没连上的原因是服务端同步过来的那句（超出范围、没电、没频道），按客户端语言读出来。
+    @Override public Optional<String> unlinkedWhy(AbstractContainerMenu menu) {
+        if (!(menu instanceof MEStorageMenu storage) || storage.getLinkStatus().connected()) return Optional.empty();
+        var why = storage.getLinkStatus().statusDescription();
+        return why == null ? Optional.empty() : Optional.of(why.getString());
     }
 
     @Override public Optional<Boolean> linked(AbstractContainerMenu menu) {

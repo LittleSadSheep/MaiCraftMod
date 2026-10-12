@@ -17,7 +17,9 @@ import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuOpening;
+import org.maiwithu.maicraft.behavior.menu.HeldItemMenuOpening;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
+import org.maiwithu.maicraft.behavior.menu.MenuOpening;
 import org.maiwithu.maicraft.behavior.menu.MoveConfirmation;
 import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
@@ -70,7 +72,85 @@ public final class MenuTerminalTakes implements TerminalTakes {
 
     @Override public Optional<Action> take(Ae2Terminals.Terminal terminal, String dimension, ItemRequest request,
             Permissions permissions) {
-        return Optional.of(new TakeAction(terminal, dimension, request, permissions));
+        return Optional.of(new TakeAction(new Placed(terminal, dimension, permissions), request));
+    }
+
+    @Override public Optional<Action> takeWireless(String terminalItemId, ItemRequest request) {
+        return Optional.of(new TakeAction(new Wireless(terminalItemId), request));
+    }
+
+    /** 到网络跟前的办法：走到一台装着的终端点开，或拿出身上的无线终端打开。取货的其余步骤两者一样。 */
+    private interface Access {
+        /** 怎么打开终端界面。 */
+        MenuOpening opening();
+
+        /** 点开的这份界面是不是这一台的。 */
+        boolean belongs(AbstractContainerMenu raw, ClientLevel level);
+
+        /** 给结果与日志看的一句话。 */
+        String describe();
+
+        /** 记下这次看到的网络存货，下次报价用。 */
+        void remember(boolean linked, List<Ae2TerminalMenu.StockEntry> stock);
+    }
+
+    /** 装在线缆上的一台终端：走过去、点在面板上打开（不点线缆芯）。 */
+    private final class Placed implements Access {
+        private final Ae2Terminals.Terminal terminal;
+        private final String dimension;
+        private final MenuOpening opening;
+
+        Placed(Ae2Terminals.Terminal terminal, String dimension, Permissions permissions) {
+            this.terminal = terminal;
+            this.dimension = dimension;
+            // 走过去能动多少地形按这次任务的许可来；靠近与右键都对准面板，不点线缆芯。
+            this.opening = new ClientMenuOpening(terminal.block(), terminal.panel(), permissions,
+                    services.menuLayouts(), services.approach(), services.interactions(), services.context());
+        }
+
+        @Override public MenuOpening opening() {
+            return opening;
+        }
+
+        @Override public boolean belongs(AbstractContainerMenu raw, ClientLevel level) {
+            return compat.menuBelongsTo(raw, level, terminal.block(), terminal.side());
+        }
+
+        @Override public String describe() {
+            return terminal.describe();
+        }
+
+        @Override public void remember(boolean linked, List<Ae2TerminalMenu.StockEntry> stock) {
+            seen.saw(dimension, terminal, linked, stock, clock.get());
+        }
+    }
+
+    /** 身上带着的无线终端：不用走路，拿到主手右键打开，连的是它绑定的那张网。 */
+    private final class Wireless implements Access {
+        private final String itemId;
+        private final MenuOpening opening;
+
+        Wireless(String itemId) {
+            this.itemId = itemId;
+            this.opening = new HeldItemMenuOpening(itemId, services.menuLayouts(), services.toMainhand(),
+                    services.interactions(), services.context());
+        }
+
+        @Override public MenuOpening opening() {
+            return opening;
+        }
+
+        @Override public boolean belongs(AbstractContainerMenu raw, ClientLevel level) {
+            return compat.wirelessMenu(raw);
+        }
+
+        @Override public String describe() {
+            return "身上的" + itemId;
+        }
+
+        @Override public void remember(boolean linked, List<Ae2TerminalMenu.StockEntry> stock) {
+            seen.sawWireless(linked, stock, clock.get());
+        }
     }
 
     /** 从终端取货的先后顺序。 */
@@ -82,10 +162,9 @@ public final class MenuTerminalTakes implements TerminalTakes {
     /** 从终端取货的动作：点开 → 等同步 → 逐笔取 → 关上，跨刻推进。 */
     private final class TakeAction implements Action {
 
-        private final Ae2Terminals.Terminal terminal;
-        private final String dimension;
+        private final Access access;
         private final ItemRequest request;
-        private final ClientMenuOpening opening;
+        private final MenuOpening opening;
         private final TransferSettlement settlement = new TransferSettlement();
         private Stage stage = Stage.OPEN;
         private OpenedMenu menu;
@@ -113,18 +192,15 @@ public final class MenuTerminalTakes implements TerminalTakes {
         private int cursorWaited;
         private PendingMenuAction putBackPending;
 
-        TakeAction(Ae2Terminals.Terminal terminal, String dimension, ItemRequest request, Permissions permissions) {
-            this.terminal = terminal;
-            this.dimension = dimension;
+        TakeAction(Access access, ItemRequest request) {
+            this.access = access;
             this.request = request;
-            // 走过去能动多少地形按这次任务的许可来；靠近与右键都对准面板，不点线缆芯。
-            this.opening = new ClientMenuOpening(terminal.block(), terminal.panel(), permissions,
-                    services.menuLayouts(), services.approach(), services.interactions(), services.context());
+            this.opening = access.opening();
         }
 
         @Override public ActionStatus tick(TickContext tick) {
             if (++waited > GIVE_UP_TICKS && stage.ordinal() < Stage.CURSOR.ordinal()) {
-                stop(Problem.of(Problem.Kind.STUCK, "从 " + terminal.describe() + " 取货超时", null));
+                stop(Problem.of(Problem.Kind.STUCK, "从 " + access.describe() + " 取货超时", null));
             }
             return switch (stage) {
                 case OPEN -> open(tick);
@@ -153,9 +229,9 @@ public final class MenuTerminalTakes implements TerminalTakes {
             if (menu.reading().isEmpty()) {
                 return finishWithout(Problem.of(Problem.Kind.TARGET_GONE, "终端界面刚打开就被关上了", null));
             }
-            if (!compat.menuBelongsTo(raw, level, terminal.block(), terminal.side())) {
+            if (!access.belongs(raw, level)) {
                 return stopNow(Problem.of(Problem.Kind.TARGET_GONE,
-                        "点开的不是 " + terminal.describe() + " 的界面", null));
+                        "点开的不是 " + access.describe() + " 的界面", null));
             }
             Optional<Boolean> linked = compat.networkLinked(raw);
             Optional<List<Ae2TerminalMenu.StockEntry>> stock = compat.networkStock(raw);
@@ -168,10 +244,12 @@ public final class MenuTerminalTakes implements TerminalTakes {
             // 连上了、也有货就不用再等；空表或没连上时多等一小会儿，免得把还没到的同步当成空网络。
             boolean clearlyReady = linked.get() && !stock.get().isEmpty();
             if (!clearlyReady && ++settleWaited <= STOCK_SETTLE_TICKS) return ActionStatus.running();
-            seen.saw(dimension, terminal, linked.get(), stock.get(), clock.get());
+            access.remember(linked.get(), stock.get());
             if (!linked.get()) {
+                // 界面上写着原因就照抄（无线终端超出访问点范围、没电、没频道）；读不到才用笼统的说法。
+                String why = compat.unlinkedWhy(raw).map(text -> "（" + text + "）").orElse("（没电或没频道）");
                 return stopNow(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
-                        terminal.describe() + " 没连上 ME 网络（没电或没频道），取不了", null));
+                        access.describe() + " 没连上 ME 网络" + why + "，取不了", null));
             }
             stage = Stage.TAKE;
             return ActionStatus.progressed();
@@ -211,7 +289,7 @@ public final class MenuTerminalTakes implements TerminalTakes {
                         () -> compat.takeOne(raw, takeOne.serial()));
                 case NetworkTakePlan.PutDown putDown -> putDown(putDown.slotId(), cursor, raw);
                 case NetworkTakePlan.NoRoom noRoom -> stopNow(Problem.of(Problem.Kind.INVENTORY_FULL,
-                        "背包放不下从 " + terminal.describe() + " 取的" + request.wanted().describe(), null));
+                        "背包放不下从 " + access.describe() + " 取的" + request.wanted().describe(), null));
                 case NetworkTakePlan.Done done -> stopNow(remaining > 0 ? nothingLeft() : null);
             };
         }
@@ -261,14 +339,14 @@ public final class MenuTerminalTakes implements TerminalTakes {
                 case CONFIRMED_NOT_APPLIED -> {
                     // 点了没动静：背包放不下、网络刚断、或这种东西刚被别人取走。不再硬点。
                     return stopNow(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
-                            "在 " + terminal.describe() + " 取" + item + "没取到（背包放不下、网络断了或刚被别人取走）",
+                            "在 " + access.describe() + " 取" + item + "没取到（背包放不下、网络断了或刚被别人取走）",
                             null));
                 }
                 default -> {
-                    settlement.unconfirmed("从 " + terminal.describe() + " 取" + item + "的一下没能确认："
+                    settlement.unconfirmed("从 " + access.describe() + " 取" + item + "的一下没能确认："
                             + settled.detail());
                     return stopNow(Problem.of(Problem.Kind.STUCK,
-                            "从 " + terminal.describe() + " 取" + item + "的一下没能确认", null));
+                            "从 " + access.describe() + " 取" + item + "的一下没能确认", null));
                 }
             }
         }
@@ -354,7 +432,7 @@ public final class MenuTerminalTakes implements TerminalTakes {
             PendingMenuAction settled = putBackPending;
             putBackPending = null;
             if (settled.status() != PendingMenuAction.Status.CONFIRMED_APPLIED) {
-                settlement.unconfirmed("把光标上的东西放回 " + terminal.describe() + " 的网络没能确认："
+                settlement.unconfirmed("把光标上的东西放回 " + access.describe() + " 的网络没能确认："
                         + settled.detail());
                 stage = Stage.CLOSE;
             }
@@ -410,14 +488,14 @@ public final class MenuTerminalTakes implements TerminalTakes {
             Optional<Boolean> linked = compat.networkLinked(raw);
             Optional<List<Ae2TerminalMenu.StockEntry>> stock = compat.networkStock(raw);
             if (linked.isPresent() && stock.isPresent()) {
-                seen.saw(dimension, terminal, linked.get(), stock.get(), clock.get());
+                access.remember(linked.get(), stock.get());
             }
         }
 
         // 网络里已经没有想要的了：这一笔之前一件都没取到就是"网络里没有"，取到过就是"取完了"。
         private Problem nothingLeft() {
             return Problem.of(Problem.Kind.NEED_ITEM,
-                    terminal.describe() + " 的网络里没有" + request.wanted().describe() + "了", null);
+                    access.describe() + " 的网络里没有" + request.wanted().describe() + "了", null);
         }
 
         private int confirmedTotal() {
@@ -461,7 +539,7 @@ public final class MenuTerminalTakes implements TerminalTakes {
         }
 
         @Override public String describe() {
-            return "从 " + terminal.describe() + " 取" + request.wanted().describe();
+            return "从 " + access.describe() + " 取" + request.wanted().describe();
         }
     }
 

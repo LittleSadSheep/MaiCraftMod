@@ -16,10 +16,11 @@ import org.maiwithu.maicraft.behavior.menu.spi.MenuLayoutProof;
 public final class Ae2TerminalLayout implements MenuLayoutProof {
 
     /**
-     * 证明的菜单类型：ME 终端、合成终端、样板编码终端。这里是菜单类型的注册 ID，不是方块或物品 ID；
-     * 三者都是 AE2 的 MEStorageMenu。类别：游戏事实（AE2 菜单类型注册）。
+     * 证明的菜单类型：ME 终端、合成终端、样板编码终端，以及身上的无线终端、无线合成终端打开的界面。
+     * 这里是菜单类型的注册 ID，不是方块或物品 ID；都是 AE2 的 MEStorageMenu。类别：游戏事实（AE2 菜单类型注册）。
      */
-    private static final Set<String> TERMINAL_MENUS = Set.of("ae2:item_terminal", "ae2:craftingterm", "ae2:patternterm");
+    private static final Set<String> TERMINAL_MENUS = Set.of("ae2:item_terminal", "ae2:craftingterm", "ae2:patternterm",
+            "ae2:wirelessterm", "ae2:wirelesscraftingterm");
 
     @Override public Set<String> menuTypes() {
         return TERMINAL_MENUS;

@@ -21,8 +21,21 @@ public interface Ae2TerminalMenu {
     /** 这份界面是不是装在这一格这一面的那台 ME 终端打开的；点开之后先核对，免得在别的界面上点。 */
     boolean belongsTo(AbstractContainerMenu menu, ClientLevel level, BlockPos block, Direction side);
 
+    /**
+     * 这份界面是不是身上的无线终端打开的（背后是拿在手里的那件物品，不是装在线缆上的面板）。
+     * 拿出无线终端点开之后先核对，免得在别的界面上点。
+     */
+    default boolean wirelessMenu(AbstractContainerMenu menu) {
+        return false;
+    }
+
     /** 终端界面显示网络连没连上（没电、没频道都算没连上）；不是 ME 终端的界面时给空。 */
     Optional<Boolean> linked(AbstractContainerMenu menu);
+
+    /** 没连上时界面上写的原因（超出无线范围、没电、没频道）；读不到为空。 */
+    default Optional<String> unlinkedWhy(AbstractContainerMenu menu) {
+        return Optional.empty();
+    }
 
     /**
      * 终端界面里已经同步过来的网络存货，只列物品，流体等别的种类不列。

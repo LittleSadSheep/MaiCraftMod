@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Predicate;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
@@ -175,6 +176,26 @@ class Ae2TerminalSourceTest {
                 Ae2TerminalSource.quoteFrom(new TerminalChooser.None("附近 64 格内没有 ME 终端"), torches(8),
                         "ME 终端", NOW));
         assertEquals("附近 64 格内没有 ME 终端", unavailable.reason());
+    }
+
+    @Test
+    void 身上的无线终端不用走路_没开过报不知道有多少_记得有货报明确数量() {
+        Predicate<String> torch = "minecraft:torch"::equals;
+        SourceQuote.Offer fresh = assertInstanceOf(SourceQuote.Offer.class, Ae2TerminalSource.wirelessQuote(
+                "ae2:wireless_crafting_terminal", torches(8), Optional.empty(), torch));
+        assertTrue(fresh.countUnknown());
+        assertEquals(0, fresh.cost().distanceBlocks(), "带在身上，不用走路");
+        assertEquals("wireless:ae2:wireless_crafting_terminal", fresh.hint());
+
+        SourceQuote.Offer known = assertInstanceOf(SourceQuote.Offer.class, Ae2TerminalSource.wirelessQuote(
+                "ae2:wireless_crafting_terminal", torches(8),
+                Optional.of(new SeenNetworkStock.Sighting(true, Map.of("minecraft:torch", 200L), NOW)), torch));
+        assertEquals(8, known.obtainableCount());
+
+        SourceQuote.Offer outOfRange = assertInstanceOf(SourceQuote.Offer.class, Ae2TerminalSource.wirelessQuote(
+                "ae2:wireless_crafting_terminal", torches(8),
+                Optional.of(new SeenNetworkStock.Sighting(false, Map.of(), NOW)), torch));
+        assertTrue(outOfRange.countUnknown() && outOfRange.risk().contains("没连上"), "上次超出范围照样报，写明上次的情况");
     }
 
     /** 只装了 AE2、版本给定的加载器环境替身。 */
