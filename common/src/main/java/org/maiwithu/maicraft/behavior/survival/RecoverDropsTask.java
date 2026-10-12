@@ -81,7 +81,6 @@ final class RecoverDropsTask extends PhasedTask<RecoverDropsTask.Phase> {
         return switch (phase) {
             case RUN_BACK -> runBack(context);
             case PICK_UP -> {
-                if (carriedBefore < 0) carriedBefore = moves.carriedStacks(context);
                 yield switch (runAction(context)) {
                     case ActionStatus.Running running -> Next.stay();
                     case ActionStatus.Done done -> finish(pickedText(context), TaskResult.Status.DONE);
@@ -96,6 +95,8 @@ final class RecoverDropsTask extends PhasedTask<RecoverDropsTask.Phase> {
 
     // 跑回去：走到说做完了也要核对人真到了跟前；没到就再起步，几次都不行如实收场，不站在远处空捡。
     private Next<Phase> runBack(TickContext context) {
+        // 身上几格东西从出发时数起：跑到地方时走过那堆就已经吸进包了，等开始捡再数就数不出来。
+        if (carriedBefore < 0) carriedBefore = moves.carriedStacks(context);
         ActionStatus status = runAction(context);
         if (status instanceof ActionStatus.Running) return Next.stay();
         if (close(context)) return Next.go(Phase.PICK_UP, "到了死的地方，捡地上的东西");
