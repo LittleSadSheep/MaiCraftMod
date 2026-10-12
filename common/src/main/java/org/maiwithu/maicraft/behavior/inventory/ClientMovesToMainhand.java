@@ -269,7 +269,30 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
 
         private ActionStatus fail(String message) {
             failure = Problem.of(Problem.Kind.STUCK, message, null);
+            releaseScreen();
             return ActionStatus.failed(failure);
+        }
+
+        // 被收掉（施工换下一格、任务被打断）：自己开着的背包界面同样交给原版关上。
+        @Override
+        public void close() {
+            if (failure == null) releaseScreen();
+        }
+
+        // 换到一半收场：自己为搬运打开的背包界面还开着就请原版关上，不留着挡后面的走路与点方块。
+        // 原先换快捷栏没确认就直接失败、界面一直开着，施工接着走路原地卡了八分钟。
+        private void releaseScreen() {
+            if (stage != Stage.MENU_STAGE && stage != Stage.CLOSING) return;
+            PlayerContext player = contexts.get();
+            if (player == null || player.localPlayer() == null || player.menuActions() == null
+                    || !player.menuActions().blocksWorld(player)) {
+                return;
+            }
+            try {
+                player.menuActions().closeForTaskBoundary(player, STEP_TIMEOUT_TICKS, "换手收尾");
+            } catch (RuntimeException notNow) {
+                // 这一刻交不出关界面：走路、点方块前会自己先关。
+            }
         }
 
         @Override
