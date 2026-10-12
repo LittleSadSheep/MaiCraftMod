@@ -18,12 +18,19 @@ public final class HungerNeed implements SurvivalNeed {
     /** 饱食度到这条线及以下就不能疾跑。 */
     public static final int SPRINT_FLOOR = 6;
 
+    /** 原版自然回血要的饱食度：到这一线以上才慢慢回血。 */
+    public static final int NATURAL_REGEN_FOOD = 18;
+
     /**
      * 饥饿处境：饱食度、是否已在掉血、身上最小的一件普通食物（见 {@link FoodPicker#plain}）补多少饱食度。
      *
      * @param smallestPlainNutrition 身上普通食物里补得最少的那件的营养值；身上没有普通食物时为 0
      */
-    public record Facts(int food, boolean losingHealth, int smallestPlainNutrition) {
+    public record Facts(int food, boolean losingHealth, int smallestPlainNutrition, boolean injured) {
+
+        public Facts(int food, boolean losingHealth, int smallestPlainNutrition) {
+            this(food, losingHealth, smallestPlainNutrition, false);
+        }
 
         /** 身上有没有饿了就能顺手吃的普通食物。 */
         public boolean carryingEdible() {
@@ -40,7 +47,10 @@ public final class HungerNeed implements SurvivalNeed {
             return Urgency.SOON;
         }
         // 趁空当吃：身上最小的一件普通食物能整份补进去（不溢出）才吃，不在饱食度刚掉一格时就停下手上的活去吃。
-        if (facts.carryingEdible() && facts.food() + facts.smallestPlainNutrition() <= 20) {
+        // 受了伤、饱食度又不到原版自然回血线（18）：溢出一点也吃，血回得来比省一口吃的要紧
+        // （实机 13 点血、饱食度 17，揣着面包一直不回血）。
+        if (facts.carryingEdible() && (facts.food() + facts.smallestPlainNutrition() <= 20
+                || facts.injured() && facts.food() < NATURAL_REGEN_FOOD)) {
             return Urgency.LATER;
         }
         return null;

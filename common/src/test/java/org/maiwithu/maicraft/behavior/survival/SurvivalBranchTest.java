@@ -32,6 +32,9 @@ class SurvivalBranchTest {
         assertNull(HungerNeed.assess(new HungerNeed.Facts(16, false, 5)));
         assertEquals(Urgency.LATER, HungerNeed.assess(new HungerNeed.Facts(15, false, 5)));
         assertNull(HungerNeed.assess(new HungerNeed.Facts(20, false, 5)));
+        // 受了伤、不到回血线（18）：溢出也吃，血才回得来（实机 13 点血、饱食度 17 一直不回血）。
+        assertEquals(Urgency.LATER, HungerNeed.assess(new HungerNeed.Facts(17, false, 5, true)));
+        assertNull(HungerNeed.assess(new HungerNeed.Facts(18, false, 5, true)), "到了回血线就不用吃");
     }
 
     @Test
