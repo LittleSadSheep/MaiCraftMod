@@ -103,4 +103,13 @@ public interface CreateTools {
      * @param buttons 按键序号：0 前、1 后、2 左、3 右、4 跳、5 潜行
      */
     void remoteButtons(List<Integer> buttons, boolean press);
+
+    /**
+     * 这个遥控器六个键各绑的频率：每个键两格（没放东西为空物品），顺序是上、下、左、右、跳、潜行；不是遥控器为空列表。
+     * 和机械动力按键时算频率用的是同一份数据。
+     */
+    List<List<ItemStack>> remoteFrequencies(ItemStack controller);
+
+    /** 无线红石能连多远（格）：机械动力服务端配置，读不到按默认的 256。 */
+    int linkRange();
 }

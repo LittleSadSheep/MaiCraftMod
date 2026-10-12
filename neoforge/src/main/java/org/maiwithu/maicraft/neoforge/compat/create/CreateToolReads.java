@@ -13,6 +13,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
+import com.simibubi.create.content.redstone.link.controller.LinkedControllerItem;
+import net.neoforged.neoforge.items.ItemStackHandler;
 import com.simibubi.create.AllDataComponents;
 import com.simibubi.create.AllRecipeTypes;
 import com.simibubi.create.api.equipment.potatoCannon.PotatoCannonProjectileType;
@@ -149,5 +151,24 @@ public final class CreateToolReads implements CreateTools {
 
     @Override public void remoteButtons(List<Integer> buttons, boolean press) {
         CatnipServices.NETWORK.sendToServer(new LinkedControllerInputPacket(buttons, press));
+    }
+
+    // 遥控器的十二个频率格：第 i 个键是第 2i、2i+1 格，和机械动力按键时算频率的同一份。
+    @Override public List<List<ItemStack>> remoteFrequencies(ItemStack controller) {
+        if (!(controller.getItem() instanceof LinkedControllerItem)) return List.of();
+        ItemStackHandler items = LinkedControllerItem.getFrequencyItems(controller);
+        List<List<ItemStack>> keys = new ArrayList<>();
+        for (int key = 0; key < items.getSlots() / 2; key++) {
+            keys.add(List.of(items.getStackInSlot(key * 2).copy(), items.getStackInSlot(key * 2 + 1).copy()));
+        }
+        return keys;
+    }
+
+    @Override public int linkRange() {
+        try {
+            return AllConfigs.server().logistics.linkRange.get();
+        } catch (RuntimeException unreadable) {
+            return 256;
+        }
     }
 }

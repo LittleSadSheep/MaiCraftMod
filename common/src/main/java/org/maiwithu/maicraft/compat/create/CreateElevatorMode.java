@@ -2,7 +2,6 @@
 package org.maiwithu.maicraft.compat.create;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,7 +27,8 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 
 /**
  * 坐机械动力的电梯当一种出行方式（via=elevator）：楼里装了电梯就不爬楼。
- * 报价：附近有电梯、角色站在它的某一层（或就在轿厢里）、能叫得动它（轿厢就停在这层，或这层触点旁有呼梯按钮）、
+ * 报价：附近有电梯、角色站在它的某一层（或就在轿厢里）、能叫得动它（轿厢就停在这层，或有呼梯的办法：触点旁的按钮、
+ * 无线链路的发射端按钮、身上同频的遥控器键，见 {@link ElevatorCalls}）、
  * 轿厢里有装置控制器能选层，就按"走到按钮 + 等轿厢 + 坐过去"估一份；楼层表没同步先要一次，下一刻再答。
  * 去哪层：给了 floor 按它（楼层名、top、bottom、up、down），没给按目的地的高度挑最近的一层。
  */
@@ -111,11 +111,14 @@ final class CreateElevatorMode implements TravelMode {
             boolean comesHere = elevator.carriesPlayer()
                     || elevator.currentContactY() == here.get().contactY() || elevator.targetContactY() == here.get().contactY();
             if (!comesHere) {
-                button = nearest(ElevatorFloors.callButtons(level, elevator.contact(here.get())), from);
-                if (button.isEmpty()) {
-                    reasons.add("这一层（" + ElevatorFloors.describe(here.get()) + "）的触点旁没有呼梯按钮，轿厢停在别的层");
+                // 轿厢在别的层：要有呼梯的办法；第一种是按钮就算走过去的路，是遥控器就不用走。
+                ElevatorCalls.Found calls = ElevatorCalls.find(compat, level, player, elevator.contact(here.get()),
+                        ElevatorFloors.describe(here.get()));
+                if (calls.calls().isEmpty()) {
+                    reasons.add(calls.looked() + "，轿厢停在别的层");
                     continue;
                 }
+                button = Optional.ofNullable(calls.calls().getFirst().button());
             }
             long ticks = button.map(at -> Math.round(Math.sqrt(at.distSqr(from)) * WALK_TICKS_PER_BLOCK)).orElse(0L)
                     + (long) Math.abs(elevator.currentContactY() - here.get().contactY()) * TICKS_PER_BLOCK
@@ -144,9 +147,5 @@ final class CreateElevatorMode implements TravelMode {
             floorsAsked.put(elevator.entityId(), now);
         }
         return true;
-    }
-
-    private static Optional<BlockPos> nearest(List<BlockPos> cells, BlockPos from) {
-        return cells.stream().min(Comparator.comparingDouble(cell -> cell.distSqr(from)));
     }
 }

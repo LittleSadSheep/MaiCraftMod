@@ -3,7 +3,9 @@ package org.maiwithu.maicraft.compat.create;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -34,7 +36,9 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 /**
  * 坐一趟电梯：呼梯 → 等轿厢停稳 → 走进轿厢里面一点 → 在控制器上选层 → 站着别动 → 到了走出去 → 在固定平台上站稳。
  *
- * <p>轿厢已经停在这层、或已经叫过正往这层来，就不再按按钮；10 秒轿厢一点没动就停在当前安全处如实结束。
+ * <p>呼梯的办法（{@link ElevatorCalls}）：触点旁的按钮、和触点旁无线接收端同频的发射端旁的按钮、身上遥控器同频的键，
+ * 近的先试；一种没用成（走不到、遥控器拿错）换下一种，都按过了轿厢还不来，再按一次按成过的，还不来就如实结束。
+ * 轿厢已经停在这层、或已经叫过正往这层来，就不再按按钮；10 秒轿厢一点没动就停在当前安全处如实结束。
  * 轿厢里的路寻路看不见（轿厢不是世界方块），进出都直着走；坐着的这段时间轿厢和电梯井不当障碍。
  * 出口挨个试：最近的门口被挡就换下一个。选中的轿厢不同步了（走远、被拆）也停下如实说。
  */
@@ -48,8 +52,10 @@ final class ElevatorRide implements TravelLeg {
     /** 选完层这么多刻电梯还没反应就再选一次，最多选两次。 */
     static final int SELECT_WAIT_TICKS = 40;
     static final int MAX_SELECTS = 2;
-    /** 呼梯最多按几次：按了没反应再按一次。 */
+    /** 呼梯最多按成几次：几种办法都按过了轿厢还不来，按成过的再按一次。 */
     static final int MAX_PRESSES = 2;
+    /** 按成了记的那句。 */
+    private static final String PRESSED = "按了";
     /** 出来后在固定平台上站稳这么多刻才算到。 */
     static final int SETTLE_TICKS = 3;
     /** 进轿厢、出轿厢每个出口最多直着走多少刻。 */
@@ -67,6 +73,10 @@ final class ElevatorRide implements TravelLeg {
     private boolean riding;
     private boolean stopRequested;
     private int presses;
+    /** 试过的呼梯办法 → 怎么样了（按了，或为什么没用成）；这一次正在试的那个。 */
+    private final Map<String, String> triedCalls = new LinkedHashMap<>();
+    private final Map<String, String> callHows = new LinkedHashMap<>();
+    private ElevatorCalls.Call trying;
     private int selects;
     private long selectedAt;
     private long lastMoveTick = Long.MIN_VALUE;
@@ -122,7 +132,8 @@ final class ElevatorRide implements TravelLeg {
         };
     }
 
-    // 呼梯：已经在轿厢里就直接选层；轿厢停在这层就进去；已经叫过、正往这层来就等，不重复按；否则走到按钮跟前按一下。
+    // 呼梯：已经在轿厢里就直接选层；轿厢停在这层就进去；已经叫过、正往这层来就等，不重复按；
+    // 否则挑一个呼梯办法——走到按钮跟前按一下，或拿遥控器按那个键。
     private ActionStatus call(PlayerContext context, ClientLevel level, LocalPlayer player,
             CreateElevators.Elevator elevator, long now) {
         if (elevator.carriesPlayer()) return go(Step.SELECT);
@@ -137,18 +148,26 @@ final class ElevatorRide implements TravelLeg {
             lastMoveTick = now;
             return go(Step.WAIT);
         }
-        if (presses >= MAX_PRESSES) {
-            return fail(context, Problem.of(Problem.Kind.STUCK, "按了 " + presses + " 次呼梯按钮，轿厢没往这层（"
-                    + ElevatorFloors.describe(here.get()) + "）来"));
+        ElevatorCalls.Found found = ElevatorCalls.find(compat, level, player, elevator.contact(here.get()),
+                ElevatorFloors.describe(here.get()));
+        if (found.calls().isEmpty()) {
+            return fail(context, Problem.of(Problem.Kind.UNREACHABLE, found.looked() + "，叫不来轿厢"));
         }
-        Optional<BlockPos> button = ElevatorFloors.callButtons(level, elevator.contact(here.get())).stream()
-                .min(Comparator.comparingDouble(cell -> cell.distSqr(player.blockPosition())));
-        if (button.isEmpty()) {
-            return fail(context, Problem.of(Problem.Kind.UNREACHABLE, "这一层（" + ElevatorFloors.describe(here.get())
-                    + "）的触点旁没有呼梯按钮，叫不来轿厢"));
+        Optional<ElevatorCalls.Call> next = nextCall(found.calls());
+        if (next.isEmpty()) {
+            String tried = triedText();
+            return fail(context, presses > 0
+                    ? Problem.of(Problem.Kind.STUCK, "呼了 " + presses + " 次梯（" + tried + "），轿厢没往这层（"
+                            + ElevatorFloors.describe(here.get()) + "）来")
+                    : Problem.of(Problem.Kind.UNREACHABLE, "呼梯的办法都没用成：" + tried));
         }
-        BlockPos at = button.get();
-        presses++;
+        trying = next.get();
+        callHows.put(trying.key(), trying.how());
+        if (trying.remote()) {
+            current = new RemotePress(compat, services, trying.remoteKey(), trying.remoteFrequency());
+            return ActionStatus.progressed();
+        }
+        BlockPos at = trying.button();
         current = new StepsInOrder("呼梯", List.of(
                 new StepsInOrder.Step("走到呼梯按钮跟前", () -> services.approach().toward(ApproachTarget.ofBlock(at), permissions)),
                 new StepsInOrder.Step("按呼梯按钮", () -> {
@@ -167,10 +186,8 @@ final class ElevatorRide implements TravelLeg {
         }
         if (stopRequested) return done(context);
         boolean coming = here.isPresent() && elevator.targetContactY() == here.get().contactY();
+        // 轿厢不来：回去换一种呼梯办法（或把按成过的再按一次），都用过了由呼梯那一步如实结束。
         if (now - lastMoveTick >= NO_MOVE_TICKS || (!coming && elevator.arrived() && now - lastMoveTick >= SELECT_WAIT_TICKS)) {
-            if (presses >= MAX_PRESSES) {
-                return fail(context, Problem.of(Problem.Kind.STUCK, "叫了电梯，轿厢 " + NO_MOVE_TICKS / 20 + " 秒没往这层来"));
-            }
             return go(Step.CALL);
         }
         return ActionStatus.running();
@@ -254,6 +271,9 @@ final class ElevatorRide implements TravelLeg {
             CreateElevators.Elevator elevator, long now) {
         return switch (step) {
             case CALL -> {
+                // 按成了一次：记下，去等轿厢。
+                if (trying != null) triedCalls.put(trying.key(), PRESSED);
+                presses++;
                 lastMoveTick = now;
                 yield go(Step.WAIT);
             }
@@ -264,13 +284,34 @@ final class ElevatorRide implements TravelLeg {
         };
     }
 
-    // 一步失败：出口被挡换下一个出口；别的照它的问题结束。
+    // 一步失败：出口被挡换下一个出口；这种呼梯办法没用成（按钮走不到、遥控器拿错）记下换下一种；别的照它的问题结束。
     private ActionStatus afterFailedStep(PlayerContext context, ClientLevel level, Problem problem) {
         if (step == Step.EXIT) {
             exitIndex++;
             return ActionStatus.running();
         }
+        if (step == Step.CALL && trying != null) {
+            triedCalls.put(trying.key(), problem.headline());
+            trying = null;
+            return ActionStatus.running();
+        }
         return fail(context, problem);
+    }
+
+    // 下一种呼梯办法：没试过的先试（近的在前）；都试过了，按成过的那个再按一次，按成的次数到顶就没有了。
+    private Optional<ElevatorCalls.Call> nextCall(List<ElevatorCalls.Call> calls) {
+        for (ElevatorCalls.Call call : calls) {
+            if (!triedCalls.containsKey(call.key())) return Optional.of(call);
+        }
+        if (presses >= MAX_PRESSES) return Optional.empty();
+        return calls.stream().filter(call -> PRESSED.equals(triedCalls.get(call.key()))).findFirst();
+    }
+
+    // 试过的呼梯办法一句话一个：怎么叫的、怎么样了。
+    private String triedText() {
+        List<String> lines = new ArrayList<>();
+        triedCalls.forEach((key, outcome) -> lines.add(callHows.getOrDefault(key, key) + "：" + outcome));
+        return String.join("；", lines);
     }
 
     // 轿厢在动没有：轿厢底挪了一点就算动了（呼梯、坐着都按它判断有没有进展）。

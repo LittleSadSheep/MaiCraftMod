@@ -122,6 +122,16 @@ public final class CreateCompat extends CompatModule {
         run("坐列车座位", () -> railways.sit(entityId, seat));
     }
 
+    /** 遥控器每个键绑的频率；见 {@link CreateTools#remoteFrequencies}。 */
+    List<List<ItemStack>> remoteFrequencies(ItemStack controller) {
+        return call("读遥控器绑的频率", () -> tools.remoteFrequencies(controller));
+    }
+
+    /** 无线红石能连多远；见 {@link CreateTools#linkRange}。 */
+    int linkRange() {
+        return call("读无线红石的距离", tools::linkRange);
+    }
+
     /** 按下或松开遥控器的按键；见 {@link CreateTools#remoteButtons}。 */
     void remoteButtons(List<Integer> buttons, boolean press) {
         run(press ? "按下遥控器的键" : "松开遥控器的键", () -> tools.remoteButtons(buttons, press));
