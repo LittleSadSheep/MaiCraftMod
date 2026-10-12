@@ -126,7 +126,9 @@ public final class MenuContainerTakes implements ContainerTakes {
 
         @Override
         public ActionStatus tick(TickContext tick) {
-            if (++waited > GIVE_UP_TICKS) {
+            // 总期限从点开箱子算起：走过去的那段路由走到自己管（有没有进展、走不走得到），
+            // 原先连走路一起算 30 秒，六十格外的箱子还没走到就"开箱取货超时"。
+            if (stage != Stage.OPEN && ++waited > GIVE_UP_TICKS) {
                 // 总期限到了还在一笔上：点出去没等到结果的那几下照实交回，再以卡住收场。
                 noteUnsettledMove("总期限到了");
                 return ActionStatus.failed(Problem.of(Problem.Kind.STUCK, "开箱取货超时：" + container.name(), null));

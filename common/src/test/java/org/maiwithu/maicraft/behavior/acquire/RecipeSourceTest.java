@@ -414,6 +414,27 @@ class RecipeSourceTest {
     }
 
     @Test
+    void 烧木炭没燃料_揣着原木就拿原木做木板烧() {
+        // 实机（全量测试 10-12）：做火把缺木炭，身上 16 根原木，烧木炭时"身上没有能烧的燃料"，再去弄煤又转回木炭。
+        WorldMemory memory = memory();
+        memory.rememberWorkstationUsed(TABLE_AT, "minecraft:furnace", NOW);
+        tags.put("minecraft:oak_log", "minecraft:logs", "minecraft:logs_that_burn");
+        backpack.add("minecraft:oak_log", 16);
+        WorkstationRecipe charcoal = new WorkstationRecipe("minecraft:charcoal", WorkstationRecipe.Kind.SMELTING,
+                WantedItem.ofItem("minecraft:charcoal"), 1,
+                List.of(new WorkstationRecipe.IngredientStack(WantedItem.ofTag("minecraft:logs_that_burn"), 1)));
+        CapturingNeeds needs = new CapturingNeeds();
+        RecipeSource recipeSource = source(memory, wanted -> List.of(charcoal), needs);
+        ItemRequest request = new ItemRequest(WantedItem.ofItem("minecraft:charcoal"), 2, "火把");
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, recipeSource.quote(request, CONTEXT));
+        recipeSource.begin(request, offer, CONTEXT).orElseThrow();
+
+        ItemRequest fuel = needs.asked.stream().filter(asked -> asked.purpose().contains("燃料")).findFirst().orElseThrow();
+        assertTrue(fuel.wanted().isTag() && fuel.wanted().tagId().equals("minecraft:planks"), fuel.toString());
+        assertEquals(2, fuel.count(), "烧两块木炭 400 刻，两块木板 600 刻够");
+    }
+
+    @Test
     void 身上的木板加起来够烧_不去弄煤() {
         // 烤 4 块牛肉要 800 刻，一块木板只烧 300 刻，十块加起来够：不能因为最耐烧的一件不够就去找煤。
         WorldMemory memory = memory();

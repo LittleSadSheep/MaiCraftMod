@@ -54,6 +54,10 @@ public final class RecipeSource implements ItemSource {
     /** 备燃料时的规划数字：一块煤烧 1600 刻，按它算要带几块，实际烧多久以燃料表为准。 */
     private static final int PLANNED_COAL_BURN_TICKS = 1600;
     private static final String COAL = "minecraft:coal";
+    private static final String LOGS_TAG = "minecraft:logs";
+    private static final String PLANKS_TAG = "minecraft:planks";
+    /** 一块木板烧多久（刻）：一块半件的量。 */
+    private static final int PLANK_BURN_TICKS = 300;
 
     private final Set<WorkstationRecipe.Kind> kinds;
     private final ReadsRecipes recipes;
@@ -607,7 +611,24 @@ public final class RecipeSource implements ItemSource {
         if (burnable >= smeltTicks) {
             return Optional.empty();
         }
-        int coalNeeded = Math.max(1, (int) Math.ceil((double) smeltTicks / PLANNED_COAL_BURN_TICKS));
+        // 身上有原木（又不全是这次要烧的）：拿原木做木板当燃料，开局就这么烧——要烧木炭时再去弄煤只会转圈
+        // （实机做火把缺木炭，揣着原木却因为"没有燃料"烧不了木炭）。没有原木才去弄煤。
+        long spareLogs = 0;
+        boolean burnsLogs = false;
+        for (var stack : backpack.stacks()) {
+            if (!tags.tagsOf(stack.itemId()).contains(LOGS_TAG)) continue;
+            spareLogs += stack.count();
+            burnsLogs |= isIngredientOf(recipe, stack.itemId());
+        }
+        // 这一炉本来就烧原木（烧木炭）：留够要烧的那几根，剩下的才拿去做木板。
+        if (burnsLogs) spareLogs -= times;
+        long missingTicks = smeltTicks - burnable;
+        if (spareLogs > 0) {
+            int planksNeeded = Math.max(1, (int) Math.ceil((double) missingTicks / PLANK_BURN_TICKS));
+            return Optional.of(new ItemRequest(WantedItem.ofTag(PLANKS_TAG), planksNeeded,
+                    "烧炼" + recipe.result().describe() + "的燃料"));
+        }
+        int coalNeeded = Math.max(1, (int) Math.ceil((double) missingTicks / PLANNED_COAL_BURN_TICKS));
         return Optional.of(new ItemRequest(WantedItem.ofItem(COAL), coalNeeded,
                 "烧炼" + recipe.result().describe() + "的燃料"));
     }
