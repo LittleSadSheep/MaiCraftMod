@@ -44,6 +44,11 @@ import org.maiwithu.maicraft.behavior.navigation.baritone.PathPlannerPool;
  */
 public final class AStarPathFinder extends AbstractNodeCostSearch {
 
+    /** 一直没有像样分段时，总时长最多是失败预算的这么多倍。 */
+    private static final long FAILING_CAP_FACTOR = 3;
+    /** 一直没有像样分段时，总时长下限（毫秒）：慢机器上也给够算一会儿。 */
+    private static final long FAILING_CAP_MIN_MS = 6_000;
+
     private final Favoring favoring;
     private final CalculationContext calcContext;
 
@@ -78,13 +83,19 @@ public final class AStarPathFinder extends AbstractNodeCostSearch {
         long primaryTimeoutTime = startTime + (slowPath ? Baritone.settings().slowPathTimeoutMS.value : primaryTimeout);
         long idleTimeout = slowPath ? Baritone.settings().slowPathTimeoutMS.value : failureTimeout;
         ProgressBudget expansionBudget = new ProgressBudget(TimeUnit.MILLISECONDS.toNanos(Math.max(1, idleTimeout)));
+        // 一直找不到像样分段（failing）时节点照常展开就不算停滞，原先没有总上限：山顶允许挖垫时可达的格子无穷多，
+        // 一次算路能连算七八分钟，人站在山顶一动不动。给它一个总上限，到点按"这次没算出来"交回去换办法。
+        long failingDeadline = slowPath ? Long.MAX_VALUE
+                : startTime + Math.max(idleTimeout * FAILING_CAP_FACTOR, FAILING_CAP_MIN_MS);
         expansionBudget.observe(System.nanoTime(), false);
         boolean failing = true;
         int numNodes = 0;
         int numMovementsConsidered = 0;
         int numEmptyChunk = 0;
         boolean isFavoring = !favoring.isEmpty();
-        int timeCheckInterval = 1 << 6;
+        // 每个节点都看一次表：本来每展开一个节点就要读一次 nanoTime 续期；按 64 个节点看一次时，悬崖边一个节点要算
+        // 好几种落地办法，64 个节点就能拖过十几秒才看到超时。
+        int timeCheckInterval = 1;
         int pathingMaxChunkBorderFetch = Baritone.settings().pathingMaxChunkBorderFetch.value; // grab all settings beforehand so that changing settings during pathing doesn't cause a crash or unpredictable behavior
         double minimumImprovement = Baritone.settings().minimumImprovementRepropagation.value ? MIN_IMPROVEMENT : 0;
         Moves[] allMoves = Moves.values();
@@ -93,7 +104,7 @@ public final class AStarPathFinder extends AbstractNodeCostSearch {
                 long now = System.currentTimeMillis(); // since nanoTime is slow on windows (takes many microseconds)
                 // 已有可走分段时按原切片交付路线；尚无分段时，只有节点展开停滞才消耗失败预算。
                 if (idleTimeout <= 0 || expansionBudget.observe(System.nanoTime(), false)
-                        || (!failing && now - primaryTimeoutTime >= 0)) {
+                        || (!failing && now - primaryTimeoutTime >= 0) || (failing && now - failingDeadline >= 0)) {
                     break;
                 }
                 if (now >= nextPreviewTime) {
