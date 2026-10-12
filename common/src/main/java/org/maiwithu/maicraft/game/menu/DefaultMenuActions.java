@@ -68,6 +68,13 @@ public final class DefaultMenuActions implements MenuActions {
         }
     }
 
+    @Override public boolean blocksWorld(PlayerContext context) {
+        LocalPlayer player = context == null ? null : context.localPlayer();
+        if (player == null) return false;
+        return player.containerMenu != player.inventoryMenu || !player.containerMenu.getCarried().isEmpty()
+                || !MenuVisibility.worldInputAllowed(Minecraft.getInstance().screen);
+    }
+
     @Override
     public boolean ensureVisible(PlayerContext context) {
         // 先停输入。需要背包界面时打开它，并等它真的绘制过；不会直接在隐藏的物品栏对象上点击。

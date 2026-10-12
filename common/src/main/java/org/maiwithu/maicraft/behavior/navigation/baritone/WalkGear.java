@@ -11,6 +11,7 @@ import net.minecraft.client.player.LocalPlayer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.maiwithu.maicraft.game.menu.MenuActions;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -47,8 +48,16 @@ final class WalkGear {
         this.owner = Objects.requireNonNull(owner, "owner");
     }
 
-    // 先看要不要为飞上去开喷气背包，再看要不要关误开的；正在做的那一样做完才看下一样。
-    State tick(PlayerContext context, LocalPlayer player, PathingBehavior pathing, IBaritone engine) {
+    // 先看有没有界面挡着，再看要不要为飞上去开喷气背包、要不要关误开的；正在做的那一样做完才看下一样。
+    // staging：挪垫料正开着背包换快捷栏，那是走路自己开的，不去关。
+    State tick(PlayerContext context, LocalPlayer player, PathingBehavior pathing, IBaritone engine, boolean staging) {
+        // 背包、容器界面还开着（施工换快捷栏、上一件事留下的）：像人先按 Esc 关上再走，界面开着角色走不动。
+        // 原先界面开着照样推路线，原地一遍遍重算绕行（实机卡在齿轮箱顶上八分钟）。
+        if (current == null && !staging && screenInTheWay(context)) {
+            engine.getInputOverrideHandler().clearAllKeys();
+            context.input().applyNavigationMovement(PlayerInput.Movement.STOPPED, context.clientTick());
+            return State.BUSY;
+        }
         if (current == null) {
             forFlyUp = player.onGround() && flyUpNow(pathing);
             current = forFlyUp ? owner.prepareFlyUp(context).orElse(null)
@@ -80,6 +89,18 @@ final class WalkGear {
     /** 人接回角色、走路收场：手上收拾到一半的放下。 */
     void drop() {
         current = null;
+    }
+
+    // 有界面挡着就请它关上，关好前算挡着；关不掉照常走，走不动由走路的卡住判定收场。
+    private static boolean screenInTheWay(PlayerContext context) {
+        MenuActions menus = context.menuActions();
+        if (menus == null || !menus.blocksWorld(context)) return false;
+        try {
+            return !menus.ensureWorldVisible(context);
+        } catch (RuntimeException stuck) {
+            LOG.info("[maicraft-path] 开着的界面关不掉，照常走：{}", stuck.getMessage());
+            return false;
+        }
     }
 
     // 路线这一步是不是"飞上去"。

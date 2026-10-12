@@ -20,6 +20,14 @@ public interface MenuActions {
     /** 世界动作被旧页面挡住时原生关闭并等待；当前所需菜单的点击仍使用 {@link #ensureVisible}。 */
     boolean ensureWorldVisible(PlayerContext context);
 
+    /**
+     * 此刻有没有界面挡着在世界里动手走路：容器、背包或模组界面开着、光标上挂着东西（聊天框不算）。
+     * 走路前看它，挡着就先 {@link #ensureWorldVisible} 关上。替身默认不挡。
+     */
+    default boolean blocksWorld(PlayerContext context) {
+        return false;
+    }
+
     /** 必要时显示玩家背包，并等对应界面真正可操作。 */
     boolean ensureVisible(PlayerContext context);
 

@@ -657,7 +657,7 @@ final class BaritoneWalkRun implements WalkRun {
     // 要飞上去却开不起来就按走不通收场，下一次算路换垫方块或绕路。
     private boolean tendingGear(PlayerContext context, LocalPlayer player, PathingBehavior pathing, IBaritone engine) {
         if (progress.done()) return false;
-        switch (gear.tick(context, player, pathing, engine)) {
+        switch (gear.tick(context, player, pathing, engine, scaffoldMove != null)) {
             case BUSY -> { return true; }
             case FINISHED -> displacement.restart(context.clientTick());
             case FAILED -> {
