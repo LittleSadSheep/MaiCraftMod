@@ -23,8 +23,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class DeathRecoveryTest {
 
-    private static final DeathFacts FACTS = new DeathFacts(12, "minecraft:overworld", 10.5, -3.0, 20.25, false);
-    private static final DeathFacts HARDCORE = new DeathFacts(12, "minecraft:overworld", 10.5, -3.0, 20.25, true);
+    private static final DeathFacts FACTS = new DeathFacts(12, "minecraft:overworld", 10.5, -3.0, 20.25, false, null);
+    private static final DeathFacts HARDCORE = new DeathFacts(12, "minecraft:overworld", 10.5, -3.0, 20.25, true, null);
 
     private final TaskEventLog events = new TaskEventLog();
     private final DeathRecovery recovery = new DeathRecovery(events);
@@ -38,6 +38,7 @@ class DeathRecoveryTest {
         assertEquals(Question.Reason.CHOOSE_ONE, question.reason());
         assertTrue(question.text().contains("分数 12"), "问题带死亡事实：" + question.text());
         assertTrue(question.text().contains("minecraft:overworld"), "问题带维度：" + question.text());
+        assertFalse(question.text().contains("死因"), "没读到死因不编：" + question.text());
         assertEquals(List.of("respawn", "cancel_goal"), optionIds(question));
 
         // 继续死着：同一个死亡过程不重复挂。

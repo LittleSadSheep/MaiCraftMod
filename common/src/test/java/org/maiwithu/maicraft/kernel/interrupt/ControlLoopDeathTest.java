@@ -93,6 +93,20 @@ class ControlLoopDeathTest {
     }
 
     @Test
+    void deathEventCarriesTheDeathScreenCause() {
+        // 死亡界面上那句死因原话带进事件：LLM 才知道是被什么弄死的。
+        RecordingEvents events = new RecordingEvents();
+        DyingPlayer body = new DyingPlayer();
+        body.facts = new DeathFacts(12, "minecraft:overworld", 1, 64, 2, false, "MaiBot被苦力怕炸死了");
+        ControlLoop loop = new ControlLoop(List.of(), events, new RecordingDeathDecisions());
+        loop.setMainTask(new FakeTask("挖矿", Interruptibility.WORKING));
+        body.dead = true;
+        loop.tick(new Tick(body));
+        assertTrue(events.published.stream().anyMatch(line -> line.startsWith("CHARACTER_DIED:角色死了（MaiBot被苦力怕炸死了）")),
+                "事件带死因：" + events.published);
+    }
+
+    @Test
     void deathHandsFactsToTheDecisionHostOnce() {
         // 停摆的第一刻把死亡事实与连接状态交给挂决策的一方，之后每刻停摆不再重复叫。
         RecordingDeathDecisions decisions = new RecordingDeathDecisions();
@@ -144,7 +158,7 @@ class ControlLoopDeathTest {
     /** 只回答"死没死"的角色上下文替身；其他入口这些测试用不到，如实报缺。 */
     private static final class DyingPlayer implements PlayerContext {
         boolean dead;
-        DeathFacts facts = new DeathFacts(12, "minecraft:overworld", 1, 64, 2, false);
+        DeathFacts facts = new DeathFacts(12, "minecraft:overworld", 1, 64, 2, false, null);
 
         @Override public LocalPlayer localPlayer() { return null; }
         @Override public ClientLevel level() { return null; }

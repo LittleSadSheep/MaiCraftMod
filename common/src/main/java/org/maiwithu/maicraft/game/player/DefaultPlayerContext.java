@@ -5,6 +5,7 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.player.LocalPlayer;
 
+import org.maiwithu.maicraft.game.ClientHooks;
 import org.maiwithu.maicraft.game.interaction.InteractionSender;
 import org.maiwithu.maicraft.game.menu.MenuActions;
 
@@ -80,10 +81,17 @@ final class DefaultPlayerContext implements PlayerContext {
     long playerEpoch() { return playerEpoch; }
     long controlRevision() { return controlRevision; }
 
-    // 死亡现场的可见事实：分数与位置此刻读得到就直接给；死因随死亡界面走，客户端身上没有。
+    // 死亡现场的可见事实：分数与位置此刻读得到就直接给；死因读死亡包里记下的那句，只认五秒内收到的，
+    // 不把上一回的死因安到这一回头上。
     @Override public DeathFacts deathFacts() {
+        ClientHooks.DeathMessage message = ClientHooks.lastDeathMessage();
+        String cause = message != null && Math.abs(level.getGameTime() - message.gameTime()) <= DEATH_MESSAGE_FRESH_TICKS
+                ? message.text() : null;
         return new DeathFacts(player.getScore(), level.dimension().location().toString(),
-                player.getX(), player.getY(), player.getZ(), level.getLevelData().isHardcore());
+                player.getX(), player.getY(), player.getZ(), level.getLevelData().isHardcore(), cause);
     }
+
+    /** 死亡包里的死因多久内算这一回的（刻）。 */
+    private static final long DEATH_MESSAGE_FRESH_TICKS = 100;
 
 }

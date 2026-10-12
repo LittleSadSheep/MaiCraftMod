@@ -306,11 +306,13 @@ public final class ControlLoop {
             if (!stack.isEmpty()) {
                 stack.getFirst().pause();
             }
-            events.publish(TaskEvent.Kind.CHARACTER_DIED,
-                    "角色死了，等重生；插着的任务已结束，主任务停在原地，重生后接着做");
             // 死亡是 LLM 该拿主意的事：把现场事实交给挂决策的一方，连接还在才提供切观战这个选项。
             PlayerContext body = context.player();
             DeathFacts facts = body == null ? null : body.deathFacts();
+            // 死因照死亡界面上那句原话带上（被谁、怎么死的），LLM 才知道下回该防什么。
+            String cause = facts == null || facts.cause() == null ? "" : "（" + facts.cause() + "）";
+            events.publish(TaskEvent.Kind.CHARACTER_DIED,
+                    "角色死了" + cause + "，等重生；插着的任务已结束，主任务停在原地，重生后接着做");
             deathDecisions.characterDied(facts, body != null && body.connection() != null);
             LOG.info("角色死亡：控制循环停摆，等重生");
         } else {

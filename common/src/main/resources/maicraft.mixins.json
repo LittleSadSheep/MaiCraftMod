@@ -24,6 +24,7 @@
     "ItemEntityConfirmationMixin",
     "EquipmentConfirmationMixin",
     "DamageEventMixin",
+    "DeathMessageMixin",
     "AwardStatsMixin"
   ],
   "server": [],

@@ -192,9 +192,10 @@ public final class DeathRecovery {
         events.append(TaskEvent.Kind.DEATH_RECOVERY_APPLIED, decision.id(), summary, TaskResult.Status.DONE);
     }
 
-    // 问题文本：带死亡现场的事实，拿得到什么带什么；死因客户端拿不到，不编。
+    // 问题文本：带死亡现场的事实，拿得到什么带什么；死因读到了就照死亡界面原话写，没读到不编。
     private static String questionText(DeathFacts facts) {
         StringBuilder text = new StringBuilder("角色死了。");
+        if (facts != null && facts.cause() != null) text.append("死因：").append(facts.cause()).append("。");
         if (facts != null) {
             text.append("分数 ").append(facts.score())
                     .append("，死在 ").append(facts.dimension())

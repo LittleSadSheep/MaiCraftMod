@@ -28,6 +28,8 @@ public final class ClientHooks {
     private static final AtomicReference<DropConfirmations> DROP_CONFIRMATIONS = new AtomicReference<>();
     private static final AtomicReference<EquipmentConfirmations> EQUIPMENT_CONFIRMATIONS = new AtomicReference<>();
     private static final AtomicReference<DamageObserver> DAMAGE_OBSERVER = new AtomicReference<>();
+    /** 最近一次本地玩家死亡包里的死因与收到时的游戏刻。 */
+    private static final AtomicReference<DeathMessage> LAST_DEATH_MESSAGE = new AtomicReference<>();
     private static final AtomicReference<RestStatistics> REST_STATISTICS = new AtomicReference<>();
 
     private ClientHooks() {}
@@ -55,6 +57,24 @@ public final class ClientHooks {
     /** 启动时登记本地聊天栏的记录端；聊天栏每加一条消息由 Mixin 转过来。 */
     public static void registerChatLog(ChatLog log) {
         CHAT_LOG.set(log);
+    }
+
+    /**
+     * 本地玩家死亡包里的那句死因（死亡界面上那行字）与收到时的游戏刻。
+     *
+     * @param text     原版按客户端语言拼好的一句，例如"MaiBot被苦力怕炸死了"
+     * @param gameTime 收到时的游戏刻：读死亡现场时只认刚收到的，不把上一回的死因安到这一回头上
+     */
+    public record DeathMessage(String text, long gameTime) {}
+
+    /** Mixin 类跨包调用：收到本地玩家的死亡包时记下死因。 */
+    public static void noteDeathMessage(String text, long gameTime) {
+        LAST_DEATH_MESSAGE.set(new DeathMessage(text, gameTime));
+    }
+
+    /** 最近一次记下的死因；从没死过为 null。 */
+    public static DeathMessage lastDeathMessage() {
+        return LAST_DEATH_MESSAGE.get();
     }
 
     /** 启动时登记界面真正画出来的记录；界面渲染的 Mixin 往里记帧。传 null 表示停止。 */
