@@ -50,9 +50,9 @@ class McpBindFallbackHttpTest {
 
     @Test
     void exhaustedFallbackRangeFailsLoudly() throws Exception {
-        try (ServerSocket first = bindLocal();
-             ServerSocket second = bindAt(first.getLocalPort() + 1);
-             ServerSocket third = bindAt(first.getLocalPort() + 2)) {
+        // 系统随手给的端口后面两个可能正被别的程序占着（本机开着游戏时常见）：换几次，找三个连着都能占住的。
+        ServerSocket[] held = holdThreeConsecutive();
+        try (ServerSocket first = held[0]; ServerSocket second = held[1]; ServerSocket third = held[2]) {
             // 全部候选端口都被占时不能启动成功；启动失败的候选由服务自己关闭。
             assertThrows(IOException.class,
                     () -> EmbeddedMcpService.startWithFallback(McpConfig.local(first.getLocalPort()), 2).close());
@@ -92,6 +92,24 @@ class McpBindFallbackHttpTest {
         ServerSocket socket = new ServerSocket();
         socket.bind(new InetSocketAddress("127.0.0.1", 0));
         return socket;
+    }
+
+    private static ServerSocket[] holdThreeConsecutive() throws IOException {
+        for (int attempt = 0; attempt < 20; attempt++) {
+            ServerSocket first = bindLocal();
+            try {
+                ServerSocket second = bindAt(first.getLocalPort() + 1);
+                try {
+                    return new ServerSocket[] {first, second, bindAt(first.getLocalPort() + 2)};
+                } catch (IOException taken) {
+                    second.close();
+                }
+            } catch (IOException taken) {
+                // 后面的端口被别人占着：放掉这一组换下一组。
+            }
+            first.close();
+        }
+        throw new IOException("找不到三个连着的空闲端口");
     }
 
     private static ServerSocket bindAt(int port) throws IOException {
