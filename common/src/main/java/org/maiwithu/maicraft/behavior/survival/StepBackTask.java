@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.survival;
 
+import java.util.Locale;
 import java.util.Objects;
 
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
@@ -62,8 +63,10 @@ final class StepBackTask extends PhasedTask<StepBackTask.Phase> {
             }
             return Next.done(TaskResult.builder(TaskResult.Status.DONE, "退离边沿，站回了安全处").build());
         }
-        return runActionThen(context, () -> Next.done(TaskResult.builder(TaskResult.Status.DONE,
-                "退到了安全处附近").build()));
+        // 路走完了人却还没到落点（落点就在脚下边沿、走不过去）：算没退成，让控制循环缓一阵再说，
+        // 不当成"退到了"——实机里每刻插一次、立刻"退到了"、下一刻又插，一秒刷二十条。
+        return runActionThen(context, () -> Next.fail(walkProblem(Problem.of(Problem.Kind.STUCK,
+                "走完了还差 " + String.format(Locale.ROOT, "%.1f", remaining) + " 格才到安全处"))));
     }
 
     @Override
