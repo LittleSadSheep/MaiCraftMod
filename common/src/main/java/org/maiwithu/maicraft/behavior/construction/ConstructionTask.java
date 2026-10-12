@@ -41,6 +41,8 @@ public final class ConstructionTask extends PhasedTask<ConstructionTask.Phase> {
     private Set<BlockPos> lastNeedingWork = Set.of();
     private CleanupWork cleanup;
     private List<BlockPos> temporariesLeft = List.of();
+    /** 卡住转去善后时记下的卡住原因：善后做完照它收场。 */
+    private Problem stuckProblem;
 
     public ConstructionTask(ConstructionInput input, ConstructionServices services) {
         super("施工", Phase.CHECK, new ProgressTracker(20L * 60, 20L * 60 * 120));
@@ -173,8 +175,20 @@ public final class ConstructionTask extends PhasedTask<ConstructionTask.Phase> {
         return Next.go(Phase.CLEANUP, "收回临时方块");
     }
 
+    // 卡住要收场时先把垫的临时方块收回来：原先卡住直接按失败结束，临时方块一块不收，
+    // 实机接网络在平台边上留下一串圆石，回执里还写没有遗留。善后阶段里再卡住就照常收场。
+    @Override protected Next<Phase> beforeGivingUp(Problem problem) {
+        if (stuckProblem != null || phase() == Phase.CLEANUP) return null;
+        stuckProblem = problem;
+        return toCleanup();
+    }
+
     private Next<Phase> finish() {
         temporariesLeft = cleanup == null ? services.ledger().temporaries() : cleanup.left();
+        if (stuckProblem != null) {
+            // 是卡住转来善后的：善后做完照实按卡住交代，带上还剩的临时方块。
+            return Next.fail(stuckProblem);
+        }
         if (site.allSettled() && temporariesLeft.isEmpty()) return Next.done(result("按图建好了"));
         Problem problem = problem();
         return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL, "按图建了一部分：" + site.unsettled() + " 格没做成")

@@ -206,6 +206,12 @@ public abstract class PhasedTask<P extends Enum<P>> implements Task {
             ProgressTracker.Status status = progress.status();
             if (status instanceof ProgressTracker.Status.Stuck
                     || status instanceof ProgressTracker.Status.TimedOut) {
+                // 收场前有要善后的（施工垫的临时方块）：给子类一次机会先转去善后，善后完再按卡住交代。
+                Next<P> aftercare = beforeGivingUp(noProgressProblem(status));
+                if (aftercare != null) {
+                    progress.recordProgress("卡住了，先善后");
+                    return apply(aftercare);
+                }
                 return finish(failedResult(noProgressProblem(status)));
             }
         }
@@ -303,6 +309,14 @@ public abstract class PhasedTask<P extends Enum<P>> implements Task {
             case Next.Done<P> done -> finish(merge(done.result()));
             case Next.Fail<P> fail -> finish(failedResult(fail.problem()));
         };
+    }
+
+    /**
+     * 卡住或超时、马上要按失败收场时问一次：有要先善后的就给出善后的那一步（例如施工先收回垫的临时方块），
+     * 没有给 null 直接收场。只问一次的由子类自己记着；善后阶段里再卡住就照常收场。
+     */
+    protected Next<P> beforeGivingUp(Problem problem) {
+        return null;
     }
 
     /**
