@@ -30,6 +30,8 @@ public final class CreateJetpackCompat extends CompatModule {
         registry.travelMode(this, services -> new JetpackMode(this, services));
         // 意外往下掉：穿着有气的喷气背包就开悬停刹住，落稳再关（所有者 10-11 定，比落水桶优先）。
         registry.fallBrake(this, context -> JetpackFallBrake.start(this, context));
+        // 走路前把误开的喷气背包关上：开着走路一起跳就被推高、走下台阶悬在半空。
+        registry.stowBeforeWalking(this, new JetpackStow(this));
     }
 
     /** 身上的喷气背包；见 {@link JetpackControls#pack}。 */

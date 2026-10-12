@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.behavior.survival.spi.RangedWeapon;
 import org.maiwithu.maicraft.behavior.travel.spi.TravelMode;
 import org.maiwithu.maicraft.behavior.navigation.spi.ObstacleSource;
 import org.maiwithu.maicraft.behavior.landing.spi.FallBrake;
+import org.maiwithu.maicraft.behavior.navigation.spi.StowBeforeWalking;
 import org.maiwithu.maicraft.behavior.perception.spi.ModSight;
 import org.maiwithu.maicraft.ability.vehicle.spi.TrainScheduler;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleAssembler;
@@ -70,6 +71,7 @@ public final class CompatRegistry {
     private final List<RangedWeapon> rangedWeapons = new ArrayList<>();
     private final List<ObstacleSource> obstacleSources = new ArrayList<>();
     private final List<FallBrake> fallBrakes = new ArrayList<>();
+    private final List<StowBeforeWalking> stowsBeforeWalking = new ArrayList<>();
     private final List<ModSight> modSights = new ArrayList<>();
     private final List<ToBuild<VehicleAssembler>> vehicleAssemblers = new ArrayList<>();
     private final List<ToBuild<VehicleDriver>> vehicleDrivers = new ArrayList<>();
@@ -78,7 +80,7 @@ public final class CompatRegistry {
     /** 全部的槽：一个模组交接到一半出错时，按交接前的长度一起撤回。新加槽时把它的列表加进来。 */
     private final List<List<?>> slots = List.of(itemSources, machineTypes, networkReaders, questBooks,
             breakAccelerators, dismantleTools, menuLayouts, carriedBackpacks, knowledgeSources, recipeViewers,
-            serverReads, placementRules, rangedWeapons, itemSettings, travelModes, obstacleSources, fallBrakes, modSights, vehicleAssemblers,
+            serverReads, placementRules, rangedWeapons, itemSettings, travelModes, obstacleSources, fallBrakes, stowsBeforeWalking, modSights, vehicleAssemblers,
             vehicleDrivers, vehicleReaders, trainSchedulers);
     private final List<String> decisions = new ArrayList<>();
 
@@ -263,6 +265,11 @@ public final class CompatRegistry {
         fallBrakes.add(new CompatFallBrake(module, brake));
     }
 
+    /** 联动入口交一样走路前要收起来的东西（误开的喷气背包）：包一层后交给寻路；模组停用后不再收。 */
+    public void stowBeforeWalking(CompatModule module, StowBeforeWalking stow) {
+        stowsBeforeWalking.add(new CompatStowBeforeWalking(module, stow));
+    }
+
     /** 联动入口交一个障碍来源（会动的结构）：包一层后交给寻路；模组停用后不再报障碍。 */
     public void obstacleSource(CompatModule module, ObstacleSource source) {
         obstacleSources.add(new CompatObstacleSource(module, source));
@@ -393,6 +400,11 @@ public final class CompatRegistry {
     /** 联动模组刹住一掉的办法，按联动清单的顺序；落地防护先问它们。 */
     public List<FallBrake> fallBrakes() {
         return Collections.unmodifiableList(fallBrakes);
+    }
+
+    /** 联动模组登记的走路前要收起来的东西：走路每刻推进前问一遍。 */
+    public List<StowBeforeWalking> stowsBeforeWalking() {
+        return Collections.unmodifiableList(stowsBeforeWalking);
     }
 
     /** 联动模组的障碍来源：进世界时交给寻路。 */

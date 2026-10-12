@@ -18,6 +18,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -33,10 +34,12 @@ import org.maiwithu.maicraft.behavior.navigation.ScaffoldBlocks;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
+import org.maiwithu.maicraft.behavior.navigation.spi.StowBeforeWalking;
 import org.maiwithu.maicraft.behavior.navigation.debug.NavigationPathSnapshot;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.behavior.travel.ReadsPlacedBlocks;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.kernel.task.Action;
 
 /**
  * 走到的内嵌 Baritone 实现方，也是全仓唯一接触 Baritone 非 api 包的位置。
@@ -69,6 +72,8 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
     private List<String> lastBroken = List.of();
     /** 正要用的东西每种留几件：垫脚只用多出来的。 */
     private final ItemsToKeep keeps;
+    /** 走路前要收起来的东西（联动登记，误开的喷气背包）；进世界、联动加载后接上，之前没有。 */
+    private Supplier<List<StowBeforeWalking>> stows = List::of;
     /** 镜头离引擎要的精确瞄点差这么多度以内算转到位：平滑镜头收敛到 0.3° 吸附，留点余量。 */
     private static final float AIM_SETTLED_DEGREES = 3.0f;
     /** 本刻引擎要的精确瞄点（挖、放）；没要为 null。走到运行按它判断镜头转到位没有，没到位左右键不出手。 */
@@ -84,6 +89,20 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
     /** @param keeps 正要用的东西每种留几件：上一个目标刚拿到的、手上这件事正在拿的 */
     public BaritoneInternals(ItemsToKeep keeps) {
         this.keeps = keeps;
+    }
+
+    /** 接上联动登记的走路前要收起来的东西。 */
+    public void stowBeforeWalking(Supplier<List<StowBeforeWalking>> stows) {
+        this.stows = stows;
+    }
+
+    /** 此刻走路前要不要先收起什么：问遍登记的，第一样要收的给出做法。 */
+    Optional<Action> stowBeforeWalking(PlayerContext context) {
+        for (StowBeforeWalking stow : stows.get()) {
+            Optional<Action> action = stow.stow(context);
+            if (action.isPresent()) return action;
+        }
+        return Optional.empty();
     }
 
     @Override

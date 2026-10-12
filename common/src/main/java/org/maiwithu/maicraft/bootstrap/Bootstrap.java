@@ -579,6 +579,8 @@ public final class Bootstrap {
             compat = CompatRegistry.load(compatCatalog, loader);
             // 联动模组要向服务端问的只读操作（ME 网络读数这类）入服前登记进请求路由，进世界后才问得了。
             compat.serverReads().forEach(session.router()::register);
+            // 走路前要收起来的东西（误开的喷气背包）交给寻路：每次问都读当时的登记表。
+            walks.stowBeforeWalking(() -> compat.stowsBeforeWalking());
             tools = goalTools(abilities, goals, clientWork, taskEvents, chatEvents, () -> worldScope[0], recentCalls,
                     lookupTool(), () -> reminders == null ? List.of() : reminders.snapshot());
             try {

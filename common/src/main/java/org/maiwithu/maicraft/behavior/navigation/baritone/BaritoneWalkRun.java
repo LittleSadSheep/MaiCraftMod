@@ -81,6 +81,8 @@ final class BaritoneWalkRun implements WalkRun {
     private final ClientMovesToMainhand hands = new ClientMovesToMainhand(() -> this.lastContext);
     /** 正在把垫料挪到快捷栏的动作；没在挪为 null。 */
     private Action scaffoldMove;
+    /** 正在收起的随身东西（关误开的喷气背包）；没在收为 null。 */
+    private Action stowing;
     /** 会摔伤的一跳靠什么接住：出发点备料、空中放下、落地收回；意外掉下去就地接手。 */
     private final WalkLanding landing = new WalkLanding();
     /** 不许挖时走不通的只读复算："假如允许挖垫有没有路、要动哪些格"，只进说明不执行。 */
@@ -280,6 +282,7 @@ final class BaritoneWalkRun implements WalkRun {
         var pathing = owner.pathing();
         IBaritone engine = owner.engine();
         resumeAfterHuman(engine, context);
+        if (stowingGear(context, engine)) return; // 误开的喷气背包：站定关上再走
         if (stagingScaffold(context, player, pathing, engine)) return; // 垫料只在主背包：先挪到快捷栏再走
         if (landingHolds(context, player, pathing, engine)) return; // 落地救援占着身体：出发前备料、落地后收回
         if (waitsForMovingObstacle(context, player, pathing, engine)) return; // 前方有正在动的东西：原地等它过去
@@ -630,6 +633,26 @@ final class BaritoneWalkRun implements WalkRun {
         replanWhenSafe = true;
     }
 
+    // 收起碍事的随身东西：误开的喷气背包开着走路，一起跳就被推高、走下台阶悬在半空，寻路一步都对不上。
+    // 站定、引擎这几刻不推进，关好再走；关不上（读回一直不对）就记一行照走，不为它把这趟路判失败。
+    private boolean stowingGear(PlayerContext context, IBaritone engine) {
+        if (stowing == null) {
+            if (progress.done()) return false;
+            stowing = owner.stowBeforeWalking(context).orElse(null);
+            if (stowing == null) return false;
+            engine.getInputOverrideHandler().clearAllKeys();
+            LOG.info("[maicraft-path] {}", stowing.describe());
+        }
+        context.input().applyNavigationMovement(PlayerInput.Movement.STOPPED, context.clientTick());
+        ActionStatus status = stowing.tick(TickContext.of(context.level().getGameTime(), context));
+        if (status instanceof ActionStatus.Running) return true;
+        if (status instanceof ActionStatus.Failed failed) LOG.info("[maicraft-path] {}", failed.problem().message());
+        stowing = null;
+        // 站着关开关这几刻不算进"长时间没有进展"。
+        displacement.restart(context.clientTick());
+        return false;
+    }
+
     // 挪垫料：没在挪时，站在地上、路线这一两步要垫方块、垫料只在主背包才开始挪；挪的这几刻引擎不推进，角色站定。
     // 挪不成（界面没确认）就如实走不通，写明是哪一步没确认；不在没挪成时让引擎去垫一块够不着的料。
     private boolean stagingScaffold(PlayerContext context, LocalPlayer player, PathingBehavior pathing,
@@ -684,6 +707,7 @@ final class BaritoneWalkRun implements WalkRun {
         course.reset();
         // 挪垫料挪到一半也放下：背包界面要是还开着，人自己关；交回后要垫时重新看一遍再挪。
         scaffoldMove = null;
+        stowing = null;
         probe.cancel();
         landing.stop(lastContext, "人接回了角色");
         routeDropped = true;
