@@ -504,6 +504,7 @@ final class BaritoneWalkRun implements WalkRun {
             case ENGINE -> false;
             case HOLD -> {
                 displacement.restart(context.clientTick());
+                lastLandingHoldTick = context.clientTick();
                 yield true;
             }
             case BLOCKED -> {
@@ -558,12 +559,31 @@ final class BaritoneWalkRun implements WalkRun {
     // 引擎说没有路：不许挖的先别认输，做一次"假如允许挖垫"的只读复算，等它回来再定——
     // 复算出不用改地形也有路就在原任务里重新算路，否则按走不通收场、把要动哪些格写进说明。
     // 复算期间引擎又给出了路线（看守重启了搜索），复算作废，照常走。
+    /** 落地救援刚交还身体后这么久（刻）内算路失败，按一时现场重算。 */
+    private static final long TRANSIENT_WINDOW_TICKS = 40;
+    /** 一时现场最多重算几次。 */
+    private static final int TRANSIENT_RETRIES = 3;
+    private long lastLandingHoldTick = Long.MIN_VALUE / 2;
+    private int transientRetries;
+
     private boolean concludeNoPath(IBaritone engine, boolean routePresent, BlockPos feet, long tick) {
         if (routePresent) {
             probe.cancel();
             return false;
         }
         if (!engineFailedPath && !probe.waiting()) return false;
+        // 刚落地收完水、人还泡在自己放的水里那一两刻算的路常常失败（起点在水里、水正被舀走）：
+        // 这是一时的现场，从站稳处重新算几次，不把整趟出行判成没有路（实机柱子上放水接住自己后，travel 当场失败）。
+        LocalPlayer body = lastContext == null ? null : lastContext.localPlayer();
+        boolean unsettled = tick - lastLandingHoldTick <= TRANSIENT_WINDOW_TICKS
+                || body != null && (body.isInWater() || !body.onGround());
+        if (engineFailedPath && unsettled && transientRetries < TRANSIENT_RETRIES) {
+            transientRetries++;
+            engineFailedPath = false;
+            engine.getCustomGoalProcess().setGoalAndPath(engineGoal);
+            displacement.restart(tick);
+            return false;
+        }
         // 卡在坑里：不等复算也不等 LLM 放宽许可，按"搭 → 挖"升一级重新算路；已经升到头还是没路就按走不通收场。
         if (!probe.waiting() && raiseToEscape(engine, feet, tick)) return false;
         if (escape.active()) return true;
