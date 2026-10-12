@@ -7,8 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.HashMap;
+import java.util.Set;
+import java.util.HashSet;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -79,10 +79,12 @@ class FightTaskTest {
 
         final List<String> started = new ArrayList<>();
         int closed;
-        /** 地上的掉落物；测试摆，捡起时拿掉。 */
-        final List<Drop> drops = new ArrayList<>();
-        /** 服务器说本玩家从哪件上收了几件；测试摆。 */
-        final Map<Integer, Integer> pickedUp = new HashMap<>();
+        /** 开打前就躺在身边的掉落物；测试摆。 */
+        final Set<Integer> lyingBefore = new HashSet<>();
+        /** 捡掉落物时交给它的"不碰"名单。 */
+        Set<Integer> pickupSkipped;
+        /** 服务器说本玩家收进包的（开打后才冒出来的）；测试摆。 */
+        final List<Gained> gained = new ArrayList<>();
 
         @Override public Action strike(TickContext context, int entityId) {
             return action("打 " + entityId, ActionStatus.done());
@@ -107,15 +109,16 @@ class FightTaskTest {
 
         @Override public double[] selfPosition(TickContext context) { return new double[] {0, 64, 0}; }
 
-        @Override public List<Drop> dropsNear(TickContext context, double x, double y, double z, double radius) {
-            return drops.stream().filter(drop -> Math.hypot(drop.x() - x, drop.z() - z) <= radius).toList();
-        }
-
         @Override public long dropCursor(TickContext context) { return 0; }
 
-        @Override public int pickedUp(TickContext context, int entityId, long sinceCursor) {
-            return pickedUp.getOrDefault(entityId, 0);
+        @Override public Set<Integer> dropsLyingBefore(TickContext context, long cursor) { return lyingBefore; }
+
+        @Override public Action pickUpNewSince(Set<Integer> before) {
+            pickupSkipped = before;
+            return action("捡掉落物", ActionStatus.done());
         }
+
+        @Override public List<Gained> pickedUpSince(TickContext context, long cursor) { return gained; }
 
         private Action action(String what, ActionStatus status) {
             started.add(what);
@@ -202,18 +205,17 @@ class FightTaskTest {
         task.tick(new Tick(1));
         task.tick(new Tick(2));
         targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, true);
-        moves.drops.add(new FightMoves.Drop(42, "minecraft:mutton", 0.5, 64, 0.5));
+        // 开打前脚边就躺着一件别人丢的：不是这一仗的，不去碰；羊肉是这一仗掉的，服务器说收进了包。
+        moves.lyingBefore.add(41);
+        moves.gained.add(new FightMoves.Gained("minecraft:mutton", 1));
         TaskResult result = null;
         for (long t = 3; t < 40 && result == null; t++) {
-            // 走到跟前两刻后被原版吸进包：地上那件没了，背包多一件。
-            if (t == 6) {
-                moves.drops.clear();
-                moves.pickedUp.put(42, 1);
-            }
             if (task.tick(new Tick(t)) instanceof TickResult.Finished finished) result = finished.result();
         }
 
         assertNotNull(result);
+        assertTrue(moves.started.contains("捡掉落物"), "拾荒交给共用的捡掉落物：" + moves.started);
+        assertEquals(Set.of(41), moves.pickupSkipped, "开打前就躺着的不碰");
         FightTask.FightDetails details = (FightTask.FightDetails) result.details();
         assertEquals(List.of("minecraft:mutton"), details.lootGained(), result.summary());
     }

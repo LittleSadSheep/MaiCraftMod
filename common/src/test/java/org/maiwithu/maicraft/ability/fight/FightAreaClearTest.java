@@ -100,13 +100,13 @@ class FightAreaClearTest {
 
         @Override public double[] selfPosition(TickContext context) { return new double[] {0, 64, 0}; }
 
-        @Override public List<Drop> dropsNear(TickContext context, double x, double y, double z, double radius) {
-            return List.of();
-        }
-
         @Override public long dropCursor(TickContext context) { return 0; }
 
-        @Override public int pickedUp(TickContext context, int entityId, long sinceCursor) { return 0; }
+        @Override public Set<Integer> dropsLyingBefore(TickContext context, long cursor) { return Set.of(); }
+
+        @Override public Action pickUpNewSince(Set<Integer> before) { return done(); }
+
+        @Override public List<Gained> pickedUpSince(TickContext context, long cursor) { return List.of(); }
 
         private static Action done() {
             return new Action() {

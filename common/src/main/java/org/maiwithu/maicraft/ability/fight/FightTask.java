@@ -87,13 +87,12 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     /** 拾荒正在做的那一步（走向某件掉落物）。 */
     private Action current;
     private String currentKey;
-    /** 开始拾荒那一刻的掉落物确认序号：只认这之后本玩家的拾取。 */
-    private long lootCursor;
-    private List<FightMoves.Drop> pendingDrops = List.of();
-    /** 走到掉落物跟前后等它被吸进包的刻数：原版拾取要一两刻，到了就结算会把捡得到的记成没捡到。 */
-    private int lootWaited;
-    /** 走到掉落物跟前最多等几刻。 */
-    private static final int LOOT_SETTLE_TICKS = 10;
+    /** 开打那一刻的掉落物确认序号：这之后冒出来的掉落才是这一仗带出来的。 */
+    private long fightCursor;
+    /** 拾荒先回到最后一只倒下的地方：远处的掉落进不了"身边"的名单。 */
+    private boolean atKillSpot;
+    /** 捡这一仗掉出来的东西（共用的捡掉落物）。 */
+    private Action pickup;
 
     FightTask(FightInput input, CombatSenses senses, SeenTargets seenTargets, FightMoves moves,
             NamedTargetConsent consent) {
@@ -167,6 +166,9 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         }
         double radius = named.isEmpty() ? input.radius() : ThreatAssessment.VIGILANCE_RADIUS;
         battle = new Battle(senses, moves, new Roster(), radius);
+        // 夜里退无可退、打不过：引擎报要挖坑时这一仗停下，交给自卫接挖三填一。
+        battle.offerShelter();
+        fightCursor = moves.dropCursor(context);
         return Next.go(Phase.FIGHT, verdict == ThreatAssessment.Verdict.RISKY
                 ? "有风险，打的时候盯着血线" : "评估能赢，开打");
     }
@@ -191,6 +193,9 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
                         "撤离成功，甩开了追兵（" + moment.retreatWhy() + "），但目标没有击败——这一仗算没打赢",
                         "吃点东西回血到拒战线以上，或换把武器再来"));
             }
+            case NEEDS_SHELTER -> Next.fail(Problem.of(Problem.Kind.DANGER,
+                    "撤不掉又打不过，天黑露天：这一仗停下，交给自保挖坑熬到天亮",
+                    "天亮后回血、换把武器再来"));
             case FINISHED -> named.isEmpty()
                     ? Next.go(Phase.LOOT, lastKillSpot == null ? "附近没有要打的了" : "这一批清完了，就地捡一下")
                     : lastKillSpot == null ? Next.done(settled()) : Next.go(Phase.LOOT, "打完了，就地捡一下");
@@ -275,50 +280,49 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         }
     }
 
+    // 拾荒：先回到最后一只倒下的地方，再交给共用的捡掉落物捡这一仗新冒出来的东西（开打前就躺着的不碰），
+    // 收没收进包按服务器的拾取包认；走不到、捡不到的如实写进结果，不影响击败判定，不站着等尸体刷掉落。
     private Next<Phase> loot(TickContext context) {
         if (lastKillSpot == null) {
             return Next.done(settled());
         }
-        if (pendingDrops.isEmpty()) {
-            // 抄一份自己逐件划掉，不改读端交来的清单。
-            pendingDrops = new ArrayList<>(moves.dropsNear(context, lastKillSpot[0], lastKillSpot[1], lastKillSpot[2], 4.0));
-            lootCursor = moves.dropCursor(context);
-            if (pendingDrops.isEmpty()) {
-                recordProgress("身边没有掉落物可捡");
-                return Next.done(settled());
+        if (!atKillSpot) {
+            double[] self = moves.selfPosition(context);
+            if (Math.hypot(self[0] - lastKillSpot[0], self[2] - lastKillSpot[2]) <= KILL_SPOT_NEAR) {
+                atKillSpot = true;
+                dropCurrent();
+            } else {
+                keep("回到倒下的地方", () -> moves.walk(GoalCompiler.near(
+                        BlockPos.containing(lastKillSpot[0], lastKillSpot[1], lastKillSpot[2]), KILL_SPOT_NEAR)));
+                if (current.tick(context) instanceof ActionStatus.Running running) {
+                    if (running.progressed()) recordProgress("回到倒下的地方捡掉落");
+                    return Next.stay();
+                }
+                // 走到了或走不到都照样捡：站在原地，够得着的先收，收不到的由捡的动作如实交代。
+                atKillSpot = true;
+                dropCurrent();
             }
         }
-        FightMoves.Drop drop = pendingDrops.get(0);
-        double[] self = moves.selfPosition(context);
-        double distance = Math.hypot(self[0] - drop.x(), self[2] - drop.z());
-        boolean stillThere = !moves.dropsNear(context, drop.x(), drop.y(), drop.z(), 0.5).isEmpty() || distance < 2.0;
-        // 走到跟前了而它还在地上：等一两刻让原版吸进包，再按拾取包结算。
-        if (stillThere && distance <= 1.2 && ++lootWaited <= LOOT_SETTLE_TICKS) {
+        if (pickup == null) pickup = moves.pickUpNewSince(moves.dropsLyingBefore(context, fightCursor));
+        ActionStatus status = pickup.tick(context);
+        if (status instanceof ActionStatus.Running running) {
+            if (running.progressed()) recordProgress(pickup.describe());
             return Next.stay();
         }
-        if (!stillThere || distance <= 1.2) {
-            settleOneDrop(drop, context);
-            pendingDrops.remove(0);
-            lootWaited = 0;
-            dropCurrent();
-            return pendingDrops.isEmpty() ? Next.done(settled()) : Next.stay();
+        if (status instanceof ActionStatus.Failed failed) {
+            recordAttempt("捡这一仗掉出来的东西", failed.problem().message());
         }
-        keep("捡 " + drop.item() + " " + drop.x() + "," + drop.z(),
-                () -> moves.walk(GoalCompiler.near(BlockPos.containing(drop.x(), drop.y(), drop.z()), 1.0)));
-        stepCurrent(context, "捡 " + drop.item());
-        return Next.stay();
+        pickup.close();
+        pickup = null;
+        for (FightMoves.Gained gained : moves.pickedUpSince(context, fightCursor)) {
+            lootGained.add(gained.item());
+            recordChange(Change.of(Change.Kind.ITEM_GAINED, gained.item(), gained.count()));
+        }
+        return Next.done(settled());
     }
 
-    // 捡到没捡到按服务器的拾取包认：说本玩家收了几件就是几件；没说就按没能确认记，不拿背包变多冒充。
-    private void settleOneDrop(FightMoves.Drop drop, TickContext context) {
-        int got = moves.pickedUp(context, drop.entityId(), lootCursor);
-        if (got > 0) {
-            lootGained.add(drop.item());
-            recordChange(Change.of(Change.Kind.ITEM_GAINED, drop.item(), got));
-        } else {
-            recordUnconfirmed(Change.of(Change.Kind.ITEM_GAINED, drop.item(), 1));
-        }
-    }
+    /** 离最后一只倒下的地方这么近就开始捡（格）。 */
+    private static final double KILL_SPOT_NEAR = 3.0;
 
     private ThreatAssessment.MySide mySide(TickContext context) {
         CombatSenses.CombatProfile profile = senses.profile(context);
@@ -445,6 +449,7 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         @Override
         public void pause() {
             if (current != null) current.pause();
+            if (pickup != null) pickup.pause();
             if (battle != null) battle.pause();
         }
 
@@ -452,11 +457,14 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         public void close() {
             // 换阶段或任务结束时基类收尾外壳：拾荒的走到、引擎的出手与寻路、拉了一半的弓都收尾。
             dropCurrent();
+            if (pickup != null) pickup.close();
+            pickup = null;
             if (battle != null) battle.close();
         }
 
         @Override
         public String describe() {
+            if (pickup != null) return pickup.describe();
             if (current != null) return current.describe();
             return battle == null ? "观察战场" : battle.describe();
         }
