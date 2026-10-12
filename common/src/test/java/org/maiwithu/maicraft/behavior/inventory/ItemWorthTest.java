@@ -69,6 +69,15 @@ class ItemWorthTest {
     }
 
     @Test
+    void 不能叠的工具当随身装备() {
+        // 扳手、无线终端不能叠：腾背包不把它们存走、丢掉。
+        assertEquals(Worth.GEAR, ItemWorth.of(new BackpackStack("create:wrench", 1, 1, false, false, false, false),
+                Set.of(), Map.of()));
+        assertEquals(Worth.GEAR, ItemWorth.of(new BackpackStack("ae2:wireless_crafting_terminal", 1, 1, false, false,
+                false, false), Set.of(), Map.of()));
+    }
+
+    @Test
     void 任务要用的零碎不算零碎() {
         // 正在为过滤器打蜘蛛拿线：线是这次任务留用的。
         assertEquals(Worth.TASK_RESERVED,

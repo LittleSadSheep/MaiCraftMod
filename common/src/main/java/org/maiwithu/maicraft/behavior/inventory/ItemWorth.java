@@ -24,7 +24,9 @@ final class ItemWorth {
         if (reservedItemIds.contains(stack.itemId())) {
             return Worth.TASK_RESERVED;
         }
-        if (stack.gear()) {
+        // 不能叠的非食物（扳手、无线终端、配置器、模组工具）也当随身装备：腾背包不把手头工具存走、丢掉。
+        // 实机腾背包时扳手不见了，要用时还得再做一把。
+        if (stack.gear() || stack.maxStackSize() == 1 && !stack.food()) {
             return Worth.GEAR;
         }
         if (stack.precious()) {
