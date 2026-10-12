@@ -216,6 +216,17 @@ class ConstructionTaskTest {
     }
 
     @Test
+    void 同一层先放离人近的_站一处放完再挪() {
+        // 施工顺序本来是 x 从小到大；人站在 x=5 那头，先放够得着的 x=4，再去 x=0。
+        Fake fake = new Fake().ground(63);
+        fake.feet = new BlockPos(5, 64, 1);
+        fake.carried.put("minecraft:stone", 2);
+        TaskResult result = run(fake, wall(STONE, new BlockPos(0, 64, 0), new BlockPos(4, 64, 0)));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(List.of(new BlockPos(4, 64, 0), new BlockPos(0, 64, 0)), fake.placedOrder);
+    }
+
+    @Test
     void 挡着的先清掉再放() {
         Fake fake = new Fake().ground(63);
         fake.world.put(new BlockPos(0, 64, 0), Blocks.DIRT.defaultBlockState());

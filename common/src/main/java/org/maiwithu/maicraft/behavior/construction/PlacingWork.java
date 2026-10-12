@@ -24,15 +24,22 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * 砌筑：按施工顺序一格一格放。每格先看能从哪几面点，走到能点那一面的站位，用原版放置预测核对落下来是不是要的样子，
  * 把材料换到手上，点下去，按放置确认看结果。放不上的格先做别的，回头再试；回头仍放不上就垫一条临时方块链再试；
  * 垫不了的记"够不着"。材料用完就停在材料尽头，缺的格如实记下。
+ *
+ * <p>像真人一样站一处把够得着的都放完再挪：同一层同一阶段里挑离人最近的那格先放，点哪一面先挑站着不动就够得着的。
+ * 原先按蓝图顺序一格一格来，两排墙交替写的水槽就在两边来回跑，镜头跟着乱甩。
  */
 final class PlacingWork extends ConstructionWork {
 
     private enum Step { APPROACH, HOLD, CLICK }
+
+    private static final Logger LOG = LoggerFactory.getLogger(PlacingWork.class);
 
     private final Permissions permissions;
     private final String purpose;
@@ -75,7 +82,7 @@ final class PlacingWork extends ConstructionWork {
             while (queue.isEmpty()) {
                 if (!refill()) return ActionStatus.done();
             }
-            PlannedCell cell = queue.poll();
+            PlannedCell cell = pollNearest();
             boolean temporary = temporaries.contains(cell.pos());
             if (temporary ? TemporaryBlocks.solid(services.site(), cell.pos()) : !site.needsWork(cell.pos())) continue;
             String itemId = itemId(cell);
@@ -99,7 +106,8 @@ final class PlacingWork extends ConstructionWork {
                 site.exclude(cell.pos(), CellEnding.IMPOSSIBLE, "要对着另一格放才落得到这里（动力辊这类会被下面的实心面抬高一格），那一格被占着");
                 continue;
             }
-            List<PlacementAttempt.Candidate> candidates = PlacementAttempt.candidates(services.site(), cell, placeAt);
+            List<PlacementAttempt.Candidate> candidates = reachableFirst(
+                    PlacementAttempt.candidates(services.site(), cell, placeAt));
             if (candidates.isEmpty()) {
                 deferred.add(cell);
                 continue;
@@ -107,6 +115,55 @@ final class PlacingWork extends ConstructionWork {
             attempt = new PlacementAttempt(cell, placeAt, temporary, candidates);
             return tryNextCandidate();
         }
+    }
+
+    /** 站着不动点得着的距离（格）：眼睛到那一面的中心，比原版交互距离 4.5 留半格余量。 */
+    private static final double REACH_FROM_HERE = 4.0;
+    /** 眼睛比脚底高多少（格）：站着时的视线高度。 */
+    private static final double EYE_HEIGHT = 1.62;
+
+    // 同一层、同一阶段（清空、骨架、贴附件）里挑离人最近的一格：先把站的地方够得着的放完再挪。
+    // 临时方块链要按链上的顺序垫，队头是临时方块时照原顺序。
+    private PlannedCell pollNearest() {
+        PlannedCell head = queue.peek();
+        BlockPos feet = services.site().feet();
+        if (head == null || feet == null || temporaries.contains(head.pos())) return queue.poll();
+        PlannedCell best = head;
+        double bestDistance = Double.MAX_VALUE;
+        for (PlannedCell cell : queue) {
+            if (temporaries.contains(cell.pos()) || !sameTier(cell, head)) continue;
+            double distance = cell.pos().distToCenterSqr(feet.getX() + 0.5, feet.getY() + EYE_HEIGHT, feet.getZ() + 0.5);
+            if (distance < bestDistance) {
+                best = cell;
+                bestDistance = distance;
+            }
+        }
+        queue.remove(best);
+        return best;
+    }
+
+    // 施工顺序里同一档：同一层、同样要不要靠着别的东西、同一阶段。跨档仍按施工顺序，地基先、贴附件后。
+    private static boolean sameTier(PlannedCell cell, PlannedCell head) {
+        return cell.pos().getY() == head.pos().getY()
+                && BuildOrder.needsSupport(cell.state()) == BuildOrder.needsSupport(head.state())
+                && BuildOrder.stage(cell) == BuildOrder.stage(head);
+    }
+
+    // 站着不动就点得着的那几面排前面（原有的先后不变）：够得着就不走，够不着才去找站位。
+    private List<PlacementAttempt.Candidate> reachableFirst(List<PlacementAttempt.Candidate> candidates) {
+        BlockPos feet = services.site().feet();
+        if (feet == null || candidates.size() < 2) return candidates;
+        List<PlacementAttempt.Candidate> near = new ArrayList<>();
+        List<PlacementAttempt.Candidate> far = new ArrayList<>();
+        for (PlacementAttempt.Candidate candidate : candidates) {
+            var face = PlacementSpots.faceBox(candidate.clicked(), candidate.face()).getCenter();
+            double dx = face.x - (feet.getX() + 0.5);
+            double dy = face.y - (feet.getY() + EYE_HEIGHT);
+            double dz = face.z - (feet.getZ() + 0.5);
+            (dx * dx + dy * dy + dz * dz <= REACH_FROM_HERE * REACH_FROM_HERE ? near : far).add(candidate);
+        }
+        near.addAll(far);
+        return near;
     }
 
     // 主队列空了：这一轮有进展就把放一放的格再排一轮；没进展就给第一个放不上的格垫临时方块链。
@@ -176,6 +233,10 @@ final class PlacingWork extends ConstructionWork {
         }
         PlacementAttempt.Candidate candidate = attempt.next();
         step = Step.APPROACH;
+        // 施工时走来走去难查：每次为一格换一面去点都记一行，人在哪、要去点哪一面，实机日志里看得出在折腾什么。
+        LOG.info("[施工] 放 {}：去点 {} 的 {} 面（人在 {}）", attempt.cell.pos().toShortString(),
+                candidate.clicked().toShortString(), candidate.face(),
+                services.site().feet() == null ? "未知" : services.site().feet().toShortString());
         begin(services.close().toward(PlacementSpots.faceTarget(candidate.clicked(), candidate.face()), permissions,
                         PlacementSpots.avoiding(attempt.occupied(), at -> false)),
                 "走到能点 " + candidate.clicked().toShortString() + " " + candidate.face() + " 面的位置");
@@ -192,6 +253,9 @@ final class PlacingWork extends ConstructionWork {
                 && (PlacementPrediction.complete(attempt.cell, predicted.get().predicted())
                 || PlacementPrediction.isProgress(attempt.cell, live, predicted.get().predicted()));
         if (!acceptable) {
+            LOG.info("[施工] 放 {}：从 {} 的 {} 面不行（{}）", attempt.cell.pos().toShortString(),
+                    candidate.clicked().toShortString(), candidate.face(),
+                    predicted.isEmpty() ? "点不到那一面" : "会放成 " + predicted.get().predicted());
             records.attempt("从 " + candidate.clicked().toShortString() + " 的 " + candidate.face() + " 面放 " + attempt.cell.pos().toShortString(),
                     predicted.isEmpty() ? "从这里点不到那一面" : "原版会放成 " + predicted.get().predicted() + "，不是要的样子");
             return tryNextCandidate();
@@ -285,6 +349,7 @@ final class PlacingWork extends ConstructionWork {
     }
 
     @Override protected ActionStatus failed(TickContext context, ActionStatus.Failed failure) {
+        LOG.info("[施工] {} 失败：{}", describe(), failure.problem().message());
         records.attempt(describe(), failure.problem().message());
         if (step == Step.HOLD) {
             deferred.add(attempt.cell);

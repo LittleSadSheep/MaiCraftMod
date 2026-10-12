@@ -186,6 +186,11 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
             }
             return Next.go(nextWorkPhase(), "现场做完，" + (nothingLeft() ? "整机比对" : "装机器自己的部分"));
         }
+        // 施工引擎在干活：它有真实进展（放下一格、挖掉一格）就算整台机器有进展。原先外层收不到，
+        // 一边放一边被 60 秒卡住判定掐掉，引擎记下的尝试也跟着丢了（实机刷石机围墙两次"自开始之后没进展"）。
+        runner.currentProgress()
+                .filter(progress -> progress.ticksSinceProgress() == 0)
+                .ifPresent(progress -> recordProgress(progress.lastProgress()));
         return Next.stay();
     }
 
