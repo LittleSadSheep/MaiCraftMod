@@ -94,8 +94,10 @@ final class NightRestTask extends SleepTask {
     @Override
     protected Next<Phase> tick(Phase phase, TickContext context) {
         this.now = context;
-        // 第一次推进时记住站位：夜休从哪儿出发，干完活回哪儿去。
-        if (homeSpot == null && context.player() != null) {
+        // 第一次站在地上（或水里）时记住站位：夜休从哪儿出发，干完活回哪儿去。人在半空（刚交回时开着喷气背包
+        // 飘在上面、正往下掉）不记——实机记成半空一格，睡醒回不去，附近一千多个候选全是"脚下悬空"，人留在了床边。
+        if (homeSpot == null && context.player() != null && context.player().localPlayer() != null
+                && (context.player().localPlayer().onGround() || context.player().localPlayer().isInWater())) {
             var at = context.player().localPlayer().blockPosition();
             homeSpot = WorldPosition.here(at.getX(), at.getY(), at.getZ());
         }
