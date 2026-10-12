@@ -111,10 +111,18 @@ final class SandpaperSource implements ItemSource {
         Permissions permissions = context.permissions();
         // 备原料 → 备砂纸 → 每一件：原料放副手、砂纸换主手、按住右键直到背包里多出一份产物。
         List<StepsInOrder.Step> steps = new ArrayList<>();
-        steps.add(new StepsInOrder.Step("拿 " + rounds + " 件 " + input, () -> services.needs().actionFor(
-                new ItemRequest(WantedItem.ofItem(input), rounds, "砂纸打磨的原料"), permissions)));
-        steps.add(new StepsInOrder.Step("拿 " + papers + " 张砂纸", () -> services.needs().actionFor(
-                new ItemRequest(WantedItem.ofTag(SANDPAPER_TAG), papers, "砂纸打磨"), permissions)));
+        // 身上（含副手）已经有的原料和砂纸先用，只去拿差的那几件：拿东西是"再拿几件"，
+        // 原先不管身上有没有都去拿，实机每磨一次就多做一块玫瑰石英、一张砂纸，背包塞满了还磨不出来。
+        int inputShort = rounds - carried(input);
+        int papersShort = papers - carriedSandpaper();
+        if (inputShort > 0) {
+            steps.add(new StepsInOrder.Step("拿 " + inputShort + " 件 " + input, () -> services.needs().actionFor(
+                    new ItemRequest(WantedItem.ofItem(input), inputShort, "砂纸打磨的原料"), permissions)));
+        }
+        if (papersShort > 0) {
+            steps.add(new StepsInOrder.Step("拿 " + papersShort + " 张砂纸", () -> services.needs().actionFor(
+                    new ItemRequest(WantedItem.ofTag(SANDPAPER_TAG), papersShort, "砂纸打磨"), permissions)));
+        }
         for (int round = 1; round <= rounds; round++) {
             String which = "第 " + round + " 件";
             steps.add(new StepsInOrder.Step(which + "：原料放副手", () -> toOffhand(input)));
@@ -152,6 +160,19 @@ final class SandpaperSource implements ItemSource {
                         : InteractionConfirmation.Verdict.PENDING, HOLD_TICKS);
     }
 
+    // 身上有几张砂纸（按砂纸标签认，用过几次的也算一张）。
+    private int carriedSandpaper() {
+        PlayerContext current = services.context().get();
+        if (current == null || current.localPlayer() == null) return 0;
+        Inventory inventory = current.localPlayer().getInventory();
+        int count = 0;
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            if (isSandpaper(inventory.getItem(slot))) count += inventory.getItem(slot).getCount();
+        }
+        return count;
+    }
+
+    // 身上这种东西有几件：背包的全部格子都数，含副手（原料就是要放副手的）。
     private int carried(String itemId) {
         PlayerContext current = services.context().get();
         if (current == null || current.localPlayer() == null) return 0;
