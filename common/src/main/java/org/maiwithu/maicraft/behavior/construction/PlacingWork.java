@@ -38,6 +38,8 @@ final class PlacingWork extends ConstructionWork {
     private final String purpose;
     private final Deque<PlannedCell> queue;
     private final List<PlannedCell> deferred = new ArrayList<>();
+    /** 已经为它垫过临时方块的格：同一格只垫一回。 */
+    private final Set<BlockPos> scaffolded = new HashSet<>();
     /** 这次垫的临时方块：不在蓝图里，放好记进账本而不是工地。 */
     private final Set<BlockPos> temporaries = new HashSet<>();
     private PlacementAttempt attempt;
@@ -124,6 +126,11 @@ final class PlacingWork extends ConstructionWork {
             return true;
         }
         deferred.remove(stuck);
+        // 垫过一回临时方块还是放不上：再垫也一样（实机放一张工作台垫了四块圆石、试了八千多次），如实记下这格放不成。
+        if (!scaffolded.add(stuck.pos().immutable())) {
+            site.unreachable(stuck.pos(), "垫了临时方块，每一面还是放不上");
+            return true;
+        }
         List<BlockPos> chain = permissions.changeBlocks() == Permissions.BlockChanges.NONE ? List.of()
                 : TemporaryBlocks.chain(services.site(), stuck.pos(), this::mayPlaceTemporary, pos -> true);
         Optional<String> material = services.site().temporaryMaterial();

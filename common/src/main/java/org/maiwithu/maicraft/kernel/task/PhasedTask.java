@@ -13,7 +13,9 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
@@ -47,6 +49,8 @@ public abstract class PhasedTask<P extends Enum<P>> implements Task {
     private final List<Change> changes = new ArrayList<>();
     private final List<Change> unconfirmed = new ArrayList<>();
     private final List<Attempt> attempts = new ArrayList<>();
+    /** 和已记的某条一模一样的试法又出现了几次。 */
+    private final Map<Attempt, Integer> repeats = new HashMap<>();
     /** 交给动作的记账口：动作记的和任务自己记的进同一份结果。 */
     private final TaskRecords records = new TaskRecords() {
         @Override public void change(Change change) {
@@ -157,7 +161,25 @@ public abstract class PhasedTask<P extends Enum<P>> implements Task {
 
     /** 记下一次试过的办法及结果，结束时进入结果的 attempts。 */
     protected final void recordAttempt(String tried, String whatHappened) {
-        attempts.add(new Attempt(tried, whatHappened));
+        Attempt attempt = new Attempt(tried, whatHappened);
+        // 一模一样的试法与结果只记一条，后面数次数：同一件事反复试，结果里不该堆出几千条一样的话。
+        if (attempts.contains(attempt)) {
+            repeats.merge(attempt, 1, Integer::sum);
+        } else {
+            attempts.add(attempt);
+        }
+    }
+
+    // 进结果的试法：重复过的在结果后面写明又出现了几次。
+    private List<Attempt> attemptsForResult() {
+        if (repeats.isEmpty()) return attempts;
+        List<Attempt> merged = new ArrayList<>(attempts.size());
+        for (Attempt attempt : attempts) {
+            Integer more = repeats.get(attempt);
+            merged.add(more == null ? attempt
+                    : new Attempt(attempt.tried(), attempt.result() + "（同样的结果又出现 " + more + " 次）"));
+        }
+        return merged;
     }
 
     /**
@@ -230,7 +252,7 @@ public abstract class PhasedTask<P extends Enum<P>> implements Task {
             case PLAYER_GONE -> "角色没了（死亡、断线或换世界）";
         };
         result = TaskResult.builder(TaskResult.Status.CANCELLED, label + "：" + why)
-                .changes(changes).unconfirmed(unconfirmed).attempts(attempts)
+                .changes(changes).unconfirmed(unconfirmed).attempts(attemptsForResult())
                 .remaining(remaining()).details(details()).build();
         return result;
     }
@@ -301,7 +323,7 @@ public abstract class PhasedTask<P extends Enum<P>> implements Task {
     // 子类在 Next.done 里只需写结论与细节；运行中用 recordChange() 等记下的内容在这里补进结果。
     private TaskResult merge(TaskResult given) {
         TaskResult.Builder builder = given.toBuilder()
-                .changes(changes).unconfirmed(unconfirmed).attempts(attempts);
+                .changes(changes).unconfirmed(unconfirmed).attempts(attemptsForResult());
         if (given.status() != TaskResult.Status.DONE && given.remaining().isEmpty()) {
             builder.remaining(remaining());
         }
@@ -312,7 +334,7 @@ public abstract class PhasedTask<P extends Enum<P>> implements Task {
     // 一句话结论只带卡住的那句结论；展开的原因在问题的说明里，结果、目标快照与结束事件里不各抄一遍整段。
     private TaskResult failedResult(Problem problem) {
         return TaskResult.builder(TaskResult.Status.FAILED, label + "没有完成：" + problem.headline())
-                .problem(problem).changes(changes).unconfirmed(unconfirmed).attempts(attempts)
+                .problem(problem).changes(changes).unconfirmed(unconfirmed).attempts(attemptsForResult())
                 .remaining(remaining()).details(details()).build();
     }
 

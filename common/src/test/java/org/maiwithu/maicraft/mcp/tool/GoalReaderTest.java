@@ -133,6 +133,20 @@ class GoalReaderTest {
     }
 
     @Test
+    void onFailureOnTheWholeSequenceIsEachStepsDefault() {
+        // 实机（全量测试 10-12）：on_failure 写在 sequence 上被悄悄忽略，第一步失败后面五步没做。
+        GoalReader.Reading reading = read("""
+                {"ability": "sequence", "on_failure": "continue", "steps": [
+                   {"ability": "use"},
+                   {"ability": "use", "on_failure": "stop"}]}""");
+
+        assertTrue(reading.ok(), reading.errors()::toString);
+        assertEquals(Goal.OnFailure.CONTINUE, reading.goal().steps().get(0).onFailure(), "没单独写的按整件事的");
+        assertEquals(Goal.OnFailure.STOP, reading.goal().steps().get(1).onFailure(), "单独写了的照自己的");
+        assertTrue(reading.notes().stream().anyMatch(note -> note.contains("goal.on_failure")), reading.notes()::toString);
+    }
+
+    @Test
     void stepsKeepTheWholeThingsPermissionsUnlessTheyOverrideAField() {
         GoalReader.Reading reading = read("""
                 {"ability": "sequence", "permissions": {"fight": "self_defense", "protected_landmarks": ["家"]},

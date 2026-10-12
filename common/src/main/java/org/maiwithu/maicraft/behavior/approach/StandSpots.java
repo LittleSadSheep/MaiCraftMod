@@ -93,6 +93,9 @@ public final class StandSpots {
                                                 ApproachWorldView world, ProtectedCells guarded) {
         BlockPos feet = world.currentFeet();
         if (!world.onGround()) return Optional.of("还没落地");
+        // 站的这格不能站（要往这里放东西、或受保护）：先挪开。实机让它就地放工作台，人站在要放的那格里，
+        // 原版放不下去，原地试了八千多次。
+        if (guarded.contains(feet)) return Optional.of("站的这格要放东西或受保护，得挪开");
         // 写告示牌这类只站正面的目标，人已经站在背面时先报背面：在这里点下去编辑的是背面那一面。
         String behind = sideFailure(feet, target);
         if (behind != null) return Optional.of(behind);

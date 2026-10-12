@@ -69,6 +69,22 @@ public final class GoalReader {
         if (module == null) {
             return null;
         }
+        // on_failure 写在 sequence 本身上：本意是"哪一步没做成都接着做"，当成每一步没单独写时的默认，
+        // 不悄悄忽略（实机写了 continue，第一步失败后面五步一步没做）。
+        if (onFailure != null && !steps.isEmpty() && object.get("steps").isJsonArray()) {
+            JsonArray rawSteps = object.getAsJsonArray("steps");
+            Goal.OnFailure wholeChoice = Goal.OnFailure.valueOf(onFailure.toUpperCase(Locale.ROOT));
+            List<Goal> adjusted = new ArrayList<>(steps.size());
+            for (int i = 0; i < steps.size(); i++) {
+                Goal step = steps.get(i);
+                boolean ownChoice = i < rawSteps.size() && rawSteps.get(i).isJsonObject()
+                        && rawSteps.get(i).getAsJsonObject().has("on_failure");
+                adjusted.add(ownChoice ? step : new Goal(step.ability(), step.purpose(), step.target(), step.params(),
+                        step.permissions(), step.steps(), wholeChoice));
+            }
+            steps = adjusted;
+            check.note(path + ".on_failure：写在整件事上，按每一步没单独写 on_failure 时的默认处理");
+        }
         return new Goal(module.spec().id(), purpose, target, params, permissions, steps,
                 onFailure == null ? null : Goal.OnFailure.valueOf(onFailure.toUpperCase(Locale.ROOT)));
     }
