@@ -24,6 +24,15 @@ neoForge {
             client()
             jvmArgument('-Xmx3072M')
             programArguments.addAll '--width', '1280', '--height', '720'
+            // 实机测试：设了 MAICRAFT_JOIN_SERVER（如 localhost:25565）就开机直连那台服务端，用 MAICRAFT_USERNAME 当玩家名。
+            def joinServer = System.getenv('MAICRAFT_JOIN_SERVER')
+            if (joinServer) {
+                programArguments.addAll '--quickPlayMultiplayer', joinServer
+            }
+            def username = System.getenv('MAICRAFT_USERNAME')
+            if (username) {
+                programArguments.addAll '--username', username
+            }
         }
         data {
             data()
@@ -32,6 +41,9 @@ neoForge {
         }
         server {
             server()
+            // 专用服务端单独一个目录：和客户端共用 run 会抢同一份 logs/latest.log 与配置。
+            gameDirectory = file('run-server')
+            programArguments.add '--nogui'
         }
     }
     mods {
