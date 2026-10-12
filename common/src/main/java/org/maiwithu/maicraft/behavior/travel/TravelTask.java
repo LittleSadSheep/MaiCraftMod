@@ -239,13 +239,21 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
         recordPlacementsSoFar();
         noteBackpack(context);
         RemainingDistance remaining = remainingFromHere();
-        if (remaining != null && remaining.horizontalBlocks() < bestRemaining) {
+        if (remaining != null && progressGap(remaining) < bestRemaining) {
             // 剩余距离是进展信号：更近了才算前进，站着不动早晚被判卡住。
-            bestRemaining = remaining.horizontalBlocks();
+            bestRemaining = progressGap(remaining);
             recordProgress("离目的地还剩 " + remaining.describe());
         }
         progressListener.onTravelProgress(new TravelProgress(
                 describeStage(report), report.feet(), remaining, crossedWater));
+    }
+
+    // 高度核实过的目的地，往上爬、往下挖也是在靠近：原先只量水平，下竖井挖了 15 格也被当成三十秒没进展判卡住。
+    // 只给 x/z 的目的地高度是占位，仍只量水平。
+    private double progressGap(RemainingDistance remaining) {
+        return destination.heightConfirmed()
+                ? remaining.horizontalBlocks() + Math.abs(remaining.verticalBlocks())
+                : remaining.horizontalBlocks();
     }
 
     /** 路上垫的临时方块逐刻记进变化：取消或空转收场时也已经记下，不用等到结算那一刻。 */

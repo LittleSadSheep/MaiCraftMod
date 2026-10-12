@@ -184,7 +184,9 @@ final class TerrainProbe {
         Map<String, List<BlockPos>> breaks = new LinkedHashMap<>();
         Set<BlockPos> places = new LinkedHashSet<>();
         Set<String> outside = new LinkedHashSet<>();
-        IPath path = calculation.getPath().map(IPath::postProcess).orElse(null);
+        // 算路结束时 Baritone 已经把路线摊成逐步动作（postProcess）并按加载区截短；再摊一次会抛异常，
+        // 只读复算就从来没出过结论（实机日志"Path must not be verified twice"）。直接用算好的路线。
+        IPath path = calculation.getPath().orElse(null);
         if (path != null) {
             for (IMovement raw : path.movements()) {
                 if (!(raw instanceof Movement movement)) continue;
