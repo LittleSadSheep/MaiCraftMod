@@ -4,9 +4,9 @@ package org.maiwithu.maicraft.behavior.survival;
 import java.util.OptionalInt;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.levelgen.Heightmap;
 
 import org.maiwithu.maicraft.game.world.ReadsLightLevels;
+import org.maiwithu.maicraft.behavior.navigation.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -48,8 +48,9 @@ public final class LiveDarkView implements DarknessNeed.ReadsDarkness {
                 : skyEye.isEmpty() ? skyFeet
                 : OptionalInt.of(Math.max(skyFeet.getAsInt(), skyEye.getAsInt()));
         // 林下：不算树叶的地表落在脚下或脚这一层，头顶就只有树叶（或什么都没有），不是洞里也不是屋里。
-        boolean onlyLeaves = player.localPlayer().level().getHeight(
-                Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, feet.getX(), feet.getZ()) <= feet.getY();
+        // 客户端只同步了含树叶的高度图，"忽略树叶"那张一直是空的（整列读成世界最底层）；从同步的那张往下补读。
+        boolean onlyLeaves = player.level() != null
+                && ClientSurfaceHeight.motionBlockingNoLeaves(player.level(), feet.getX(), feet.getZ()) <= feet.getY();
         return new DarknessNeed.DarknessFacts(OptionalInt.of(darkest), carriedTorches(player.backpack()) > 0, feet, sky,
                 onlyLeaves);
     }

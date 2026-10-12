@@ -6,9 +6,9 @@ import java.util.OptionalInt;
 import java.util.function.Supplier;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.levelgen.Heightmap;
 
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.behavior.navigation.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
@@ -45,7 +45,8 @@ public final class ClientTravelWorldView implements TravelWorldView {
         // 客户端世界的 hasChunkAt 永远答“加载着”，没加载的格读出来是空气、地表落在世界最底层；按区块真加载没加载判。
         if (!current.level().isLoaded(column)) return OptionalInt.empty();
         // 地表最高的实心（不算树叶）方块上面那一格就是站的地方。
-        return OptionalInt.of(current.level().getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z));
+        // 客户端只同步了含树叶的高度图，"忽略树叶"那张一直是空的（整列读成世界最底层）；从同步的那张往下补读。
+        return OptionalInt.of(ClientSurfaceHeight.motionBlockingNoLeaves(current.level(), x, z));
     }
 
     @Override

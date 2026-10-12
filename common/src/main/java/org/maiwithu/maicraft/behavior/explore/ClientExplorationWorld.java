@@ -21,8 +21,8 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.behavior.navigation.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.BlockScanService;
 import org.maiwithu.maicraft.game.world.ObservationVisibility;
@@ -90,7 +90,8 @@ public final class ClientExplorationWorld implements ExplorationWorld {
             return ColumnSample.unloaded();
         }
         // 高度图返回的是顶块上面的第一个空位；减一才是"忽略树叶的最高实体或液体遮挡物"。
-        int topY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z) - 1;
+        // 客户端只同步了含树叶的高度图，"忽略树叶"那张一直是空的（整列读成世界最底层）；从同步的那张往下补读。
+        int topY = ClientSurfaceHeight.motionBlockingNoLeaves(level, x, z) - 1;
         BlockPos top = new BlockPos(x, topY, z);
         BlockState state = level.getBlockState(top);
         String biome = level.getBiome(top).unwrapKey()

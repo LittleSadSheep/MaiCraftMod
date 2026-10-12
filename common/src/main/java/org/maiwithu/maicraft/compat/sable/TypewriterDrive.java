@@ -14,11 +14,11 @@ import java.util.Set;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleDriver;
+import org.maiwithu.maicraft.behavior.navigation.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -347,7 +347,8 @@ final class TypewriterDrive implements VehicleDriver.Run {
         int x = (int) Math.floor(at.x);
         int z = (int) Math.floor(at.z);
         if (!level.getChunkSource().hasChunk(x >> 4, z >> 4)) return at.y;
-        return level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+        // 客户端只同步了含树叶的高度图，"忽略树叶"那张一直是空的（整列读成世界最底层）；从同步的那张往下补读。
+        return ClientSurfaceHeight.motionBlockingNoLeaves(level, x, z);
     }
 
     // 读世界地面给落点与前方地形用：只读已经加载的区块，没加载答不知道。
@@ -355,11 +356,11 @@ final class TypewriterDrive implements VehicleDriver.Run {
         return new LandingSites.Ground() {
             @Override public Integer top(int x, int z) {
                 if (!level.getChunkSource().hasChunk(x >> 4, z >> 4)) return null;
-                return level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+                return ClientSurfaceHeight.motionBlockingNoLeaves(level, x, z);
             }
 
             @Override public boolean liquid(int x, int z) {
-                int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z) - 1;
+                int y = ClientSurfaceHeight.motionBlockingNoLeaves(level, x, z) - 1;
                 return !level.getFluidState(new BlockPos(x, y, z)).isEmpty();
             }
         };

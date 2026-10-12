@@ -78,6 +78,18 @@ class CodingRulesTest {
             .should().callMethodWhere(JavaCall.Predicates.target(HasName.Predicates.name("hasChunkAt")))
             .allowEmptyShould(true);
 
+    /**
+     * 客户端只同步了含树叶的高度图，"忽略树叶""海底"两张一直是空的，整列读成世界最底层
+     * （实机远程出行的地表段因此落在 y=-64）。读地面高度走 ClientSurfaceHeight，它从同步的那张往下补读。
+     */
+    @ArchTest
+    static final ArchRule noUnsyncedHeightmapOnClient = noClasses()
+            .that().resideInAPackage("org.maiwithu.maicraft..")
+            .and().doNotHaveFullyQualifiedName(ROOT + "behavior.navigation.util.ClientSurfaceHeight")
+            .should().accessField("net.minecraft.world.level.levelgen.Heightmap$Types", "MOTION_BLOCKING_NO_LEAVES")
+            .orShould().accessField("net.minecraft.world.level.levelgen.Heightmap$Types", "OCEAN_FLOOR")
+            .allowEmptyShould(true);
+
     /** 只有游戏接口层和调试界面可以直接取 Minecraft 客户端单例；其他层通过游戏接口层访问。 */
     @ArchTest
     static final ArchRule minecraftSingletonOnlyInGameLayer = noClasses()
