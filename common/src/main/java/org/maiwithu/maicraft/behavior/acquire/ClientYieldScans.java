@@ -92,6 +92,9 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
                     && !NaturalTrees.partOfNaturalTree(hit, current.level(), current.level()::isLoaded, trunksChecked)) {
                 continue;
             }
+            // 箱子、熔炉、机器这类带方块实体的是摆着用的设施，不当矿挖：实机要箱子去建进料口，
+            // 把机器的进料箱挖了，掉的箱子还没捡回来。
+            if (current.level().getBlockState(hit).hasBlockEntity()) continue;
             String blockTypeId = blockTypeIdOf(current, hit);
             String dropped = VanillaBlockDrops.droppedBy(blockTypeId);
             // 同名通例带出的方块未必真的掉想要的东西：掉落对不上这次要的就不报。
