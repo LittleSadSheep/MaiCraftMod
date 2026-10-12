@@ -25,6 +25,25 @@ public interface MenuConfirmation {
         };
     }
 
+    /**
+     * 点一格、快速移动这一下的确认：被点的那一格或光标上的东西变了（客户端已按原版规则先算出结果）就算生效，
+     * 服务器改过菜单版本也算。原先只等菜单版本变：客户端先算对了的点击服务器一个包都不回，版本不变，
+     * 每一下都要等满五秒才按说不清收场，往箱子里存一件东西要等五十秒。点了以后东西对不对，由调用方按两侧内容核对。
+     */
+    static MenuConfirmation slotOrCursorChanged(int slot, ItemStack slotBefore, ItemStack carriedBefore) {
+        ItemStack frozenSlot = slotBefore.copy();
+        ItemStack frozenCarried = carriedBefore.copy();
+        return (context, pending) -> {
+            var menu = context.localPlayer().containerMenu;
+            if (menu.containerId != pending.containerId()) return Verdict.PENDING;
+            if (menu.getStateId() != pending.beforeStateId()) return Verdict.APPLIED;
+            boolean slotChanged = slot >= 0 && slot < menu.slots.size()
+                    && !ItemStack.matches(menu.getSlot(slot).getItem(), frozenSlot);
+            boolean cursorChanged = !ItemStack.matches(menu.getCarried(), frozenCarried);
+            return slotChanged || cursorChanged ? Verdict.APPLIED : Verdict.PENDING;
+        };
+    }
+
     static MenuConfirmation inventorySwap(
             int sourceInventorySlot,
             int hotbarSlot,

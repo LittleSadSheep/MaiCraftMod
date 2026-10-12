@@ -54,7 +54,7 @@ final class ClientOpenedMenu implements OpenedMenu {
         PlayerContext context = contexts.get();
         if (!channel.readyForAction(context)) return false;
         context.menuActions().click(context, slotId, 0, ClickType.QUICK_MOVE,
-                MenuConfirmation.stateChanged(), QUICK_MOVE_TIMEOUT_TICKS);
+                ClientMenuChannel.clickedChanged(context, slotId), QUICK_MOVE_TIMEOUT_TICKS);
         return true;
     }
 

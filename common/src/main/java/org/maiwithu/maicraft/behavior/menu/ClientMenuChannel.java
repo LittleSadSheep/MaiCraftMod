@@ -89,9 +89,16 @@ public final class ClientMenuChannel implements MenuChannel {
     public boolean click(int slot, int button) {
         PlayerContext context = contexts.get();
         if (!readyForAction(context)) return false;
-        context.menuActions().click(context, slot, button, ClickType.PICKUP, MenuConfirmation.stateChanged(),
+        context.menuActions().click(context, slot, button, ClickType.PICKUP, clickedChanged(context, slot),
                 CLOSE_TIMEOUT_TICKS);
         return true;
+    }
+
+    /** 点这一格之前，记下这一格和光标上的东西：点下去哪个变了就算这一下生效（客户端先算出的结果）。 */
+    static MenuConfirmation clickedChanged(PlayerContext context, int slot) {
+        AbstractContainerMenu menu = context.localPlayer().containerMenu;
+        ItemStack before = slot >= 0 && slot < menu.slots.size() ? menu.getSlot(slot).getItem() : ItemStack.EMPTY;
+        return MenuConfirmation.slotOrCursorChanged(slot, before, menu.getCarried());
     }
 
     // 快速移动与点格子同一条就绪判断；搬没搬成由调用方按两侧内容的前后对照核对。
@@ -99,7 +106,7 @@ public final class ClientMenuChannel implements MenuChannel {
     public boolean quickMove(int slot) {
         PlayerContext context = contexts.get();
         if (!readyForAction(context)) return false;
-        context.menuActions().click(context, slot, 0, ClickType.QUICK_MOVE, MenuConfirmation.stateChanged(),
+        context.menuActions().click(context, slot, 0, ClickType.QUICK_MOVE, clickedChanged(context, slot),
                 CLOSE_TIMEOUT_TICKS);
         return true;
     }
