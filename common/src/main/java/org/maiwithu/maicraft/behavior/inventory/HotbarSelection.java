@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.inventory;
 
+import net.minecraft.world.entity.player.Inventory;
 import org.maiwithu.maicraft.game.interaction.PendingInteraction;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -20,9 +21,13 @@ public final class HotbarSelection implements Action {
     private final int slot;
     private PendingInteraction pending;
 
-    /** @param slot 快捷栏第几格（0–8） */
+    /** @param slot 快捷栏第几格（原版 0–8；装了扩展快捷栏的模组时照它的上限） */
     public HotbarSelection(int slot) {
-        if (slot < 0 || slot > 8) throw new IllegalArgumentException("快捷栏只有 0–8 格：" + slot);
+        // 上限问原版自己（服务端 handleSetCarriedItem 按同一个上限校验）：装了 HotBaaaar 这类扩展快捷栏，
+        // 第二排也能选中；原先写死 0–8，空手时挑到第二排的空格就内部错误"快捷栏只有 0–8 格：16"。
+        if (slot < 0 || slot >= Inventory.getSelectionSize()) {
+            throw new IllegalArgumentException("快捷栏只有 0–" + (Inventory.getSelectionSize() - 1) + " 格：" + slot);
+        }
         this.slot = slot;
     }
 
