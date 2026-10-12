@@ -504,4 +504,10 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
             return leg.describe();
         }
     }
+
+    /** 本来就在挪地方：被临时任务带离原地后从新地点接着走。 */
+    @Override
+    public boolean resumesAnywhere() {
+        return true;
+    }
 }

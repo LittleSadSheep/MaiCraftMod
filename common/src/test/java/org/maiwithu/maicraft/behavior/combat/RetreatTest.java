@@ -41,6 +41,7 @@ class RetreatTest {
         assertFalse(retreat.escaped(start));
         assertTrue(retreat.escaped(field(foe(7, 20, false))), "远处没参与追击的不让逃跑无限延长");
         assertFalse(retreat.escaped(field(foe(7, 20, true))), "新近打过我的照样算");
+        assertFalse(retreat.escaped(field(foe(8, 5, false))), "看得见的会还手的还在 10 格内：没甩开");
         // 连着走不通到上限才退无可退；身体真走出两格就清账。
         assertFalse(retreat.routeFailed(0, 0));
         assertFalse(retreat.routeFailed(0, 0));

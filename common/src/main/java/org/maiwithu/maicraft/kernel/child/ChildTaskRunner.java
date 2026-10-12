@@ -130,6 +130,11 @@ public final class ChildTaskRunner {
         return child == null || result != null || child.stoppedSafely();
     }
 
+    /** 手上那个任务被带离原地后能不能从新地点接着做。 */
+    public boolean resumesAnywhere() {
+        return child != null && result == null && child.resumesAnywhere();
+    }
+
     /**
      * 父任务提前结束（被替换、被取消、角色没了）时调用：让子任务按同样的原因收尾，如实交代已发生的变化。
      * 只允许调用一次；子任务已经自己结算过时再调用是重复结算，直接抛异常。

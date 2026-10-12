@@ -9,6 +9,7 @@ import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
+import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
@@ -26,6 +27,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalInt;
 
 /**
  * 出行任务：去一个地方。解析目的地 → 交给走到逐刻推进 → 到达或停下时如实结算。
@@ -52,6 +54,13 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
     private final ReadsPlacedBlocks placedBlocks;
     private final TravelProgressListener progressListener;
 
+    /** 读地表高度与角色在哪：远程出行按地表一段一段走；没有为 null（只按目的地走一整段）。 */
+    private final TravelWorldView world;
+    /** 这一段走的是地表的一小段（不是目的地本身）。 */
+    private boolean onSurfaceLeg;
+    /** 地表小段接连走不通了几次；到上限就不再分段，按目的地直接走。 */
+    private int surfaceLegFailures;
+
     private WalkRun walk;
     private TravelSettlement settlement;
     private boolean stopRequested;
@@ -75,8 +84,16 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
      */
     public TravelTask(TravelDestination destination, int maxSeconds, TerrainPermit permit,
             WalkTo walks, ReadsPlacedBlocks placedBlocks, TravelProgressListener progressListener) {
+        this(destination, maxSeconds, permit, walks, placedBlocks, progressListener, null);
+    }
+
+    /** @param world 读地表高度与角色位置：给了就把远程出行分成地表上的一小段一小段 */
+    public TravelTask(TravelDestination destination, int maxSeconds, TerrainPermit permit,
+            WalkTo walks, ReadsPlacedBlocks placedBlocks, TravelProgressListener progressListener,
+            TravelWorldView world) {
         super("出行", Phase.WALK, new ProgressTracker(STUCK_AFTER_TICKS,
                 maxSeconds > 0 ? maxSeconds * 20L : Long.MAX_VALUE));
+        this.world = world;
         this.destination = destination;
         this.permit = permit;
         this.walks = walks;
@@ -97,8 +114,38 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
     /** 把目的地编译成导航目标交给走到；出行不碰寻路内部。 */
     private WalkRun startWalk() {
         // 出行没有途中要保护的方块：目的地是去站的地方，不是要去动的东西。
-        walk = walks.start(new GoalCompiler.Compiled(destination.navGoal(), LongSets.emptySet()), permit);
+        NavGoal leg = surfaceLeg();
+        onSurfaceLeg = leg != null;
+        walk = walks.start(new GoalCompiler.Compiled(leg != null ? leg : destination.navGoal(), LongSets.emptySet()),
+                permit);
         return walk;
+    }
+
+    /** 远了才分段：离目的地这么远（格）以上。 */
+    private static final double SURFACE_LEG_FROM = 96;
+    /** 每段往目的地方向走这么远（格），落在那一列的地表上。 */
+    private static final double SURFACE_LEG = 48;
+    /** 到了那一段落点附近这么近（格）就算走完这段。 */
+    private static final double SURFACE_LEG_RADIUS = 4;
+    /** 地表小段接连走不通这么多次就不再分段。 */
+    private static final int SURFACE_LEG_GIVE_UP = 3;
+
+    // 远程出行一段一段沿地表走：寻路对着几百格外的一柱列算，山地里常钻进洞里绕圈子（实机 1000 格往北，
+    // 在地下绕了几分钟才走了两百多格）。真人赶远路是在地面上朝那个方向跑，看见坎就绕。
+    // 往目的地方向 48 格那一列的地表当这一段的落点；那一列没加载、读不到地表就按目的地直接走。
+    private NavGoal surfaceLeg() {
+        if (world == null || surfaceLegFailures >= SURFACE_LEG_GIVE_UP) return null;
+        WorldPosition here = world.currentSpot();
+        if (here == null) return null;
+        BlockPos aim = destination.aimFrom(new BlockPos(here.x(), here.y(), here.z()));
+        double dx = aim.getX() - here.x();
+        double dz = aim.getZ() - here.z();
+        double distance = Math.hypot(dx, dz);
+        if (distance < SURFACE_LEG_FROM) return null;
+        int x = here.x() + (int) Math.round(dx / distance * SURFACE_LEG);
+        int z = here.z() + (int) Math.round(dz / distance * SURFACE_LEG);
+        OptionalInt y = world.surfaceFeet(x, z);
+        return y.isEmpty() ? null : NavGoal.near(new BlockPos(x, y.getAsInt(), z), SURFACE_LEG_RADIUS);
     }
 
     @Override
@@ -117,6 +164,17 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
         if (report.state() == WalkReport.State.STOPPED) {
             recordProgress("从原地接着走");
             return Next.go(Phase.WALK, "上一段走到已停稳，从原地接着走");
+        }
+        if (onSurfaceLeg && !(status instanceof ActionStatus.Running)) {
+            // 地表的一小段走完了：接着从这里往目的地方向再定一段；这一段走不通就记一次，接连不行改成直接走。
+            if (status instanceof ActionStatus.Failed failed) {
+                surfaceLegFailures++;
+                recordAttempt("沿地表走一段", failed.problem().message());
+            } else {
+                surfaceLegFailures = 0;
+                recordProgress("沿地表走完一段");
+            }
+            return Next.go(Phase.WALK, "沿地表接着往目的地方向走");
         }
         return switch (status) {
             case ActionStatus.Running running -> Next.stay();
@@ -313,5 +371,11 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
 
     private String shortSpot(BlockPos feet) {
         return feet == null ? "未知" : "(" + feet.getX() + ", " + feet.getY() + ", " + feet.getZ() + ")";
+    }
+
+    /** 本来就在挪地方：被临时任务带离原地后从新地点接着走。 */
+    @Override
+    public boolean resumesAnywhere() {
+        return true;
     }
 }

@@ -168,6 +168,16 @@ public final class ControlLoop {
         return List.copyOf(layers);
     }
 
+    /**
+     * LLM 让停在半路的主任务接着做（恢复目标）：撤掉"停在半路"，下一刻照常推进。没停着时什么都不做。
+     */
+    public void unparkMain() {
+        if (!stack.isEmpty() && stack.getFirst().from == null && stack.getFirst().paused) {
+            stack.getFirst().paused = false;
+            parkedWhere = null;
+        }
+    }
+
     /** 主任务被临时任务停在半路时说停在了哪里；没停时为 null。 */
     public String parkedWhere() {
         return parkedWhere;
@@ -389,8 +399,10 @@ public final class ControlLoop {
             failureStreaks.remove(frame.from);
         }
         // 临时任务回不到原来的岗位时不让主任务在新地点悄悄续上：停住等 LLM 决定。
+        // 去某地、跑图这类本来就在挪地方的主任务不停：从新地点接着走就是了（原先一被撤离就停在半路，
+        // 也没人告诉 LLM，远程出行走走停停）。
         if (frame.task instanceof DisplacedTask displaced && displaced.cannotResumeInPlace()
-                && !stack.isEmpty() && stack.getFirst().from == null) {
+                && !stack.isEmpty() && stack.getFirst().from == null && !stack.getFirst().task.resumesAnywhere()) {
             stack.getFirst().paused = true;
             parkedWhere = displaced.stoppedWhere();
             return new Decision.Parked(stack.getFirst().task, parkedWhere);

@@ -708,7 +708,11 @@ public final class Bootstrap {
                 if (!owned) walks.humanTookPlayer();
             }
             if (owned) {
-                controlLoop.tick(new ClientTickContext(gameTick, current));
+                // 主任务被临时任务带离原地、回不去：目标挂成暂停并发事件，LLM 才知道身体停着。
+                if (controlLoop.tick(new ClientTickContext(gameTick, current)) instanceof ControlLoop.Decision.Parked
+                        && goals != null) {
+                    goals.mainParked();
+                }
             }
             playerControl.endTick(current);
         }

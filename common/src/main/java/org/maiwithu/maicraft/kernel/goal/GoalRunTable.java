@@ -98,6 +98,16 @@ public final class GoalRunTable {
         deathRecovery.applied(choice, deathActions.requestRespawn(), true);
     }
 
+    /**
+     * 控制循环说主任务被临时任务带离原地、停在了半路：把这个目标挂成暂停，事件流发一条"暂停"，
+     * LLM 才知道要看现场、决定接着做还是换办法（原先目标一直显示在跑，身体却停着，没人知道）。
+     */
+    public void mainParked() {
+        if (mainRunId == -1) return;
+        GoalRunner runner = runners.get(mainRunId);
+        if (runner != null && runner.run().state() == GoalRunState.RUNNING) runner.pauseGoal();
+    }
+
     /** 死亡过程结束（重生或以别的方式回到活体）：本轮死亡决策了结，下次死亡再挂新的。 */
     public void characterAliveAgain() {
         deathRecovery.backAlive();
@@ -275,6 +285,8 @@ public final class GoalRunTable {
             throw new WrongGoalRunState("目标 " + id + " 现在是 " + runner.run().state() + "，不在暂停");
         }
         runner.resumeGoal();
+        // 主任务被临时任务带离原地后停在半路：恢复就是让它从新地点接着做。
+        if (mainRunId == id) loop.unparkMain();
         if (mainRunId != id) {
             makeMain(runner);
         } else {

@@ -228,6 +228,35 @@ class ControlLoopTest {
     }
 
     @Test
+    void displacedTempTaskParksWorkButNotTravel() {
+        // 打完架人已经不在打点：挖矿这种守着原地的主任务停在半路等 LLM，LLM 让接着做就撤掉停住。
+        FakeTask mine = new FakeTask("挖矿", Interruptibility.WORKING);
+        ControlLoop loop = new ControlLoop(List.of(FakeNeed.of("自卫",
+                () -> new MovedTask("自卫临时"), Urgency.NOW, null)));
+        loop.setMainTask(mine);
+        assertAdvancedIsTempTask(loop.tick(TICK), "自卫");
+        assertTrue(loop.tick(TICK) instanceof ControlLoop.Decision.Parked, "回不到原地：主任务停住");
+        assertEquals("离打点 20 格", loop.parkedWhere());
+        loop.unparkMain();
+        assertNull(loop.parkedWhere());
+        assertSame(mine, assertAdvanced(loop.tick(TICK)).task());
+
+        // 去某地本来就在挪地方：被撤离到哪都从新地点接着走，不停下来干等。
+        FakeTask travel = new FakeTask("去某地", Interruptibility.WORKING) {
+            @Override public boolean resumesAnywhere() {
+                return true;
+            }
+        };
+        ControlLoop moving = new ControlLoop(List.of(FakeNeed.of("自卫",
+                () -> new MovedTask("自卫临时"), Urgency.NOW, null)));
+        moving.setMainTask(travel);
+        assertAdvancedIsTempTask(moving.tick(TICK), "自卫");
+        assertFalse(moving.tick(TICK) instanceof ControlLoop.Decision.Parked, "出行不因被撤离而停住");
+        assertNull(moving.parkedWhere());
+        assertSame(travel, assertAdvanced(moving.tick(TICK)).task());
+    }
+
+    @Test
     void needDoesNotRelaunchWhileItsTempTaskIsStillLive() {
         FakeNeed breath = FakeNeed.always("换气", Urgency.NOW);
         ControlLoop loop = new ControlLoop(List.of(breath));
@@ -618,6 +647,22 @@ class ControlLoopTest {
 
         @Override public String describe() {
             return name;
+        }
+    }
+
+    /** 被撤离的临时任务替身：第二刻做完，收尾时人已经回不到原来的岗位。 */
+    static final class MovedTask extends FakeTask implements DisplacedTask {
+        MovedTask(String name) {
+            super(name, Interruptibility.WORKING);
+            finishingAfter(2);
+        }
+
+        @Override public boolean cannotResumeInPlace() {
+            return true;
+        }
+
+        @Override public String stoppedWhere() {
+            return "离打点 20 格";
         }
     }
 

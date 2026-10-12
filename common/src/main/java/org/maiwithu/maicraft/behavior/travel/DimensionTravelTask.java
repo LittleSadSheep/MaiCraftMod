@@ -414,4 +414,10 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
             case WALK_ON -> "接着走到坐标";
         };
     }
+
+    /** 本来就在挪地方：被临时任务带离原地后从新地点接着走。 */
+    @Override
+    public boolean resumesAnywhere() {
+        return true;
+    }
 }

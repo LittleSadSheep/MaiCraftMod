@@ -381,6 +381,11 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, KeepsTempTaskFa
         return child == null || child.finished() || child.stoppedSafely();
     }
 
+    // 目标能不能在新地点接着做，看手上正在做的那一步。
+    @Override public boolean resumesAnywhere() {
+        return child != null && !child.finished() && child.resumesAnywhere();
+    }
+
     @Override public TaskResult close(CloseReason reason) {
         if (result != null) {
             return result;

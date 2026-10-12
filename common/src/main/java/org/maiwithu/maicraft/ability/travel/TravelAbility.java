@@ -222,13 +222,13 @@ public final class TravelAbility implements AbilityModule {
         factories.register(TravelInput.class, input -> {
             // 每次运行新建出行任务；走到与垫方块记录通过闭包交给任务，不经全局单例。
             return new TravelTask(input.destination(), input.maxSeconds(), input.permit(),
-                    walks, placedBlocks, progressListener);
+                    walks, placedBlocks, progressListener, world);
         });
         factories.register(JourneyInput.class, input -> {
             // 换交通的行程：走路的几段每段新建一个出行任务，挖垫、泅渡、落地救援照只走路的那一套。
             JourneyTask.Journey journey = input.journey();
             return new JourneyTask(journey, world, modes, destination -> new TravelTask(destination,
-                    journey.maxSeconds(), input.permit(), walks, placedBlocks, progressListener));
+                    journey.maxSeconds(), input.permit(), walks, placedBlocks, progressListener, world));
         });
         factories.register(DimensionTravelInput.class, input -> {
             // 跨维度行程：找门、进门、建门与末地门房间都从这个任务里按阶段走。

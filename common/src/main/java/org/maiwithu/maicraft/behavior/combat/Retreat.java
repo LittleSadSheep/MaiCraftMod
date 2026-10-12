@@ -62,8 +62,16 @@ public final class Retreat {
         for (Battlefield.Foe foe : field.chasers()) {
             if (pursuers.contains(foe.id()) || foe.attacker()) return false;
         }
+        // 还看得见、会还手的就在 10 格内：这一刻它只是没在"追"（目标一闪一闪），不算甩开。原先撤一步就算甩开，
+        // 自卫刚收场下一刻又插进来，一秒里"已撤离，离打点 0 格"好几回，赶路的主任务跟着走走停停。
+        for (Battlefield.Foe foe : field.foes()) {
+            if (foe.fightsBack() && foe.threat().visible() && foe.distance() < CLEAR_GAP) return false;
+        }
         return true;
     }
+
+    /** 甩开要拉开的距离（格）：看得见的会还手的怪都在这之外。 */
+    static final double CLEAR_GAP = 10;
 
     /**
      * 一条撤离路线走不通：换下一个方向再试；身体比上次失败处真走出两格就清账重数。
