@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.acquire;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.Map;
 
 /**
@@ -52,13 +53,18 @@ public final class VanillaBlockDrops {
      * 谁都知道埋在脚下的石头：地表往下挖几格就有，不用先看见。
      * 只有它是例外，矿石（煤、铁、钻石）照旧要看得见才去挖。
      */
-    private static final String BURIED_STONE = "minecraft:stone";
+    /**
+     * 地下常见、往下挖楼梯多半挖得到的石头：石头本身，成团长在石头里的安山岩、闪长岩、花岗岩，再往下的深板岩、凝灰岩。
+     * 要安山岩做安山合金时像玩家一样往下挖去找，不只说"看得见的地方没有"（实机主城平台上要 40 块安山岩就卡住）。
+     */
+    private static final Set<String> BURIED_STONES = Set.of("minecraft:stone", "minecraft:andesite", "minecraft:diorite",
+            "minecraft:granite", "minecraft:tuff", "minecraft:deepslate");
 
     private VanillaBlockDrops() {}
 
     /** 这件东西是不是埋在脚下的石头掉的（圆石）：看不见石头时也能往下挖楼梯去找。 */
     public static boolean buriedUnderfoot(String itemId) {
-        return blocksDropping(itemId).contains(BURIED_STONE);
+        return blocksDropping(itemId).stream().anyMatch(BURIED_STONES::contains);
     }
 
     /** 挖掉会掉出这件东西的方块类型；对照里没有、也不掉自己的物品给空。 */

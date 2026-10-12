@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.acquire;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** 原版方块掉落对照：矿石对上矿、石头掉圆石、泥土对上自己，玻璃什么也不掉。 */
@@ -25,6 +26,16 @@ class VanillaBlockDropsTest {
                 .contains("minecraft:stone"));
         assertTrue(VanillaBlockDrops.blocksDropping("minecraft:cobbled_deepslate")
                 .contains("minecraft:deepslate"));
+    }
+
+    @Test
+    void commonUndergroundStonesAreWorthDiggingDownFor() {
+        // 要圆石、安山岩这类：看不见就往下挖楼梯去找；原木、铁锭不是挖楼梯挖得到的。
+        assertTrue(VanillaBlockDrops.buriedUnderfoot("minecraft:cobblestone"));
+        assertTrue(VanillaBlockDrops.buriedUnderfoot("minecraft:andesite"));
+        assertTrue(VanillaBlockDrops.buriedUnderfoot("minecraft:cobbled_deepslate"));
+        assertFalse(VanillaBlockDrops.buriedUnderfoot("minecraft:oak_log"));
+        assertFalse(VanillaBlockDrops.buriedUnderfoot("minecraft:iron_ingot"));
     }
 
     @Test
