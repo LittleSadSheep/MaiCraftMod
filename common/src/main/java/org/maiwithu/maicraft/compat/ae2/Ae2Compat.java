@@ -63,6 +63,8 @@ public final class Ae2Compat extends CompatModule {
             return new Ae2TerminalSource(this, services, new MenuTerminalTakes(this, services, seen, Instant::now),
                     seen, Instant::now);
         });
+        // 腾地方、整理背包时：身上的无线终端连着网络就把东西存进网络，不往地上扔。
+        registry.networkStorage(this, services -> new MenuNetworkStores(this, services));
         // 机器这一半：每种 ME 设备、ME 网络读取器（汇总经服务端只读操作问），线缆格还管接线缆与装部件。
         for (Ae2MachineCatalog.Kind kind : Ae2MachineCatalog.kinds()) {
             registry.machineType(this, services -> new Ae2MachineType(kind, this, services, blocksOf(kind.blocks())));

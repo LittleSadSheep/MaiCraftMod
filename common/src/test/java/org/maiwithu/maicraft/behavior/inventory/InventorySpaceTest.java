@@ -13,6 +13,7 @@ import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.inventory.spi.CarriedBackpack;
+import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -120,6 +121,31 @@ class InventorySpaceTest {
         }
     }
 
+    // 测试替身：身上的无线终端连着网络，存一堆就从背包表里拿掉；坏了就说没连上。
+    private static final class FakeNetwork implements NetworkStorage {
+        final List<String> stored = new ArrayList<>();
+        boolean broken;
+        private final FakeBackpack backpack;
+
+        FakeNetwork(FakeBackpack backpack) {
+            this.backpack = backpack;
+        }
+
+        @Override public boolean available() {
+            return true;
+        }
+
+        @Override public Optional<Action> store(BackpackStack stack, String purpose, TaskRecords records) {
+            return Optional.of(oneTick(() -> {
+                if (broken) return ActionStatus.failed(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "终端没连上 ME 网络"));
+                stored.add(stack.itemId());
+                backpack.removeOne(stack.itemId());
+                records.change(new Change(Change.Kind.ITEM_STORED, stack.itemId(), stack.count(), purpose + "：存进了网络"));
+                return ActionStatus.done();
+            }));
+        }
+    }
+
     private interface Step {
         ActionStatus run();
     }
@@ -204,6 +230,34 @@ class InventorySpaceTest {
         assertEquals(List.of("minecraft:cobblestone"), carried.stored);
         assertEquals(Change.Kind.ITEM_STORED, records.changes.getFirst().kind());
         assertEquals(64, records.changes.getFirst().count());
+    }
+
+    @Test
+    void 身上的终端连着网络就存进网络_有用的也不丢() {
+        // 链条是做出来的有用东西：有网络就存进去，不丢也不问。
+        FakeBackpack backpack = new FakeBackpack(1, new BackpackStack("minecraft:chain", 32, 64, false, false, false, false));
+        FakeNetwork network = new FakeNetwork(backpack);
+        InventorySpace space = new InventorySpace(backpack, Optional.empty(), Optional.empty(),
+                Optional.empty(), Optional.empty(), Optional.empty(), () -> Optional.of(network));
+        CollectedRecords records = new CollectedRecords();
+
+        assertInstanceOf(ActionStatus.Done.class, run(makeRoom(space, 1, Set.of(), records)));
+        assertEquals(List.of("minecraft:chain"), network.stored);
+        assertTrue(records.changes.getFirst().note().contains("存进了网络"), records.changes::toString);
+    }
+
+    @Test
+    void 网络存不进就改走别的路() {
+        // 终端没连上：不再试网络，零碎照常丢不了时如实说腾不出（这里没接丢东西的部件）。
+        FakeBackpack backpack = new FakeBackpack(1, junk("minecraft:dirt", 64));
+        FakeNetwork network = new FakeNetwork(backpack);
+        network.broken = true;
+        FakeCarried carried = new FakeCarried(backpack);
+        InventorySpace space = new InventorySpace(backpack, Optional.empty(), Optional.of(carried),
+                Optional.empty(), Optional.empty(), Optional.empty(), () -> Optional.of(network));
+
+        assertInstanceOf(ActionStatus.Done.class, run(makeRoom(space, 1, Set.of(), new CollectedRecords())));
+        assertEquals(List.of("minecraft:dirt"), carried.stored, "网络存不进，改放随身背包");
     }
 
     @Test

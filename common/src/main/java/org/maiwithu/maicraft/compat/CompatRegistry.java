@@ -30,6 +30,7 @@ import org.maiwithu.maicraft.ability.vehicle.spi.VehicleAssembler;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleDriver;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleReader;
 import org.maiwithu.maicraft.behavior.inventory.spi.CarriedBackpack;
+import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
 import org.maiwithu.maicraft.behavior.menu.spi.MenuLayoutProof;
 import org.maiwithu.maicraft.behavior.recipe.RecipeViewer;
@@ -64,6 +65,7 @@ public final class CompatRegistry {
     private final List<ToBuild<DismantleTool>> dismantleTools = new ArrayList<>();
     private final List<ToBuild<ItemSettings>> itemSettings = new ArrayList<>();
     private final List<ToBuild<TravelMode>> travelModes = new ArrayList<>();
+    private final List<ToBuild<NetworkStorage>> networkStorages = new ArrayList<>();
     private final List<MenuLayoutProof> menuLayouts = new ArrayList<>();
     private final List<CarriedBackpack> carriedBackpacks = new ArrayList<>();
     private final List<KnowledgeSource> knowledgeSources = new ArrayList<>();
@@ -85,7 +87,7 @@ public final class CompatRegistry {
     private final List<List<?>> slots = List.of(itemSources, machineTypes, networkReaders, questBooks,
             breakAccelerators, dismantleTools, menuLayouts, carriedBackpacks, knowledgeSources, recipeViewers,
             serverReads, placementRules, rangedWeapons, itemSettings, travelModes, obstacleSources, fallBrakes, stowsBeforeWalking, flyUpGears, modSights, vehicleAssemblers,
-            vehicleDrivers, vehicleReaders, trainSchedulers, rideAlongs);
+            vehicleDrivers, vehicleReaders, trainSchedulers, rideAlongs, networkStorages);
     private final List<String> decisions = new ArrayList<>();
 
     private CompatRegistry() {}
@@ -154,6 +156,11 @@ public final class CompatRegistry {
      */
     public void itemSource(CompatModule module, Function<PlayerServices, ItemSource> build) {
         itemSources.add(new ToBuild<>(module, build));
+    }
+
+    /** 联动入口交网络存储的建法：腾地方时把东西存进网络（AE2 的无线终端），包一层后交给背包空间。 */
+    public void networkStorage(CompatModule module, Function<PlayerServices, NetworkStorage> build) {
+        networkStorages.add(new ToBuild<>(module, build));
     }
 
     /** 联动入口交一种机器的建法：进世界时建，包一层后交给机器能力；模组停用后不再认领方块。 */
@@ -327,6 +334,11 @@ public final class CompatRegistry {
     /** 进世界时建联动模组的物品设置；规矩同物品来源。 */
     public List<ItemSettings> itemSettings(PlayerServices services) {
         return build(itemSettings, services, "物品设置", CompatItemSettings::new);
+    }
+
+    /** 进世界时建联动模组的网络存储（身上的无线终端存东西）；规矩同物品来源。 */
+    public List<NetworkStorage> networkStorages(PlayerServices services) {
+        return build(networkStorages, services, "网络存储", CompatNetworkStorage::new);
     }
 
     /** 进世界时建联动模组的出行方式；规矩同物品来源。 */

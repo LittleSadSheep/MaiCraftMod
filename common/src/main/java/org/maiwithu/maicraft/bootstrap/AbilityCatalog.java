@@ -128,6 +128,7 @@ import org.maiwithu.maicraft.behavior.inventory.ClientStackMerger;
 import org.maiwithu.maicraft.behavior.inventory.DropAvoidance;
 import org.maiwithu.maicraft.behavior.inventory.DropsItems;
 import org.maiwithu.maicraft.behavior.inventory.InventorySpace;
+import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 import org.maiwithu.maicraft.behavior.inventory.RememberedContainers;
 import org.maiwithu.maicraft.behavior.inventory.StoresInContainer;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
@@ -414,12 +415,15 @@ public final class AbilityCatalog {
                 deps.memory());
         // 腾地方：合并散堆、记得的容器、存进容器、丢出去四条路都接上了，存进容器与丢出去用的是
         // 存东西、丢弃能力同一份现场部件；装备与拿东西在背包要满时先按它腾。随身背包的接缝留给随身背包的联动模组。
+        // 身上带着连着网络的无线终端（AE2）时先存进网络：联动模组登记的第一个网络存储。
+        List<NetworkStorage> networks = deps.compat().networkStorages(playerServices);
         InventorySpace space = new InventorySpace(deps.backpack(),
                 Optional.of(new ClientStackMerger(deps.context())),
                 Optional.empty(),
                 Optional.of(new RememberedContainers(deps.memory(), deps.characterPosition(), deps.protection())),
                 Optional.of(storing),
-                Optional.of(dropping));
+                Optional.of(dropping),
+                () -> networks.stream().findFirst());
         return new Shared(bringsClose, toMainhand, digging, drops, collects, innerNeeds, refusals,
                 permission, playerServices, dropping, storing, space);
     }
