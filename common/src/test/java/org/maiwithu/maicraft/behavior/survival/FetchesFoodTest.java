@@ -23,7 +23,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 class FetchesFoodTest {
 
     /** 拿东西引擎的替身：每类口粮多远按表回答，动手就记下要的是哪类，下一刻做完。 */
-    private static final class FakeNeeds implements ItemNeeds {
+    private static class FakeNeeds implements ItemNeeds {
         final Map<String, Double> distances;
         final List<String> asked = new ArrayList<>();
         boolean neverDone;
@@ -69,6 +69,31 @@ class FetchesFoodTest {
         FetchesFood fetch = new FetchesFood(needs, 1200);
         assertInstanceOf(ActionStatus.Done.class, fetch.tick(at(0)));
         assertEquals(List.of("#c:foods/cooked_meat"), needs.asked);
+    }
+
+    @Test
+    void 这一类弄不成就换下一类() {
+        // 问价说面包最近，去弄却没弄成：换熟肉，不就此饿着。
+        FakeNeeds needs = new FakeNeeds(Map.of("#c:foods/bread", 2d, "#c:foods/cooked_meat", 8d)) {
+            @Override public Action actionFor(ItemRequest request, Permissions permissions) {
+                asked.add(request.wanted().specifier());
+                boolean bread = request.wanted().specifier().equals("#c:foods/bread");
+                return new Action() {
+                    @Override public ActionStatus tick(TickContext context) {
+                        return bread ? ActionStatus.failed(Problem.of(Problem.Kind.NEED_ITEM, "面包弄不到")) : ActionStatus.done();
+                    }
+
+                    @Override public String describe() {
+                        return "替身去拿";
+                    }
+                };
+            }
+        };
+        FetchesFood fetch = new FetchesFood(needs, 1200);
+        ActionStatus status = ActionStatus.running();
+        for (int i = 0; i < 5 && !(status instanceof ActionStatus.Done); i++) status = fetch.tick(at(i));
+        assertInstanceOf(ActionStatus.Done.class, status);
+        assertEquals(List.of("#c:foods/bread", "#c:foods/cooked_meat"), needs.asked);
     }
 
     @Test

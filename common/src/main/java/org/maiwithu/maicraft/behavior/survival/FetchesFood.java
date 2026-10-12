@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.survival;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.WantedItem;
@@ -33,6 +35,9 @@ final class FetchesFood implements Action {
     private long deadline = -1;
     private Action current;
     private String chosen;
+    /** 已经去弄过、没弄成的几类：换下一类，不在同一类上反复。 */
+    private final Set<String> tried = new HashSet<>();
+    private Problem lastFailure;
 
     FetchesFood(ItemNeeds needs, long budgetTicks) {
         this.needs = Objects.requireNonNull(needs, "needs");
@@ -50,14 +55,24 @@ final class FetchesFood implements Action {
         if (current == null) {
             Optional<ItemRequest> nearest = nearestKind();
             if (nearest.isEmpty()) {
+                if (lastFailure != null) return ActionStatus.failed(lastFailure);
                 return ActionStatus.failed(Problem.of(Problem.Kind.NEED_ITEM,
                         "饿了，身上没有口粮，附近、箱子里、网络里也都没找到现成的面包、熟肉、熟鱼、蔬菜或水果",
                         "给角色一些普通食物，或种地、养殖"));
             }
+            tried.add(nearest.get().wanted().specifier());
             chosen = nearest.get().wanted().describe();
             current = needs.actionFor(nearest.get(), Permissions.DEFAULT);
         }
-        return current.tick(context);
+        ActionStatus status = current.tick(context);
+        // 这一类问价时说有、去弄却没弄成（报价太乐观）：换下一类，不就此饿着。
+        if (status instanceof ActionStatus.Failed failed) {
+            current.close();
+            current = null;
+            lastFailure = failed.problem();
+            return ActionStatus.progressed();
+        }
+        return status;
     }
 
     // 挨类问一句要走多远（只问价不拿）：问得出的里面挑最近的；都问不出给空。
@@ -65,6 +80,7 @@ final class FetchesFood implements Action {
         ItemRequest best = null;
         double bestDistance = Double.MAX_VALUE;
         for (String kind : KINDS) {
+            if (tried.contains(WantedItem.ofTag(kind).specifier())) continue;
             ItemRequest request = new ItemRequest(WantedItem.ofTag(kind), COUNT, "饿了，弄点吃的");
             Optional<Double> distance = needs.nearestDistanceBlocks(request, Permissions.DEFAULT);
             if (distance.isPresent() && distance.get() < bestDistance) {
