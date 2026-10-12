@@ -46,6 +46,22 @@ public final class LiveNightAndEdgeMoves {
             @Override public PicksUpDrops drops() {
                 return drops;
             }
+
+            @Override public double[] selfPosition(TickContext context) {
+                LocalPlayer self = context.player() == null ? null : context.player().localPlayer();
+                return self == null ? null : new double[] {self.getX(), self.getY(), self.getZ()};
+            }
+
+            @Override public int carriedStacks(TickContext context) {
+                LocalPlayer self = context.player() == null ? null : context.player().localPlayer();
+                if (self == null) return 0;
+                int stacks = 0;
+                Inventory inventory = self.getInventory();
+                for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+                    if (!inventory.getItem(slot).isEmpty()) stacks++;
+                }
+                return stacks;
+            }
         };
         return (death, expiresAtTick) -> new RecoverDropsTask(death, expiresAtTick, moves, events);
     }

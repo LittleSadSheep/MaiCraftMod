@@ -8,6 +8,7 @@ import org.maiwithu.maicraft.behavior.inventory.PicksUpDrops;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
+import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.ResultDetails;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -35,12 +36,25 @@ final class RecoverDropsTask extends PhasedTask<RecoverDropsTask.Phase> {
         Action runTo(double x, double y, double z);
 
         PicksUpDrops drops();
+
+        /** 此刻站在哪（x, y, z）；读不到为 null。 */
+        double[] selfPosition(TickContext context);
+
+        /** 身上有几格东西：捡没捡回来按它前后的差说。 */
+        int carriedStacks(TickContext context);
     }
+
+    /** 离死的地方这么近（格）才算跑到了，地上的东西在拾取扫描的范围里。 */
+    private static final double CLOSE_ENOUGH = 6;
+    /** 跑回去的路一次没走通，再起步几次：刚重生那一两刻世界还没就绪，走到常常一出手就收场。 */
+    private static final int RUN_TRIES = 3;
 
     private final LostItemsNeed.Death death;
     private final long expiresAtTick;
     private final Moves moves;
     private final TaskEventSink events;
+    private int runs;
+    private int carriedBefore = -1;
 
     RecoverDropsTask(LostItemsNeed.Death death, long expiresAtTick, Moves moves, TaskEventSink events) {
         super("回去捡东西", Phase.RUN_BACK, new ProgressTracker(STUCK_AFTER_TICKS, Long.MAX_VALUE));
@@ -65,24 +79,45 @@ final class RecoverDropsTask extends PhasedTask<RecoverDropsTask.Phase> {
             return finish("东西快消失了，不再耗着", TaskResult.Status.PARTIAL);
         }
         return switch (phase) {
-            case RUN_BACK -> switch (runAction(context)) {
-                case ActionStatus.Running running -> Next.stay();
-                case ActionStatus.Done done -> Next.go(Phase.PICK_UP, "到了死的地方，捡地上的东西");
-                case ActionStatus.Failed failed -> {
-                    // 跑不到正中也照样捡：站在够得着的地方先收一批。
-                    recordAttempt("跑回死的地方", failed.problem().message());
-                    yield Next.go(Phase.PICK_UP, "跑不到正中，就近捡");
-                }
-            };
-            case PICK_UP -> switch (runAction(context)) {
-                case ActionStatus.Running running -> Next.stay();
-                case ActionStatus.Done done -> finish("捡回了死时撒在地上的东西", TaskResult.Status.DONE);
-                case ActionStatus.Failed failed -> {
-                    recordAttempt("捡地上的东西", failed.problem().message());
-                    yield finish("捡回一部分：" + failed.problem().message(), TaskResult.Status.PARTIAL);
-                }
-            };
+            case RUN_BACK -> runBack(context);
+            case PICK_UP -> {
+                if (carriedBefore < 0) carriedBefore = moves.carriedStacks(context);
+                yield switch (runAction(context)) {
+                    case ActionStatus.Running running -> Next.stay();
+                    case ActionStatus.Done done -> finish(pickedText(context), TaskResult.Status.DONE);
+                    case ActionStatus.Failed failed -> {
+                        recordAttempt("捡地上的东西", failed.problem().message());
+                        yield finish(pickedText(context) + "；" + failed.problem().message(), TaskResult.Status.PARTIAL);
+                    }
+                };
+            }
         };
+    }
+
+    // 跑回去：走到说做完了也要核对人真到了跟前；没到就再起步，几次都不行如实收场，不站在远处空捡。
+    private Next<Phase> runBack(TickContext context) {
+        ActionStatus status = runAction(context);
+        if (status instanceof ActionStatus.Running) return Next.stay();
+        if (close(context)) return Next.go(Phase.PICK_UP, "到了死的地方，捡地上的东西");
+        if (status instanceof ActionStatus.Failed failed) recordAttempt("跑回死的地方", failed.problem().message());
+        if (++runs < RUN_TRIES) return Next.go(Phase.RUN_BACK, "还没到死的地方，再起步");
+        if (events != null) {
+            events.publish(TaskEvent.Kind.TEMPORARY_TASK_FINISHED, "跑不回死的地方，东西没捡成，接着干活");
+        }
+        return Next.fail(Problem.of(Problem.Kind.UNREACHABLE, "跑不回死的地方，东西没捡成"));
+    }
+
+    private boolean close(TickContext context) {
+        double[] here = moves.selfPosition(context);
+        return here != null && Math.hypot(here[0] - death.x(), here[2] - death.z()) <= CLOSE_ENOUGH
+                && Math.abs(here[1] - death.y()) <= CLOSE_ENOUGH;
+    }
+
+    // 捡回多少按身上前后几格东西的差说：地上已经没东西了也照实说，不冒充捡回来了。
+    private String pickedText(TickContext context) {
+        int gained = moves.carriedStacks(context) - Math.max(0, carriedBefore);
+        return gained > 0 ? "捡回了死时撒在地上的东西（身上多了 " + gained + " 格）"
+                : "到了死的地方，地上没捡到东西（可能已经消失或被别人捡走）";
     }
 
     private Next<Phase> finish(String summary, TaskResult.Status status) {

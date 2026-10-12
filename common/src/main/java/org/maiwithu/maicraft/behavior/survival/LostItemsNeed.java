@@ -55,6 +55,10 @@ public final class LostItemsNeed implements SurvivalNeed {
     private PlayerNow last;
     /** 还没回去捡的那次死亡。 */
     private Death pending;
+    /** 看到重生的那一刻（游戏刻）。 */
+    private long respawnedAt;
+    /** 重生后先等这么久（刻）再动身。 */
+    static final long SETTLE_TICKS = 40;
 
     public LostItemsNeed(ReadsPlayer players, RecoversDrops recovery, TaskEventSink events) {
         this.players = Objects.requireNonNull(players, "players");
@@ -72,9 +76,12 @@ public final class LostItemsNeed implements SurvivalNeed {
                 && last.carriedStacks() > now.carriedStacks()) {
             // 换了个身体、旧的是死的、身上比死前少了：刚重生，东西撒在死的地方。
             pending = new Death(last.x(), last.y(), last.z(), last.dimension(), last.gameTick(), last.carriedStacks());
+            respawnedAt = now.gameTick();
         }
         last = now;
         if (pending == null) return null;
+        // 刚重生那一两秒世界还没就绪（区块、身体、走到都在换新），稍等再动身。
+        if (now.gameTick() < respawnedAt + SETTLE_TICKS) return null;
         if (now.gameTick() - pending.gameTick() >= DESPAWN_TICKS
                 || !Objects.equals(now.dimension(), pending.dimension())
                 || Math.hypot(now.x() - pending.x(), now.z() - pending.z()) > REACH_BLOCKS) {

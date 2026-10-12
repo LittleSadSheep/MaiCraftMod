@@ -63,12 +63,13 @@ class LostItemsNeedTest {
         assertNull(at(player(first, 10, "minecraft:overworld", 100, 12)));
         // 死了：循环停摆，旧身体是死的；40 刻后在出生点重生，身上空了。
         players.dead.add(first);
-        assertEquals(Urgency.SOON, at(player(second, 40, "minecraft:overworld", 140, 0)));
-        Task task = need.createTask(new Tick(141));
+        assertNull(at(player(second, 40, "minecraft:overworld", 140, 0)), "刚重生先等世界就绪");
+        assertEquals(Urgency.SOON, at(player(second, 40, "minecraft:overworld", 140 + LostItemsNeed.SETTLE_TICKS, 0)));
+        Task task = need.createTask(new Tick(141 + LostItemsNeed.SETTLE_TICKS));
         assertNull(task);
         assertNotNull(recovered);
         assertEquals(10, recovered.x(), "回到死前最后一刻在的地方");
-        assertNull(at(player(second, 40, "minecraft:overworld", 142, 0)), "一次死亡只回去一次");
+        assertNull(at(player(second, 40, "minecraft:overworld", 142 + LostItemsNeed.SETTLE_TICKS, 0)), "一次死亡只回去一次");
     }
 
     @Test
@@ -98,7 +99,8 @@ class LostItemsNeedTest {
         Object second = new Object();
         at(player(first, 10, "minecraft:overworld", 100, 12));
         players.dead.add(first);
-        assertEquals(Urgency.SOON, at(player(second, 40, "minecraft:overworld", 140, 0)));
+        assertNull(at(player(second, 40, "minecraft:overworld", 140, 0)));
+        assertEquals(Urgency.SOON, at(player(second, 40, "minecraft:overworld", 140 + LostItemsNeed.SETTLE_TICKS, 0)));
         assertNull(at(player(second, 40, "minecraft:overworld", 100 + LostItemsNeed.DESPAWN_TICKS, 0)),
                 "快消失了还没插进去：不白跑");
     }
