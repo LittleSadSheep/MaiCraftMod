@@ -233,8 +233,10 @@ final class JetpackFlight implements TravelLeg {
         }
         if (horizontal > 0.3) input.lookAt(player, new Vec3(aim.x, player.getEyeY(), aim.z));
         boolean forward = horizontal > 0.3;
+        // 按键交给角色输入要用本刻的客户端刻号（不是世界时间）：原先传世界时间，飞第一段就内部错误
+        // "input request is not for the active tick"。
         input.applyMovement(new PlayerInput.Movement(forward ? 1.0f : 0.0f, 0.0f, rise > 0.3, rise < -0.3,
-                forward && horizontal > 3), now);
+                forward && horizontal > 3), context.clientTick());
         return ActionStatus.running();
     }
 
@@ -269,7 +271,8 @@ final class JetpackFlight implements TravelLeg {
         Vec3 aim = Vec3.atBottomCenterOf(landing);
         double horizontal = horizontal(player.position(), aim);
         if (horizontal > 0.4) context.input().lookAt(player, new Vec3(aim.x, player.getEyeY(), aim.z));
-        context.input().applyMovement(new PlayerInput.Movement(horizontal > 0.4 ? 0.6f : 0.0f, 0.0f, false, false, false), now);
+        context.input().applyMovement(new PlayerInput.Movement(horizontal > 0.4 ? 0.6f : 0.0f, 0.0f, false, false, false),
+                context.clientTick());
         return ActionStatus.running();
     }
 
