@@ -173,12 +173,14 @@ public final class Ae2TerminalSource implements ItemSource {
     static SourceQuote wirelessQuote(String itemId, ItemRequest request, Optional<SeenNetworkStock.Sighting> lastTime,
             Predicate<String> wanted) {
         AcquisitionCost cost = new AcquisitionCost(0, ACTIONS_WITH_WIRELESS);
-        String source = "身上的无线终端";
+        // 来源名与装着的终端用同一个：引擎按来源名划掉做砸了的来源。原先写成"身上的无线终端"，
+        // 网络里没有这样东西时开了一趟一件没拿到，引擎划掉的名字对不上，又来问价又去开，实机转了五分多钟。
+        String source = "ME 终端";
         if (lastTime.isPresent() && lastTime.get().linked() && lastTime.get().count(wanted) > 0) {
             return new SourceQuote.Offer(source, (int) Math.min(lastTime.get().count(wanted), request.count()), cost,
-                    "记的是上次打开无线终端时看到的数，打开后以界面里为准", WIRELESS_HINT + itemId);
+                    "用身上的无线终端取，记的是上次打开时看到的数，打开后以界面里为准", WIRELESS_HINT + itemId);
         }
-        String note = lastTime.isEmpty() ? "身上的无线终端这次还没打开过，不知道网络里有什么"
+        String note = lastTime.isEmpty() ? "用身上的无线终端取，这次还没打开过，不知道网络里有什么"
                 : !lastTime.get().linked() ? "上次打开时没连上网络（超出范围或没电），不知道现在好了没有，打开看一眼"
                 : "上次打开时网络里没有这样东西，不知道现在有没有，打开看一眼";
         return new SourceQuote.Offer(source, SourceQuote.Offer.UNKNOWN_COUNT, cost, note, WIRELESS_HINT + itemId);

@@ -77,6 +77,8 @@ class ConstructionTaskTest {
         /** 每次放的放法与放到的格，按出手顺序。 */
         final List<PlacementPrediction.Placement> clicks = new ArrayList<>();
         final List<BlockPos> placedOrder = new ArrayList<>();
+        /** 倒过的桶（物品名），按倒的先后。 */
+        final List<String> pouredItems = new ArrayList<>();
         int digCalls;
         BlockPos feet = new BlockPos(5, 64, 5);
 
@@ -115,6 +117,7 @@ class ConstructionTaskTest {
         }
         @Override public Click pour(PlannedCell cell, InteractionConfirmation confirmation) {
             return click(() -> {
+                pouredItems.add(BuiltInRegistries.ITEM.getKey(cell.item()).getPath());
                 world.put(cell.pos(), cell.state());
                 carried.merge(BuiltInRegistries.ITEM.getKey(cell.item()).toString(), -1, Integer::sum);
                 carried.merge("minecraft:bucket", 1, Integer::sum);
@@ -278,6 +281,20 @@ class ConstructionTaskTest {
         assertTrue(fake.temporaries.isEmpty());
         assertEquals(AIR, fake.state(new BlockPos(0, 68, 0)));
         assertTrue(details(result).temporaryBlocksLeft().isEmpty());
+    }
+
+    @Test
+    void 同一层按蓝图里写的先后倒桶() {
+        // 刷石机写了先岩浆后水：照写的先后倒，不按坐标排（按坐标是先倒 x=0 的水）。
+        Fake fake = new Fake().ground(63);
+        fake.carried.put("minecraft:water_bucket", 1);
+        fake.carried.put("minecraft:lava_bucket", 1);
+        Blueprint blueprint = new Blueprint(DIM, new BlockPos(0, 64, 0), List.of(
+                PlannedCell.block(new BlockPos(2, 64, 0), Blocks.LAVA.defaultBlockState(), Set.of()),
+                PlannedCell.block(new BlockPos(0, 64, 0), Blocks.WATER.defaultBlockState(), Set.of())));
+        TaskResult result = run(fake, blueprint);
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(List.of("lava_bucket", "water_bucket"), fake.pouredItems);
     }
 
     @Test

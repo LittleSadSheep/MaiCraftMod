@@ -18,6 +18,8 @@ import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * 收回临时方块：先收站着够得着的，再沿自己的柱逐格下撤，每格拆前确认下一格落得稳；
@@ -29,6 +31,8 @@ final class CleanupWork extends ConstructionWork {
     static final long STALL_TICKS = 600;
 
     private enum Step { APPROACH, DIG }
+
+    private static final Logger LOG = LoggerFactory.getLogger(CleanupWork.class);
 
     private final Permissions permissions;
     private final Deque<BlockPos> queue = new ArrayDeque<>();
@@ -124,6 +128,8 @@ final class CleanupWork extends ConstructionWork {
     }
 
     @Override protected ActionStatus failed(TickContext context, ActionStatus.Failed failure) {
+        // 收临时方块卡住难查：每块没收成记一行，实机日志里看得出败在走过去还是挖。
+        LOG.info("[施工] 收回临时方块 {} 没成（{}）：{}", removing.toShortString(), step, failure.problem().message());
         records.attempt("收回临时方块 " + removing.toShortString(), failure.problem().message());
         left.add(removing);
         removing = null;

@@ -131,7 +131,9 @@ final class ConstructionSite {
         for (PlannedCell cell : blueprint.cells()) {
             if (cell.kind() == CellKind.FLUID_SOURCE && needsWork(cell.pos())) out.add(cell);
         }
-        out.sort(BuildOrder.LOW_TO_HIGH);
+        // 低层先倒；同一层按蓝图里写的先后倒（排序是稳定的）。先倒哪桶决定水和岩浆在哪碰上，是设计的一部分，
+        // 照 LLM 写的来：原先按坐标排，刷石机写了先岩浆后水也是先倒水，水流过去把岩浆源冲成了黑曜石。
+        out.sort(Comparator.comparingInt((PlannedCell cell) -> cell.pos().getY()));
         return out;
     }
 

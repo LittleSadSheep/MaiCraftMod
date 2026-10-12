@@ -2,7 +2,7 @@
 
 ## 怎么用
 
-- `design_id`、`cells`、`block`、`file` 四选一。`cells` 是逐格清单：`[{"offset":[x,y,z],"block":"minecraft:stone","properties":{"facing":"north"}}]`，offset 相对锚点；水源、岩浆源表示倒桶。`block` 配 `properties` 只放一格。
+- `design_id`、`cells`、`block`、`file` 四选一。`cells` 是逐格清单：`[{"offset":[x,y,z],"block":"minecraft:stone","properties":{"facing":"north"}}]`，offset 相对锚点；水源、岩浆源表示倒桶，实心格砌完后倒；同一层按清单里写的先后倒（先倒哪桶决定水和岩浆在哪碰上）。`block` 配 `properties` 只放一格。
 - `file` 是 `schematics/` 目录下的结构文件名（可不写扩展名）：原版 `.nbt` / `.snbt`、Litematica `.litematic`、Sponge `.schem`，以及 design 导出的 `.json`。文件原点落在锚点；原版文件里明写的空气格就是清空，另两种格式的空白不算。朝向、轴向、上下半、半砖类型、旋转、门轴、开关这些放置时定下的属性照文件验收，连接、形状、含水、点亮按原生落法接受。结构方块这类建不了的、流动的水整格跳过；展示框、盔甲架、画这些摆设实体一个都不装，结果里写有几个；箱子里的东西、告示牌的字这些方块实体数据不搬。
 - `target` 必填，是锚点：设计原点或 offset [0,0,0] 落在这里。`here` 是脚下；坐标省略 y 时取那一列的地表；记得的地点按名字；观察编号查它在哪。
 - `rotation` 绕锚点转 0 / 90 / 180 / 270 度，只配 `design_id` 或 `file`。

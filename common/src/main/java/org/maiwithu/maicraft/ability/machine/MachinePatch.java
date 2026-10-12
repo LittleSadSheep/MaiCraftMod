@@ -28,6 +28,9 @@ final class MachinePatch {
             cells.put(cell.pos(), cell);
         }
         for (PlannedCell cell : patch.cells()) {
+            // 补丁里写的格挪到末尾、按补丁里的先后排：同位旧格原地覆盖会沿用旧档案的先后，
+            // 补丁写了"先岩浆后水"也照旧档案先倒水。
+            cells.remove(cell.pos());
             cells.put(cell.pos(), cell);
         }
         Map<String, MachineBlueprint.Part> parts = new LinkedHashMap<>();

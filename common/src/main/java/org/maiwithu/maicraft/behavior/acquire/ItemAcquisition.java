@@ -329,6 +329,9 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                 }
                 switch (source.quote(request.just(stillNeeded), context)) {
                     case SourceQuote.Offer offer -> {
+                        // 报价写的来源名和来源自称的不一样时（同一来源分好几路报价），也按报价上的名字认划掉的：
+                        // 不然做砸了划掉的名字对不上，又来问价、又去跑同一趟，原地转圈。
+                        if (excluded.contains(offer.source())) continue;
                         if (scope.maxDistanceBlocks() != null
                                 && offer.cost().distanceBlocks() > scope.maxDistanceBlocks()) {
                             refusals.add(new SourceQuote.Unavailable(offer.source(),

@@ -186,6 +186,7 @@ class Ae2TerminalSourceTest {
         assertTrue(fresh.countUnknown());
         assertEquals(0, fresh.cost().distanceBlocks(), "带在身上，不用走路");
         assertEquals("wireless:ae2:wireless_crafting_terminal", fresh.hint());
+        assertEquals("ME 终端", fresh.source(), "与装着的终端同名：开了一趟没拿到，引擎能把它划掉");
 
         SourceQuote.Offer known = assertInstanceOf(SourceQuote.Offer.class, Ae2TerminalSource.wirelessQuote(
                 "ae2:wireless_crafting_terminal", torches(8),
