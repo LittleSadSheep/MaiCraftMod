@@ -96,6 +96,9 @@ final class MenuDropBatch implements Action {
             pending = menus.close(player, CLICK_TIMEOUT_TICKS);
             return ActionStatus.running();
         }
+        // 每一下之前界面都要真画出来过：上一下提交后要等新的一帧，窗口没在画（最小化、被挡）时等它画，
+        // 不然点下去游戏层直接报错，整个任务按内部错误收场（实机压板站投料两次都这样）。
+        if (!menus.ensureVisible(player)) return ActionStatus.running();
         Click click = clicks.get(index);
         pending = menus.click(player, click.slot(), click.button(), click.type(), confirmation(click), CLICK_TIMEOUT_TICKS);
         return ActionStatus.running();

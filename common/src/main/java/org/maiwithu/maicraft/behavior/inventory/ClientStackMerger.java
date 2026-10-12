@@ -130,6 +130,8 @@ public final class ClientStackMerger implements StackMerger {
             switch (pending.status()) {
                 case CONFIRMED_APPLIED -> {
                     if (picking) {
+                        // 第二下之前界面也要真画出来过：窗口没在画时等它画，下一刻再来这里点。
+                        if (!player.menuActions().ensureVisible(player)) return ActionStatus.running();
                         pending = player.menuActions().click(player, targetMenuSlot, 0, ClickType.PICKUP,
                                 placedConfirmation(), STEP_TIMEOUT_TICKS);
                         stage = Stage.PLACING;
