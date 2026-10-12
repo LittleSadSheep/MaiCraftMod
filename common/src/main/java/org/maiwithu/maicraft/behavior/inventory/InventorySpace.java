@@ -6,8 +6,10 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.behavior.inventory.spi.CarriedBackpack;
+import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -23,8 +25,8 @@ import org.maiwithu.maicraft.game.player.BackpackView;
 /**
  * 背包空间：捡东西、合成取出、交易、开箱取物、卸下装备之前，统一来这里腾格子，任务自己不再各自处理"背包满了"。
  *
- * <p>腾挪照真人玩家的做法一步步来：合并散堆 → 放进随身背包 → 存进附近记得的容器 → 丢最不值钱的；
- * 要动到贵重一级才停下来问。每一步都是一个真实的动作（并散堆、存箱子用的是存东西能力同一份存放动作，
+ * <p>腾挪照真人玩家的做法一步步来：合并散堆 → 身上的无线终端连着网络就存进网络 → 放进随身背包
+ * → 存进附近记得的容器 → 丢最不值钱的；有用的只存不丢，要动到它才停下来问。每一步都是一个真实的动作（并散堆、存箱子用的是存东西能力同一份存放动作，
  * 丢东西用的是丢弃能力同一份丢东西动作），确认的变化与没能确认的交互直接记进发起任务的结果。
  *
  * <p>腾一次就是一个动作（{@link #makeRoom}）：每做完一步重新看背包、重新排计划，腾够了算做完；
@@ -42,6 +44,8 @@ public final class InventorySpace {
     private final Optional<KnownContainers> knownContainers;
     private final Optional<StoresInContainer.Parts> storing;
     private final Optional<DropsItems.Parts> dropping;
+    /** 网络存储（身上的无线终端）；没接上为空。每次腾挪时现取，联动模组在进世界后才登记。 */
+    private final Supplier<Optional<NetworkStorage>> network;
 
     /**
      * @param backpack        背包视图：腾挪的每一步都以它读到的现场为准
@@ -58,6 +62,19 @@ public final class InventorySpace {
             Optional<KnownContainers> knownContainers,
             Optional<StoresInContainer.Parts> storing,
             Optional<DropsItems.Parts> dropping) {
+        this(backpack, stackMerger, carriedBackpack, knownContainers, storing, dropping, Optional::empty);
+    }
+
+    /** @param network 网络存储（身上的无线终端）；没有联动时给空 */
+    public InventorySpace(
+            BackpackView backpack,
+            Optional<StackMerger> stackMerger,
+            Optional<CarriedBackpack> carriedBackpack,
+            Optional<KnownContainers> knownContainers,
+            Optional<StoresInContainer.Parts> storing,
+            Optional<DropsItems.Parts> dropping,
+            Supplier<Optional<NetworkStorage>> network) {
+        this.network = Objects.requireNonNull(network, "network");
         this.backpack = Objects.requireNonNull(backpack, "backpack");
         this.stackMerger = Objects.requireNonNull(stackMerger, "stackMerger");
         this.carriedBackpack = Objects.requireNonNull(carriedBackpack, "carriedBackpack");
@@ -98,6 +115,8 @@ public final class InventorySpace {
         private final Set<WorldPosition> failedContainers = new HashSet<>();
         private boolean mergeBroken;
         private boolean carriedBroken;
+        /** 这次存不进网络了（终端打不开、没连上、网络满了）：不再试，改走箱子或丢。 */
+        private boolean networkBroken;
         private SpaceMove doing;
         private Action step;
         /** 正在做的存箱子那一步，和这一步确认存进了几件：做完没存进或放不下了，这只就不再试。 */
@@ -171,7 +190,8 @@ public final class InventorySpace {
                     Set.copyOf(unmovable),
                     stackMerger.isPresent() && !mergeBroken,
                     carriedBroken ? 0 : carriedBackpack.map(CarriedBackpack::freeSlots).orElse(0),
-                    storing.isPresent() ? containers : List.of());
+                    storing.isPresent() ? containers : List.of(),
+                    !networkBroken && network.get().map(NetworkStorage::available).orElse(false));
         }
 
         // 把计划里的一步变成动作；部件没接上就给空。
@@ -179,6 +199,8 @@ public final class InventorySpace {
             return switch (move) {
                 case SpaceMove.MergeStacks merge -> stackMerger.map(merger -> merger.mergeOne(records));
                 case SpaceMove.ToCarriedBackpack(var stack) -> carriedBackpack.flatMap(pack -> pack.store(stack, records));
+                case SpaceMove.ToNetwork(var stack) -> network.get()
+                        .flatMap(storage -> storage.store(stack, "腾地方（" + purpose + "）", records));
                 case SpaceMove.ToKnownContainer(var container, var stack) -> storing.map(parts -> {
                     storingStep = new StoresInContainer(container, List.of(stack.itemId()), storeLedger(stack),
                             permissions, parts);
@@ -219,6 +241,7 @@ public final class InventorySpace {
             switch (move) {
                 case SpaceMove.MergeStacks merge -> mergeBroken = true;
                 case SpaceMove.ToCarriedBackpack carried -> carriedBroken = true;
+                case SpaceMove.ToNetwork stored -> networkBroken = true;
                 case SpaceMove.ToKnownContainer(var container, var stack) -> failedContainers.add(container.at());
                 case SpaceMove.DropStack(var stack) -> unmovable.add(stack.itemId());
             }
@@ -278,6 +301,7 @@ public final class InventorySpace {
         return switch (move) {
             case SpaceMove.MergeStacks merge -> "合并散着的 " + merge.itemId();
             case SpaceMove.ToCarriedBackpack(var stack) -> "把 " + noteOf(stack) + " 放进随身背包";
+            case SpaceMove.ToNetwork(var stack) -> "把 " + noteOf(stack) + " 存进网络";
             case SpaceMove.ToKnownContainer(var container, var stack) -> "把 " + noteOf(stack) + " 存进 " + container.name();
             case SpaceMove.DropStack(var stack) -> "丢掉 " + noteOf(stack);
         };

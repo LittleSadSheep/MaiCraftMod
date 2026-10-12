@@ -141,6 +141,42 @@ class SpacePlannerTest {
     }
 
     @Test
+    void 零碎先丢_有用的不丢而是问() {
+        // 实机：背包里链条、蜘蛛眼、生羊肉、树苗——腾两格丢蜘蛛眼和生羊肉，链条留着。
+        List<BackpackStack> stacks = List.of(
+                stack("minecraft:chain", 32),
+                stack("minecraft:spider_eye", 1),
+                new BackpackStack("minecraft:mutton", 2, 64, false, true, false, false),
+                junk("minecraft:spruce_sapling", 3));
+        SpacePlanner.Plan plan = SpacePlanner.plan(scene(stacks, 0, 2, false, List.of()));
+        assertEquals(List.of(new SpaceMove.DropStack(stack("minecraft:spider_eye", 1)),
+                new SpaceMove.DropStack(new BackpackStack("minecraft:mutton", 2, 64, false, true, false, false))),
+                plan.moves());
+        // 只剩链条这种有用的：不自作主张丢，停下来问。
+        SpacePlanner.Plan onlyUseful = SpacePlanner.plan(scene(List.of(stack("minecraft:chain", 32)), 0, 1, false,
+                List.of()));
+        assertTrue(onlyUseful.moves().isEmpty());
+        assertEquals(Question.Reason.NEED_APPROVAL, onlyUseful.question().reason());
+        assertTrue(onlyUseful.question().text().contains("腾不出 1 格"));
+    }
+
+    @Test
+    void 有用的能存就存() {
+        SpacePlanner.Plan plan = SpacePlanner.plan(scene(List.of(stack("minecraft:chain", 32)), 0, 1, false,
+                List.of(家门口的箱子)));
+        assertEquals(new SpaceMove.ToKnownContainer(家门口的箱子, stack("minecraft:chain", 32)), plan.moves().getFirst());
+    }
+
+    @Test
+    void 身上的终端连着网络就先存进网络() {
+        // 整理背包往 AE 里放：附近有箱子也先存网络，有用的、零碎都存，不往地上扔。
+        List<BackpackStack> stacks = List.of(stack("minecraft:chain", 32), stack("minecraft:spider_eye", 1));
+        SpacePlanner.Scene scene = new SpacePlanner.Scene(stacks, 0, 2, Set.of(), true, 0, List.of(家门口的箱子), true);
+        assertEquals(List.of(new SpaceMove.ToNetwork(stack("minecraft:spider_eye", 1)),
+                new SpaceMove.ToNetwork(stack("minecraft:chain", 32))), SpacePlanner.plan(scene).moves());
+    }
+
+    @Test
     void 随身背包满了接着存箱子_再不行才丢() {
         // 随身背包只剩一格：第一堆放进去，第二堆存进记得的箱子，第三堆才丢。
         List<BackpackStack> stacks = List.of(junk("minecraft:dirt", 64), junk("minecraft:gravel", 64),

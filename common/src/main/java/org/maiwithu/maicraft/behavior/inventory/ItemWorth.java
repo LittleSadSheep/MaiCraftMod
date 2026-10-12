@@ -33,13 +33,18 @@ final class ItemWorth {
         if (isJunk(stack, totalsInBackpack)) {
             return Worth.JUNK;
         }
+        // 顺手捡的零碎压过食物：生肉、蜘蛛眼能吃，可没人把它当口粮留着占格子。
+        if (IncidentalLoot.is(stack.itemId())) {
+            return Worth.INCIDENTAL;
+        }
         if (stack.food()) {
             return Worth.FOOD;
         }
         if (stack.buildingMaterial()) {
             return Worth.BUILDING_MATERIAL;
         }
-        return Worth.ORDINARY_LOOT;
+        // 其余的（做出来的零件、锭、机器方块、说不准的材料）都当有用的：不自作主张丢。
+        return Worth.USEFUL;
     }
 
     // 垃圾的账要算背包里的总数：圆石攒了三组，第三组往外的才是垃圾；一组以内还能搭桥垫脚、做石器。

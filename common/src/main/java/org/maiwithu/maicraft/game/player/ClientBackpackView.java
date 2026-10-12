@@ -5,6 +5,7 @@ import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.ArmorItem;
 import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.level.block.EntityBlock;
 import net.minecraft.world.item.DiggerItem;
 import net.minecraft.world.item.ElytraItem;
 import net.minecraft.world.item.FishingRodItem;
@@ -101,8 +102,10 @@ public final class ClientBackpackView implements BackpackView {
         boolean food = stack.has(DataComponents.FOOD);
         // 贵重：游戏标了 uncommon 以上稀有度，或者带附魔——丢了心疼、难补的东西。
         boolean precious = stack.getRarity() != Rarity.COMMON || stack.isEnchanted();
+        // 带方块实体的（箱子、机器、漏斗、溜槽）不算建材：是做出来的设备，腾地方不先丢它。
         boolean building = item instanceof BlockItem blockItem
-                && blockItem.getBlock().defaultBlockState().blocksMotion();
+                && blockItem.getBlock().defaultBlockState().blocksMotion()
+                && !(blockItem.getBlock() instanceof EntityBlock);
         return new BackpackStack(
                 BuiltInRegistries.ITEM.getKey(item).toString(),
                 stack.getCount(),

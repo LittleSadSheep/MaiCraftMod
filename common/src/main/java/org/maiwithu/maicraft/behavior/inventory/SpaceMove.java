@@ -20,6 +20,10 @@ sealed interface SpaceMove {
     record ToKnownContainer(KnownContainer container, BackpackStack stack) implements SpaceMove {
     }
 
+    /** 把主背包里的一堆存进身上无线终端连着的网络。 */
+    record ToNetwork(BackpackStack stack) implements SpaceMove {
+    }
+
     /** 把主背包里的一堆丢到地上，从最不值钱的开始；数量是一整格。 */
     record DropStack(BackpackStack stack) implements SpaceMove {
     }

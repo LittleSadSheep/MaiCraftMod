@@ -16,8 +16,8 @@ import java.util.Set;
  * 腾挪计划：看着背包现在有什么、要腾几格，排出"先动哪一堆"的清单。
  *
  * <p>纯判断，不碰游戏。顺序照真人玩家的做法：能合的散堆先合起来；然后从最不值钱的开始
- * 往外挪——随身背包能塞就塞，附近有记得的容器就存进去，都没有才丢；一旦要动到贵重一级，
- * 就停下来问，不自作主张。任务贵重品与装备永远不在计划里。
+ * 往外挪——身上的无线终端连着网络就存进网络，随身背包能塞就塞，附近有记得的容器就存进去，
+ * 都没有才丢；"有用的"只存不丢，存不了又要动到它就停下来问，不自作主张。任务留用、贵重品与装备永远不在计划里。
  */
 final class SpacePlanner {
 
@@ -33,6 +33,7 @@ final class SpacePlanner {
      * @param stackMergerAvailable      合并散堆的接缝接上了没有
      * @param carriedBackpackFreeSlots  随身背包还空着几格；没有随身背包时为 0
      * @param nearbyContainers          记得的附近容器；接缝没接上时为空
+     * @param networkStorage            身上的无线终端连着网络、能把东西存进去
      */
     record Scene(
             List<BackpackStack> stacks,
@@ -41,7 +42,15 @@ final class SpacePlanner {
             Set<String> reservedItemIds,
             boolean stackMergerAvailable,
             int carriedBackpackFreeSlots,
-            List<KnownContainer> nearbyContainers) {
+            List<KnownContainer> nearbyContainers,
+            boolean networkStorage) {
+
+        /** 没有网络可存。 */
+        Scene(List<BackpackStack> stacks, int freeSlots, int slotsNeeded, Set<String> reservedItemIds,
+                boolean stackMergerAvailable, int carriedBackpackFreeSlots, List<KnownContainer> nearbyContainers) {
+            this(stacks, freeSlots, slotsNeeded, reservedItemIds, stackMergerAvailable, carriedBackpackFreeSlots,
+                    nearbyContainers, false);
+        }
     }
 
     /**
@@ -60,7 +69,8 @@ final class SpacePlanner {
         List<SpaceMove> moves = new ArrayList<>();
         slotsFreed += addMergeMoves(scene, moves);
 
-        // 挪东西从最不值钱的开始：垃圾、普通掉落、建材、食物依次往后，贵重及以上不进计划。
+        // 挪东西从最不值钱的开始：垃圾、零碎、建材、食物、有用的依次往后，贵重、装备、任务留用的不进计划。
+        Map<String, Integer> totals = totalsInBackpack(scene.stacks());
         List<BackpackStack> movable = movableStacksWorthLeastFirst(scene);
         int containerIndex = 0;
         int carriedRoom = scene.carriedBackpackFreeSlots();
@@ -68,15 +78,20 @@ final class SpacePlanner {
             if (slotsFreed >= scene.slotsNeeded) {
                 return new Plan(List.copyOf(moves), null, null);
             }
-            // 随身背包有空就先放进去，满了再存记得的容器，都不行才丢——附近有箱子就不往地上扔。
-            if (carriedRoom > 0) {
+            // 网络能存就先存进网络（玩家整理背包就是往 AE 里放）；再是随身背包、记得的容器，都不行才丢——
+            // 有地方存就不往地上扔。有用的只存不丢：存不了就跳过，留给后面问。
+            if (scene.networkStorage()) {
+                moves.add(new SpaceMove.ToNetwork(stack));
+            } else if (carriedRoom > 0) {
                 moves.add(new SpaceMove.ToCarriedBackpack(stack));
                 carriedRoom--;
             } else if (containerIndex < scene.nearbyContainers().size()) {
                 moves.add(new SpaceMove.ToKnownContainer(scene.nearbyContainers().get(containerIndex), stack));
                 containerIndex++;
-            } else {
+            } else if (!ItemWorth.of(stack, scene.reservedItemIds(), totals).tooValuableToDrop()) {
                 moves.add(new SpaceMove.DropStack(stack));
+            } else {
+                continue;
             }
             slotsFreed++;
         }
@@ -135,18 +150,18 @@ final class SpacePlanner {
         }
     }
 
-    // 能自动挪的堆：贵重、装备与任务留用的都不动；从垃圾排起，垃圾里按先丢后丢（腐肉、泥土、三废石……圆石最后），
-    // 其余同级的保持背包里的格子顺序。
+    // 能自动挪的堆：贵重、装备与任务留用的都不动，有用的只在能存时挪；从垃圾排起，垃圾里按先丢后丢
+    // （腐肉、泥土、三废石……圆石最后），零碎按清单先后，其余同级的保持背包里的格子顺序。
     private static List<BackpackStack> movableStacksWorthLeastFirst(Scene scene) {
         Map<String, Integer> totals = totalsInBackpack(scene.stacks());
         record Entry(BackpackStack stack, int worthRank, int junkOrder) {}
         List<Entry> entries = new ArrayList<>();
         for (BackpackStack stack : scene.stacks()) {
             Worth worth = ItemWorth.of(stack, scene.reservedItemIds(), totals);
-            if (!worth.tooValuableToDrop() && worth != Worth.TASK_RESERVED) {
-                entries.add(new Entry(stack, worth.ordinal(),
-                        worth == Worth.JUNK ? JunkItems.dropOrder(stack.itemId()) : 0));
-            }
+            if (worth == Worth.TASK_RESERVED || worth == Worth.GEAR || worth == Worth.PRECIOUS) continue;
+            int order = worth == Worth.JUNK ? JunkItems.dropOrder(stack.itemId())
+                    : worth == Worth.INCIDENTAL ? IncidentalLoot.dropOrder(stack.itemId()) : 0;
+            entries.add(new Entry(stack, worth.ordinal(), order));
         }
         // 稳定排序：同级之间不动格子顺序，计划才可复现、测试才说得清。
         entries.sort((a, b) -> a.worthRank != b.worthRank ? Integer.compare(b.worthRank, a.worthRank)
