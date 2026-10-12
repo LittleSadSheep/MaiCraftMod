@@ -63,9 +63,12 @@ public final class LivePlacements implements ConstructionSeams.PlansPlacement {
         Optional<PlacementPrediction.Placement> standing = settle(cell, placeAt, player, level, hit, yaw, pitch, sneak);
         // 站着点放不成要的样子、点的又不是非蹲不可的方块：像玩家一样蹲着再试一次——机械动力的方向机器蹲着朝视线、
         // 站着背着视线，有的朝向只有蹲着才放得出（站在置物台旁边放朝下的机械手）。
-        if (!sneak && standing.isPresent() && !PlacementPrediction.complete(cell, standing.get().predicted())) {
+        // 站着点落不到这一格（预测为空）就不比朝向：蹲着也落不到，原样交回"放不成"。
+        if (!sneak && standing.isPresent() && standing.get().predicted() != null
+                && !PlacementPrediction.complete(cell, standing.get().predicted())) {
             Optional<PlacementPrediction.Placement> crouching = settle(cell, placeAt, player, level, hit, yaw, pitch, true);
-            if (crouching.isPresent() && PlacementPrediction.complete(cell, crouching.get().predicted())) return crouching;
+            if (crouching.isPresent() && crouching.get().predicted() != null
+                    && PlacementPrediction.complete(cell, crouching.get().predicted())) return crouching;
         }
         return standing;
     }
