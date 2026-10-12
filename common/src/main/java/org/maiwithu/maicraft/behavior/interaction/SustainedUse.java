@@ -152,6 +152,7 @@ public final class SustainedUse implements Action {
         heldAtSubmission = scene.heldItem(hand);
         pending = player.interactionSender().useBlock(player, hand, (BlockHitResult) hit,
                 startConfirmation(), START_TIMEOUT_TICKS);
+        holdWhileStarting(player);
         stage = Stage.STARTING;
         return ActionStatus.progressed();
     }
@@ -162,9 +163,11 @@ public final class SustainedUse implements Action {
             FirstPersonScene scene = scenes.apply(player);
             heldAtSubmission = scene.heldItem(hand);
             pending = player.interactionSender().useItem(player, hand, startConfirmation(), START_TIMEOUT_TICKS);
+            holdWhileStarting(player);
             return ActionStatus.running();
         }
         if (!pending.terminal()) {
+            holdWhileStarting(player);
             pending = player.interactionSender().poll(player, pending);
         }
         if (!pending.terminal()) {
@@ -176,6 +179,15 @@ public final class SustainedUse implements Action {
         }
         stage = Stage.HOLDING;
         return ActionStatus.progressed();
+    }
+
+    // 等开始确认的这几刻也要按住：客户端一出手就进入使用状态，可服务器那边的"正在使用"要过一两刻才同步回来；
+    // 这期间不投影按住，原版下一刻看到使用键没按着就松手，吃东西、拉弓永远开始不了（实机连吃五次都是
+    // "持续使用没有开始"）。只在本地确实已经在用时才续，免得把还没开始的剩余刻数记成 0。
+    private void holdWhileStarting(PlayerContext player) {
+        if (projection != null && pending != null && !pending.terminal() && player.usingItem()) {
+            projection.renew(this, player, pending, hand, heldAtSubmission);
+        }
     }
 
     // 开始确认：手上东西变了（吃掉一口、弓开始蓄力会换状态）或正在使用中，都算这次使用已生效。
@@ -283,7 +295,7 @@ public final class SustainedUse implements Action {
 
     private String describeHeld() {
         // 只说提交时的数量，不报物品注册名：注册名要过注册表，现场说明里不是必需的。
-        return heldAtSubmission == null ? "手持物品" : "手持物品（提交时 " + heldAtSubmission.getCount() + " 件）";
+        return heldAtSubmission == null ? "物品" : "物品（提交时 " + heldAtSubmission.getCount() + " 件）";
     }
 
     private ActionStatus failureFrom(InteractionResult outcome) {

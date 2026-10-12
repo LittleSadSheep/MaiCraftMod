@@ -137,6 +137,29 @@ class SustainedUseTest {
     }
 
     @Test
+    void itKeepsHoldingWhileTheStartIsStillBeingConfirmed() {
+        // 实机（全量测试 10-12）：连吃五次都是"持续使用没有开始"——等开始确认的那两刻没投影按住，
+        // 原版下一刻看到使用键没按就松手，确认永远等不到。本地已经在用时，等确认期间也要续投影。
+        Rig rig = Rig.create();
+        SustainedUse action = rig.action(NEVER_DONE, 0);
+        rig.context.using = true;
+        assertTrue(action.tick(rig.context.asTickContext()) instanceof ActionStatus.Running, "提交那刻在等开始确认");
+        assertEquals(1, rig.projection.renewCalls, "一出手就按住");
+        rig.context.advance();
+        assertTrue(action.tick(rig.context.asTickContext()) instanceof ActionStatus.Running, "还在等确认");
+        assertEquals(2, rig.projection.renewCalls, "等确认的每一刻都续上");
+    }
+
+    @Test
+    void itDoesNotProjectBeforeTheUseHasStarted() {
+        // 本地还没进入使用状态就不续：投影会把剩余刻数记成 0，之后再也认不出是同一次使用。
+        Rig rig = Rig.create();
+        SustainedUse action = rig.action(NEVER_DONE, 0);
+        action.tick(rig.context.asTickContext());
+        assertEquals(0, rig.projection.renewCalls);
+    }
+
+    @Test
     void aConfirmedFinishReleasesThenReportsApplied() {
         Rig rig = Rig.create();
         // 确认条件按测试开关翻转：翻真那一刻松手，松开确认后再如实记生效。
