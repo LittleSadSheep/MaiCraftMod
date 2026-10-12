@@ -509,7 +509,11 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             if (!explained.isEmpty()) {
                 message.append("；").append(explained);
             }
-            return Problem.of(Problem.Kind.NEED_ITEM, message.toString(), null);
+            // 指定了途径（例如只从 ME 网络取）时如实说只走了这几条：没有现货不等于做不出来，
+            // 实机用 via=ae2 试探"有没有铁粒"得到"没有"，其实网络里的铁块合成下去就有。
+            String suggestion = scope.vias().isEmpty() || advancing.size() > 1 ? null
+                    : "这次只走了 " + String.join("、", scope.vias()) + "；不指定 via 再下达一次，会试合成、烧炼等别的途径（例如用网络里的整块拆出来）";
+            return Problem.of(Problem.Kind.NEED_ITEM, message.toString(), suggestion);
         }
 
         private String describeRefusal(SourceQuote refusal) {
