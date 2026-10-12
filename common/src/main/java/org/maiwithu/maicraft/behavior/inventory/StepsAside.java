@@ -14,6 +14,11 @@ import org.maiwithu.maicraft.kernel.task.Action;
  */
 public interface StepsAside {
 
-    /** 从丢东西的位置走开几步的动作；接缝没接上或四面都不通时为 empty。 */
-    Optional<Action> stepAway(WorldPosition from, int blocks);
+    /**
+     * 从丢东西的位置走开几步的动作；接缝没接上或四面都不通时为 empty。
+     *
+     * @param awayX 刚丢出时往哪个方向的反方向走（水平分量 x）：人还站在丢出点上时按它起步，不朝东西落的地方走
+     * @param awayZ 同上，z 分量
+     */
+    Optional<Action> stepAway(WorldPosition from, int blocks, double awayX, double awayZ);
 }

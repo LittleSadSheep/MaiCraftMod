@@ -233,7 +233,11 @@ public final class DropsItems implements Action {
     }
 
     private ActionStatus beginStepAway() {
-        current = parts.stepsAside().flatMap(aside -> aside.stepAway(thrownAt, STEP_AWAY_BLOCKS)).orElse(null);
+        // 背对丢出去的方向走开：东西落在前面，人往后退。
+        double awayX = throwDirection == null ? 0 : -throwDirection.x;
+        double awayZ = throwDirection == null ? 0 : -throwDirection.z;
+        current = parts.stepsAside().flatMap(aside -> aside.stepAway(thrownAt, STEP_AWAY_BLOCKS, awayX, awayZ))
+                .orElse(null);
         stage = Stage.STEP_AWAY;
         return ActionStatus.progressed();
     }

@@ -39,9 +39,9 @@ public final class ClientStepsAside implements StepsAside {
     }
 
     @Override
-    public Optional<Action> stepAway(WorldPosition from, int blocks) {
+    public Optional<Action> stepAway(WorldPosition from, int blocks, double awayX, double awayZ) {
         if (blocks <= 0) return Optional.empty();
-        return Optional.of(new WalkAwayAction(from, blocks, (long) blocks * TICKS_PER_BLOCK + 40));
+        return Optional.of(new WalkAwayAction(from, blocks, (long) blocks * TICKS_PER_BLOCK + 40, awayX, awayZ));
     }
 
     /**
@@ -73,12 +73,17 @@ public final class ClientStepsAside implements StepsAside {
         private final WorldPosition from;
         private final int blocks;
         private final long deadlineTicks;
+        /** 还站在丢出点上时往哪边起步：背对东西落下的方向。 */
+        private final double awayX;
+        private final double awayZ;
         private long walkedTicks;
 
-        WalkAwayAction(WorldPosition from, int blocks, long deadlineTicks) {
+        WalkAwayAction(WorldPosition from, int blocks, long deadlineTicks, double awayX, double awayZ) {
             this.from = from;
             this.blocks = blocks;
             this.deadlineTicks = deadlineTicks;
+            this.awayX = awayX;
+            this.awayZ = awayZ;
         }
 
         @Override
@@ -86,6 +91,11 @@ public final class ClientStepsAside implements StepsAside {
             var player = context.player().localPlayer();
             double dx = player.getX() - (from.x() + 0.5);
             double dz = player.getZ() - (from.z() + 0.5);
+            // 刚丢完还站在原地：按丢出方向的反方向起步。原先这时一律朝南走，东西正好往南丢时，
+            // 走开就是走进刚丢的那堆里（实机连丢四种，回头把 64 个闪长岩吸回了包里）。
+            boolean stillHere = Math.abs(dx) + Math.abs(dz) < 0.3;
+            double headX = stillHere ? awayX : dx;
+            double headZ = stillHere ? awayZ : dz;
             WorldPosition standing = WorldPosition.here(
                     (int) Math.floor(player.getX()),
                     (int) Math.floor(player.getY()),
@@ -101,7 +111,7 @@ public final class ClientStepsAside implements StepsAside {
                         "走不出去：四周都被挡住了，丢出的东西可能被自己捡回", null));
             }
             // 背对丢出点，下一步要踩进的格子落在刚丢的落点里就侧绕开，别两秒后把自己丢的吸回来。
-            Vec3 away = steppingDirection(dx, dz, direction -> {
+            Vec3 away = steppingDirection(headX, headZ, direction -> {
                 double stepX = player.getX() + direction.x * 1.5;
                 double stepZ = player.getZ() + direction.z * 1.5;
                 WorldPosition nextCell = WorldPosition.here(
