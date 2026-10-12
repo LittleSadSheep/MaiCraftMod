@@ -36,6 +36,12 @@ public final class TargetIndex {
     /** 驱逐清扫周期(tick)。 */
     private static final int EVICT_SWEEP_TICKS = 200;
     private static final long QUERY_NANOS_PER_TICK = 2_000_000L;
+    /**
+     * 每次查询至少能推进这么久，哪怕这一刻的共用预算已经被别的查询用完：观察每刻先查设施，
+     * 角色一走动查询就换了起点从头扫，常常一个人吃光两毫秒，排在后面的采掘、寻找每刻零推进，
+     * 等多久都扫不完，最后"等了 100 刻还没看完现场"收场。
+     */
+    private static final long MIN_QUERY_SLICE_NANOS = 300_000L;
     private static final int MAX_PENDING_QUERIES = 32;
     private static final int COMPLETED_QUERY_TICKS = 20;
     private long queryTick = Long.MIN_VALUE;
@@ -226,7 +232,7 @@ public final class TargetIndex {
      * 还近才停。
      *
      * <p>只读索引;未建条目就地构建,每次调用最多构建 {@code buildBudget} 个 section(预算耗尽
-     * 返回 {@code complete=false},调用方稍后再查)。所有查询共享每 tick 2ms 墙钟预算，
+     * 返回 {@code complete=false},调用方稍后再查)。所有查询共享每 tick 2ms 墙钟预算(每次查询另保底 0.3ms)，
      * 包括热索引遍历和饱和段取位；游标跨 tick 续进，避免反复遍历前缀饿死冷段。未加载区块
      * 跳过——索引只回答已加载世界。
      */
@@ -275,7 +281,9 @@ public final class TargetIndex {
         int centerCz = SectionPos.blockToSectionCoord(center.getZ());
         int minSection = level.getMinSection();
         int budget = Math.max(1, buildBudget);
-        while (!progress.complete && System.nanoTime() < queryDeadline) {
+        // 共用预算用完了也给这次查询留一小段，谁都不会被前面的查询饿死。
+        long deadline = Math.max(queryDeadline, System.nanoTime() + MIN_QUERY_SLICE_NANOS);
+        while (!progress.complete && System.nanoTime() < deadline) {
             if (progress.perimeterIndex >= RingSpiral.perimeter(progress.ring)) {
                 if (progress.nearest.canStopAfterRing(progress.ring)
                         || ++progress.ring > key.radius()) {

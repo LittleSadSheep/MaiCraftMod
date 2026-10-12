@@ -99,6 +99,13 @@ public final class WorldScope {
     /** 设施分类：容器与工作设施按这个世界同步过来的方块标签认。 */
     private final FacilityKinds kinds;
     private final Scene scene;
+    /** 这一刻在看的玩家现场：设施观察的读端跨刻复用一个，每刻从这里读现场。 */
+    private PlayerContext observing;
+    /**
+     * 设施观察的读端：只建一个。每刻新建会每刻重新遍历整张方块注册表找床（大型整合包里几万种方块），
+     * 还会每刻重复登记同一批方块，扫描索引的引用计数只增不减。
+     */
+    private final ClientNearbyBlocksSight facilitySight;
     /** 联动模组的观察（电梯、车站、列车、物理结构）：场景每次刷新时问。 */
     private final List<ModSight> modSights;
     /** 模组的东西在角色周围多大范围里看（格）。 */
@@ -135,6 +142,7 @@ public final class WorldScope {
         this.goalRuns = new DocumentGoalRunStore(documents, identity.key(), abilities);
         this.kinds = new FacilityKinds(new RegistryBlockTags());
         this.scene = new Scene(memory, kinds);
+        this.facilitySight = new ClientNearbyBlocksSight(blockScans, () -> observing, kinds);
         // 保护判断：归属记录按区块问服务端（还没问到的按受保护处理），区域读每刻抄一份的快照，地标问世界记忆；
         this.ownership = new OwnershipMap(session);
         this.regions = new RegionsSnapshot(memory);
@@ -227,8 +235,8 @@ public final class WorldScope {
         // 床不在扫描清单里（按颜色散成十六种）。
         Set<String> facilities = new LinkedHashSet<>(kinds.containerBlockTypes());
         facilities.addAll(kinds.workstationBlockTypes());
-        scene.updateFacilities(gameTick, when,
-                new ClientNearbyBlocksSight(blockScans, () -> current, kinds).nearby(facilities));
+        observing = current;
+        scene.updateFacilities(gameTick, when, facilitySight.nearby(facilities));
         // 模组的东西：电梯、车站、列车、物理结构，联动模组各自报角色附近看得到的。
         List<ModThing> things = new ArrayList<>();
         AABB around = new AABB(player.blockPosition()).inflate(THINGS_RADIUS);

@@ -18,10 +18,15 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 /**
  * 夜晚处境的生产读取：到了能睡的时间没有、身在何处算不算安全、现在的威胁评估是什么。
  *
- * <p>"安全处"按看得到的光读：不在天空直射下、或身边光照充足（屋里、矿道、火把边）就算安全；
- * 露天无遮蔽就是露天。威胁评估直接用战斗感观现算一遍——夜里露天要不要躲，靠的就是它。
+ * <p>"安全处"按看得到的光读：头顶真被盖住（屋里、矿道）、或身边光照充足（火把边）就算安全；
+ * 露天、树荫下、岩檐下都算露天。威胁评估直接用战斗感观现算一遍——夜里露天要不要躲，靠的就是它。
  */
 public final class LiveNightView implements NightfallNeed.ReadsNight {
+
+    /** 天光掉到这一级及以下算头顶盖住了：只隔一片树叶、一块岩檐的地方天光还有 13、14。 */
+    private static final int COVERED_SKY_LIGHT = 7;
+    /** 方块光到这一级及以上算灯够亮。 */
+    private static final int LIT_BLOCK_LIGHT = 8;
 
     private final CombatSenses senses;
 
@@ -41,7 +46,9 @@ public final class LiveNightView implements NightfallNeed.ReadsNight {
         BlockPos eye = BlockPos.containing(self.getEyePosition());
         int sky = level.getBrightness(LightLayer.SKY, eye);
         int block = level.getBrightness(LightLayer.BLOCK, eye);
-        boolean inShelter = sky < 15 || block >= 8;
+        // 安全处：头顶真被盖住（天光掉到 7 及以下：屋里、矿道深处）或灯够亮（方块光 8 以上，怪刷不出来）。
+        // 树荫下、悬崖下天光只掉一两级，怪照样刷、照样走过来，不算安全处。
+        boolean inShelter = sky <= COVERED_SKY_LIGHT || block >= LIT_BLOCK_LIGHT;
         var profile = senses.profile(context);
         ArrayList<ThreatAssessment.Foe> foes = new ArrayList<>();
         for (CombatSenses.Threat threat : senses.threats(context, ThreatAssessment.VIGILANCE_RADIUS)) {
