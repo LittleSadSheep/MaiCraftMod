@@ -59,8 +59,15 @@ public final class UseKeyHold {
         if (active != null && active.owner == owner && active.pending == pending) {
             remaining = Math.min(remaining, active.remaining);
         }
+        // 持用开始后物品自己加了组件（砂纸把要磨的东西夹进去）：手上还是同一种东西、正用着这只手，
+        // 就按此刻手上的样子续。原先死认提交前的样子，砂纸一夹东西就"换了物品"松手，抛光玫瑰石英怎么都磨不出来。
+        ItemStack basis = before;
+        ItemStack inHand = player.getItemInHand(hand);
+        if (player.isUsingItem() && player.getUsedItemHand() == hand && ItemStack.isSameItem(before, inHand)) {
+            basis = inHand;
+        }
         active = new Hold(owner, Minecraft.getInstance(), player, context.level(), context.input(),
-                context.interactionSender(), pending, hand, before.copy(), selected, remaining,
+                context.interactionSender(), pending, hand, basis.copy(), selected, remaining,
                 context.level().getGameTime() + 2, System.nanoTime() + 250_000_000L);
         return true;
     }
