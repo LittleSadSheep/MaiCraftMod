@@ -36,7 +36,7 @@ class RetreatTest {
     @Test
     void escapeCountsOnlyThisRetreatsPursuersAndFreshAttackers() {
         Retreat retreat = new Retreat();
-        Battlefield start = field(foe(1, 6, false));
+        Battlefield start = field(foe(1, 12, false));
         retreat.begin("血快见底", start);
         assertFalse(retreat.escaped(start));
         assertTrue(retreat.escaped(field(foe(7, 20, false))), "远处没参与追击的不让逃跑无限延长");
@@ -48,6 +48,19 @@ class RetreatTest {
         assertFalse(retreat.routeFailed(5, 0), "走出了两格，重新数");
         assertFalse(retreat.routeFailed(5, 0));
         assertTrue(retreat.routeFailed(5, 0));
+    }
+
+    @Test
+    void aPursuerHiddenForAMomentIsNotShakenOff() {
+        Retreat retreat = new Retreat();
+        Battlefield start = field(foe(1, 4, false));
+        retreat.begin("手上没有任何武器", start);
+        assertFalse(retreat.escaped(start));
+        // 拐过墙角看不见了：它最后露面在 4 格外，不算甩开；往它最后露面的反方向跑。
+        assertFalse(retreat.escaped(field()), "一时看不见不是甩开");
+        assertEquals(4, retreat.pursuersCenter()[0]);
+        for (int i = 0; i < Retreat.REMEMBER_TICKS; i++) retreat.escaped(field());
+        assertTrue(retreat.escaped(field()), "三秒都没再露面才算甩开");
     }
 
     private static Battlefield field(Battlefield.Foe... foes) {

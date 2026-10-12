@@ -239,6 +239,12 @@ public final class Battle {
             }
             cx /= Math.max(1, chasers.size());
             cz /= Math.max(1, chasers.size());
+            // 这一刻一只追兵都看不见：按最后露面的位置背离着跑，不朝世界原点反方向乱跑。
+            double[] remembered = chasers.isEmpty() ? retreat.pursuersCenter() : null;
+            if (remembered != null) {
+                cx = remembered[0];
+                cz = remembered[1];
+            }
             int[] haven = Retreat.haven(me.x(), me.y(), me.z(), cx, cz, retreat.turns(),
                     (x, y, z) -> moves.standable(context, x, y, z));
             List<ThreatField.Threat> threats = pathThreats(field, -1);

@@ -218,7 +218,11 @@ class BattleTest {
         senses.health = 20;
         assertEquals(Battle.State.RETREATING, fight.tick(new Tick(1)).state());
         senses.threats.clear();
+        // 僵尸一时看不见：它最后露面在 6 格外，接着跑；三秒都没再露面才算甩开。
         Battle.Moment escaped = fight.tick(new Tick(2));
+        int t = 2;
+        while (escaped.state() == Battle.State.RETREATING && t < 200) escaped = fight.tick(new Tick(++t));
+        assertTrue(t - 2 >= Retreat.REMEMBER_TICKS, "看不见后又跑了 " + (t - 2) + " 刻");
         assertEquals(Battle.State.ESCAPED, escaped.state());
         assertEquals("血快见底，先撤离保命", escaped.retreatWhy());
     }

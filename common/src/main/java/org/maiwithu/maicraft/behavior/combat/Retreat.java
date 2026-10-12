@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.combat;
 
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -32,6 +34,8 @@ public final class Retreat {
 
     private String why;
     private final Set<Integer> pursuers = new HashSet<>();
+    /** 这次的追兵最后一次露面在哪（x, z）、之后又过了几刻：拐过墙角一时看不见的不当它凭空消失。 */
+    private final Map<Integer, double[]> lastSeen = new HashMap<>();
     private int failures;
     private int turns;
     private double[] lastFailureAt;
@@ -41,6 +45,7 @@ public final class Retreat {
         why = reason;
         pursuers.clear();
         for (Battlefield.Foe foe : field.chasers()) pursuers.add(foe.id());
+        lastSeen.clear();
         failures = 0;
         turns = 0;
         lastFailureAt = null;
@@ -59,6 +64,7 @@ public final class Retreat {
 
     /** 甩开了：三十二格内没有这次参与追击的、也没有新近打过我的。 */
     boolean escaped(Battlefield field) {
+        remember(field);
         for (Battlefield.Foe foe : field.chasers()) {
             if (pursuers.contains(foe.id()) || foe.attacker()) return false;
         }
@@ -67,11 +73,44 @@ public final class Retreat {
         for (Battlefield.Foe foe : field.foes()) {
             if (foe.fightsBack() && foe.threat().visible() && foe.distance() < CLEAR_GAP) return false;
         }
+        // 追兵一时被地形挡住看不见（夜里、山里一拐弯就没了）：它最后露面的地方还在 10 格内、离露面不到三秒，
+        // 就当它还在后面接着跑。原先一看不见就算甩开，没武器时"已撤离，离打点 0 格"一秒好几回。
+        Battlefield.Me me = field.me();
+        for (double[] seen : lastSeen.values()) {
+            if (Math.hypot(seen[0] - me.x(), seen[1] - me.z()) < CLEAR_GAP) return false;
+        }
         return true;
+    }
+
+    // 每刻记下这次追兵露面的位置；没露面的又老一刻，老过三秒就忘掉。
+    private void remember(Battlefield field) {
+        for (double[] seen : lastSeen.values()) seen[2]++;
+        for (Battlefield.Foe foe : field.foes()) {
+            if (pursuers.contains(foe.id()) || foe.attacker()) {
+                lastSeen.put(foe.id(), new double[] {foe.threat().x(), foe.threat().z(), 0});
+            }
+        }
+        lastSeen.values().removeIf(seen -> seen[2] > REMEMBER_TICKS);
+    }
+
+    /**
+     * 往哪个反方向跑用的追兵重心：此刻露面的按此刻位置，一时看不见的按最后露面的位置；一个都没记着为 null。
+     */
+    double[] pursuersCenter() {
+        if (lastSeen.isEmpty()) return null;
+        double x = 0;
+        double z = 0;
+        for (double[] seen : lastSeen.values()) {
+            x += seen[0];
+            z += seen[1];
+        }
+        return new double[] {x / lastSeen.size(), z / lastSeen.size()};
     }
 
     /** 甩开要拉开的距离（格）：看得见的会还手的怪都在这之外。 */
     static final double CLEAR_GAP = 10;
+    /** 追兵看不见多久（刻）才当它不在了：三秒。 */
+    static final int REMEMBER_TICKS = 60;
 
     /**
      * 一条撤离路线走不通：换下一个方向再试；身体比上次失败处真走出两格就清账重数。

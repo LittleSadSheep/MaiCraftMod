@@ -111,6 +111,8 @@ public final class LiveNightAndEdgeMoves {
         private final double within;
         private final String what;
         private Action walk;
+        /** 被别的临时任务打断过：回来时这一段路作废，从站的地方重新算路。 */
+        private boolean interrupted;
 
         private WalkMove(WalkTo walks, double[] target, TerrainPermit permit, double within, String what) {
             this.walks = walks;
@@ -122,6 +124,13 @@ public final class LiveNightAndEdgeMoves {
 
         @Override
         public ActionStatus tick(TickContext context) {
+            // 跑回去捡东西、躲夜路上被自卫打断：走到停稳后只会报"已停下"，原先这一下被当成"没走到"记一次失败，
+            // 打断三回就放弃捡东西。回来先把停下的那一段收掉，从站的地方重新上路。
+            if (interrupted) {
+                interrupted = false;
+                if (walk != null) walk.close();
+                walk = null;
+            }
             if (walk == null) {
                 if (walks == null) {
                     return ActionStatus.failed(Problem.of(Problem.Kind.UNSUPPORTED,
@@ -137,6 +146,7 @@ public final class LiveNightAndEdgeMoves {
         @Override
         public void pause() {
             if (walk != null) walk.pause();
+            interrupted = true;
         }
 
         @Override
