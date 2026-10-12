@@ -18,6 +18,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
 
+import org.maiwithu.maicraft.behavior.navigation.baritone.ClearanceWhitelist;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.game.interaction.BlockDigger;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -112,6 +113,10 @@ final class LiveStandOpener implements StandOpener {
     // 挖得：不在不许踩的格里、硬度在石头一类以内、许可检查点放行（受保护的、玩家的、超出档位的都拒）。
     private boolean breakable(Level level, BlockPos cell, BlockState state) {
         if (guarded.contains(cell)) return false;
+        // 只挖地形一类（与寻路挖路、施工清场同一份白名单：树叶、草、天然土石）：机器、箱子、溜槽这些搭出来的东西
+        // 挡着视线也不挖。原先许可开到 natural 时自己搭的机器零件也算能挖，靠近大齿轮机械手时把旁边的机械手、
+        // 溜槽、补料箱当遮挡挖掉了。
+        if (state.hasBlockEntity() || !ClearanceWhitelist.allows(state)) return false;
         float hardness = state.getDestroySpeed(level, cell);
         if (hardness < 0 || hardness > MAX_HARDNESS) return false;
         var position = new WorldPosition(cell.getX(), cell.getY(), cell.getZ(), level.dimension().location().toString());
