@@ -239,6 +239,9 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
                 == ItemUseAim.Gesture.SCOOP;
     }
 
+    /** 上一次出手被挡住时站的那一格：换站位时不再站它；没被挡过为 null。 */
+    private BlockPos blockedStand;
+
     // 靠近：方块按格子、实体按它此刻的包围盒；实体已经不在了就是目标没了。
     // 写告示牌时目标带上"只站正面那一侧"，站位候选由站位判断按它筛，不再站到背面去写。
     private Next<Phase> approach() {
@@ -246,7 +249,11 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
         if (shape.isEmpty()) {
             return stop(Problem.of(Problem.Kind.TARGET_GONE, target.describe() + " 已经不在了", "重新 observe"));
         }
-        return goWith(Phase.APPROACH, services.close().toward(shape.get(), input.permissions()), "靠近目标");
+        // 上一次站在这一格出手被挡住：换站位时把它排除。不然靠近一核对"这里看得见"就原地不动，又出手、又被挡。
+        BlockPos avoid = blockedStand;
+        Action toward = avoid == null ? services.close().toward(shape.get(), input.permissions())
+                : services.close().toward(shape.get(), input.permissions(), avoid::equals);
+        return goWith(Phase.APPROACH, toward, "靠近目标");
     }
 
     // 出手前冻结现场：动作栏原有的话、脚边原有的掉落物，之后才认得出哪些是这一下带来的。
@@ -285,6 +292,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     private Next<Phase> aimFailed(Problem problem) {
         if (problem.kind() == Problem.Kind.UNREACHABLE && target != null && approachRetries < 1) {
             approachRetries++;
+            blockedStand = services.world().feet();
             recordAttempt("对" + target.describe() + "出手", problem.message() + "；换个站位再试一次");
             return approach();
         }

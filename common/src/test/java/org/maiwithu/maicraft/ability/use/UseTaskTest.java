@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
+import org.maiwithu.maicraft.behavior.approach.ProtectedCells;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
 import org.maiwithu.maicraft.behavior.interaction.InteractionVerdict;
@@ -253,6 +254,8 @@ class UseTaskTest {
         assertEquals(TaskResult.Status.DONE, result.status());
         assertEquals(2, rig.close.calls);
         assertTrue(result.attempts().stream().anyMatch(attempt -> attempt.result().contains("换个站位")));
+        // 换站位时把被挡的那一格排除：不然靠近一核对就原地不动、又被挡。
+        assertTrue(rig.close.lastAvoid != null && rig.close.lastAvoid.contains(BlockPos.ZERO), "换站位不再站被挡的那一格");
     }
 
     @Test
@@ -580,10 +583,17 @@ class UseTaskTest {
         int calls;
         ApproachTarget lastTarget;
 
+        ProtectedCells lastAvoid;
+
         @Override public Action toward(ApproachTarget target, Permissions permissions) {
             calls++;
             lastTarget = target;
             return new Scripted(1, ActionStatus.done(), () -> { });
+        }
+
+        @Override public Action toward(ApproachTarget target, Permissions permissions, ProtectedCells avoid) {
+            lastAvoid = avoid;
+            return toward(target, permissions);
         }
     }
 
