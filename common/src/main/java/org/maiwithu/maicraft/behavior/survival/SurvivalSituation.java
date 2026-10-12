@@ -57,6 +57,9 @@ public record SurvivalSituation(
     /** 往上数水深最多数多少格；再深按这个深度估，照样会早早叫人上浮。类别：玩家常识。 */
     private static final int MAX_DEPTH_PROBE = 16;
 
+    /** 竖直速度低于这个（格/刻，往下为负）才算在往下掉：自由落体第二刻是 -0.155。 */
+    static final double FALLING_SPEED = -0.15;
+
     /**
      * 从真实游戏状态读一份处境。只在客户端刻内、拿着当刻的角色上下文调用。
      * 只读世界，不写任何东西；落点只在往下掉时才往下扫，平时不花这个开销。
@@ -70,7 +73,9 @@ public record SurvivalSituation(
         BlockPos buried = suffocates(level, eyeCell) ? eyeCell
                 : suffocates(level, headTopCell) ? headTopCell : null;
 
-        boolean falling = !player.onGround() && player.getDeltaMovement().y < 0 && !player.isInWater()
+        // 往下走得够快才算在掉：真踩空第二刻就有 -0.155；喷气背包悬停、站在链条输送机这类边上时
+        // 只有 -0.01 上下的慢沉，原先也当成坠落，落地防护在半空一遍遍开喷气背包刹车。
+        boolean falling = !player.onGround() && player.getDeltaMovement().y < FALLING_SPEED && !player.isInWater()
                 && !player.onClimbable() && !player.isFallFlying() && !player.getAbilities().flying
                 && player.getVehicle() == null;
         Landing landing = falling ? landingBelow(level, feet) : Landing.NONE;
