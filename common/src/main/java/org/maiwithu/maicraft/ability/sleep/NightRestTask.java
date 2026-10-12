@@ -36,8 +36,11 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  */
 final class NightRestTask extends SleepTask {
 
-    /** 醒来后留出的同步时间：醒来的实体包与时间包不同刻到达，等它们对齐再走动。游戏事实。 */
-    private static final int WAKE_SYNC_TICKS = 200;
+    /**
+     * 醒来后留出的同步时间：醒来的实体包与时间包不同刻到达，等它们对齐再走动。游戏事实。
+     * 时间包每秒一个，两秒够对齐两次；原先等十秒，人醒了在床边干站，而且正好撞上 200 刻的卡住判定。
+     */
+    private static final int WAKE_SYNC_TICKS = 40;
     /** "家"区域的范围：床离记住的家这么近就当是家里的床，不收。玩家常识。 */
     private static final double HOME_RADIUS_BLOCKS = 8.0;
 
@@ -137,6 +140,9 @@ final class NightRestTask extends SleepTask {
         }
         wakeCountdown--;
         if (wakeCountdown <= 0) {
+            // 起身这一刻算进展：等对齐是有意的停顿，不能让回站位一出手就按"醒了之后没进展"判卡住
+            // （实机醒来后走回站位第一刻就以卡住收场，人留在三十多格外的床边）。
+            recordProgress("起身");
             cellsToCollect = collectibleCells(context);
             if (!cellsToCollect.isEmpty() && collects.collect(cellsToCollect.getFirst(), permissions).isPresent()) {
                 return Next.go(Phase.COLLECT_BED, "睡醒了，收回放下的床");
