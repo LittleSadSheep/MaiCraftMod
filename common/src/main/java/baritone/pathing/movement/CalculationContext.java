@@ -54,6 +54,8 @@ import org.maiwithu.maicraft.game.player.FallDamage;
 import org.maiwithu.maicraft.behavior.landing.WaterLandingWindow;
 import org.maiwithu.maicraft.behavior.landing.LandingPlan;
 import org.maiwithu.maicraft.behavior.landing.LandingOptions;
+import org.maiwithu.maicraft.behavior.navigation.spi.FlyUpGear;
+import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 import org.maiwithu.maicraft.behavior.landing.LandingGeometry;
 import org.maiwithu.maicraft.behavior.landing.BoatOptions;
 import org.maiwithu.maicraft.behavior.landing.BoatPlan;
@@ -107,6 +109,10 @@ public class CalculationContext {
     public final NavigationProtection.Snapshot maicraftPolicy;
     /** 这次算路能用的落地办法：出发前取一份，搜索全程一致；会摔伤的一跳只有落点接得住人才收。 */
     public final LandingOptions landingOptions;
+    /** 这一趟一次最多能飞上几格（穿着、气够的喷气背包）；不能飞为 0。算路开始时读一次，整趟按它算。 */
+    public final int flyUpMaxBlocks;
+    /** 往上飞一格大约几刻；不能飞时不用。 */
+    public final double flyUpTicksPerBlock;
     /** 用船接住的条件：身上带着哪种船、附近停着哪些空船、够得着的距离；不许用落地办法时为 null。 */
     private final BoatOptions boatOptions;
     /** 有计划地往下跳时，留不留得出倒水的那一刻。 */
@@ -261,6 +267,10 @@ public class CalculationContext {
         this.landingOptions = LandingOptions.capture(player,
                 forceTerrainMutation || Baritone.settings().allowWaterBucketFall.value);
         this.boatOptions = landingOptions.allowed() ? BoatOptions.capture(player) : null;
+        // 身上能直接飞上高处的装备：有就让"飞上去"和垫方块往上搭比开销，没有这一步就不存在。
+        var flyUp = BaritoneInternals.flyUpReach();
+        this.flyUpMaxBlocks = flyUp.map(FlyUpGear.Reach::maxBlocks).orElse(0);
+        this.flyUpTicksPerBlock = flyUp.map(FlyUpGear.Reach::ticksPerBlock).orElse(0.0);
         this.waterLandingWindow = new WaterLandingWindow(fallDamageBudget.gravity(), player.blockInteractionRange(),
                 player.getEyeHeight(), Math.max(0, -player.getDeltaMovement().y));
         this.portalEntryCells = portalEntryCells(
