@@ -122,14 +122,17 @@ class ControlLoopTest {
         ControlLoop loop = new ControlLoop(List.of(hunger));
         loop.setMainTask(main);
 
-        loop.tick(TICK);
-        loop.tick(TICK);
-        assertEquals(1, main.stopAsks, "被按住的需求只因停下不安全：叫它先落地");
-        loop.tick(TICK);
+        long ask = ControlLoop.ASK_SAFE_STOP_AFTER_TICKS;
+        loop.tick(new TestContext(1));
+        loop.tick(new TestContext(ask));
+        assertEquals(0, main.stopAsks, "一会儿就过去的停不下：先等它自己过去");
+        loop.tick(new TestContext(1 + ask));
+        assertEquals(1, main.stopAsks, "一直停下不安全：叫它先落地");
+        loop.tick(new TestContext(2 + ask));
         assertEquals(1, main.stopAsks, "已经在收尾，不再叫");
         assertEquals(0, hunger.created);
         main.landed = true;
-        ControlLoop.Decision.Advanced advanced = assertAdvanced(loop.tick(TICK));
+        ControlLoop.Decision.Advanced advanced = assertAdvanced(loop.tick(new TestContext(3 + ask)));
 
         assertAdvancedIsTempTask(advanced, "吃饭");
         assertEquals(1, main.pauses, "插进来时照常让它停手");
@@ -144,10 +147,10 @@ class ControlLoopTest {
         ControlLoop loop = new ControlLoop(List.of(hunger));
         loop.setMainTask(main);
 
-        loop.tick(TICK);
-        loop.tick(TICK);
+        loop.tick(new TestContext(1));
+        loop.tick(new TestContext(1 + ControlLoop.ASK_SAFE_STOP_AFTER_TICKS));
         assertTrue(main.stopping);
-        loop.tick(TICK);
+        loop.tick(new TestContext(2 + ControlLoop.ASK_SAFE_STOP_AFTER_TICKS));
 
         assertFalse(main.stopping, "需求没了：不用再收尾");
         assertEquals(1, main.pauses);

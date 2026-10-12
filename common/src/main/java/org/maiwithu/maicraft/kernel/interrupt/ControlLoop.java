@@ -47,8 +47,9 @@ import java.util.Set;
  * 这个需求先缓一阵再插：自救没成功就每刻重来一遍，只会让主任务永远动不了，也解决不了问题。
  * 主任务被临时任务停在了半路时只等生存需求先救命，活不接着干，等 LLM 明确换活或解除暂停。
  *
- * <p>不急（SOON）的需求碰上此刻停下不安全的任务（飞着、开着车）时不干等：先叫手上的任务到安全的地方（就近落地、刹停），
- * 它停稳了能打断了，需求照常插进来；收尾期间需求没了或缓成 LATER，就叫它照原样接着做。
+ * <p>不急（SOON）的需求碰上一直停下不安全的任务（飞着、开着车，连着两秒以上）时不干等：先叫手上的任务到安全的地方
+ * （就近落地、刹停），它停稳了能打断了，需求照常插进来；收尾期间需求没了或缓成 LATER，就叫它照原样接着做。
+ * 一会儿就过去的停不下（坐下、迈上船沿、悬空放一格）照常等它自己过去。
  */
 public final class ControlLoop {
     private static final Logger LOG = LoggerFactory.getLogger(ControlLoop.class);
@@ -61,6 +62,9 @@ public final class ControlLoop {
 
     /** 接连没做成时等待逐次加倍，最长五分钟：弄不到吃的这类一时解决不了的事，不每隔几秒就打断一次手上的活。 */
     static final long MAX_RETRY_AFTER_FAILED_TICKS = 20L * 60 * 5;
+
+    /** 手上的任务连着停下不安全多久（刻），不急的需求才叫它先到安全的地方：两秒，一会儿就过去的不打扰。 */
+    static final long ASK_SAFE_STOP_AFTER_TICKS = 40;
 
     private final List<SurvivalNeed> needs;
     /** 角色死亡这类循环自身的处境变化从这里告诉宿主。 */
@@ -234,6 +238,12 @@ public final class ControlLoop {
             return new Decision.Parked(current.task, parkedWhere == null ? "位置不明" : parkedWhere);
         }
         askedInterruptibility = current.interruptibility(context);
+        // 记下从哪一刻起一直停下不安全：一会儿就过去的不叫它收尾。
+        if (askedInterruptibility != Interruptibility.UNSAFE_TO_STOP) {
+            current.unsafeSince = Long.MIN_VALUE;
+        } else if (current.unsafeSince == Long.MIN_VALUE) {
+            current.unsafeSince = context.gameTick();
+        }
         Choice choice = choose(context, askedInterruptibility, current.task);
         if (choice.chosen != null) {
             // 能走到这里，说明打断规则已经放行：NOW 本来就不管停不停得下，SOON 与 LATER 只在停下安全时才选得上。
@@ -244,16 +254,18 @@ public final class ControlLoop {
         }
         // 没有人能插进来：忍住，手上的任务继续；被按住的需求交给调用方提醒，也留给面板说清是谁在等。
         if (choice.deferred != null) heldBackNeed = new HeldBackNeed(choice.deferred.name(), choice.deferredUrgency);
-        windDownFor(current, choice);
+        windDownFor(current, choice, context);
         return advance(current, context, choice.deferred);
     }
 
-    // 不急的需求只因为手上的任务此刻停下不安全才插不进来：叫它先到安全的地方再停，停稳了下一刻需求就插得进来。
+    // 不急的需求只因为手上的任务一直停下不安全才插不进来：叫它先到安全的地方再停，停稳了下一刻需求就插得进来。
     // 正在等着再试的需求不算（它本来就插不进来，不值得为它落地）；需求没了或缓成 LATER，就叫它照原样接着做。
-    private void windDownFor(Frame current, Choice choice) {
+    private void windDownFor(Frame current, Choice choice, TickContext context) {
         boolean wanted = choice.deferred != null && choice.deferredUrgency == Urgency.SOON
                 && !backoffs.containsKey(choice.deferred);
-        if (wanted && !current.stopAsked && askedInterruptibility == Interruptibility.UNSAFE_TO_STOP) {
+        boolean longUnsafe = askedInterruptibility == Interruptibility.UNSAFE_TO_STOP
+                && context.gameTick() - current.unsafeSince >= ASK_SAFE_STOP_AFTER_TICKS;
+        if (wanted && !current.stopAsked && longUnsafe) {
             current.stopAsked = current.stopSafely();
             if (current.stopAsked) {
                 LOG.info("{}要{}，先到安全的地方再停：{}", choice.deferred.name(), choice.deferredUrgency, current.task.describe());
@@ -466,6 +478,8 @@ public final class ControlLoop {
         boolean paused;
         /** 为了让不急的需求插进来，已经叫它先到安全的地方再停。 */
         boolean stopAsked;
+        /** 从哪一刻起一直停下不安全；此刻能停为 Long.MIN_VALUE。 */
+        long unsafeSince = Long.MIN_VALUE;
 
         Frame(Task task, SurvivalNeed from, Urgency urgency) {
             this.task = Objects.requireNonNull(task, "task");

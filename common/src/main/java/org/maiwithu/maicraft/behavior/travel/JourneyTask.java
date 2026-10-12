@@ -476,8 +476,10 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
             leg.pause();
         }
 
-        // 先到安全的地方再停：飞着的落地、电梯里的等停靠、车上的等停车；这一段停下了就结束，结束就是停稳了。
+        // 先到安全的地方再停：这一段此刻停下不安全（飞着、在轿厢里、开着载具）才叫它就近落地、等停靠、刹停，
+        // 停下了这一段就结束，结束就是停稳了；坐着的火车这类此刻停得下的，原地停就行。
         @Override public boolean stopSafely() {
+            if (leg.interruptibility() != Interruptibility.UNSAFE_TO_STOP) return false;
             leg.requestSafeStop();
             return true;
         }

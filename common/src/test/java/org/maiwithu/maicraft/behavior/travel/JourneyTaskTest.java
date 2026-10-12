@@ -27,6 +27,7 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
@@ -74,6 +75,7 @@ class JourneyTaskTest {
         // 坐电梯途中被叫暂停：这一段先停靠出轿厢，停下就站着等，不再问报价开下一段；放回来从站的地方接着规划。
         FakeMode elevator = new FakeMode(request -> new TravelOffer(ELEVATOR, request.from(), request.to(), 100,
                 List.of(), List.of(), ""), WorldPosition.here(2, 100, 2));
+        elevator.unsafe = true;
         JourneyTask task = journey(at(2, 100, 2), null, elevator);
         task.start(tick);
         for (int i = 0; i < 10 && elevator.started == 0; i++) {
@@ -254,6 +256,8 @@ class JourneyTaskTest {
         TravelRequest lastRequest;
         boolean claims;
         int safeStops;
+        /** 这一段坐着时停下不安全（在轿厢里）。 */
+        boolean unsafe;
 
         @Override public boolean claims(TravelRequest request) {
             return claims && started == 0;
@@ -293,6 +297,10 @@ class JourneyTaskTest {
 
                 @Override public void requestSafeStop() {
                     safeStops++;
+                }
+
+                @Override public Interruptibility interruptibility() {
+                    return unsafe ? Interruptibility.UNSAFE_TO_STOP : Interruptibility.WORKING;
                 }
 
                 @Override public String describe() {
