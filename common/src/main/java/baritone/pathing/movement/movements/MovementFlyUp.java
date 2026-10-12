@@ -24,7 +24,7 @@ import java.util.Set;
  * 像玩家一样，悬崖、高台不再一块块垫圆石往上搭；身上有穿着的喷气背包、背罐里气够才有这一步（见 {@link CalculationContext#flyUpMaxBlocks}）。
  *
  * <p>只算往上两格以上：一格高的走上去就行。落脚处取这一边头一个站得住的高度；中途头顶被挡就没有这一步。
- * 飞的过程：开好喷气背包（走路那边先停下拨开关）→ 按着跳往上 → 高过落脚处就朝它挪 → 到了正上方蹲着往下落 → 踩稳算到。
+ * 飞的过程：开好喷气背包（走路那边先停下拨开关）→ 按着跳往上 → 高过落脚处就朝它挪 → 到了正上方松开，悬停着慢慢落下 → 踩稳算到。
  * 落地后走路前那一关会把喷气背包关上。
  */
 public class MovementFlyUp extends Movement {
@@ -155,8 +155,8 @@ public class MovementFlyUp extends Movement {
             state.setInput(Input.JUMP, position.y < dest.y + CLEAR_ABOVE);
             return state;
         }
-        // 到了正上方：悬停时蹲着往下落，踩稳就算到。
-        state.setInput(Input.SNEAK, true);
+        // 到了正上方：什么都不按，悬停着慢慢落下，踩稳就算到。原先按潜行往下落，下降速度碰上落地防护的线，
+        // 实机追僵尸时落地防护接手、自卫被打断，一刀没出。
         return state;
     }
 

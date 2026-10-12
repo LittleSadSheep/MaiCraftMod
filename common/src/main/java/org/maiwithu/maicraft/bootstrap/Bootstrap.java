@@ -258,9 +258,10 @@ public final class Bootstrap {
                 new DigOutNeed(new SurvivalSituation.FromPlayer(),
                         () -> new NativeBlockBreaking(interactionSender, menuActions)),
                 new BreathNeed(new SurvivalSituation.FromPlayer(), ceilings, new LiveAirRoutes()),
-                // 走路里的落地救援、喷气背包飞的那一段自己管着上下时，落地防护让开。
+                // 走路里的落地救援、喷气背包飞的那一段、寻路"飞上去"那一步自己管着上下时，落地防护让开。
                 new FallNeed(new SurvivalSituation.FromPlayer(), fallRescues,
-                        () -> BaritoneInternals.landingInProgress() || ClientHooks.flightControlled()),
+                        () -> BaritoneInternals.landingInProgress() || ClientHooks.flightControlled()
+                                || BaritoneInternals.flyingUp()),
                 // 自家人打角色只发事件、不停工；别的玩家打角色退开举盾、停下等 LLM 决定。
                 // 夜里撤不掉又打不过：自卫接同一套挖三填一。
                 new SelfDefenseNeed(combatSenses, new LiveBattleMoves(walks, interactions.heldProjection(), ranged), events,

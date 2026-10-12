@@ -120,6 +120,15 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
         return best;
     }
 
+    /**
+     * 落地防护问：此刻是不是正在"飞上去"、而且喷气背包开着——这时悬停着往下落是走路自己管着的，落地防护让开；
+     * 喷气背包被关了（真掉下去）就不算，照样兜底。
+     */
+    public static boolean flyingUp() {
+        BaritoneInternals internals = ATTACHED.get();
+        return internals != null && internals.active != null && WalkGear.flyUpNow(internals.pathing()) && flyUpReady();
+    }
+
     /** 走到"飞上去"那一步：装备已经开好了吗。 */
     public static boolean flyUpReady() {
         BaritoneInternals internals = ATTACHED.get();

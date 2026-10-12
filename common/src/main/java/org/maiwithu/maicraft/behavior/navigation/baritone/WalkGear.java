@@ -83,7 +83,7 @@ final class WalkGear {
     }
 
     // 路线这一步是不是"飞上去"。
-    private static boolean flyUpNow(PathingBehavior pathing) {
+    static boolean flyUpNow(PathingBehavior pathing) {
         PathExecutor executor = pathing == null ? null : pathing.getCurrent();
         if (executor == null) return false;
         var movements = executor.getPath().movements();
