@@ -127,7 +127,9 @@ final class EatTask extends PhasedTask<EatTask.Phase> {
                     .remaining("再吃 " + unitsLeft() + " 件 " + input.itemId())
                     .details(new EatDetails(List.copyOf(effectsGained))).build());
         }
-        if (carried() <= 0) {
+        // 这一件开吃时身上就没有了才算缺：吃最后一件时它在嘴里没了，身上数到 0 是吃进去了，
+        // 等按住动作确认完再记账（原先这里抢先判"身上已经没有"，金苹果吃下去了结果却写失败）。
+        if (baseline <= 0 && carried() <= 0) {
             return Next.fail(new Problem(Problem.Kind.NEED_ITEM,
                     "身上已经没有" + input.itemId() + "了，还差 " + unitsLeft() + " 件没吃", null));
         }

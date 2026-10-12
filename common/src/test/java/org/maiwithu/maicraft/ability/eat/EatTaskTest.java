@@ -256,6 +256,26 @@ class EatTaskTest {
     }
 
     @Test
+    void 吃最后一件_身上数到零也是吃进去了() {
+        // 实机（全量测试 10-12）：只有一个金苹果，吃下去了，结果却写"身上已经没有了"、失败、不记消耗。
+        Rig rig = new Rig().bread(1, 0);
+        EatTask eat = rig.task(1);
+        boolean[] dipped = {false};
+        rig.worldStep = r -> {
+            r.confirmAnythingPending();
+            if (r.sender.submissions.size() >= 1 && r.sender.last != null && r.sender.last.terminal() && !dipped[0]) {
+                r.backpack.set(BREAD, 0);
+                dipped[0] = true;
+            }
+        };
+        TickResult result = rig.run(eat, 60);
+        assertTrue(result instanceof TickResult.Finished finished
+                && finished.result().status() == TaskResult.Status.DONE, () -> "应该吃完：" + result);
+        assertEquals(1, ((TickResult.Finished) result).result().changes().stream()
+                .filter(change -> change.kind() == Change.Kind.ITEM_CONSUMED).mapToInt(change -> change.count()).sum());
+    }
+
+    @Test
     void 数量没少就不冒充吃饱_失败带着饥饿值() {
         Rig rig = new Rig().bread(2, 2);
         rig.worldStep = Rig::confirmAnythingPending;
