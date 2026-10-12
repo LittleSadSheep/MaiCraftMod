@@ -80,7 +80,7 @@ final class FindTask extends PhasedTask<FindTask.Phase> {
             return Next.done(FindSettlement.done(input, found, countByType(found)));
         }
         if (round.complete()) {
-            return Next.done(FindSettlement.insufficient(input, found, countByType(found)));
+            return Next.done(FindSettlement.insufficient(input, found, countByType(found), round.hiddenLead()));
         }
         return Next.stay();
     }

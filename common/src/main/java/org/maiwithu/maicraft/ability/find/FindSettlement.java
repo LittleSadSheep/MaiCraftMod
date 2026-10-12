@@ -25,7 +25,14 @@ final class FindSettlement {
     /** 扫完了却不够数：有收获按部分完成，一个都没有按没找到失败；两种都写明查了多大范围。 */
     static TaskResult insufficient(FindInput input, List<FindDetails.Found> found,
             Map<String, Integer> byType) {
-        Problem problem = Problem.of(Problem.Kind.NOT_FOUND, searched(input),
+        return insufficient(input, found, byType, null);
+    }
+
+    /** 同上；{@code hiddenLead} 是范围内被挡住、看不见的那些的线索（几只、最近一只的方位），没有为 null。 */
+    static TaskResult insufficient(FindInput input, List<FindDetails.Found> found,
+            Map<String, Integer> byType, String hiddenLead) {
+        Problem problem = Problem.of(Problem.Kind.NOT_FOUND,
+                searched(input) + (hiddenLead == null ? "" : "；" + hiddenLead),
                 "走近一些再找，或先用出行到大概念有的地方再找；要搜更大的范围要靠勘察，还没有");
         if (found.isEmpty()) {
             return TaskResult.failed("寻找：这一片没有找到" + String.join("、", input.selectors()), problem);

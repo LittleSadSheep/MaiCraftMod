@@ -139,6 +139,9 @@ final class LiveFinder implements FindsAround {
         List<Hit> hits = new ArrayList<>();
         Set<Integer> seen = new HashSet<>();
         double reach = (double) input.radius() * input.radius();
+        int hidden = 0;
+        BlockPos nearestHidden = null;
+        double nearestHiddenDistance = 0;
         for (Entity entity : level.entitiesForRendering()) {
             // 角色自己不算目标；部件不是一条：末影龙的身子各段折到主体，一条就是一条。
             if (entity == player || entity.isRemoved() || entity instanceof EnderDragonPart) {
@@ -150,8 +153,15 @@ final class LiveFinder implements FindsAround {
             if (entity.blockPosition().distSqr(center) > reach) {
                 continue;
             }
-            // 被墙挡住的实体不冒充看见：跑过去或看得见了再算。
+            // 被墙挡住的实体不冒充看见：跑过去或看得见了再算；但记下有几只、最近一只在哪，
+            // 找不够时交代出去（真人听得见山那边的羊叫，知道往哪边走），不让结论读成"附近没有"。
             if (!ObservationVisibility.entity(player, entity)) {
+                hidden++;
+                double distance = Math.sqrt(entity.blockPosition().distSqr(center));
+                if (nearestHidden == null || distance < nearestHiddenDistance) {
+                    nearestHidden = entity.blockPosition();
+                    nearestHiddenDistance = distance;
+                }
                 continue;
             }
             if (!seen.add(entity.getId())) {
@@ -172,7 +182,10 @@ final class LiveFinder implements FindsAround {
                     entity.getId(), creatureProtected, reason, ClientEntitySight.traits(entity)));
         }
         // 实体清单一刻读得完：这轮就是全部，如实报扫完。
-        return new Round(List.copyOf(hits), true, false);
+        String hiddenLead = hidden == 0 ? null : "范围内另有 " + hidden + " 只被挡住、看不见，最近一只在 ("
+                + nearestHidden.getX() + ", " + nearestHidden.getY() + ", " + nearestHidden.getZ() + ")，约 "
+                + Math.round(nearestHiddenDistance) + " 格，走过去看得见了再找";
+        return new Round(List.copyOf(hits), true, false, hiddenLead);
     }
 
     // 有名字、被驯服、拴着绳、圈养着，占哪条就写哪条：照常报告，但能不能动归许可。

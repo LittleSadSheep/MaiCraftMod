@@ -28,10 +28,14 @@ public interface FindsAround {
      * @param complete     愿意找的范围扫完了没有
      * @param worldChanged 扫描期间换了世界：这轮结果作废，任务如实结束，不冒充结论
      */
-    record Round(List<Hit> hits, boolean complete, boolean worldChanged) {
+    record Round(List<Hit> hits, boolean complete, boolean worldChanged, String hiddenLead) {
 
         public Round {
             hits = List.copyOf(hits);
+        }
+
+        Round(List<Hit> hits, boolean complete, boolean worldChanged) {
+            this(hits, complete, worldChanged, null);
         }
     }
 
