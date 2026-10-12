@@ -42,8 +42,11 @@ public final class LostItemsNeed implements SurvivalNeed {
 
     /** 掉落物在地上待满五分钟（6000 刻）就消失；留十秒余量，到不了就别白跑。 */
     static final long DESPAWN_TICKS = 6000 - 200;
-    /** 离死的地方这么远（格）以内才回去：重生在几百格外的床边，跑回去东西早没了。 */
-    static final double REACH_BLOCKS = 160;
+    /**
+     * 离死的地方这么远（格）以内才回去：疾跑一秒五六格，四百格一分多钟，五分钟里来得及；
+     * 再远（重生在千把格外的床边）跑回去东西多半没了。来不来得及另按剩下的时间判断。
+     */
+    static final double REACH_BLOCKS = 400;
 
     private final ReadsPlayer players;
     private final RecoversDrops recovery;
