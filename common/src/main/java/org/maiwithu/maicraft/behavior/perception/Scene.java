@@ -288,8 +288,8 @@ public final class Scene {
     }
 
     /**
-     * observe 列出来的实体：敌对的、盯着角色的、有名字的、玩家，不论远近都列；其他的只列三十二格以内。
-     * 远处不相干的蝙蝠、鱿鱼、掉落物只按种类计数（见 {@link #distantCounts}），要找哪一种用 find。
+     * observe 列出来的实体：盯着角色的、有名字的、玩家、看得见的敌对生物，不论远近都列；其他的只列三十二格以内。
+     * 远处不相干的蝙蝠、鱿鱼、掉落物，以及远处看不见的敌对生物只按种类计数（见 {@link #distantCounts}），要找哪一种用 find。
      * 场景自己的实体列表仍然完整，战斗、跟随、找东西照常从里面认编号。
      */
     public List<SceneEntity> listedEntities() {
@@ -309,10 +309,12 @@ public final class Scene {
         return sorted;
     }
 
-    // 要逐只列出来的：会威胁角色的、有主的、别的玩家，或者就在近处的。
+    // 要逐只列出来的：盯着角色的、有主的、别的玩家、就在近处的，以及看得见的敌对生物。
+    // 远处看不见、也没盯着角色的敌对生物（脚下几十格洞穴里的僵尸骷髅）只计数：它们不影响眼下的决定，
+    // 山地出生点一眼就有七十只，逐只列会把一次观察撑到两万多字。
     private static boolean listed(SceneEntity entity) {
-        return entity.hostile() || entity.targetingMe() || entity.name() != null
-                || PLAYER.equals(entity.type()) || entity.distance() <= LISTED_RADIUS;
+        return entity.targetingMe() || entity.name() != null || PLAYER.equals(entity.type())
+                || entity.distance() <= LISTED_RADIUS || entity.hostile() && entity.visible();
     }
 
     /**

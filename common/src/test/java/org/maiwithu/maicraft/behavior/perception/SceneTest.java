@@ -141,18 +141,21 @@ class SceneTest {
                 WorldPosition.here(60, 40, 0), false, false, false, null, Map.of()));
         crowd.add(new EntitySight.Observation(3000, "minecraft:skeleton", null,
                 WorldPosition.here(0, 64, -60), true, true, false, null, Map.of()));
+        // 脚下洞穴里看不见、没盯着角色的僵尸：只计数。
+        crowd.add(new EntitySight.Observation(3003, "minecraft:zombie", null,
+                WorldPosition.here(0, -30, 40), false, true, false, null, Map.of()));
         crowd.add(new EntitySight.Observation(3001, "minecraft:wolf", "小白",
                 WorldPosition.here(50, 64, 0), true, false, false, null, Map.of()));
         crowd.add(new EntitySight.Observation(3002, "minecraft:cow", null,
                 WorldPosition.here(5, 64, 0), true, false, false, null, Map.of()));
         scene.updateEntities(10, crowd);
-        assertEquals(34, scene.entities().size(), "场景自己的列表照样完整");
+        assertEquals(35, scene.entities().size(), "场景自己的列表照样完整");
         List<String> listed = scene.listedEntities().stream().map(SceneEntity::type).toList();
         assertEquals(List.of("minecraft:skeleton", "minecraft:wolf", "minecraft:cow"), listed,
-                "远处的敌对、有名字的照列，近处的照列");
-        assertEquals(Map.of("minecraft:squid", 30, "minecraft:bat", 1), scene.distantCounts());
+                "远处看得见的敌对、有名字的照列，近处的照列");
+        assertEquals(Map.of("minecraft:squid", 30, "minecraft:bat", 1, "minecraft:zombie", 1), scene.distantCounts());
         assertEquals("minecraft:squid", scene.distantCounts().keySet().iterator().next(), "多的在前");
-        assertTrue(scene.summary().contains("32 格外另有 31 个"), scene.summary());
+        assertTrue(scene.summary().contains("32 格外另有 32 个"), scene.summary());
     }
 
     @Test
