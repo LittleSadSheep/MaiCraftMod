@@ -5,6 +5,7 @@ import org.maiwithu.maicraft.behavior.combat.ThreatAssessment;
 
 import org.junit.jupiter.api.Test;
 
+import org.maiwithu.maicraft.kernel.interrupt.KeepsCompany;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.Task;
@@ -73,6 +74,36 @@ class SurvivalBranchTest {
         now[0] = night;
         autoSleep.enable();
         assertEquals(Urgency.LATER, need.urgency(tick));
+    }
+
+    /** 陪人的任务替身：只答陪着的人睡没睡。 */
+    private static final class Companion implements Task, KeepsCompany {
+        boolean asleep;
+
+        @Override public boolean companionAsleep() { return asleep; }
+        @Override public TickResult tick(TickContext context) { return TickResult.RUNNING; }
+        @Override public void pause() {}
+        @Override public TaskResult close(CloseReason reason) { return TaskResult.done("结束"); }
+        @Override public String describe() { return "陪着人"; }
+    }
+
+    @Test
+    void nightWhileKeepingCompanyWaitsForTheCompanionToSleep() {
+        // 跟着一个人：他还醒着就不自己走开去睡；他躺下了才去附近找床睡。露天又打不过照旧挖坑自保。
+        NightfallNeed.Facts night = new NightfallNeed.Facts(true, false, ThreatAssessment.Verdict.WINNABLE, 20, 15);
+        NightfallNeed.Facts danger = new NightfallNeed.Facts(true, false, ThreatAssessment.Verdict.OUTMATCHED, 20, 15);
+        NightfallNeed.Facts[] now = {night};
+        NightfallNeed need = new NightfallNeed(context -> now[0], () -> null, context -> true, context -> null);
+        TickContext tick = TickContext.of(0, null);
+        Companion company = new Companion();
+        assertNull(need.urgency(tick, company), "他醒着：不去睡");
+        company.asleep = true;
+        assertEquals(Urgency.LATER, need.urgency(tick, company), "他睡下了：找空当去睡");
+        company.asleep = false;
+        now[0] = danger;
+        assertEquals(Urgency.SOON, need.urgency(tick, company), "露天打不过照旧挖坑");
+        now[0] = night;
+        assertEquals(Urgency.LATER, need.urgency(tick, null), "手上不是陪人的任务：照常去睡");
     }
 
     @Test

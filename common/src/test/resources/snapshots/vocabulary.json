@@ -162,7 +162,8 @@
     "reminder",
     "discovered",
     "hurt",
-    "dimension_changed"
+    "dimension_changed",
+    "follow_status"
   ],
   "chat_kinds": [
     "player",

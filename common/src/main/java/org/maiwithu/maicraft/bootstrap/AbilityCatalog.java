@@ -35,9 +35,11 @@ import org.maiwithu.maicraft.ability.explore.ExploreAbility;
 import org.maiwithu.maicraft.ability.fight.FightModule;
 import org.maiwithu.maicraft.ability.fish.FishModule;
 import org.maiwithu.maicraft.ability.fight.LiveFightMoves;
+import org.maiwithu.maicraft.behavior.combat.LiveBattleMoves;
 import org.maiwithu.maicraft.behavior.combat.ModRangedWeapons;
 import org.maiwithu.maicraft.ability.fight.LiveSeenTargets;
 import org.maiwithu.maicraft.ability.follow.FollowModule;
+import org.maiwithu.maicraft.ability.follow.LiveFollowMoves;
 import org.maiwithu.maicraft.ability.follow.LiveFollowView;
 import org.maiwithu.maicraft.ability.gather.ApproachesTargets;
 import org.maiwithu.maicraft.ability.find.FindModule;
@@ -511,8 +513,22 @@ public final class AbilityCatalog {
                         // 拾荒和采集、打猎共用一套捡掉落物。
                         new ClientDropPickup(deps.context(), deps.walks(), deps.dropConfirmations())), permission));
 
-        // 跟随：常驻任务，目标从场景的观察编号找。
-        registry.register(new FollowModule(deps.walks(), new LiveFollowView(deps.scene().seen())));
+        // 跨维度出行的现场部件一次拼好：找门、进门、建门与末地门房间，出行与跟着过门共用。
+        DimensionTravelServices portals = new DimensionTravelServices(
+                new ClientDimensionWorld(deps.context(),
+                        new PortalFinder(deps.context(), deps.blockScans()), deps.blockScans()),
+                deps.context(),
+                deps.walks(), shared.innerNeeds(), shared.toMainhand(),
+                new LiveBlockUses(deps.interactions()), construction,
+                deps.memory(), deps.walkInternals(), deps.travelProgress());
+
+        // 跟随：常驻任务，目标从场景的观察编号找；坐车先认原版的船与骆驼，过门走出行的跨维度段，
+        // 帮打用和自卫同一套战斗动手，跟不过去、跟丢了经事件出口告诉宿主。
+        registry.register(new FollowModule(deps.walks(), new LiveFollowView(deps.scene().seen()),
+                new LiveFollowMoves(deps.walks(), deps.interactions(), List.of(), portals, deps.senses(),
+                        new LiveBattleMoves(deps.walks(), deps.useKeyProjection(),
+                                new ModRangedWeapons(deps.compat()::rangedWeapons, deps.foods()))),
+                deps.events()));
 
         // 等待：只看世界，不依赖接缝。
         registry.register(new WaitModule());
@@ -526,14 +542,7 @@ public final class AbilityCatalog {
         // 联动登记的出行方式（电梯、喷气背包、火车）进世界时建好交给出行：远处或走不通时比它们的报价。
         registry.register(new TravelAbility(deps.walks(),
                 new DestinationResolver(deps.travelWorld(), deps.memory(), new SceneSeenTargets(deps::scene)),
-                deps.walkInternals(), deps.travelProgress(),
-                new DimensionTravelServices(
-                        new ClientDimensionWorld(deps.context(),
-                                new PortalFinder(deps.context(), deps.blockScans()), deps.blockScans()),
-                        deps.context(),
-                        deps.walks(), shared.innerNeeds(), shared.toMainhand(),
-                        new LiveBlockUses(deps.interactions()), construction,
-                        deps.memory(), deps.walkInternals(), deps.travelProgress()),
+                deps.walkInternals(), deps.travelProgress(), portals,
                 deps.travelWorld(), travelModes(deps, services)));
 
         // 寻找：方块与实体扫已加载区，结构查记过的产地线索；命中直接在场景的观察编号表上领编号。

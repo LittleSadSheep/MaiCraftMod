@@ -92,6 +92,7 @@ final class PanelWords {
             case DISCOVERED -> "发现";
             case HURT -> "挨打";
             case DIMENSION_CHANGED -> "换维度";
+            case FOLLOW_STATUS -> "跟随";
         };
     }
 

@@ -2,12 +2,15 @@
 package org.maiwithu.maicraft.game.world;
 
 import java.util.Optional;
+import java.util.UUID;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.multiplayer.PlayerInfo;
 
+import org.maiwithu.maicraft.game.player.PlayerContext;
+
 /**
- * 当前连接的玩家列表（Tab 列表）：按名字查在线玩家的编号。只在客户端线程调用。
+ * 当前连接的玩家列表（Tab 列表）：按名字查在线玩家的编号、按编号问在不在线。只在客户端线程调用。
  */
 public final class OnlinePlayers {
 
@@ -21,5 +24,14 @@ public final class OnlinePlayers {
         ClientPacketListener connection = minecraft.getConnection();
         PlayerInfo info = connection == null ? null : connection.getPlayerInfo(name);
         return info == null ? Optional.empty() : Optional.of(info.getProfile().getId().toString());
+    }
+
+    /**
+     * 这个编号的玩家此刻在不在玩家列表里：看不见他不等于他下线了，走出能看见的范围时他照样在列表里。
+     * 还没连上服务器时答不在。
+     */
+    public static boolean online(PlayerContext context, UUID id) {
+        ClientPacketListener connection = context.connection();
+        return connection != null && connection.getPlayerInfo(id) != null;
     }
 }

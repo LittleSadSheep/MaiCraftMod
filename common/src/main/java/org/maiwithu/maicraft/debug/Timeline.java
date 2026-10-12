@@ -102,6 +102,7 @@ final class Timeline {
             // 挨打是正在发生的麻烦，用等待色提醒主播看一眼；换维度只是一个经过
             case HURT -> PanelColor.WAITING;
             case DIMENSION_CHANGED -> PanelColor.MINOR;
+            case FOLLOW_STATUS -> PanelColor.MINOR;
             case STEP_FINISHED, TEMPORARY_TASK_FINISHED, DEATH_RECOVERY_APPLIED -> PanelColor.MINOR;
             case DISCOVERED -> PanelColor.MINOR;
             case FINISHED -> event.status() == null ? PanelColor.MINOR : switch (event.status()) {

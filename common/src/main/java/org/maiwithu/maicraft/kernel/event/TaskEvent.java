@@ -57,7 +57,12 @@ public record TaskEvent(long cursor, Kind kind, long goalRunId, String message, 
          */
         HURT,
         /** 换了维度：从哪到哪、落在哪在消息里（走门过去、重生到另一个维度都算）。 */
-        DIMENSION_CHANGED
+        DIMENSION_CHANGED,
+        /**
+         * 跟随的状况变了：跟不过去停下等、跟丢了在找、又跟上了、跟着过门、上下他那辆载具、开始与结束帮他打；
+         * 发生了什么、他在哪、我在哪在消息里。角色不因这条停下等回答，照常跟着。
+         */
+        FOLLOW_STATUS
     }
 
     public TaskEvent {

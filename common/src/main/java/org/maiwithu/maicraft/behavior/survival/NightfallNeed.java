@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.survival;
 
 import org.maiwithu.maicraft.behavior.combat.ThreatAssessment;
 
+import org.maiwithu.maicraft.kernel.interrupt.KeepsCompany;
 import org.maiwithu.maicraft.kernel.interrupt.SurvivalNeed;
 import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -90,12 +91,19 @@ public final class NightfallNeed implements SurvivalNeed {
 
     @Override
     public Urgency urgency(TickContext context) {
+        return urgency(context, null);
+    }
+
+    @Override
+    public Urgency urgency(TickContext context, Task currentTask) {
         Facts facts = reader.read(context);
         if (facts == null) {
             return null;
         }
         // 夜里自动去睡被关掉（例如多人游戏有人说"晚上别睡"）：当作弄不到床，不去睡；露天打不过照旧挖坑。
-        return branch(facts, autoSleep.enabled() && beds.bedReady(context));
+        // 正陪着一个人（跟随）而他还醒着：同样当作弄不到床，不自己走开去睡，免得把人跟丢；他躺下了才去附近找床睡。
+        boolean companionAwake = currentTask instanceof KeepsCompany company && !company.companionAsleep();
+        return branch(facts, !companionAwake && autoSleep.enabled() && beds.bedReady(context));
     }
 
     @Override

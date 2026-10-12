@@ -202,7 +202,7 @@
       },
       {
         "ability": "maicraft:follow",
-        "summary": "跟着一位玩家或一个实体，保持几格距离，它走就跟、它停就停",
+        "summary": "跟着一位玩家或一个实体，保持几格距离：它走就跟、它停就停，跟着上车、过门，它在打怪时上去帮忙",
         "parameters": "distance: integer = 3",
         "targets": [
           "player",
@@ -1149,7 +1149,7 @@
     },
     {
       "ability": "maicraft:follow",
-      "summary": "跟着一位玩家或一个实体，保持几格距离，它走就跟、它停就停",
+      "summary": "跟着一位玩家或一个实体，保持几格距离：它走就跟、它停就停，跟着上车、过门，它在打怪时上去帮忙",
       "parameters": [
         {
           "name": "distance",
