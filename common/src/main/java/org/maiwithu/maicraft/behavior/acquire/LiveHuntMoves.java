@@ -9,6 +9,8 @@ import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 
 import org.maiwithu.maicraft.behavior.combat.MeleeStrike;
+import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
+import it.unimi.dsi.fastutil.longs.LongSets;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.game.world.InteractionRange;
@@ -67,6 +69,36 @@ public final class LiveHuntMoves implements HuntMoves {
     @Override public Action walkTo(double x, double y, double z) {
         return new WalkMove(walks, new double[] {x, y, z});
     }
+
+    @Override public Action walkToArea(double x, double y, double z) {
+        return new Action() {
+            private Action walk;
+
+            @Override public ActionStatus tick(TickContext context) {
+                if (walk == null) {
+                    // 到那一列附近（四格内）哪个高度都算；可以临时垫块翻过小坎，事后收回。
+                    walk = walks.start(new GoalCompiler.Compiled(NavGoal.column((int) Math.floor(x), (int) Math.floor(z),
+                            AREA_RADIUS), LongSets.emptySet()), TerrainPermit.TEMPORARY);
+                }
+                return walk.tick(context);
+            }
+
+            @Override public void pause() {
+                if (walk != null) walk.pause();
+            }
+
+            @Override public void close() {
+                if (walk != null) walk.close();
+            }
+
+            @Override public String describe() {
+                return walk == null ? "走出去找猎物" : walk.describe();
+            }
+        };
+    }
+
+    /** 搜索点到这么近（格）就算到了那一片。 */
+    private static final double AREA_RADIUS = 4.0;
 
     @Override public double[] selfPosition(TickContext context) {
         var self = context.player() == null ? null : context.player().localPlayer();

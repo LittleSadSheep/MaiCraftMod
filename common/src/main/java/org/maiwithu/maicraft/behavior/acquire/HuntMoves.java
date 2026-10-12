@@ -24,6 +24,14 @@ public interface HuntMoves {
     /** 朝一个位置走过去（只走不改）。 */
     Action walkTo(double x, double y, double z);
 
+    /**
+     * 走到一片地方去找猎物：只认水平位置，到了那一列附近哪个高度都算（山地里按出发时的高度去找，
+     * 点常在山体里或半空中，寻路对着它绕远路一分钟没进展）。默认按给的高度走。
+     */
+    default Action walkToArea(double x, double y, double z) {
+        return walkTo(x, y, z);
+    }
+
     /** 此刻角色所在的位置。 */
     double[] selfPosition(TickContext context);
 }

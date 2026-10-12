@@ -145,7 +145,7 @@ public final class LiveHunts implements Hunts {
                 return nextPointOrGiveUp(tick);
             }
             keep("出去找 " + (int) point.x() + "," + (int) point.z(),
-                    () -> moves.walkTo(point.x(), point.y(), point.z()));
+                    () -> moves.walkToArea(point.x(), point.y(), point.z()));
             boolean finished = stepCurrent(tick, "走出去看一片");
             if (++stageTicks > PER_POINT_TICKS && current == null) {
                 notes.add("走不到搜索点 " + (int) point.x() + "," + (int) point.z() + "，换下一个");
