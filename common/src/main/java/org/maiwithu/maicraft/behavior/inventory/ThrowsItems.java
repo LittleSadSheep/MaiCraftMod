@@ -119,6 +119,14 @@ public final class ThrowsItems implements Action {
             batch = new MenuDropBatch(player.localPlayer().getInventory().selected, remaining);
             return ActionStatus.progressed();
         }
+        // 上一件事留下的界面（工作台、箱子、过滤器）还开着、光标上还挂着东西：先关上回到世界里再丢，像人先按 Esc。
+        // 原先直接丢，程序报错，腾地方、拿东西接连失败。
+        try {
+            if (player.localPlayer() != null && player.menuActions() != null
+                    && !player.menuActions().ensureWorldVisible(player)) return ActionStatus.running();
+        } catch (RuntimeException stuck) {
+            return ActionStatus.failed(Problem.of(Problem.Kind.REFUSED_BY_GAME, "开着的界面关不掉，丢不了：" + stuck.getMessage()));
+        }
         plannedThisThrow = held.getCount() <= remaining ? held.getCount() : 1;
         ItemStack before = held.copy();
         pending = player.interactionSender().dropSelected(player, before, plannedThisThrow > 1,

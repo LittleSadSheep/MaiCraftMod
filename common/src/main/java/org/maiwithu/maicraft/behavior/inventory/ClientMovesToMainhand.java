@@ -177,6 +177,15 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
         private ActionStatus menuStage(PlayerContext player) {
             MenuActions actions = player.menuActions();
             if (menuPending == null) {
+                // 上一件事留下的工作台、过滤器这类界面还开着：像人一样先按 Esc 关上，再开自己的背包换东西。
+                // 原先直接在别的界面上换快捷栏，程序报错，吃饭、拿东西接连失败。
+                if (player.localPlayer().containerMenu != player.localPlayer().inventoryMenu) {
+                    try {
+                        if (!actions.ensureWorldVisible(player)) return ActionStatus.running();
+                    } catch (RuntimeException stuck) {
+                        return fail("开着的界面关不掉：" + stuck.getMessage());
+                    }
+                }
                 if (!actions.ensureVisible(player)) return ActionStatus.running();
                 // 换之前先把旧快捷栏物品的格冻结进确认条件：交换必须两端都对上调换才算数。
                 int hotbar = hotbarTarget >= 0 ? hotbarTarget

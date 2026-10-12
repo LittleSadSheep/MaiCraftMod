@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Consumer;
 
 /**
  * 控制循环：每刻决定角色听谁的，并推进那个任务一刻。
@@ -92,6 +93,18 @@ public final class ControlLoop {
     private Interruptibility askedInterruptibility;
     /** 本刻想插进来、却被打断规则按住或正等着再试的需求；没有时为 null。只给面板看。 */
     private HeldBackNeed heldBackNeed;
+    /** 上一次推进的是哪个任务：换了一件事做时先叫换手收尾。 */
+    private Task lastAdvanced;
+    /** 换一件事做、新的那件推进之前叫一次（关掉上一件留下的界面）；没接为空操作。 */
+    private Consumer<TickContext> onSwitch = context -> {};
+
+    /**
+     * 换一件事做（插进临时任务、做完回到下面那件、换了主任务）时、新的那件推进之前叫一次：
+     * 生产里关掉上一件留下的工作台、过滤器界面，像人先按 Esc 再干别的。
+     */
+    public void onTaskSwitch(Consumer<TickContext> hook) {
+        this.onSwitch = Objects.requireNonNull(hook, "hook");
+    }
 
     /** 各生存需求在启动时登记一次；顺序决定同样急时谁先插进来。 */
     public ControlLoop(List<SurvivalNeed> needs) {
@@ -411,6 +424,11 @@ public final class ControlLoop {
 
     /** 推进这一层一刻（第一次推进时先 start）；它若走到结局就弹出，临时任务没做成时它的需求先缓一阵。 */
     private Decision advance(Frame frame, TickContext context, SurvivalNeed deferred) {
+        // 换了一件事做：先让上一件留下的界面关上，新的这件再动手。
+        if (frame.task != lastAdvanced) {
+            if (lastAdvanced != null) onSwitch.accept(context);
+            lastAdvanced = frame.task;
+        }
         TickResult result;
         if (!frame.started) {
             frame.started = true;

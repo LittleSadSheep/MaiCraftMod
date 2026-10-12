@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
+import org.maiwithu.maicraft.game.interaction.PendingInteraction;
 import org.maiwithu.maicraft.game.menu.PendingMenuAction;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -171,7 +172,8 @@ final class CreateFilterSettings implements ItemSettings {
     private final class Editing implements Action {
         private enum Stage { HAND, OPEN, EDIT, CLOSE, FINISHED }
 
-        private static final int OPEN_HOLD_TICKS = 10;
+        /** 右键后等过滤器界面打开的期限（刻）。 */
+        private static final int OPEN_TIMEOUT_TICKS = 20;
         private static final int CLOSE_TIMEOUT_TICKS = 40;
 
         private final int inventorySlot;
@@ -179,6 +181,7 @@ final class CreateFilterSettings implements ItemSettings {
         private Stage stage = Stage.HAND;
         private Action current;
         private PendingMenuAction closing;
+        private PendingInteraction opening;
         private Problem problem;
 
         Editing(int inventorySlot, List<Step> steps) {
@@ -191,9 +194,7 @@ final class CreateFilterSettings implements ItemSettings {
             if (player == null || player.localPlayer() == null) return ActionStatus.running();
             return switch (stage) {
                 case HAND -> run(context, () -> toHand(player.localPlayer()), Stage.OPEN, "没能把过滤器拿到主手");
-                case OPEN -> run(context, () -> services.interactions().useHeldItem(InteractionHand.MAIN_HAND,
-                        c -> compat.filterMenuOpen(c.localPlayer()) ? InteractionConfirmation.Verdict.APPLIED
-                                : InteractionConfirmation.Verdict.PENDING, OPEN_HOLD_TICKS), Stage.EDIT, "过滤器的界面没打开");
+                case OPEN -> open(player);
                 case EDIT -> edit(player);
                 case CLOSE -> close(player);
                 case FINISHED -> problem == null ? ActionStatus.done() : ActionStatus.failed(problem);
@@ -222,15 +223,33 @@ final class CreateFilterSettings implements ItemSettings {
             if (status instanceof ActionStatus.Running) return status;
             current.close();
             current = null;
-            if (status instanceof ActionStatus.Failed broken) return finish(Problem.of(broken.problem().kind(),
+            if (status instanceof ActionStatus.Failed broken) return finish(context.player(), Problem.of(broken.problem().kind(),
                     failed + "：" + broken.problem().message()));
             stage = next;
             return ActionStatus.progressed();
         }
 
+        // 右键一下手里的过滤器：原版这一下就打开过滤器界面，不是吃东西那样的持续使用；界面开了就算成。
+        // 原先按持续使用等"开始使用"，界面明明开了也判没打开，还把界面留着没关，人卡在界面里走不动。
+        private ActionStatus open(PlayerContext player) {
+            if (opening == null) {
+                opening = player.interactionSender().useItem(player, InteractionHand.MAIN_HAND,
+                        c -> compat.filterMenuOpen(c.localPlayer()) ? InteractionConfirmation.Verdict.APPLIED
+                                : InteractionConfirmation.Verdict.PENDING, OPEN_TIMEOUT_TICKS);
+                return ActionStatus.running();
+            }
+            if (!opening.terminal()) opening = player.interactionSender().poll(player, opening);
+            if (!opening.terminal()) return ActionStatus.running();
+            if (opening.status() != PendingInteraction.Status.CONFIRMED_APPLIED && !compat.filterMenuOpen(player.localPlayer())) {
+                return finish(player, Problem.of(Problem.Kind.STUCK, "过滤器的界面没打开：" + opening.detail()));
+            }
+            stage = Stage.EDIT;
+            return ActionStatus.progressed();
+        }
+
         // 一刻一下；界面被关掉了就不再发，如实说。
         private ActionStatus edit(PlayerContext player) {
-            if (!compat.filterMenuOpen(player.localPlayer())) return finish(Problem.of(Problem.Kind.STUCK, "过滤器的界面中途关了"));
+            if (!compat.filterMenuOpen(player.localPlayer())) return finish(player, Problem.of(Problem.Kind.STUCK, "过滤器的界面中途关了"));
             Step next = steps.poll();
             if (next == null) {
                 stage = Stage.CLOSE;
@@ -257,14 +276,30 @@ final class CreateFilterSettings implements ItemSettings {
             return problem == null ? ActionStatus.done() : ActionStatus.failed(problem);
         }
 
-        private ActionStatus finish(Problem reason) {
+        // 做不下去了：界面还开着就先关上再收场（关的时候 Create 照样把已改的写进物品），不把界面留给后面的事。
+        private ActionStatus finish(PlayerContext player, Problem reason) {
             problem = reason;
+            if (player != null && compat.filterMenuOpen(player.localPlayer())) {
+                stage = Stage.CLOSE;
+                return ActionStatus.progressed();
+            }
             stage = Stage.FINISHED;
             return ActionStatus.failed(reason);
         }
 
         @Override public void close() {
             if (current != null) current.close();
+            // 中途被收掉（换活、被打断收尾）：过滤器界面还开着就交给原版关上，不留给后面的事。
+            PlayerContext player = services.context().get();
+            if (stage == Stage.FINISHED || closing != null || player == null || player.localPlayer() == null
+                    || !compat.filterMenuOpen(player.localPlayer())) {
+                return;
+            }
+            try {
+                player.menuActions().closeForTaskBoundary(player, CLOSE_TIMEOUT_TICKS, "改过滤器收尾");
+            } catch (RuntimeException notNow) {
+                // 这一刻交不出关界面（不在本刻的交互窗口里）：换任务时的收尾还会再关一次。
+            }
         }
 
         @Override public Interruptibility interruptibility() {

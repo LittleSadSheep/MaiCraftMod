@@ -82,6 +82,7 @@ import org.maiwithu.maicraft.behavior.survival.SurvivalSituation;
 import org.maiwithu.maicraft.game.ModIdentity;
 import org.maiwithu.maicraft.game.interaction.DefaultInteractionSender;
 import org.maiwithu.maicraft.game.interaction.InteractionSender;
+import org.maiwithu.maicraft.game.menu.LeftoverScreens;
 import org.maiwithu.maicraft.game.menu.MenuActions;
 import org.maiwithu.maicraft.game.loader.LoaderEnvironment;
 import org.maiwithu.maicraft.game.ChatLog;
@@ -254,7 +255,7 @@ public final class Bootstrap {
             ModRangedWeapons ranged, Function<PlayerContext, CatchesFall> fallRescues, Predicate<UUID> trusted,
             PicksUpDrops lostDrops) {
         // 角色死亡这类循环自身的处境变化也从同一条事件流出去；死亡决策从挂载口交给目标运行表。
-        return new ControlLoop(List.of(
+        ControlLoop loop = new ControlLoop(List.of(
                 new DigOutNeed(new SurvivalSituation.FromPlayer(),
                         () -> new NativeBlockBreaking(interactionSender, menuActions)),
                 new BreathNeed(new SurvivalSituation.FromPlayer(), ceilings, new LiveAirRoutes()),
@@ -276,6 +277,9 @@ public final class Bootstrap {
                 // 刚重生、身上的东西撒在死的地方：五分钟内跑回去捡。
                 new LostItemsNeed(LiveNightAndEdgeMoves.players(),
                         LiveNightAndEdgeMoves.lostItems(walks, lostDrops, events), events)), events, deathDecisions);
+        // 换一件事做之前先关掉上一件留下的界面（工作台、过滤器），再让新的那件动手。
+        loop.onTaskSwitch(context -> LeftoverScreens.close(context.player()));
+        return loop;
     }
 
     /**
