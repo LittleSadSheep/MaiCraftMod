@@ -11,6 +11,8 @@ import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.maiwithu.maicraft.behavior.navigation.calc.ThreatField;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
@@ -31,6 +33,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 被追上就面朝它退着还手；连着三次走不通就背水一战。
  */
 public final class Battle {
+
+    private static final Logger LOG = LoggerFactory.getLogger(Battle.class);
 
     /** 这一刻在做什么。 */
     public enum State { FIGHTING, SHOOTING, EVADING, RETREATING, HOLDING, ESCAPED, FINISHED, NEEDS_SHELTER }
@@ -107,6 +111,8 @@ public final class Battle {
     /** 上一刻每只的距离：估它冲过来多快，拉弓的距离带按它留。 */
     private final Map<Integer, Double> lastDistance = new HashMap<>();
     private String doing = "观察战场";
+    /** 上一行日志对着的那只。 */
+    private int loggedTarget = -1;
     /** 被拒的那个站位与还要绕开它几刻。 */
     private double[] rejectedAt;
     private int sidestepTicks;
@@ -167,6 +173,15 @@ public final class Battle {
             case Tactic.Finished finished -> finish();
         };
         for (Battlefield.Foe foe : field.foes()) lastDistance.put(foe.id(), foe.distance());
+        // 打法、对手换了记一行（对着谁、多远、点没点引信、我在哪），实机出事后对得上当时在做什么。
+        if (!moment.doing().equals(doing) || moment.targetId() != loggedTarget) {
+            loggedTarget = moment.targetId();
+            Battlefield.Foe foe = field.foes().stream().filter(f -> f.id() == moment.targetId()).findFirst().orElse(null);
+            LOG.info("[战斗] {}：{}{}，我在 {}", moment.state(), moment.doing(), foe == null ? ""
+                    : String.format("（%s #%d，%.1f 格，高差 %.1f%s）", foe.threat().type(), foe.id(), foe.distance(),
+                    foe.threat().y() - field.me().y(), foe.fusing() ? "，引信点着" : ""),
+                    String.format("%.1f, %.1f, %.1f", field.me().x(), field.me().y(), field.me().z()));
+        }
         doing = moment.doing();
         return moment;
     }
@@ -348,6 +363,18 @@ public final class Battle {
             if (swinging) moves.stepKeepingAim(context, step);
             else moves.step(context, target.id(), step);
             moved = !step.standing() || jumpNow;
+        } else if (threat.kind() == ThreatAssessment.Kind.EXPLOSIVE) {
+            // 苦力怕不在眼前同一层的平地上（隔着坑、差着高、要绕路搭桥）：不寻路凑过去——绕路、搭桥时人慢，
+            // 它一贴近就点火，实机就是潜行着往苦力怕那边挪被炸。原地守在它的点火距离外，等它走到平地跟前再砍；
+            // 看不见或不在同一层的记成够不着，它真贴上来自卫会再接手。
+            dropWalk();
+            List<Footwork.Hazard> hazards = sideHazards(field, target.id(), SIDE_MARGIN);
+            hazards.add(new Footwork.Hazard(threat.x(), threat.z(), CombatGeometry.CREEPER_IGNITE + SIDE_MARGIN));
+            Footwork.Step step = Footwork.choose(me.x(), me.z(), new Footwork.Stance(null, hazards, false),
+                    moves.ground(context));
+            moves.step(context, target.id(), step);
+            moved = !step.standing();
+            if (!threat.visible() || Math.abs(threat.y() - me.y()) > LEVEL_GAP) unreachable.add(target.id());
         } else {
             List<ThreatField.Threat> threats = pathThreats(field, -1);
             Vec3 focus = new Vec3(threat.x(), threat.y(), threat.z());
