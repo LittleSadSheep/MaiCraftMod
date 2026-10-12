@@ -11,6 +11,7 @@ import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
+import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -37,6 +38,8 @@ public final class HandThenClick implements Action {
     private final Supplier<InteractionConfirmation> confirmation;
     private Stage stage = Stage.HAND;
     private Action current;
+    /** 上一次对准时被挡住的站位：换站位重走一次时不再站它；没被挡过为 null。 */
+    private BlockPos blockedStand;
 
     /**
      * @param what         在做什么，给描述与失败说明，例如"把铁锭放上置物台"
@@ -62,6 +65,15 @@ public final class HandThenClick implements Action {
             if (current == null) return ActionStatus.done();
         }
         ActionStatus status = current.tick(context);
+        // 对准时被挡住（右键还没发出去）：换个站位重走一次，不再站刚才那一格；发出去之后的失败不重点。
+        if (status instanceof ActionStatus.Failed blocked && stage == Stage.CLICK && blockedStand == null
+                && blocked.problem().kind() == Problem.Kind.UNREACHABLE && standingCell() != null) {
+            blockedStand = standingCell();
+            current.close();
+            current = null;
+            stage = Stage.APPROACH;
+            return ActionStatus.progressed();
+        }
         if (status instanceof ActionStatus.Failed failed) {
             return ActionStatus.failed(Problem.of(failed.problem().kind(), what + "没做成：" + failed.problem().message(),
                     failed.problem().suggestion()));
@@ -83,9 +95,17 @@ public final class HandThenClick implements Action {
                 stage = Stage.APPROACH;
                 yield next();
             }
-            case APPROACH -> services.approach().toward(ApproachTarget.ofBlockPart(cell, face), permissions);
+            case APPROACH -> blockedStand == null
+                    ? services.approach().toward(ApproachTarget.ofBlockPart(cell, face), permissions)
+                    : services.approach().toward(ApproachTarget.ofBlockPart(cell, face), permissions, blockedStand::equals);
             case CLICK -> services.interactions().useBlockPart(cell, face, confirmation.get());
         };
+    }
+
+    // 角色此刻脚下那一格；不在世界里为 null。
+    private BlockPos standingCell() {
+        PlayerContext player = services.context().get();
+        return player == null || player.localPlayer() == null ? null : player.localPlayer().blockPosition();
     }
 
     @Override public void pause() {
