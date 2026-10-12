@@ -43,8 +43,14 @@ public final class EmergencyLanding {
         // 看不清下面落在哪（没加载、读不懂）时，掉得很快就当会掉血；看得清就按预计伤害算，护住了的（羽毛掉落、落在床上）不接手。
         if (ground == null) return player.getDeltaMovement().y <= FAST_FALL_SPEED;
         if (liquidOnTheWay(player, ground)) return false;
-        return predictedDamage(player, ground) > 0;
+        // 摔掉半颗心以内、血又还多：真人不会为这点伤开喷气背包、倒水桶。原先预计伤害大于零就接手，
+        // 实机在三格高的垫块上施工，一踩空就开喷气背包刹车，十五秒里来回九次。血少时照旧一点都不让摔。
+        float damage = predictedDamage(player, ground);
+        return damage >= MINOR_FALL_DAMAGE || damage > 0 && damage >= player.getHealth() - MINOR_FALL_DAMAGE;
     }
+
+    /** 这么点摔伤（生命值，2 = 一颗心）以内、血又还多就不出手接。 */
+    private static final float MINOR_FALL_DAMAGE = 2.0F;
 
     /** 找一个落点和那里能用的办法，交给一次空中救援；哪里都救不了时为 null。 */
     public static CatchesFall find(PlayerContext context, Predicate<BlockPos> protectedCell, LongSet noEntryCells) {

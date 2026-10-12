@@ -29,6 +29,8 @@ final class CleanupWork extends ConstructionWork {
 
     /** 多少刻没收回一块就不再试。 */
     static final long STALL_TICKS = 600;
+    /** 收一块（走过去或挖）最多做多少刻：黑曜石钻石镐也要九秒多，留二十秒。 */
+    static final long PER_BLOCK_TICKS = 400;
 
     private enum Step { APPROACH, DIG }
 
@@ -53,6 +55,10 @@ final class CleanupWork extends ConstructionWork {
         List<BlockPos> all = new ArrayList<>(left);
         all.addAll(queue);
         return all;
+    }
+
+    @Override protected long maxActionTicks() {
+        return PER_BLOCK_TICKS;
     }
 
     @Override protected ActionStatus advance(TickContext context) {
