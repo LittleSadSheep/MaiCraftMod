@@ -312,6 +312,8 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
             }
             return Next.done(TaskResult.done(summary));
         }
+        // 这一段出行有真实进展就算整趟有进展，外层不按"没进展"掐掉还在走的子任务。
+        runner.progressedNow().ifPresent(this::recordProgress);
         return Next.stay();
     }
 
@@ -345,6 +347,8 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
             }
             return Next.go(Phase.FIND_PORTAL, "末地门激活了，回去找开着的门");
         }
+        // 建门、找末地门房间的子任务有真实进展就算整趟有进展。
+        runner.progressedNow().ifPresent(this::recordProgress);
         return Next.stay();
     }
 

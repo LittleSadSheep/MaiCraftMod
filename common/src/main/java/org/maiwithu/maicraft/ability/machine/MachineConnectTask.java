@@ -291,6 +291,8 @@ final class MachineConnectTask extends PhasedTask<MachineConnectTask.Phase> {
             }
             return Next.go(Phase.CHECK, "线路铺完，核对两端");
         }
+        // 铺线路的施工引擎有真实进展就算接网络有进展：和建机器一样，外层收不到会被 60 秒卡住判定掐掉。
+        runner.progressedNow().ifPresent(this::recordProgress);
         return Next.stay();
     }
 

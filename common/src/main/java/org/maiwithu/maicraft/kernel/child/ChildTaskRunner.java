@@ -171,6 +171,14 @@ public final class ChildTaskRunner {
         return child.interruptibility(context);
     }
 
+    /**
+     * 子任务这一刻有没有真实进展：有就给出它最后一次进展的说法，没有为空。
+     * 父任务据此续自己的卡住判定——子任务在干活，父任务不能按"自开始之后没进展"把它掐掉。
+     */
+    public Optional<String> progressedNow() {
+        return currentProgress().filter(progress -> progress.ticksSinceProgress() == 0).map(TaskProgress::lastProgress);
+    }
+
     /** 正在跑的子任务此刻的进展；还没开始或已结算时为空。 */
     public Optional<TaskProgress> currentProgress() {
         return child == null || result != null ? Optional.empty() : child.currentProgress();

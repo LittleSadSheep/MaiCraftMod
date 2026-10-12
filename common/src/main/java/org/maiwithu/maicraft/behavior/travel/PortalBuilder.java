@@ -217,6 +217,8 @@ final class PortalBuilder extends PhasedTask<PortalBuilder.Phase> {
             }
             return Next.go(Phase.VERIFY_FRAME, "施工做完，看看门框成型没有");
         }
+        // 砌门框的施工引擎有真实进展就算建门有进展，外层不按"没进展"掐掉。
+        runner.progressedNow().ifPresent(this::recordProgress);
         return Next.stay();
     }
 

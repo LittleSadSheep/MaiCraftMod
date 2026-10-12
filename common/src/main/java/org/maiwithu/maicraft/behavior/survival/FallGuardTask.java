@@ -19,6 +19,8 @@ import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.Next;
 import org.maiwithu.maicraft.kernel.task.PhasedTask;
 import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * 落地防护临时任务：意外掉下去、预计会掉血时，就地找落点（正下方或周围两格内空中推得过去的，水优先），
@@ -29,6 +31,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 救命不看任务许可；收不回的东西留在原地，结果里写清楚。
  */
 public final class FallGuardTask extends PhasedTask<FallGuardTask.Phase> {
+
+    private static final Logger LOG = LoggerFactory.getLogger(FallGuardTask.class);
 
     public enum Phase { FIND, CATCH }
 
@@ -58,6 +62,14 @@ public final class FallGuardTask extends PhasedTask<FallGuardTask.Phase> {
         if (situation.landsInWater()) return Next.done(TaskResult.done("落地防护：下面就是水，落进水里不用自救"));
         if (situation.overVoid()) {
             return Next.fail(Problem.of(Problem.Kind.DANGER, "下面是虚空，什么都接不住这一掉"));
+        }
+        // 插进来到这一刻处境可能变了（踩空一格就落到下一层）：这一掉已经不会掉血就不出手。
+        if (situation.landsUnhurt()) return Next.done(TaskResult.done("落地防护：这一掉不会掉血，不用接"));
+        // 实机在平台上施工时一格的落差也开喷气背包刹车，难查：接手时把现场记一行。
+        var self = player.localPlayer();
+        if (self != null) {
+            LOG.info("[落地防护] 接手：脚 {}，下落速度 {}，已掉 {} 格", self.blockPosition().toShortString(),
+                    String.format("%.2f", self.getDeltaMovement().y), String.format("%.1f", self.fallDistance));
         }
         rescue = rescues.apply(player);
         if (rescue == null) {

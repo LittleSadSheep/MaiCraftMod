@@ -50,6 +50,13 @@ public final class MenuTerminalTakes implements TerminalTakes {
     private static final int STOCK_WAIT_TICKS = 40;
     /** 存货表出现后再等几刻（刻）：网络是空的或没连上时，同步到的就是空表，等过这一小会儿才下结论。 */
     private static final int STOCK_SETTLE_TICKS = 10;
+    /**
+     * 没看到要的东西时，存货表连着这么多刻（刻）不再变才下"网络里没有"的结论：大网络的存货 AE2 分好几个包同步，
+     * 第一个包到了就判没有，实机主城 AE 里的铁锭、铁板都被说成"没有"。
+     */
+    private static final int STOCK_STABLE_TICKS = 10;
+    /** 等存货表同步齐的总期限（刻）：到点还没稳下来就按此刻看到的下结论。 */
+    private static final int STOCK_FULL_WAIT_TICKS = 100;
     /** 一下取货等游戏确认的期限（刻）。 */
     private static final int TAKE_TIMEOUT_TICKS = 40;
     /** 放下光标那一下点完后，等两侧内容同步过来的宽限（刻）。 */
@@ -172,6 +179,10 @@ public final class MenuTerminalTakes implements TerminalTakes {
         private long waited;
         private int syncWaited;
         private int settleWaited;
+        /** 没看到要的东西时，存货表上一刻有几条、连着几刻没变、一共等了几刻。 */
+        private int lastStockSize = -1;
+        private int stockStableTicks;
+        private int stockFullWaited;
         /** 收场的原因：一件都没取到时按它失败；取到了就算做完。null 是正常收场（拿够了）。 */
         private Problem stopReason;
 
@@ -277,6 +288,8 @@ public final class MenuTerminalTakes implements TerminalTakes {
             }
             Ae2TerminalMenu.StockEntry entry = cursor.isEmpty() ? firstWanted(stock) : entryFor(cursor, stock);
             if (entry == null) {
+                // 一件还没取到就没看见：可能是存货还没同步齐，等表连着几刻不再变多再说没有。
+                if (confirmedTotal() == 0 && stockStillArriving(stock.size())) return ActionStatus.running();
                 return stopNow(nothingLeft());
             }
             int remaining = request.count() - confirmedTotal();
@@ -292,6 +305,17 @@ public final class MenuTerminalTakes implements TerminalTakes {
                         "背包放不下从 " + access.describe() + " 取的" + request.wanted().describe(), null));
                 case NetworkTakePlan.Done done -> stopNow(remaining > 0 ? nothingLeft() : null);
             };
+        }
+
+        // 存货表还在变（还有包没到）就接着等；连着几刻没变或等到期限就算齐了。
+        private boolean stockStillArriving(int size) {
+            if (++stockFullWaited > STOCK_FULL_WAIT_TICKS) return false;
+            if (size != lastStockSize) {
+                lastStockSize = size;
+                stockStableTicks = 0;
+                return true;
+            }
+            return ++stockStableTicks < STOCK_STABLE_TICKS;
         }
 
         // 发一下取货：本刻发不出去（上一下没结清、界面没画好、没有交互机会）就下一刻再试。

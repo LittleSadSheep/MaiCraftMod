@@ -180,7 +180,9 @@ final class ConstructionSite {
     }
 
     void problem(String reason, BlockPos pos) {
-        problems.computeIfAbsent(reason, ignored -> new ArrayList<>()).add(pos.immutable());
+        // 同一格同一个原因只记一次：验收后再修一轮会把缺料的格又过一遍，原先三台机械手报成"还缺 6 格的量"。
+        List<BlockPos> cells = problems.computeIfAbsent(reason, ignored -> new ArrayList<>());
+        if (!cells.contains(pos)) cells.add(pos.immutable());
     }
 
     /** 全部格都对了（或这次放好、清好、倒好、交给机器）。 */
