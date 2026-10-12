@@ -179,11 +179,11 @@ class Ae2TerminalSourceTest {
     }
 
     @Test
-    void 身上的无线终端不用走路_没开过报不知道有多少_记得有货报明确数量() {
+    void 身上的无线终端不用走路_没开过先看一眼_记得有货或有样板就报够数() {
         Predicate<String> torch = "minecraft:torch"::equals;
         SourceQuote.Offer fresh = assertInstanceOf(SourceQuote.Offer.class, Ae2TerminalSource.wirelessQuote(
                 "ae2:wireless_crafting_terminal", torches(8), Optional.empty(), torch));
-        assertTrue(fresh.countUnknown());
+        assertEquals(8, fresh.obtainableCount(), "像玩家一样先看一眼 AE：按够数报，没有的话引擎划掉再换路");
         assertEquals(0, fresh.cost().distanceBlocks(), "带在身上，不用走路");
         assertEquals("wireless:ae2:wireless_crafting_terminal", fresh.hint());
         assertEquals("ME 终端", fresh.source(), "与装着的终端同名：开了一趟没拿到，引擎能把它划掉");
@@ -197,6 +197,15 @@ class Ae2TerminalSourceTest {
                 "ae2:wireless_crafting_terminal", torches(8),
                 Optional.of(new SeenNetworkStock.Sighting(false, Map.of(), NOW)), torch));
         assertTrue(outOfRange.countUnknown() && outOfRange.risk().contains("没连上"), "上次超出范围照样报，写明上次的情况");
+
+        SourceQuote.Offer byPattern = assertInstanceOf(SourceQuote.Offer.class, Ae2TerminalSource.wirelessQuote(
+                "ae2:wireless_crafting_terminal", torches(8),
+                Optional.of(new SeenNetworkStock.Sighting(true, Map.of(), NOW, Set.of("minecraft:torch"))), torch));
+        assertEquals(8, byPattern.obtainableCount(), "没现货但有样板：到了在网络里下单");
+
+        assertInstanceOf(SourceQuote.Unavailable.class, Ae2TerminalSource.wirelessQuote(
+                "ae2:wireless_crafting_terminal", torches(8),
+                Optional.of(new SeenNetworkStock.Sighting(true, Map.of(), NOW)), torch), "刚看过既没有也没样板：不再去开");
     }
 
     /** 只装了 AE2、版本给定的加载器环境替身。 */

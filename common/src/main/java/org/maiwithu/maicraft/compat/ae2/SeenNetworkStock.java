@@ -7,6 +7,8 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.HashSet;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Predicate;
@@ -59,13 +61,18 @@ public final class SeenNetworkStock {
 
     private static Sighting sighting(boolean linked, List<Ae2TerminalMenu.StockEntry> stock, Instant when) {
         Map<String, Long> storedByItem = new LinkedHashMap<>();
+        // 有样板能做的也记下：现货是零的东西，下次报价时知道能在网络里下单。
+        Set<String> craftable = new HashSet<>();
+        for (Ae2TerminalMenu.StockEntry entry : stock) {
+            if (entry.craftable()) craftable.add(BuiltInRegistries.ITEM.getKey(entry.sample().getItem()).toString());
+        }
         for (Ae2TerminalMenu.StockEntry entry : stock) {
             if (entry.stored() <= 0) continue;
             // 同一种物品的几个变体（耐久、附魔不同）合在一起记：要东西时按物品 ID 或标签认，不细分变体。
             String itemId = BuiltInRegistries.ITEM.getKey(entry.sample().getItem()).toString();
             storedByItem.merge(itemId, entry.stored(), Long::sum);
         }
-        return new Sighting(linked, Map.copyOf(storedByItem), when);
+        return new Sighting(linked, Map.copyOf(storedByItem), when, Set.copyOf(craftable));
     }
 
     /** 这台终端上次看到的样子；没看过或已经过了 {@link #FRESH_FOR} 都给空。 */
@@ -89,11 +96,25 @@ public final class SeenNetworkStock {
      * @param storedByItem 物品 ID → 网络里的件数（各变体合计），只记有货的
      * @param seenAt       看到的时刻
      */
-    public record Sighting(boolean linked, Map<String, Long> storedByItem, Instant seenAt) {
+    public record Sighting(boolean linked, Map<String, Long> storedByItem, Instant seenAt, Set<String> craftableItems) {
         public Sighting {
             Objects.requireNonNull(storedByItem, "storedByItem");
             Objects.requireNonNull(seenAt, "seenAt");
             storedByItem = Map.copyOf(storedByItem);
+            craftableItems = craftableItems == null ? Set.of() : Set.copyOf(craftableItems);
+        }
+
+        /** 只记现货、没记样板的写法（测试与旧调用用）。 */
+        public Sighting(boolean linked, Map<String, Long> storedByItem, Instant seenAt) {
+            this(linked, storedByItem, seenAt, Set.of());
+        }
+
+        /** 想要的东西网络里有没有样板能做。 */
+        public boolean craftable(Predicate<String> wanted) {
+            for (String itemId : craftableItems) {
+                if (wanted.test(itemId)) return true;
+            }
+            return false;
         }
 
         /** 想要的东西网络里有几件：wanted 按物品 ID 回答算不算想要的（标签由调用方查好）。 */

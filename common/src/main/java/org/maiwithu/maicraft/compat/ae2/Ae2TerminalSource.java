@@ -44,7 +44,7 @@ public final class Ae2TerminalSource implements ItemSource {
 
     /** 这条途径：via 取 ae2 就只从 ME 终端取。 */
     public static final AcquireVia VIA = new AcquireVia("ae2",
-            "从 ME 网络取网络里已有的：身上带着绑过的无线终端就直接拿出来开，不然去附近的 ME 终端（装了 AE2 才有）");
+            "从 ME 网络取：身上带着绑过的无线终端就直接拿出来开，不然去附近的 ME 终端；没现货但有样板就在网络里下单合成，等做好再取（装了 AE2 才有）");
 
     /** 找终端的半径：与找箱子的一样，再远就不算顺手能拿。 */
     public static final int SEARCH_RADIUS_BLOCKS = 64;
@@ -167,8 +167,10 @@ public final class Ae2TerminalSource implements ItemSource {
     }
 
     /**
-     * 身上无线终端的报价：上次打开时记得网络里有货就报明确数量，没开过或记录过时报不知道有多少；
-     * 上次没连上（超出范围、没电）照样报，写明上次的情况——人可能已经走回范围里了。
+     * 身上无线终端的报价。像玩家一样先看一眼 AE：这次还没打开过就按够数报（打开看一眼只要一两秒，
+     * 没有的话引擎划掉它再换路，比先去手搓一整条链省事）；记得有现货报现货的数；记得没现货但有样板，
+     * 按够数报、到了在网络里下单；上次没连上（超出范围、没电）照样报，写明上次的情况；
+     * 五分钟内看过、网络里既没有也没样板，就不再去开。
      */
     static SourceQuote wirelessQuote(String itemId, ItemRequest request, Optional<SeenNetworkStock.Sighting> lastTime,
             Predicate<String> wanted) {
@@ -176,14 +178,25 @@ public final class Ae2TerminalSource implements ItemSource {
         // 来源名与装着的终端用同一个：引擎按来源名划掉做砸了的来源。原先写成"身上的无线终端"，
         // 网络里没有这样东西时开了一趟一件没拿到，引擎划掉的名字对不上，又来问价又去开，实机转了五分多钟。
         String source = "ME 终端";
-        if (lastTime.isPresent() && lastTime.get().linked() && lastTime.get().count(wanted) > 0) {
-            return new SourceQuote.Offer(source, (int) Math.min(lastTime.get().count(wanted), request.count()), cost,
-                    "用身上的无线终端取，记的是上次打开时看到的数，打开后以界面里为准", WIRELESS_HINT + itemId);
+        String hint = WIRELESS_HINT + itemId;
+        if (lastTime.isEmpty()) {
+            return new SourceQuote.Offer(source, request.count(), cost,
+                    "用身上的无线终端看一眼，这次还没打开过，有没有、有多少以界面里为准", hint);
         }
-        String note = lastTime.isEmpty() ? "用身上的无线终端取，这次还没打开过，不知道网络里有什么"
-                : !lastTime.get().linked() ? "上次打开时没连上网络（超出范围或没电），不知道现在好了没有，打开看一眼"
-                : "上次打开时网络里没有这样东西，不知道现在有没有，打开看一眼";
-        return new SourceQuote.Offer(source, SourceQuote.Offer.UNKNOWN_COUNT, cost, note, WIRELESS_HINT + itemId);
+        SeenNetworkStock.Sighting seen = lastTime.get();
+        if (!seen.linked()) {
+            return new SourceQuote.Offer(source, SourceQuote.Offer.UNKNOWN_COUNT, cost,
+                    "上次打开时没连上网络（超出范围或没电），不知道现在好了没有，打开看一眼", hint);
+        }
+        if (seen.count(wanted) > 0) {
+            return new SourceQuote.Offer(source, (int) Math.min(seen.count(wanted), request.count()), cost,
+                    "用身上的无线终端取，记的是上次打开时看到的数，打开后以界面里为准", hint);
+        }
+        if (seen.craftable(wanted)) {
+            return new SourceQuote.Offer(source, request.count(), cost,
+                    "网络里没现货但有样板，用身上的无线终端下单合成，等做好再取", hint);
+        }
+        return new SourceQuote.Unavailable(source, "身上的无线终端连着的网络里，上次打开时既没有这样东西也没有样板");
     }
 
     private SourceQuote wirelessQuote(String itemId, ItemRequest request, Instant now) {

@@ -52,6 +52,32 @@ public interface Ae2TerminalMenu {
     /** 向服务端发"把光标上的东西放回网络"：等于在终端的网络格子空白处点一下；网络放不下的留在光标上。 */
     void putBack(AbstractContainerMenu menu);
 
+    /** 向服务端发"下单合成这一条"：网络里有样板能做它时，服务端打开填数量的界面。不是 ME 终端的界面时什么都不发。 */
+    default void requestCraft(AbstractContainerMenu menu, long serial) {
+    }
+
+    /** 这份界面是不是填合成数量的界面。 */
+    default boolean craftAmountMenu(AbstractContainerMenu menu) {
+        return false;
+    }
+
+    /** 这份界面是不是合成确认界面（算料、选合成 CPU 的那一页）。 */
+    default boolean craftConfirmMenu(AbstractContainerMenu menu) {
+        return false;
+    }
+
+    /** 在填数量的界面里定下数量，请网络算料、算完能做就直接开工；缺料时停在确认界面列出缺什么。 */
+    default void confirmCraft(AbstractContainerMenu menu, int amount) {
+    }
+
+    /**
+     * 合成确认界面里算出来缺的料（物品 ID 与件数，一条一句）；还在算、或不缺（网络已经开工就不会停在这页）为空。
+     * 没有空闲的合成 CPU 时也写一句。
+     */
+    default List<String> craftShortages(AbstractContainerMenu menu) {
+        return List.of();
+    }
+
     /**
      * 网络存货的一条：一种东西（物品加组件）在网络里有多少。
      *

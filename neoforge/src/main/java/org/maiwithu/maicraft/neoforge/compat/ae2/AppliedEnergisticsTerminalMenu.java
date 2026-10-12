@@ -12,6 +12,8 @@ import appeng.helpers.WirelessTerminalMenuHost;
 import appeng.menu.me.common.GridInventoryEntry;
 import appeng.menu.me.common.IClientRepo;
 import appeng.menu.me.common.MEStorageMenu;
+import appeng.menu.me.crafting.CraftAmountMenu;
+import appeng.menu.me.crafting.CraftConfirmMenu;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -72,6 +74,38 @@ public final class AppliedEnergisticsTerminalMenu implements Ae2TerminalMenu {
 
     @Override public void takeOne(AbstractContainerMenu menu, long serial) {
         if (menu instanceof MEStorageMenu storage) storage.handleInteraction(serial, InventoryAction.PICKUP_SINGLE);
+    }
+
+    // 下单合成：和在终端里中键点那一条一样，服务端打开填数量的界面。
+    @Override public void requestCraft(AbstractContainerMenu menu, long serial) {
+        if (menu instanceof MEStorageMenu storage) storage.handleInteraction(serial, InventoryAction.AUTO_CRAFT);
+    }
+
+    @Override public boolean craftAmountMenu(AbstractContainerMenu menu) {
+        return menu instanceof CraftAmountMenu;
+    }
+
+    @Override public boolean craftConfirmMenu(AbstractContainerMenu menu) {
+        return menu instanceof CraftConfirmMenu;
+    }
+
+    // 定数量、不只补差额、算完就开工：料齐时服务端直接开工并回到终端，缺料时停在确认页把缺的列出来。
+    @Override public void confirmCraft(AbstractContainerMenu menu, int amount) {
+        if (menu instanceof CraftAmountMenu craftAmount) craftAmount.confirm(amount, false, true);
+    }
+
+    // 确认页算出来的缺料（模拟结果里缺的每一样），没有空闲合成 CPU 也算一条。
+    @Override public List<String> craftShortages(AbstractContainerMenu menu) {
+        if (!(menu instanceof CraftConfirmMenu confirm)) return List.of();
+        List<String> shortages = new ArrayList<>();
+        var plan = confirm.getPlan();
+        if (plan != null && plan.isSimulation()) {
+            for (var entry : plan.getEntries()) {
+                if (entry.getMissingAmount() > 0) shortages.add(entry.getWhat().getId() + " ×" + entry.getMissingAmount());
+            }
+        }
+        if (plan != null && !plan.isSimulation() && confirm.hasNoCPU()) shortages.add("没有空闲的合成 CPU");
+        return List.copyOf(shortages);
     }
 
     // 编号 -1 指网络格子的空白处：光标上拿着东西时，左键这一下把它放回网络。

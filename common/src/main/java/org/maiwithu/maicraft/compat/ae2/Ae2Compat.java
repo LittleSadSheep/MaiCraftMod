@@ -137,6 +137,31 @@ public final class Ae2Compat extends CompatModule {
         return call("读 ME 终端里的网络存货", () -> menus.stock(menu));
     }
 
+    /** 下单合成这一条；见 {@link Ae2TerminalMenu#requestCraft}。 */
+    public void requestCraft(AbstractContainerMenu menu, long serial) {
+        run("向 ME 网络下单合成", () -> menus.requestCraft(menu, serial));
+    }
+
+    /** 是不是填合成数量的界面；见 {@link Ae2TerminalMenu#craftAmountMenu}。 */
+    public boolean craftAmountMenu(AbstractContainerMenu menu) {
+        return call("认合成数量界面", () -> menus.craftAmountMenu(menu));
+    }
+
+    /** 是不是合成确认界面；见 {@link Ae2TerminalMenu#craftConfirmMenu}。 */
+    public boolean craftConfirmMenu(AbstractContainerMenu menu) {
+        return call("认合成确认界面", () -> menus.craftConfirmMenu(menu));
+    }
+
+    /** 定下合成数量并请网络开工；见 {@link Ae2TerminalMenu#confirmCraft}。 */
+    public void confirmCraft(AbstractContainerMenu menu, int amount) {
+        run("定下合成数量", () -> menus.confirmCraft(menu, amount));
+    }
+
+    /** 合成确认页算出来缺的料；见 {@link Ae2TerminalMenu#craftShortages}。 */
+    public List<String> craftShortages(AbstractContainerMenu menu) {
+        return call("读合成缺料", () -> menus.craftShortages(menu));
+    }
+
     /** 发一次整组取货；见 {@link Ae2TerminalMenu#takeStack}。 */
     public void takeStack(AbstractContainerMenu menu, long serial) {
         run("从 ME 终端整组取货", () -> menus.takeStack(menu, serial));
