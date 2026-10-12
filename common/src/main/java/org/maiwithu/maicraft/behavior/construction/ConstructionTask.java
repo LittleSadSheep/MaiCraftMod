@@ -176,7 +176,7 @@ public final class ConstructionTask extends PhasedTask<ConstructionTask.Phase> {
     }
 
     // 卡住要收场时先把垫的临时方块收回来：原先卡住直接按失败结束，临时方块一块不收，
-    // 实机接网络在平台边上留下一串圆石，回执里还写没有遗留。善后阶段里再卡住就照常收场。
+    // 实机接网络在平台边上留下一串圆石，结果里还写没有遗留。善后阶段里再卡住就照常收场。
     @Override protected Next<Phase> beforeGivingUp(Problem problem) {
         if (stuckProblem != null || phase() == Phase.CLEANUP) return null;
         stuckProblem = problem;

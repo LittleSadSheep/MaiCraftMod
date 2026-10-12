@@ -45,7 +45,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
 
     /**
      * 递归备料的深度上限。原先 4 层（工具 → 锭 → 矿石），机械动力的东西一条链就超过：机械手 → 电子管 →
-     * 抛光玫瑰石英 → 玫瑰石英 → 石英与红石 → 红石块，实机做机械手卡在"层数太深"。v0 的材料树最多 32 层；
+     * 抛光玫瑰石英 → 玫瑰石英 → 石英与红石 → 红石块，实机做机械手卡在"层数太深"。
      * 转圈有防环、这一次问遍没拿到的有记账，不会无限往下，放到 12 层够模组的中后期链。
      */
     public static final int DEFAULT_MAX_DEPTH = 12;

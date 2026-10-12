@@ -66,8 +66,8 @@
       },
       {
         "ability": "maicraft:sleep",
-        "summary": "找一张床躺下睡觉，白天会先备好今晚的床再报告睡不了",
-        "parameters": "",
+        "summary": "找一张床躺下睡觉，白天会先备好今晚的床再报告睡不了；也能开、关、查夜里自动去睡（默认开）",
+        "parameters": "operation: string = sleep",
         "targets": [
           "here",
           "landmark",
@@ -596,8 +596,22 @@
     },
     {
       "ability": "maicraft:sleep",
-      "summary": "找一张床躺下睡觉，白天会先备好今晚的床再报告睡不了",
-      "parameters": [],
+      "summary": "找一张床躺下睡觉，白天会先备好今晚的床再报告睡不了；也能开、关、查夜里自动去睡（默认开）",
+      "parameters": [
+        {
+          "name": "operation",
+          "type": "string",
+          "required": false,
+          "doc": "sleep 现在去睡（默认）/ auto_off 关掉夜里自动去睡（有人说晚上别睡时用） / auto_on 打开 / auto_status 查开没开",
+          "default": "sleep",
+          "choices": [
+            "sleep",
+            "auto_on",
+            "auto_off",
+            "auto_status"
+          ]
+        }
+      ],
       "targets": [
         "here",
         "landmark",
