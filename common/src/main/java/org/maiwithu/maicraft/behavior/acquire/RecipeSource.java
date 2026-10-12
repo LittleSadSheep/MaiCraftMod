@@ -48,6 +48,8 @@ public final class RecipeSource implements ItemSource {
 
     /** 缺得一样多的做法最多挨个试几种：木板十来种木头，再多也不一直试下去。 */
     private static final int MAX_VARIANTS = 12;
+    /** 一趟最多做几份：分批做，料不够时中间件和最后一步交替用料，不把共用的料先全做成中间件。 */
+    static final int MAX_CRAFTS_PER_RUN = 16;
     /** 排远近前最多看几种做法：装了加木头的模组时木板有几十种，先全拿来按远近排，再取最近的几种试。 */
     private static final int VARIANT_POOL = 64;
 
@@ -191,13 +193,15 @@ public final class RecipeSource implements ItemSource {
     }
 
     // 照一种配方做的一整串：摆得进背包合成格的在背包里做，否则到设施上做（没有就先摆一个）。
+    // 一次最多做 MAX_CRAFTS_PER_RUN 份，做完由引擎清点、还差再来：料不够时不会先把共用的料全做成中间件，
+    // 最后一步没料可用（实机要 50 个大齿轮，13 根原木全做成了齿轮，只出了 1 个大齿轮）。
     private Action attempt(WorkstationRecipe recipe, ItemRequest request, SourceContext context) {
+        int times = Math.min(timesNeeded(recipe, request.count()), MAX_CRAFTS_PER_RUN);
         if (inInventory(recipe)) {
-            return assembleInInventory(recipe, timesNeeded(recipe, request.count()), context);
+            return assembleInInventory(recipe, times, context);
         }
         Optional<MemoryRecord> station = handyStation(recipe.kind(), context);
-        return assemble(recipe, station.map(MemoryRecord::position).orElse(null),
-                timesNeeded(recipe, request.count()), context);
+        return assemble(recipe, station.map(MemoryRecord::position).orElse(null), times, context);
     }
 
     /**
