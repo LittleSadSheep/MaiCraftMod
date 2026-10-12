@@ -401,21 +401,18 @@ final class BaritoneWalkRun implements WalkRun {
         }
     }
 
-    // 普通走路的镜头锁在路线航向上：朝下一个路点算出航向，偏差超过二十五度才开始转、缩到十五度以内就停、
-    // 每刻最多转九度，路线里的小修正不转镜头；俯仰平地固定略向下，潜泳时跟着实际潜泳方向。
+    // 普通走路的镜头看路线往前约四格的那个点：格子路线斜着走时一格一拐的锯齿被平均掉，长直线上就对着整条线，
+    // 到拐角也像人一样提前一点转头。转法交给航向（疾跑时对正到原版擦边判定以内，走路时小修正不转、持续偏一边才转），
+    // 俯仰平地固定略向下，潜泳时跟着实际潜泳方向。
     // 不追引擎每刻给的方块中心瞄点——那会压低视线、随靠近越来越陡、每段交接弹回，逐格点头。
-    private void lookAlongRoute(IBaritone engine, PlayerInput playerInput,
-                                PlayerContext context, LocalPlayer player, boolean routePresent) {
+    private void lookAlongRoute(IBaritone engine, PlayerInput playerInput, PlayerContext context,
+                                LocalPlayer player, boolean routePresent, boolean sprinting) {
         Vec3 anchor = null;
         var executor = engine.getPathingBehavior().getCurrent();
         boolean submerged = false;
         float submergedPitch = 0.0f;
         if (routePresent && executor != null) {
-            var positions = executor.getPath().positions();
-            if (!positions.isEmpty()) {
-                int index = Math.clamp(executor.getPosition() + 1, 0, positions.size() - 1);
-                anchor = Vec3.atBottomCenterOf(positions.get(index));
-            }
+            anchor = lookAhead(executor.getPath().positions(), executor.getPosition() + 1, player.position());
             if (executor instanceof PathExecutor pathExecutor && pathExecutor.submergedWaterTravelActive()) {
                 submerged = true;
                 submergedPitch = pathExecutor.submergedWaterCameraPitch();
@@ -423,10 +420,31 @@ final class BaritoneWalkRun implements WalkRun {
         }
         if (anchor == null) return;
         Vec3 delta = anchor.subtract(player.getEyePosition());
-        float rawYaw = (float) (Math.atan2(delta.z, delta.x) * (180 / Math.PI)) - 90.0f;
-        float yaw = course.target(rawYaw, context.clientTick());
+        // 前方的点就在头顶或脚下（搭柱子、往下挖）时水平方向说不准，保持现在的朝向，不让镜头乱转。
+        float rawYaw = delta.horizontalDistanceSqr() < 1.0
+                ? player.getYRot()
+                : (float) (Math.atan2(delta.z, delta.x) * (180 / Math.PI)) - 90.0f;
+        float yaw = course.target(rawYaw, sprinting, context.clientTick());
         float pitch = NavigationCameraCourse.pitch(submergedPitch, submerged);
         playerInput.requestNavigationLook(yaw, pitch, context.clientTick());
+    }
+
+    /** 镜头往前看多远（水平格数）。 */
+    static final double LOOK_AHEAD_BLOCKS = 4.0;
+    /** 往前最多数几个路点：绕圈的楼梯这类路线，直线距离总也不够远，不能一直数下去。 */
+    static final int LOOK_AHEAD_NODES = 6;
+
+    // 从下一个路点起往前数，取第一个水平离身体够四格的路点；都不够远就取数到的最后一个。
+    static Vec3 lookAhead(List<? extends BlockPos> positions, int next, Vec3 body) {
+        if (positions.isEmpty()) return null;
+        int index = Math.clamp(next, 0, positions.size() - 1);
+        int last = Math.min(positions.size() - 1, index + LOOK_AHEAD_NODES - 1);
+        for (; index < last; index++) {
+            Vec3 point = Vec3.atBottomCenterOf(positions.get(index));
+            double dx = point.x - body.x, dz = point.z - body.z;
+            if (dx * dx + dz * dz >= LOOK_AHEAD_BLOCKS * LOOK_AHEAD_BLOCKS) break;
+        }
+        return Vec3.atBottomCenterOf(positions.get(index));
     }
 
     // 人交回了角色：从当时的位置重新算路；人操作的那段不算"长时间没进展"。
@@ -471,7 +489,7 @@ final class BaritoneWalkRun implements WalkRun {
             // 路线在手而引擎本刻没按键：保持站立但按住路线朝向，等执行段下一刻的指令。
             playerInput.applyNavigationMovement(PlayerInput.Movement.STOPPED, context.clientTick());
         }
-        lookAlongRoute(engine, playerInput, context, player, routePresent);
+        lookAlongRoute(engine, playerInput, context, player, routePresent, sprint);
         workBlocks(context, input);
     }
 
