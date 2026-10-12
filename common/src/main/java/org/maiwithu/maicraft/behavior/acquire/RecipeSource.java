@@ -48,6 +48,8 @@ public final class RecipeSource implements ItemSource {
 
     /** 缺得一样多的做法最多挨个试几种：木板十来种木头，再多也不一直试下去。 */
     private static final int MAX_VARIANTS = 12;
+    /** 排远近前最多看几种做法：装了加木头的模组时木板有几十种，先全拿来按远近排，再取最近的几种试。 */
+    private static final int VARIANT_POOL = 64;
 
     /** 烧炼一件东西要烧多少刻：原版熔炉的固定速度。 */
     private static final int SMELT_TICKS_PER_ITEM = 200;
@@ -144,13 +146,15 @@ public final class RecipeSource implements ItemSource {
         int missing = missingFor(recipe, request.count());
         List<WorkstationRecipe> variants = new ArrayList<>(List.of(recipe));
         for (WorkstationRecipe other : candidates) {
-            if (variants.size() >= MAX_VARIANTS) break;
+            if (variants.size() >= VARIANT_POOL) break;
             if (other != recipe && missingFor(other, request.count()) == missing) variants.add(other);
         }
         // 缺得一样多的做法，缺的原料近的先试：补一块木板，手边有树就够了，不为它跑去十格外挖竹子；
-        // 问不出远近的做法排在问得出的后面，彼此先后不变（List.sort 稳定）。
+        // 问不出远近的做法排在问得出的后面，彼此先后不变（List.sort 稳定）。先排远近再取前几种：
+        // 原先先截前十二种再排，装了加木头的模组时附近的云杉、白桦排不进前十二，木板说"哪儿都拿不到"。
         if (variants.size() > 1) {
             variants.sort(Comparator.comparingDouble(variant -> missingIngredientDistance(variant, request, context)));
+            if (variants.size() > MAX_VARIANTS) variants = new ArrayList<>(variants.subList(0, MAX_VARIANTS));
         }
         return Optional.of(variants.size() == 1 ? attempt(recipe, request, context)
                 : new Variants(request, variants, context));

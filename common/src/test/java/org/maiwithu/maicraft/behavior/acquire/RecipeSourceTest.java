@@ -716,6 +716,50 @@ class RecipeSourceTest {
         assertEquals(List.of("minecraft:jungle_log"), asked, "先试原料近的做法，没去碰十格外的竹子");
     }
 
+    @Test
+    void 做法多过十二种_先按远近排再取() {
+        // 实机：装了加木头的模组，木板几十种，附近只有云杉；原先先截前十二种再排远近，云杉排不进去，
+        // 木板说"哪儿都拿不到"。现在全拿来排，近的云杉先试。
+        List<WorkstationRecipe> recipes = new ArrayList<>();
+        for (int i = 0; i < 14; i++) {
+            String planks = "modwood:wood" + i + "_planks";
+            tags.put(planks, "minecraft:planks");
+            recipes.add(new WorkstationRecipe(planks, WorkstationRecipe.Kind.CRAFTING, WantedItem.ofItem(planks), 4,
+                    List.of(new WorkstationRecipe.IngredientStack(WantedItem.ofItem("modwood:wood" + i + "_log"), 1)), true));
+        }
+        tags.put("minecraft:spruce_planks", "minecraft:planks");
+        recipes.add(new WorkstationRecipe("minecraft:spruce_planks", WorkstationRecipe.Kind.CRAFTING,
+                WantedItem.ofItem("minecraft:spruce_planks"), 4,
+                List.of(new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:spruce_log"), 1)), true));
+        List<String> asked = new ArrayList<>();
+        ItemNeeds needs = new ItemNeeds() {
+            @Override public Optional<Double> nearestDistanceBlocks(ItemRequest request, Permissions permissions) {
+                return request.wanted().specifier().equals("minecraft:spruce_log") ? Optional.of(3d) : Optional.empty();
+            }
+
+            @Override public Action actionFor(ItemRequest request, Permissions permissions) {
+                asked.add(request.wanted().specifier());
+                return new Action() {
+                    @Override public ActionStatus tick(TickContext context) {
+                        backpack.add(request.wanted().specifier(), 1);
+                        return ActionStatus.done();
+                    }
+
+                    @Override public String describe() {
+                        return "备" + request.wanted().describe();
+                    }
+                };
+            }
+        };
+        RecipeSource recipeSource = new RecipeSource(wanted -> recipes, memory(),
+                itemId -> 0, new InventoryRuns(), backpack, offhand, tags, needs);
+        ItemRequest request = new ItemRequest(WantedItem.ofTag("minecraft:planks"), 1, "做箱子");
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, recipeSource.quote(request, CONTEXT));
+
+        assertInstanceOf(ActionStatus.Done.class, runToEnd(recipeSource.begin(request, offer, CONTEXT).orElseThrow()));
+        assertEquals("minecraft:spruce_log", asked.getFirst(), "先试附近有的云杉：" + asked);
+    }
+
     private int countOf(String itemId) {
         return backpack.stacks().stream()
                 .filter(stack -> stack.itemId().equals(itemId))

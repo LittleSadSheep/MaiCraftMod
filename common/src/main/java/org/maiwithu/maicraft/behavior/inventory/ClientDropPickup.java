@@ -125,7 +125,9 @@ public final class ClientDropPickup implements PicksUpDrops {
                     return ActionStatus.running();
                 }
                 stopWalking();
-                return missed == 0 ? ActionStatus.done() : ActionStatus.failed(Problem.of(Problem.Kind.STUCK,
+                // 只有走过去了还躺在地上的才算没捡到；"不见了"多半是几块原木落地并成了一堆、并进去的那堆随后被收进包，
+                // 拿到多少由上层按身上的重新清点。原先一见"不见了"就整个放弃，砍树挖了几格就不挖了。
+                return missed == vanished ? ActionStatus.done() : ActionStatus.failed(Problem.of(Problem.Kind.STUCK,
                         "有 " + (missed - vanished) + " 件掉出的东西走过去了还在地上"
                                 + (vanished > 0 ? "，" + vanished + " 件不见了但不是自己收的（被别人捡走或消失）" : "")
                                 + "，先不捡了", null));
