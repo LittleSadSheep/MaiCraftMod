@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat.create;
 
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.function.BiFunction;
+import java.util.Optional;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.EnumSet;
@@ -77,5 +84,25 @@ class CreatePlacementRulesTest {
         // 下面是下半砖：顶面不满，原版不抬高。
         slab.put(AT.below(), Blocks.STONE_SLAB.defaultBlockState());
         assertEquals(AT, CreatePlacementRules.rollerPlaceAt(AT, world(slab)));
+    }
+
+    @Test
+    void 扳手转法_宽度优先找最少几下转到要的朝向() {
+        // 替身转法：点哪一面就绕那一面的轴顺时针转九十度，点朝向所在的轴不动（照 Create 方向机器的转法）。
+        BlockState south = Blocks.OBSERVER.defaultBlockState().setValue(BlockStateProperties.FACING, Direction.SOUTH);
+        BiFunction<BlockState, Direction, Optional<BlockState>> wrench = (state, face) -> {
+            Direction facing = state.getValue(BlockStateProperties.FACING);
+            return Optional.of(facing.getAxis() == face.getAxis() ? state
+                    : state.setValue(BlockStateProperties.FACING, facing.getClockWise(face.getAxis())));
+        };
+        var down = CreatePlacementRules.turns(south,
+                state -> state.getValue(BlockStateProperties.FACING) == Direction.DOWN, wrench).orElseThrow();
+        BlockState turned = south;
+        for (Direction face : down) turned = wrench.apply(turned, face).orElseThrow();
+        assertEquals(Direction.DOWN, turned.getValue(BlockStateProperties.FACING));
+        assertTrue(down.size() <= 3, "替身只会顺时针转，最多三下转到朝下：" + down);
+        assertTrue(CreatePlacementRules.turns(south, state -> false, wrench).isEmpty(), "转不到就为空");
+        assertTrue(CreatePlacementRules.turns(south, state -> true, (state, face) -> Optional.empty()).isEmpty(),
+                "读不出转法当转不到");
     }
 }

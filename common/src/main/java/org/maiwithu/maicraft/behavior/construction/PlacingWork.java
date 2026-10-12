@@ -12,12 +12,16 @@ import java.util.Optional;
 import java.util.Set;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.behavior.approach.PlacementSpots;
+import org.maiwithu.maicraft.behavior.construction.spi.PlacementRules;
 import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
+import org.maiwithu.maicraft.behavior.interaction.InteractionVerdict;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
+import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -37,7 +41,7 @@ import org.slf4j.LoggerFactory;
  */
 final class PlacingWork extends ConstructionWork {
 
-    private enum Step { APPROACH, HOLD, CLICK }
+    private enum Step { APPROACH, HOLD, CLICK, TURN_HOLD, TURN_CLICK }
 
     private static final Logger LOG = LoggerFactory.getLogger(PlacingWork.class);
     /** 同一面"到了却点不到"最多换几次站位。 */
@@ -76,6 +80,8 @@ final class PlacingWork extends ConstructionWork {
                 case APPROACH -> arrived();
                 case HOLD -> clickNow();
                 case CLICK -> settle();
+                case TURN_HOLD -> startTurn();
+                case TURN_CLICK -> settleTurn();
             };
         }
         return nextCell();
@@ -263,7 +269,7 @@ final class PlacingWork extends ConstructionWork {
         Optional<PlacementPrediction.Placement> predicted = services.placements().predict(attempt.cell, attempt.placeAt,
                 candidate.clicked(), candidate.face());
         BlockState live = services.site().loaded(attempt.cell.pos()) ? services.site().state(attempt.cell.pos()) : null;
-        boolean acceptable = predicted.isPresent() && predicted.get().predicted() != null && live != null
+        boolean exact = predicted.isPresent() && predicted.get().predicted() != null && live != null
                 && (PlacementPrediction.complete(attempt.cell, predicted.get().predicted())
                 || PlacementPrediction.isProgress(attempt.cell, live, predicted.get().predicted()));
         // 站位核对说够得着、到了却点不到那一面（人没站在格子正中、视线擦边）：像玩家一样挪个地方再点，
@@ -276,6 +282,15 @@ final class PlacingWork extends ConstructionWork {
             step = Step.APPROACH;
             approach(candidate);
             return ActionStatus.progressed();
+        }
+        // 原版放出来朝向不对，但能拿扳手转到要的样子（机械动力的方向机器）：像玩家一样照放，放下后用扳手转到位。
+        // 原先站着、蹲着都放不出朝下的机械手，换遍了面就记"每一面还是放不上"。
+        boolean acceptable = exact || !attempt.temporary && predicted.isPresent() && predicted.get().predicted() != null
+                && live != null && turnable(predicted.get().predicted());
+        if (acceptable && !exact) {
+            attempt.turnAfter = true;
+            LOG.info("[施工] 放 {}：放出来会是 {}，放下后用扳手转到位", attempt.cell.pos().toShortString(),
+                    predicted.get().predicted());
         }
         if (!acceptable) {
             LOG.info("[施工] 放 {}：从 {} 的 {} 面不行（{}）", attempt.cell.pos().toShortString(),
@@ -343,6 +358,10 @@ final class PlacingWork extends ConstructionWork {
                 progressThisRound = true;
                 records.change(new Change(Change.Kind.BLOCK_PLACED, itemId, 1, (attempt.temporary ? "临时方块 " : "") + cell.pos().toShortString()));
                 BlockState live = services.site().state(cell.pos());
+                // 放下来朝向不对、能拿扳手转到位（照放的，或预测说放得成却落成了别的朝向）：转到位再收下。
+                if (!PlacementPrediction.complete(cell, live) && !attempt.temporary && (attempt.turnAfter || turnable(live))) {
+                    yield startTurn();
+                }
                 if (PlacementPrediction.complete(cell, live) || attempt.uses >= PlacementPrediction.maximumUses(cell)) yield finish();
                 yield arrived();
             }
@@ -352,6 +371,72 @@ final class PlacingWork extends ConstructionWork {
             }
             case UNEXPECTED, UNCONFIRMED -> unconfirmed(cell, itemId, result.scene());
         };
+    }
+
+    // 这样放出来能不能拿扳手转到要的样子：规则说转得到、身上有那件工具才算。
+    private boolean turnable(BlockState placed) {
+        return services.placements().turnsTo(placed, state -> PlacementPrediction.complete(attempt.cell, state))
+                .filter(turns -> services.site().creative() || services.site().carried(toolId(turns)) > 0)
+                .isPresent();
+    }
+
+    // 扳手转到位：按此刻的样子重算要点哪几面，拿扳手点第一面，点完再看；转到了、转不到、没扳手、
+    // 点满四下都照现在的样子收下，还不对的由整机比对交代。
+    private ActionStatus startTurn() {
+        PlannedCell cell = attempt.cell;
+        BlockState live = services.site().state(cell.pos());
+        if (PlacementPrediction.complete(cell, live)) return finish();
+        Optional<PlacementRules.Turns> turns = attempt.turnsLeft <= 0 ? Optional.empty()
+                : services.placements().turnsTo(live, state -> PlacementPrediction.complete(cell, state));
+        if (turns.isEmpty() || turns.get().faces().isEmpty()) {
+            records.attempt("用扳手把 " + cell.pos().toShortString() + " 转到要的样子", "转不到，现在是 " + live);
+            return finish();
+        }
+        String tool = toolId(turns.get());
+        return switch (services.hand().hold(tool)) {
+            case ConstructionSeams.HoldPlan.Ready ready -> clickTurn(turns.get().faces().getFirst(), live);
+            case ConstructionSeams.HoldPlan.Move move -> {
+                step = Step.TURN_HOLD;
+                begin(move.action(), "把 " + tool + " 换到手上");
+                yield ActionStatus.progressed();
+            }
+            case ConstructionSeams.HoldPlan.NotCarried notCarried -> {
+                records.attempt("用扳手把 " + cell.pos().toShortString() + " 转到要的样子", "身上没有 " + tool);
+                yield finish();
+            }
+            case ConstructionSeams.HoldPlan.Cannot cannot -> {
+                records.attempt("把 " + tool + " 换到手上", cannot.problem().message());
+                yield finish();
+            }
+        };
+    }
+
+    // 点一面：不潜行（潜行右键是拆下来），那一格变了样才算转了一下。
+    private ActionStatus clickTurn(Direction face, BlockState before) {
+        attempt.turnsLeft--;
+        BlockPos pos = attempt.cell.pos();
+        click = services.clicks().turn(pos, face, InteractionConfirmation.blockChanged(pos, before));
+        step = Step.TURN_CLICK;
+        begin(click.action(), "用扳手点 " + pos.toShortString() + " 的 " + face.getName() + " 面");
+        return ActionStatus.progressed();
+    }
+
+    // 转了一下：记一笔接着看还要不要转；没转动、说不清就照现在的样子收下。
+    private ActionStatus settleTurn() {
+        InteractionResult result = click.result() == null ? null : click.result().get();
+        BlockPos pos = attempt.cell.pos();
+        if (result != null && result.verdict() == InteractionVerdict.APPLIED) {
+            BlockState now = services.site().state(pos);
+            records.change(new Change(Change.Kind.BLOCK_CHANGED, BuiltInRegistries.BLOCK.getKey(now.getBlock()).toString(), 1,
+                    "用扳手把 " + pos.toShortString() + " 转成 " + now));
+            return startTurn();
+        }
+        records.attempt("用扳手转 " + pos.toShortString(), result == null ? "没有结论" : "没转动：" + result.scene());
+        return finish();
+    }
+
+    private static String toolId(PlacementRules.Turns turns) {
+        return BuiltInRegistries.ITEM.getKey(turns.tool()).toString();
     }
 
     private ActionStatus unconfirmed(PlannedCell cell, String itemId, String scene) {
@@ -377,6 +462,8 @@ final class PlacingWork extends ConstructionWork {
     @Override protected ActionStatus failed(TickContext context, ActionStatus.Failed failure) {
         LOG.info("[施工] {} 失败：{}", describe(), failure.problem().message());
         records.attempt(describe(), failure.problem().message());
+        // 扳手转到一半出了岔子：方块已经放下了，照现在的样子收下，差异交给整机比对。
+        if (step == Step.TURN_HOLD || step == Step.TURN_CLICK) return finish();
         if (step == Step.HOLD) {
             deferred.add(attempt.cell);
             attempt = null;

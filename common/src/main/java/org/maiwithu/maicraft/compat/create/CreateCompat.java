@@ -297,6 +297,11 @@ public final class CreateCompat extends CompatModule {
         return call("读传送带上的东西", () -> stations.beltItems(level, at));
     }
 
+    /** 扳手点这一面转出来的样子；见 {@link CreateTools#wrenched}。 */
+    public Optional<BlockState> wrenched(BlockState state, Direction face) {
+        return call("算扳手转出来的样子", () -> tools.wrenched(state, face));
+    }
+
     /** 能不能用扳手整块拆下；见 {@link CreateTools#wrenchable}。 */
     public boolean wrenchable(BlockState state) {
         return call("认扳手拆得下的方块", () -> tools.wrenchable(state));

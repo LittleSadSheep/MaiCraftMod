@@ -1,12 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat.create;
 
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.BiFunction;
+import java.util.function.Predicate;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
@@ -48,6 +54,8 @@ final class CreatePlacementRules implements PlacementRules {
     private static final String ROLLER = NS + "mechanical_roller";
     private static final String REDSTONE_LINK = NS + "redstone_link";
     private static final BlockPos BELOW = new BlockPos(0, -1, 0);
+    /** 扳手最多转几下：方向机器四下内转得到任何朝向。 */
+    static final int MAX_TURNS = 4;
 
     private final CreateCompat compat;
 
@@ -98,6 +106,37 @@ final class CreatePlacementRules implements PlacementRules {
     static Direction.Axis verticalGearboxAxis(Set<Direction.Axis> incoming, Direction playerFacing) {
         if (incoming.size() == 1) return incoming.contains(Direction.Axis.X) ? Direction.Axis.Z : Direction.Axis.X;
         return playerFacing.getClockWise().getAxis();
+    }
+
+    /**
+     * 放出来朝向不对的机械动力方块，拿扳手转到要的样子：扳手（不潜行）每点一面按 Create 自己的转法转一下，
+     * 宽度优先找最少几下点得到要的样子，最多 {@value #MAX_TURNS} 下；不是同一种方块、不是扳手可调的、转不到都为空。
+     */
+    @Override public Optional<Turns> turnsTo(BlockState placed, Predicate<BlockState> wanted) {
+        Optional<Item> wrench = item(CreateWrench.WRENCH);
+        if (wrench.isEmpty() || !compat.wrenchable(placed)) return Optional.empty();
+        return turns(placed, wanted, compat::wrenched).map(faces -> new Turns(wrench.get(), faces));
+    }
+
+    /** 宽度优先找点哪几面能转到要的样子，纯函数；读不出转法（不认这种方块）就当转不到。 */
+    static Optional<List<Direction>> turns(BlockState placed, Predicate<BlockState> wanted,
+            BiFunction<BlockState, Direction, Optional<BlockState>> wrenched) {
+        record Node(BlockState state, List<Direction> faces) {}
+        Deque<Node> queue = new ArrayDeque<>(List.of(new Node(placed, List.of())));
+        Set<BlockState> seen = new HashSet<>(Set.of(placed));
+        while (!queue.isEmpty()) {
+            Node node = queue.poll();
+            if (node.faces().size() >= MAX_TURNS) continue;
+            for (Direction face : Direction.values()) {
+                Optional<BlockState> next = wrenched.apply(node.state(), face);
+                if (next.isEmpty()) return Optional.empty();
+                List<Direction> faces = new ArrayList<>(node.faces());
+                faces.add(face);
+                if (wanted.test(next.get())) return Optional.of(List.copyOf(faces));
+                if (seen.add(next.get())) queue.add(new Node(next.get(), faces));
+            }
+        }
+        return Optional.empty();
     }
 
     /**

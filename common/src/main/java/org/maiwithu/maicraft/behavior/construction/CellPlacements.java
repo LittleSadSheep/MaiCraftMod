@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.construction;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Predicate;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
@@ -94,6 +95,16 @@ public final class CellPlacements {
             if (settled != null && !settled.equals(placed)) return settled;
         }
         return placed;
+    }
+
+    /** 放下来的样子用工具转到要的样子要点哪几面；第一份答得出的规则算数，都转不到为空。 */
+    public Optional<PlacementRules.Turns> turnsTo(BlockState placed, Predicate<BlockState> wanted) {
+        if (placed == null) return Optional.empty();
+        for (PlacementRules rule : rules) {
+            Optional<PlacementRules.Turns> turns = rule.turnsTo(placed, wanted);
+            if (turns != null && turns.isPresent()) return turns;
+        }
+        return Optional.empty();
     }
 
     private Optional<PlacementRules.Placement> placement(BlockState state, BlockPos at, ReadsBlocks world) {

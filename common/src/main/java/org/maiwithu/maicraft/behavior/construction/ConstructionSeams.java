@@ -3,10 +3,13 @@ package org.maiwithu.maicraft.behavior.construction;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.level.block.state.BlockState;
+import org.maiwithu.maicraft.behavior.construction.spi.PlacementRules;
 import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
@@ -63,6 +66,11 @@ public final class ConstructionSeams {
 
         /** 被点的方块自己有右键行为时要潜行再点。 */
         boolean requiresSneak(BlockPos clicked);
+
+        /** 放下来的样子用工具转到要的样子要点哪几面；转不到为空。 */
+        default Optional<PlacementRules.Turns> turnsTo(BlockState placed, Predicate<BlockState> wanted) {
+            return Optional.empty();
+        }
     }
 
     /** 出手：放、倒、舀、点一下；每个动作带它结束后的结论读口。 */
@@ -78,6 +86,11 @@ public final class ConstructionSeams {
 
         /** 右键一下这一格（开关门）。 */
         Click use(BlockPos block, InteractionConfirmation confirmation);
+
+        /** 右键这一格朝 face 的那一面（拿扳手转机器，不潜行：潜行是拆）。 */
+        default Click turn(BlockPos block, Direction face, InteractionConfirmation confirmation) {
+            return use(block, confirmation);
+        }
 
         /** 一次出手：逐刻推进的动作，以及它结束后的结论（没出手就失败时为 null）。 */
         record Click(Action action, Supplier<InteractionResult> result) {}

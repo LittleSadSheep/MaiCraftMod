@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.construction.spi;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Predicate;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
@@ -42,6 +43,27 @@ public interface PlacementRules {
      */
     default BlockState afterPlacing(Item item, BlockState placed, ClientLevel level, BlockPos at, Direction playerFacing) {
         return placed;
+    }
+
+    /**
+     * 放下以后用工具转到要的样子（机械动力的方向机器拿扳手转）：placed 转成 wanted 认可的样子要依次点哪几面。
+     * 转不到、不是这份规则管的为空。
+     */
+    default Optional<Turns> turnsTo(BlockState placed, Predicate<BlockState> wanted) {
+        return Optional.empty();
+    }
+
+    /**
+     * 用什么工具、依次点哪几面。
+     *
+     * @param tool  拿这个工具点（扳手）
+     * @param faces 依次点的面
+     */
+    record Turns(Item tool, List<Direction> faces) {
+        public Turns {
+            Objects.requireNonNull(tool, "tool");
+            faces = List.copyOf(faces);
+        }
     }
 
     /**

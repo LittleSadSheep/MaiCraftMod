@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.construction;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -76,6 +77,10 @@ public final class LivePlacements implements ConstructionSeams.PlansPlacement {
         if (predicted == null || predicted.predicted() == null) return Optional.ofNullable(predicted);
         BlockState settled = placements.afterPlacing(cell.item(), predicted.predicted(), level, cell.pos(), Direction.fromYRot(yaw));
         return Optional.of(new PlacementPrediction.Placement(predicted.clicked(), predicted.face(), settled, sneak));
+    }
+
+    @Override public Optional<PlacementRules.Turns> turnsTo(BlockState placed, Predicate<BlockState> wanted) {
+        return placements.turnsTo(placed, wanted);
     }
 
     @Override public boolean requiresSneak(BlockPos clicked) {

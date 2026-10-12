@@ -5,6 +5,7 @@ import java.util.Objects;
 import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
 import org.maiwithu.maicraft.behavior.interaction.AimAndInteract;
 import org.maiwithu.maicraft.behavior.interaction.HoldsSneak;
@@ -43,6 +44,12 @@ public final class LiveClicks implements ConstructionSeams.Clicks {
 
     @Override public Click scoop(BlockPos source, InteractionConfirmation confirmation) {
         AimAndInteract use = interactions.useHeldItemToward(source, InteractionHand.MAIN_HAND, confirmation);
+        return new Click(use, use::result);
+    }
+
+    // 拿扳手转机器：只点朝 face 的那一面，不潜行（潜行右键是拆下来）。
+    @Override public Click turn(BlockPos block, Direction face, InteractionConfirmation confirmation) {
+        AimAndInteract use = interactions.useBlockFace(block, face, confirmation);
         return new Click(use, use::result);
     }
 

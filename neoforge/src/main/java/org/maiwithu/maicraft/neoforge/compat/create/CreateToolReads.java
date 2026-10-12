@@ -31,6 +31,7 @@ import com.simibubi.create.content.trains.track.TrackBlockEntity;
 import com.simibubi.create.content.trains.track.TrackPlacement;
 import com.simibubi.create.content.equipment.wrench.IWrenchable;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
@@ -50,6 +51,12 @@ public final class CreateToolReads implements CreateTools {
 
     @Override public boolean wrenchable(BlockState state) {
         return state.getBlock() instanceof IWrenchable;
+    }
+
+    // 扳手点一面：照 Create 自己的转法算（方向机器绕被点那一面的轴转九十度，点朝向那一面切换转轴）。
+    @Override public Optional<BlockState> wrenched(BlockState state, Direction face) {
+        return state.getBlock() instanceof IWrenchable wrenchable
+                ? Optional.of(wrenchable.getRotatedBlockState(state, face)) : Optional.empty();
     }
 
     @Override public List<Polishing> polishing(ClientLevel level) {

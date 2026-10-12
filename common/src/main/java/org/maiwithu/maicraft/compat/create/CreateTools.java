@@ -7,6 +7,7 @@ import java.util.Optional;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
@@ -22,6 +23,11 @@ public interface CreateTools {
 
     /** 这种方块能不能用扳手整块拆下（Create 认它是可用扳手调的方块）。 */
     boolean wrenchable(BlockState state);
+
+    /** 扳手（不潜行）点这一面会把它转成什么样子；不是 Create 可调的方块为空。 */
+    default Optional<BlockState> wrenched(BlockState state, Direction face) {
+        return Optional.empty();
+    }
 
     /** 砂纸打磨的全部配方：拿什么磨、磨出什么、一次几件。 */
     List<Polishing> polishing(ClientLevel level);

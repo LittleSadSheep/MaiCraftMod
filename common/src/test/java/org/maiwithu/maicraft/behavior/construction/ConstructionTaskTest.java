@@ -9,6 +9,7 @@ import org.maiwithu.maicraft.behavior.construction.spi.PlacementRules;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.function.Predicate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -71,6 +72,9 @@ class ConstructionTaskTest {
         /** 只有蹲着才放得出要的样子的格（机械动力的方向机器）；放的时候记下这一下蹲没蹲。 */
         final Set<BlockPos> crouchOnly = new HashSet<>();
         final Map<BlockPos, Boolean> sneakedAt = new HashMap<>();
+        /** 原版放出来会是这个样子的格（朝向不对）；拿扳手点一下转成蓝图里的样子。 */
+        final Map<BlockPos, BlockState> placesAs = new HashMap<>();
+        final List<Direction> turnedFaces = new ArrayList<>();
         final Set<String> unobtainable = new HashSet<>();
         final List<BlockPos> temporaries = new ArrayList<>();
         final List<String> siteNotes = new ArrayList<>();
@@ -105,9 +109,24 @@ class ConstructionTaskTest {
             BlockState predicted = cell.state();
             // 替身的原版：门总是关着放下来，开关由验收去按。
             if (predicted.hasProperty(BlockStateProperties.OPEN)) predicted = predicted.setValue(BlockStateProperties.OPEN, false);
+            if (placesAs.containsKey(cell.pos())) predicted = placesAs.get(cell.pos());
             return Optional.of(new PlacementPrediction.Placement(clicked, face, predicted, crouchOnly.contains(cell.pos())));
         }
         @Override public boolean requiresSneak(BlockPos clicked) { return false; }
+        // 替身转法：放出来的样子点一下东面就转成蓝图里的样子（拿木棍当扳手）。
+        @Override public Optional<PlacementRules.Turns> turnsTo(BlockState placed, Predicate<BlockState> wanted) {
+            for (var wrong : placesAs.entrySet()) {
+                if (wrong.getValue().equals(placed)) return Optional.of(new PlacementRules.Turns(Items.STICK, List.of(Direction.EAST)));
+            }
+            return Optional.empty();
+        }
+        @Override public Click turn(BlockPos block, Direction face, InteractionConfirmation confirmation) {
+            return click(() -> {
+                turnedFaces.add(face);
+                world.put(block, turnTo.getOrDefault(block, state(block)));
+            });
+        }
+        final Map<BlockPos, BlockState> turnTo = new HashMap<>();
 
         @Override public Click place(PlannedCell cell, PlacementPrediction.Placement placement, boolean sneak, PlacementConfirmation confirmation) {
             return click(() -> {
@@ -220,6 +239,25 @@ class ConstructionTaskTest {
         assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
         assertEquals(Boolean.TRUE, fake.sneakedAt.get(new BlockPos(0, 65, 0)));
         assertEquals(Boolean.FALSE, fake.sneakedAt.get(new BlockPos(0, 64, 0)));
+    }
+
+    @Test
+    void 放出来朝向不对_能拿扳手转到位就照放再转() {
+        // 机械动力的方向机器：站着蹲着都放不出要的朝向，放下后拿扳手点一面转到位，记一笔转动。
+        Fake fake = new Fake().ground(63);
+        BlockPos at = new BlockPos(0, 64, 0);
+        BlockState wanted = Blocks.OBSERVER.defaultBlockState().setValue(BlockStateProperties.FACING, Direction.DOWN);
+        BlockState placed = wanted.setValue(BlockStateProperties.FACING, Direction.SOUTH);
+        fake.carried.put("minecraft:observer", 1);
+        fake.carried.put("minecraft:stick", 1);
+        fake.placesAs.put(at, placed);
+        fake.turnTo.put(at, wanted);
+        // 蓝图写明了朝向：没写的属性不比，写了的才要转到位。
+        TaskResult result = run(fake, new Blueprint(DIM, at, List.of(PlannedCell.block(at, wanted, Set.of("facing")))));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(wanted, fake.world.get(at));
+        assertEquals(List.of(Direction.EAST), fake.turnedFaces);
+        assertTrue(result.changes().stream().anyMatch(change -> change.kind() == Change.Kind.BLOCK_CHANGED));
     }
 
     @Test

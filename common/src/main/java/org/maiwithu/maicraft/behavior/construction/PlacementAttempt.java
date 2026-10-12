@@ -30,6 +30,10 @@ final class PlacementAttempt {
     PlacementPrediction.Placement placement;
     PlacementConfirmation confirmation;
     int uses;
+    /** 原版放出来朝向不对、能拿扳手转到位：照放，放下后转。 */
+    boolean turnAfter;
+    /** 还能拿扳手点几下。 */
+    int turnsLeft = 4;
 
     PlacementAttempt(PlannedCell cell, BlockPos placeAt, boolean temporary, List<Candidate> candidates) {
         this.cell = cell;
