@@ -59,11 +59,23 @@ public final class LivePlacements implements ConstructionSeams.PlansPlacement {
         float yaw = (float) (Mth.atan2(delta.z, delta.x) * Mth.RAD_TO_DEG) - 90.0f;
         float pitch = (float) -(Mth.atan2(delta.y, horizontal) * Mth.RAD_TO_DEG);
         boolean sneak = requiresSneak(clicked);
-        // 原版以为在放 placeAt；落下来以后物品自己再改的样子（朝向这一下的水平方向定）由放置规则补上，再拿去和蓝图比。
+        Optional<PlacementPrediction.Placement> standing = settle(cell, placeAt, player, level, hit, yaw, pitch, sneak);
+        // 站着点放不成要的样子、点的又不是非蹲不可的方块：像玩家一样蹲着再试一次——机械动力的方向机器蹲着朝视线、
+        // 站着背着视线，有的朝向只有蹲着才放得出（站在置物台旁边放朝下的机械手）。
+        if (!sneak && standing.isPresent() && !PlacementPrediction.complete(cell, standing.get().predicted())) {
+            Optional<PlacementPrediction.Placement> crouching = settle(cell, placeAt, player, level, hit, yaw, pitch, true);
+            if (crouching.isPresent() && PlacementPrediction.complete(cell, crouching.get().predicted())) return crouching;
+        }
+        return standing;
+    }
+
+    // 原版以为在放 placeAt；落下来以后物品自己再改的样子（朝向这一下的水平方向定）由放置规则补上，再拿去和蓝图比。
+    private Optional<PlacementPrediction.Placement> settle(PlannedCell cell, BlockPos placeAt, LocalPlayer player,
+            ClientLevel level, BlockHitResult hit, float yaw, float pitch, boolean sneak) {
         PlacementPrediction.Placement predicted = PlacementPrediction.predict(player, new ItemStack(cell.item()), hit, yaw, pitch, sneak, placeAt);
         if (predicted == null || predicted.predicted() == null) return Optional.ofNullable(predicted);
         BlockState settled = placements.afterPlacing(cell.item(), predicted.predicted(), level, cell.pos(), Direction.fromYRot(yaw));
-        return Optional.of(new PlacementPrediction.Placement(predicted.clicked(), predicted.face(), settled));
+        return Optional.of(new PlacementPrediction.Placement(predicted.clicked(), predicted.face(), settled, sneak));
     }
 
     @Override public boolean requiresSneak(BlockPos clicked) {

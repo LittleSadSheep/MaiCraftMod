@@ -321,7 +321,8 @@ final class PlacingWork extends ConstructionWork {
         for (var effect : PlacementPrediction.generatedBy(cell.pos(), attempt.placement.predicted())) before.put(effect.pos(), services.site().state(effect.pos()));
         materialBefore = services.site().creative() ? -1 : services.site().carried(itemId(cell));
         attempt.confirmation = new PlacementConfirmation(cell, before, attempt.placement.predicted(), materialBefore);
-        boolean sneak = services.placements().requiresSneak(attempt.placement.clicked());
+        // 点会开界面的方块要蹲着；试算时蹲着才放得出要的朝向的，也蹲着点。
+        boolean sneak = attempt.placement.sneak() || services.placements().requiresSneak(attempt.placement.clicked());
         click = services.clicks().place(cell, attempt.placement, sneak, attempt.confirmation);
         step = Step.CLICK;
         begin(click.action(), "放 " + cell.pos().toShortString());

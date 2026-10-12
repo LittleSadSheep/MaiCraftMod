@@ -44,10 +44,15 @@ public final class PlacementPrediction {
         }
     }
 
-    /** 一个放法：点哪一格的哪一面，原版预测会放成什么。 */
-    public record Placement(BlockPos clicked, Direction face, BlockState predicted) {
+    /** 一个放法：点哪一格的哪一面、潜不潜行，原版预测会放成什么。 */
+    public record Placement(BlockPos clicked, Direction face, BlockState predicted, boolean sneak) {
         public Placement {
             clicked = clicked.immutable();
+        }
+
+        /** 不潜行的放法。 */
+        public Placement(BlockPos clicked, Direction face, BlockState predicted) {
+            this(clicked, face, predicted, false);
         }
     }
 
@@ -162,6 +167,10 @@ public final class PlacementPrediction {
                                     boolean sneak, BlockPos target) {
         if (!(stack.getItem() instanceof BlockItem blockItem)) return null;
         Direction[] nearest = LookDirections.ordered(yaw, pitch);
+        // 机械动力的方向机器按角色身上"蹲没蹲"定朝向（蹲着朝视线、站着背着视线），不看放置上下文：
+        // 试算时把角色的潜行标记临时换成候选值，算完立刻还原，这一刻不发包。
+        boolean wasSneaking = player.isShiftKeyDown();
+        if (wasSneaking != sneak) player.setShiftKeyDown(sneak);
         try {
             BlockPlaceContext context = new BlockPlaceContext(new UseOnContext(player.level(), player, InteractionHand.MAIN_HAND, stack, hit) {}) {
                 @Override public boolean isSecondaryUseActive() {
@@ -190,14 +199,16 @@ public final class PlacementPrediction {
             };
             // 点同类半砖可能补成被点格的双层砖而不是放到邻格：落点也要和这次的目标格对上。
             BlockPos destination = context.getClickedPos();
-            if (!destination.equals(target) || !context.canPlace()) return new Placement(hit.getBlockPos(), hit.getDirection(), null);
+            if (!destination.equals(target) || !context.canPlace()) return new Placement(hit.getBlockPos(), hit.getDirection(), null, sneak);
             // 原版右键放方块的顺序：物品先改放置上下文（脚手架往外续），再由物品自己定放成什么。
             BlockPlaceContext placing = blockItem.updatePlacementContext(context);
-            if (placing == null || !placing.getClickedPos().equals(target)) return new Placement(hit.getBlockPos(), hit.getDirection(), null);
+            if (placing == null || !placing.getClickedPos().equals(target)) return new Placement(hit.getBlockPos(), hit.getDirection(), null, sneak);
             BlockState placed = PlacementItems.placementState(blockItem, placing);
-            return new Placement(hit.getBlockPos(), hit.getDirection(), placed);
+            return new Placement(hit.getBlockPos(), hit.getDirection(), placed, sneak);
         } catch (RuntimeException unavailable) {
             return null;
+        } finally {
+            if (wasSneaking != sneak) player.setShiftKeyDown(wasSneaking);
         }
     }
 }

@@ -68,6 +68,9 @@ class ConstructionTaskTest {
         final Map<BlockPos, BlockState> world = new HashMap<>();
         final Map<String, Integer> carried = new HashMap<>();
         final Set<BlockPos> protectedCells = new HashSet<>();
+        /** 只有蹲着才放得出要的样子的格（机械动力的方向机器）；放的时候记下这一下蹲没蹲。 */
+        final Set<BlockPos> crouchOnly = new HashSet<>();
+        final Map<BlockPos, Boolean> sneakedAt = new HashMap<>();
         final Set<String> unobtainable = new HashSet<>();
         final List<BlockPos> temporaries = new ArrayList<>();
         final List<String> siteNotes = new ArrayList<>();
@@ -102,12 +105,13 @@ class ConstructionTaskTest {
             BlockState predicted = cell.state();
             // 替身的原版：门总是关着放下来，开关由验收去按。
             if (predicted.hasProperty(BlockStateProperties.OPEN)) predicted = predicted.setValue(BlockStateProperties.OPEN, false);
-            return Optional.of(new PlacementPrediction.Placement(clicked, face, predicted));
+            return Optional.of(new PlacementPrediction.Placement(clicked, face, predicted, crouchOnly.contains(cell.pos())));
         }
         @Override public boolean requiresSneak(BlockPos clicked) { return false; }
 
         @Override public Click place(PlannedCell cell, PlacementPrediction.Placement placement, boolean sneak, PlacementConfirmation confirmation) {
             return click(() -> {
+                sneakedAt.put(cell.pos(), sneak);
                 clicks.add(placement);
                 placedOrder.add(cell.pos());
                 world.put(cell.pos(), placement.predicted());
@@ -204,6 +208,18 @@ class ConstructionTaskTest {
         assertTrue(result.changes().isEmpty());
         assertEquals(1, details(result).cells().get("matches"));
         assertEquals(List.of("开工"), fake.siteNotes);
+    }
+
+    @Test
+    void 只有蹲着放得出要的样子_就蹲着点() {
+        // 机械动力的方向机器蹲着朝视线、站着背着视线：试算说蹲着才对，出手就蹲着；别的格照常站着点。
+        Fake fake = new Fake().ground(63);
+        fake.carried.put("minecraft:stone", 2);
+        fake.crouchOnly.add(new BlockPos(0, 65, 0));
+        TaskResult result = run(fake, wall(STONE, new BlockPos(0, 64, 0), new BlockPos(0, 65, 0)));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(Boolean.TRUE, fake.sneakedAt.get(new BlockPos(0, 65, 0)));
+        assertEquals(Boolean.FALSE, fake.sneakedAt.get(new BlockPos(0, 64, 0)));
     }
 
     @Test
