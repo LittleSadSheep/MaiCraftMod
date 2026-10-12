@@ -127,6 +127,23 @@ class DepositTaskTest {
     }
 
     @Test
+    void 补料箱下面的溜槽抽走一部分_离开背包的不再算没存下() {
+        // 实机：往补料箱存齿轮，下面的溜槽一边往外抽；背包少了 32 件、箱子只多了 16 件。
+        Rig rig = new Rig();
+        rig.carry(DIRT, 32);
+        FakeChest chest = rig.chest(NEAR, false);
+        chest.drainPerMove = 16;
+        TaskResult result = rig.run(rig.input(null, List.of(DIRT), null));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(0, rig.carried(DIRT));
+        assertEquals(16, chest.total(DIRT));
+        assertTrue(result.summary().contains("抽走"), result.summary());
+        assertTrue(result.remaining().isEmpty(), result.remaining().toString());
+        assertTrue(result.unconfirmed().stream().anyMatch(change -> change.note().contains("溜槽")),
+                result.unconfirmed().toString());
+    }
+
+    @Test
     void 第一只装满了换第二只() {
         Rig rig = new Rig();
         rig.carry(DIRT, 32);
@@ -372,6 +389,8 @@ class DepositTaskTest {
         int sentClicks;
         /** 不收东西的格（箱子侧第几格）：像熔炉产出格、机器的输出格。 */
         final Set<Integer> refusing = new HashSet<>();
+        /** 每次快速移动后被下面的溜槽抽走几件（像补料箱）。 */
+        int drainPerMove;
 
         FakeChest(Rig rig, WorldPosition at, boolean someoneElses) {
             this.rig = rig;
@@ -459,6 +478,14 @@ class DepositTaskTest {
                 }
             }
             if (moving.isEmpty()) rig.player.set(slotId, ItemStack.EMPTY);
+            // 下面的溜槽一边往外抽。
+            int drain = drainPerMove;
+            for (ItemStack slot : slots) {
+                if (drain <= 0) break;
+                int taken = Math.min(drain, slot.getCount());
+                slot.shrink(taken);
+                drain -= taken;
+            }
             return true;
         }
 

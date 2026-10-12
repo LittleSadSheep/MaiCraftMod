@@ -230,6 +230,12 @@ public final class InventorySpace {
                     records.unconfirmed(new Change(Change.Kind.OTHER, "腾背包", 1, fact));
                 }
 
+                // 放进去就被下面的溜槽、漏斗抽走的也腾出了背包：算进这一步，去向照实记进没能确认。
+                @Override public void passedThrough(String itemId, int amount, String fact) {
+                    storedThisStep += amount;
+                    records.unconfirmed(new Change(Change.Kind.OTHER, "腾背包", amount, fact));
+                }
+
                 @Override public void attempt(String tried, String whatHappened) {
                     records.attempt("腾地方：" + tried, whatHappened);
                 }

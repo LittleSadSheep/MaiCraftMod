@@ -58,6 +58,14 @@ public final class StoresInContainer implements Action {
         /** 这种东西还要存几件。 */
         int left(String itemId);
 
+        /**
+         * 离开了背包、却没留在容器里的几件：背包少的比容器多的多、光标是空的——放进去就被容器下面的溜槽、漏斗抽走了。
+         * 东西确实离开了背包，不再算"还要存"；去向是推断的，照实记进没能确认。默认只记没能确认。
+         */
+        default void passedThrough(String itemId, int amount, String fact) {
+            unconfirmed(fact);
+        }
+
         /** 确认存进了这么多。 */
         void stored(String itemId, int amount);
 

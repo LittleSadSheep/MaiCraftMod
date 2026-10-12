@@ -49,6 +49,8 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
     /** 每样东西一共要存几件，按存什么的顺序。 */
     private final Map<String, Integer> wanted = new LinkedHashMap<>();
     private final Map<String, Integer> confirmed = new LinkedHashMap<>();
+    /** 放进去就被容器下面的溜槽、漏斗抽走的件数：离开了背包，没留在容器里。 */
+    private final Map<String, Integer> passed = new LinkedHashMap<>();
     /** 每只容器存进了什么：容器的叫法 → 物品 → 件数。 */
     private final Map<String, Map<String, Integer>> storedIn = new LinkedHashMap<>();
     private final List<Problem> openFailures = new ArrayList<>();
@@ -220,10 +222,14 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
     // 收尾：存完算完成；存进了一些算部分完成；一件都没存进按失败，原因是开不了就说开不了，否则是都满了。
     private Next<Phase> finish() {
         long deposited = confirmed.values().stream().mapToLong(Integer::longValue).sum();
+        long drained = passed.values().stream().mapToLong(Integer::longValue).sum();
         long total = wanted.values().stream().mapToLong(Integer::longValue).sum();
-        if (deposited >= total) {
-            return Next.done(TaskResult.done("存进了 " + storedIn.size() + " 只容器，要存的都存进去了"));
+        // 要存的都离开了背包：一部分留在容器里，一部分被下面的溜槽、漏斗抽走了，分开说清。
+        String drainedNote = drained == 0 ? "" : "；另有 " + drained + " 件放进去就被下面的溜槽或漏斗抽走了，没留在容器里";
+        if (deposited + drained >= total) {
+            return Next.done(TaskResult.done("存进了 " + storedIn.size() + " 只容器，要存的都离开了背包" + drainedNote));
         }
+        deposited += drained;
         Problem why = deposited == 0 && !openFailures.isEmpty() ? openFailures.getFirst()
                 : Problem.of(Problem.Kind.NOT_FOUND, "附近的容器都满了，或都开不了", "走远一点再存，或点名一只有空位的容器");
         if (deposited == 0) {
@@ -237,7 +243,13 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
     private StoresInContainer.Ledger ledger() {
         return new StoresInContainer.Ledger() {
             @Override public int left(String itemId) {
-                return wanted.getOrDefault(itemId, 0) - confirmed.getOrDefault(itemId, 0);
+                return wanted.getOrDefault(itemId, 0) - confirmed.getOrDefault(itemId, 0) - passed.getOrDefault(itemId, 0);
+            }
+
+            // 放进去就被下面的溜槽、漏斗抽走的：离开了背包，不再当还要存；去向照实记进没能确认。
+            @Override public void passedThrough(String itemId, int amount, String fact) {
+                passed.merge(itemId, amount, Integer::sum);
+                recordUnconfirmed(new Change(Change.Kind.OTHER, "搬运", amount, fact));
             }
 
             @Override public void stored(String itemId, int amount) {
@@ -297,7 +309,7 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
     @Override protected List<String> remaining() {
         List<String> left = new ArrayList<>();
         wanted.forEach((itemId, amount) -> {
-            int missing = amount - confirmed.getOrDefault(itemId, 0);
+            int missing = amount - confirmed.getOrDefault(itemId, 0) - passed.getOrDefault(itemId, 0);
             if (missing > 0) left.add(itemId + " 还有 " + missing + " 件没存下");
         });
         return left;

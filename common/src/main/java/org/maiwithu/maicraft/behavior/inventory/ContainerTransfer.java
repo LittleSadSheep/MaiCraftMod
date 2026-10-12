@@ -190,6 +190,12 @@ final class ContainerTransfer implements Action {
             if (!inFlight.carried()) full.add(itemId);
         } else if (out == in && out > 0 && menu.cursorEmpty()) {
             ledger.stored(itemId, out);
+        } else if (out > in && in >= 0 && menu.cursorEmpty()) {
+            // 背包少的比容器多的多、光标空着：东西进了这只容器，又被它下面的溜槽、漏斗抽走了一部分（补料箱常这样）。
+            // 容器里多出来的照实记存进；其余离开了背包，不再当"还没存"反复去存。原先整笔记成对不上账、说"还有几件没存下"。
+            if (in > 0) ledger.stored(itemId, in);
+            ledger.passedThrough(itemId, out - in, "往容器里搬 " + itemId + "：背包少了 " + out + " 件，容器只多了 " + in
+                    + " 件，差的 " + (out - in) + " 件多半一放进去就被下面的溜槽或漏斗抽走了");
         } else {
             ledger.unconfirmed("往容器里搬 " + itemId + "：背包少了 " + out + " 件，容器多了 " + in
                     + " 件" + (menu.cursorEmpty() ? "" : "，光标上还拿着东西") + "，对不上账");
