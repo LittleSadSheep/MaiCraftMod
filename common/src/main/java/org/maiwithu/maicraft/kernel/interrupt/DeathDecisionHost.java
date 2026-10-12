@@ -21,6 +21,9 @@ public interface DeathDecisionHost {
     /** 死亡过程结束（重生或以别的方式回到活体）：本轮决策收尾，下次死亡再挂新的。 */
     void characterAliveAgain();
 
+    /** 还死着的每一刻（挂过决策之后）：到点没人回答时，普通世界由挂载方直接点重生。 */
+    default void stillDead(long gameTick) {}
+
     /** 没接上挂载对象时的空实现：死亡照常停摆，只是不挂决策。 */
     DeathDecisionHost NONE = new DeathDecisionHost() {
         @Override public void characterDied(DeathFacts facts, boolean connectionAlive) {}

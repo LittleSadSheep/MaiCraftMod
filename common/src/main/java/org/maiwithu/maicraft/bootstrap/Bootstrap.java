@@ -16,6 +16,8 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.Camera;
 import net.minecraft.client.gui.GuiGraphics;
 import org.joml.Matrix4f;
+import org.maiwithu.maicraft.behavior.inventory.PicksUpDrops;
+import org.maiwithu.maicraft.behavior.inventory.ClientDropPickup;
 import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.debug.BlueprintOverlay;
 import org.maiwithu.maicraft.debug.DebugPanel;
@@ -73,6 +75,7 @@ import org.maiwithu.maicraft.behavior.survival.BlockBreaking;
 import org.maiwithu.maicraft.behavior.survival.LiveAirRoutes;
 import org.maiwithu.maicraft.behavior.survival.LiveCeilingDigs;
 import org.maiwithu.maicraft.behavior.survival.LiveNightView;
+import org.maiwithu.maicraft.behavior.survival.LostItemsNeed;
 import org.maiwithu.maicraft.behavior.survival.NightfallNeed;
 import org.maiwithu.maicraft.behavior.survival.SelfDefenseNeed;
 import org.maiwithu.maicraft.behavior.survival.SurvivalSituation;
@@ -248,7 +251,8 @@ public final class Bootstrap {
             EatSoonTask.FoodMoves foodMoves, ReadsFoodValues foods, LiveBurrow burrow, LiveCeilingDigs ceilings,
             NightRestWiring nightWiring, ItemsToKeep keeps, Supplier<Protection> protection,
             FollowLighting followLighting, ReadsLightLevels lightLevels, ClientMovesToMainhand hands,
-            ModRangedWeapons ranged, Function<PlayerContext, CatchesFall> fallRescues, Predicate<UUID> trusted) {
+            ModRangedWeapons ranged, Function<PlayerContext, CatchesFall> fallRescues, Predicate<UUID> trusted,
+            PicksUpDrops lostDrops) {
         // 角色死亡这类循环自身的处境变化也从同一条事件流出去；死亡决策从挂载口交给目标运行表。
         return new ControlLoop(List.of(
                 new DigOutNeed(new SurvivalSituation.FromPlayer(),
@@ -266,7 +270,10 @@ public final class Bootstrap {
                 new NightfallNeed(new LiveNightView(combatSenses),
                         LiveNightAndEdgeMoves.burrow(burrow, events), nightWiring, nightWiring),
                 new EdgeProximityNeed(new LiveEdgeView(),
-                        LiveNightAndEdgeMoves.retreat(walks, events))), events, deathDecisions);
+                        LiveNightAndEdgeMoves.retreat(walks, events)),
+                // 刚重生、身上的东西撒在死的地方：五分钟内跑回去捡。
+                new LostItemsNeed(LiveNightAndEdgeMoves.players(),
+                        LiveNightAndEdgeMoves.lostItems(walks, lostDrops, events), events)), events, deathDecisions);
     }
 
     /**
@@ -482,6 +489,10 @@ public final class Bootstrap {
                 @Override public void characterAliveAgain() {
                     if (goals != null) goals.characterAliveAgain();
                 }
+
+                @Override public void stillDead(long gameTick) {
+                    if (goals != null) goals.stillDead(gameTick);
+                }
             };
         }
 
@@ -520,7 +531,9 @@ public final class Bootstrap {
                     // 意外往下掉：先问联动的刹车（穿着有气的喷气背包开悬停），刹不住再就地找落点放东西接住。
                     FallRescues.withBrakes(() -> compat.fallBrakes()),
                     // 自家人按进世界时读的实例配置认；还没进世界时谁都不算。
-                    uuid -> worldScope[0] != null && worldScope[0].trustedPlayers().includes(uuid.toString()));
+                    uuid -> worldScope[0] != null && worldScope[0].trustedPlayers().includes(uuid.toString()),
+                    // 回去捡尸体用和采集、打猎同一套捡掉落物。
+                    new ClientDropPickup(now, walks, dropConfirmations));
         }
 
         /**

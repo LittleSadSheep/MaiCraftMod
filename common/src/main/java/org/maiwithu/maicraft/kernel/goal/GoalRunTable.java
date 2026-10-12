@@ -87,6 +87,17 @@ public final class GoalRunTable {
         deathRecovery.onDeath(facts, connectionAlive);
     }
 
+    /**
+     * 还死着的每一刻：普通世界挂着的死亡决策到点没人回答，就像真人那样直接点重生
+     * （掉的东西五分钟就消失，等不起 LLM 想一轮）。
+     */
+    public void stillDead(long gameTick) {
+        if (!deathRecovery.autoRespawnDue(gameTick)) return;
+        long id = deathRecovery.decisionRun().map(GoalRun::id).orElseThrow();
+        DeathRecovery.Choice choice = deathRecovery.answer(id, "respawn");
+        deathRecovery.applied(choice, deathActions.requestRespawn(), true);
+    }
+
     /** 死亡过程结束（重生或以别的方式回到活体）：本轮死亡决策了结，下次死亡再挂新的。 */
     public void characterAliveAgain() {
         deathRecovery.backAlive();

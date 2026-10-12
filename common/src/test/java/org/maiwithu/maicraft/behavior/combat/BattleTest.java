@@ -310,7 +310,8 @@ class BattleTest {
     @Test
     void cornedAtNightAsksForShelter() {
         Senses senses = new Senses();
-        senses.threats.add(zombie(1, 6));
+        // 追兵贴着（挖坑来不及）：先撤，撤不掉才就地挖。
+        senses.threats.add(zombie(1, 5));
         senses.health = 4;
         Moves moves = new Moves();
         moves.walkStatus = ActionStatus.failed(Problem.of(Problem.Kind.UNREACHABLE, "死路"));

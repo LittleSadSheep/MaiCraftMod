@@ -11,6 +11,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.LightLayer;
 
 import java.util.ArrayList;
+import java.util.List;
 
 import org.maiwithu.maicraft.game.world.WorldTime;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -27,6 +28,11 @@ public final class LiveNightView implements NightfallNeed.ReadsNight {
     private static final int COVERED_SKY_LIGHT = 7;
     /** 方块光到这一级及以上算灯够亮。 */
     private static final int LIT_BLOCK_LIGHT = 8;
+
+    /** 一晚上露天迟早会碰上的：一只僵尸、一只骷髅，都还在远处、没盯上角色。 */
+    private static final List<ThreatAssessment.Foe> TYPICAL_NIGHT_PACK = List.of(
+            new ThreatAssessment.Foe(16, ThreatAssessment.Kind.MELEE, false, false),
+            new ThreatAssessment.Foe(16, ThreatAssessment.Kind.RANGED, false, false));
 
     private final CombatSenses senses;
 
@@ -54,6 +60,9 @@ public final class LiveNightView implements NightfallNeed.ReadsNight {
         for (CombatSenses.Threat threat : senses.threats(context, ThreatAssessment.VIGILANCE_RADIUS)) {
             foes.add(new ThreatAssessment.Foe(threat.distance(), threat.kind(), threat.armed(), threat.armed()));
         }
+        // 眼下还没有怪：按一晚上迟早会碰上的一只僵尸一只骷髅估——空手（镐不算兵器）的身板
+        // 等怪真到了跟前再躲就晚了，天一黑就挖坑；拿着剑、斧的照常干活，来了再打。
+        if (foes.isEmpty()) foes.addAll(TYPICAL_NIGHT_PACK);
         var mine = new ThreatAssessment.MySide(self.getHealth(), self.getArmorValue(),
                 profile.weapon().map(WeaponChoice::scoreOf).orElse(0), profile.foodCount(), true);
         ThreatAssessment.Verdict verdict = ThreatAssessment.assess(mine, foes).verdict();

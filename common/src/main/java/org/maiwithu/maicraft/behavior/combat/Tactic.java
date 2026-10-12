@@ -98,6 +98,12 @@ public final class Tactic {
         }
         if (bomb != null) return new EvadeBlast(bomb);
         boolean chased = !field.chasers().isEmpty();
+        boolean outmatched = me.belowRetreatLine() || !me.hasMelee() && !me.canShoot() && me.weaponScore() <= 0;
+        // 天黑了打不过：先拉开距离，追兵离得够远（挖三格来得及）就地挖坑封起来熬到天亮，
+        // 不往黑地里一路跑——夜里越跑撞上的怪越多，实机第一晚空手撤着撤着被围死。
+        if (memory.mayDigIn() && chased && outmatched && nearestFighter(field) >= DIG_IN_GAP) {
+            return new DigIn("天黑露天打不过，趁追兵还远挖坑封起来熬到天亮");
+        }
         // 2 已在撤离：保持到甩开。
         if (memory.retreating() && !memory.cornered()) return new Withdraw("已在撤离，跑到甩开为止");
         // 3 打不过。
@@ -108,7 +114,6 @@ public final class Tactic {
         }
         // 撤不掉又打不过：白天、没有在射我的（站高了更挨射），就地垫高三格，近战怪够不着；
         // 天黑了挖坑把自己封起来熬到天亮（封住的坑射不进来，不看有没有射手）。
-        boolean outmatched = me.belowRetreatLine() || !me.hasMelee() && !me.canShoot() && me.weaponScore() <= 0;
         if (memory.cornered() && !memory.perched() && chased && outmatched) {
             if (memory.mayPillar() && field.chasers().stream().noneMatch(Tactic::shootsUp)) {
                 return new PillarUp("撤不掉又打不过，就地垫高三格");
@@ -124,6 +129,15 @@ public final class Tactic {
         }
         // 5 打法。
         return shoots(me, memory, target) ? new Shoot(target) : new Melee(target);
+    }
+
+    /** 天黑挖坑要的空当：最近一只会还手的追兵离这么远（格）以上才开挖，挖三格来得及。 */
+    static final double DIG_IN_GAP = 6.0;
+
+    // 最近一只会还手的追兵有多远；没有为无穷远。
+    private static double nearestFighter(Battlefield field) {
+        return field.chasers().stream().filter(Battlefield.Foe::fightsBack)
+                .mapToDouble(Battlefield.Foe::distance).min().orElse(Double.POSITIVE_INFINITY);
     }
 
     // 站高了反而更挨打的：远程怪、会飞的、别的玩家。

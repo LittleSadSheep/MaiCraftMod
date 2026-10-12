@@ -38,6 +38,14 @@ public final class DeathRecovery {
     private Question lastQuestion;
     /** 下一条决策的编号：从"与目标无关"的编号再往回一格起，负数往回数，与目标运行的正数编号永不相遇。 */
     private long nextDecisionId = TaskEventLog.NO_GOAL - 1;
+    /** 这次死在哪一刻（游戏刻）；还没数到为 -1。 */
+    private long diedAtTick = -1;
+
+    /**
+     * 普通世界死了这么久（刻）还没人选，就像真人看一眼死亡界面那样直接点重生：掉的东西五分钟就消失，
+     * 等 LLM 想一轮再点，回去捡尸体就来不及了。极限模式、连接断了不自动选。
+     */
+    public static final long AUTO_RESPAWN_TICKS = 40;
 
     public DeathRecovery(TaskEventLog events) {
         this.events = Objects.requireNonNull(events, "events");
@@ -64,11 +72,25 @@ public final class DeathRecovery {
     /** 死亡过程结束（重生或以别的方式回到活体）：本轮决策丢掉，下次死亡再挂新的。 */
     public void backAlive() {
         decision = null;
+        diedAtTick = -1;
+    }
+
+    /**
+     * 还死着的每一刻：普通世界挂着重生选项、过了 {@link #AUTO_RESPAWN_TICKS} 还没人回答，就该自动点重生了。
+     *
+     * @return 该自动重生时为 true（调用方接着按回答 respawn 执行）
+     */
+    public boolean autoRespawnDue(long gameTick) {
+        if (decision == null || decision.question() == null) return false;
+        if (diedAtTick < 0) diedAtTick = gameTick;
+        boolean canRespawn = decision.question().options().stream().anyMatch(option -> option.id().equals("respawn"));
+        return canRespawn && gameTick - diedAtTick >= AUTO_RESPAWN_TICKS;
     }
 
     /** 离开世界：整份现场丢弃，决策不跨世界残留。 */
     public void forget() {
         decision = null;
+        diedAtTick = -1;
     }
 
     /** 这个编号是不是本轮死亡决策的记录。 */
@@ -146,6 +168,11 @@ public final class DeathRecovery {
      * 在决策记录上定下结果并发事件；原生请求没发出去就把同一个问题重新挂上，答复不吞。
      */
     public void applied(Choice choice, boolean sent) {
+        applied(choice, sent, false);
+    }
+
+    /** 同上；{@code autoAnswered} 为 true 时是到点自动点的重生，结果里如实写明。 */
+    public void applied(Choice choice, boolean sent, boolean autoAnswered) {
         if (decision == null || decision.question() != null) {
             throw new GoalRunTable.WrongGoalRunState("死亡恢复决策不在等执行结果");
         }
@@ -156,7 +183,8 @@ public final class DeathRecovery {
             return;
         }
         String summary = switch (choice) {
-            case RESPAWN -> "已发出原版重生请求，等服务器结算，复活后循环接着做";
+            case RESPAWN -> autoAnswered ? "等了 " + AUTO_RESPAWN_TICKS / 20 + " 秒没人选，像人一样直接点了重生，复活后循环接着做"
+                    : "已发出原版重生请求，等服务器结算，复活后循环接着做";
             case SPECTATE -> "已发出切观战的请求，成不成由服务器决定";
             case CANCEL_GOAL -> "已取消当前目标，死亡屏幕留给人处理";
         };

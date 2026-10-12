@@ -46,6 +46,26 @@ class DeathRecoveryTest {
     }
 
     @Test
+    void ordinaryWorldRespawnsByItselfAfterAGlance() {
+        // 实机（全量测试 10-12）：等 LLM 想一轮再点重生，回去捡尸体时掉落物已经消失。
+        recovery.onDeath(FACTS, true);
+        assertFalse(recovery.autoRespawnDue(100), "刚死：先等一眼");
+        assertFalse(recovery.autoRespawnDue(100 + DeathRecovery.AUTO_RESPAWN_TICKS - 1));
+        assertTrue(recovery.autoRespawnDue(100 + DeathRecovery.AUTO_RESPAWN_TICKS), "到点没人选：直接点重生");
+        long id = recovery.decisionRun().orElseThrow().id();
+        recovery.applied(recovery.answer(id, "respawn"), true, true);
+        assertTrue(recovery.decisionRun().orElseThrow().result().summary().contains("直接点了重生"));
+        assertFalse(recovery.autoRespawnDue(500), "已经点过：不再重复");
+    }
+
+    @Test
+    void hardcoreNeverRespawnsByItself() {
+        recovery.onDeath(HARDCORE, true);
+        recovery.autoRespawnDue(0);
+        assertFalse(recovery.autoRespawnDue(10_000), "极限模式只能旁观：留给 LLM 选");
+    }
+
+    @Test
     void comingBackIsOnlyOfferedWhileConnected() {
         recovery.onDeath(FACTS, false);
 

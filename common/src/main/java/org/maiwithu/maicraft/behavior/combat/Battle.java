@@ -142,7 +142,8 @@ public final class Battle {
         // 被打下柱顶（击退、柱子被炸）：不再算站在高处。
         if (perched && field.me().y() < perchY - 0.5) perched = false;
         boolean mayPillar = !pillarTried && cornered && moves.canPillar(context);
-        boolean mayDigIn = offersShelter && !shelterAsked && cornered && moves.night(context);
+        // 天黑才挖坑；拉开距离后就挖，不必等到退无可退（何时挖由打法按追兵远近定）。
+        boolean mayDigIn = offersShelter && !shelterAsked && moves.night(context);
         Tactic.Plan plan = Tactic.decide(field, new Tactic.Memory(locked, retreating, cornered, unreachable,
                 bow.givenUp(), bow.shooting(), mayPillar || pillar != null, perched, mayDigIn));
         if (pillar != null && !(plan instanceof Tactic.PillarUp)) {

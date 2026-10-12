@@ -303,6 +303,9 @@ public final class ControlLoop {
             DeathFacts facts = body == null ? null : body.deathFacts();
             deathDecisions.characterDied(facts, body != null && body.connection() != null);
             LOG.info("角色死亡：控制循环停摆，等重生");
+        } else {
+            // 还死着：到点没人选，普通世界直接点重生（像真人看一眼死亡界面就点），掉的东西还来得及捡。
+            deathDecisions.stillDead(context.gameTick());
         }
         return new Decision.WaitingRespawn(stack.isEmpty() ? null : stack.getFirst().task);
     }

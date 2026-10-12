@@ -80,6 +80,17 @@ class TacticTest {
     }
 
     @Test
+    void atNightOutmatchedDigsInOnceTheChasersAreFarEnough() {
+        // 实机（全量测试 10-12）：第一晚空手往黑地里撤，越撤撞上的怪越多，被围死三次。
+        Tactic.Memory night = new Tactic.Memory(-1, false, false, Set.of(), false, false, false, false, true);
+        assertInstanceOf(Tactic.Withdraw.class, decide(me(20, false, false), night, zombie(1, 3)), "追兵贴着：先拉开距离");
+        assertInstanceOf(Tactic.DigIn.class, decide(me(20, false, false), night, zombie(1, 8)), "离得够远：就地挖坑");
+        Tactic.Memory fleeing = new Tactic.Memory(-1, true, false, Set.of(), false, false, false, false, true);
+        assertInstanceOf(Tactic.DigIn.class, decide(me(20, false, false), fleeing, zombie(1, 8)), "撤着撤着拉开了也挖");
+        assertInstanceOf(Tactic.Melee.class, decide(me(20, true, false), night, zombie(1, 8)), "打得过就不躲");
+    }
+
+    @Test
     void picksTheMostUrgentAndSticksToTheLockedOne() {
         // 近处的苦力怕比贴脸的僵尸还急。
         assertEquals(2, target(decide(me(20, true, false), Tactic.Memory.FRESH, zombie(1, 2), creeper(2, 6, false))));
