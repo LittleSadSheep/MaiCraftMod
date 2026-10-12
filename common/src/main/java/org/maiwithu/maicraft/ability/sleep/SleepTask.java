@@ -49,8 +49,11 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
 
     /** 换床次数上限：接连几张都不行说明这片床区整体不行，如实结束，不无限换。玩家常识。 */
     private static final int MAX_BED_TRIES = 3;
-    /** 十秒没有真实进展算卡住：靠近一张床、一次放置都该在十秒里有动静。 */
-    private static final int STUCK_AFTER_TICKS = 200;
+    /**
+     * 三十秒没有真实进展算卡住，和出行一样：走去床边要算路、绕墙角，算一次路最多就要好几秒；
+     * 原先十秒，实机走去三十多格外的床、睡醒走回原位都在半路以"没进展"收场，人留在半路。
+     */
+    private static final int STUCK_AFTER_TICKS = 600;
     /** 最多做一刻钟：选床扫描加绕路走近，再长就是路线或床本身有问题。 */
     private static final long MAX_TICKS = 20L * 60 * 15;
 
