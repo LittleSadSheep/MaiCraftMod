@@ -229,7 +229,7 @@ public final class AbilityCatalog {
             CompatRegistry compat,
             FacilityKinds facilities,
             /** 夜晚生存需求与睡觉能力之间的晚接桥；进世界登记睡觉能力后接上真实现。 */
-            NightRestWiring nightWiring,
+            SurvivalWiring survivalWiring,
             /** 这个游戏实例的配置目录：设计库放在这里，导出写到实例的 schematics 目录。 */
             Path configDirectory,
             /** 施工预览：design 投影的蓝图交给它画；没有画面的清单传 {@link ShowsPreview#NONE}。 */
@@ -461,9 +461,9 @@ public final class AbilityCatalog {
                 deps.backpack(), deps.offhand(), deps.interactions(), shared.bringClose(), shared.collects(),
                 deps.memory(), new DestinationResolver(deps.travelWorld(), deps.memory(),
                         new SceneSeenTargets(deps::scene)),
-                shared.innerNeeds(), shared.refusals()::latestMessage, deps.nightWiring().autoSleep());
+                shared.innerNeeds(), shared.refusals()::latestMessage, deps.survivalWiring().autoSleep());
         registry.register(sleepModule);
-        deps.nightWiring().attach(sleepModule.bedAvailability(), sleepModule);
+        deps.survivalWiring().attach(sleepModule.bedAvailability(), sleepModule);
     }
 
     /**
@@ -674,6 +674,8 @@ public final class AbilityCatalog {
                 deps.backpack(), deps.offhand(), deps.itemTags(),
                 deps.characterPosition(), Optional.of(space), ItemAcquisition.DEFAULT_MAX_DEPTH);
         innerNeeds.attach(acquisition);
+        // 饿了身上没吃的：吃饭的临时任务经同一个引擎去弄口粮。
+        deps.survivalWiring().attachFood(acquisition);
         // 拿东西途中走路垫脚，不把正在拿的东西垫掉：引擎此刻在推进的那一串就是正要用的。
         deps.itemsInUse().watch(acquisition::inProgress);
         // via 的可选值就是这些来源自报的途径：来源列表变了，能力说明里的参数表跟着变。

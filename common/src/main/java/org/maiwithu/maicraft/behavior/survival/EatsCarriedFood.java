@@ -2,12 +2,14 @@
 package org.maiwithu.maicraft.behavior.survival;
 
 import java.util.Objects;
+import java.util.function.Supplier;
 import java.util.Optional;
 
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
 
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
 import org.maiwithu.maicraft.behavior.interaction.SustainedUse;
@@ -37,6 +39,8 @@ public final class EatsCarriedFood implements EatSoonTask.FoodMoves {
     private final UseKeyProjection projection;
     /** 正要用的东西：饿了顺手吃不吃它们。 */
     private final ItemsToKeep keeps;
+    /** 拿东西的引擎：进世界、能力清单建好后才有；没有时弄不了吃的。 */
+    private final Supplier<Optional<ItemNeeds>> sources;
 
     public EatsCarriedFood(BackpackView backpack, ReadsFoodValues foods,
             MovesToMainhand toMainhand, UseKeyProjection projection) {
@@ -45,6 +49,14 @@ public final class EatsCarriedFood implements EatSoonTask.FoodMoves {
 
     public EatsCarriedFood(BackpackView backpack, ReadsFoodValues foods,
             MovesToMainhand toMainhand, UseKeyProjection projection, ItemsToKeep keeps) {
+        this(backpack, foods, toMainhand, projection, keeps, Optional::empty);
+    }
+
+    /** @param sources 拿东西的引擎（进世界后接上）；饿了身上没吃的时经它去弄 */
+    public EatsCarriedFood(BackpackView backpack, ReadsFoodValues foods,
+            MovesToMainhand toMainhand, UseKeyProjection projection, ItemsToKeep keeps,
+            Supplier<Optional<ItemNeeds>> sources) {
+        this.sources = Objects.requireNonNull(sources, "sources");
         this.backpack = Objects.requireNonNull(backpack, "backpack");
         this.foods = Objects.requireNonNull(foods, "foods");
         this.toMainhand = Objects.requireNonNull(toMainhand, "toMainhand");
@@ -63,8 +75,8 @@ public final class EatsCarriedFood implements EatSoonTask.FoodMoves {
 
     @Override
     public Action fetching(long budgetTicks) {
-        // 有预算地弄吃的（翻已知容器、合成、采集）还没有实现方；给 null 让任务如实说弄不到。
-        return null;
+        // 饿了身上没吃的：经拿东西的引擎有预算地弄几件现成口粮（网络、箱子、做、打猎）；引擎还没接上给 null，任务如实说。
+        return sources.get().map(needs -> (Action) new FetchesFood(needs, budgetTicks)).orElse(null);
     }
 
     /** 吃一口的动作：换到主手 → 按住使用键；食物已经在主手就直接按住。 */

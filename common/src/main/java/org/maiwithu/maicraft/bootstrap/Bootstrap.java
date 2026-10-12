@@ -250,7 +250,7 @@ public final class Bootstrap {
             InteractionSender interactionSender, MenuActions menuActions, Interactions interactions,
             CombatSenses combatSenses, WalkTo walks,
             EatSoonTask.FoodMoves foodMoves, ReadsFoodValues foods, LiveBurrow burrow, LiveCeilingDigs ceilings,
-            NightRestWiring nightWiring, ItemsToKeep keeps, Supplier<Protection> protection,
+            SurvivalWiring survivalWiring, ItemsToKeep keeps, Supplier<Protection> protection,
             FollowLighting followLighting, ReadsLightLevels lightLevels, ClientMovesToMainhand hands,
             ModRangedWeapons ranged, Function<PlayerContext, CatchesFall> fallRescues, Predicate<UUID> trusted,
             PicksUpDrops lostDrops) {
@@ -271,7 +271,7 @@ public final class Bootstrap {
                 new DarknessNeed(new LiveDarkView(lightLevels),
                         new LiveTorchMoves(interactions, hands, protection, Set.of()), followLighting),
                 new NightfallNeed(new LiveNightView(combatSenses),
-                        LiveNightAndEdgeMoves.burrow(burrow, events), nightWiring, nightWiring, nightWiring.autoSleep()),
+                        LiveNightAndEdgeMoves.burrow(burrow, events), survivalWiring, survivalWiring, survivalWiring.autoSleep()),
                 new EdgeProximityNeed(new LiveEdgeView(),
                         LiveNightAndEdgeMoves.retreat(walks, events)),
                 // 刚重生、身上的东西撒在死的地方：五分钟内跑回去捡。
@@ -360,7 +360,7 @@ public final class Bootstrap {
         /** 随行补光的会话设置：太暗生存需求与 light 能力共用一份，进世界重置为默认。 */
         private final FollowLighting followLighting = new FollowLighting();
         /** 夜晚生存需求与睡觉能力之间的晚接：能力进世界登记后接上真实现。 */
-        private final NightRestWiring nightWiring = new NightRestWiring();
+        private final SurvivalWiring survivalWiring = new SurvivalWiring();
         private Interactions interactions;
         private ToolDispatcher tools;
         private GoalRunTable goals;
@@ -509,11 +509,12 @@ public final class Bootstrap {
             ReadsFoodValues foods = PlayerViews.foods(() -> playerControl.activeContext().orElse(null));
             // 换手一份：吃饭换手与随行插火把换手共用同一套界面搬运。
             ClientMovesToMainhand hands = new ClientMovesToMainhand(() -> playerControl.activeContext().orElse(null));
+            // 饿了身上没吃的：经进世界后接上的拿东西引擎去弄口粮（网络、箱子、做、打猎）。
             EatsCarriedFood foodMoves = new EatsCarriedFood(
                     PlayerViews.backpack(() -> playerControl.activeContext().orElse(null)),
                     foods,
                     hands,
-                    useKeyProjection, itemsInUse);
+                    useKeyProjection, itemsInUse, survivalWiring::food);
             // 战斗感观一份：生存需求的自卫与战斗能力看的是同一份伤害证据。
             combatMemory = new CombatMemory();
             // 联动的远程武器（土豆加农炮）：登记表在启动完成时才定，这里给取表的办法；口粮不当弹药按同一份食物数值认。
@@ -533,7 +534,7 @@ public final class Bootstrap {
                     protection);
             controlLoop = withSurvivalNeeds(taskEvents, deathDecisions, interactionSender, menuActions, interactions,
                     combatSenses, walks, foodMoves, foods, burrow, new LiveCeilingDigs(diggings, protection),
-                    nightWiring, itemsInUse, protection, followLighting, lightLevels, hands, ranged,
+                    survivalWiring, itemsInUse, protection, followLighting, lightLevels, hands, ranged,
                     // 意外往下掉：先问联动的刹车（穿着有气的喷气背包开悬停），刹不住再就地找落点放东西接住。
                     FallRescues.withBrakes(() -> compat.fallBrakes()),
                     // 自家人按进世界时读的实例配置认；还没进世界时谁都不算。
@@ -641,13 +642,13 @@ public final class Bootstrap {
                 WorldScope scope = new WorldScope(minecraft, playerControl, blockScans, session,
                         subtitles, interactions, useKeyProjection, walks, combatSenses,
                         abilities, interactionSender, menuActions, instanceConfig, furnaceFuels,
-                        compat, nightWiring, loader.configDirectory(), blueprintOverlay, itemsInUse, dropConfirmations,
+                        compat, survivalWiring, loader.configDirectory(), blueprintOverlay, itemsInUse, dropConfirmations,
                         taskEvents, lightLevels, lightingWorld, followLighting);
                 worldScope[0] = scope;
                 // 随行补光的会话设置回默认：开关与阈值不跨世界残留，仍暗的路线格作废。
                 followLighting.reset();
                 // 夜里自动去睡回默认（开）：上个世界里有人说"晚上别睡"，不带到这个世界。
-                nightWiring.autoSleep().reset();
+                survivalWiring.autoSleep().reset();
                 // 换了世界，任务事件流换一条新的，宿主手里的旧游标如实作废；再把这个世界上次没做完的目标
                 // 读回来，全部恢复为暂停，等 LLM 决定接不接着做。读回时的暂停事件进的是新的这条流。
                 taskEvents.restart();

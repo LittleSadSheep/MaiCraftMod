@@ -143,7 +143,7 @@ final class OfflineCatalog {
                 CompatRegistry.empty(),
                 facilities,
                 // 睡觉能力在离线清单里没有登记方，夜晚生存需求按弄不到床对待即可。
-                new NightRestWiring(),
+                new SurvivalWiring(),
                 tempDir.resolve("config"),
                 ShowsPreview.NONE,
                 new DocumentStore(tempDir.resolve("state.sqlite")),

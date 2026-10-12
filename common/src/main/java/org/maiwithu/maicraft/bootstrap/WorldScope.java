@@ -126,7 +126,7 @@ public final class WorldScope {
             UseKeyProjection useKeyProjection, BaritoneInternals walks, CombatSenses senses,
             AbilityRegistry abilities, InteractionSender interactionSender, MenuActions menuActions,
             InstanceConfig instanceConfig, FurnaceFuels furnaceFuels, CompatRegistry compat,
-            NightRestWiring nightWiring, Path configDirectory, ShowsPreview preview, ItemsInUse itemsInUse,
+            SurvivalWiring survivalWiring, Path configDirectory, ShowsPreview preview, ItemsInUse itemsInUse,
             DropConfirmations dropConfirmations, TaskEventSink events, ReadsLightLevels lightLevels,
             LightingWorld lightingWorld, FollowLighting followLighting) {
         // 游戏接口层认出是哪个存档或服务器，内核的世界身份只拿编号与目录。
@@ -202,7 +202,7 @@ public final class WorldScope {
                 furnaceFuels,
                 compat,
                 kinds,
-                nightWiring, configDirectory, preview, documents, identity.key(), itemsInUse, dropConfirmations,
+                survivalWiring, configDirectory, preview, documents, identity.key(), itemsInUse, dropConfirmations,
                 instanceConfig.machineBlockLimits(), events, lightLevels, lightingWorld, followLighting), abilities);
     }
 
