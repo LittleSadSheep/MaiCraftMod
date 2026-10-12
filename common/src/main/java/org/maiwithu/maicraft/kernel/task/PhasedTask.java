@@ -66,6 +66,8 @@ public abstract class PhasedTask<P extends Enum<P>> implements Task {
     private P phase;
     private Action action;
     private boolean entered;
+    /** 被叫先收尾再停（飞着的就近落地）；被打断或接着做时清掉。 */
+    private boolean stopping;
     private TaskResult result;
 
     /**
@@ -190,7 +192,30 @@ public abstract class PhasedTask<P extends Enum<P>> implements Task {
 
     @Override
     public final void pause() {
+        // 暂停或从收尾里放回来：不再收尾，回来照原样接着做。
+        stopping = false;
         if (action != null) action.pause();
+    }
+
+    /**
+     * 先到安全的地方再停：交给手上的动作（飞着的就近落地、车上的刹停）；动作说现在就能停就不用收尾。
+     * 子类有自己的收尾（行程里一段坐完别再开下一段）时改写它，记得调回这里。
+     */
+    @Override
+    public boolean stopSafely() {
+        stopping = action != null && action.stopSafely();
+        return stopping;
+    }
+
+    /** 收尾做完了：动作说停稳了，或那个动作已经结束、这一阶段没有动作。 */
+    @Override
+    public boolean stoppedSafely() {
+        return !stopping || action == null || action.stoppedSafely();
+    }
+
+    /** 此刻在收尾（被叫先到安全的地方再停）：子类别再往前开新的一段。 */
+    protected final boolean stopping() {
+        return stopping;
     }
 
     @Override

@@ -16,6 +16,19 @@ public interface Action {
     /** 不再使用：结清已提交的交互、释放占用的东西（每刻的交互机会、打开的容器界面、按住的键）。 */
     default void close() {}
 
+    /**
+     * 停下之前先到安全的地方（飞着的就近落地、车上的刹停）：返回真表示开始收尾，之后照常推进它，
+     * 收尾做完了 {@link #stoppedSafely} 为真；返回假表示现在就能停。默认现在就能停。之后再 {@link #pause} 就是照原样接着做。
+     */
+    default boolean stopSafely() {
+        return false;
+    }
+
+    /** 收尾做完了，停在安全的地方等着；没在收尾为真。 */
+    default boolean stoppedSafely() {
+        return true;
+    }
+
     /** 此刻能不能被打断；正在等游戏确认交互结果、或者悬空时应返回 UNSAFE_TO_STOP。 */
     default Interruptibility interruptibility() {
         return Interruptibility.WORKING;

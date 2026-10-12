@@ -251,6 +251,15 @@ public final class GoalRunTable {
     public void resume(long id) {
         requireNotDeathDecision(id);
         GoalRunner runner = require(id);
+        // 还在先落地再暂停的路上又叫恢复：不停了，照原样接着做；等着取消的不收回。
+        if (runner.windingDown() && runner.run().state() == GoalRunState.RUNNING) {
+            try {
+                runner.keepGoing();
+            } catch (IllegalStateException cancelling) {
+                throw new WrongGoalRunState("目标 " + id + " 正在先到安全的地方再取消，取消说了就算");
+            }
+            return;
+        }
         if (runner.run().state() != GoalRunState.PAUSED) {
             throw new WrongGoalRunState("目标 " + id + " 现在是 " + runner.run().state() + "，不在暂停");
         }
@@ -271,6 +280,10 @@ public final class GoalRunTable {
             throw new WrongGoalRunState("目标 " + id + " 已经结束");
         }
         if (mainRunId == id) {
+            // 手上的任务此刻停下不安全（飞着、开着车）：先收尾，停稳了它自己按取消结束，控制循环照常把它收掉。
+            if (runner.cancelAfterSafeStop()) {
+                return;
+            }
             // 是主任务：经控制循环收尾，它会连同压在上面等它的位置一起清掉。
             loop.endMainTask(CloseReason.CANCELLED);
             mainRunId = -1;

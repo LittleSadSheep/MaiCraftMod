@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -575,6 +576,109 @@ class GoalRunnerTest {
         runner.resumeGoal();
         assertEquals(GoalRunState.RUNNING, runner.run().state());
         assertEquals(1, ability.startedInputs().size(), "恢复后接着原来的任务，不重新开始");
+    }
+
+    /** 起一个一直在飞、停下要先落地的目标，推进过一刻。 */
+    private static GoalRunner flyingGoal(GoalTestAbility ability, InMemoryGoalRunStore store) {
+        ability.shared().keepRunning("飞过去");
+        ability.next(new StepDecision.Run(new TestInput("飞过去")));
+        GoalRunner runner = launch(Goal.of("maicraft:test", null, null), ability, store, new TestMemory());
+        runner.start(TICK0);
+        runner.tick(new GoalTestTick(101));
+        ability.shared().created.get("飞过去").needsSafeStop = true;
+        return runner;
+    }
+
+    @Test
+    void pauseLetsAFlyingTaskLandFirst() {
+        // 飞着时被叫暂停：先就近落地，照常推进到落稳再暂停；恢复后接着原来的任务。
+        GoalTestAbility ability = new GoalTestAbility("maicraft:test");
+        InMemoryGoalRunStore store = new InMemoryGoalRunStore();
+        GoalRunner runner = flyingGoal(ability, store);
+        ScriptedGoalTask flying = ability.shared().created.get("飞过去");
+
+        runner.pauseGoal();
+
+        assertEquals(GoalRunState.RUNNING, runner.run().state(), "还在空中：先不暂停");
+        assertTrue(runner.windingDown());
+        assertTrue(runner.describe().contains("先到安全的地方再暂停"), runner.describe());
+        assertEquals(TickResult.RUNNING, runner.tick(new GoalTestTick(102)));
+        assertEquals(GoalRunState.RUNNING, runner.run().state(), "没落稳照常推进");
+        assertEquals(0, flying.pauses);
+        flying.landed = true;
+        runner.tick(new GoalTestTick(103));
+        assertEquals(GoalRunState.PAUSED, runner.run().state(), "落稳了才暂停");
+        assertEquals(GoalRunState.PAUSED, store.unfinished().get(0).state(), "暂停后存盘");
+        assertEquals(1, flying.pauses, "暂停时任务松手，也就不再收尾");
+        runner.resumeGoal();
+        runner.tick(new GoalTestTick(104));
+        assertEquals(1, ability.startedInputs().size(), "恢复后接着原来的任务");
+        assertFalse(runner.windingDown());
+    }
+
+    @Test
+    void resumingWhileLandingCarriesOnWithoutPausing() {
+        // 还在落地的路上又叫恢复：不停了，任务照原样接着做，不暂停。
+        GoalTestAbility ability = new GoalTestAbility("maicraft:test");
+        GoalRunner runner = flyingGoal(ability, new InMemoryGoalRunStore());
+        ScriptedGoalTask flying = ability.shared().created.get("飞过去");
+
+        runner.pauseGoal();
+        runner.tick(new GoalTestTick(102));
+        runner.keepGoing();
+        flying.landed = true;
+        runner.tick(new GoalTestTick(103));
+
+        assertEquals(GoalRunState.RUNNING, runner.run().state());
+        assertFalse(runner.windingDown());
+        assertFalse(flying.stopping, "叫它不用再收尾了");
+        assertEquals(1, flying.pauses);
+    }
+
+    @Test
+    void landingThatTakesTooLongPausesAnyway() {
+        // 两分钟还没落稳（落点一直找不到、卡在半空）：照原先要的暂停，不一直拖着。
+        GoalTestAbility ability = new GoalTestAbility("maicraft:test");
+        GoalRunner runner = flyingGoal(ability, new InMemoryGoalRunStore());
+
+        runner.pauseGoal();
+        runner.tick(new GoalTestTick(102));
+        runner.tick(new GoalTestTick(102 + GoalRunner.SAFE_STOP_TICKS - 1));
+        assertEquals(GoalRunState.RUNNING, runner.run().state());
+        runner.tick(new GoalTestTick(102 + GoalRunner.SAFE_STOP_TICKS));
+
+        assertEquals(GoalRunState.PAUSED, runner.run().state());
+    }
+
+    @Test
+    void cancelLetsAFlyingTaskLandThenEndsAsCancelled() {
+        // 飞着时被取消：先落地，落稳了按取消结束，结果照样交代。
+        GoalTestAbility ability = new GoalTestAbility("maicraft:test");
+        GoalRunner runner = flyingGoal(ability, new InMemoryGoalRunStore());
+        ScriptedGoalTask flying = ability.shared().created.get("飞过去");
+
+        assertTrue(runner.cancelAfterSafeStop());
+        assertTrue(runner.describe().contains("先到安全的地方再取消"), runner.describe());
+        assertEquals(TickResult.RUNNING, runner.tick(new GoalTestTick(102)));
+        flying.landed = true;
+        TickResult ended = runner.tick(new GoalTestTick(103));
+
+        assertEquals(TaskResult.Status.CANCELLED, assertInstanceOf(TickResult.Finished.class, ended).result().status());
+        assertEquals(CloseReason.CANCELLED, flying.closedWith);
+        assertEquals(GoalRunState.FINISHED, runner.run().state());
+    }
+
+    @Test
+    void taskThatCanStopRightAwayIsPausedOnTheSpot() {
+        // 走路、挖矿这类现在就能停的：暂停、取消都当场生效，不收尾。
+        GoalTestAbility ability = new GoalTestAbility("maicraft:test");
+        GoalRunner runner = flyingGoal(ability, new InMemoryGoalRunStore());
+        ability.shared().created.get("飞过去").needsSafeStop = false;
+
+        assertFalse(runner.cancelAfterSafeStop(), "现在就能停：交给调用方当场取消");
+        runner.pauseGoal();
+
+        assertEquals(GoalRunState.PAUSED, runner.run().state());
     }
 
     @Test

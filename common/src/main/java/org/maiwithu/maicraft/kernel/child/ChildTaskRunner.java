@@ -120,6 +120,16 @@ public final class ChildTaskRunner {
         }
     }
 
+    /** 先到安全的地方再停：转给子任务；子任务没在跑时现在就能停。 */
+    public boolean stopSafely() {
+        return child != null && result == null && child.stopSafely();
+    }
+
+    /** 子任务收尾做完了（或没在跑）。 */
+    public boolean stoppedSafely() {
+        return child == null || result != null || child.stoppedSafely();
+    }
+
     /**
      * 父任务提前结束（被替换、被取消、角色没了）时调用：让子任务按同样的原因收尾，如实交代已发生的变化。
      * 只允许调用一次；子任务已经自己结算过时再调用是重复结算，直接抛异常。

@@ -115,6 +115,46 @@ class ControlLoopTest {
     }
 
     @Test
+    void soonNeedAsksAFlyingTaskToLandFirst() {
+        // 飞着的时候饿了：不急，先叫它就近落地；落稳了（能打断了）再去吃，不悬在空中干等，也不松手往下掉。
+        LandingTask main = new LandingTask("飞过去");
+        FakeNeed hunger = FakeNeed.always("吃饭", Urgency.SOON);
+        ControlLoop loop = new ControlLoop(List.of(hunger));
+        loop.setMainTask(main);
+
+        loop.tick(TICK);
+        loop.tick(TICK);
+        assertEquals(1, main.stopAsks, "被按住的需求只因停下不安全：叫它先落地");
+        loop.tick(TICK);
+        assertEquals(1, main.stopAsks, "已经在收尾，不再叫");
+        assertEquals(0, hunger.created);
+        main.landed = true;
+        ControlLoop.Decision.Advanced advanced = assertAdvanced(loop.tick(TICK));
+
+        assertAdvancedIsTempTask(advanced, "吃饭");
+        assertEquals(1, main.pauses, "插进来时照常让它停手");
+        assertFalse(main.stopping, "停手后不再收尾，回来照原样接着做");
+    }
+
+    @Test
+    void needThatGoesAwayLetsTheFlyingTaskCarryOn() {
+        // 叫它先落地之后需求没了（自己回了血）：叫它照原样接着飞，不白白落下来。
+        LandingTask main = new LandingTask("飞过去");
+        FakeNeed hunger = FakeNeed.of("吃饭", Urgency.SOON, Urgency.SOON, null);
+        ControlLoop loop = new ControlLoop(List.of(hunger));
+        loop.setMainTask(main);
+
+        loop.tick(TICK);
+        loop.tick(TICK);
+        assertTrue(main.stopping);
+        loop.tick(TICK);
+
+        assertFalse(main.stopping, "需求没了：不用再收尾");
+        assertEquals(1, main.pauses);
+        assertEquals(0, hunger.created);
+    }
+
+    @Test
     void soonNeedInterruptsNormalWork() {
         FakeTask main = new FakeTask("挖矿", Interruptibility.WORKING);
         ControlLoop loop = new ControlLoop(List.of(FakeNeed.always("自卫", Urgency.SOON)));
@@ -575,6 +615,36 @@ class ControlLoopTest {
 
         @Override public String describe() {
             return name;
+        }
+    }
+
+    /** 飞着的任务替身：停下不安全；被叫先落地后，落稳了就能打断；暂停时不再收尾。 */
+    static final class LandingTask extends FakeTask {
+        int stopAsks;
+        boolean stopping;
+        boolean landed;
+
+        LandingTask(String name) {
+            super(name, Interruptibility.UNSAFE_TO_STOP);
+        }
+
+        @Override public boolean stopSafely() {
+            stopAsks++;
+            stopping = true;
+            return true;
+        }
+
+        @Override public boolean stoppedSafely() {
+            return !stopping || landed;
+        }
+
+        @Override public void pause() {
+            super.pause();
+            stopping = false;
+        }
+
+        @Override public Interruptibility interruptibility(TickContext context) {
+            return landed ? Interruptibility.WORKING : Interruptibility.UNSAFE_TO_STOP;
         }
     }
 

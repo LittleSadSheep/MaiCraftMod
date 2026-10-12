@@ -48,6 +48,10 @@ final class GoalTestAbility implements AbilityModule {
         int closes;
         int pauses;
         CloseReason closedWith;
+        /** 停下不安全、要先收尾的替身（飞着的）：被叫先停后，落稳前 stoppedSafely 为假。 */
+        boolean needsSafeStop;
+        boolean stopping;
+        boolean landed;
 
         ScriptedGoalTask(TickResult ending) {
             this(ending, null);
@@ -74,6 +78,16 @@ final class GoalTestAbility implements AbilityModule {
 
         @Override public void pause() {
             pauses++;
+            stopping = false;
+        }
+
+        @Override public boolean stopSafely() {
+            stopping = needsSafeStop;
+            return stopping;
+        }
+
+        @Override public boolean stoppedSafely() {
+            return !stopping || landed;
         }
 
         @Override public TaskResult close(CloseReason reason) {

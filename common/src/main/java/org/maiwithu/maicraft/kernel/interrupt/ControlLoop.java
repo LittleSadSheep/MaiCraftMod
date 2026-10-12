@@ -46,6 +46,9 @@ import java.util.Set;
  * 不再为它创建新的临时任务——它的事已经有人在办了。临时任务没做成而处境没有更急时，
  * 这个需求先缓一阵再插：自救没成功就每刻重来一遍，只会让主任务永远动不了，也解决不了问题。
  * 主任务被临时任务停在了半路时只等生存需求先救命，活不接着干，等 LLM 明确换活或解除暂停。
+ *
+ * <p>不急（SOON）的需求碰上此刻停下不安全的任务（飞着、开着车）时不干等：先叫手上的任务到安全的地方（就近落地、刹停），
+ * 它停稳了能打断了，需求照常插进来；收尾期间需求没了或缓成 LATER，就叫它照原样接着做。
  */
 public final class ControlLoop {
     private static final Logger LOG = LoggerFactory.getLogger(ControlLoop.class);
@@ -235,12 +238,31 @@ public final class ControlLoop {
         if (choice.chosen != null) {
             // 能走到这里，说明打断规则已经放行：NOW 本来就不管停不停得下，SOON 与 LATER 只在停下安全时才选得上。
             LOG.info("{}被{}打断（{}），插进临时任务", current.task.describe(), choice.chosen.name(), choice.urgency);
+            current.stopAsked = false;
             current.pause();
             return takeOver(choice, context);
         }
         // 没有人能插进来：忍住，手上的任务继续；被按住的需求交给调用方提醒，也留给面板说清是谁在等。
         if (choice.deferred != null) heldBackNeed = new HeldBackNeed(choice.deferred.name(), choice.deferredUrgency);
+        windDownFor(current, choice);
         return advance(current, context, choice.deferred);
+    }
+
+    // 不急的需求只因为手上的任务此刻停下不安全才插不进来：叫它先到安全的地方再停，停稳了下一刻需求就插得进来。
+    // 正在等着再试的需求不算（它本来就插不进来，不值得为它落地）；需求没了或缓成 LATER，就叫它照原样接着做。
+    private void windDownFor(Frame current, Choice choice) {
+        boolean wanted = choice.deferred != null && choice.deferredUrgency == Urgency.SOON
+                && !backoffs.containsKey(choice.deferred);
+        if (wanted && !current.stopAsked && askedInterruptibility == Interruptibility.UNSAFE_TO_STOP) {
+            current.stopAsked = current.stopSafely();
+            if (current.stopAsked) {
+                LOG.info("{}要{}，先到安全的地方再停：{}", choice.deferred.name(), choice.deferredUrgency, current.task.describe());
+            }
+        } else if (!wanted && current.stopAsked) {
+            LOG.info("等着插进来的需求没了，{}照原样接着做", current.task.describe());
+            current.stopAsked = false;
+            current.pause();
+        }
     }
 
     /**
@@ -442,6 +464,8 @@ public final class ControlLoop {
         boolean started;
         /** 主任务被临时任务留在了半路：不能再推进，等 LLM 明确换任务或解除暂停。 */
         boolean paused;
+        /** 为了让不急的需求插进来，已经叫它先到安全的地方再停。 */
+        boolean stopAsked;
 
         Frame(Task task, SurvivalNeed from, Urgency urgency) {
             this.task = Objects.requireNonNull(task, "task");
@@ -456,6 +480,11 @@ public final class ControlLoop {
             } else {
                 task.pause();
             }
+        }
+
+        /** 先到安全的地方再停：只有推进过的任务才可能停下不安全，还没推进过的现在就能停。 */
+        boolean stopSafely() {
+            return started && runner.stopSafely();
         }
 
         /** 此刻能不能打断：推进过的问子任务运行器，还没推进过的直接问任务自己。 */
