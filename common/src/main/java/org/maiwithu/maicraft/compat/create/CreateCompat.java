@@ -101,6 +101,8 @@ public final class CreateCompat extends CompatModule {
         // 车站组车、拆车当组装载具的一种办法；给列车写时刻表交给列车长（载具规格，所有者 10-11 批）。
         registry.vehicleAssembler(this, services -> new StationAssembly(this, services));
         registry.trainScheduler(this, services -> new TrainTimetable(this, services));
+        // 跟着的人坐上列车：他那节车厢有空座位就走过去坐上（跟随的同乘）。
+        registry.rideAlong(this, services -> new TrainRideAlong(this, services));
         // 遥控器按键当 vehicle_drive 试按的一种控制件：拿在手里按住几刻再松开，遥控的是什么都行（载具、门、闸）。
         registry.vehicleDriver(this, services -> new RemoteButtons(this, services));
         // 观察里列出电梯（当前层、楼层表）、车站（站名、有没有车在站）、列车（车名、动没动、空座）。

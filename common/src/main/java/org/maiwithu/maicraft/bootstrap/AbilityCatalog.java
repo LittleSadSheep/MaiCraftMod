@@ -522,10 +522,11 @@ public final class AbilityCatalog {
                 new LiveBlockUses(deps.interactions()), construction,
                 deps.memory(), deps.walkInternals(), deps.travelProgress());
 
-        // 跟随：常驻任务，目标从场景的观察编号找；坐车先认原版的船与骆驼，过门走出行的跨维度段，
+        // 跟随：常驻任务，目标从场景的观察编号找；坐车先认原版的船与骆驼、再问联动登记的（列车座位），过门走出行的跨维度段，
         // 帮打用和自卫同一套战斗动手，跟不过去、跟丢了经事件出口告诉宿主。
         registry.register(new FollowModule(deps.walks(), new LiveFollowView(deps.scene().seen()),
-                new LiveFollowMoves(deps.walks(), deps.interactions(), List.of(), portals, deps.senses(),
+                new LiveFollowMoves(deps.walks(), deps.interactions(), deps.compat().rideAlongs(services), portals,
+                        deps.senses(),
                         new LiveBattleMoves(deps.walks(), deps.useKeyProjection(),
                                 new ModRangedWeapons(deps.compat()::rangedWeapons, deps.foods()))),
                 deps.events()));

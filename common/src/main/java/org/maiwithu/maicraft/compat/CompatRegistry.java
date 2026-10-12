@@ -24,6 +24,7 @@ import org.maiwithu.maicraft.behavior.landing.spi.FallBrake;
 import org.maiwithu.maicraft.behavior.navigation.spi.FlyUpGear;
 import org.maiwithu.maicraft.behavior.navigation.spi.StowBeforeWalking;
 import org.maiwithu.maicraft.behavior.perception.spi.ModSight;
+import org.maiwithu.maicraft.ability.follow.spi.RideAlong;
 import org.maiwithu.maicraft.ability.vehicle.spi.TrainScheduler;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleAssembler;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleDriver;
@@ -79,11 +80,12 @@ public final class CompatRegistry {
     private final List<ToBuild<VehicleDriver>> vehicleDrivers = new ArrayList<>();
     private final List<ToBuild<VehicleReader>> vehicleReaders = new ArrayList<>();
     private final List<ToBuild<TrainScheduler>> trainSchedulers = new ArrayList<>();
+    private final List<ToBuild<RideAlong>> rideAlongs = new ArrayList<>();
     /** 全部的槽：一个模组交接到一半出错时，按交接前的长度一起撤回。新加槽时把它的列表加进来。 */
     private final List<List<?>> slots = List.of(itemSources, machineTypes, networkReaders, questBooks,
             breakAccelerators, dismantleTools, menuLayouts, carriedBackpacks, knowledgeSources, recipeViewers,
             serverReads, placementRules, rangedWeapons, itemSettings, travelModes, obstacleSources, fallBrakes, stowsBeforeWalking, flyUpGears, modSights, vehicleAssemblers,
-            vehicleDrivers, vehicleReaders, trainSchedulers);
+            vehicleDrivers, vehicleReaders, trainSchedulers, rideAlongs);
     private final List<String> decisions = new ArrayList<>();
 
     private CompatRegistry() {}
@@ -257,6 +259,11 @@ public final class CompatRegistry {
         trainSchedulers.add(new ToBuild<>(module, build));
     }
 
+    /** 联动入口交一种同乘办法（机械动力的列车座位）的建法：进世界时建，包一层后交给跟随。 */
+    public void rideAlong(CompatModule module, Function<PlayerServices, RideAlong> build) {
+        rideAlongs.add(new ToBuild<>(module, build));
+    }
+
     /** 联动入口交一种观察（电梯、车站、列车、物理结构在 observe 里的样子）：包一层后交给场景；模组停用后不再报。 */
     public void modSight(CompatModule module, ModSight sight) {
         modSights.add(new CompatModSight(module, sight));
@@ -345,6 +352,11 @@ public final class CompatRegistry {
     /** 进世界时建联动模组的定时刻表办法；规矩同物品来源。 */
     public List<TrainScheduler> trainSchedulers(PlayerServices services) {
         return build(trainSchedulers, services, "定列车时刻表的办法", CompatTrainScheduler::new);
+    }
+
+    /** 进世界时建联动模组的同乘办法；规矩同物品来源。 */
+    public List<RideAlong> rideAlongs(PlayerServices services) {
+        return build(rideAlongs, services, "同乘的办法", CompatRideAlong::new);
     }
 
     /** 进世界时建联动模组的挖掘加速；规矩同物品来源。 */
