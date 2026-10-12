@@ -4,6 +4,8 @@ package org.maiwithu.maicraft.behavior.interaction;
 import java.util.Objects;
 import java.util.function.Supplier;
 
+import net.minecraft.client.player.LocalPlayer;
+
 import org.maiwithu.maicraft.game.player.InputDriver;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -29,9 +31,13 @@ public final class LiveHoldsSneak implements HoldsSneak {
         return new Sneaking(Objects.requireNonNull(inner, "inner"));
     }
 
+    /** 潜行落到角色身上最多等几刻：骑着东西、被别的状态压着按不下去时不干等，照常往下做。 */
+    private static final int SETTLE_TICKS = 10;
+
     /** 整个动作里每刻按着潜行；暂停与结束时松开。 */
     private final class Sneaking implements Action {
         private final Action inner;
+        private int waited;
 
         Sneaking(Action inner) {
             this.inner = inner;
@@ -39,6 +45,10 @@ public final class LiveHoldsSneak implements HoldsSneak {
 
         @Override public ActionStatus tick(TickContext tick) {
             hold(true);
+            // 潜行真落到角色身上（游戏这一刻已把"按下潜行"发给服务器）才往下做：同一刻刚按下就右键，
+            // 服务器还当没潜行，手里的方块会被置物台、箱子截走——实机垫临时方块点在置物台顶上，七块平滑石头全放上了台。
+            LocalPlayer self = tick.player().localPlayer();
+            if (self != null && !self.isShiftKeyDown() && waited++ < SETTLE_TICKS) return ActionStatus.running();
             return inner.tick(tick);
         }
 
