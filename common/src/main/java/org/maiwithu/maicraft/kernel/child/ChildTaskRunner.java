@@ -130,6 +130,11 @@ public final class ChildTaskRunner {
         return child == null || result != null || child.stoppedSafely();
     }
 
+    /** 手上正在跑的那个任务；没有或已经结束为 null。 */
+    public Task running() {
+        return result == null ? child : null;
+    }
+
     /** 手上那个任务被带离原地后能不能从新地点接着做。 */
     public boolean resumesAnywhere() {
         return child != null && result == null && child.resumesAnywhere();

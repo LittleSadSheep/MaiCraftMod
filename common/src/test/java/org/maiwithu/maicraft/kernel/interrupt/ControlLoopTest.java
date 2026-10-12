@@ -257,6 +257,40 @@ class ControlLoopTest {
     }
 
     @Test
+    void needsSeeTheAbilityTaskInsideTheGoalShell() {
+        // 目标外壳里正在跑的是打架任务：需求看到的是打架任务本身，才认得出"它自己在打"。
+        FakeTask fight = new FakeTask("打架", Interruptibility.WORKING);
+        FakeTask goal = new FakeTask("目标", Interruptibility.WORKING) {
+            @Override public Task activeTask() {
+                return fight;
+            }
+        };
+        List<Task> seen = new ArrayList<>();
+        SurvivalNeed watcher = new SurvivalNeed() {
+            @Override public String name() {
+                return "看一眼";
+            }
+
+            @Override public Urgency urgency(TickContext context) {
+                return null;
+            }
+
+            @Override public Urgency urgency(TickContext context, Task currentTask) {
+                seen.add(currentTask);
+                return null;
+            }
+
+            @Override public Task createTask(TickContext context) {
+                return null;
+            }
+        };
+        ControlLoop loop = new ControlLoop(List.of(watcher));
+        loop.setMainTask(goal);
+        loop.tick(TICK);
+        assertSame(fight, seen.get(seen.size() - 1));
+    }
+
+    @Test
     void needDoesNotRelaunchWhileItsTempTaskIsStillLive() {
         FakeNeed breath = FakeNeed.always("换气", Urgency.NOW);
         ControlLoop loop = new ControlLoop(List.of(breath));

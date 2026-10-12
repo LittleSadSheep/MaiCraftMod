@@ -254,7 +254,8 @@ public final class ControlLoop {
         } else if (current.unsafeSince == Long.MIN_VALUE) {
             current.unsafeSince = context.gameTick();
         }
-        Choice choice = choose(context, askedInterruptibility, current.task);
+        // 需求看此刻真正在做事的那一层（目标外壳里的能力任务），才认得出它自己管灯、自己在打仗。
+        Choice choice = choose(context, askedInterruptibility, current.task.activeTask());
         if (choice.chosen != null) {
             // 能走到这里，说明打断规则已经放行：NOW 本来就不管停不停得下，SOON 与 LATER 只在停下安全时才选得上。
             LOG.info("{}被{}打断（{}），插进临时任务", current.task.describe(), choice.chosen.name(), choice.urgency);

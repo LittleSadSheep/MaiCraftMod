@@ -381,6 +381,13 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, KeepsTempTaskFa
         return child == null || child.finished() || child.stoppedSafely();
     }
 
+    // 生存需求看到的是目标手上正在跑的那个能力任务：原先只看到目标外壳，打架时自卫照样插进来抢、
+    // 照明施工时随行补光往验收范围里插野火把、出行时插火把按"找空当"而不是"落地站稳就插"。
+    @Override public Task activeTask() {
+        Task running = child == null || child.finished() ? null : child.running();
+        return running == null ? this : running.activeTask();
+    }
+
     // 目标能不能在新地点接着做，看手上正在做的那一步。
     @Override public boolean resumesAnywhere() {
         return child != null && !child.finished() && child.resumesAnywhere();
