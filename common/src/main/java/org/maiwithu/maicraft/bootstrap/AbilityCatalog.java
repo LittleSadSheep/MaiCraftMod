@@ -119,6 +119,8 @@ import org.maiwithu.maicraft.behavior.inventory.ClientGearChanges;
 import org.maiwithu.maicraft.behavior.interaction.LiveHoldsSneak;
 import org.maiwithu.maicraft.behavior.inventory.ClientDropPickup;
 import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
+import org.maiwithu.maicraft.behavior.inventory.TossArc;
+import org.maiwithu.maicraft.behavior.inventory.TossesOnto;
 import org.maiwithu.maicraft.behavior.inventory.ClientStepsAside;
 import org.maiwithu.maicraft.behavior.inventory.ClientStackMerger;
 import org.maiwithu.maicraft.behavior.inventory.DropAvoidance;
@@ -304,7 +306,11 @@ public final class AbilityCatalog {
 
         // 丢弃：换手接上了；丢完朝旁边走两步，别让丢出的东西落回自己头上。
         // 丢东西的现场部件与腾地方共用一份：落点登记写进同一本避让账，走开的每一步绕开它。
-        registry.register(new DropModule(deps.backpack(), deps.offhand(), deps.itemTags(), shared.dropping()));
+        // 给了坐标就朝那一格扔（传送带、工作盆上）：接住东西的高度按那一格方块顶面算，空着的格按落到底。
+        registry.register(new DropModule(deps.backpack(), deps.offhand(), deps.itemTags(), shared.dropping(),
+                (itemId, count, cell, permissions) -> new TossesOnto(itemId, count, cell,
+                        TossArc.catchHeightOf(deps.context().get(), cell), permissions, shared.bringClose(),
+                        shared.toMainhand(), FirstPersonScene::of)));
 
         // 拿到物品：身上的不算来源（引擎开场就清点），已实现的途径都登记，见 obtainModule。
         // 看不见石头时往下挖楼梯：挖一格、捡这一级掉的东西与采掘共用一套，走下一级只走不改地形。

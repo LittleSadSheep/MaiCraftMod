@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.drop;
 
+import net.minecraft.core.BlockPos;
+
 import org.maiwithu.maicraft.kernel.task.TaskInput;
 
 /**
@@ -8,8 +10,14 @@ import org.maiwithu.maicraft.kernel.task.TaskInput;
  *
  * @param itemId 要丢的物品注册 ID
  * @param count  要丢几件，1 到 999
+ * @param onto   朝哪一格扔（扔到传送带、工作盆上）；不指定为 null，随便找个开阔的方向丢
  */
-record DropInput(String itemId, int count) implements TaskInput {
+record DropInput(String itemId, int count, BlockPos onto) implements TaskInput {
+
+    /** 不指定往哪扔。 */
+    DropInput(String itemId, int count) {
+        this(itemId, count, null);
+    }
 
     DropInput {
         if (itemId == null || itemId.isBlank()) throw new IllegalArgumentException("要丢的物品不能为空");
@@ -18,6 +26,7 @@ record DropInput(String itemId, int count) implements TaskInput {
 
     @Override
     public String describe() {
-        return "丢掉 " + count + " 件 " + itemId;
+        return onto == null ? "丢掉 " + count + " 件 " + itemId
+                : "把 " + count + " 件 " + itemId + " 扔到 " + onto.toShortString();
     }
 }

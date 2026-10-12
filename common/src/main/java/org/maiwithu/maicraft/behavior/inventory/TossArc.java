@@ -6,10 +6,12 @@ import java.util.Objects;
 import java.util.Optional;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
+import org.maiwithu.maicraft.game.player.PlayerContext;
 /**
  * 原版丢东西的抛物线，纯计算：Q 丢出的东西从眼睛下方 0.3 格出手，沿视线以 0.3 的速度飞出、再往上加 0.1；
  * 竖直方向随机多出 ±0.1，水平方向随机偏 0.02 以内；之后每刻先受重力 0.04、再移动、再乘 0.98 的阻力。
@@ -56,6 +58,18 @@ public final class TossArc {
      * 往哪扔：落进哪一格，东西落到离这一格底面多高就被接住。
      * 工作盆的盆沿在 13/16 格，石磨外圈的台面在 6/16 格，朝上的锯面在 12/16 格，粉碎轮中间那一格从格顶就开始卷。
      */
+    /**
+     * 扔到一格上时东西在多高被接住：那一格方块碰撞外形的顶（传送带、工作盆、置物台的台面），空着的格按落到底（0）。
+     * 读不到现场按 0。
+     */
+    public static double catchHeightOf(PlayerContext context, BlockPos cell) {
+        if (context == null || context.level() == null || !context.level().isLoaded(cell)) return 0.0;
+        var state = context.level().getBlockState(cell);
+        var shape = state.getCollisionShape(context.level(), cell);
+        if (shape.isEmpty()) return 0.0;
+        return Math.max(0.0, Math.min(1.0, shape.max(Direction.Axis.Y)));
+    }
+
     public record Target(BlockPos cell, double catchHeight) {
 
         public Target {

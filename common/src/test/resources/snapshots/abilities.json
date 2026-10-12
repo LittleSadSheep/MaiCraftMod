@@ -31,7 +31,9 @@
         "ability": "maicraft:drop",
         "summary": "把身上带的东西丢出去",
         "parameters": "item: string, count: integer",
-        "targets": [],
+        "targets": [
+          "position"
+        ],
         "mode": "controls_player"
       },
       {
@@ -467,7 +469,9 @@
           "max": 999
         }
       ],
-      "targets": [],
+      "targets": [
+        "position"
+      ],
       "mode": "controls_player",
       "required_mods": [],
       "knowledge": [],

@@ -8,6 +8,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
+import net.minecraft.core.BlockPos;
+
 import org.maiwithu.maicraft.behavior.acquire.CarriedItems;
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
@@ -22,6 +24,8 @@ import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
 import org.maiwithu.maicraft.kernel.ability.Listing;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
+import org.maiwithu.maicraft.kernel.goal.Target;
+import org.maiwithu.maicraft.kernel.goal.TargetKind;
 import org.maiwithu.maicraft.kernel.param.ParamSpec;
 import org.maiwithu.maicraft.kernel.param.ParamSpecs;
 import org.maiwithu.maicraft.kernel.param.ParamType;
@@ -42,18 +46,23 @@ public final class DropModule implements AbilityModule {
     private final OffhandContents offhand;
     private final ReadsItemTags tags;
     private final DropsItems.Parts parts;
+    /** 朝一格扔的做法；没接上现场（离线测试）为 null，这时给了坐标照实说扔不了。 */
+    private final TossOnto tossOnto;
 
     /**
      * @param backpack 背包视图：实际持有多少从这里数
      * @param offhand  副手内容：副手上的也算持有的
      * @param tags     物品标签：按标签点名时匹配用
      * @param parts    丢东西要用的现场部件，与腾地方共用一份
+     * @param tossOnto 朝一格扔的做法（扔到传送带、工作盆上）
      */
-    public DropModule(BackpackView backpack, OffhandContents offhand, ReadsItemTags tags, DropsItems.Parts parts) {
+    public DropModule(BackpackView backpack, OffhandContents offhand, ReadsItemTags tags, DropsItems.Parts parts,
+            TossOnto tossOnto) {
         this.backpack = Objects.requireNonNull(backpack, "backpack");
         this.offhand = Objects.requireNonNull(offhand, "offhand");
         this.tags = Objects.requireNonNull(tags, "tags");
         this.parts = Objects.requireNonNull(parts, "parts");
+        this.tossOnto = tossOnto;
     }
 
     @Override
@@ -65,7 +74,8 @@ public final class DropModule implements AbilityModule {
                                 .doc("要丢的物品 ID").build(),
                         ParamSpec.of("count", ParamType.INTEGER).required().range(1, 999)
                                 .doc("要丢几件；超过实际持有时会按实际持有的丢").build()),
-                Set.of(), ExecutionMode.CONTROLS_PLAYER, Set.of(), List.of(), Listing.LISTED);
+                // 给了坐标就朝那一格扔（传送带、工作盆上）；不给就随便找个开阔的方向丢。
+                Set.of(TargetKind.POSITION), ExecutionMode.CONTROLS_PLAYER, Set.of(), List.of(), Listing.LISTED);
     }
 
     @Override
@@ -81,8 +91,17 @@ public final class DropModule implements AbilityModule {
                     Problem.of(Problem.Kind.NEED_ITEM, "身上没有 " + item, null)));
         }
         // 给的是标签：丢身上挂着这个标签、数量最多的那一种；丢的动作一次只认一种具体的物品。
+        // 朝哪一格扔：只认写了高度的坐标，扔的是那一格的顶上。
+        BlockPos onto = null;
+        if (step.goal().target() instanceof Target.Position position) {
+            if (position.y() == null) {
+                return new StepDecision.Finish(TaskResult.failed("朝一格扔要写那一格的高度",
+                        Problem.of(Problem.Kind.INVALID_PARAMETER, "target 的坐标没写 y", "写上要扔到的那一格的 y")));
+            }
+            onto = new BlockPos(position.x(), position.y(), position.z());
+        }
         return new StepDecision.Run(new DropInput(item.startsWith("#") ? mostCarriedIn(item.substring(1)) : item,
-                count));
+                count, onto));
     }
 
     private String mostCarriedIn(String tagId) {
@@ -99,6 +118,6 @@ public final class DropModule implements AbilityModule {
     @Override
     public void registerTasks(TaskFactories factories) {
         // 任务需要的接缝在这里闭包交给它；换手与走开的接缝没接上时任务按现状如实结算。
-        factories.register(DropInput.class, input -> new DropTask(input, backpack, offhand, parts));
+        factories.register(DropInput.class, input -> new DropTask(input, backpack, offhand, parts, tossOnto));
     }
 }
