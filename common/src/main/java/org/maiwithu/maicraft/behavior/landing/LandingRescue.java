@@ -506,6 +506,17 @@ public final class LandingRescue implements CatchesFall {
             return true;
         }
         BlockPos feet = plan.feet();
+        // 人飘离了计划的那一列（带着跑步的冲劲跳下来，落点往前多出一两格）：低头看下去正下方这一列能接住人，
+        // 就改接在这里——掉落的时间回不来，死盯着计划那一列只会摔在地上（实机 15 格柱子冲出去摔掉 11 点血）。
+        if ((water.getX() != feet.getX() || water.getZ() != feet.getZ()) && belowPlayer(player, water)) {
+            var drifted = new LandingPlan(LandingAid.WATER, water, water, hit.getBlockPos(), hit.getDirection(), false,
+                    hit.getLocation());
+            if (!protectedCell.test(water) && LandingOptions.canPlace(LandingAid.WATER, context.level(), water)
+                    && safe(context, player, drifted)) {
+                plan = drifted;
+                return true;
+            }
+        }
         BlockPos plantTop = BucketWater.exposedWaterCell(context.level(), feet);
         if (water.getX() != feet.getX() || water.getZ() != feet.getZ()
                 || water.getY() < feet.getY() - 1 || water.getY() > plantTop.getY()
@@ -520,6 +531,11 @@ public final class LandingRescue implements CatchesFall {
         if (!safe(context, player, actual)) return false;
         plan = actual;
         return true;
+    }
+
+    // 这一格水在不在身子正下方那一列、而且在脚下（不往头顶上放）。
+    private static boolean belowPlayer(LocalPlayer player, BlockPos water) {
+        return water.getX() == player.getBlockX() && water.getZ() == player.getBlockZ() && water.getY() <= player.getY();
     }
 
     private void refreshWaterAim(PlayerContext context, LocalPlayer player) {
