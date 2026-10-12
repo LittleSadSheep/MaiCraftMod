@@ -6,7 +6,6 @@ import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.InteractionHand;
-import org.maiwithu.maicraft.behavior.approach.PlacementSpots;
 import org.maiwithu.maicraft.behavior.interaction.AimAndInteract;
 import org.maiwithu.maicraft.behavior.interaction.HoldsSneak;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
@@ -16,7 +15,7 @@ import org.maiwithu.maicraft.game.player.InputDriver;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /**
- * 出手的生产实现：放方块是对着被点那一面的薄框瞄准再右键（交互动作自己转头、核对命中、提交、逐刻确认）；
+ * 出手的生产实现：放方块是对着被点方块朝那个方向的表面瞄准再右键（交互动作自己转头、核对命中、提交、逐刻确认）；
  * 倒桶与舀水是朝那一格使用手里的物品；开关门是右键那一格。被点的方块会开界面时整个动作里按着潜行。
  */
 public final class LiveClicks implements ConstructionSeams.Clicks {
@@ -31,7 +30,8 @@ public final class LiveClicks implements ConstructionSeams.Clicks {
     }
 
     @Override public Click place(PlannedCell cell, PlacementPrediction.Placement placement, boolean sneak, PlacementConfirmation confirmation) {
-        AimAndInteract use = interactions.useBlockPart(placement.clicked(), PlacementSpots.faceBox(placement.clicked(), placement.face()), confirmation);
+        // 点被点方块朝那个方向的任一处表面：链条输送机的轮缘、细轴的侧面都算，和挑站位、放置预测同一条规则。
+        AimAndInteract use = interactions.useBlockFace(placement.clicked(), placement.face(), confirmation);
         // 被点的箱子、工作台会把右键截走开界面：整个动作里按着潜行，手里的方块才放得下去。
         return new Click(sneak && this.sneak != null ? this.sneak.sneaking(use) : use, use::result);
     }

@@ -19,9 +19,9 @@ public final class PlacementSpots {
 
     private PlacementSpots() {}
 
-    /** 靠近的目标：点 {@code clicked} 的 {@code face} 那一面。 */
+    /** 靠近的目标：点 {@code clicked} 朝 {@code face} 的那一面，看得见按方块外形上朝这边的表面判。 */
     public static ApproachTarget faceTarget(BlockPos clicked, Direction face) {
-        return ApproachTarget.ofBlockPart(clicked, faceBox(clicked, face));
+        return ApproachTarget.ofBlockFace(clicked, face);
     }
 
     /** 贴在那一面上的薄框（世界坐标）。 */

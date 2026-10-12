@@ -142,6 +142,10 @@ public final class LiveApproachWorld implements ApproachWorldView {
         }
         // 触及距离由够得着规则单独判，这里只问视线：给一个刚好盖过这段距离的上限。
         double reach = eye.distanceTo(target.center()) + 2;
+        // 放方块点的那一面：按外形上朝这个方向的表面判，和放置预测、出手瞄准同一条规则。
+        if (target.face() != null) {
+            return FirstPersonInteractionTargeting.visibleFaceHit(level, player, eye, cell, reach, target.face()) != null;
+        }
         AABB cellBox = new AABB(cell);
         boolean part = !target.bounds().equals(cellBox);
         return part ? FirstPersonInteractionTargeting.visiblePartHit(level, player, eye, cell, reach, target.bounds()) != null

@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.approach;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
@@ -15,12 +16,14 @@ import net.minecraft.world.phys.Vec3;
  * @param frontYaw 正面的水平朝向角（原版的旋转角，南为 0、往西转）：只站正面那一侧的目标才带，
  *                 其余为 null。告示牌从哪一面点就编辑哪一面，写告示牌只挑正面那一侧的站位，
  *                 站到背面会把字写到背面去。
+ * @param face     放方块时要点的那一面朝哪边：看不看得见按方块外形上朝这边的任一处表面判，
+ *                 够不够得着仍按 bounds（格子边界上那一面的薄框）估；其余为 null
  */
-public record ApproachTarget(InteractionKind kind, BlockPos block, AABB bounds, Double frontYaw) {
+public record ApproachTarget(InteractionKind kind, BlockPos block, AABB bounds, Double frontYaw, Direction face) {
 
     /** 对一个方块做事，例如箱子、工作台；床不用这个，见 {@link #ofBed}。 */
     public static ApproachTarget ofBlock(BlockPos at) {
-        return new ApproachTarget(InteractionKind.BLOCK, at, new AABB(at), null);
+        return new ApproachTarget(InteractionKind.BLOCK, at, new AABB(at), null, null);
     }
 
     /**
@@ -33,7 +36,16 @@ public record ApproachTarget(InteractionKind kind, BlockPos block, AABB bounds, 
         if (!new AABB(at).intersects(part)) {
             throw new IllegalArgumentException("部件框不在 " + at.toShortString() + " 这一格里");
         }
-        return new ApproachTarget(InteractionKind.BLOCK, at, part, null);
+        return new ApproachTarget(InteractionKind.BLOCK, at, part, null, null);
+    }
+
+    /**
+     * 点一格方块朝 {@code face} 的那一面（放方块就是这样点的）：看不看得见按方块外形上朝这边的任一处表面判，
+     * 不按格子边界——链条输送机的轮缘伸出格外、轴只有细细一根，格子边界上那一面不是被挡住就是空气。
+     * 够不够得着按格子边界上那一面的薄框估。
+     */
+    public static ApproachTarget ofBlockFace(BlockPos at, Direction face) {
+        return new ApproachTarget(InteractionKind.BLOCK, at, PlacementSpots.faceBox(at, face), null, face);
     }
 
     /**
@@ -41,12 +53,12 @@ public record ApproachTarget(InteractionKind kind, BlockPos block, AABB bounds, 
      * 背面那一侧的按"背面"拒掉。正面的水平朝向角按原版告示牌自己的旋转角给出。
      */
     public static ApproachTarget onFrontSideOf(BlockPos at, double frontYaw) {
-        return new ApproachTarget(InteractionKind.BLOCK, at, new AABB(at), frontYaw);
+        return new ApproachTarget(InteractionKind.BLOCK, at, new AABB(at), frontYaw, null);
     }
 
     /** 对一张床做事：给床头或床尾任意一半的格子，距离与视线都按床底面判。 */
     public static ApproachTarget ofBed(BlockPos half) {
-        return new ApproachTarget(InteractionKind.BED, half, new AABB(half), null);
+        return new ApproachTarget(InteractionKind.BED, half, new AABB(half), null, null);
     }
 
     /**
@@ -61,13 +73,13 @@ public record ApproachTarget(InteractionKind kind, BlockPos block, AABB bounds, 
         }
         AABB landing = new AABB(cell.getX(), cell.getY() + catchHeight, cell.getZ(),
                 cell.getX() + 1, cell.getY() + Math.max(1.0, catchHeight + 0.05), cell.getZ() + 1);
-        return new ApproachTarget(InteractionKind.TOSS, cell, landing, null);
+        return new ApproachTarget(InteractionKind.TOSS, cell, landing, null, null);
     }
 
     /** 对一个实体做事；包围盒由调用方在取目标的同一刻读出来。 */
     public static ApproachTarget ofEntity(AABB box) {
         BlockPos center = BlockPos.containing(box.getCenter());
-        return new ApproachTarget(InteractionKind.ENTITY, center, box, null);
+        return new ApproachTarget(InteractionKind.ENTITY, center, box, null, null);
     }
 
     public ApproachTarget {
@@ -80,6 +92,9 @@ public record ApproachTarget(InteractionKind kind, BlockPos block, AABB bounds, 
         }
         if (frontYaw != null && kind != InteractionKind.BLOCK) {
             throw new IllegalArgumentException("只有方块目标能带正面那一侧的约束");
+        }
+        if (face != null && kind != InteractionKind.BLOCK) {
+            throw new IllegalArgumentException("只有方块目标能指定点哪一面");
         }
     }
 

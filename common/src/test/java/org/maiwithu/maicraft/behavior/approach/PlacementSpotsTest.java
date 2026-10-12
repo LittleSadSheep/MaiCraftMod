@@ -28,6 +28,7 @@ class PlacementSpotsTest {
         assertEquals(clicked, target.block());
         assertEquals(InteractionKind.BLOCK, target.kind());
         assertTrue(target.center().z < -1.9, "目标中心在北面上");
+        assertEquals(Direction.NORTH, target.face(), "看得见按外形上朝北的表面判，不按格子边界");
     }
 
     @Test

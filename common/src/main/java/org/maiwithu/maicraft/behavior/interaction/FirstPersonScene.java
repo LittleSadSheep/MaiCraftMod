@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.interaction;
 
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
@@ -41,6 +42,15 @@ public interface FirstPersonScene {
     default BlockHitResult visiblePartHit(BlockPos target, AABB part) {
         BlockHitResult hit = visibleHit(target);
         return hit != null && AimCheck.insidePart(hit, part) ? hit : null;
+    }
+
+    /**
+     * 方块外形上朝 face 的表面里看得见的部位（放方块点的那一面）；看不到、够不着时为 null。
+     * 默认按整格找一个可见部位再核对朝向；真实现场改为在外形每个框朝这个方向的面上找瞄准点。
+     */
+    default BlockHitResult visibleFaceHit(BlockPos target, Direction face) {
+        BlockHitResult hit = visibleHit(target);
+        return hit != null && hit.getDirection() == face ? hit : null;
     }
 
     /**

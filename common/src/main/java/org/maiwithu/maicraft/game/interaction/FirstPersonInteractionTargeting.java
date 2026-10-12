@@ -32,7 +32,11 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 
 
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Predicate;
+
+import net.minecraft.util.Mth;
 
 /**
  * 在走过去之前先试算“站在那里能否点到”，相机转到位后再用同一套规则核对。
@@ -239,6 +243,62 @@ public final class FirstPersonInteractionTargeting {
         AABB accepted = part.inflate(FACE_INSET);
         return hitWithin(level, observer, eye, target, reach, shape.intersect(local),
                 hit -> accepted.contains(hit.getLocation()));
+    }
+
+    /**
+     * 放方块要点的"那一面"：方块外形上朝 {@code face} 的任一处表面都算，命中的面朝这个方向就行。
+     * 原版放方块只看点中的是哪一格、点中的面朝哪边，放到那一面外侧那一格；链条输送机的轮缘四边各伸出格外半格多，
+     * 机械动力的轴只有细细一根，真正朝北的表面不在格子北边界上——照格子边界瞄，要么被伸出来的轮缘挡住、要么瞄进空气。
+     * 所以对外形里的每一个框，在它朝这个方向的那一面上试中间和四个内缩点：命中必须属于这一格、面朝 face、在触及距离内。
+     * 站位挑选、放置预测、出手瞄准都用这一条，免得站到了又说点不到。
+     */
+    public static BlockHitResult visibleFaceHit(
+            Level level, Entity observer, Vec3 eye, BlockPos target, double reach, Direction face) {
+        if (!Double.isFinite(reach) || reach <= 0.0D
+                || !level.isLoaded(BlockPos.containing(eye))
+                || !level.isLoaded(target)) {
+            return null;
+        }
+        var state = level.getBlockState(target);
+        if (state.isAir() || state.getBlock() instanceof LiquidBlock) return null;
+        VoxelShape shape = state.getShape(level, target);
+        if (shape.isEmpty()) shape = Shapes.block();
+        for (AABB box : shape.toAabbs()) {
+            for (Vec3 local : faceAims(box, face)) {
+                Vec3 aim = local.add(target.getX(), target.getY(), target.getZ());
+                Vec3 direction = aim.subtract(eye);
+                if (direction.lengthSqr() < EPSILON) continue;
+                Vec3 end = eye.add(direction.normalize().scale(reach));
+                BlockHitResult hit = level.clip(new ClipContext(
+                        eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, observer));
+                if (hit.getType() == HitResult.Type.BLOCK
+                        && hit.getBlockPos().equals(target)
+                        && hit.getDirection() == face
+                        && eye.distanceToSqr(hit.getLocation()) <= reach * reach + EPSILON) {
+                    return hit;
+                }
+            }
+        }
+        return null;
+    }
+
+    // 一个框朝 face 那一面上的瞄准点（方块内的局部坐标）：面中间和四个往里缩四分之一的点，
+    // 深度往框里收一点点，免得瞄点正好落在边界上被判给相邻格。
+    private static List<Vec3> faceAims(AABB box, Direction face) {
+        Direction.Axis axis = face.getAxis();
+        double depth = face.getAxisDirection() == Direction.AxisDirection.POSITIVE
+                ? insetMax(box.min(axis), box.max(axis)) : insetMin(box.min(axis), box.max(axis));
+        double[][] spread = {{0.5, 0.5}, {0.25, 0.25}, {0.25, 0.75}, {0.75, 0.25}, {0.75, 0.75}};
+        List<Vec3> aims = new ArrayList<>();
+        for (double[] at : spread) {
+            double[] point = new double[3];
+            int next = 0;
+            for (Direction.Axis each : Direction.Axis.values()) {
+                point[each.ordinal()] = each == axis ? depth : Mth.lerp(at[next++], box.min(each), box.max(each));
+            }
+            aims.add(new Vec3(point[0], point[1], point[2]));
+        }
+        return aims;
     }
 
     // 方块选择形状的边界（方块内的局部坐标）；形状为空时按整格算。

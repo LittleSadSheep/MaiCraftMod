@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.interaction;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.AABB;
@@ -46,6 +47,14 @@ public final class Interactions {
      */
     public AimAndInteract useBlockPart(BlockPos target, AABB part, InteractionConfirmation confirmation) {
         return new AimAndInteract(new InteractionTarget.BlockTarget(target, part), confirmation,
+                FirstPersonScene::of);
+    }
+
+    /**
+     * 点方块外形上朝 face 的那一面（放方块）：瞄准点在外形每个框朝这个方向的面上找，准星点中这一格、面朝对了才提交。
+     */
+    public AimAndInteract useBlockFace(BlockPos target, Direction face, InteractionConfirmation confirmation) {
+        return new AimAndInteract(InteractionTarget.BlockTarget.facing(target, face), confirmation,
                 FirstPersonScene::of);
     }
 

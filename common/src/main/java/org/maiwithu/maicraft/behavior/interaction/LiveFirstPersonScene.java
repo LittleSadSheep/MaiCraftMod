@@ -5,6 +5,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
@@ -49,6 +50,12 @@ public final class LiveFirstPersonScene implements FirstPersonScene {
         // 只在部件框和方块形状重叠的那一块里试瞄准点：线缆上的面板，照整格瞄会点到线缆芯。
         return FirstPersonInteractionTargeting.visiblePartHit(player.level(), player, player.getEyePosition(),
                 target, InteractionRange.blockReach(player), part);
+    }
+
+    @Override public BlockHitResult visibleFaceHit(BlockPos target, Direction face) {
+        // 放方块点的那一面：外形上朝这个方向的任一处表面都算，和挑站位、放置预测同一条规则。
+        return FirstPersonInteractionTargeting.visibleFaceHit(player.level(), player, player.getEyePosition(),
+                target, InteractionRange.blockReach(player), face);
     }
 
     @Override public BlockHitResult visibleItemHit(BlockPos target, InteractionHand hand) {

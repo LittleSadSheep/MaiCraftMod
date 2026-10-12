@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.interaction;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
@@ -48,6 +49,11 @@ public final class AimCheck {
     /** 准星命中了方块上的那个部件：点到的是目标格，命中点也在部件框里；同一格上的线缆、别的面板不算。 */
     public static boolean hitsPart(HitResult hit, BlockPos target, AABB part) {
         return hitsBlock(hit, target) && insidePart((BlockHitResult) hit, part);
+    }
+
+    /** 准星命中了目标格朝 face 的表面：放方块点哪一面只看命中的朝向，外形伸出格外的部分也算。 */
+    public static boolean hitsFace(HitResult hit, BlockPos target, Direction face) {
+        return hitsBlock(hit, target) && ((BlockHitResult) hit).getDirection() == face;
     }
 
     /** 准星命中了指定的那只实体；另一只实体走进射线不算命中。 */

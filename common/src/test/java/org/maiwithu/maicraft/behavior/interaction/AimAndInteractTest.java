@@ -221,4 +221,43 @@ class AimAndInteractTest {
         assertEquals("UNREACHABLE", failedKind(status));
         assertTrue(sender.submissions.isEmpty());
     }
+
+    @Test
+    void aWholeCellPartIsTheWholeBlock() {
+        // 部件框正好是整格：按整格方块瞄，外形伸出格外的部分（链条输送机的轮缘）也算点到；真部件照旧按框。
+        assertNull(new InteractionTarget.BlockTarget(TARGET, new AABB(TARGET)).part());
+        assertEquals(PANEL, new InteractionTarget.BlockTarget(TARGET, PANEL).part());
+    }
+
+    @Test
+    void aFaceIsClickedWhereverTheHitFacesThatWay() {
+        // 放方块点朝上的那一面：命中点在格子外的轮缘上也行，只要点中这一格、面朝上。
+        ScriptedInteractionSender sender = new ScriptedInteractionSender();
+        InteractionTestFakes.FakeContext context = new InteractionTestFakes.FakeContext().withSender(sender);
+        InteractionTestFakes.FakeScene scene = new InteractionTestFakes.FakeScene(context);
+        Vec3 flange = new Vec3(TARGET.getX() + 1.5, TARGET.getY() + 0.875, TARGET.getZ() + 0.5);
+        scene.visibleAt.put(TARGET, flange);
+        scene.ray = new BlockHitResult(flange, Direction.UP, TARGET, false);
+        runUntilSubmitted(new AimAndInteract(InteractionTarget.BlockTarget.facing(TARGET, Direction.UP),
+                c -> InteractionConfirmation.Verdict.PENDING, player -> scene), context);
+        assertEquals(1, sender.submissions.size());
+    }
+
+    @Test
+    void hittingAnotherFaceOfTheSameBlockIsNotHittingThatFace() {
+        // 同一格、但准星点中的面朝北：放下去会落到北边那一格，不算点中朝上那一面；换瞄准点用尽后按到不了收尾，绝不出手。
+        ScriptedInteractionSender sender = new ScriptedInteractionSender();
+        InteractionTestFakes.FakeContext context = new InteractionTestFakes.FakeContext().withSender(sender);
+        InteractionTestFakes.FakeScene scene = new InteractionTestFakes.FakeScene(context);
+        scene.ray = new BlockHitResult(Vec3.atCenterOf(TARGET), Direction.NORTH, TARGET, false);
+        AimAndInteract action = new AimAndInteract(InteractionTarget.BlockTarget.facing(TARGET, Direction.UP),
+                c -> InteractionConfirmation.Verdict.PENDING, player -> scene);
+        ActionStatus status = null;
+        for (int i = 0; i < 40 && !(status instanceof ActionStatus.Failed); i++) {
+            status = action.tick(context.asTickContext());
+            context.advance();
+        }
+        assertEquals("UNREACHABLE", failedKind(status));
+        assertTrue(sender.submissions.isEmpty());
+    }
 }

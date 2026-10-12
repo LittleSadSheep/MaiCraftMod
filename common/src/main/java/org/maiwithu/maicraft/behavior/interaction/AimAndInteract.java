@@ -149,6 +149,7 @@ public final class AimAndInteract implements Action {
         if (target instanceof InteractionTarget.BlockTarget block) {
             BlockHitResult visible = gesture == Gesture.USE_HELD_ITEM
                     ? scene.visibleItemHit(block.pos(), hand)
+                    : block.face() != null ? scene.visibleFaceHit(block.pos(), block.face())
                     : block.part() != null ? scene.visiblePartHit(block.pos(), block.part())
                     : scene.visibleHit(block.pos());
             return visible == null ? null : visible.getLocation();
@@ -241,6 +242,8 @@ public final class AimAndInteract implements Action {
 
     private boolean hitsTarget(HitResult hit) {
         if (target instanceof InteractionTarget.BlockTarget block) {
+            // 放方块点的那一面：点中这一格、面朝对了就行，伸出格外的轮缘也算。
+            if (block.face() != null) return AimCheck.hitsFace(hit, block.pos(), block.face());
             return block.part() == null ? AimCheck.hitsBlock(hit, block.pos())
                     : AimCheck.hitsPart(hit, block.pos(), block.part());
         }

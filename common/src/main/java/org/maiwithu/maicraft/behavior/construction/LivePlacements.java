@@ -49,7 +49,9 @@ public final class LivePlacements implements ConstructionSeams.PlansPlacement {
         LocalPlayer player = current.localPlayer();
         ClientLevel level = current.level();
         Vec3 eye = player.getEyePosition();
-        BlockHitResult hit = FirstPersonInteractionTargeting.visibleBlockHit(level, player, eye, clicked, InteractionRange.blockReach(player), face);
+        // 点那一面按方块外形上朝这个方向的表面找（轮缘伸出格外、细轴都算），和挑站位、出手瞄准同一条规则：
+        // 原先这里只试外形边界上七个点，站位按格子边界那一面挑，两边对不上，站到了又说点不到。
+        BlockHitResult hit = FirstPersonInteractionTargeting.visibleFaceHit(level, player, eye, clicked, InteractionRange.blockReach(player), face);
         if (hit == null) return Optional.empty();
         // 看向命中点的角度：和交互动作转头后的真实视角一致，原版按它决定朝向。
         Vec3 delta = hit.getLocation().subtract(eye);
