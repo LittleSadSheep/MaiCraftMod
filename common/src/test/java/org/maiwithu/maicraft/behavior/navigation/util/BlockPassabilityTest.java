@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import java.util.HashMap;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -60,6 +61,20 @@ class BlockPassabilityTest {
     }
 
     /** 小片世界替身：按坐标记方块，没记的当空气。 */
+    @Test
+    void standingOnTopOfALowBlockCountsTheCellAbove() {
+        // 站在箱子、附魔台顶上：脚位是上面那一格，寻路才有起点（原先读成方块里面那一格，人下不来）。
+        Grid world = new Grid();
+        world.put(new BlockPos(3, 64, 3), Blocks.CHEST.defaultBlockState());
+        world.put(new BlockPos(6, 64, 3), Blocks.ENCHANTING_TABLE.defaultBlockState());
+        world.put(new BlockPos(9, 64, 3), Blocks.WHITE_CARPET.defaultBlockState());
+        assertEquals(new BlockPos(3, 65, 3), BlockPassability.playerFeet(world, 3.5, 64.8749999, 3.5),
+                "箱子顶（0.875 高，坐标差一点点也认）");
+        assertEquals(new BlockPos(6, 65, 3), BlockPassability.playerFeet(world, 6.5, 64.75, 3.5), "附魔台顶（0.75 高）");
+        assertEquals(new BlockPos(9, 64, 3), BlockPassability.playerFeet(world, 9.5, 64.0625, 3.5),
+                "地毯不到半格：人还在地毯这一格");
+    }
+
     private static final class Grid implements BlockGetter {
         final Map<BlockPos, BlockState> blocks = new HashMap<>();
 

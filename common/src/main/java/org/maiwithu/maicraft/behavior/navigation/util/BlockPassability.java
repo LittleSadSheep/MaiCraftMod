@@ -203,9 +203,18 @@ public final class BlockPassability {
      */
     public static BlockPos playerFeet(BlockGetter level, double x, double y, double z) {
         BlockPos f = BlockPos.containing(x, y + 0.1251, z);
-        Block block = level.getBlockState(f).getBlock();
+        BlockState state = level.getBlockState(f);
+        Block block = state.getBlock();
         if (block instanceof SlabBlock || block instanceof StairBlock) {
             return f.above();
+        }
+        // 站在半格以上高的矮方块顶上（置物台、箱子、附魔台、切石机这类）：人在这一格的碰撞外形顶上，脚位算上面那一格。
+        // 原先只认半砖与楼梯，站在置物台、箱子顶上时脚位读成方块里面那一格，寻路找不到起点，人下不来。
+        // 地毯、雪片这类不到半格的照旧算这一格。
+        VoxelShape shape = state.getCollisionShape(level, f);
+        if (!shape.isEmpty()) {
+            double top = shape.max(Direction.Axis.Y);
+            if (top >= 0.5 && f.getY() + top <= y + 1.0e-3) return f.above();
         }
         return f;
     }
