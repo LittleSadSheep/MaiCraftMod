@@ -708,6 +708,7 @@ public final class Bootstrap {
                 automationOwned = owned;
                 // 人收回角色：正在走的路线立刻撤掉，引擎不再改走路朝向，人按 W 就朝视角方向走；交回后接着走。
                 if (!owned) walks.humanTookPlayer();
+                else walks.automationTookPlayer();
             }
             if (owned) {
                 // 主任务被临时任务带离原地、回不去：目标挂成暂停并发事件，LLM 才知道身体停着。

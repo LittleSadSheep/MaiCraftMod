@@ -102,7 +102,8 @@ public final class LookBehavior extends Behavior implements ILookBehavior {
 
         switch (event.getState()) {
             case PRE: {
-                if (this.target.mode == Target.Mode.NONE) {
+                // 角色在人手里：不拿引擎的朝向换掉人的视角，人按 W 朝自己看的方向走。
+                if (this.target.mode == Target.Mode.NONE || BaritoneInternals.humanHoldsPlayer()) {
                     // Just return for PRE, we still want to set target to null on POST
                     return;
                 }
@@ -181,7 +182,8 @@ public final class LookBehavior extends Behavior implements ILookBehavior {
 
     @Override
     public void onPlayerRotationMove(RotationMoveEvent event) {
-        if (this.target != null) {
+        // 角色在人手里：走路、起跳按人自己的朝向，不按引擎留下的朝向。
+        if (this.target != null && !BaritoneInternals.humanHoldsPlayer()) {
             final Rotation actual = this.processor.peekRotation(this.target.rotation);
             event.setYaw(actual.getYaw());
             event.setPitch(actual.getPitch());

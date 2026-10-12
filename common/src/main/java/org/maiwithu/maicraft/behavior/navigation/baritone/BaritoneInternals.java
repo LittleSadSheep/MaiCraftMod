@@ -8,6 +8,7 @@ import baritone.api.event.events.PathEvent;
 import baritone.api.event.events.WorldEvent;
 import baritone.api.event.events.type.EventState;
 import baritone.api.event.listener.AbstractGameEventListener;
+import baritone.behavior.LookBehavior;
 import baritone.behavior.PathingBehavior;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -15,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
@@ -333,13 +335,35 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
         return yawOff <= AIM_SETTLED_DEGREES && pitchOff <= AIM_SETTLED_DEGREES;
     }
 
+    /** 角色此刻在人手里（按 F8 收回了，或还没交给自动化）：引擎定的朝向不许改人走路的方向。 */
+    private static final AtomicBoolean HUMAN_HOLDING = new AtomicBoolean(true);
+
+    /** 寻路引擎问：角色是不是在人手里。在人手里时引擎不再拿它的朝向替换走路方向。 */
+    public static boolean humanHoldsPlayer() {
+        return HUMAN_HOLDING.get();
+    }
+
     /**
      * 人按 F8 收回了角色：正在走的那一趟立刻撤掉路线、松开引擎按键，不让引擎自己的刻接着执行
      * （否则它每刻还在改走路朝向，人按 W 会朝旧路线走）。这一趟不结算；人交回后从当时的位置重新算路接着走。
+     * 没有正在走的那一趟也把引擎整个停下、丢掉它这一刻的朝向：实机收回时角色刚睡醒走回原位，
+     * 引擎还留着一个朝向，人按 W 照旧朝那边走、转视角不跟。
      */
     public void humanTookPlayer() {
+        HUMAN_HOLDING.set(true);
         BaritoneWalkRun current = active;
         if (current != null) current.dropRoute();
+        PathingBehavior pathing = pathing();
+        if (pathing != null) pathing.forceCancel();
+        if (engine != null) {
+            engine.getInputOverrideHandler().clearAllKeys();
+            if (engine.getLookBehavior() instanceof LookBehavior look) look.clearTarget();
+        }
+    }
+
+    /** 自动化拿到了角色：引擎定的朝向重新管走路方向。 */
+    public void automationTookPlayer() {
+        HUMAN_HOLDING.set(false);
     }
 
     private PlayerContext tickContext;
