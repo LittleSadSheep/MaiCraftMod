@@ -50,6 +50,9 @@ public final class ContainerTakePlan {
             if (snapshot.isEmpty() || !wanted.test(snapshot)) continue;
             int slotId = reading.containerSlotIds().get(i);
             if (snapshot.count() <= needed) {
+                // 背包那一侧一件都放不下（没空格、同种的堆也满了）：点了也纹丝不动，还会被记成"没能确认"，
+                // 不点，交回去让引擎先腾地方。
+                if (roomyPlayerSlot(reading.playerSnapshots(), snapshot, 1) < 0) return Optional.empty();
                 // 这整堆都用得上（含刚好够）：一笔快速移动整堆进背包，落在背包哪格由游戏挑。
                 return Optional.of(new Move(slotId, snapshot.count(),
                         List.of(new Click(slotId, true, 0, false))));

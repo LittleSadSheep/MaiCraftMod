@@ -310,11 +310,11 @@ class MenuContainerTakesTest {
 
     @Test
     void 点出去了容器一直没动_照常收场_没能确认的那笔交回() {
-        // 背包塞满时服务端照样收下点击、东西却搬不动：点出去是事实，结果没能确认要如实交回，
+        // 背包有空格、服务端照样收下点击、东西却没搬过来：点出去是事实，结果没能确认要如实交回，
         // 不与"没点过"混在一起；箱子原封不动，拿走多少仍由引擎清点。
         FakeBox box = new FakeBox();
         box.box.set(4, new ItemStack(Items.IRON_INGOT, 64));
-        for (int i = 0; i < 36; i++) box.player.set(i, new ItemStack(Items.GOLD_BLOCK, 64));
+        for (int i = 0; i < 35; i++) box.player.set(i, new ItemStack(Items.GOLD_BLOCK, 64));
         box.jamMoves = 3;
         Action take = takes(box, 64);
         ActionStatus status = runToFinish(take);
@@ -326,6 +326,20 @@ class MenuContainerTakesTest {
         assertEquals(1, facts.size(), "点出去没等到结果的只有这一笔");
         assertTrue(facts.get(0).contains("搬 64 件"), "交回的事实写明要搬几件");
         assertTrue(facts.get(0).contains("没能确认"));
+    }
+
+    @Test
+    void 背包一件都放不下_不点_也不记没能确认() {
+        // 实机（全量测试 10-12）：背包满了还整堆快速移动，箱子纹丝不动，结果里多出两条"没能确认"，
+        // 其实东西后来腾出地方都拿到了。放不下就不点，交回去让引擎先腾地方。
+        FakeBox box = new FakeBox();
+        box.box.set(4, new ItemStack(Items.IRON_INGOT, 64));
+        for (int i = 0; i < 36; i++) box.player.set(i, new ItemStack(Items.GOLD_BLOCK, 64));
+        Action take = takes(box, 64);
+
+        assertInstanceOf(ActionStatus.Done.class, runToFinish(take));
+        assertEquals(64, box.box.get(4).getCount(), "箱子原封不动");
+        assertTrue(((ReportsUnconfirmed) take).unconfirmedFacts().isEmpty(), "没点就没有没能确认的");
     }
 
     @Test

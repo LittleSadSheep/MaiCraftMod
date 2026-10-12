@@ -95,6 +95,19 @@ class ContainerSourceTest {
     }
 
     @Test
+    void 记得没有但就在跟前的箱子_再开一眼() {
+        // 实机（全量测试 10-12）：主播刚往旁边箱子里放了原木，记忆里那只箱子没有，obtain 直接说"记得的容器里没有"。
+        WorldMemory memory = memory();
+        memory.rememberContainerOpened(new WorldPosition(3, 64, 0, null), "minecraft:chest",
+                List.of("minecraft:bread"), NOW);
+        ContainerSource source = new ContainerSource(memory, tags, NOBODY_OWNS, (container, request, permissions) -> Optional.empty());
+
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, source.quote(request(1), CONTEXT));
+        assertEquals(SourceQuote.Offer.UNKNOWN_COUNT, offer.obtainableCount());
+        assertTrue(offer.risk().contains("再开一眼"), offer.risk());
+    }
+
+    @Test
     void 玩家的箱子记得有货也不翻() {
         // 默认绝不碰玩家的箱子：服务端记着这只箱子是 bob 放的，里面有铁也跳过，说明里交代一句。
         WorldMemory memory = memory();

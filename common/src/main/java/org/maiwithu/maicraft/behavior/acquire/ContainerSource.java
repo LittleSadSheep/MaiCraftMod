@@ -43,6 +43,9 @@ public final class ContainerSource implements ItemSource {
         this.takes = takes;
     }
 
+    /** 记得没有、但离这么近（格）的箱子再开一眼：几步路的事，记忆可能过时。 */
+    static final double RECHECK_NEAR_BLOCKS = 8;
+
     @Override public String describe() {
         return "记得的箱子";
     }
@@ -55,6 +58,7 @@ public final class ContainerSource implements ItemSource {
         List<MemoryRecord> records = memory.recordsNear(context.characterAt(), searchRadius(context));
         MemoryRecord known = null;
         MemoryRecord maybe = null;
+        MemoryRecord stale = null;
         boolean skippedProtected = false;
         for (MemoryRecord record : records) {
             if (record.kind() != MemoryKind.CONTAINER) continue;
@@ -69,6 +73,11 @@ public final class ContainerSource implements ItemSource {
             if (maybe == null && !record.openedBefore()) {
                 maybe = record;
             }
+            // 开过、记得里面没有，但就在跟前：记忆可能过时（主播刚往里放了东西），真人会顺手再开一眼。
+            if (stale == null && record.openedBefore() && !holdsWanted(record, request)
+                    && distance(record, context) <= RECHECK_NEAR_BLOCKS) {
+                stale = record;
+            }
         }
         if (known != null) {
             int count = countWanted(known, request);
@@ -82,6 +91,11 @@ public final class ContainerSource implements ItemSource {
             return new SourceQuote.Offer(describe(), SourceQuote.Offer.UNKNOWN_COUNT,
                     new AcquisitionCost(distance(maybe, context), 4),
                     "这只箱子只是看见过，没开过，不确定里面有什么", positionHint(maybe));
+        }
+        if (stale != null) {
+            return new SourceQuote.Offer(describe(), SourceQuote.Offer.UNKNOWN_COUNT,
+                    new AcquisitionCost(distance(stale, context) + RECHECK_NEAR_BLOCKS, 4),
+                    "上回开的时候没有，就在跟前，再开一眼看看有没有新放进去的", positionHint(stale));
         }
         return new SourceQuote.Unavailable(describe(),
                 "记得的容器里没有装着" + request.wanted().describe() + "的"
