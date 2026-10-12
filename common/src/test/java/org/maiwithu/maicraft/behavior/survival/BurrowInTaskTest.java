@@ -74,6 +74,32 @@ class BurrowInTaskTest {
     }
 
     @Test
+    void standingInTheOpenCountsAsExposedButAFullHoleDoesNot() {
+        // 自卫接手挖坑时按它决定回不回去打：挖不成、站在露天硬熬算露着；挖满三格的坑没封口也不算。
+        Moves refused = new Moves();
+        refused.site = column(Ground.PROTECTED);
+        BurrowInTask standing = new BurrowInTask(refused, (kind, message) -> { });
+        Tick tick = new Tick();
+        refused.night = true;
+        standing.start(tick);
+        standing.tick(tick);
+        assertTrue(standing.exposedWhileWaiting(), "站在露天硬熬就是站着挨打");
+
+        Moves noSeal = new Moves();
+        noSeal.hasSealBlock = false;
+        noSeal.night = true;
+        BurrowInTask hole = new BurrowInTask(noSeal, (kind, message) -> { });
+        Tick now = new Tick();
+        hole.start(now);
+        for (int i = 0; i < 200; i++) {
+            now.now = i;
+            hole.tick(now);
+        }
+        assertEquals(3, noSeal.dugCells.size());
+        assertTrue(!hole.exposedWhileWaiting(), "坑底近战怪够不着");
+    }
+
+    @Test
     void withoutABlockToSealItWaitsInTheOpenHoleAndStillClimbsOut() {
         Moves moves = new Moves();
         moves.hasSealBlock = false;

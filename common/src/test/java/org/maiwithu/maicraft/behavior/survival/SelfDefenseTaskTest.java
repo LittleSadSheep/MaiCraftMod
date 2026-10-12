@@ -29,6 +29,8 @@ import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.maiwithu.maicraft.kernel.task.Task;
+import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 import org.maiwithu.maicraft.kernel.task.Urgency;
 
@@ -68,6 +70,9 @@ class SelfDefenseTaskTest {
         int strikes;
         int walks;
         ActionStatus walkStatus = ActionStatus.progressed();
+        boolean night;
+
+        @Override public boolean night(TickContext context) { return night; }
 
         @Override public Action strike(TickContext context, int entityId) {
             return new Fixed(() -> {
@@ -232,6 +237,41 @@ class SelfDefenseTaskTest {
         assertTrue(finished.summary().contains("没有还手"), finished.summary());
         assertTrue(task.cannotResumeInPlace(), "主任务暂停等指示");
         assertTrue(events.messages.stream().anyMatch(m -> m.contains("fight 点名")), events.messages.toString());
+    }
+
+    @Test
+    void cornedAtNightDigsInUntilDawnThenGoesBack() {
+        Senses senses = new Senses();
+        senses.threats.add(zombie(1, 6, 6));
+        senses.health = 4;
+        Moves moves = new Moves();
+        moves.walkStatus = ActionStatus.failed(Problem.of(Problem.Kind.UNREACHABLE, "死路"));
+        moves.night = true;
+        int[] dug = {0};
+        // 挖三填一的替身：挖坑封顶熬三刻就天亮。
+        NightfallNeed.BurrowMoves shelter = () -> new Task() {
+            int ticks;
+
+            @Override public TickResult tick(TickContext context) {
+                dug[0]++;
+                return ++ticks < 3 ? TickResult.RUNNING
+                        : TickResult.finished(TaskResult.done("熬过了夜，回到了地面"));
+            }
+
+            @Override public TaskResult close(CloseReason reason) { return TaskResult.done("收尾"); }
+            @Override public void pause() {}
+            @Override public String describe() { return "挖三填一"; }
+        };
+        SelfDefenseNeed need = new SelfDefenseNeed(senses, moves, TaskEventSink.NONE, uuid -> false, shelter);
+        SelfDefenseTask task = (SelfDefenseTask) need.createTask(new Tick(0));
+        task.start(new Tick(0));
+        run(task, 0, 6);
+        assertTrue(dug[0] > 0, "撤不掉又打不过、天黑：挖坑自保");
+        // 天亮爬回地面，怪也散了：观察一阵、走回打点收场。
+        senses.threats.clear();
+        TaskResult finished = assertInstanceOf(TickResult.Finished.class,
+                run(task, 6, 6 + SelfDefenseTask.WATCH_TICKS + 10)).result();
+        assertEquals(TaskResult.Status.DONE, finished.status(), finished.summary());
     }
 
     @Test

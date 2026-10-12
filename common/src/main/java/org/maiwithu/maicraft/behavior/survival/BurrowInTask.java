@@ -110,6 +110,14 @@ final class BurrowInTask extends PhasedTask<BurrowInTask.Phase> {
         };
     }
 
+    /**
+     * 坑没挖成、人还露在外头站着熬：自卫接手挖坑时据此回去背水一战——站在露天硬熬就是站着挨打。
+     * 挖满三格的坑哪怕没封口，近战怪也够不着坑底，不算露着。
+     */
+    boolean exposedWhileWaiting() {
+        return phase() == Phase.WAIT && dug < BurrowPlan.DEPTH;
+    }
+
     // 看脚下：挖得成一个封得住的坑才挖，不然站定硬熬并说明原因。
     private Next<Phase> check(TickContext context) {
         surface = moves.feet(context);

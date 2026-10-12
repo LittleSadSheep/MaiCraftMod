@@ -28,6 +28,9 @@ import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.Next;
 import org.maiwithu.maicraft.kernel.task.PhasedTask;
 import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.maiwithu.maicraft.kernel.task.TickResult;
+import org.maiwithu.maicraft.kernel.task.Task;
+import org.maiwithu.maicraft.kernel.task.CloseReason;
 
 /**
  * 自卫插曲：谁威胁角色就打谁，打完回到开打的原地。怎么打全交给战斗引擎（{@link Battle}），和点名战斗是同一个；
@@ -37,13 +40,15 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 正压着我打的、远处射我的不受这个限制。危险消失后再观察两秒（跑得几乎一样快的怪会在边界上一进一出）；
  * 撤离甩开了就是这次处理好了，人已不在原地，主任务不在这里悄悄续上。
  *
+ * <p>夜里撤不掉又打不过：接夜晚需求那套挖三填一，挖坑封顶熬到天亮再爬回地面；坑挖不成就回去背水一战。
+ *
  * <p>被没点名的玩家打：不还手，只退到他够不着外、举着盾；他停手后停下来等 LLM 决定（还手就 fight 点名他，
  * 不理就让主任务继续），不自己走回去接着干活。自家人打角色只发事件、不停工。
  */
 final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements DisplacedTask {
 
-    /** 自卫的阶段：打 → 危险消失后的观察期 → 走回打点。撤离在打的阶段里由引擎做。 */
-    enum Phase { ENGAGE, WATCH, RETURN }
+    /** 自卫的阶段：打 → 危险消失后的观察期 → 走回打点。撤离在打的阶段里由引擎做；夜里退无可退时挖坑熬到天亮。 */
+    enum Phase { ENGAGE, SHELTER, WATCH, RETURN }
 
     /** 打点圆心到追击上限（只比水平距离）。 */
     static final double CHASE_LIMIT = 16.0;
@@ -65,6 +70,8 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
     private int watchTicksLeft;
     private boolean reportedCornered;
     private Action walkBack;
+    /** 夜里挖坑熬着的那一次挖三填一。 */
+    private Task burrow;
     /** 撤离后人不在原地，或收尾走不回打点，或被陌生玩家打了：主任务不能悄悄续上。 */
     private boolean displaced;
     /** 这次打过角色的陌生玩家（实体编号）：不还手，收场时暂停主任务等 LLM 决定。 */
@@ -85,6 +92,8 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
                 return need.trusted(threat);
             }
         }, ThreatAssessment.VIGILANCE_RADIUS);
+        // 夜里退无可退、打不过：引擎报要挖坑，这里接夜晚需求那套挖三填一。
+        if (need.offersShelter()) battle.offerShelter();
     }
 
     // 名单：正在追我的都打；出打点 16 格、又没在打我的不追（守在打点附近），正压着我打的、远处射我的照打；
@@ -109,6 +118,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
     protected Next<Phase> tick(Phase phase, TickContext context) {
         return switch (phase) {
             case ENGAGE -> engage(context);
+            case SHELTER -> shelter(context);
             case WATCH -> watch(context);
             case RETURN -> back(context);
         };
@@ -131,8 +141,40 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         return switch (moment.state()) {
             case ESCAPED -> escaped(context, moment.retreatWhy());
             case FINISHED -> strangers.isEmpty() ? watchFirst() : stoppedByStranger(context);
+            case NEEDS_SHELTER -> Next.go(Phase.SHELTER, moment.doing());
             default -> Next.stay();
         };
+    }
+
+    // 挖坑熬夜：交给挖三填一，熬到天亮爬回地面再观察、走回打点。坑挖不成、人还露在外头就回去背水一战，
+    // 不站在露天硬熬（那是站着挨打）。挖坑的变化记进自卫的结果。
+    private Next<Phase> shelter(TickContext context) {
+        if (burrow == null) {
+            burrow = need.shelter();
+            if (burrow == null) return Next.go(Phase.ENGAGE, "挖不了坑，背水一战");
+            burrow.start(context);
+        }
+        if (burrow instanceof BurrowInTask digging && digging.exposedWhileWaiting()) {
+            TaskResult stopped = burrow.close(CloseReason.FINISHED);
+            burrow = null;
+            keepFacts(stopped);
+            return Next.go(Phase.ENGAGE, "坑挖不成，回去背水一战");
+        }
+        if (burrow.tick(context) instanceof TickResult.Finished finished) {
+            // 有了结果照内核的规矩收个尾，再把它交代的变化并进自卫的结果。
+            burrow.close(CloseReason.FINISHED);
+            burrow = null;
+            keepFacts(finished.result());
+            recordProgress(finished.result().summary());
+            return watchFirst();
+        }
+        return Next.stay();
+    }
+
+    private void keepFacts(TaskResult result) {
+        if (result == null) return;
+        result.changes().forEach(this::recordChange);
+        result.unconfirmed().forEach(this::recordUnconfirmed);
     }
 
     private Next<Phase> watchFirst() {
@@ -244,6 +286,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
 
     @Override
     public Interruptibility interruptibility(TickContext context) {
+        if (burrow != null) return burrow.interruptibility(context);
         return walkBack != null ? walkBack.interruptibility() : battle.interruptibility();
     }
 
@@ -258,6 +301,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         public void pause() {
             battle.pause();
             if (walkBack != null) walkBack.pause();
+            if (burrow != null) burrow.pause();
         }
 
         @Override
@@ -266,10 +310,13 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
             battle.close();
             if (walkBack != null) walkBack.close();
             walkBack = null;
+            if (burrow != null) keepFacts(burrow.close(phase() == Phase.SHELTER ? CloseReason.CANCELLED : CloseReason.FINISHED));
+            burrow = null;
         }
 
         @Override
         public String describe() {
+            if (burrow != null) return burrow.describe();
             return walkBack != null ? walkBack.describe() : battle.describe();
         }
     }

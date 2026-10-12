@@ -51,6 +51,8 @@ public final class SelfDefenseNeed implements SurvivalNeed {
 
     /** 自家人：实例配置里所有者信任的玩家，他们打角色只发事件、不停工。 */
     private final Predicate<UUID> trusted;
+    /** 夜里退无可退、打不过时挖坑自保：和夜晚需求同一套挖三填一；没接上为 null。 */
+    private final NightfallNeed.BurrowMoves shelter;
 
     /** @param moves 出手与走位怎么落地；生产用原生攻击与走到，测试换替身。 */
     public SelfDefenseNeed(CombatSenses senses, BattleMoves moves, TaskEventSink events) {
@@ -59,10 +61,27 @@ public final class SelfDefenseNeed implements SurvivalNeed {
 
     /** @param trusted 这位玩家是不是自家人（打角色多半是玩笑，只发事件不停工） */
     public SelfDefenseNeed(CombatSenses senses, BattleMoves moves, TaskEventSink events, Predicate<UUID> trusted) {
+        this(senses, moves, events, trusted, null);
+    }
+
+    /** @param shelter 夜里退无可退、打不过时挖坑自保的那一套（夜晚需求的挖三填一） */
+    public SelfDefenseNeed(CombatSenses senses, BattleMoves moves, TaskEventSink events, Predicate<UUID> trusted,
+                           NightfallNeed.BurrowMoves shelter) {
         this.senses = senses;
         this.moves = moves;
         this.events = events;
         this.trusted = trusted;
+        this.shelter = shelter;
+    }
+
+    /** 接得住挖坑自保吗。 */
+    boolean offersShelter() {
+        return shelter != null;
+    }
+
+    /** 新起一次挖三填一；没接上为 null。 */
+    Task shelter() {
+        return shelter == null ? null : shelter.burrowIn();
     }
 
     /** 这只是自家人：不躲不打，也不为它停工。 */
