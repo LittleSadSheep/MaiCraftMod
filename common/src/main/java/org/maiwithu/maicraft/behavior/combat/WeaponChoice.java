@@ -118,11 +118,22 @@ public final class WeaponChoice {
      * 一样好时快捷栏里的先（不用开背包）。对手举着盾时斧优先，斧是原版里能破盾的近战武器。都没有就空手。
      * 镐铲锄是工具不是兵器，不拿来打（磨工具耐久还打不过空手太多）。
      */
+    /** 不是兵器的工具拿来打：一下至少这么多伤害才比空手强得多（石镐 3、钻石镐 5）。 */
+    static final double MAKESHIFT_DAMAGE = 3.0;
+
     public static Picked pickMelee(List<Carried> carried, boolean opponentShielding) {
         Carried best = null;
         for (Carried stack : carried) {
             if (stack.count() <= 0 || stack.gear() != Gear.AXE && stack.gear() != Gear.BLADE) continue;
             if (best == null || better(stack, best, opponentShielding)) best = stack;
+        }
+        // 没有剑斧：像玩家一样抄起手边最趁手的工具（镐、铲、模组工具），一下比空手狠得多才算（伤害三点以上）。
+        // 原先只认剑斧，身上只有钻石镐时一律当空手，见怪就跑、被追着打也不还手。
+        if (best == null) {
+            for (Carried stack : carried) {
+                if (stack.count() <= 0 || stack.gear() != Gear.OTHER || stack.attackDamage() < MAKESHIFT_DAMAGE) continue;
+                if (best == null || better(stack, best, false)) best = stack;
+            }
         }
         return best == null ? new Picked(null, Weapon.BARE_HANDS, -1, 0)
                 : new Picked(best.item(), Weapon.MELEE, best.slot(), best.rate());

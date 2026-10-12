@@ -40,6 +40,20 @@ class WeaponChoiceTest {
     }
 
     @Test
+    void toolStandsInWhenThereIsNoSwordOrAxe() {
+        // 实机：身上只有钻石镐、木镐和一组圆石——抄起钻石镐打，不当空手见怪就跑；有剑时还是用剑。
+        var diamondPickaxe = new WeaponChoice.Carried("minecraft:diamond_pickaxe", 1, false, 3, 5, 1.2, WeaponChoice.Gear.OTHER);
+        var woodenPickaxe = new WeaponChoice.Carried("minecraft:wooden_pickaxe", 1, false, 4, 2, 1.2, WeaponChoice.Gear.OTHER);
+        var cobble = new WeaponChoice.Carried("minecraft:cobblestone", 64);
+        var picked = WeaponChoice.pickMelee(List.of(cobble, woodenPickaxe, diamondPickaxe), false);
+        assertEquals(WeaponChoice.Weapon.MELEE, picked.weapon());
+        assertEquals("minecraft:diamond_pickaxe", picked.itemId());
+        assertEquals(WeaponChoice.Weapon.BARE_HANDS, WeaponChoice.pickMelee(List.of(cobble, woodenPickaxe), false).weapon(),
+                "木镐一下才两点，不比空手强多少");
+        assertEquals("minecraft:iron_sword", WeaponChoice.pickMelee(List.of(diamondPickaxe, SWORD), false).itemId());
+    }
+
+    @Test
     void axeFirstWhenOpponentShields() {
         assertEquals("minecraft:iron_axe",
                 WeaponChoice.pick(List.of(SWORD, AXE), false, true).orElseThrow().itemId());
@@ -67,9 +81,9 @@ class WeaponChoiceTest {
         // 一样好的两把剑：快捷栏里那把先，不用开背包。
         var sameInHotbar = blade("minecraft:iron_sword", 3, 6, 1.6);
         assertEquals(3, WeaponChoice.pickMelee(List.of(ironSword, sameInHotbar), false).slot());
-        // 镐不是近战武器：只有镐就空手（交给手里现有的打）。
+        // 有剑斧时镐不上场；只有镐时抄起镐打（见下一条）。
         var pickaxe = new WeaponChoice.Carried("minecraft:iron_pickaxe", 1, false, 0, 4, 1.2, WeaponChoice.Gear.OTHER);
-        assertEquals(WeaponChoice.Weapon.BARE_HANDS, WeaponChoice.pickMelee(List.of(pickaxe), false).weapon());
+        assertEquals("minecraft:iron_sword", WeaponChoice.pickMelee(List.of(pickaxe, ironSword), false).itemId());
     }
 
     @Test
