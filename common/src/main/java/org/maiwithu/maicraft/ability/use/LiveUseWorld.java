@@ -49,7 +49,8 @@ final class LiveUseWorld implements UseSeams.ReadsWorld {
     // 只看那一格所在的区块在不在客户端：高度不影响"那一片加载了没有"。
     @Override public boolean loaded(BlockPos cell) {
         ClientLevel level = level();
-        return level != null && level.hasChunkAt(cell);
+        // 客户端世界的 hasChunkAt 永远答“加载着”，没加载的格读出来是空气、地表落在世界最底层；按区块真加载没加载判。
+        return level != null && level.isLoaded(cell);
     }
 
     @Override public Optional<String> blockId(BlockPos cell) {
@@ -72,14 +73,14 @@ final class LiveUseWorld implements UseSeams.ReadsWorld {
     @Override public Optional<BlockPos> ground(int x, int z) {
         ClientLevel level = level();
         BlockPos column = new BlockPos(x, 0, z);
-        if (level == null || !level.hasChunkAt(column)) return Optional.empty();
+        if (level == null || !level.isLoaded(column)) return Optional.empty();
         int top = level.getHeight(Heightmap.Types.MOTION_BLOCKING, x, z) - 1;
         return top < level.getMinBuildHeight() ? Optional.empty() : Optional.of(new BlockPos(x, top, z));
     }
 
     @Override public Fluid fluid(BlockPos cell) {
         ClientLevel level = level();
-        if (level == null || !level.hasChunkAt(cell)) return Fluid.NONE;
+        if (level == null || !level.isLoaded(cell)) return Fluid.NONE;
         FluidState fluid = level.getFluidState(cell);
         if (fluid.isEmpty()) return Fluid.NONE;
         return fluid.isSource() ? Fluid.SOURCE : Fluid.FLOWING;
@@ -88,14 +89,14 @@ final class LiveUseWorld implements UseSeams.ReadsWorld {
     // 同种流体按流体类型自己的"是不是同一种"判断（流动的水与水源是同一种水）；只看已加载的格子。
     @Override public Optional<BlockPos> nearestSource(BlockPos near, int radius) {
         ClientLevel level = level();
-        if (level == null || !level.hasChunkAt(near)) return Optional.empty();
+        if (level == null || !level.isLoaded(near)) return Optional.empty();
         FluidState kind = level.getFluidState(near);
         if (kind.isEmpty()) return Optional.empty();
         BlockPos best = null;
         double bestDistance = Double.MAX_VALUE;
         for (BlockPos cell : BlockPos.betweenClosed(near.offset(-radius, -radius, -radius),
                 near.offset(radius, radius, radius))) {
-            if (!level.hasChunkAt(cell)) continue;
+            if (!level.isLoaded(cell)) continue;
             FluidState fluid = level.getFluidState(cell);
             if (!fluid.isSource() || !fluid.getType().isSame(kind.getType())) continue;
             double distance = cell.distSqr(near);
@@ -110,7 +111,7 @@ final class LiveUseWorld implements UseSeams.ReadsWorld {
     // 告示牌的上蜡状态随方块实体同步到客户端：上过蜡的游戏不让改字。
     @Override public Sign sign(BlockPos cell) {
         ClientLevel level = level();
-        if (level == null || !level.hasChunkAt(cell)) return Sign.NOT_A_SIGN;
+        if (level == null || !level.isLoaded(cell)) return Sign.NOT_A_SIGN;
         if (!(level.getBlockEntity(cell) instanceof SignBlockEntity sign)) return Sign.NOT_A_SIGN;
         return sign.isWaxed() ? Sign.WAXED : Sign.WRITABLE;
     }
@@ -147,7 +148,7 @@ final class LiveUseWorld implements UseSeams.ReadsWorld {
             return Optional.of(ApproachTarget.ofBlock(target.cell()));
         }
         ClientLevel level = level();
-        if (level == null || !level.hasChunkAt(target.cell())) return Optional.empty();
+        if (level == null || !level.isLoaded(target.cell())) return Optional.empty();
         BlockState state = level.getBlockState(target.cell());
         if (!(state.getBlock() instanceof SignBlock sign)) return Optional.empty();
         return Optional.of(ApproachTarget.onFrontSideOf(target.cell(), sign.getYRotationDegrees(state)));
@@ -155,7 +156,7 @@ final class LiveUseWorld implements UseSeams.ReadsWorld {
 
     private Optional<BlockState> state(BlockPos cell) {
         ClientLevel level = level();
-        if (level == null || !level.hasChunkAt(cell)) return Optional.empty();
+        if (level == null || !level.isLoaded(cell)) return Optional.empty();
         return Optional.of(level.getBlockState(cell));
     }
 

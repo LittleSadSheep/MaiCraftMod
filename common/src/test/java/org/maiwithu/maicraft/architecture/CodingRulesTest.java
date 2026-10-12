@@ -2,7 +2,9 @@
 package org.maiwithu.maicraft.architecture;
 
 import com.tngtech.archunit.base.DescribedPredicate;
+import com.tngtech.archunit.core.domain.JavaCall;
 import com.tngtech.archunit.core.domain.JavaField;
+import com.tngtech.archunit.core.domain.properties.HasName;
 import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.junit.AnalyzeClasses;
 import com.tngtech.archunit.junit.ArchTest;
@@ -64,6 +66,16 @@ class CodingRulesTest {
             .should().dependOnClassesThat().haveFullyQualifiedName("net.minecraft.client.multiplayer.MultiPlayerGameMode")
             .orShould().dependOnClassesThat().haveFullyQualifiedName("net.minecraft.client.multiplayer.ClientPacketListener")
             .orShould().dependOnClassesThat().haveFullyQualifiedName("net.minecraft.client.KeyMapping")
+            .allowEmptyShould(true);
+
+    /**
+     * 判断格子加载没加载不用 hasChunkAt：客户端世界把它改成永远答"加载着"，没加载的格读出来是空气、
+     * 地表落在世界最底层（实机远程出行因此把目的地定在 y=-64、钻到地下绕圈）。用 isLoaded。
+     */
+    @ArchTest
+    static final ArchRule noAlwaysTrueChunkCheck = noClasses()
+            .that().resideInAPackage("org.maiwithu.maicraft..")
+            .should().callMethodWhere(JavaCall.Predicates.target(HasName.Predicates.name("hasChunkAt")))
             .allowEmptyShould(true);
 
     /** 只有游戏接口层和调试界面可以直接取 Minecraft 客户端单例；其他层通过游戏接口层访问。 */

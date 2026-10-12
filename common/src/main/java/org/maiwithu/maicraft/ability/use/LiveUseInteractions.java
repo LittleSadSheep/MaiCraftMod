@@ -104,7 +104,8 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
     private UseSeams.Built onBlock(ClientLevel level, LocalPlayer player, ResolvedTarget target, boolean writesSign,
             ItemStack handBefore, UseSeams.ReadsWorld.Held held, ItemUseAim.Gesture gesture, int menuBefore) {
         BlockPos cell = target.cell();
-        if (!level.hasChunkAt(cell)) {
+        // 客户端世界的 hasChunkAt 永远答“加载着”，没加载的格读出来是空气、地表落在世界最底层；按区块真加载没加载判。
+        if (!level.isLoaded(cell)) {
             return new UseSeams.Built.CannotAim(Problem.of(Problem.Kind.UNREACHABLE, "目标那一格没加载", null));
         }
         BlockState state = level.getBlockState(cell);

@@ -42,7 +42,8 @@ public final class ClientTravelWorldView implements TravelWorldView {
         PlayerContext current = context.get();
         if (current == null || current.level() == null) return OptionalInt.empty();
         BlockPos column = new BlockPos(x, 0, z);
-        if (!current.level().hasChunkAt(column)) return OptionalInt.empty();
+        // 客户端世界的 hasChunkAt 永远答“加载着”，没加载的格读出来是空气、地表落在世界最底层；按区块真加载没加载判。
+        if (!current.level().isLoaded(column)) return OptionalInt.empty();
         // 地表最高的实心（不算树叶）方块上面那一格就是站的地方。
         return OptionalInt.of(current.level().getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z));
     }

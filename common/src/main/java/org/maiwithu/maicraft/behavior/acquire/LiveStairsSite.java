@@ -52,7 +52,8 @@ public final class LiveStairsSite implements ClientStairsDown.Site {
     public ClientStairsDown.Ground ground(TickContext context, BlockPos cell) {
         ClientLevel level = level(context);
         // 没加载、看不到的格子不当成空的：按挖不动处理，楼梯停在这里。
-        if (level == null || !level.hasChunkAt(cell)) return ClientStairsDown.Ground.UNBREAKABLE;
+        // 客户端世界的 hasChunkAt 永远答“加载着”，没加载的格读出来是空气、地表落在世界最底层；按区块真加载没加载判。
+        if (level == null || !level.isLoaded(cell)) return ClientStairsDown.Ground.UNBREAKABLE;
         BlockState state = level.getBlockState(cell);
         if (!state.getFluidState().isEmpty()) return ClientStairsDown.Ground.FLUID;
         if (state.getCollisionShape(level, cell).isEmpty()) return ClientStairsDown.Ground.OPEN;

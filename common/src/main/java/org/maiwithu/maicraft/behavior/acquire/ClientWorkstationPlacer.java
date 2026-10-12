@@ -65,7 +65,8 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation {
         BlockPos pos = new BlockPos(at.x(), at.y(), at.z());
         // 只认同一维度、已加载的那一格：读不到的不下结论。
         if (at.dimension() != null && !at.dimension().equals(current.level().dimension().location().toString())) return false;
-        if (!current.level().hasChunkAt(pos)) return false;
+        // 客户端世界的 hasChunkAt 永远答“加载着”，没加载的格读出来是空气、地表落在世界最底层；按区块真加载没加载判。
+        if (!current.level().isLoaded(pos)) return false;
         return !blockType.equals(BuiltInRegistries.BLOCK.getKey(current.level().getBlockState(pos).getBlock()).toString());
     }
 

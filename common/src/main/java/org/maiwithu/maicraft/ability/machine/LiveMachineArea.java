@@ -97,7 +97,8 @@ final class LiveMachineArea implements ReadsMachineArea {
                 continue;
             }
             BlockPos at = new BlockPos(x, y, z);
-            if (!level.hasChunkAt(at)) {
+            // 客户端世界的 hasChunkAt 永远答“加载着”，没加载的格读出来是空气、地表落在世界最底层；按区块真加载没加载判。
+            if (!level.isLoaded(at)) {
                 // 没加载的格逐格记账：结论里要写有几格不知道，不能按空气算。
                 unloadedSoFar++;
                 continue;

@@ -33,7 +33,8 @@ final class LiveMachineWorld implements MachineWorldView {
 
     @Override public Optional<BlockState> stateAt(BlockPos at) {
         PlayerContext current = context.get();
-        if (current == null || current.level() == null || !current.level().hasChunkAt(at)) {
+        // 客户端世界的 hasChunkAt 永远答“加载着”，没加载的格读出来是空气、地表落在世界最底层；按区块真加载没加载判。
+        if (current == null || current.level() == null || !current.level().isLoaded(at)) {
             return Optional.empty();
         }
         return Optional.of(current.level().getBlockState(at));

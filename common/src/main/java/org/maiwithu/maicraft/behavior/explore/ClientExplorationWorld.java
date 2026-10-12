@@ -85,7 +85,8 @@ public final class ClientExplorationWorld implements ExplorationWorld {
     @Override
     public ColumnSample sampleColumn(int x, int z) {
         ClientLevel level = level();
-        if (level == null || !level.hasChunkAt(new BlockPos(x, 0, z))) {
+        // 客户端世界的 hasChunkAt 永远答“加载着”，没加载的格读出来是空气、地表落在世界最底层；按区块真加载没加载判。
+        if (level == null || !level.isLoaded(new BlockPos(x, 0, z))) {
             return ColumnSample.unloaded();
         }
         // 高度图返回的是顶块上面的第一个空位；减一才是"忽略树叶的最高实体或液体遮挡物"。

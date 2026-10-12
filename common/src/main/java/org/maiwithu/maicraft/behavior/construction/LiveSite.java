@@ -32,7 +32,8 @@ public final class LiveSite implements ConstructionSeams.ReadsSite {
 
     @Override public boolean loaded(BlockPos pos) {
         ClientLevel level = level();
-        return level != null && level.hasChunkAt(pos) && level.isInWorldBounds(pos);
+        // 客户端世界的 hasChunkAt 永远答“加载着”，没加载的格读出来是空气、地表落在世界最底层；按区块真加载没加载判。
+        return level != null && level.isLoaded(pos) && level.isInWorldBounds(pos);
     }
 
     @Override public BlockState state(BlockPos pos) {

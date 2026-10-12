@@ -66,7 +66,8 @@ public final class LivePlacements implements ConstructionSeams.PlansPlacement {
 
     @Override public boolean requiresSneak(BlockPos clicked) {
         PlayerContext current = context.get();
-        if (current == null || current.level() == null || !current.level().hasChunkAt(clicked)) return false;
+        // 客户端世界的 hasChunkAt 永远答“加载着”，没加载的格读出来是空气、地表落在世界最底层；按区块真加载没加载判。
+        if (current == null || current.level() == null || !current.level().isLoaded(clicked)) return false;
         return PlacementPrediction.requiresSneak(current.level(), clicked, current.level().getBlockState(clicked));
     }
 }

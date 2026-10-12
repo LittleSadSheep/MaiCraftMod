@@ -87,8 +87,9 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
                 continue;
             }
             // 砍树只砍长着的树：没有树冠的原木是玩家搭的木屋、栅栏柱、横梁，不当候选。
+            // 客户端世界的 hasChunkAt 永远答“加载着”，没加载的格读出来是空气、地表落在世界最底层；按区块真加载没加载判。
             if (NaturalTrees.isLog(current.level().getBlockState(hit))
-                    && !NaturalTrees.partOfNaturalTree(hit, current.level(), current.level()::hasChunkAt, trunksChecked)) {
+                    && !NaturalTrees.partOfNaturalTree(hit, current.level(), current.level()::isLoaded, trunksChecked)) {
                 continue;
             }
             String blockTypeId = blockTypeIdOf(current, hit);

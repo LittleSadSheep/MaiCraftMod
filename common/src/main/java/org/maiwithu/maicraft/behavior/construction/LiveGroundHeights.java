@@ -22,7 +22,8 @@ public final class LiveGroundHeights implements AnchorResolver.GroundHeights {
     @Override public Optional<Integer> surfaceY(int x, int z) {
         PlayerContext current = context.get();
         ClientLevel level = current == null ? null : current.level();
-        if (level == null || !level.hasChunkAt(new BlockPos(x, 0, z))) return Optional.empty();
+        // 客户端世界的 hasChunkAt 永远答“加载着”，没加载的格读出来是空气、地表落在世界最底层；按区块真加载没加载判。
+        if (level == null || !level.isLoaded(new BlockPos(x, 0, z))) return Optional.empty();
         int top = level.getHeight(Heightmap.Types.MOTION_BLOCKING, x, z);
         return top <= level.getMinBuildHeight() ? Optional.empty() : Optional.of(top);
     }
