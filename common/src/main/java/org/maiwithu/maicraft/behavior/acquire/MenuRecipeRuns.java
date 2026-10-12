@@ -293,19 +293,24 @@ public final class MenuRecipeRuns implements RecipeRuns {
 
         // 取货：整堆收进背包；收到几件按取货前后背包里这件东西的数量差记，不按产出格上写的数猜。
         // 真收进来几件就记几件：自制的东西逐笔记进发起任务的结果，结果里的变化能和背包净变化对得上。
+        /** 连着几下点产出格一件都没收进来。 */
+        private int fruitlessTakes;
+
         private ActionStatus takeOutput(TickContext tick, MenuContent.Reading open, int output) {
             int before = carriedResults(open);
             int slotId = open.containerSlotIds().get(output);
             ItemStack shown = open.containerSnapshots().get(output).stack().copy();
             return click(tick, slotId, 0, ClickType.QUICK_MOVE, slotChanged(slotId, shown), (status, later) -> {
-                openReading().ifPresent(now -> {
-                    int gained = Math.max(0, carriedResults(now) - before);
-                    produced += gained;
-                    if (gained > 0 && records != null) {
-                        records.change(Change.of(Change.Kind.ITEM_GAINED, recipe.result().itemId(), gained));
-                    }
-                });
-                if (status == PendingMenuAction.Status.CONFIRMED_NOT_APPLIED) {
+                int gained = openReading().map(now -> Math.max(0, carriedResults(now) - before)).orElse(0);
+                produced += gained;
+                if (gained > 0 && records != null) {
+                    records.change(Change.of(Change.Kind.ITEM_GAINED, recipe.result().itemId(), gained));
+                }
+                // 点了产出格却一件没收进来：背包满了时客户端先算好"放不下"，服务器不回包，只会等到超时。
+                // 连着两下这样就按收不进背包收场，让上层先腾地方；原先每五秒点一下一直点，工作台界面也一直开着。
+                fruitlessTakes = gained > 0 ? 0 : fruitlessTakes + 1;
+                if (status == PendingMenuAction.Status.CONFIRMED_NOT_APPLIED
+                        || status != PendingMenuAction.Status.CONFIRMED_APPLIED && fruitlessTakes >= 2) {
                     return fail(Problem.Kind.INVENTORY_FULL,
                             "产出格的" + recipe.result().describe() + "收不进背包，背包可能满了");
                 }
