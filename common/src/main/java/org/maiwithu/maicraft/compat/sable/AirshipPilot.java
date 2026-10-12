@@ -11,7 +11,8 @@ import net.minecraft.world.phys.Vec3;
  * 飞艇的飞控（纯函数的状态机，每刻吃一个样本吐一个输出）：
  * 起飞先垂直离地约 8 格、姿态稳了（倾斜 &lt; 8°、斜角每秒变 &lt; 8.6°）才前进和转向 →
  * 巡航保持高度、车头对准落点再开动力 → 到进近范围保持高度移到落点上方、减速 →
- * 落点上方水平 1 格内、水平速度 &lt; 0.3 格/秒才垂直下降（每秒约 1 格，按漂移小修，近地停桨）→ 接地交给停稳确认。
+ * 落点上方水平 1 格内、水平速度 &lt; 0.3 格/秒才垂直下降（离地 12 格以上每秒约 4 格快降、燃烧器基本关着，
+ * 12 格以内每秒约 1 格去接地；按漂移小修，近地停桨）→ 接地交给停稳确认。不在空中慢慢等它飘下来。
  * 升力在悬停配平附近按高度差与升降速度调；配平先按 0.5，平飞时按实测慢慢修正——求不出不当准入条件。
  * 巡航中碰到地面（撞山、压到树）也按落地交给停稳确认，结果写明不是按进近落的。
  */
@@ -28,6 +29,9 @@ final class AirshipPilot {
     static final double CRUISE_SPEED = 6;
     static final double CLIMB_RATE = 2;
     static final double DESCENT_RATE = 1;
+    /** 离落点还高时的快降速度（每秒几格）与放慢的高度（格）：高处每秒 1 格要等太久。 */
+    static final double FAST_DESCENT_RATE = 4;
+    static final double SLOW_DOWN_HEIGHT = 12;
     /** 在落点上方多近、水平多慢才往下降。 */
     static final double OVERHEAD = 1;
     static final double OVERHEAD_SPEED = 0.3;
@@ -132,7 +136,7 @@ final class AirshipPilot {
         return command(sample, course, distance, headingError);
     }
 
-    // 各阶段的输出：巡航与进近保持巡航高度；下降按每秒约 1 格往下；转向近地时不动。
+    // 各阶段的输出：巡航与进近保持巡航高度；下降高处快、近地每秒约 1 格；转向近地时不动。
     private PilotCommand command(PilotSample sample, Course course, double distance, double headingError) {
         double turn = servo(headingError, sample.turnRate());
         boolean aligned = Math.abs(headingError) < 30;
@@ -157,8 +161,9 @@ final class AirshipPilot {
                 double height = sample.position().y - course.touchdown().y;
                 // 下降中漂开 2 格以上、离地还有 4 格以上时小推一下修回去；近地停桨，不转向。
                 double power = distance > 2 && height > 4 && aligned ? Math.min(0.3, distance * 0.05) : 0;
-                double target = Math.max(course.touchdown().y, sample.position().y - DESCENT_RATE);
-                yield new PilotCommand(power, lift(sample, target), 0, false);
+                // 离地 12 格以上按每秒 4 格往下压（升力低于配平，燃烧器基本关着），之后按每秒 1 格放慢去接地。
+                double rate = height > SLOW_DOWN_HEIGHT ? FAST_DESCENT_RATE : DESCENT_RATE;
+                yield new PilotCommand(power, hover + (-rate - sample.velocity().y) * 0.5, 0, false);
             }
             default -> PilotCommand.IDLE;
         };

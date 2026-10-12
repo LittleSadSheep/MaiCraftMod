@@ -9,22 +9,23 @@ import org.maiwithu.maicraft.game.player.NetworkDelay;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /**
- * 喷气背包的快速下降：这个模组开着慢慢往下飘反而会摔伤（模组的毛病，所有者 09-07、09-26 原话），玩家的做法是
- * 到落点正上方关掉背包自由落，算好速度和网络延迟，快到地面前重新打开刹一下，确认真的慢下来了，
- * 离地不到两格半再关掉落下去（这点高度摔不伤）。下面是水、或本来就不高，直接关掉落下去。
+ * 喷气背包的快速下降：这个模组开着慢慢往下飘反而会摔伤，还要飘很久（模组的毛病，所有者 09-07、09-26、10-12 原话），
+ * 玩家的做法是到落点正上方关掉背包自由落，到了摔不伤的高度瞬间打开一下（服务端重新算摔落高度、悬停把下落压住），
+ * 紧接着关掉落到地上。打开的时机按下落速度和来回延迟算：读回打开时正好离地一格左右；
+ * 读回之前就落了地也不伤（服务端已经清零），停得比两格半还高就关掉再落一次、再开一下，不悬在空中等它慢慢飘。
+ * 下面是水、或本来就不高，直接关掉落下去。
  */
 final class FastDrop {
 
     /** 落差不超过这么多格直接关掉落下去：原版摔落三格以内不掉血。 */
     static final double SAFE_DROP = 2.5;
-    /** 刹完速度要回到这么慢（格每刻，往下为负）才算真的刹住。 */
+    /** 刹完速度要回到这么慢（格每刻，往下为负）才算真的刹住；挨打落地前刹车用。 */
     static final double SLOWED = -0.12;
-    /** 刹车点多留的格数与刻数。 */
-    static final double MARGIN_BLOCKS = 2.0;
-    static final int MARGIN_TICKS = 4;
+    /** 打开那一下读回生效时，想让人停在离地多高（格）：低一点没关系，带着开着落地也不伤。 */
+    static final double OPEN_AT = 1.0;
 
-    /** 落到哪一步了。 */
-    enum Stage { CUT, FALL, BRAKE, FINAL_CUT, DOWN }
+    /** 落到哪一步了：关掉、自由落、瞬间打开、关掉落地、落地了。 */
+    enum Stage { CUT, FALL, OPEN, FINAL_CUT, DOWN }
 
     private final JetpackSwitches switches;
     private final double landingY;
@@ -42,7 +43,7 @@ final class FastDrop {
         if (soft) switches.want(false, true);
     }
 
-    // 关 → 自由落 → 快到时重新打开刹住 → 离地不到两格半再关 → 落地；刹完还高就再关一次接着落。
+    // 关 → 自由落 → 快到地面瞬间打开 → 读回开了马上关 → 落地；打开后停得还高就再关一次接着落。
     Stage tick(PlayerContext context, long now) {
         LocalPlayer player = context.localPlayer();
         if (player.onGround() || player.isInWater()) {
@@ -57,21 +58,19 @@ final class FastDrop {
                 if (settled(player, now)) stage = Stage.FALL;
             }
             case FALL -> {
-                // 刹车点：照这个速度，网络延迟加几刻里还会掉多少，再多留两格。
-                double brakeAt = falling * (latencyTicks(context) + MARGIN_TICKS) + MARGIN_BLOCKS;
-                if (height <= brakeAt) {
+                // 打开的时机：按下去到读回生效要一个来回，这期间照这个速度还会掉多少，读回时正好离地一格左右。
+                double openAt = Math.max(SAFE_DROP, falling * (latencyTicks(context) + 1) + OPEN_AT);
+                if (height <= openAt) {
                     switches.want(true, true);
-                    stage = Stage.BRAKE;
+                    stage = Stage.OPEN;
                 }
             }
-            case BRAKE -> {
-                if (settled(player, now) && player.getDeltaMovement().y > SLOWED) {
-                    if (height <= SAFE_DROP) {
-                        switches.want(false, true);
-                        stage = Stage.FINAL_CUT;
-                    } else {
-                        stage = Stage.CUT;
-                    }
+            case OPEN -> {
+                // 读回开了（悬停已把下落压住、服务端清了摔落高度）就马上关：剩下不到两格半直接落地，
+                // 停得还高就关掉再落一次，下次按慢下来的速度再开，不开着慢慢飘。
+                if (settled(player, now)) {
+                    switches.want(false, true);
+                    stage = height <= SAFE_DROP ? Stage.FINAL_CUT : Stage.CUT;
                 }
             }
             case FINAL_CUT -> settled(player, now);

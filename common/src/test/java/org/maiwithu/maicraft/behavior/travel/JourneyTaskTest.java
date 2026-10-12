@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.travel;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -66,6 +67,38 @@ class JourneyTaskTest {
 
     private static JourneyDetails details(TaskResult result) {
         return assertInstanceOf(JourneyDetails.class, result.details());
+    }
+
+    @Test
+    void 坐着的一段按要求停下后_站着等不再开下一段_放回来接着走() {
+        // 坐电梯途中被叫暂停：这一段先停靠出轿厢，停下就站着等，不再问报价开下一段；放回来从站的地方接着规划。
+        FakeMode elevator = new FakeMode(request -> new TravelOffer(ELEVATOR, request.from(), request.to(), 100,
+                List.of(), List.of(), ""), WorldPosition.here(2, 100, 2));
+        JourneyTask task = journey(at(2, 100, 2), null, elevator);
+        task.start(tick);
+        for (int i = 0; i < 10 && elevator.started == 0; i++) {
+            task.tick(tick);
+            tick.nextTick();
+        }
+        assertEquals(1, elevator.started);
+
+        assertTrue(task.stopSafely(), "坐着的一段要先停下");
+        assertEquals(1, elevator.safeStops);
+        assertFalse(task.stoppedSafely());
+        elevator.failure = Problem.of(Problem.Kind.STUCK, "按要求先停下，停在半路");
+        for (int i = 0; i < 5; i++) {
+            task.tick(tick);
+            tick.nextTick();
+        }
+        assertTrue(task.stoppedSafely(), "这一段停下了就是停稳了");
+        int asked = elevator.asked;
+        task.tick(tick);
+        assertEquals(asked, elevator.asked, "收尾时不再问报价、不开下一段");
+
+        task.pause();
+        elevator.failure = null;
+        TaskResult result = run(task, 50);
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
     }
 
     @Test
@@ -220,6 +253,7 @@ class JourneyTaskTest {
         int started;
         TravelRequest lastRequest;
         boolean claims;
+        int safeStops;
 
         @Override public boolean claims(TravelRequest request) {
             return claims && started == 0;
@@ -257,7 +291,9 @@ class JourneyTaskTest {
                     return ActionStatus.done();
                 }
 
-                @Override public void requestSafeStop() {}
+                @Override public void requestSafeStop() {
+                    safeStops++;
+                }
 
                 @Override public String describe() {
                     return "坐电梯替身";

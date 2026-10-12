@@ -32,6 +32,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 停稳确认：接地（船是浮着）、每秒挪不到 0.35 格、倾斜 &lt; 8° 连着 20 个样本，100 刻内做不到写明"落地了但没停稳" →
  * 交还无线红石打字机。每刻核对还接管着、还坐着、结构还在；每 2 秒核对绑的键没变（回路被改就松键停下）。
  * 按路程给的时间用完了：飞艇就地找落点降下来，车船就地刹住，不悬在空中干等。
+ * 被叫先到安全的地方再停（暂停、取消、不急的需求）：飞艇就近找落点快降、车船就地刹住，停稳后松开键坐在驾驶位上等；
+ * 再接着开时从停下的地方重新定一趟去原来的目的地。
  * 飞艇沿途每 5 刻看前方 48 格的地形，地面比巡航高度近 6 格以内就把巡航高度抬上去；只按地形抬高，不绕。
  */
 final class TypewriterDrive implements VehicleDriver.Run {
@@ -56,7 +58,7 @@ final class TypewriterDrive implements VehicleDriver.Run {
     /** 近到这么远还找不到落点，就落在目的地本身（格）。 */
     static final double SITE_GIVE_UP = 48;
 
-    private enum Step { PREPARE, PLAN, MOVE, PARK, DISCONNECT }
+    private enum Step { PREPARE, PLAN, MOVE, PARK, HOLD, DISCONNECT }
 
     private final SimulatedCompat compat;
     private final PlayerServices services;
@@ -86,6 +88,13 @@ final class TypewriterDrive implements VehicleDriver.Run {
     private boolean parked;
     private boolean disconnected;
     private VehicleDriver.Report report;
+    /** 被叫先到安全的地方再停；这次的就近落点（刹停点）定了没有。 */
+    private boolean stopping;
+    private boolean stopAimed;
+    /** 停下过：再接着开时从停下的地方重新定一趟（换一个飞控），不沿用去近处落点的航线。 */
+    private boolean replan;
+    /** 之前几趟飞控的阶段变化：重新定过一趟时接在前面。 */
+    private final List<String> earlierPhases = new ArrayList<>();
 
     TypewriterDrive(SimulatedCompat compat, PlayerServices services, VehicleDriver.DriveRequest request,
             TypewriterDriver.Station station) {
@@ -112,7 +121,7 @@ final class TypewriterDrive implements VehicleDriver.Run {
             ActionStatus prepared = cockpit.prepare(tick);
             if (prepared instanceof ActionStatus.Failed failed) return stop(level, failed.problem());
             if (!(prepared instanceof ActionStatus.Done)) return prepared;
-            return go(last == null ? Step.PLAN : Step.MOVE, now);
+            return go(last == null || replan ? Step.PLAN : Step.MOVE, now);
         }
         PilotSample sample = sample(level, ship.get(), now);
         if (step != Step.DISCONNECT) {
@@ -123,6 +132,7 @@ final class TypewriterDrive implements VehicleDriver.Run {
             case PLAN -> plan(level, ship.get(), sample, now);
             case MOVE -> move(level, ship.get(), sample, now);
             case PARK -> park(sample, now);
+            case HOLD -> hold();
             case DISCONNECT -> disconnect(level, now);
             case PREPARE -> ActionStatus.running();
         };
@@ -142,10 +152,30 @@ final class TypewriterDrive implements VehicleDriver.Run {
             keys.put(role.getKey(), key);
         }
         mixer = new KeyMixer(keys);
+        // 停下过再接着开：之前那一趟的阶段留着，时间、落点、就地降落都按这一趟重新算。
+        if (replan) {
+            if (flying != null) earlierPhases.addAll(flying.transitions());
+            if (driving != null) earlierPhases.addAll(driving.transitions());
+            replan = false;
+            overtime = false;
+            siteChosen = false;
+            raised = false;
+            parked = false;
+            parkedCount = 0;
+            // 就近停下的地方已经在目的地附近（最后一段降落时被叫停）：不再起飞，直接交还。
+            boolean down = !airship || sample.grounded();
+            if (down && sample.flatDistance(request.destination()) <= (airship ? ARRIVED_AIR : ARRIVED_GROUND)) {
+                parked = true;
+                notes.add("停下的地方已经在目的地附近，不再开");
+                return go(Step.DISCONNECT, now);
+            }
+            notes.add("从 " + shortText(sample.position()) + " 接着开");
+        }
         double distance = sample.flatDistance(request.destination());
         deadline = now + Math.min(12_000, Math.max(1_200, Math.round((60 + distance / 2) * 20)));
         if (airship) {
-            flying = new AirshipPilot(sample.position().y);
+            // 接着开时人还在空中（落地前叫停又放回来）：已经离地了，不再先垂直爬 8 格，姿态稳了就走。
+            flying = new AirshipPilot(sample.grounded() ? sample.position().y : sample.position().y - AirshipPilot.CLEARANCE);
             double ground = request.heightKnown() ? request.destination().y : surface(level, request.destination());
             Vec3 touchdown = new Vec3(request.destination().x, ground, request.destination().z);
             Optional<Vec3> site = LandingSites.find(touchdown, halfWidth(ship), ground(level));
@@ -172,7 +202,21 @@ final class TypewriterDrive implements VehicleDriver.Run {
         if ((now - stepStart) % CIRCUIT_EVERY == 0 && bound != null && !bound.equals(cockpit.bound(level))) {
             return stop(level, Problem.of(Problem.Kind.STUCK, "开着开着回路变了（绑的键不一样了），松开所有键停下"));
         }
-        if (now >= deadline && !overtime) {
+        if (stopping && !stopAimed) {
+            // 被叫先停：飞艇就近找落点（够平够大、不是水），找不到就落在正下方；车船就地刹住。
+            stopAimed = true;
+            notes.add("按要求先停下，就近" + (airship ? "降落" : "刹住"));
+            if (airship) {
+                Vec3 here = new Vec3(sample.position().x, surface(level, sample.position()), sample.position().z);
+                Vec3 site = LandingSites.find(here, halfWidth(ship), ground(level)).orElse(here);
+                course = new AirshipPilot.Course(site, course.cruiseAltitude());
+                siteChosen = true;
+                landing = "按要求就近落在 " + shortText(site);
+            } else {
+                target = sample.position();
+            }
+        }
+        if (now >= deadline && !overtime && !stopping) {
             overtime = true;
             notes.add("开了 " + (now - stepStart) / 20 + " 秒还没到，就地" + (airship ? "降落" : "刹住"));
             if (airship) {
@@ -240,12 +284,18 @@ final class TypewriterDrive implements VehicleDriver.Run {
         parkedCount = settled ? parkedCount + 1 : 0;
         if (parkedCount >= PARK_SAMPLES) {
             parked = true;
-            return go(Step.DISCONNECT, now);
+            return go(stopping ? Step.HOLD : Step.DISCONNECT, now);
         }
         if (now - stepStart >= PARK_TICKS) {
             notes.add(airship ? "落地了但没停稳" : "停下了但没停稳");
-            return go(Step.DISCONNECT, now);
+            return go(stopping ? Step.HOLD : Step.DISCONNECT, now);
         }
+        return ActionStatus.running();
+    }
+
+    // 按要求停稳了：键都松开，坐在驾驶位上等，等暂停（再接着开）或收掉（交还无线红石打字机）。
+    private ActionStatus hold() {
+        cockpit.releaseAll();
         return ActionStatus.running();
     }
 
@@ -340,7 +390,9 @@ final class TypewriterDrive implements VehicleDriver.Run {
     }
 
     private void writeReport() {
-        List<String> phases = flying != null ? flying.transitions() : driving != null ? driving.transitions() : List.of();
+        List<String> phases = new ArrayList<>(earlierPhases);
+        if (flying != null) phases.addAll(flying.transitions());
+        if (driving != null) phases.addAll(driving.transitions());
         double left = last == null ? -1 : TypewriterTrial.round(last.flatDistance(request.destination()), 10);
         boolean arrived = left >= 0 && left <= (airship ? ARRIVED_AIR : ARRIVED_GROUND);
         if (flying != null && flying.unplannedTouchdown()) notes.add("不是按进近落的：还没到落点就碰到了地面");
@@ -355,12 +407,31 @@ final class TypewriterDrive implements VehicleDriver.Run {
     }
 
     // 被打断：松开所有键（飞艇会慢慢往下沉，不会悬着加速），回来先核对还接管着，再按现在的样子接着开。
+    // 正在就近停或已经停稳的：不用再停了，回来从停下的地方重新定一趟去原来的目的地。
     @Override public void pause() {
         cockpit.pause();
-        if (step == Step.MOVE || step == Step.PARK) {
+        if (stopping || step == Step.HOLD) replan = true;
+        stopping = false;
+        stopAimed = false;
+        if (step == Step.MOVE || step == Step.PARK || step == Step.HOLD) {
             step = Step.PREPARE;
             stepStart = Long.MIN_VALUE;
         }
+    }
+
+    /**
+     * 先到安全的地方再停：开着（在飞、在开）的，飞艇就近找落点快降、车船就地刹住，停稳后坐着等；
+     * 还没开起来、已经在停稳确认或交还的（几秒就完）现在就能停。
+     */
+    @Override public boolean stopSafely() {
+        // 飞艇还在地上（刚要起飞）停下就是安全的，现在就能停；只有在空中、车船开着才先就近停。
+        if (step != Step.HOLD && (step != Step.MOVE || interruptibility() != Interruptibility.UNSAFE_TO_STOP)) return false;
+        stopping = true;
+        return true;
+    }
+
+    @Override public boolean stoppedSafely() {
+        return !stopping || step == Step.HOLD || report != null;
     }
 
     @Override public void close() {
@@ -383,8 +454,10 @@ final class TypewriterDrive implements VehicleDriver.Run {
         return switch (step) {
             case PREPARE -> cockpit.describe();
             case PLAN -> "定航线";
-            case MOVE -> airship ? "飞（" + flying.phase().name().toLowerCase(Locale.ROOT) + "）" : "开过去";
+            case MOVE -> (stopping ? "就近停下：" : "") + (airship ? "飞（" + flying.phase().name().toLowerCase(Locale.ROOT) + "）"
+                    : stopping ? "刹住" : "开过去");
             case PARK -> "停稳确认";
+            case HOLD -> "按要求停稳了，坐在驾驶位上等";
             case DISCONNECT -> "交还无线红石打字机";
         };
     }

@@ -82,6 +82,29 @@ class PilotsTest {
     }
 
     @Test
+    void 飞艇高处快降_离地十二格内放慢_不在空中慢慢飘() {
+        // 已经在落点正上方 40 格：先快降，近地放慢接地；接地时下沉不快，整段比每秒 1 格降下来快得多。
+        Toy ship = new Toy(false);
+        ship.y = 104;
+        AirshipPilot pilot = new AirshipPilot(64);
+        AirshipPilot.Course course = new AirshipPilot.Course(new Vec3(0, 64, 0), 104);
+        double fastest = 0;
+        double touchdownSpeed = 0;
+        int ticks = 0;
+        for (; ticks < 6000 && pilot.phase() != AirshipPilot.Phase.LANDED; ticks++) {
+            PilotCommand command = pilot.tick(ship.sample(), course);
+            if (pilot.phase() == AirshipPilot.Phase.DESCENT) fastest = Math.max(fastest, -ship.vy);
+            double before = ship.vy;
+            ship.step(command, 40);
+            if (ship.y <= 64.001 && touchdownSpeed == 0) touchdownSpeed = -before;
+        }
+        assertEquals(AirshipPilot.Phase.LANDED, pilot.phase(), pilot.transitions().toString());
+        assertTrue(fastest > 2.8, "高处快降：最快每秒 " + fastest + " 格");
+        assertTrue(touchdownSpeed < 1.6, "近地放慢：接地时每秒 " + touchdownSpeed + " 格");
+        assertTrue(ticks < 20 * 30, "四十格不到三十秒降完：" + ticks + " 刻");
+    }
+
+    @Test
     void 开着升力半分钟没离地就不再等() {
         Toy stuck = new Toy(false);
         AirshipPilot pilot = new AirshipPilot(64);

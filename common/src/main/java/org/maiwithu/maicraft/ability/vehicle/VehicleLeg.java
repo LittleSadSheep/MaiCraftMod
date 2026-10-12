@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 开载具的一段行程：走到驾驶位旁（够得着就跳过）→ 交给驾驶办法坐下、接管、开到目的地附近、停稳、交还。
  * 开到了算这一段做完；没开到（时间用完就地降落、半路停下）以"卡住"结束，行程从停下的地方接着规划；
  * 上不去、飞不起来、中途断开照驾驶办法的问题结束。驾驶办法在走到驾驶位以后才建——驾驶位按那时离人最近的算。
+ * 被叫先到安全的地方再停：开着的交给驾驶办法就近降落、刹停，停稳了这一段以"按要求停下"结束；还没开起来的当场结束。
  */
 final class VehicleLeg implements TravelLeg {
 
@@ -26,6 +27,8 @@ final class VehicleLeg implements TravelLeg {
     private Step step = Step.BOARD;
     private Action current;
     private VehicleDriver.Run run;
+    /** 被叫先到安全的地方再停；被打断（暂停）时清掉，回来照原样开。 */
+    private boolean stopping;
 
     VehicleLeg(List<VehicleDriver> drivers, VehicleDriver.DriveRequest request) {
         this.drivers = List.copyOf(drivers);
@@ -33,6 +36,10 @@ final class VehicleLeg implements TravelLeg {
     }
 
     @Override public ActionStatus tick(TickContext context) {
+        if (stopping) {
+            ActionStatus stopped = stopHere();
+            if (stopped != null) return stopped;
+        }
         if (current == null) {
             ActionStatus started = startStep();
             if (started != null) return started;
@@ -82,10 +89,30 @@ final class VehicleLeg implements TravelLeg {
     }
 
     @Override public void requestSafeStop() {
-        // 开着的载具还不会先就近降落再停；到这里照常开完这一段。
+        // 开着的：飞艇就近找落点快降、车船就地刹住，停稳了再结束这一段；还没开起来的下一刻就结束。
+        if (stopping) return;
+        stopping = true;
+        if (current != null && current == run) run.stopSafely();
+    }
+
+    // 按要求先停：驾驶办法还在往安全处停就接着推进；停稳了（或还没开起来）就收掉，这一段以停在半路结束，行程从这里接着规划。
+    private ActionStatus stopHere() {
+        if (step == Step.DRIVE && current != null && current == run && !run.stoppedSafely()) return null;
+        if (step == Step.DONE) return null;
+        if (current != null) {
+            current.close();
+            current = null;
+        }
+        step = Step.DONE;
+        VehicleDriver.Report report = run == null ? null : run.report();
+        String where = report == null || report.drove() == null ? "还没开起来"
+                : "就近停下，离目的地还有 " + report.drove().distanceLeft() + " 格";
+        return ActionStatus.failed(Problem.of(Problem.Kind.STUCK, "按要求先停下：" + where));
     }
 
     @Override public void pause() {
+        // 暂停就是不用收尾了：回来照原样开（驾驶办法从停下的地方重新定一趟）。
+        stopping = false;
         if (current != null) current.pause();
     }
 

@@ -155,6 +155,8 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
             arrivedAt = spot;
             return Next.done(TaskResult.done("出行：" + journey.via() + " 送到了，实测位置 " + feet.toShortString()));
         }
+        // 被叫先到安全的地方再停（暂停、取消、不急的需求）：坐的那一段已经停下，这里就站着等，不再开下一段。
+        if (stopping()) return Next.stay();
         BlockPos aim = aim(feet);
         String via = journey.via();
         request = new TravelRequest(feet, aim, spot.dimension() == null ? "" : spot.dimension(),
@@ -472,6 +474,16 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
 
         @Override public void pause() {
             leg.pause();
+        }
+
+        // 先到安全的地方再停：飞着的落地、电梯里的等停靠、车上的等停车；这一段停下了就结束，结束就是停稳了。
+        @Override public boolean stopSafely() {
+            leg.requestSafeStop();
+            return true;
+        }
+
+        @Override public boolean stoppedSafely() {
+            return false;
         }
 
         // 整趟提前结束：这段按它自己的收尾松键、交出身体，确认的变化照样记进这趟。

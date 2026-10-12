@@ -108,6 +108,23 @@ class CompatAction implements Action {
         }
     }
 
+    // 先到安全的地方再停照转给模组的动作；对不上时按现在就能停，下一刻推进时按不支持收场。
+    @Override public boolean stopSafely() {
+        try {
+            return action.stopSafely();
+        } catch (ModApiMismatch ignored) {
+            return false;
+        }
+    }
+
+    @Override public boolean stoppedSafely() {
+        try {
+            return action.stoppedSafely();
+        } catch (ModApiMismatch ignored) {
+            return true;
+        }
+    }
+
     @Override public Interruptibility interruptibility() {
         return action.interruptibility();
     }
