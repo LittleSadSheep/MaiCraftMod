@@ -62,10 +62,11 @@ final class BaritoneWalkRun implements WalkRun {
     private static final int STALL_LIMIT_TICKS = 200;
 
     private final BaritoneInternals owner;
-    private final GoalCompiler.Compiled target;
+    // 目标、引擎目标与只读复算跟着"走着换目标点"一起换：跟人走时人在动，到没到要按他此刻的位置判。
+    private GoalCompiler.Compiled target;
     private final TerrainPermit permit;
-    private final NavGoal goal;
-    private final MaiCraftGoalAdapter engineGoal;
+    private NavGoal goal;
+    private MaiCraftGoalAdapter engineGoal;
     // 逐刻判断必须拿到真实目标才能建：字段初始化会抢在构造赋值之前跑，拿到空目标，
     // 所以上路运行挪进构造函数、在目标赋值之后再建。
     private final WalkRunProgress progress;
@@ -86,7 +87,8 @@ final class BaritoneWalkRun implements WalkRun {
     /** 会摔伤的一跳靠什么接住：出发点备料、空中放下、落地收回；意外掉下去就地接手。 */
     private final WalkLanding landing = new WalkLanding();
     /** 不许挖时走不通的只读复算："假如允许挖垫有没有路、要动哪些格"，只进说明不执行。 */
-    private final TerrainProbe probe;
+    private TerrainProbe probe;
+    private boolean sprintAllowed = true; // 这一趟能不能疾跑：跟人快追上时关掉，免得冲过头撞上去
     /** 卡坑自动脱困：没路又困在坑里时按"搭 → 挖"临时升许可，出坑降回。 */
     private final TrapEscape escape;
     /** 人按 F8 收回角色时路线被撤了：交回后第一刻重新算路、进展计时重新起算。 */
@@ -257,6 +259,26 @@ final class BaritoneWalkRun implements WalkRun {
     public WalkReport report() {
         return progress.report();
     }
+
+    // 走着换目标点：结算了、被顶掉的不换；排队的只换目标；正在走的交给引擎的追踪入口，旧路线还在往新目标靠近就接着走。
+    // 人按 F8 收回、正在停下时不碰引擎，交回后重新算路或停稳结算都用新目标。
+    @Override
+    public boolean retarget(GoalCompiler.Compiled next) {
+        if (progress.done() || abandoned) return false;
+        target = next;
+        goal = next.goal();
+        engineGoal = new MaiCraftGoalAdapter(goal);
+        progress.retarget(goal);
+        probe.cancel();
+        probe = new TerrainProbe(engineGoal, permit);
+        if (activated && owner.owns(this) && !routeDropped && !progress.stopRequested()) {
+            NavigationProtection.install(sacredCells(), noEntryCells(), Integer.MIN_VALUE);
+            owner.engine().getCustomGoalProcess().updateGoalAndPath(engineGoal);
+        }
+        return true;
+    }
+
+    @Override public void allowSprint(boolean allowed) { sprintAllowed = allowed; }
 
     @Override
     public boolean stop() {
@@ -494,10 +516,7 @@ final class BaritoneWalkRun implements WalkRun {
                 - (input.isInputForcedDown(Input.MOVE_RIGHT) ? 1F : 0F);
         boolean jump = input.isInputForcedDown(Input.JUMP);
         boolean sneak = input.isInputForcedDown(Input.SNEAK);
-        // 疾跑：执行段算出"下一刻该疾跑"后会把疾跑键松开、自己记着（原版 Baritone 靠一个改疾跑键的 mixin 读它，
-        // 我们没装那个 mixin）。只读按键就永远读不到疾跑，实测 220 格直道一路慢走 4.3 格/秒、一次没跑跳。
-        boolean sprint = input.isInputForcedDown(Input.SPRINT)
-                || pathing != null && pathing.getCurrent() != null && pathing.getCurrent().isSprinting();
+        boolean sprint = WalkSprint.sprint(input, pathing, sprintAllowed);
         if (forward != 0F || strafe != 0F || jump || sneak) {
             playerInput.applyNavigationMovement(
                     new PlayerInput.Movement(forward, strafe, jump, sneak, sprint), context.clientTick());

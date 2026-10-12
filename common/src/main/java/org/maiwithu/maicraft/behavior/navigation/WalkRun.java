@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.navigation;
 
+import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.kernel.task.Action;
 
 /**
@@ -22,4 +23,20 @@ public interface WalkRun extends Action {
      * 要等安全边界（落地、走完正在跨的一步），停稳后走到情况变为已停下。
      */
     boolean stop();
+
+    /**
+     * 走着换目标点：跟着会动的人或东西走时用。路线照走，不停下重来——原来的路线还在往新目标靠近就接着走、
+     * 后面一段由前瞻续上；方向已经不对了才在能停的地方撤掉旧路线、从原地重算。到没到从这一刻起按新目标判。
+     * 这一趟已经结束、或这种走法换不了目标时返回 false，调用方另开一趟。
+     */
+    default boolean retarget(GoalCompiler.Compiled target) {
+        return false;
+    }
+
+    /**
+     * 这一趟能不能疾跑。快追上人时关掉：疾跑的惯性会冲过头撞到人身上。跳远这种不疾跑跳不过去的一步照样疾跑。
+     * 默认跑得动就跑。
+     */
+    default void allowSprint(boolean allowed) {
+    }
 }

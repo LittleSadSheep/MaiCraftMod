@@ -41,6 +41,18 @@ class WalkRunProgressTest {
     }
 
     @Test
+    void afterRetargetArrivalIsJudgedByTheNewTarget() {
+        // 跟人走时换了目标点：走到旧目标点不算到，走到新目标点才算。
+        var progress = progressExact();
+        progress.observe(seen(ELSEWHERE, true, false, true, false));
+        progress.retarget(GoalCompiler.standOn(ELSEWHERE.east(3)).goal());
+        var atOld = progress.observe(seen(TARGET, true, false, true, false));
+        assertEquals(WalkReport.State.ON_THE_WAY, atOld.report().state());
+        var atNew = progress.observe(seen(ELSEWHERE.east(3), true, false, true, false));
+        assertEquals(WalkReport.State.ARRIVED, atNew.report().state());
+    }
+
+    @Test
     void standingOnTheTargetCellOnGroundArrives() {
         var progress = progressExact();
         progress.observe(seen(ELSEWHERE, true, false, true, false));

@@ -37,7 +37,7 @@ final class WalkRunProgress {
 
     record Conclusion(WalkReport report, Action action, boolean done, boolean progressed) {}
 
-    private final NavGoal goal;
+    private NavGoal goal;
     private WalkReport report = WalkReport.planning();
     private boolean crossedWater;
     private boolean stopRequested;
@@ -47,6 +47,11 @@ final class WalkRunProgress {
     WalkRunProgress(NavGoal goal) {
         // 没有目标就无从判断到没到：这是调用方的程序错误，建的时候就拒绝，不在走的路上兜底。
         this.goal = Objects.requireNonNull(goal, "goal");
+    }
+
+    /** 走着换了目标点：到没到从这一刻起按新目标判；已经有结论的不改。 */
+    void retarget(NavGoal next) {
+        this.goal = Objects.requireNonNull(next, "goal");
     }
 
     WalkReport report() {
