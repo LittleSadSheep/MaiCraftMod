@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.survival;
 import java.util.OptionalInt;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.levelgen.Heightmap;
 
 import org.maiwithu.maicraft.game.world.ReadsLightLevels;
 import org.maiwithu.maicraft.game.player.BackpackStack;
@@ -12,7 +13,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 太暗处境的生产读取：脚部与眼部实测方块光的最小值、天空光的较大值（头顶见不见得到天；
- * 亮度读数从只读亮度接缝来，测试换替身），包里有没有火把按背包视图数。角色不在世界里时如实交空，这一刻不评估。
+ * 亮度读数从只读亮度接缝来，测试换替身），头顶是不是只有树叶（不算树叶的地表高度不高过脚），
+ * 包里有没有火把按背包视图数。角色不在世界里时如实交空，这一刻不评估。
  */
 public final class LiveDarkView implements DarknessNeed.ReadsDarkness {
 
@@ -45,7 +47,11 @@ public final class LiveDarkView implements DarknessNeed.ReadsDarkness {
         OptionalInt sky = skyFeet.isEmpty() ? skyEye
                 : skyEye.isEmpty() ? skyFeet
                 : OptionalInt.of(Math.max(skyFeet.getAsInt(), skyEye.getAsInt()));
-        return new DarknessNeed.DarknessFacts(OptionalInt.of(darkest), carriedTorches(player.backpack()) > 0, feet, sky);
+        // 林下：不算树叶的地表落在脚下或脚这一层，头顶就只有树叶（或什么都没有），不是洞里也不是屋里。
+        boolean onlyLeaves = player.localPlayer().level().getHeight(
+                Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, feet.getX(), feet.getZ()) <= feet.getY();
+        return new DarknessNeed.DarknessFacts(OptionalInt.of(darkest), carriedTorches(player.backpack()) > 0, feet, sky,
+                onlyLeaves);
     }
 
     /** 背包里的火把数：主格为准，副手不占背包格、单独清点时另算。 */

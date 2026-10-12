@@ -36,12 +36,17 @@ class DarknessNeedTest {
 
     private static DarknessNeed.ReadsDarkness dark(int light, boolean torches, BlockPos feet) {
         // 默认在地下：头顶遮着，天空光 0。
-        return context -> new DarknessNeed.DarknessFacts(OptionalInt.of(light), torches, feet, OptionalInt.of(0));
+        return context -> new DarknessNeed.DarknessFacts(OptionalInt.of(light), torches, feet, OptionalInt.of(0), false);
     }
 
     /** 露天的暗处：方块光 0、天空光 15（白天黑夜都是这个原始值）。 */
     private static DarknessNeed.ReadsDarkness openSky() {
-        return context -> new DarknessNeed.DarknessFacts(OptionalInt.of(0), true, FEET, OptionalInt.of(15));
+        return context -> new DarknessNeed.DarknessFacts(OptionalInt.of(0), true, FEET, OptionalInt.of(15), false);
+    }
+
+    /** 密林底下：方块光 0，几层树叶把天空光压到 5，头顶只有树叶。 */
+    private static DarknessNeed.ReadsDarkness underCanopy() {
+        return context -> new DarknessNeed.DarknessFacts(OptionalInt.of(0), true, FEET, OptionalInt.of(5), true);
     }
 
     private static final DarknessNeed.TorchMoves NO_MOVES = (context, onAttempt) -> null;
@@ -95,6 +100,14 @@ class DarknessNeedTest {
         DarknessNeed need = new DarknessNeed(openSky(), NO_MOVES, follow);
         assertNull(urgency(need, null), "露天的方块光处处是 0，按它算会每两格插一支");
         assertTrue(follow.darkOnRoute().isEmpty(), "露天不记暗格");
+    }
+
+    @Test
+    void 林下不算太暗_天空光被树叶压低也不插() {
+        FollowLighting follow = new FollowLighting();
+        DarknessNeed need = new DarknessNeed(underCanopy(), NO_MOVES, follow);
+        assertNull(urgency(need, new RouteTask()), "密林里赶路不当成地下每几格插一支");
+        assertTrue(follow.darkOnRoute().isEmpty(), "林下不记暗格");
     }
 
     @Test

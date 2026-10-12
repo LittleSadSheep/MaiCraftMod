@@ -20,7 +20,7 @@ import org.maiwithu.maicraft.kernel.task.Urgency;
  * 不专门跑路；出行、探索这类沿路走的任务，走路途中落地站稳时就插（SOON），不等走完整趟。
  *
  * <p>露天不算太暗：露天的方块光处处是 0，白天也一样，按方块光算会每两格插一支；头顶见得到天
- * （天空光 8 以上）就不插，白天黑夜都不插。随行补光默认开着，所以只认地下与屋里这类真暗的地方。
+ * （天空光 8 以上）或头顶只有树叶（林下）就不插，白天黑夜都不插。随行补光默认开着，所以只认地下与屋里这类真暗的地方。
  *
  * <p>节制：距上次出手不足 2 格不再出手，原生被拒也算出手过，不原地撒灯。
  * 缺火把就不插、不采购、不报错，主任务照常；临时任务没做成不牵连主任务。
@@ -36,9 +36,11 @@ public final class DarknessNeed implements SurvivalNeed {
 
     /**
      * 暗处的处境：脚与眼实测方块光的最小值（读不到现场为空）、包里有没有火把、脚站在哪，
-     * 以及脚与眼天空光的较大值（头顶见不见得到天；读不到为空，按头顶被遮住算，只看方块光）。
+     * 脚与眼天空光的较大值（头顶见不见得到天；读不到为空，按头顶被遮住算，只看方块光），
+     * 以及头顶除了树叶再没有挡着的（林下、露天）。
      */
-    public record DarknessFacts(OptionalInt darkestLight, boolean torchCarried, BlockPos feet, OptionalInt skyLight) {}
+    public record DarknessFacts(OptionalInt darkestLight, boolean torchCarried, BlockPos feet, OptionalInt skyLight,
+            boolean onlyLeavesOverhead) {}
 
     /** 读暗处处境的接缝：亮度按只读亮度读取实测，生产实现转述游戏接口层，测试给固定值。 */
     @FunctionalInterface
@@ -92,6 +94,11 @@ public final class DarknessNeed implements SurvivalNeed {
         }
         if (facts.skyLight().isPresent() && facts.skyLight().getAsInt() >= OPEN_SKY_LIGHT) {
             // 头顶见得到天：露天的方块光本来就是 0，不算太暗，不插也不记暗格。
+            return null;
+        }
+        if (facts.onlyLeavesOverhead()) {
+            // 林下：密林里几层树叶把天空光压到 8 以下，白天赶路也当成地下每几格插一支，人不会这样；
+            // 头顶只有树叶就跟露天一样不插、不记暗格。
             return null;
         }
         // 走过并实测仍暗的格记下来：light 能力查状态时报"最近的暗格"，卸载的格不猜。
