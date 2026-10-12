@@ -16,9 +16,15 @@ import org.maiwithu.maicraft.kernel.task.TaskInput;
  * @param count       一共存几件；null 表示全存
  * @param radius      自己挑容器时的范围（格）
  * @param permissions 这次任务的许可
+ * @param network     存进身上无线终端连着的 ME 网络，不找容器
  */
 record DepositInput(Target target, List<String> itemIds, Integer count, long radius,
-        Permissions permissions) implements TaskInput {
+        Permissions permissions, boolean network) implements TaskInput {
+
+    /** 存进容器。 */
+    DepositInput(Target target, List<String> itemIds, Integer count, long radius, Permissions permissions) {
+        this(target, itemIds, count, radius, permissions, false);
+    }
 
     DepositInput {
         Objects.requireNonNull(itemIds, "itemIds");
@@ -28,7 +34,7 @@ record DepositInput(Target target, List<String> itemIds, Integer count, long rad
 
     @Override public String describe() {
         String what = itemIds.isEmpty() ? "随身要留的东西以外全部" : String.join("、", itemIds);
-        String where = target == null ? "附近挑容器" : "指定的目标";
+        String where = network ? "身上无线终端连着的网络" : target == null ? "附近挑容器" : "指定的目标";
         String times = count == null ? "" : "，共 " + count + " 件";
         return "存进去：" + what + "，" + where + times;
     }

@@ -26,6 +26,7 @@
     "format": "导出文件的格式：json / nbt",
     "inputs": "试按载具时逐条按的输入：[{control, ticks}]，control 是控制件和键，ticks 按住几刻",
     "interests": "探索途中留意的东西：地形要素（lava_pool）、结构 ID、方块 ID 或 # 标签、实体类型 ID",
+    "into": "存进哪里：container 箱子、木桶这类容器（默认），network 身上无线终端连着的 ME 网络",
     "inventory_slot": "背包里的第几格（0~35，副手 40）：同一种物品有几件时指定哪一件",
     "item": "物品 ID，或 # 开头的物品标签",
     "items": "多个物品 ID 或物品标签",

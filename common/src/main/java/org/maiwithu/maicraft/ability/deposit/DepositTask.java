@@ -4,8 +4,10 @@ package org.maiwithu.maicraft.ability.deposit;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Set;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.BiPredicate;
@@ -15,7 +17,9 @@ import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.behavior.inventory.ContainerChooser;
 import org.maiwithu.maicraft.behavior.inventory.KnownContainer;
 import org.maiwithu.maicraft.behavior.inventory.StoresInContainer;
+import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 import org.maiwithu.maicraft.game.player.BackpackView;
+import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -29,6 +33,7 @@ import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Next;
 import org.maiwithu.maicraft.kernel.task.PhasedTask;
 import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 
 /**
  * 存东西的任务：挑好容器、清开压住盖子的方块，再交给玩家行为层的存放动作（走过去点开、一笔笔搬进去、
@@ -39,8 +44,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  */
 final class DepositTask extends PhasedTask<DepositTask.Phase> {
 
-    /** 挑容器 → 清开盖子 → 存进去（走过去点开、搬、关上）→ 换下一只。 */
-    enum Phase { CHOOSE, DIG, STORE, NEXT }
+    /** 挑容器 → 清开盖子 → 存进去（走过去点开、搬、关上）→ 换下一只；存进网络时一样样存进去。 */
+    enum Phase { CHOOSE, DIG, STORE, NEXT, NETWORK }
 
     private final DepositInput input;
     private final DepositServices services;
@@ -54,6 +59,10 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
     /** 每只容器存进了什么：容器的叫法 → 物品 → 件数。 */
     private final Map<String, Map<String, Integer>> storedIn = new LinkedHashMap<>();
     private final List<Problem> openFailures = new ArrayList<>();
+    /** 存进网络时已经交给网络存储试过的东西：存不进的不再试。 */
+    private final Set<String> networkTried = new HashSet<>();
+    /** 存进网络没成的原因；没有为 null。 */
+    private Problem networkFailure;
     private boolean planned;
     private Action prepared;
     private ContainerChooser.Entry current;
@@ -78,6 +87,7 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
             case DIG -> dig(context);
             case STORE -> store(context);
             case NEXT -> nextContainer();
+            case NETWORK -> network(context);
         };
     }
 
@@ -90,6 +100,7 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
             return Next.done(TaskResult.done(input.itemIds().isEmpty() ? "身上没有要存的东西"
                     : "身上没有要存的 " + String.join("、", input.itemIds())));
         }
+        if (input.network()) return nextToNetwork();
         Optional<ContainerChooser.Pick> pick = pick();
         if (pick.isEmpty()) {
             recordProgress("正在扫附近 " + input.radius() + " 格内的容器");
@@ -170,6 +181,61 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
                 && (changes == Permissions.BlockChanges.NATURAL || changes == Permissions.BlockChanges.ANY);
     }
 
+    // 存进网络：一样样交给网络存储（拿出终端打开、快速移动进去、关上），存进的按背包少了几件记账；
+    // 一样存不进（没连上、放不下）就不再试别的，带着还剩多少收尾。
+    private Next<Phase> nextToNetwork() {
+        Optional<NetworkStorage> storage = services.network().get();
+        if (storage.isEmpty() || !storage.get().available()) {
+            return Next.fail(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "身上没有绑了访问点的无线终端，存不进网络",
+                    "带上绑好访问点的无线终端，或改存进箱子（into=container）"));
+        }
+        for (Map.Entry<String, Integer> entry : wanted.entrySet()) {
+            int left = entry.getValue() - confirmed.getOrDefault(entry.getKey(), 0);
+            if (left <= 0 || networkTried.contains(entry.getKey())) continue;
+            networkTried.add(entry.getKey());
+            Optional<Action> store = storage.get().store(new BackpackStack(entry.getKey(), left, 64, false, false,
+                    false, false), "存东西", networkLedger());
+            if (store.isEmpty()) continue;
+            return goWith(Phase.NETWORK, store.get(), "把 " + entry.getKey() + " 存进网络");
+        }
+        return finish();
+    }
+
+    private Next<Phase> network(TickContext context) {
+        return switch (runAction(context)) {
+            case ActionStatus.Running running -> Next.stay();
+            case ActionStatus.Done done -> nextToNetwork();
+            case ActionStatus.Failed failed -> {
+                recordAttempt("存进网络", failed.problem().message());
+                networkFailure = failed.problem();
+                yield finish();
+            }
+        };
+    }
+
+    // 网络存储记的账：存进的一笔并进这次的确认与"存进了哪"，其余照转。
+    private TaskRecords networkLedger() {
+        TaskRecords records = records();
+        return new TaskRecords() {
+            @Override public void change(Change change) {
+                if (change.kind() == Change.Kind.ITEM_STORED) {
+                    confirmed.merge(change.what(), change.count(), Integer::sum);
+                    storedIn.computeIfAbsent("ME 网络", ignored -> new LinkedHashMap<>())
+                            .merge(change.what(), change.count(), Integer::sum);
+                }
+                records.change(change);
+            }
+
+            @Override public void unconfirmed(Change change) {
+                records.unconfirmed(change);
+            }
+
+            @Override public void attempt(String tried, String whatHappened) {
+                records.attempt(tried, whatHappened);
+            }
+        };
+    }
+
     // 换下一只：都存完了或候选用尽就收尾；盖子被压住先挖开，再走过去点开。
     private Next<Phase> nextContainer() {
         current = allStored() ? null : candidates.poll();
@@ -230,7 +296,8 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
             return Next.done(TaskResult.done("存进了 " + storedIn.size() + " 只容器，要存的都离开了背包" + drainedNote));
         }
         deposited += drained;
-        Problem why = deposited == 0 && !openFailures.isEmpty() ? openFailures.getFirst()
+        Problem why = networkFailure != null ? networkFailure
+                : deposited == 0 && !openFailures.isEmpty() ? openFailures.getFirst()
                 : Problem.of(Problem.Kind.NOT_FOUND, "附近的容器都满了，或都开不了", "走远一点再存，或点名一只有空位的容器");
         if (deposited == 0) {
             return Next.fail(why);
@@ -321,6 +388,7 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
             case DIG -> "清开盖子上的方块";
             case STORE -> "走过去点开容器、搬进去、关上";
             case NEXT -> "换下一只容器";
+            case NETWORK -> "拿出无线终端存进网络";
         };
     }
 }

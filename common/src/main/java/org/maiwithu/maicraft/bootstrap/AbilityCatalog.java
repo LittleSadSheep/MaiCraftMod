@@ -328,7 +328,7 @@ public final class AbilityCatalog {
                 containerSource, shared.drops()));
 
         // 存东西：找容器把现场扫描与世界记忆并起来，打开容器、逐笔搬运与挖盖子都接上了。
-        registry.register(depositModule(deps, shared.storing(), shared.collects()));
+        registry.register(depositModule(deps, shared.storing(), shared.collects(), shared.networks()));
 
         // 附魔：缺料走受限补齐（身上与记得的容器，要下矿才够就 NEED_ITEM），界面里装料与报价
         // 走容器界面的既有规矩；观察编号查场景、记过的地点查世界记忆、台子分刻扫描找。
@@ -373,7 +373,8 @@ public final class AbilityCatalog {
     private record Shared(LiveApproaches bringClose, ClientMovesToMainhand toMainhand, LiveBlockDigging digging,
             ClientDropPickup drops, ClientCollectsBlocks collects, DeferredInnerNeeds innerNeeds,
             ClientGameRefusals refusals, PermissionCheck permission, PlayerServices playerServices,
-            DropsItems.Parts dropping, StoresInContainer.Parts storing, InventorySpace space) {
+            DropsItems.Parts dropping, StoresInContainer.Parts storing, InventorySpace space,
+            List<NetworkStorage> networks) {
     }
 
     /** 把共用的现场部件一次建好：世界记忆之外的每刻现场都从这里出。 */
@@ -425,7 +426,7 @@ public final class AbilityCatalog {
                 Optional.of(dropping),
                 () -> networks.stream().findFirst());
         return new Shared(bringsClose, toMainhand, digging, drops, collects, innerNeeds, refusals,
-                permission, playerServices, dropping, storing, space);
+                permission, playerServices, dropping, storing, space, networks);
     }
 
     /**
@@ -698,10 +699,11 @@ public final class AbilityCatalog {
 
     /** 存东西能力的一份：找容器把现场扫描与世界记忆并起来，归属与压住盖子的方块问这个世界的保护判断。 */
     private static DepositModule depositModule(Deps deps, StoresInContainer.Parts storing,
-            ClientCollectsBlocks collects) {
+            ClientCollectsBlocks collects, List<NetworkStorage> networks) {
+        // 存进网络（into=network）用和腾地方同一份网络存储：联动模组登记的第一个。
         return DepositModule.live(deps.context(), storing, collects,
                 deps.itemTags(), deps.memory(), deps.backpack(), deps.blockScans(), deps.protection(), deps::scene,
-                deps.facilities());
+                deps.facilities(), () -> networks.stream().findFirst());
     }
 
     /**

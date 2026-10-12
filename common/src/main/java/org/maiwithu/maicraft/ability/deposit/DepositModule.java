@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.ability.deposit;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
 
@@ -10,6 +11,7 @@ import org.maiwithu.maicraft.behavior.acquire.CollectsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.ReadsItemTags;
 import org.maiwithu.maicraft.behavior.inventory.ClientSpotsContainers;
 import org.maiwithu.maicraft.behavior.inventory.StoresInContainer;
+import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 import org.maiwithu.maicraft.behavior.perception.Scene;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
@@ -52,7 +54,10 @@ public final class DepositModule implements AbilityModule {
                     ParamSpec.of("count", ParamType.INTEGER).range(1, 576)
                             .doc("一共存几件；不给就全存").build(),
                     ParamSpec.of("radius", ParamType.INTEGER).range(1, 128).defaultValue(32)
-                            .doc("自己挑容器时的范围（格）").build()),
+                            .doc("自己挑容器时的范围（格）").build(),
+                    ParamSpec.of("into", ParamType.CHOICE).choices("container", "network").defaultValue("container")
+                            .doc("存进哪里：container 箱子、木桶这类容器；network 身上无线终端连着的 ME 网络"
+                                    + "（拿出终端打开、快速移动进去，不用走路，target 不用给）").build()),
             // 前面某一步确认过的位置（previous）还没有地方记，解析不了：不列进接受的目标，免得说接受却用不了。
             Set.of(TargetKind.HERE, TargetKind.SEEN, TargetKind.LANDMARK, TargetKind.POSITION),
             ExecutionMode.CONTROLS_PLAYER,
@@ -73,13 +78,13 @@ public final class DepositModule implements AbilityModule {
     public static DepositModule live(Supplier<PlayerContext> contexts, StoresInContainer.Parts storing,
             CollectsBlocks digs, ReadsItemTags tags, WorldMemory memory,
             BackpackView backpack, BlockScanService scans, Protection protection, Supplier<Scene> scene,
-            FacilityKinds facilities) {
+            FacilityKinds facilities, Supplier<Optional<NetworkStorage>> network) {
         return new DepositModule(new DepositServices(
                 new ClientSpotsContainers(scans, contexts, memory, protection, facilities),
                 storing,
                 new LiveDepositPlaces(scene, memory, contexts),
                 new NativeLidDigging(digs),
-                tags), backpack);
+                tags, network), backpack);
     }
 
     @Override public AbilitySpec spec() {
@@ -94,8 +99,9 @@ public final class DepositModule implements AbilityModule {
                 : List.of();
         Integer count = params.has("count") ? (int) params.integer("count") : null;
         long radius = params.has("radius") ? params.integer("radius") : 32;
+        boolean network = params.has("into") && params.text("into").equals("network");
         return new StepDecision.Run(new DepositInput(step.goal().target(), items, count, radius,
-                step.goal().permissions()));
+                step.goal().permissions(), network));
     }
 
     @Override public void registerTasks(TaskFactories factories) {

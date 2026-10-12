@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.inventory.ContainerChooser;
 import org.maiwithu.maicraft.behavior.inventory.SpotsContainers;
 import org.maiwithu.maicraft.behavior.inventory.StoresInContainer;
+import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 import org.maiwithu.maicraft.behavior.menu.MenuChannel;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuOpening;
@@ -40,6 +41,7 @@ import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -141,6 +143,47 @@ class DepositTaskTest {
         assertTrue(result.remaining().isEmpty(), result.remaining().toString());
         assertTrue(result.unconfirmed().stream().anyMatch(change -> change.note().contains("溜槽")),
                 result.unconfirmed().toString());
+    }
+
+    @Test
+    void 存进网络_拿出终端一样样存进去_不找箱子() {
+        Rig rig = new Rig();
+        rig.carry(DIRT, 32).carry(SAND, 16);
+        rig.network = new NetworkStorage() {
+            @Override public boolean available() {
+                return true;
+            }
+
+            @Override public Optional<Action> store(BackpackStack stack, String purpose, TaskRecords records) {
+                return Optional.of(new Action() {
+                    @Override public ActionStatus tick(TickContext context) {
+                        int moved = Math.min(stack.count(), rig.carried(stack.itemId()));
+                        rig.take(stack.itemId(), moved);
+                        records.change(new Change(Change.Kind.ITEM_STORED, stack.itemId(), moved, purpose + "：存进了网络"));
+                        return ActionStatus.done();
+                    }
+
+                    @Override public String describe() {
+                        return "替身存进网络";
+                    }
+                });
+            }
+        };
+        TaskResult result = rig.run(new DepositInput(null, List.of(DIRT, SAND), null, 32, Permissions.DEFAULT, true));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(0, rig.carried(DIRT));
+        assertEquals(0, rig.carried(SAND));
+        assertEquals(0, rig.opens, "存进网络不去开箱子");
+        assertEquals(48, stored(result));
+    }
+
+    @Test
+    void 存进网络_身上没有终端如实说() {
+        Rig rig = new Rig();
+        rig.carry(DIRT, 32);
+        TaskResult result = rig.run(new DepositInput(null, List.of(DIRT), null, 32, Permissions.DEFAULT, true));
+        assertEquals(TaskResult.Status.FAILED, result.status(), result.summary());
+        assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, result.problem().kind());
     }
 
     @Test
@@ -279,6 +322,8 @@ class DepositTaskTest {
         final List<ItemStack> player = new ArrayList<>();
         final Map<WorldPosition, FakeChest> chests = new HashMap<>();
         int opens;
+        /** 网络存储替身；没有为 null。 */
+        NetworkStorage network;
         private long tick;
 
         Rig() {
@@ -288,6 +333,18 @@ class DepositTaskTest {
         Rig carry(String id, int count) {
             player.set(player.indexOf(ItemStack.EMPTY), stack(id, count));
             return this;
+        }
+
+        // 从背包表里拿走几件（网络存储替身用）。
+        void take(String id, int amount) {
+            for (int i = 0; i < player.size() && amount > 0; i++) {
+                ItemStack item = player.get(i);
+                if (item.isEmpty() || !BuiltInRegistries.ITEM.getKey(item.getItem()).toString().equals(id)) continue;
+                int taken = Math.min(amount, item.getCount());
+                item.shrink(taken);
+                amount -= taken;
+                if (item.isEmpty()) player.set(i, ItemStack.EMPTY);
+            }
         }
 
         int carried(String id) {
@@ -328,7 +385,8 @@ class DepositTaskTest {
             DepositServices services = new DepositServices(spots, new StoresInContainer.Parts((at, permissions) -> {
                 opens++;
                 return new FakeOpening(chests.get(WorldPosition.here(at.getX(), at.getY(), at.getZ())));
-            }, null), places, null, itemId -> itemId.equals("minecraft:oak_log") ? Set.of("minecraft:logs") : Set.of());
+            }, null), places, null, itemId -> itemId.equals("minecraft:oak_log") ? Set.of("minecraft:logs") : Set.of(),
+                    () -> Optional.ofNullable(network));
             DepositTask task = new DepositTask(input, services, backpack());
             task.start(tick());
             return task;

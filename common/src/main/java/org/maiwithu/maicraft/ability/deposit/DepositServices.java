@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.deposit;
 
+import java.util.Optional;
+import java.util.function.Supplier;
+
+import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
+
 import org.maiwithu.maicraft.behavior.inventory.SpotsContainers;
 import org.maiwithu.maicraft.behavior.inventory.StoresInContainer;
 import org.maiwithu.maicraft.behavior.acquire.ReadsItemTags;
@@ -16,17 +21,26 @@ import org.maiwithu.maicraft.behavior.acquire.ReadsItemTags;
  * @param places  目标对象落在哪
  * @param digs    挖开压住盖子的方块
  * @param tags    物品挂着哪些标签（玩家行为层的读法）；没接上时为 null，按什么标签都不挂算
+ * @param network 网络存储（身上的无线终端）；没有联动时给空
  */
 record DepositServices(
         SpotsContainers spots,
         StoresInContainer.Parts storing,
         DepositSeams.FindsPlaces places,
         DepositSeams.DigsLid digs,
-        ReadsItemTags tags) {
+        ReadsItemTags tags,
+        Supplier<Optional<NetworkStorage>> network) {
+
+    /** 没有网络存储。 */
+    DepositServices(SpotsContainers spots, StoresInContainer.Parts storing, DepositSeams.FindsPlaces places,
+            DepositSeams.DigsLid digs, ReadsItemTags tags) {
+        this(spots, storing, places, digs, tags, Optional::empty);
+    }
 
     DepositServices {
         if (spots == null) throw new IllegalArgumentException("找容器的接缝不能为空");
         if (storing == null) throw new IllegalArgumentException("存放的现场部件不能为空");
         if (places == null) throw new IllegalArgumentException("找位置的接缝不能为空");
+        if (network == null) network = Optional::empty;
     }
 }

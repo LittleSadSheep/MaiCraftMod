@@ -46,7 +46,7 @@
       {
         "ability": "maicraft:deposit",
         "summary": "把背包里的东西存进容器",
-        "parameters": "items?: array, count?: integer, radius: integer = 32",
+        "parameters": "items?: array, count?: integer, radius: integer = 32, into: string = container",
         "targets": [
           "here",
           "landmark",
@@ -569,6 +569,17 @@
           "default": 32,
           "min": 1,
           "max": 128
+        },
+        {
+          "name": "into",
+          "type": "string",
+          "required": false,
+          "doc": "存进哪里：container 箱子、木桶这类容器；network 身上无线终端连着的 ME 网络（拿出终端打开、快速移动进去，不用走路，target 不用给）",
+          "default": "container",
+          "choices": [
+            "container",
+            "network"
+          ]
         }
       ],
       "targets": [
