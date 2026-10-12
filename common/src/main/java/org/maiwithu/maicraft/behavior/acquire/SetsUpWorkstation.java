@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.acquire;
 
 import java.util.Optional;
 
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.task.Action;
 
 /**
@@ -19,4 +20,12 @@ public interface SetsUpWorkstation {
      * @param blockType 要放的设施方块类型，例如 minecraft:crafting_table、minecraft:furnace
      */
     Optional<Action> placeNearby(String blockType);
+
+    /**
+     * 记得的那台设施眼下是不是已经没了：那一片加载着、那一格却已经不是这种方块（被挖走、被炸掉）。
+     * 没加载、读不到的不算没了，到跟前再看。
+     */
+    default boolean gone(WorldPosition at, String blockType) {
+        return false;
+    }
 }

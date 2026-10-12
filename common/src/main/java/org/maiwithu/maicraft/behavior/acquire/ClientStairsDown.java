@@ -43,7 +43,9 @@ public final class ClientStairsDown implements DigsStairsDown {
         /** 水、岩浆，含水的方块也算。 */
         FLUID,
         /** 挖不动的（基岩这类），或者还没加载、看不到的。 */
-        UNBREAKABLE
+        UNBREAKABLE,
+        /** 工作台、箱子、熔炉、床这类设施：挖得动也不为挖楼梯拆，换个方向挖。 */
+        FACILITY
     }
 
     /** 挖楼梯要读的现场与走下一级的动作；生产实现读当刻的世界，测试用替身。 */
@@ -316,10 +318,13 @@ public final class ClientStairsDown implements DigsStairsDown {
 
         private Problem blocked(TickContext context, BlockPos cell, Ground ground) {
             String what = site.blockType(context, cell);
-            return ground == Ground.FLUID
-                    ? Problem.of(Problem.Kind.DANGER, "往下挖楼梯：前面 " + at(cell) + " 是 " + what + "，停在这里")
-                    : Problem.of(Problem.Kind.NOT_FOUND, "往下挖楼梯：前面 " + at(cell) + " 的 " + what
-                            + " 挖不动，停在这里");
+            return switch (ground) {
+                case FLUID -> Problem.of(Problem.Kind.DANGER, "往下挖楼梯：前面 " + at(cell) + " 是 " + what + "，停在这里");
+                case FACILITY -> Problem.of(Problem.Kind.NOT_FOUND, "往下挖楼梯：前面 " + at(cell) + " 是设施 " + what
+                        + "，不为挖楼梯拆它，停在这里");
+                default -> Problem.of(Problem.Kind.NOT_FOUND, "往下挖楼梯：前面 " + at(cell) + " 的 " + what
+                        + " 挖不动，停在这里");
+            };
         }
 
         private WorldPosition position(TickContext context, BlockPos cell) {

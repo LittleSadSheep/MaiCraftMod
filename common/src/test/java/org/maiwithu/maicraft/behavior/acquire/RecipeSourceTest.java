@@ -464,6 +464,12 @@ class RecipeSourceTest {
         private final WorldMemory memory;
         private final boolean remember;
         int placed;
+        /** 这一格记着的台子在世界里已经没了。 */
+        WorldPosition goneAt;
+
+        @Override public boolean gone(WorldPosition at, String blockType) {
+            return at.equals(goneAt);
+        }
 
         PlacesWorkstation(WorldMemory memory, boolean remember) {
             this.memory = memory;
@@ -551,6 +557,31 @@ class RecipeSourceTest {
         assertInstanceOf(ActionStatus.Done.class, runToEnd(recipeSource.begin(request, offer, CONTEXT).orElseThrow()));
         assertEquals(1, placer.placed, "摆了一次台");
         assertEquals(1, runs.crafted, "摆完就在新台上做了，不能只摆台不做东西");
+    }
+
+    @Test
+    void 记得的台子已经没了_划掉记忆_放下身上那张照做() {
+        // 实机（全量测试 10-12）：挖楼梯把刚用过的工作台挖走了，记忆里还记着它，石镐走过去点空地整件失败，
+        // 身上明明揣着那张工作台。
+        WorldMemory memory = memory();
+        WorldPosition old = new WorldPosition(1, 64, 1, null);
+        memory.rememberWorkstationUsed(old, "minecraft:crafting_table", NOW);
+        MemoryBackedRuns runs = new MemoryBackedRuns(memory);
+        PlacesWorkstation placer = new PlacesWorkstation(memory, true);
+        placer.goneAt = old;
+        RecipeSource recipeSource = new RecipeSource(Set.of(WorkstationRecipe.Kind.CRAFTING),
+                wanted -> List.of(pickaxeRecipe()), memory, itemId -> 0, runs, backpack, offhand, tags,
+                new CapturingNeeds(), placer, null);
+        backpack.add("minecraft:oak_planks", 3);
+        backpack.add("minecraft:stick", 2);
+        backpack.add("minecraft:crafting_table", 1);
+        ItemRequest request = new ItemRequest(WantedItem.ofItem("minecraft:wooden_pickaxe"), 1, "开局");
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, recipeSource.quote(request, CONTEXT));
+
+        assertInstanceOf(ActionStatus.Done.class, runToEnd(recipeSource.begin(request, offer, CONTEXT).orElseThrow()));
+        assertTrue(memory.recordAt(MemoryKind.WORKSTATION, old).isEmpty(), "没了的台子从记忆里划掉");
+        assertEquals(1, placer.placed, "放下身上那张");
+        assertEquals(1, runs.crafted, "在新台上做成");
     }
 
     @Test

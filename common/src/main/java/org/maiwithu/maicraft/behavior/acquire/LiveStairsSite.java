@@ -9,6 +9,7 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
@@ -56,6 +57,11 @@ public final class LiveStairsSite implements ClientStairsDown.Site {
         if (!state.getFluidState().isEmpty()) return ClientStairsDown.Ground.FLUID;
         if (state.getCollisionShape(level, cell).isEmpty()) return ClientStairsDown.Ground.OPEN;
         if (state.getDestroySpeed(level, cell) < 0) return ClientStairsDown.Ground.UNBREAKABLE;
+        // 工作台、箱子、熔炉、床这类设施不为挖楼梯拆掉：刚做完东西脸正对着工作台，第一级楼梯会把它挖走。
+        if (state.hasBlockEntity() || state.getMenuProvider(level, cell) != null
+                || state.getBlock() instanceof BedBlock) {
+            return ClientStairsDown.Ground.FACILITY;
+        }
         return ClientStairsDown.Ground.DIGGABLE;
     }
 

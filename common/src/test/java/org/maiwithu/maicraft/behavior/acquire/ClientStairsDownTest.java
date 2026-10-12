@@ -71,6 +71,7 @@ class ClientStairsDownTest {
                 case "minecraft:air" -> ClientStairsDown.Ground.OPEN;
                 case "minecraft:water", "minecraft:lava" -> ClientStairsDown.Ground.FLUID;
                 case "minecraft:bedrock" -> ClientStairsDown.Ground.UNBREAKABLE;
+                case "minecraft:crafting_table" -> ClientStairsDown.Ground.FACILITY;
                 default -> ClientStairsDown.Ground.DIGGABLE;
             };
         }
@@ -190,6 +191,16 @@ class ClientStairsDownTest {
         assertInstanceOf(ActionStatus.Done.class, run(9));
         assertTrue(digs.types.contains("minecraft:stone"));
         assertEquals(new BlockPos(0, 60, -4), world.feet, "停在挨着水的那一级前面");
+    }
+
+    @Test
+    void 脸对着刚用过的工作台_不拆它_转个方向挖() {
+        // 实机（全量测试 10-12）：做完木镐脸正对着工作台，第一级楼梯把它挖走了，接着做石镐就没台子可用。
+        world.placed.put(new BlockPos(0, 64, -1), "minecraft:crafting_table");
+
+        assertInstanceOf(ActionStatus.Done.class, run(1));
+        assertTrue(digs.types.stream().noneMatch("minecraft:crafting_table"::equals), "工作台不拆：" + digs.types);
+        assertEquals(new BlockPos(1, 63, 0), digs.dug.getFirst(), "北边是工作台，转到东边");
     }
 
     @Test

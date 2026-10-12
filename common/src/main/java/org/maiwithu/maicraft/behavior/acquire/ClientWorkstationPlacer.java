@@ -59,6 +59,17 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation {
     }
 
     @Override
+    public boolean gone(WorldPosition at, String blockType) {
+        PlayerContext current = context.get();
+        if (current == null || current.level() == null) return false;
+        BlockPos pos = new BlockPos(at.x(), at.y(), at.z());
+        // 只认同一维度、已加载的那一格：读不到的不下结论。
+        if (at.dimension() != null && !at.dimension().equals(current.level().dimension().location().toString())) return false;
+        if (!current.level().hasChunkAt(pos)) return false;
+        return !blockType.equals(BuiltInRegistries.BLOCK.getKey(current.level().getBlockState(pos).getBlock()).toString());
+    }
+
+    @Override
     public Optional<Action> placeNearby(String blockType) {
         // 方块类型在注册表里查不到：这个设施放不了，让来源如实换路。
         return blockOf(blockType).isEmpty()

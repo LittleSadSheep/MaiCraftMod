@@ -644,10 +644,21 @@ public final class RecipeSource implements ItemSource {
     private Optional<MemoryRecord> findStation(WorkstationRecipe.Kind kind, SourceContext context) {
         String blockType = workstationBlockType(kind);
         // 记得好几台时挑离得最近的那台：世界记忆按记下的先后排，最新记的不一定最近。
-        return memory.recordsNear(context.characterAt(), SEARCH_RADIUS_BLOCKS).stream()
+        // 眼下看得到已经没了的（被挖走、被炸掉）先从记忆里划掉：不然会走过去点一块空地，整件合成白白失败，
+        // 身上明明还有一张工作台也不会放下来用。
+        List<MemoryRecord> remembered = memory.recordsNear(context.characterAt(), SEARCH_RADIUS_BLOCKS).stream()
                 .filter(record -> record.kind() == MemoryKind.WORKSTATION)
                 .filter(record -> blockType.equals(record.blockType()))
-                .min(Comparator.comparingDouble(record -> distance(record, context)));
+                .toList();
+        List<MemoryRecord> standing = new ArrayList<>();
+        for (MemoryRecord record : remembered) {
+            if (placer != null && placer.gone(record.position(), blockType)) {
+                memory.forget(MemoryKind.WORKSTATION, record.position());
+            } else {
+                standing.add(record);
+            }
+        }
+        return standing.stream().min(Comparator.comparingDouble(record -> distance(record, context)));
     }
 
     private String riskNote(WorkstationRecipe recipe, int times, SourceContext context) {
