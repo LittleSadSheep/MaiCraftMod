@@ -40,6 +40,8 @@ final class PlacingWork extends ConstructionWork {
     private enum Step { APPROACH, HOLD, CLICK }
 
     private static final Logger LOG = LoggerFactory.getLogger(PlacingWork.class);
+    /** 同一面"到了却点不到"最多换几次站位。 */
+    private static final int MAX_RESPOTS = 2;
 
     private final Permissions permissions;
     private final String purpose;
@@ -50,6 +52,10 @@ final class PlacingWork extends ConstructionWork {
     /** 这次垫的临时方块：不在蓝图里，放好记进账本而不是工地。 */
     private final Set<BlockPos> temporaries = new HashSet<>();
     private PlacementAttempt attempt;
+    /** 这一面站过、核对说够得着可实际点不到的站位：再靠近时不站这些格。 */
+    private final Set<BlockPos> poorSpots = new HashSet<>();
+    /** 这一面为"点不到"换过几次站位。 */
+    private int respots;
     private Step step;
     private ConstructionSeams.Clicks.Click click;
     private int materialBefore;
@@ -232,15 +238,23 @@ final class PlacingWork extends ConstructionWork {
             return nextCell();
         }
         PlacementAttempt.Candidate candidate = attempt.next();
+        poorSpots.clear();
+        respots = 0;
         step = Step.APPROACH;
         // 施工时走来走去难查：每次为一格换一面去点都记一行，人在哪、要去点哪一面，实机日志里看得出在折腾什么。
         LOG.info("[施工] 放 {}：去点 {} 的 {} 面（人在 {}）", attempt.cell.pos().toShortString(),
                 candidate.clicked().toShortString(), candidate.face(),
                 services.site().feet() == null ? "未知" : services.site().feet().toShortString());
-        begin(services.close().toward(PlacementSpots.faceTarget(candidate.clicked(), candidate.face()), permissions,
-                        PlacementSpots.avoiding(attempt.occupied(), at -> false)),
-                "走到能点 " + candidate.clicked().toShortString() + " " + candidate.face() + " 面的位置");
+        approach(candidate);
         return ActionStatus.progressed();
+    }
+
+    // 走到能点这一面的站位：避开放下后会占住的格，以及这一面已经站过却点不到的位置。
+    private void approach(PlacementAttempt.Candidate candidate) {
+        Set<BlockPos> avoid = Set.copyOf(poorSpots);
+        begin(services.close().toward(PlacementSpots.faceTarget(candidate.clicked(), candidate.face()), permissions,
+                        PlacementSpots.avoiding(attempt.occupied(), avoid::contains)),
+                "走到能点 " + candidate.clicked().toShortString() + " " + candidate.face() + " 面的位置");
     }
 
     // 到了：用原版的放置规则试算这一下会放成什么；不是要的样子就换一面。
@@ -252,6 +266,17 @@ final class PlacingWork extends ConstructionWork {
         boolean acceptable = predicted.isPresent() && predicted.get().predicted() != null && live != null
                 && (PlacementPrediction.complete(attempt.cell, predicted.get().predicted())
                 || PlacementPrediction.isProgress(attempt.cell, live, predicted.get().predicted()));
+        // 站位核对说够得着、到了却点不到那一面（人没站在格子正中、视线擦边）：像玩家一样挪个地方再点，
+        // 换两次还不行才换下一面。原先一次点不到就换面，换遍了就垫脚手架、又收掉，接线在半空一节都没放上。
+        if (predicted.isEmpty() && respots < MAX_RESPOTS && services.site().feet() != null) {
+            respots++;
+            poorSpots.add(services.site().feet().immutable());
+            LOG.info("[施工] 放 {}：在 {} 点不到 {} 的 {} 面，换个站位再点", attempt.cell.pos().toShortString(),
+                    services.site().feet().toShortString(), candidate.clicked().toShortString(), candidate.face());
+            step = Step.APPROACH;
+            approach(candidate);
+            return ActionStatus.progressed();
+        }
         if (!acceptable) {
             LOG.info("[施工] 放 {}：从 {} 的 {} 面不行（{}）", attempt.cell.pos().toShortString(),
                     candidate.clicked().toShortString(), candidate.face(),
