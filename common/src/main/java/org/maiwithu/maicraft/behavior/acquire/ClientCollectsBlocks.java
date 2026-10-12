@@ -54,6 +54,9 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
 
         private enum Stage { APPROACH, DIG, PICK_UP, DONE }
 
+        /** 一格挖了这么久（刻）还没挖下来就跳过它挖下一格：看不着、够不着的那一格不把整批卡住。 */
+        private static final int DIG_GIVE_UP_TICKS = 20 * 15;
+
         private final List<BlockPos> cells;
         private final Permissions permissions;
         private int index;
@@ -61,6 +64,9 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
         private Action step;
         /** 第一下动手前脚边原有的掉落物；整批只记一次，捡的时候只捡这之后新冒出来的。 */
         private Set<Integer> dropsBefore;
+        /** 这一格已经挖了几刻；跳过了几格。 */
+        private int digTicks;
+        private int skipped;
 
         Collect(List<BlockPos> cells, Permissions permissions) {
             this.cells = cells;
@@ -79,6 +85,12 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
                 step = next.get();
             }
             ActionStatus status = step.tick(context);
+            // 一格挖了十五秒还没下来（树冠里的原木看不着又开不出路、高处够不着）：跳过这一格挖下一格，
+            // 整批挖完照样去捡。原先一直挖同一格，一分钟没进展整个拿东西失败，前面挖下的也没捡。
+            if (status instanceof ActionStatus.Running && stage == Stage.DIG && ++digTicks > DIG_GIVE_UP_TICKS) {
+                skipped++;
+                return advance();
+            }
             if (status instanceof ActionStatus.Running) return status;
             if (status instanceof ActionStatus.Failed failed) {
                 return ActionStatus.failed(stage == Stage.APPROACH
@@ -109,6 +121,7 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
                 return ActionStatus.failed(Problem.of(Problem.Kind.UNSUPPORTED, "挖方块的现场动作没接上", null));
             }
             closeStep();
+            digTicks = 0;
             stage = switch (stage) {
                 case APPROACH -> Stage.DIG;
                 case DIG -> {
@@ -117,6 +130,11 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
                 }
                 case PICK_UP, DONE -> Stage.DONE;
             };
+            // 一格都没挖下来（每格都跳过了）：如实说挖不下来，不冒充收完。
+            if (stage == Stage.PICK_UP && skipped >= cells.size()) {
+                return ActionStatus.failed(Problem.of(Problem.Kind.STUCK,
+                        "这 " + cells.size() + " 格每格挖了十五秒都没挖下来（看不着或够不着），换个地方挖", null));
+            }
             return stage == Stage.DONE ? ActionStatus.done() : ActionStatus.progressed();
         }
 

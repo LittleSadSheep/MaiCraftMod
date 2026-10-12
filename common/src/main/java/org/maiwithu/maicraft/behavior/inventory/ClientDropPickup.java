@@ -8,8 +8,10 @@ import java.util.function.Supplier;
 
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.level.Level;
 
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
@@ -40,6 +42,8 @@ public final class ClientDropPickup implements PicksUpDrops {
     private static final int APPEAR_TICKS = 10;
     /** 每件东西的耐心；到点没捡到就放弃这一件，不在一件东西上耗着。 */
     private static final int GIVE_UP_TICKS = 100;
+    /** 走到了旁边、它还躺着这么多刻（刻）：多半钻在树冠底下够不着，扒开树叶走进那一格。 */
+    private static final int STUCK_BESIDE_TICKS = 20;
 
     private final Supplier<PlayerContext> context;
     private final WalkTo walks;
@@ -83,6 +87,9 @@ public final class ClientDropPickup implements PicksUpDrops {
         private Integer current;
         private BlockPos walkingTo;
         private WalkRun walk;
+        /** 这一件已经改成扒开树叶走进它那一格；走到旁边后又等了几刻。 */
+        private boolean clearingLeaves;
+        private int besideTicks;
         private int waited;
         private int missed;
         private int picked;
@@ -149,6 +156,7 @@ public final class ClientDropPickup implements PicksUpDrops {
             if (best == null) return false;
             current = best.getId();
             waited = 0;
+            clearingLeaves = false;
             return true;
         }
 
@@ -158,11 +166,23 @@ public final class ClientDropPickup implements PicksUpDrops {
             if (walk == null || !cell.equals(walkingTo)) {
                 stopWalking();
                 walkingTo = cell;
+                besideTicks = 0;
                 // 走到它旁边一格以内就够原版吸进包，不必站进那一格：挖进墙里的那一格头顶常是实心的，
                 // 站不进去会被当成走不过去，东西明明挨着却放弃不捡。
-                walk = walks.start(GoalCompiler.near(cell, PICKUP_REACH_BLOCKS), TerrainPermit.WALK_ONLY);
+                walk = clearingLeaves
+                        ? walks.start(GoalCompiler.near(cell, 0.5), TerrainPermit.NATURAL)
+                        : walks.start(GoalCompiler.near(cell, PICKUP_REACH_BLOCKS), TerrainPermit.WALK_ONLY);
             }
-            if (walk.tick(tick) instanceof ActionStatus.Failed) {
+            ActionStatus walked = walk.tick(tick);
+            // 走到了旁边它还躺着、它那一格头顶是树叶：砍树掉下的原木常钻在云杉低垂的树冠底下，人站不进去也吸不到。
+            // 像玩家一样扒开树叶走进那一格；只为树冠底下的东西这样做，不为一件东西挖土开路。
+            if (walked instanceof ActionStatus.Done && !clearingLeaves && ++besideTicks > STUCK_BESIDE_TICKS
+                    && underLeaves(drop.level(), cell)) {
+                clearingLeaves = true;
+                stopWalking();
+                return ActionStatus.progressed();
+            }
+            if (walked instanceof ActionStatus.Failed) {
                 // 走不过去就别指望它自己吸过来了：放弃这一件，挑下一件。
                 skip.add(current);
                 missed++;
@@ -170,6 +190,11 @@ public final class ClientDropPickup implements PicksUpDrops {
                 stopWalking();
             }
             return ActionStatus.progressed();
+        }
+
+        // 这一格头顶（上面一格）是树叶。
+        private static boolean underLeaves(Level level, BlockPos cell) {
+            return level.getBlockState(cell.above()).is(BlockTags.LEAVES);
         }
 
         private void stopWalking() {

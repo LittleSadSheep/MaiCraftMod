@@ -104,6 +104,26 @@ class ClientCollectsBlocksTest {
     }
 
     @Test
+    void 一格挖不下来就跳过_挖完别的照样去捡() {
+        // 砍树：最高那根原木在树冠里看不着，挖了十五秒没下来就跳过，下面那根挖下来照样去捡。
+        Step stuck = new Step("挖不下来", ActionStatus.running());
+        Step fine = new Step("挖", ActionStatus.done());
+        BringsPlayerClose close = (target, permissions) -> new Step("走", ActionStatus.done());
+        DigsBlocks digs = target -> Optional.of(target.equals(ORE.above()) ? stuck : fine);
+        PicksUpDrops drops = new PicksUpDrops() {
+            @Override public Set<Integer> nearby() { return Set.of(); }
+            @Override public Action pickUpNewSince(Set<Integer> before) { return new Step("捡", ActionStatus.done()); }
+        };
+        Action collect = new ClientCollectsBlocks(close, digs, drops)
+                .collectBatch(List.of(ORE, ORE.above()), Permissions.DEFAULT).orElseThrow();
+        ActionStatus status = ActionStatus.running();
+        for (int i = 0; i < 400 && !(status instanceof ActionStatus.Done); i++) status = collect.tick(null);
+        assertTrue(status instanceof ActionStatus.Done, status.toString());
+        assertTrue(stuck.closed, "挖不下来的那一格收了尾");
+        assertTrue(log.contains("捡"), "挖下来的照样去捡");
+    }
+
+    @Test
     void 手上那一步跟着暂停与收尾() {
         Step dig = new Step("挖", ActionStatus.running());
         Action collect = collects(new Step("走", ActionStatus.done()), dig, new Step("捡", ActionStatus.done()))
