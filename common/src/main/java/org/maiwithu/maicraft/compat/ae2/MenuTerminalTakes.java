@@ -103,7 +103,7 @@ public final class MenuTerminalTakes implements TerminalTakes {
         String describe();
 
         /** 记下这次看到的网络存货，下次报价用。 */
-        void remember(boolean linked, List<Ae2TerminalMenu.StockEntry> stock);
+        void remember(boolean linked, List<Ae2TerminalMenu.StockEntry> stock, boolean complete);
     }
 
     /** 装在线缆上的一台终端：走过去、点在面板上打开（不点线缆芯）。 */
@@ -132,8 +132,8 @@ public final class MenuTerminalTakes implements TerminalTakes {
             return terminal.describe();
         }
 
-        @Override public void remember(boolean linked, List<Ae2TerminalMenu.StockEntry> stock) {
-            seen.saw(dimension, terminal, linked, stock, clock.get());
+        @Override public void remember(boolean linked, List<Ae2TerminalMenu.StockEntry> stock, boolean complete) {
+            seen.saw(dimension, terminal, linked, stock, clock.get(), complete);
         }
     }
 
@@ -158,8 +158,8 @@ public final class MenuTerminalTakes implements TerminalTakes {
             return "身上的" + itemId;
         }
 
-        @Override public void remember(boolean linked, List<Ae2TerminalMenu.StockEntry> stock) {
-            seen.sawWireless(linked, stock, clock.get());
+        @Override public void remember(boolean linked, List<Ae2TerminalMenu.StockEntry> stock, boolean complete) {
+            seen.sawWireless(linked, stock, clock.get(), complete);
         }
     }
 
@@ -269,7 +269,8 @@ public final class MenuTerminalTakes implements TerminalTakes {
             // 连上了、也有货就不用再等；空表或没连上时多等一小会儿，免得把还没到的同步当成空网络。
             boolean clearlyReady = linked.get() && !stock.get().isEmpty();
             if (!clearlyReady && ++settleWaited <= STOCK_SETTLE_TICKS) return ActionStatus.running();
-            access.remember(linked.get(), stock.get());
+            // 刚同步过来的多半只是第一包（大网络分好几包发）：先按"没看全"记，免得下次把没到的当成没有。
+            access.remember(linked.get(), stock.get(), !linked.get());
             if (!linked.get()) {
                 // 界面上写着原因就照抄（无线终端超出访问点范围、没电、没频道）；读不到才用笼统的说法。
                 String why = compat.unlinkedWhy(raw).map(text -> "（" + text + "）").orElse("（没电或没频道）");
@@ -304,6 +305,8 @@ public final class MenuTerminalTakes implements TerminalTakes {
             if (entry == null) {
                 // 一件还没取到就没看见：可能是存货还没同步齐，等表连着几刻不再变多再说没有。
                 if (confirmedTotal() == 0 && stockStillArriving(stock.size())) return ActionStatus.running();
+                // 等到存货表不再变了：这时记下的才算看全了，下次报价可以照它说"没有"。
+                if (confirmedTotal() == 0) compat.networkLinked(raw).ifPresent(linked -> access.remember(linked, stock, true));
                 // 网络里没有现货但有样板能做：像玩家一样在终端里下单，等成品进网络再取（不补缺料、不加样板）。
                 Ae2TerminalMenu.StockEntry craftable = craftOrdered || confirmedTotal() > 0 ? null : craftableWanted(stock);
                 if (craftable != null) return orderCraft(raw, craftable);
@@ -611,7 +614,7 @@ public final class MenuTerminalTakes implements TerminalTakes {
             Optional<Boolean> linked = compat.networkLinked(raw);
             Optional<List<Ae2TerminalMenu.StockEntry>> stock = compat.networkStock(raw);
             if (linked.isPresent() && stock.isPresent()) {
-                access.remember(linked.get(), stock.get());
+                access.remember(linked.get(), stock.get(), false);
             }
         }
 

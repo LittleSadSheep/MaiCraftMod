@@ -45,12 +45,23 @@ public final class SeenNetworkStock {
      */
     public void saw(String dimension, Ae2Terminals.Terminal terminal, boolean linked,
             List<Ae2TerminalMenu.StockEntry> stock, Instant when) {
-        sightings.put(TerminalAt.of(dimension, terminal), sighting(linked, stock, when));
+        saw(dimension, terminal, linked, stock, when, true);
+    }
+
+    /** @param complete 存货表已经同步齐（连着几刻不再变）；只看到第一包时为 false */
+    public void saw(String dimension, Ae2Terminals.Terminal terminal, boolean linked,
+            List<Ae2TerminalMenu.StockEntry> stock, Instant when, boolean complete) {
+        sightings.put(TerminalAt.of(dimension, terminal), sighting(linked, stock, when, complete));
     }
 
     /** 打开身上的无线终端、存货同步过来之后记一笔，盖掉以前的记录。 */
     public void sawWireless(boolean linked, List<Ae2TerminalMenu.StockEntry> stock, Instant when) {
-        wireless = sighting(linked, stock, when);
+        sawWireless(linked, stock, when, true);
+    }
+
+    /** @param complete 存货表已经同步齐；只看到第一包时为 false */
+    public void sawWireless(boolean linked, List<Ae2TerminalMenu.StockEntry> stock, Instant when, boolean complete) {
+        wireless = sighting(linked, stock, when, complete);
     }
 
     /** 身上的无线终端上次打开时的样子；没开过或已经过了 {@link #FRESH_FOR} 都给空。 */
@@ -59,7 +70,8 @@ public final class SeenNetworkStock {
         return Optional.of(wireless);
     }
 
-    private static Sighting sighting(boolean linked, List<Ae2TerminalMenu.StockEntry> stock, Instant when) {
+    private static Sighting sighting(boolean linked, List<Ae2TerminalMenu.StockEntry> stock, Instant when,
+            boolean complete) {
         Map<String, Long> storedByItem = new LinkedHashMap<>();
         // 有样板能做的也记下：现货是零的东西，下次报价时知道能在网络里下单。
         Set<String> craftable = new HashSet<>();
@@ -72,7 +84,7 @@ public final class SeenNetworkStock {
             String itemId = BuiltInRegistries.ITEM.getKey(entry.sample().getItem()).toString();
             storedByItem.merge(itemId, entry.stored(), Long::sum);
         }
-        return new Sighting(linked, Map.copyOf(storedByItem), when, Set.copyOf(craftable));
+        return new Sighting(linked, Map.copyOf(storedByItem), when, Set.copyOf(craftable), complete);
     }
 
     /** 这台终端上次看到的样子；没看过或已经过了 {@link #FRESH_FOR} 都给空。 */
@@ -96,7 +108,8 @@ public final class SeenNetworkStock {
      * @param storedByItem 物品 ID → 网络里的件数（各变体合计），只记有货的
      * @param seenAt       看到的时刻
      */
-    public record Sighting(boolean linked, Map<String, Long> storedByItem, Instant seenAt, Set<String> craftableItems) {
+    public record Sighting(boolean linked, Map<String, Long> storedByItem, Instant seenAt, Set<String> craftableItems,
+            boolean complete) {
         public Sighting {
             Objects.requireNonNull(storedByItem, "storedByItem");
             Objects.requireNonNull(seenAt, "seenAt");
@@ -104,9 +117,14 @@ public final class SeenNetworkStock {
             craftableItems = craftableItems == null ? Set.of() : Set.copyOf(craftableItems);
         }
 
-        /** 只记现货、没记样板的写法（测试与旧调用用）。 */
+        /** 只记现货、没记样板的写法（测试与旧调用用），按同步齐了算。 */
         public Sighting(boolean linked, Map<String, Long> storedByItem, Instant seenAt) {
-            this(linked, storedByItem, seenAt, Set.of());
+            this(linked, storedByItem, seenAt, Set.of(), true);
+        }
+
+        /** 按同步齐了算。 */
+        public Sighting(boolean linked, Map<String, Long> storedByItem, Instant seenAt, Set<String> craftableItems) {
+            this(linked, storedByItem, seenAt, craftableItems, true);
         }
 
         /** 想要的东西网络里有没有样板能做。 */

@@ -196,6 +196,12 @@ public final class Ae2TerminalSource implements ItemSource {
             return new SourceQuote.Offer(source, request.count(), cost,
                     "网络里没现货但有样板，用身上的无线终端下单合成，等做好再取", hint);
         }
+        // 上次只看到了第一包存货（取到想要的就关了，后面的包还没到）：没看见不等于没有，打开再看一眼。
+        // 原先照着第一包说"没有"，AE 里明明有木头，拿木板、箱子五分钟内一律说网络里没有。
+        if (!seen.complete()) {
+            return new SourceQuote.Offer(source, SourceQuote.Offer.UNKNOWN_COUNT, cost,
+                    "上次打开时存货还没同步齐，没看到这样东西，打开再看一眼", hint);
+        }
         return new SourceQuote.Unavailable(source, "身上的无线终端连着的网络里，上次打开时既没有这样东西也没有样板");
     }
 
