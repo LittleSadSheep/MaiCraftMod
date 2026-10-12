@@ -314,7 +314,7 @@ final class BaritoneWalkRun implements WalkRun {
             finishRun(context, player, engine, pathing);
             return;
         }
-        steer(context, player, engine, routePresent, calculating);
+        steer(context, player, engine, pathing, routePresent, calculating);
         engineFailedPath = false;
     }
 
@@ -465,8 +465,8 @@ final class BaritoneWalkRun implements WalkRun {
 
     // 按键合成：读引擎按下的方向、跳跃与潜行，交给角色输入入口；每刻续发，缺刻自动松键。
     // 空中落地救援在管这一掉时，按键与镜头归救援：往落点推、按它的意思潜行，镜头它自己转。
-    private void steer(PlayerContext context, LocalPlayer player, IBaritone engine, boolean routePresent,
-                       boolean calculating) {
+    private void steer(PlayerContext context, LocalPlayer player, IBaritone engine, PathingBehavior pathing,
+                       boolean routePresent, boolean calculating) {
         IInputOverrideHandler input = engine.getInputOverrideHandler();
         PlayerInput playerInput = context.input();
         if (landing.steersAirborne()) {
@@ -481,7 +481,10 @@ final class BaritoneWalkRun implements WalkRun {
                 - (input.isInputForcedDown(Input.MOVE_RIGHT) ? 1F : 0F);
         boolean jump = input.isInputForcedDown(Input.JUMP);
         boolean sneak = input.isInputForcedDown(Input.SNEAK);
-        boolean sprint = input.isInputForcedDown(Input.SPRINT);
+        // 疾跑：执行段算出"下一刻该疾跑"后会把疾跑键松开、自己记着（原版 Baritone 靠一个改疾跑键的 mixin 读它，
+        // 我们没装那个 mixin）。只读按键就永远读不到疾跑，实测 220 格直道一路慢走 4.3 格/秒、一次没跑跳。
+        boolean sprint = input.isInputForcedDown(Input.SPRINT)
+                || pathing != null && pathing.getCurrent() != null && pathing.getCurrent().isSprinting();
         if (forward != 0F || strafe != 0F || jump || sneak) {
             playerInput.applyNavigationMovement(
                     new PlayerInput.Movement(forward, strafe, jump, sneak, sprint), context.clientTick());
