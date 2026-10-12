@@ -768,15 +768,19 @@ public final class DefaultInteractionSender implements InteractionSender {
             abandonedItemUseSinceTick = context.clientTick();
             return;
         }
-        // 宽限两刻：物品自行结束的那一瞬，扣数／组件证据通常和“不再使用”同刻到达，先让只读观察说话。
-        if (context.clientTick() - abandonedItemUseSinceTick < 2) return;
+        // 宽限半秒：物品自行结束的那一瞬，扣数／组件证据要等服务端那一刻结算再同步回来，联机时常常晚几刻到。
+        // 原先只宽限两刻，砂纸磨完一件、成品还没进背包就判"没等到确认"，抛光玫瑰石英怎么都磨不出来。
+        if (context.clientTick() - abandonedItemUseSinceTick < ABANDONED_USE_GRACE_TICKS) return;
         abandonedItemUse = null;
         abandonedItemUseSinceTick = -1;
         if (pending == active && !pending.terminal()) {
             pending.finish(PendingInteraction.Status.UNCERTAIN,
-                    "the held item use ended without native confirmation");
+                    "手上的持续使用结束了，没等到游戏确认效果");
         }
     }
+
+    /** 持续使用自己结束后，等效果同步回来的宽限（刻）。 */
+    private static final int ABANDONED_USE_GRACE_TICKS = 10;
 
     private static MultiPlayerGameMode gameMode(PlayerContext context) {
         Minecraft minecraft = Minecraft.getInstance();
