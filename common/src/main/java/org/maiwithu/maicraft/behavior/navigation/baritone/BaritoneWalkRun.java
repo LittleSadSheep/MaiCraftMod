@@ -152,12 +152,20 @@ final class BaritoneWalkRun implements WalkRun {
      * 记下这段路上自己垫的一格：只有右键得到游戏确认、那一格确实长出了方块才记。
      * 垫了什么如实进结算结果，收不收回由 LLM 决定。
      */
+    /** 这段路挖掉的方块，按先后。 */
+    private final List<String> broken = new ArrayList<>();
+
     private void recordPlaced(BlockPos position) {
         if (escape.effective().changes() == Permissions.BlockChanges.NONE) return;
         escape.notePlaced();
         if (!placements.contains(position)) {
             placements.add(position.immutable());
         }
+    }
+
+    /** 这段路为开路挖掉的方块："x, y, z 的 方块ID"。 */
+    List<String> broken() {
+        return List.copyOf(broken);
     }
 
     /** 这段路垫上的方块格子。 */
@@ -394,6 +402,7 @@ final class BaritoneWalkRun implements WalkRun {
         boolean aimed = owner.precisionAimSettled(context.localPlayer(), context.clientTick());
         EngineClicks.Doing doing = clicks.tick(context, left, right, aimed);
         clicks.takePlaced().ifPresent(this::recordPlaced);
+        clicks.takeBroken().ifPresent(broken::add);
         // 挖开了一格：卡坑脱困中记一笔挖开了几格。
         if (doing == EngineClicks.Doing.BROKE_A_BLOCK) escape.noteDug();
         if (doing != EngineClicks.Doing.NOTHING) {

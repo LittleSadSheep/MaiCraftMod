@@ -5,6 +5,7 @@ import java.util.Optional;
 
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
@@ -49,6 +50,10 @@ final class EngineClicks {
     private int useCooldown;
     /** 最近一次右键确认后垫上的那一格；取走后清空。 */
     private BlockPos placed;
+    /** 最近挖掉的那一格与挖之前是什么："x, y, z 的 方块ID"；取走后清空。 */
+    private String broken;
+    /** 正在挖的那一格挖之前是什么方块。 */
+    private String diggingType;
 
     /**
      * 推进一刻：先结清在途的右键，再按引擎此刻按着的键挖或点。
@@ -69,9 +74,15 @@ final class EngineClicks {
         if (useCooldown > 0) useCooldown--;
         // 挖的那一格已经没了：准星打不到它了，只结清这次挖掘的确认；确认是自己挖开的才算动了一格。
         BlockPos digging = digger.current();
+        if (digging != null && !context.level().getBlockState(digging).isAir()) {
+            diggingType = BuiltInRegistries.BLOCK.getKey(context.level().getBlockState(digging).getBlock()).toString();
+        }
         if (digging != null && context.level().getBlockState(digging).isAir()) {
             return switch (digger.settleGone(context, true)) {
-                case BROKE_TARGET, BROKE_OCCLUDER -> Doing.BROKE_A_BLOCK;
+                case BROKE_TARGET, BROKE_OCCLUDER -> {
+                    broken = digging.toShortString() + " 的 " + (diggingType == null ? "方块" : diggingType);
+                    yield Doing.BROKE_A_BLOCK;
+                }
                 case PROGRESSING -> Doing.WORKING;
                 case NO_SHOT -> Doing.NOTHING;
             };
@@ -94,6 +105,13 @@ final class EngineClicks {
             return startUse(context, player);
         }
         return Doing.NOTHING;
+    }
+
+    /** 取走最近挖掉的那一格（"x, y, z 的 方块ID"）；没挖过给空。 */
+    Optional<String> takeBroken() {
+        Optional<String> result = Optional.ofNullable(broken);
+        broken = null;
+        return result;
     }
 
     /** 取走最近一次右键垫上的那一格；没垫过给空。 */
@@ -129,8 +147,13 @@ final class EngineClicks {
             digger.tickCooldown();
             return digger.hasPendingBreak() ? Doing.WORKING : Doing.NOTHING;
         }
+        String before = BuiltInRegistries.BLOCK.getKey(context.level().getBlockState(hit.getBlockPos()).getBlock())
+                .toString();
         return switch (digger.digStep(context, hit)) {
-            case BROKE_TARGET, BROKE_OCCLUDER -> Doing.BROKE_A_BLOCK;
+            case BROKE_TARGET, BROKE_OCCLUDER -> {
+                broken = hit.getBlockPos().toShortString() + " 的 " + before;
+                yield Doing.BROKE_A_BLOCK;
+            }
             case PROGRESSING -> Doing.WORKING;
             case NO_SHOT -> Doing.NOTHING;
         };

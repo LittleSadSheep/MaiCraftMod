@@ -23,4 +23,9 @@ public interface ReadsPlacedBlocks {
     default List<String> trapEscapesDuringCurrentWalk() {
         return List.of();
     }
+
+    /** 当前这段走到里为开路挖掉的方块："x, y, z 的 方块ID"；没挖过给空列表。 */
+    default List<String> brokenDuringCurrentWalk() {
+        return List.of();
+    }
 }

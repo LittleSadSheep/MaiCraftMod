@@ -62,6 +62,8 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
     /** 垫块记账的光标：跟着当前走到运行走，换段重新记。 */
     private WalkRun placementsRecordedFor;
     private int recordedPlacements;
+    /** 这段走到里已经记进变化的挖掉方块数。 */
+    private int recordedBreaks;
     /** 上一刻的背包份数：与这一刻比，多出的是路上捡的，少掉的是路上用掉的。 */
     private Map<String, Integer> bagLastTick;
 
@@ -193,6 +195,7 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
         if (placementsRecordedFor != walk) {
             placementsRecordedFor = walk;
             recordedPlacements = 0;
+            recordedBreaks = 0;
         }
         List<BlockPos> placed = placedBlocks.placedDuringCurrentWalk();
         for (int i = recordedPlacements; i < placed.size(); i++) {
@@ -202,6 +205,12 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
                     "垫路用的临时方块，没有自动收回"));
         }
         recordedPlacements = placed.size();
+        // 开路挖掉的方块也进变化：许可是 none 时卡坑脱困也可能挖开几格，挖了哪几格要说清。
+        List<String> dug = placedBlocks.brokenDuringCurrentWalk();
+        for (int i = recordedBreaks; i < dug.size(); i++) {
+            recordChange(new Change(Change.Kind.BLOCK_BROKEN, dug.get(i), 1, "开路挖掉的"));
+        }
+        recordedBreaks = dug.size();
     }
 
     /** 背包每刻记一份份数：与上一刻比，多出来的是路上捡的，少下去的是路上用掉的，都进变化。 */

@@ -12,6 +12,9 @@ import baritone.pathing.calc.AbstractNodeCostSearch;
 import baritone.pathing.movement.CalculationContext;
 import baritone.pathing.movement.Movement;
 import baritone.utils.pathing.Favoring;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -36,6 +39,8 @@ import org.maiwithu.maicraft.kernel.result.Problem;
  * 就在原任务里重新算路接着走，不让 LLM 为同一个目的地重发一遍；同一趟最多这样重算两次，免得空转。
  */
 final class TerrainProbe {
+    private static final Logger LOG = LoggerFactory.getLogger(TerrainProbe.class);
+
 
     /** 复算最多等这么多客户端刻：搜索本身有时限，再给区块读取留余量。 */
     private static final long WAIT_LIMIT_TICKS = 300;
@@ -203,6 +208,8 @@ final class TerrainProbe {
         } catch (CompletionException failed) {
             Throwable cause = failed.getCause() == null ? failed : failed.getCause();
             unanswered = "搜索出错（" + cause.getClass().getSimpleName() + "）";
+            // 只读复算出错是程序的问题：把异常留在日志里，结果里只交代一句。
+            LOG.warn("只读复算出错", cause);
             return null;
         } catch (RuntimeException cancelled) {
             unanswered = "复算被取消";

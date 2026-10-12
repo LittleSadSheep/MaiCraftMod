@@ -64,6 +64,7 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
     /** 上一次运行里的落地救援经过；运行交出身体后结算方还要读得到。 */
     private List<String> lastLandings = List.of();
     private List<String> lastTrapEscapes = List.of();
+    private List<String> lastBroken = List.of();
     /** 正要用的东西每种留几件：垫脚只用多出来的。 */
     private final ItemsToKeep keeps;
     /** 镜头离引擎要的精确瞄点差这么多度以内算转到位：平滑镜头收敛到 0.3° 吸附，留点余量。 */
@@ -155,6 +156,7 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
         lastPlacements = List.copyOf(run.placements());
         lastLandings = run.landings();
         lastTrapEscapes = run.trapEscapes();
+        lastBroken = run.broken();
         active = null;
     }
 
@@ -170,6 +172,13 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
     public List<String> landingsDuringCurrentWalk() {
         BaritoneWalkRun current = active;
         return current != null ? current.landings() : lastLandings;
+    }
+
+    /** 这段走到（或刚结束的一段）里为开路挖掉的方块。 */
+    @Override
+    public List<String> brokenDuringCurrentWalk() {
+        BaritoneWalkRun current = active;
+        return current != null ? current.broken() : lastBroken;
     }
 
     /** 这段走到（或刚结束的一段）里每次卡坑脱困的经过。 */
