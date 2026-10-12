@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.Map;
@@ -56,6 +57,8 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
     private final Map<String, Integer> confirmed = new LinkedHashMap<>();
     /** 放进去就被容器下面的溜槽、漏斗抽走的件数：离开了背包，没留在容器里。 */
     private final Map<String, Integer> passed = new LinkedHashMap<>();
+    /** 放过东西的容器（含放进去就被抽走、一件没留下的）。 */
+    private final Set<String> putInto = new LinkedHashSet<>();
     /** 每只容器存进了什么：容器的叫法 → 物品 → 件数。 */
     private final Map<String, Map<String, Integer>> storedIn = new LinkedHashMap<>();
     private final List<Problem> openFailures = new ArrayList<>();
@@ -293,7 +296,12 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
         // 要存的都离开了背包：一部分留在容器里，一部分被下面的溜槽、漏斗抽走了，分开说清。
         String drainedNote = drained == 0 ? "" : "；另有 " + drained + " 件放进去就被下面的溜槽或漏斗抽走了，没留在容器里";
         if (deposited + drained >= total) {
-            return Next.done(TaskResult.done("存进了 " + storedIn.size() + " 只容器，要存的都离开了背包" + drainedNote));
+            // 放过东西的容器按实际放过的数：东西放进去全被下面抽走的那只也算放过，不说"存进了 0 只容器"。
+            Set<String> touched = new LinkedHashSet<>(storedIn.keySet());
+            touched.addAll(putInto);
+            return Next.done(TaskResult.done(drained == 0
+                    ? "存进了 " + storedIn.size() + " 只容器，要存的都存进去了"
+                    : "放进了 " + touched.size() + " 只容器，要存的都离开了背包" + drainedNote));
         }
         deposited += drained;
         Problem why = networkFailure != null ? networkFailure
@@ -316,6 +324,7 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
             // 放进去就被下面的溜槽、漏斗抽走的：离开了背包，不再当还要存；去向照实记进没能确认。
             @Override public void passedThrough(String itemId, int amount, String fact) {
                 passed.merge(itemId, amount, Integer::sum);
+                putInto.add(name());
                 recordUnconfirmed(new Change(Change.Kind.OTHER, "搬运", amount, fact));
             }
 
