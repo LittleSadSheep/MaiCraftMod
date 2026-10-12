@@ -118,7 +118,8 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     }
 
     private Next<Phase> found(ResolvedTarget resolved) {
-        target = resolved;
+        // 指定了点哪一面：靠近与出手都只认方块朝这一面的表面。
+        target = resolved.facing(input.face());
         if (target.isEntity()) {
             if (services.world().riding(target.entityId())) {
                 riding = target.typeId();

@@ -130,8 +130,11 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
                 InteractionHand.MAIN_HAND, handBefore, level.getBlockState(aim.clickCell()), menuBefore);
         // 桶按自己的射线作用：朝效果那一格使用手里的物品；别的东西右键要点的那一格。
         boolean bucket = gesture == ItemUseAim.Gesture.SCOOP || gesture == ItemUseAim.Gesture.POUR;
+        // 指定了点哪一面、点的就是目标那一格：只点朝这一面的表面（扳手点哪一面决定绕哪根轴转）。
+        boolean faced = target.face() != null && aim.clickCell().equals(cell);
         AimAndInteract use = bucket
                 ? interactions.useHeldItemToward(aim.effectCell(), InteractionHand.MAIN_HAND, confirmation)
+                : faced ? interactions.useBlockFace(cell, target.face(), confirmation)
                 : interactions.useBlock(aim.clickCell(), confirmation);
         return new UseSeams.Built.Ready(use, use::result, gesture, held, menuBefore, aim.effectCell());
     }

@@ -145,7 +145,9 @@ final class LiveUseWorld implements UseSeams.ReadsWorld {
             return entityById(target.entityId()).map(entity -> ApproachTarget.ofEntity(entity.getBoundingBox()));
         }
         if (!writesSign) {
-            return Optional.of(ApproachTarget.ofBlock(target.cell()));
+            // 指定了点哪一面：站位按方块外形上朝这一面的表面看不看得见挑。
+            return Optional.of(target.face() != null ? ApproachTarget.ofBlockFace(target.cell(), target.face())
+                    : ApproachTarget.ofBlock(target.cell()));
         }
         ClientLevel level = level();
         if (level == null || !level.isLoaded(target.cell())) return Optional.empty();

@@ -6,6 +6,8 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.function.Supplier;
 
+import net.minecraft.core.Direction;
+
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
@@ -61,7 +63,11 @@ public final class UseModule implements AbilityModule {
                     ParamSpec.of("radius", ParamType.INTEGER).range(1, 128).defaultValue(32)
                             .doc("按 block、entity 找目标的范围（格）").build(),
                     ParamSpec.of("text", ParamType.TEXT)
-                            .doc("写到告示牌上的文字，用换行分行，最多 4 行；给了 text 就必须空手").build()),
+                            .doc("写到告示牌上的文字，用换行分行，最多 4 行；给了 text 就必须空手").build(),
+                    ParamSpec.of("face", ParamType.CHOICE)
+                            .choices("up", "down", "north", "south", "east", "west")
+                            .doc("点方块朝哪一面（方块外形上朝这边的表面都算）；不给就点看得见的任一面。"
+                                    + "用扳手转机器时点哪一面决定绕哪根轴转").build()),
             // 前面某一步确认过的位置（previous）还没有地方记，解析不了：不列进接受的目标，免得说接受却用不了。
             Set.of(TargetKind.HERE, TargetKind.SEEN, TargetKind.LANDMARK, TargetKind.POSITION),
             ExecutionMode.CONTROLS_PLAYER,
@@ -129,8 +135,10 @@ public final class UseModule implements AbilityModule {
         }
         long count = params.has("count") ? params.integer("count") : 1;
         long radius = params.has("radius") ? params.integer("radius") : 32;
+        // 点哪一面：只对方块有意义，对实体给了也不用。
+        Direction face = params.has("face") ? Direction.byName(params.text("face")) : null;
         return new StepDecision.Run(new UseInput(step.goal().target(), lower(item), lower(block), lower(entity),
-                count, radius, textLines, step.goal().permissions()));
+                count, radius, textLines, step.goal().permissions(), face));
     }
 
     @Override public void registerTasks(TaskFactories factories) {

@@ -4,6 +4,8 @@ package org.maiwithu.maicraft.ability.use;
 import java.util.List;
 import java.util.Objects;
 
+import net.minecraft.core.Direction;
+
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.task.TaskInput;
@@ -19,9 +21,16 @@ import org.maiwithu.maicraft.kernel.task.TaskInput;
  * @param radius     按类型找目标的范围（格）
  * @param textLines  要写到告示牌上的字，逐行；不写字为空列表
  * @param permissions 这次任务的许可
+ * @param face       点方块朝哪一面；不指定为 null，点看得见的任一面
  */
 record UseInput(Target target, String item, String block, String entity,
-        long count, long radius, List<String> textLines, Permissions permissions) implements TaskInput {
+        long count, long radius, List<String> textLines, Permissions permissions, Direction face) implements TaskInput {
+
+    /** 不指定点哪一面。 */
+    UseInput(Target target, String item, String block, String entity,
+            long count, long radius, List<String> textLines, Permissions permissions) {
+        this(target, item, block, entity, count, radius, textLines, permissions, null);
+    }
 
     UseInput {
         Objects.requireNonNull(textLines, "textLines");

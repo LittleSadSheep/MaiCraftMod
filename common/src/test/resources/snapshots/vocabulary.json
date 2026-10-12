@@ -20,6 +20,7 @@
     "drawing": "建筑图纸的正文（JSON 对象）：材料表、对象、组件",
     "edits": "对图纸按名合并的修改（JSON 对象）：objects、materials、components、remove_objects、remove_components、block_state_axes、overlap_policy、name",
     "entity": "实体类型 ID，可给一个或几种",
+    "face": "点方块的哪一面：up / down / north / south / east / west；用扳手转机器时点哪一面决定绕哪根轴转",
     "file": "schematics 目录下的结构文件名",
     "floor": "坐电梯去哪一层：楼层名，或 top / bottom / up / down",
     "format": "导出文件的格式：json / nbt",

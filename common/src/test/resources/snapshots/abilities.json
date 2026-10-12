@@ -4,7 +4,7 @@
       {
         "ability": "maicraft:use",
         "summary": "对一个方块或实体用一下手上的东西（开门、按钮、拉杆、开箱看看、骑乘、剪毛、点火……）",
-        "parameters": "item?: string, block?: string, entity?: string, count: integer = 1, radius: integer = 32, text?: string",
+        "parameters": "item?: string, block?: string, entity?: string, count: integer = 1, radius: integer = 32, text?: string, face?: string",
         "targets": [
           "here",
           "landmark",
@@ -353,6 +353,20 @@
           "type": "string",
           "required": false,
           "doc": "写到告示牌上的文字，用换行分行，最多 4 行；给了 text 就必须空手"
+        },
+        {
+          "name": "face",
+          "type": "string",
+          "required": false,
+          "doc": "点方块朝哪一面（方块外形上朝这边的表面都算）；不给就点看得见的任一面。用扳手转机器时点哪一面决定绕哪根轴转",
+          "choices": [
+            "up",
+            "down",
+            "north",
+            "south",
+            "east",
+            "west"
+          ]
         }
       ],
       "targets": [

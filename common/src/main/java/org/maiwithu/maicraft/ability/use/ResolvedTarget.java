@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.ability.use;
 import java.util.Objects;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 
 /**
  * 落实下来的用东西目标：一格方块，或一只实体。
@@ -15,8 +16,13 @@ import net.minecraft.core.BlockPos;
  * @param entityId 实体目标的游戏实体编号；方块目标为 null
  * @param typeId   方块或实体此刻的类型注册 ID（读现场得到，不是参数里的筛选）
  * @param describe 给日志与结果的一句话
+ * @param face     只点方块朝这一面（用扳手转机器）；不指定为 null
  */
-record ResolvedTarget(BlockPos cell, Integer entityId, String typeId, String describe) {
+record ResolvedTarget(BlockPos cell, Integer entityId, String typeId, String describe, Direction face) {
+
+    ResolvedTarget(BlockPos cell, Integer entityId, String typeId, String describe) {
+        this(cell, entityId, typeId, describe, null);
+    }
 
     ResolvedTarget {
         Objects.requireNonNull(cell, "cell");
@@ -37,6 +43,11 @@ record ResolvedTarget(BlockPos cell, Integer entityId, String typeId, String des
     /** 是不是实体目标。 */
     boolean isEntity() {
         return entityId != null;
+    }
+
+    /** 方块目标只点朝 face 的那一面；实体目标不变。 */
+    ResolvedTarget facing(Direction face) {
+        return face == null || isEntity() ? this : new ResolvedTarget(cell, null, typeId, describe + " 的 " + face.getName() + " 面", face);
     }
 
     /** 换成同一种流体的另一格（空桶点到流动的水，改舀附近的源格）。 */

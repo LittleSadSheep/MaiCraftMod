@@ -15,6 +15,7 @@ import java.util.function.IntPredicate;
 import java.util.function.Predicate;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.phys.AABB;
 
 import org.junit.jupiter.api.Test;
@@ -60,6 +61,18 @@ class UseTaskTest {
         assertEquals(1L, ((UseDetails) result.details()).appliedTimes());
         assertTrue(result.changes().stream().anyMatch(change -> change.kind() == Change.Kind.BLOCK_CHANGED
                 && change.what().equals("minecraft:lever")));
+    }
+
+    @Test
+    void 指定点哪一面_出手只认那一面() {
+        // 用扳手转机器：点哪一面决定绕哪根轴转，交给出手的目标带上这一面。
+        Rig rig = new Rig();
+        rig.world.blocks.put(LEVER, "minecraft:lever");
+        rig.interactions.applied("拉杆扳动了");
+        TaskResult result = rig.run(new UseInput(position(LEVER), null, "minecraft:lever", null, 1, 32,
+                List.of(), Permissions.DEFAULT, Direction.EAST));
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertEquals(Direction.EAST, rig.interactions.lastTarget.face());
     }
 
     @Test

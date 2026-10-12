@@ -61,6 +61,7 @@ public final class ParamNames {
             Map.entry("tier", "附魔台三档报价里选第几档（1..3）：第 n 档消耗 n 级和 n 个青金石"),
             Map.entry("target", "探索目标：survey 自由跑图 / 群系 ID 或 # 标签 / platform 找平台 / surface 回露天"),
             Map.entry("direction", "扇形朝向：forward / backward / left / right / north / south / east / west；探索用，出发时按当时朝向固定"),
+            Map.entry("face", "点方块的哪一面：up / down / north / south / east / west；用扳手转机器时点哪一面决定绕哪根轴转"),
             Map.entry("interests", "探索途中留意的东西：地形要素（lava_pool）、结构 ID、方块 ID 或 # 标签、实体类型 ID"),
             Map.entry("angle_degrees", "扇形开口角（度），1..360；配 direction 使用，有方向默认 90"),
             Map.entry("min_distance", "忽略更近的目标匹配，单位格；有方向默认 16"),
