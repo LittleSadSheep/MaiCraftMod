@@ -13,6 +13,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.Vec3;
 
+import org.maiwithu.maicraft.game.ClientHooks;
 import org.maiwithu.maicraft.behavior.navigation.FlightLandings;
 import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
@@ -103,6 +104,9 @@ final class JetpackFlight implements TravelLeg {
             if (status instanceof ActionStatus.Failed failed) return afterGearFailed(context, failed.problem());
             return afterGear(player);
         }
+        // 起飞、飞、往下落是这一段自己管着上下：每刻说一声，落地防护不接手（快速下降时故意关包往下掉）。
+        if (step == Step.TAKEOFF || step == Step.FLY || step == Step.DESCEND) ClientHooks.noteFlightControlled();
+        else ClientHooks.clearFlightControlled();
         return switch (step) {
             case EQUIP -> equip(player);
             case TAKEOFF -> takeOff(level, player, now);
@@ -387,6 +391,7 @@ final class JetpackFlight implements TravelLeg {
     }
 
     @Override public void close() {
+        ClientHooks.clearFlightControlled();
         if (current != null) {
             current.close();
             current = null;

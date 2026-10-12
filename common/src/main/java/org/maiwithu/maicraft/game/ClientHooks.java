@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.game;
 
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import org.maiwithu.maicraft.game.player.PlayerControlBoundary;
 import org.maiwithu.maicraft.game.player.RestStatistics;
@@ -31,6 +32,10 @@ public final class ClientHooks {
     /** 最近一次本地玩家死亡包里的死因与收到时的游戏刻。 */
     private static final AtomicReference<DeathMessage> LAST_DEATH_MESSAGE = new AtomicReference<>();
     private static final AtomicReference<RestStatistics> REST_STATISTICS = new AtomicReference<>();
+    /** 喷气背包飞的那一段最近一次说"我管着上下"的时刻（纳秒）；没在飞为 0。 */
+    private static final AtomicLong FLIGHT_CONTROLLED_AT = new AtomicLong();
+    /** 多久没再说就当不在管了：飞的那一段被打断、出岔子没收尾时，落地防护照样兜底。 */
+    private static final long FLIGHT_CONTROL_FRESH_NANOS = 300_000_000L;
 
     private ClientHooks() {}
 
@@ -68,6 +73,25 @@ public final class ClientHooks {
     public record DeathMessage(String text, long gameTime) {}
 
     /** Mixin 类跨包调用：收到本地玩家的死亡包时记下死因。 */
+    /**
+     * 喷气背包飞的那一段每刻说一声：起飞、飞、往下落都是它自己在管上下，落地防护别接手——
+     * 实机飞着往下降时落地防护一遍遍接手刹车、拨回开关，把一趟三格的飞行折腾成九十格。
+     */
+    public static void noteFlightControlled() {
+        FLIGHT_CONTROLLED_AT.set(System.nanoTime());
+    }
+
+    /** 飞完、停下时说一声：不再管着上下。 */
+    public static void clearFlightControlled() {
+        FLIGHT_CONTROLLED_AT.set(0);
+    }
+
+    /** 此刻是不是有飞的那一段在管着上下（最近 0.3 秒内说过）。 */
+    public static boolean flightControlled() {
+        long at = FLIGHT_CONTROLLED_AT.get();
+        return at != 0 && System.nanoTime() - at < FLIGHT_CONTROL_FRESH_NANOS;
+    }
+
     public static void noteDeathMessage(String text, long gameTime) {
         LAST_DEATH_MESSAGE.set(new DeathMessage(text, gameTime));
     }
