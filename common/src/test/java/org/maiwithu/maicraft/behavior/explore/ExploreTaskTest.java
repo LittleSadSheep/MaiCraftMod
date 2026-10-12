@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import net.minecraft.SharedConstants;
@@ -226,6 +227,24 @@ class ExploreTaskTest {
         ExploreDetails details = assertInstanceOf(ExploreDetails.class, result.details());
         assertEquals(ExploreDetails.StopReason.RADIUS_REACHED, details.stopReason());
         assertTrue(walks.currentStopRequests() >= 1, "进入判定带要取消在途段");
+    }
+
+    @Test
+    void 进入判定带那一刻恰好走到_照样收工不干站着() {
+        // 实机（全量测试 10-12）：在判定带上恰好走到航点，收段只认"停下"不认"到了"，人在山顶站了五分钟不收工。
+        WorldMemory memory = memory();
+        walks.enqueue(new ExploreFakes.ScriptedWalk(
+                WalkReport.planning(),
+                WalkReport.onTheWay(new BlockPos(0, 64, 58), false),
+                WalkReport.arrived(new BlockPos(0, 64, 59), false))
+                .stopAnswers(Collections.nCopies(10_000, false).toArray(Boolean[]::new)));
+        ExploreTask task = task(memory, ExploreObjective.survey(), ExploreObjective.Interests.NONE,
+                null, 360, 0, 64, NATURAL);
+        TaskResult result = runToFinish(task);
+
+        assertEquals(TaskResult.Status.DONE, result.status(), () -> "problem: " + result.problem());
+        assertEquals(ExploreDetails.StopReason.RADIUS_REACHED,
+                assertInstanceOf(ExploreDetails.class, result.details()).stopReason());
     }
 
     @Test

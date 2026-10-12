@@ -301,8 +301,11 @@ public final class ExploreTask extends PhasedTask<ExploreTask.Phase> implements 
     private Next<Phase> tickStopping(TickContext context) {
         boolean settled = leg.walk.stop();
         ActionStatus status = runAction(context);
+        // 收段时这一段恰好已经走到了（到达也是站稳了）：同样交出结局。原先只认"停下"，
+        // 走到了的那一段永远等不到"停下"，实机在半径判定带上站了五分钟不收工。
         if (settled || leg.walk.report().state() == WalkReport.State.STOPPED
-                || status instanceof ActionStatus.Failed) {
+                || leg.walk.report().state() == WalkReport.State.ARRIVED
+                || status instanceof ActionStatus.Done || status instanceof ActionStatus.Failed) {
             return leg.pending;
         }
         return Next.stay();
