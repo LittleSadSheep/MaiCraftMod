@@ -34,6 +34,7 @@ import org.maiwithu.maicraft.behavior.navigation.ScaffoldBlocks;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
+import org.maiwithu.maicraft.behavior.navigation.spi.FlyUpGear;
 import org.maiwithu.maicraft.behavior.navigation.spi.StowBeforeWalking;
 import org.maiwithu.maicraft.behavior.navigation.debug.NavigationPathSnapshot;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
@@ -74,6 +75,8 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
     private final ItemsToKeep keeps;
     /** 走路前要收起来的东西（联动登记，误开的喷气背包）；进世界、联动加载后接上，之前没有。 */
     private Supplier<List<StowBeforeWalking>> stows = List::of;
+    /** 能直接飞上高处的装备（联动登记，喷气背包）；进世界、联动加载后接上，之前没有。 */
+    private Supplier<List<FlyUpGear>> flyUps = List::of;
     /** 镜头离引擎要的精确瞄点差这么多度以内算转到位：平滑镜头收敛到 0.3° 吸附，留点余量。 */
     private static final float AIM_SETTLED_DEGREES = 3.0f;
     /** 本刻引擎要的精确瞄点（挖、放）；没要为 null。走到运行按它判断镜头转到位没有，没到位左右键不出手。 */
@@ -94,6 +97,49 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
     /** 接上联动登记的走路前要收起来的东西。 */
     public void stowBeforeWalking(Supplier<List<StowBeforeWalking>> stows) {
         this.stows = stows;
+    }
+
+    /** 接上联动登记的能直接飞上高处的装备。 */
+    public void flyUpGear(Supplier<List<FlyUpGear>> flyUps) {
+        this.flyUps = flyUps;
+    }
+
+    /**
+     * 寻路引擎算路时问：这一趟能不能飞上高处、一次最多几格、每格几刻。只在走路正在推进、拿得到这一刻的角色时答，
+     * 问遍登记的装备取飞得最高的那一样；都没有为空。
+     */
+    public static Optional<FlyUpGear.Reach> flyUpReach() {
+        BaritoneInternals internals = ATTACHED.get();
+        PlayerContext context = internals == null ? null : internals.tickContext;
+        if (context == null || context.localPlayer() == null) return Optional.empty();
+        Optional<FlyUpGear.Reach> best = Optional.empty();
+        for (FlyUpGear gear : internals.flyUps.get()) {
+            Optional<FlyUpGear.Reach> reach = gear.reach(context);
+            if (reach.isPresent() && (best.isEmpty() || reach.get().maxBlocks() > best.get().maxBlocks())) best = reach;
+        }
+        return best;
+    }
+
+    /** 走到"飞上去"那一步：装备已经开好了吗。 */
+    public static boolean flyUpReady() {
+        BaritoneInternals internals = ATTACHED.get();
+        PlayerContext context = internals == null ? null : internals.tickContext;
+        return context != null && internals.flyUpGearFor(context).map(gear -> gear.ready(context)).orElse(false);
+    }
+
+    /** 走到"飞上去"那一步、装备还没开好：开它的做法；身上已经没有能飞的装备为空。 */
+    Optional<Action> prepareFlyUp(PlayerContext context) {
+        Optional<FlyUpGear> gear = flyUpGearFor(context);
+        if (gear.isEmpty() || gear.get().ready(context)) return Optional.empty();
+        return Optional.of(gear.get().prepare(context));
+    }
+
+    // 此刻能飞的那一样装备：登记的里第一样报得出能飞多高的。
+    private Optional<FlyUpGear> flyUpGearFor(PlayerContext context) {
+        for (FlyUpGear gear : flyUps.get()) {
+            if (gear.ready(context) || gear.reach(context).isPresent()) return Optional.of(gear);
+        }
+        return Optional.empty();
     }
 
     /** 此刻走路前要不要先收起什么：问遍登记的，第一样要收的给出做法。 */

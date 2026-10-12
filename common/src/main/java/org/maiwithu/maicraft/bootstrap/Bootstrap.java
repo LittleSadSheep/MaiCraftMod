@@ -581,6 +581,8 @@ public final class Bootstrap {
             compat.serverReads().forEach(session.router()::register);
             // 走路前要收起来的东西（误开的喷气背包）交给寻路：每次问都读当时的登记表。
             walks.stowBeforeWalking(() -> compat.stowsBeforeWalking());
+            // 能直接飞上高处的装备（喷气背包）交给寻路：算路时拿它和垫方块往上搭比哪个省事。
+            walks.flyUpGear(() -> compat.flyUpGears());
             tools = goalTools(abilities, goals, clientWork, taskEvents, chatEvents, () -> worldScope[0], recentCalls,
                     lookupTool(), () -> reminders == null ? List.of() : reminders.snapshot());
             try {

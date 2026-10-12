@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.behavior.survival.spi.RangedWeapon;
 import org.maiwithu.maicraft.behavior.travel.spi.TravelMode;
 import org.maiwithu.maicraft.behavior.navigation.spi.ObstacleSource;
 import org.maiwithu.maicraft.behavior.landing.spi.FallBrake;
+import org.maiwithu.maicraft.behavior.navigation.spi.FlyUpGear;
 import org.maiwithu.maicraft.behavior.navigation.spi.StowBeforeWalking;
 import org.maiwithu.maicraft.behavior.perception.spi.ModSight;
 import org.maiwithu.maicraft.ability.vehicle.spi.TrainScheduler;
@@ -72,6 +73,7 @@ public final class CompatRegistry {
     private final List<ObstacleSource> obstacleSources = new ArrayList<>();
     private final List<FallBrake> fallBrakes = new ArrayList<>();
     private final List<StowBeforeWalking> stowsBeforeWalking = new ArrayList<>();
+    private final List<FlyUpGear> flyUpGears = new ArrayList<>();
     private final List<ModSight> modSights = new ArrayList<>();
     private final List<ToBuild<VehicleAssembler>> vehicleAssemblers = new ArrayList<>();
     private final List<ToBuild<VehicleDriver>> vehicleDrivers = new ArrayList<>();
@@ -80,7 +82,7 @@ public final class CompatRegistry {
     /** 全部的槽：一个模组交接到一半出错时，按交接前的长度一起撤回。新加槽时把它的列表加进来。 */
     private final List<List<?>> slots = List.of(itemSources, machineTypes, networkReaders, questBooks,
             breakAccelerators, dismantleTools, menuLayouts, carriedBackpacks, knowledgeSources, recipeViewers,
-            serverReads, placementRules, rangedWeapons, itemSettings, travelModes, obstacleSources, fallBrakes, stowsBeforeWalking, modSights, vehicleAssemblers,
+            serverReads, placementRules, rangedWeapons, itemSettings, travelModes, obstacleSources, fallBrakes, stowsBeforeWalking, flyUpGears, modSights, vehicleAssemblers,
             vehicleDrivers, vehicleReaders, trainSchedulers);
     private final List<String> decisions = new ArrayList<>();
 
@@ -270,6 +272,11 @@ public final class CompatRegistry {
         stowsBeforeWalking.add(new CompatStowBeforeWalking(module, stow));
     }
 
+    /** 联动入口交一样能直接飞上高处的装备（喷气背包）：包一层后交给寻路；模组停用后当没有。 */
+    public void flyUpGear(CompatModule module, FlyUpGear gear) {
+        flyUpGears.add(new CompatFlyUpGear(module, gear));
+    }
+
     /** 联动入口交一个障碍来源（会动的结构）：包一层后交给寻路；模组停用后不再报障碍。 */
     public void obstacleSource(CompatModule module, ObstacleSource source) {
         obstacleSources.add(new CompatObstacleSource(module, source));
@@ -405,6 +412,11 @@ public final class CompatRegistry {
     /** 联动模组登记的走路前要收起来的东西：走路每刻推进前问一遍。 */
     public List<StowBeforeWalking> stowsBeforeWalking() {
         return Collections.unmodifiableList(stowsBeforeWalking);
+    }
+
+    /** 联动模组登记的能直接飞上高处的装备：寻路算路时问它能飞多高。 */
+    public List<FlyUpGear> flyUpGears() {
+        return Collections.unmodifiableList(flyUpGears);
     }
 
     /** 联动模组的障碍来源：进世界时交给寻路。 */

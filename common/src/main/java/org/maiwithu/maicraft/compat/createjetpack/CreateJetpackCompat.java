@@ -32,6 +32,8 @@ public final class CreateJetpackCompat extends CompatModule {
         registry.fallBrake(this, context -> JetpackFallBrake.start(this, context));
         // 走路前把误开的喷气背包关上：开着走路一起跳就被推高、走下台阶悬在半空。
         registry.stowBeforeWalking(this, new JetpackStow(this));
+        // 寻路时直接飞上高处，不再一块块垫圆石往上搭：穿着的喷气背包、气够才算。
+        registry.flyUpGear(this, new JetpackFlyUp(this));
     }
 
     /** 身上的喷气背包；见 {@link JetpackControls#pack}。 */
