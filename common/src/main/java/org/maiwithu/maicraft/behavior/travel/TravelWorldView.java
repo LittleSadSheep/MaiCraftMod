@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.travel;
 
+import java.util.OptionalInt;
+
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
@@ -15,4 +17,12 @@ public interface TravelWorldView {
 
     /** 角色此刻的水平朝向，只给东南西北之一；相对的前后左右由解析换算成绝对方向。 */
     Target.Toward currentFacing();
+
+    /**
+     * 这一柱列地表能站的那一格（脚的高度）：这一片加载着才读得到，树叶不算地面；读不到为空。
+     * 只给了 x/z 的目的地按它落到地面上，不在同一列的坑底、洞里算"到了"。
+     */
+    default OptionalInt surfaceFeet(int x, int z) {
+        return OptionalInt.empty();
+    }
 }

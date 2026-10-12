@@ -27,6 +27,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.OptionalInt;
 import java.util.Optional;
 import java.util.HashMap;
 import java.util.Map;
@@ -123,6 +124,13 @@ final class TravelFakes {
 
         @Override public Target.Toward currentFacing() {
             return facing;
+        }
+
+        /** 地表脚的高度；没摆为读不到（那一片没加载）。 */
+        Integer surface;
+
+        @Override public OptionalInt surfaceFeet(int x, int z) {
+            return surface == null ? OptionalInt.empty() : OptionalInt.of(surface);
         }
     }
 

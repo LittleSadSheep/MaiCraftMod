@@ -10,6 +10,7 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
 
 /**
  * 目的地解析：把目标对象读成一段导航要求，只读现场、给结论，不动角色。
@@ -42,6 +43,9 @@ public final class DestinationResolver {
         /** 解析不下去，带着现场事实结束。 */
         record DeadEnd(Problem problem) implements Resolution {}
     }
+
+    /** 按地表落点走时至少放宽这么多（格）：地表那一格可能是一根草、一块台阶，站在旁边就算到。 */
+    private static final double SURFACE_SLACK = 1.5;
 
     private final TravelWorldView world;
     private final ReadsRememberedPlaces rememberedPlaces;
@@ -108,7 +112,13 @@ public final class DestinationResolver {
             return routeAcross(position.dimension(), destination);
         }
         if (position.y() == null) {
-            // 高度纪律：没给 y 就不猜高度，先走到那一柱列，到了再找能站的格子。
+            // 没给 y：那一列加载着就落到地表（真人说"去那儿"指的是地面上，不是同一列的坑底、洞里）；
+            // 没加载的不猜高度，先走到那一柱列，到了再找能站的格子。
+            OptionalInt surface = world.surfaceFeet(position.x(), position.z());
+            if (surface.isPresent()) {
+                return new Resolution.Ready(TravelDestination.confirmed(new WorldPosition(position.x(),
+                        surface.getAsInt(), position.z(), position.dimension()), Math.max(radius, SURFACE_SLACK)));
+            }
             return new Resolution.Ready(TravelDestination.anyHeight(
                     position.x(), position.z(), radius, position.dimension()));
         }

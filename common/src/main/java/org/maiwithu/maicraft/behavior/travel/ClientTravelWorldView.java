@@ -2,8 +2,11 @@
 package org.maiwithu.maicraft.behavior.travel;
 
 import java.util.Objects;
+import java.util.OptionalInt;
 import java.util.function.Supplier;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.levelgen.Heightmap;
 
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Target;
@@ -32,6 +35,16 @@ public final class ClientTravelWorldView implements TravelWorldView {
         LocalPlayer player = current.localPlayer();
         return new WorldPosition((int) Math.floor(player.getX()), (int) Math.floor(player.getY()),
                 (int) Math.floor(player.getZ()), player.level().dimension().location().toString());
+    }
+
+    @Override
+    public OptionalInt surfaceFeet(int x, int z) {
+        PlayerContext current = context.get();
+        if (current == null || current.level() == null) return OptionalInt.empty();
+        BlockPos column = new BlockPos(x, 0, z);
+        if (!current.level().hasChunkAt(column)) return OptionalInt.empty();
+        // 地表最高的实心（不算树叶）方块上面那一格就是站的地方。
+        return OptionalInt.of(current.level().getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z));
     }
 
     @Override

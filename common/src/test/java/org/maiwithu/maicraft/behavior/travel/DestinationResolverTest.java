@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -54,6 +55,15 @@ class DestinationResolverTest {
         assertEquals(10, column.x);
         assertEquals(-30, column.z);
         assertEquals(2, column.radius);
+    }
+
+    @Test
+    void positionWithoutHeightLandsOnTheSurfaceWhenLoaded() {
+        // 实机（全量测试 10-12）：只给 x/z 去"出坑回地面"，同一列的坑底就算到了。那一列加载着就落到地表。
+        world.surface = 147;
+        var ready = ready(resolver.resolve(new Target.Position(10, null, -30, null), 0));
+        assertTrue(ready.navGoal().isAt(new BlockPos(10, 147, -30)), "站到地表那一格");
+        assertFalse(ready.navGoal().isAt(new BlockPos(10, 143, -30)), "同一列的坑底不算到");
     }
 
     @Test
