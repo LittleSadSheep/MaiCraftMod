@@ -11,6 +11,7 @@ import java.util.function.Predicate;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.FullRun;
@@ -100,6 +101,10 @@ final class CreateMachineType implements MachineType {
         // 机械手：手里拿着什么、什么模式并进读数，配方要它手里拿着东西时看这一项。
         MachineState state = kind.work() == CreateMachineCatalog.Work.DEPLOYER
                 ? DeployerSettings.withReading(kinetic, compat.deployer(level, at)) : kinetic;
+        // 传送带：读数里写它往哪边送，带子转向对不对、东西会不会从头上飞出去，看这一项。
+        if (kind.work() == CreateMachineCatalog.Work.BELT && here.hasProperty(BlockStateProperties.HORIZONTAL_FACING)) {
+            state = CreateReadings.withBeltHeading(state, here.getValue(BlockStateProperties.HORIZONTAL_FACING));
+        }
         return withReadouts(state, level, at);
     }
 

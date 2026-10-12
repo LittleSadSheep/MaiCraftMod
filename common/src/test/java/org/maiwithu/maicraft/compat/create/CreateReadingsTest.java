@@ -215,4 +215,14 @@ class CreateReadingsTest {
         assertEquals(MachineState.Activity.RUNNING, table.activity(), "蓝图桌在传算在干活");
         assertEquals(0.5, table.progress(), 1e-6);
     }
+
+    @Test
+    void 传送带往哪边送按带子朝向和转速正负算() {
+        // 实机那一圈：北边那段朝东、转速 -256 往东送；东边那段朝南、转速 -256 往北送（反了，东西从北头飞出去）。
+        assertEquals(Direction.EAST, CreateReadings.beltHeading(Direction.EAST, -256).orElseThrow());
+        assertEquals(Direction.NORTH, CreateReadings.beltHeading(Direction.SOUTH, -256).orElseThrow());
+        assertEquals(Direction.WEST, CreateReadings.beltHeading(Direction.WEST, 256).orElseThrow());
+        assertEquals(Direction.SOUTH, CreateReadings.beltHeading(Direction.NORTH, 256).orElseThrow());
+        assertTrue(CreateReadings.beltHeading(Direction.EAST, 0).isEmpty(), "不转不送");
+    }
 }

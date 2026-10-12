@@ -209,7 +209,9 @@ final class CreateMachineKnowledge implements KnowledgeSource {
             case BELT -> text.append("- machine_build：installations 写 `{kind: create:belt, offsets: [从一端到另一端]}`；")
                     .append("两端那两格在 cells 里写与带子垂直的 `create:shaft`（不能用机壳传动杆），中间不写或写 air；")
                     .append("沿东西或南北走，可以上下斜四十五度或竖直，两端距离小于服务器配置（默认 20）。")
-                    .append("每段两端都要有和带子走向一致的轴；拐弯分成两段\n");
+                    .append("每段两端都要有和带子走向一致的轴；拐弯分成两段\n")
+                    .append("- 往带子上放东西要扔上去（drop 的 target 指那一格），手持东西右键放不上；空手右键带子取下上面的东西。")
+                    .append("带子往哪边送看 machine_inspect 读数里的 moving_toward，一段带子的东西送到头会落到前方那一格\n");
             case CHAIN_CONVEYOR -> text.append("- machine_build：installations 写 `{kind: create:chain_conveyor, offsets: [台 A, 台 B]}`，")
                     .append("两台本身写进 cells；相距小于服务器配置（默认 32）、不小于两格半，不能竖直，")
                     .append("高差不超过水平距离；锁链约每 2.5 格一根\n");

@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.ItemStack;
 
@@ -67,6 +68,28 @@ final class CreateReadings {
     }
 
     /** 物品叠合成"什么、几件"：同一种东西合并，空的跳过。 */
+    /**
+     * 传送带往哪边送，纯函数，照 Create 的算法：沿带子朝向那根轴，"转速为负"与"轴是东西向"恰有一个成立时往负方向，
+     * 否则往正方向；不转为空。
+     */
+    static Optional<Direction> beltHeading(Direction facing, double speed) {
+        if (speed == 0 || !facing.getAxis().isHorizontal()) return Optional.empty();
+        Direction.Axis axis = facing.getAxis();
+        boolean negative = speed < 0 ^ axis == Direction.Axis.X;
+        return Optional.of(Direction.fromAxisAndDirection(axis,
+                negative ? Direction.AxisDirection.NEGATIVE : Direction.AxisDirection.POSITIVE));
+    }
+
+    /** 传送带的读数里加上它往哪边送（moving_toward）：人一眼看得出带子往哪走，LLM 只能读这一项。 */
+    static MachineState withBeltHeading(MachineState state, Direction facing) {
+        if (state.speed() == null) return state;
+        Optional<Direction> heading = beltHeading(facing, state.speed());
+        if (heading.isEmpty()) return state;
+        Map<String, Object> readings = new LinkedHashMap<>(state.readings());
+        readings.put("moving_toward", heading.get().getName());
+        return new MachineState(state.activity(), state.speed(), state.progress(), state.shown(), readings, state.note());
+    }
+
     static List<MachineState.Shown> shown(List<ItemStack> stacks) {
         Map<String, Integer> counts = new LinkedHashMap<>();
         for (ItemStack stack : stacks) {
