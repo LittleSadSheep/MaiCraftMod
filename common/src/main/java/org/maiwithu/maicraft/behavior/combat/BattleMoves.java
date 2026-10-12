@@ -38,6 +38,14 @@ public interface BattleMoves {
     /** 按挑好的一步迈这一刻；faceEntityId 为 -1 时朝走的方向。 */
     void step(TickContext context, int faceEntityId, Footwork.Step step);
 
+    /**
+     * 迈一步但不动镜头：手上这一下正瞄着（瞄点跟着对方横移、留在它碰撞箱里），走位要是再把镜头拉回它身体中心，
+     * 出手的瞄点就白算了。按键量按此刻实际朝向折算。没接上时同普通迈步。
+     */
+    default void stepKeepingAim(TickContext context, Footwork.Step step) {
+        step(context, -1, step);
+    }
+
     /** 交给寻路走一段（只走不改地形）。 */
     Action walk(GoalCompiler.Compiled goal);
 
@@ -63,6 +71,11 @@ public interface BattleMoves {
      * 夜里不垫（交给夜晚需求的挖三填一）。没接上时不能。
      */
     default boolean canPillar(TickContext context) {
+        return false;
+    }
+
+    /** 天黑了：撤不掉又打不过时不垫高，挖坑把自己封起来（由调用方交给挖三填一）。没接上时按白天。 */
+    default boolean night(TickContext context) {
         return false;
     }
 

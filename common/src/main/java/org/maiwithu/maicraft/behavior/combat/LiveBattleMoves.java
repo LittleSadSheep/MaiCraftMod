@@ -87,6 +87,17 @@ public final class LiveBattleMoves implements BattleMoves {
     }
 
     @Override
+    public void stepKeepingAim(TickContext context, Footwork.Step step) {
+        CombatStepping.move(context, CombatStepping.KEEP_AIM, step);
+    }
+
+    @Override
+    public boolean night(TickContext context) {
+        var self = context.player() == null ? null : context.player().localPlayer();
+        return self != null && !self.level().isDay();
+    }
+
+    @Override
     public Action walk(GoalCompiler.Compiled goal) {
         return new Walk(goal);
     }

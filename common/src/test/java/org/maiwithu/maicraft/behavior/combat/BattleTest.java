@@ -64,6 +64,17 @@ class BattleTest {
         BattleMoves.Posture posture = BattleMoves.Posture.GROUNDED;
         boolean canPillar;
         int pillars;
+        boolean night;
+        /** 出手被拒（原生攻击没得到确认）。 */
+        boolean rejecting;
+        int keptAim;
+
+        @Override public boolean night(TickContext context) { return night; }
+
+        @Override public void stepKeepingAim(TickContext context, Footwork.Step step) {
+            keptAim++;
+            steps.add(step);
+        }
 
         @Override public boolean canPillar(TickContext context) { return canPillar; }
 
@@ -77,7 +88,8 @@ class BattleTest {
         @Override public Action strike(TickContext context, int entityId) {
             return new Instant(() -> {
                 strikes++;
-                return ActionStatus.done();
+                return rejecting ? ActionStatus.failed(Problem.of(Problem.Kind.REFUSED_BY_GAME, "没确认"))
+                        : ActionStatus.done();
             });
         }
 
@@ -267,6 +279,47 @@ class BattleTest {
         assertTrue(closedIn, "够不着就往里凑");
         for (int tick = 20; tick < 80; tick++) fight.tick(new Tick(tick));
         assertTrue(fight.unreachable().contains(1), "凑到底还够不着：当它走不到");
+    }
+
+    @Test
+    void swingingLeavesTheAimToTheStrike() {
+        // 出手那一刻脚照迈，但镜头留给出手的瞄点（它跟着对方横移），走位不把准星拽回身体中心。
+        Senses senses = new Senses();
+        senses.threats.add(zombie(1, 1.5));
+        Moves moves = new Moves();
+        battle(senses, moves).tick(new Tick(0));
+        assertEquals(1, moves.keptAim);
+        assertTrue(moves.lastStep().dx() < 0, "照样往外退");
+    }
+
+    @Test
+    void aRejectedStrikeTriesAnotherAngleThenGivesUp() {
+        Senses senses = new Senses();
+        senses.threats.add(zombie(1, 2.6));
+        Moves moves = new Moves();
+        moves.rejecting = true;
+        Battle fight = battle(senses, moves);
+        fight.tick(new Tick(0));
+        // 刚才那个站位被拒：在带子里绕开它换个方位。
+        fight.tick(new Tick(1));
+        assertTrue(Math.abs(moves.lastStep().dz()) > 0.5, "绕到侧面再出手，实际 " + moves.lastStep());
+        fight.tick(new Tick(2));
+        assertTrue(fight.unreachable().contains(1), "连着被拒三次：这只打不出去，换下一只");
+    }
+
+    @Test
+    void cornedAtNightAsksForShelter() {
+        Senses senses = new Senses();
+        senses.threats.add(zombie(1, 6));
+        senses.health = 4;
+        Moves moves = new Moves();
+        moves.walkStatus = ActionStatus.failed(Problem.of(Problem.Kind.UNREACHABLE, "死路"));
+        moves.night = true;
+        Battle fight = battle(senses, moves);
+        fight.offerShelter();
+        for (int tick = 0; tick < 3; tick++) fight.tick(new Tick(tick));
+        assertEquals(Battle.State.NEEDS_SHELTER, fight.tick(new Tick(3)).state(), "天黑、退无可退、打不过：挖坑自保");
+        assertEquals(Battle.State.FIGHTING, fight.tick(new Tick(4)).state(), "一仗只要一次，回来了就背水一战");
     }
 
     @Test

@@ -61,6 +61,15 @@ public final class CombatStepping {
         PlayerContext player = tick.player();
         LocalPlayer self = player == null ? null : player.localPlayer();
         if (self == null) return;
+        if (faceEntityId == KEEP_AIM) {
+            // 不动镜头：按此刻实际朝向把世界方向折成前后左右，镜头留给出手的瞄点。
+            double radians = Math.toRadians(self.getYRot());
+            float forward = (float) Mth.clamp(-step.dx() * Math.sin(radians) + step.dz() * Math.cos(radians), -1, 1);
+            float strafe = (float) Mth.clamp(step.dx() * Math.cos(radians) + step.dz() * Math.sin(radians), -1, 1);
+            player.input().applyMovement(new PlayerInput.Movement(forward, strafe, step.jump(), false, false),
+                    player.clientTick());
+            return;
+        }
         Entity target = faceEntityId < 0 ? null : self.level().getEntity(faceEntityId);
         float yaw;
         float pitch;
@@ -86,6 +95,9 @@ public final class CombatStepping {
         player.input().applyMovement(new PlayerInput.Movement(forward, strafe, step.jump(), false,
                 step.sprint() && forward > 0.8f), player.clientTick());
     }
+
+    /** 迈步时不动镜头（手上正瞄着出手）。 */
+    public static final int KEEP_AIM = -2;
 
     // 身子过得去：脚和头那两格都没有碰撞。
     private static boolean passable(Level level, BlockPos feet) {

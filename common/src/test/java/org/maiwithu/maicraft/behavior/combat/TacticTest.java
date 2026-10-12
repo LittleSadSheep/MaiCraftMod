@@ -72,6 +72,14 @@ class TacticTest {
     }
 
     @Test
+    void cornedAtNightDigsInEvenWithShooters() {
+        Tactic.Memory night = new Tactic.Memory(-1, false, true, Set.of(), false, false, false, false, true);
+        assertInstanceOf(Tactic.DigIn.class, decide(me(4, true, false), night, zombie(1, 3),
+                foe(2, 10, ThreatAssessment.Kind.RANGED, false, true)), "封住的坑射不进来");
+        assertInstanceOf(Tactic.Melee.class, decide(me(20, true, false), night, zombie(1, 3)), "打得过就不躲");
+    }
+
+    @Test
     void picksTheMostUrgentAndSticksToTheLockedOne() {
         // 近处的苦力怕比贴脸的僵尸还急。
         assertEquals(2, target(decide(me(20, true, false), Tactic.Memory.FRESH, zombie(1, 2), creeper(2, 6, false))));

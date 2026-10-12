@@ -33,7 +33,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 public final class Battle {
 
     /** 这一刻在做什么。 */
-    public enum State { FIGHTING, SHOOTING, EVADING, RETREATING, HOLDING, ESCAPED, FINISHED }
+    public enum State { FIGHTING, SHOOTING, EVADING, RETREATING, HOLDING, ESCAPED, FINISHED, NEEDS_SHELTER }
 
     /**
      * 一刻的结果。
@@ -68,6 +68,10 @@ public final class Battle {
     static final double REPLAN_AFTER = 3.0;
     /** 原生攻击连着被拒这么多次才当打不出去，换下一只。 */
     static final int MAX_REJECTS = 3;
+    /** 被拒一次后这么多刻里绕开刚才那个站位，换个方位再出手。 */
+    static final int REJECT_SIDESTEP_TICKS = 15;
+    /** 绕开刚才站位多远（格）。 */
+    static final double REJECT_SIDESTEP = 1.2;
     /** 补站位：每这么多刻外沿往里收一步。 */
     static final int TRIM_EVERY = 5;
     /** 补站位每步收多少格。 */
@@ -103,6 +107,12 @@ public final class Battle {
     /** 上一刻每只的距离：估它冲过来多快，拉弓的距离带按它留。 */
     private final Map<Integer, Double> lastDistance = new HashMap<>();
     private String doing = "观察战场";
+    /** 被拒的那个站位与还要绕开它几刻。 */
+    private double[] rejectedAt;
+    private int sidestepTicks;
+    /** 调用方接得住"挖坑自保"（自卫交给挖三填一）；一仗只要一次。 */
+    private boolean offersShelter;
+    private boolean shelterAsked;
     /** 就地垫高：试过了没有（一仗只垫一次）、站没站上柱顶、柱顶多高。 */
     private boolean pillarTried;
     private boolean perched;
@@ -132,8 +142,9 @@ public final class Battle {
         // 被打下柱顶（击退、柱子被炸）：不再算站在高处。
         if (perched && field.me().y() < perchY - 0.5) perched = false;
         boolean mayPillar = !pillarTried && cornered && moves.canPillar(context);
+        boolean mayDigIn = offersShelter && !shelterAsked && cornered && moves.night(context);
         Tactic.Plan plan = Tactic.decide(field, new Tactic.Memory(locked, retreating, cornered, unreachable,
-                bow.givenUp(), bow.shooting(), mayPillar || pillar != null, perched));
+                bow.givenUp(), bow.shooting(), mayPillar || pillar != null, perched, mayDigIn));
         if (pillar != null && !(plan instanceof Tactic.PillarUp)) {
             // 垫到一半处境变了（回了血、来了射手）：垫高收尾，按新打法来。
             pillar.close();
@@ -143,6 +154,12 @@ public final class Battle {
             case Tactic.EvadeBlast evade -> evade(context, field, evade.bomb());
             case Tactic.Withdraw withdraw -> withdraw(context, field, withdraw.why());
             case Tactic.PillarUp pillarUp -> pillarUp(context, field, pillarUp.why());
+            case Tactic.DigIn digIn -> {
+                // 挖坑熬夜是整夜的事，引擎做不了：收起手脚，交给调用方（自卫接挖三填一）。
+                shelterAsked = true;
+                close();
+                yield new Moment(State.NEEDS_SHELTER, digIn.why(), false, false, false, -1, digIn.why(), true);
+            }
             case Tactic.Melee melee -> melee(context, field, melee.target());
             case Tactic.Shoot shoot -> shoot(context, field, shoot.target());
             case Tactic.KeepClear keep -> keepClear(context, field, keep.why());
@@ -200,7 +217,7 @@ public final class Battle {
         if (pursuer != null && pursuer.threat().visible() && pursuer.imminent()) {
             dropWalk();
             boolean inReach = pursuer.threat().withinReach(me.reach());
-            boolean struck = inReach && swing(context, pursuer.id());
+            boolean struck = inReach && swing(context, pursuer.id(), me);
             if (!inReach) dropStrike();
             moves.guard(context, pursuer.distance(), inReach && me.attackReady());
             Footwork.Step step = Footwork.choose(me.x(), me.z(),
@@ -297,12 +314,14 @@ public final class Battle {
             jumpNow = false;
         }
         boolean holdSwing = leaping && (posture.onGround() || !posture.falling());
-        boolean struck = inReach && !holdSwing && swing(context, target.id());
+        boolean swinging = inReach && !holdSwing;
+        boolean struck = swinging && swing(context, target.id(), me);
         if (!inReach) dropStrike();
         if (threat.dangerRadius() > 0) moves.guard(context, threat.distance(), inReach && me.attackReady());
         else moves.lowerGuard();
         Footwork.Band band = trimmed(meleeBand(me, threat, me.attackReady()), target.id(), inReach, threat.visible());
         boolean moved;
+        if (sidestepTicks > 0) sidestepTicks--;
         if (perched) {
             // 站在柱顶：脚不动（一挪就掉下去），只砍够得着的。
             dropWalk();
@@ -310,10 +329,17 @@ public final class Battle {
             moved = false;
         } else if (near(me, threat, band.outer())) {
             dropWalk();
-            Footwork.Step step = Footwork.choose(me.x(), me.z(),
-                    new Footwork.Stance(band, sideHazards(field, target.id(), SIDE_MARGIN), false), moves.ground(context));
+            List<Footwork.Hazard> hazards = sideHazards(field, target.id(), SIDE_MARGIN);
+            if (sidestepTicks > 0 && rejectedAt != null) {
+                // 刚被拒了一下：在带子里绕开刚才那个站位，换个方位再出手（方块边角、栅栏缝常挡着那一个角度）。
+                hazards.add(new Footwork.Hazard(rejectedAt[0], rejectedAt[1], REJECT_SIDESTEP));
+            }
+            Footwork.Step step = Footwork.choose(me.x(), me.z(), new Footwork.Stance(band, hazards, false),
+                    moves.ground(context));
             if (jumpNow) step = new Footwork.Step(step.dx(), step.dz(), true, false);
-            moves.step(context, target.id(), step);
+            // 这一刻手上正瞄着出手：脚照迈，镜头留给出手的瞄点（它跟着对方横移、夹在碰撞箱里）。
+            if (swinging) moves.stepKeepingAim(context, step);
+            else moves.step(context, target.id(), step);
             moved = !step.standing() || jumpNow;
         } else {
             List<ThreatField.Threat> threats = pathThreats(field, -1);
@@ -466,8 +492,9 @@ public final class Battle {
         return status instanceof ActionStatus.Running running && running.progressed();
     }
 
-    // 出手一下：同一只沿用进行中的出手；打中了清掉等下一下，连着被拒三次就当这只打不出去，换下一只。
-    private boolean swing(TickContext context, int targetId) {
+    // 出手一下：同一只沿用进行中的出手；打中了清掉等下一下。被拒一次记下站位、接下来绕开它换个方位再出手，
+    // 连着被拒三次就当这只打不出去，换下一只。
+    private boolean swing(TickContext context, int targetId, Battlefield.Me me) {
         if (strike != null && strikeTarget != targetId) dropStrike();
         if (strike == null) {
             strike = moves.strike(context, targetId);
@@ -481,9 +508,12 @@ public final class Battle {
         }
         if (status instanceof ActionStatus.Failed) {
             dropStrike();
+            rejectedAt = new double[] {me.x(), me.z()};
+            sidestepTicks = REJECT_SIDESTEP_TICKS;
             if (++rejects >= MAX_REJECTS) {
                 unreachable.add(targetId);
                 rejects = 0;
+                sidestepTicks = 0;
             }
         }
         return false;
@@ -531,6 +561,11 @@ public final class Battle {
         if (strike != null) strike.pause();
         if (walk != null) walk.pause();
         bow.close();
+    }
+
+    /** 调用方接得住挖坑自保：夜里退无可退、打不过时引擎报 {@link State#NEEDS_SHELTER} 交给它。 */
+    public void offerShelter() {
+        offersShelter = true;
     }
 
     /** 已在撤离（甩开前不回头）。 */
