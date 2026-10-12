@@ -50,6 +50,9 @@ import java.util.Set;
  * <p>不急（SOON）的需求碰上一直停下不安全的任务（飞着、开着车，连着两秒以上）时不干等：先叫手上的任务到安全的地方
  * （就近落地、刹停），它停稳了能打断了，需求照常插进来；收尾期间需求没了或缓成 LATER，就叫它照原样接着做。
  * 一会儿就过去的停不下（坐下、迈上船沿、悬空放一格）照常等它自己过去。
+ *
+ * <p>临时任务之间也分先后：正在办的临时任务只让给更急的需求，同样急时只让给登记在它前面的需求。
+ * 自卫打到一半不会被"天黑了"抢去找床（实机这样被僵尸追着打死）；反过来找床时挨打照样先自卫。
  */
 public final class ControlLoop {
     private static final Logger LOG = LoggerFactory.getLogger(ControlLoop.class);
@@ -73,6 +76,8 @@ public final class ControlLoop {
     private final DeathDecisionHost deathDecisions;
     /** 上一刻是否已在死亡停摆里；只在本刻刚看到死亡时收尾插着的任务、发一次事件。 */
     private boolean waitingRespawn;
+    /** 上一刻看到的重生次数；还没看过为 -1。 */
+    private long seenRespawns = -1;
     /** 主任务被停在半路时的一句话说明；没被停过为 null。 */
     private String parkedWhere;
     /** 从底到顶的运行栈；最底是主任务，上面是插进来的临时任务。只在客户端线程读写。 */
@@ -216,6 +221,13 @@ public final class ControlLoop {
         if (player != null && player.isDeadOrDying()) {
             return waitForRespawn(context);
         }
+        if (player != null) {
+            // 重生次数变了却没经过死亡停摆：服务器开着立即重生，死亡落在两刻之间。
+            long respawns = player.respawns();
+            boolean missedDeath = seenRespawns >= 0 && respawns != seenRespawns && !waitingRespawn;
+            seenRespawns = respawns;
+            if (missedDeath) return diedBetweenTicks(context);
+        }
         if (waitingRespawn) {
             // 从死亡停摆里走出来（重生或以别的方式回到活体）：本轮死亡决策了结，下次死亡再挂新的。
             waitingRespawn = false;
@@ -223,7 +235,7 @@ public final class ControlLoop {
         }
         if (stack.isEmpty()) {
             // 手上没有任务，没有东西要保护：任何生存需求此刻都能插进来，找空当的也不例外。
-            Choice choice = choose(context, Interruptibility.BETWEEN_ACTIONS, null);
+            Choice choice = choose(context, Interruptibility.BETWEEN_ACTIONS, null, null);
             return choice.chosen == null ? Decision.IDLE : takeOver(choice, context);
         }
         Frame current = top();
@@ -255,7 +267,7 @@ public final class ControlLoop {
             current.unsafeSince = context.gameTick();
         }
         // 需求看此刻真正在做事的那一层（目标外壳里的能力任务），才认得出它自己管灯、自己在打仗。
-        Choice choice = choose(context, askedInterruptibility, current.task.activeTask());
+        Choice choice = choose(context, askedInterruptibility, current.task.activeTask(), current);
         if (choice.chosen != null) {
             // 能走到这里，说明打断规则已经放行：NOW 本来就不管停不停得下，SOON 与 LATER 只在停下安全时才选得上。
             LOG.info("{}被{}打断（{}），插进临时任务", current.task.describe(), choice.chosen.name(), choice.urgency);
@@ -289,6 +301,40 @@ public final class ControlLoop {
     }
 
     /**
+     * 服务器开着立即重生：死亡和重生落在两刻之间，死亡界面一刻都没出现。插着的临时任务照样按"角色没了"收尾——
+     * 找床、自卫的打点都是死前那个地方的事，带到重生点只会接着找死前那片地方的床；主任务停一下，下一刻从新位置接着做。
+     * 不挂死亡决策：已经重生了，没有可选的。原先看不到这次死亡，重生后还按死前的现场"缺床"去杀羊。
+     */
+    private Decision diedBetweenTicks(TickContext context) {
+        endTempTasks();
+        backoffs.clear();
+        failureStreaks.clear();
+        PlayerContext body = context.player();
+        DeathFacts facts = body.deathFacts();
+        String cause = facts == null || facts.cause() == null ? "" : "（" + facts.cause() + "）";
+        String where = facts == null ? "" : String.format("，已经在 %.0f, %.0f, %.0f 重生", facts.x(), facts.y(), facts.z());
+        events.publish(TaskEvent.Kind.CHARACTER_DIED,
+                "角色死了" + cause + where + "（服务器立即重生）；插着的任务已结束，主任务从重生的地方接着做");
+        LOG.info("角色死亡并立即重生：插着的临时任务收尾");
+        return new Decision.WaitingRespawn(stack.isEmpty() ? null : stack.getFirst().task);
+    }
+
+    // 角色没了：插着的临时任务按"角色不在了"收尾弹出，主任务停手（不收尾）。
+    private void endTempTasks() {
+        for (int i = stack.size() - 1; i >= 0; i--) {
+            Frame frame = stack.get(i);
+            if (frame.from != null) {
+                stack.remove(i);
+                frame.close(CloseReason.PLAYER_GONE);
+            }
+        }
+        // 主任务停在原地：先停手上的动作，别让上一刻的输入继续压在一个死掉的身体上。
+        if (!stack.isEmpty()) {
+            stack.getFirst().pause();
+        }
+    }
+
+    /**
      * 死亡停摆：只在看到死亡的第一刻收尾与发事件，之后每刻如实回答"还在等重生"。
      * 插着的临时任务按"角色没了"收尾——已经发生的消耗留在它们交代的结果里；
      * 主任务不收尾，重生后从原地接着做。
@@ -296,17 +342,7 @@ public final class ControlLoop {
     private Decision waitForRespawn(TickContext context) {
         if (!waitingRespawn) {
             waitingRespawn = true;
-            for (int i = stack.size() - 1; i >= 0; i--) {
-                Frame frame = stack.get(i);
-                if (frame.from != null) {
-                    stack.remove(i);
-                    frame.close(CloseReason.PLAYER_GONE);
-                }
-            }
-            // 主任务停在原地：先停手上的动作，别让上一刻的输入继续压在一个死掉的身体上。
-            if (!stack.isEmpty()) {
-                stack.getFirst().pause();
-            }
+            endTempTasks();
             // 死亡是 LLM 该拿主意的事：把现场事实交给挂决策的一方，连接还在才提供切观战这个选项。
             PlayerContext body = context.player();
             DeathFacts facts = body == null ? null : body.deathFacts();
@@ -323,8 +359,11 @@ public final class ControlLoop {
         return new Decision.WaitingRespawn(stack.isEmpty() ? null : stack.getFirst().task);
     }
 
-    /** 按打断规则挑出这一刻最急又能插进来的需求，同时记下最急的那个被按住的需求。 */
-    private Choice choose(TickContext context, Interruptibility interruptibility, Task currentTask) {
+    /**
+     * 按打断规则挑出这一刻最急又能插进来的需求，同时记下最急的那个被按住的需求。
+     * 手上是临时任务时，排在它后面的需求不参与（见 {@link #outranks}）。
+     */
+    private Choice choose(TickContext context, Interruptibility interruptibility, Task currentTask, Frame top) {
         Choice choice = new Choice();
         if (survivalNeedsOff()) {
             return choice;
@@ -339,6 +378,7 @@ public final class ControlLoop {
                 failureStreaks.remove(need);
                 continue;
             }
+            if (!outranks(need, urgency, top)) continue;
             boolean waiting = heldBack(need, urgency, context);
             if (!waiting && InterruptRule.canInterrupt(urgency, interruptibility)) {
                 // 同样急的先来先得：只有真的更急才顶掉前面选中的。
@@ -421,6 +461,15 @@ public final class ControlLoop {
         Frame bottom = stack.remove(0);
         LOG.info("主任务结束（{}）：{}", reason, bottom.task.describe());
         return bottom.close(reason);
+    }
+
+    // 手上是临时任务时，这个需求能不能抢它：更急的能；同样急的只有登记在前面的能（自卫排在夜晚前面）；更缓的不能。
+    // 手上是主任务或没有任务时都能（照打断规则）。
+    private boolean outranks(SurvivalNeed need, Urgency urgency, Frame top) {
+        if (top == null || top.from == null) return true;
+        int compared = urgency.compareTo(top.urgency);
+        if (compared != 0) return compared > 0;
+        return needs.indexOf(need) < needs.indexOf(top.from);
     }
 
     // 判断出错的需求按"此刻不需要处理"对待：一个需求的程序错误不能拖垮其余需求与主任务。

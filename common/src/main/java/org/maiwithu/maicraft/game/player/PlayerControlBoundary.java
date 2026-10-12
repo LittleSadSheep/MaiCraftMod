@@ -32,6 +32,8 @@ public final class PlayerControlBoundary {
     private MenuActions menuActions;
     private LocalPlayer observedPlayer;
     private long playerEpoch;
+    /** 同一连接、同一身份死亡重生了几次：服务器开着立即重生时，死亡落在两刻之间，控制循环靠它知道死过一次。 */
+    private long respawns;
     private long controlRevision;
     private long tickRevision;
     private long mutationClaimedTick = Long.MIN_VALUE;
@@ -78,7 +80,9 @@ public final class PlayerControlBoundary {
         boolean ownedAtStart = input.automationOwnsControls();
         if (playerChanged) {
             // 同一连接、同一身份的死亡重生延续自动控制许可，使恢复思考期间也能自卫；活体替换和换服不继承。
-            boolean preserveControl = input.automationControlRequested() && samePlayerRespawn(previousPlayer, player);
+            boolean respawned = samePlayerRespawn(previousPlayer, player);
+            if (respawned) respawns++;
+            boolean preserveControl = input.automationControlRequested() && respawned;
             input.playerReplaced(player, preserveControl);
             observedPlayer = player;
             playerEpoch = nextRevision(playerEpoch, "body epoch");
@@ -270,6 +274,11 @@ public final class PlayerControlBoundary {
         mutationClaimedTick = Long.MIN_VALUE;
         playerEpoch = nextRevision(playerEpoch, "body epoch");
         controlRevision = nextRevision(controlRevision, "control revision");
+    }
+
+    /** 同一身份死亡重生过几次。 */
+    long respawns() {
+        return respawns;
     }
 
     private void requireClientThread() {

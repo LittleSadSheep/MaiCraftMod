@@ -20,6 +20,7 @@ import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -634,6 +635,49 @@ class ControlLoopTest {
     }
 
     /** 任务替身：按脚本报告可打断性，做到指定刻数后结束；记下被 start、推进、暂停、收尾的次数。 */
+    @Test
+    void sameUrgencyNeedRegisteredLaterDoesNotTakeOverATempTask() {
+        // 自卫打到一半天黑了：夜晚和自卫一样急，但排在自卫后面，不能把自卫抢去找床（实机这样被僵尸追着打死）。
+        FakeNeed defense = FakeNeed.always("自卫", Urgency.SOON);
+        FakeNeed night = FakeNeed.always("夜晚", Urgency.SOON);
+        ControlLoop loop = new ControlLoop(List.of(defense, night));
+        loop.setMainTask(new FakeTask("挖矿", Interruptibility.WORKING));
+
+        loop.tick(TICK);
+        Task fighting = loop.currentTask();
+        loop.tick(TICK);
+        loop.tick(TICK);
+        assertSame(fighting, loop.currentTask(), "自卫还在打");
+        assertEquals(0, night.created, "夜晚没插进来");
+    }
+
+    @Test
+    void sameUrgencyNeedRegisteredEarlierTakesOverATempTask() {
+        // 找床的路上挨打：自卫排在夜晚前面，照样先自卫。
+        FakeNeed defense = FakeNeed.of("自卫", (Urgency) null, Urgency.SOON);
+        FakeNeed night = FakeNeed.always("夜晚", Urgency.SOON);
+        ControlLoop loop = new ControlLoop(List.of(defense, night));
+        loop.setMainTask(new FakeTask("挖矿", Interruptibility.WORKING));
+
+        loop.tick(TICK);
+        assertEquals(1, night.created, "前置：先插进来的是找床");
+        ControlLoop.Decision.Advanced advanced = assertInstanceOf(ControlLoop.Decision.Advanced.class, loop.tick(TICK));
+        assertSame(defense, advanced.interrupting(), "自卫抢下找床");
+    }
+
+    @Test
+    void lessUrgentNeedWaitsForATempTask() {
+        // 自卫正急着，饿了（找空当）也不插进来吃东西。
+        FakeNeed defense = FakeNeed.always("自卫", Urgency.SOON, () -> new FakeTask("自卫临时", Interruptibility.BETWEEN_ACTIONS));
+        FakeNeed hunger = FakeNeed.always("饥饿", Urgency.LATER);
+        ControlLoop loop = new ControlLoop(List.of(defense, hunger));
+        loop.setMainTask(new FakeTask("挖矿", Interruptibility.BETWEEN_ACTIONS));
+
+        loop.tick(TICK);
+        loop.tick(TICK);
+        assertEquals(0, hunger.created, "自卫没打完不吃");
+    }
+
     static class FakeTask implements Task {
         private final String name;
         private final List<Interruptibility> script;

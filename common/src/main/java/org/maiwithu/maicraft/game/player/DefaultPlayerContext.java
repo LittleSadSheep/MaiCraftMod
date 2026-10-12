@@ -55,6 +55,7 @@ final class DefaultPlayerContext implements PlayerContext {
     @Override public ClientLevel level() { return level; }
     @Override public ClientPacketListener connection() { return connection; }
     @Override public PlayerInput input() { return owner.input(); }
+    @Override public long respawns() { return owner.respawns(); }
     // 两个动手入口在启动时接进控制边界；没有接上之前上下文如实交出 null，由调用方等待接入。
     @Override public InteractionSender interactionSender() { return interactionSender; }
     @Override public MenuActions menuActions() { return menuActions; }

@@ -137,6 +137,36 @@ class ControlLoopDeathTest {
         assertInstanceOf(ControlLoop.Decision.WaitingRespawn.class, loop.tick(new Tick(body)));
     }
 
+    @Test
+    void immediateRespawnStillEndsTempTasksAndReportsTheDeath() {
+        // 服务器开着立即重生：一刻都看不到死掉的身体，只看到重生次数变了。插着的找床照样收尾、报一条死亡，
+        // 不挂死亡决策（已经重生了）；下一刻主任务从重生的地方接着做。
+        FakeTask main = new FakeTask("挖矿", Interruptibility.WORKING);
+        FakeNeed night = FakeNeed.of("夜晚", Urgency.SOON, null);
+        RecordingEvents events = new RecordingEvents();
+        RecordingDeathDecisions decisions = new RecordingDeathDecisions();
+        ControlLoop loop = new ControlLoop(List.of(night), events, decisions);
+        loop.setMainTask(main);
+
+        DyingPlayer body = new DyingPlayer();
+        loop.tick(new Tick(body));
+        FakeTask bedHunt = (FakeTask) loop.currentTask();
+        assertFalse(bedHunt.closed, "前置：找床插进来了");
+
+        body.respawns = 1;
+        body.facts = new DeathFacts(0, "minecraft:overworld", 600, 78, 80, false, "MaiBot被僵尸杀死了");
+        assertInstanceOf(ControlLoop.Decision.WaitingRespawn.class, loop.tick(new Tick(body)));
+        assertTrue(bedHunt.closed, "找床按角色没了收尾");
+        assertEquals(CloseReason.PLAYER_GONE, bedHunt.closeReason);
+        assertEquals(0, decisions.deaths, "已经重生，不挂死亡决策");
+        assertTrue(events.published.stream().anyMatch(line -> line.startsWith("CHARACTER_DIED:角色死了（MaiBot被僵尸杀死了），已经在 600, 78, 80 重生")),
+                "报一条死亡：" + events.published);
+
+        ControlLoop.Decision.Advanced advanced = assertInstanceOf(
+                ControlLoop.Decision.Advanced.class, loop.tick(new Tick(body)));
+        assertSame(main, advanced.task(), "主任务接着做");
+    }
+
     /** 记下死亡决策挂载口被叫了几次：断言一个死亡过程只挂一次、活过来才了结。 */
     private static final class RecordingDeathDecisions implements DeathDecisionHost {
         int deaths;
@@ -158,6 +188,7 @@ class ControlLoopDeathTest {
     /** 只回答"死没死"的角色上下文替身；其他入口这些测试用不到，如实报缺。 */
     private static final class DyingPlayer implements PlayerContext {
         boolean dead;
+        long respawns;
         DeathFacts facts = new DeathFacts(12, "minecraft:overworld", 1, 64, 2, false, null);
 
         @Override public LocalPlayer localPlayer() { return null; }
@@ -178,6 +209,7 @@ class ControlLoopDeathTest {
         @Override public boolean tryClaimInteraction() { return false; }
         @Override public boolean isDeadOrDying() { return dead; }
         @Override public DeathFacts deathFacts() { return facts; }
+        @Override public long respawns() { return respawns; }
     }
 
     /** 本刻上下文替身：把身体递给循环。 */
