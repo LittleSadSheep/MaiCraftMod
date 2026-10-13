@@ -29,6 +29,12 @@ public interface BattleMoves {
     /** 举盾放盾：对手离这么近、这一刻是不是正要出手（要出手就放下）。 */
     void guard(TickContext context, double distance, boolean aboutToStrike);
 
+    /**
+     * 还在走过去、离对手够远时，先把最好的近战武器拿到手上（在主背包就开背包换）：出手那一刻贴着脸，
+     * 就不为换武器开背包了。没有剑斧、已经在手上就什么都不做。
+     */
+    default void arm(TickContext context, double distance) {}
+
     /** 不打了：盾放下。 */
     void lowerGuard();
 

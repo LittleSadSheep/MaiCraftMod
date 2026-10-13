@@ -4,7 +4,10 @@ package org.maiwithu.maicraft.behavior.combat;
 import net.minecraft.client.player.LocalPlayer;
 
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
+import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
+import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -19,6 +22,12 @@ public final class LiveCombatHands {
     private final UseKeyProjection projection;
     private final ShieldGuard shield;
     private final ModRangedWeapons weapons;
+    /** 对手离这么远以上，才为换武器打开背包。 */
+    private static final double ARM_DISTANCE = 4.0;
+    private PlayerContext current;
+    private final ClientMovesToMainhand hands = new ClientMovesToMainhand(() -> this.current);
+    /** 正在把剑斧拿到手上；没在换为 null。 */
+    private Action arming;
 
     public LiveCombatHands(UseKeyProjection projection) {
         this(projection, ModRangedWeapons.none());
@@ -56,12 +65,35 @@ public final class LiveCombatHands {
         shield.tick(context, distance, aboutToStrike);
     }
 
-    /** 不打了：盾放下。 */
-    public void stand() {
-        shield.close();
+    /**
+     * 走过去的路上把最好的剑斧拿到手上：在主背包就开背包换，换的那几刻不挥。只在对手离得够远时开始，
+     * 贴脸了不为换武器开背包（照旧拿快捷栏里最好的打）。实机 10-13 铁剑在主背包，出手的那一刻离僵尸不到四格，
+     * 一路拿着火把打，半分钟没打死，被尸壳打死。
+     */
+    public void arm(TickContext context, double distance) {
+        LocalPlayer self = self(context);
+        if (self == null) return;
+        if (arming != null) {
+            if (arming.tick(context) instanceof ActionStatus.Running) return;
+            arming.close();
+            arming = null;
+            return;
+        }
+        if (distance <= ARM_DISTANCE) return;
+        WeaponChoice.Picked best = WeaponChoice.pickMelee(WeaponCarriedReader.read(self), false);
+        if (best.weapon() == WeaponChoice.Weapon.BARE_HANDS || best.slot() == self.getInventory().selected) return;
+        arming = hands.actionToMainhand(best.itemId()).orElse(null);
     }
 
-    private static LocalPlayer self(TickContext context) {
+    /** 不打了：盾放下，换到一半的武器也收尾。 */
+    public void stand() {
+        shield.close();
+        if (arming != null) arming.close();
+        arming = null;
+    }
+
+    private LocalPlayer self(TickContext context) {
+        current = context.player();
         return context.player() == null ? null : context.player().localPlayer();
     }
 }

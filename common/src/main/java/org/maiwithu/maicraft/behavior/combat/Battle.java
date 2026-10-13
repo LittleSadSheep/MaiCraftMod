@@ -338,7 +338,11 @@ public final class Battle {
         boolean holdSwing = leaping && (posture.onGround() || !posture.falling());
         boolean swinging = inReach && !holdSwing;
         boolean struck = swinging && swing(context, target.id(), me);
-        if (!inReach) dropStrike();
+        if (!inReach) {
+            dropStrike();
+            // 还够不着、离得也够远：路上先把剑斧拿到手上，到跟前一出手就是它。
+            moves.arm(context, threat.distance());
+        }
         if (threat.dangerRadius() > 0) moves.guard(context, threat.distance(), inReach && me.attackReady());
         else moves.lowerGuard();
         Footwork.Band band = trimmed(meleeBand(me, threat, me.attackReady()), target.id(), inReach, threat.visible());

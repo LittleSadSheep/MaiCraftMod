@@ -72,6 +72,11 @@ public final class LiveBattleMoves implements BattleMoves {
     }
 
     @Override
+    public void arm(TickContext context, double distance) {
+        hands.arm(context, distance);
+    }
+
+    @Override
     public void lowerGuard() {
         hands.stand();
     }
