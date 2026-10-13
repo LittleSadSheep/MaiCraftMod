@@ -178,8 +178,11 @@ public final class ClientDropPickup implements PicksUpDrops {
             ActionStatus walked = walk.tick(tick);
             // 走到了旁边它还躺着、它那一格头顶是树叶：砍树掉下的原木常钻在云杉低垂的树冠底下，人站不进去也吸不到。
             // 像玩家一样扒开树叶走进那一格；只为树冠底下的东西这样做，不为一件东西挖土开路。
+            // 掉的是一整堆也一样（连锁挖一条矿脉，掉落物都落在一格、并成一堆，常滚进挖空的矿洞里够不着）：
+            // 为一整堆挖开一格天然方块去拿是值得的，真人也会；单件的照旧不为它挖土开路。
+            // 实机 10-13 长程挖矿连锁挖了 8 格铁矿，8 个粗铁滚进旁边的空洞，"走过去了还在地上"整趟白干。
             if (walked instanceof ActionStatus.Done && !clearingLeaves && ++besideTicks > STUCK_BESIDE_TICKS
-                    && underLeaves(drop.level(), cell)) {
+                    && (underLeaves(drop.level(), cell) || wholePile(drop))) {
                 clearingLeaves = true;
                 stopWalking();
                 return ActionStatus.progressed();
@@ -192,6 +195,11 @@ public final class ClientDropPickup implements PicksUpDrops {
                 stopWalking();
             }
             return ActionStatus.progressed();
+        }
+
+        // 地上那件是一整堆（两件以上并在一起）。
+        private static boolean wholePile(Entity drop) {
+            return drop instanceof ItemEntity item && item.getItem().getCount() >= 2;
         }
 
         // 这一格头顶（上面一格）是树叶。
