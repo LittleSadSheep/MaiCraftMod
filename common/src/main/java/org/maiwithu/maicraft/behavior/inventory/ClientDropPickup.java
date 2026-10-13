@@ -42,6 +42,8 @@ public final class ClientDropPickup implements PicksUpDrops {
     private static final int APPEAR_TICKS = 10;
     /** 每件东西的耐心；到点没捡到就放弃这一件，不在一件东西上耗着。 */
     private static final int GIVE_UP_TICKS = 100;
+    /** 改成挖开、扒开走进去以后，一件最多再等这么多刻：挖几格要时间。 */
+    private static final int OPEN_UP_GIVE_UP_TICKS = 400;
     /** 走到了旁边、它还躺着这么多刻（刻）：多半钻在树冠底下够不着，扒开树叶走进那一格。 */
     private static final int STUCK_BESIDE_TICKS = 20;
 
@@ -121,7 +123,7 @@ public final class ClientDropPickup implements PicksUpDrops {
                     missed++;
                 }
                 current = null;
-            } else if (current != null && ++waited > GIVE_UP_TICKS) {
+            } else if (current != null && ++waited > (clearingLeaves ? OPEN_UP_GIVE_UP_TICKS : GIVE_UP_TICKS)) {
                 skip.add(current);
                 missed++;
                 current = null;
@@ -137,7 +139,7 @@ public final class ClientDropPickup implements PicksUpDrops {
                 // 捡到了一些、只剩个别够不着的（卡在树叶缝里）：不让一件东西挡住后面，算这一批做完，上层清点后还缺就再挖。
                 // 原先砍 10 根原木捡到 9 根，剩 1 根卡在树冠里，整个采掘被划掉，报"还差 1 个"。
                 return missed == vanished || picked > 0 ? ActionStatus.done() : ActionStatus.failed(Problem.of(Problem.Kind.STUCK,
-                        "有 " + (missed - vanished) + " 件掉出的东西走过去了还在地上"
+                        "有 " + (missed - vanished) + " 件掉出的东西没捡到（走不过去，或走到了还在地上）"
                                 + (vanished > 0 ? "，" + vanished + " 件不见了但不是自己收的（被别人捡走或消失）" : "")
                                 + "，先不捡了", null));
             }
@@ -184,6 +186,15 @@ public final class ClientDropPickup implements PicksUpDrops {
             if (walked instanceof ActionStatus.Done && !clearingLeaves && ++besideTicks > STUCK_BESIDE_TICKS
                     && (underLeaves(drop.level(), cell) || wholePile(drop))) {
                 clearingLeaves = true;
+                waited = 0;
+                stopWalking();
+                return ActionStatus.progressed();
+            }
+            if (walked instanceof ActionStatus.Failed && !clearingLeaves && wholePile(drop)) {
+                // 一整堆在只走路到不了的地方（掉进脚下几格深的矿洞）：挖开天然方块去拿，只这一回。
+                // 实机 10-13 长程挖矿连锁挖出 10 个粗铁，落在脚下四格的洞里，只走路找不到路就放弃了。
+                clearingLeaves = true;
+                waited = 0;
                 stopWalking();
                 return ActionStatus.progressed();
             }
