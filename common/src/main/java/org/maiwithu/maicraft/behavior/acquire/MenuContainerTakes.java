@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -64,6 +65,8 @@ public final class MenuContainerTakes implements ContainerTakes {
     private final BiFunction<BlockPos, Permissions, MenuOpening> openings;
     /** 这只容器是不是在给机器供料（进料箱、补料箱）：是的话最多拿走一半，给机器留着。 */
     private final Predicate<BlockPos> feedsMachine;
+    /** 机器料箱里每种东西见过最满的时候有几件（按维度、位置、要的东西记）：留一半按它算，不按这一回剩的算。 */
+    private final Map<String, Integer> fullestFeeders = new HashMap<>();
 
     /**
      * @param layouts 认得出哪些界面：原版加上联动模组证明过的（例如模组的箱子）
@@ -121,6 +124,10 @@ public final class MenuContainerTakes implements ContainerTakes {
         private int startTotal = -1;
         /** 这一只最多拿几件：给机器供料的箱子留一半，别的不限。 */
         private int allowance = Integer.MAX_VALUE;
+        /** 是机器料箱时，它见过最满的时候有几件（留一半按它算）；不是为 -1。 */
+        private int limitedFor = -1;
+        /** 机器料箱只剩一半、一件没拿时的说明：关上界面后以它收场；别的情况为 null。 */
+        private Problem held;
         /** 正在点的那一笔动手之前，容器那一侧想要的东西有几件；没有在点的为 -1。 */
         private int beforeMove = -1;
         /** 正在点的那一笔按计划要搬几件、要点哪几下：结算与交回"没能确认"时说得清。 */
@@ -153,7 +160,7 @@ public final class MenuContainerTakes implements ContainerTakes {
                 case OPEN -> open(tick);
                 case TRANSFER -> transfer();
                 case CLOSE -> closeMenu(tick);
-                case DONE -> ActionStatus.done();
+                case DONE -> held == null ? ActionStatus.done() : ActionStatus.failed(held);
             };
         }
 
@@ -181,7 +188,7 @@ public final class MenuContainerTakes implements ContainerTakes {
                 startTotal = matchedTotal(open);
                 // 机器的进料箱、补料箱（下面挂着溜槽漏斗、旁边贴着往外抽的漏斗）能翻，但最多拿走一半，给机器留着，
                 // 不把人家搬空（用户 10-13 定）。出料箱不算，成品照样能拿完。
-                allowance = feedsMachine.test(at) ? startTotal / 2 : Integer.MAX_VALUE;
+                allowance = feedsMachine.test(at) ? feederAllowance(startTotal) : Integer.MAX_VALUE;
             }
             if (menu.busy()) return ActionStatus.running();
             if (beforeMove < 0) {
@@ -189,7 +196,15 @@ public final class MenuContainerTakes implements ContainerTakes {
                 int now = matchedTotal(open);
                 int remaining = Math.min(request.count(), allowance) - (startTotal - now);
                 Optional<ContainerTakePlan.Move> next = ContainerTakePlan.next(open, this::matches, remaining);
-                if (next.isEmpty()) return toClose(open);
+                if (next.isEmpty()) {
+                    if (allowance == 0 && startTotal > 0) {
+                        // 机器料箱已经只剩一半了：一件不拿，说清为什么，引擎好换别处。
+                        held = Problem.of(Problem.Kind.NOT_FOUND, container.name() + " 是给机器供料的箱子，最满时 "
+                                + limitedFor + " 件，至少留 " + (limitedFor + 1) / 2 + " 件给机器，现在只剩 "
+                                + startTotal + " 件，不再拿");
+                    }
+                    return toClose(open);
+                }
                 beforeMove = now;
                 moveAmount = next.get().amount();
                 moveClicks = next.get().clicks().size();
@@ -257,7 +272,20 @@ public final class MenuContainerTakes implements ContainerTakes {
             ActionStatus status = closing.tick(tick);
             if (status instanceof ActionStatus.Running) return status;
             stage = Stage.DONE;
-            return ActionStatus.done();
+            return held == null ? ActionStatus.done() : ActionStatus.failed(held);
+        }
+
+        // 机器料箱这一回最多拿几件：按见过最满的时候留一半。一次没拿够、引擎回头再开，还按那时候的一半留，
+        // 不一回回按剩下的再削一半（实机 10-13：273 个大齿轮要 150，先拿 136 关上，还缺 14 再开，
+        // 按剩的 137 又算一半，最后只剩 123）。料箱被补满了，最满的数跟着涨。
+        private int feederAllowance(int total) {
+            PlayerContext current = contexts.get();
+            ClientLevel level = current == null ? null : current.level();
+            String key = (level == null ? "" : level.dimension().location().toString()) + "@" + at.asLong()
+                    + "#" + request.wanted().describe();
+            int fullest = fullestFeeders.merge(key, total, Math::max);
+            limitedFor = fullest;
+            return Math.max(0, total - (fullest + 1) / 2);
         }
 
         // 容器那一侧装着想要的东西的总件数；界面内容按物品标签对上请求。
@@ -325,7 +353,10 @@ public final class MenuContainerTakes implements ContainerTakes {
 
         @Override
         public String describe() {
-            return "从" + container.name() + "拿" + request.wanted().describe();
+            // 是机器料箱就说一句留了多少：结果里看得出为什么没拿够。
+            return "从" + container.name() + "拿" + request.wanted().describe()
+                    + (limitedFor < 0 ? "" : "（这是给机器供料的箱子，最满时 " + limitedFor + " 件，至少留 "
+                            + (limitedFor + 1) / 2 + " 件给机器）");
         }
     }
 

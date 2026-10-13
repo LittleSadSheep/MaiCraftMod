@@ -378,6 +378,34 @@ class MenuContainerTakesTest {
         assertEquals(20, box.box.get(0).getCount(), "给机器留一半");
     }
 
+    @Test
+    void reopeningAMachineChestStillLeavesHalfOfTheFullest() {
+        // 补料箱 40 个，先要 32 个拿走 20 个；引擎还缺 12 个回头再开：按最满时的一半留，一件不拿，说清为什么。
+        FakeBox box = new FakeBox();
+        box.box.set(0, new ItemStack(Items.IRON_INGOT, 40));
+        MenuContainerTakes takes = machineTakes(box);
+        assertInstanceOf(ActionStatus.Done.class, runToFinish(take(takes, 32)));
+        assertEquals(20, box.box.get(0).getCount());
+
+        box.closed = false; // 同一只箱子再开一回。
+        ActionStatus again = runToFinish(take(takes, 12));
+        assertInstanceOf(ActionStatus.Failed.class, again, "只剩一半了，不再拿");
+        assertEquals(20, box.box.get(0).getCount(), "还给机器留着一半");
+        assertTrue(((ActionStatus.Failed) again).problem().message().contains("至少留 20 件给机器"));
+    }
+
+    private MenuContainerTakes machineTakes(FakeBox box) {
+        WorldMemory memory = new WorldMemory(new DocumentStore(temp.resolve("state.sqlite")), "world-1");
+        return new MenuContainerTakes(itemId -> Set.of(), memory, () -> null,
+                (at, permissions) -> new OpenAtOnce(box), at -> true);
+    }
+
+    private static Action take(MenuContainerTakes takes, int count) {
+        return takes.take(new KnownContainer("补料箱", WorldPosition.here(10, 64, 5), "minecraft:chest"),
+                new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), count, "工具准备"),
+                Permissions.DEFAULT).orElseThrow();
+    }
+
     /** 开好一只替身箱子、要 iron_ingot 这么几件的开箱取货动作。 */
     private Action takes(FakeBox box, int count) {
         return takes(box, count, false);
