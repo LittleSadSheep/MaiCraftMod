@@ -124,7 +124,11 @@ final class ChainedDig implements Action {
         }
         // 挥不下去好几秒：记一行挖掘器此刻在做什么，实机对得上卡在哪。
         if (!digging.swingPending() && ++ticksStalled % STALL_LOG_TICKS == 0) {
-            LOG.info("[连锁挖] {}：{} 刻还没挥下去，挖掘器在{}", trigger.toShortString(), ticksStalled, digging.describe());
+            var self = context.player() == null ? null : context.player().localPlayer();
+            LOG.info("[连锁挖] {}：{} 刻还没挥下去，挖掘器在{}；人在 {}，眼睛离这格中心 {} 格", trigger.toShortString(),
+                    ticksStalled, digging.describe(), self == null ? "?" : self.blockPosition().toShortString(),
+                    self == null ? "?" : String.format("%.1f", Math.sqrt(self.getEyePosition().distanceToSqr(
+                            trigger.getX() + 0.5, trigger.getY() + 0.5, trigger.getZ() + 0.5))));
         }
         // 要求的面一直打不中（站位斜了、上一行还没挖开）：不再挑面，哪面看得见挖哪面。
         if (faceRequired && !digging.swingPending() && ++ticksWithoutSwing > FACE_GIVE_UP_TICKS) {
