@@ -177,6 +177,16 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
 
     // 问价不拿：照常问遍来源，只把最近一条路的距离报回去，不动手也不记任何事实。
     // 只有点名才做的途径（交易）照旧不参与：没人点名买东西，问价也不问它。
+    @Override public Optional<Action> lookAround(ItemRequest request, Permissions permissions) {
+        SourceContext context = new SourceContext(position.currentPosition(), permissions);
+        for (ItemSource source : sources) {
+            if (!Scope.ALL.allows(source.via().name())) continue;
+            Optional<Action> look = source.look(request, context);
+            if (look.isPresent()) return look;
+        }
+        return Optional.empty();
+    }
+
     @Override public Optional<Double> nearestDistanceBlocks(ItemRequest request, Permissions permissions) {
         SourceContext context = new SourceContext(position.currentPosition(), permissions);
         Optional<Double> nearest = Optional.empty();

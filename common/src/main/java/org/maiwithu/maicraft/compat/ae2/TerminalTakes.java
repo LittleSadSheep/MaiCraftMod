@@ -32,4 +32,9 @@ public interface TerminalTakes {
     default Optional<Action> takeWireless(String terminalItemId, ItemRequest request) {
         return Optional.empty();
     }
+
+    /** 拿出身上的无线终端打开，等存货同步齐记下来就关上，什么都不拿；做不了给空。 */
+    default Optional<Action> lookWireless(String terminalItemId, ItemRequest request) {
+        return Optional.empty();
+    }
 }

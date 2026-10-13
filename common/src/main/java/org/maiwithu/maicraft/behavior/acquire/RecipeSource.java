@@ -3,7 +3,9 @@ package org.maiwithu.maicraft.behavior.acquire;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -152,8 +154,42 @@ public final class RecipeSource implements ItemSource {
             // 报价时还在、动手时查不到了：交回空，由引擎换路。
             return Optional.empty();
         }
-        // 缺得一样多的几种做法排在后面备着：要"任意木板"、身上一根原木都没有时，十来种木板缺的都是一根原木，
-        // 头一种一件都做不出来（附近没有樱桃原木）就换下一种，不在第一种上就把"自己做"整条划掉。
+        List<WorkstationRecipe> variants = variantsFor(recipe, candidates, request, context);
+        // 排头两种原料一样近（多半是身上的 AE 终端这五分钟没开过，每种木头都报"看一眼"）：先打开看一眼再挑，
+        // 不按配方表的顺序先试橡木、去砍附近的橡树。原先 AE 里堆着云杉原木，照样跑去砍橡树。
+        if (variants.size() > 1 && missingIngredientDistance(variants.get(0), request, context)
+                == missingIngredientDistance(variants.get(1), request, context)) {
+            Optional<Action> look = firstMissing(variants.get(0), request)
+                    .flatMap(ingredient -> needs.lookAround(ingredient, context.permissions()));
+            if (look.isPresent()) {
+                return Optional.of(new LooksBeforeChoosing(look.get(),
+                        () -> run(variantsFor(recipe, ranked(request), request, context), recipe, request, context)));
+            }
+        }
+        return Optional.of(run(variants, recipe, request, context));
+    }
+
+    private Action run(List<WorkstationRecipe> variants, WorkstationRecipe recipe, ItemRequest request,
+            SourceContext context) {
+        return variants.size() <= 1 ? attempt(recipe, request, context) : new Variants(request, variants, context);
+    }
+
+    // 这种做法缺的第一样原料，按还缺几件发请求；什么都不缺给空。
+    private Optional<ItemRequest> firstMissing(WorkstationRecipe variant, ItemRequest request) {
+        for (WorkstationRecipe.IngredientStack ingredient : variant.ingredients()) {
+            int needed = ingredient.count() * timesNeeded(variant, request.count());
+            int carried = CarriedItems.matching(backpack, offhand, ingredient.item(), tags);
+            if (carried < needed) {
+                return Optional.of(new ItemRequest(ingredient.item(), needed - carried, "补" + variant.result().describe() + "的原料"));
+            }
+        }
+        return Optional.empty();
+    }
+
+    // 缺得一样多的几种做法排在后面备着：要"任意木板"、身上一根原木都没有时，十来种木板缺的都是一根原木，
+    // 头一种一件都做不出来（附近没有樱桃原木）就换下一种，不在第一种上就把"自己做"整条划掉。
+    private List<WorkstationRecipe> variantsFor(WorkstationRecipe recipe, List<WorkstationRecipe> candidates,
+            ItemRequest request, SourceContext context) {
         int missing = missingFor(recipe, request.count());
         List<WorkstationRecipe> variants = new ArrayList<>(List.of(recipe));
         for (WorkstationRecipe other : candidates) {
@@ -164,11 +200,12 @@ public final class RecipeSource implements ItemSource {
         // 问不出远近的做法排在问得出的后面，彼此先后不变（List.sort 稳定）。先排远近再取前几种：
         // 原先先截前十二种再排，装了加木头的模组时附近的云杉、白桦排不进前十二，木板说"哪儿都拿不到"。
         if (variants.size() > 1) {
-            variants.sort(Comparator.comparingDouble(variant -> missingIngredientDistance(variant, request, context)));
+            Map<WorkstationRecipe, Double> distances = new HashMap<>();
+            for (WorkstationRecipe variant : variants) distances.put(variant, missingIngredientDistance(variant, request, context));
+            variants.sort(Comparator.comparingDouble(distances::get));
             if (variants.size() > MAX_VARIANTS) variants = new ArrayList<>(variants.subList(0, MAX_VARIANTS));
         }
-        return Optional.of(variants.size() == 1 ? attempt(recipe, request, context)
-                : new Variants(request, variants, context));
+        return variants;
     }
 
     // 这种做法缺的原料最近要走多远：逐样问引擎（只问价不拿），缺几样时最远的那样算远近；

@@ -123,6 +123,17 @@ public final class Ae2TerminalSource implements ItemSource {
         };
     }
 
+    // 身上的无线终端这五分钟没开过、或上次存货没看全：打开看一眼，好让几种做法分出先后。
+    @Override public Optional<Action> look(ItemRequest request, SourceContext context) {
+        PlayerContext player = services.context().get();
+        if (player == null || player.level() == null) return Optional.empty();
+        Optional<String> wireless = carriedWirelessTerminal(player);
+        if (wireless.isEmpty()) return Optional.empty();
+        Optional<SeenNetworkStock.Sighting> lastTime = seen.lastSeenWireless(clock.get());
+        if (lastTime.isPresent() && lastTime.get().linked() && lastTime.get().complete()) return Optional.empty();
+        return takes.lookWireless(wireless.get(), request);
+    }
+
     @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
         PlayerContext player = services.context().get();
         if (player == null || player.level() == null) return Optional.empty();

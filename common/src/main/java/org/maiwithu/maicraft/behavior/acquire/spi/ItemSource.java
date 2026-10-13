@@ -35,4 +35,13 @@ public interface ItemSource {
      * 现场已经做不了（设施没了、记忆过时、现场动作没接上）时返回 empty，由引擎换下一个来源。
      */
     Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context);
+
+    /**
+     * 只看不拿：报价要"打开看一眼才知道有没有"的来源（身上的 AE 终端这五分钟没开过）给一个看一眼的动作，
+     * 看完记下存货、关上。几种做法分不出先后（每种木头在 AE 那里都报"看一眼"）时，先看清再挑。
+     * 不用看或看不了给空。
+     */
+    default Optional<Action> look(ItemRequest request, SourceContext context) {
+        return Optional.empty();
+    }
 }

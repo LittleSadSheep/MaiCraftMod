@@ -49,4 +49,12 @@ public interface ItemNeeds {
     default Optional<Double> nearestDistanceBlocks(ItemRequest request, Permissions permissions) {
         return Optional.empty();
     }
+
+    /**
+     * 先看一眼：问各来源有没有"打开看一眼才知道"的（身上的 AE 终端这五分钟没开过），给第一个看一眼的动作；
+     * 都不用看给空。几种做法分不出先后时，看完再挑。
+     */
+    default Optional<Action> lookAround(ItemRequest request, Permissions permissions) {
+        return Optional.empty();
+    }
 }

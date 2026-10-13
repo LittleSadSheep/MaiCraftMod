@@ -57,6 +57,15 @@ public final class CompatItemSource implements ItemSource {
         }
     }
 
+    @Override public Optional<Action> look(ItemRequest request, SourceContext context) {
+        if (!module.active()) return Optional.empty();
+        try {
+            return source.look(request, context).map(action -> new CompatAction(module, action));
+        } catch (ModApiMismatch broken) {
+            return Optional.empty();
+        }
+    }
+
     private String disabledReason() {
         return module.name() + "的联动已停用：" + module.disabledReason().orElse("原因不明");
     }

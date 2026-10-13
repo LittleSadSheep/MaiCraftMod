@@ -92,6 +92,10 @@ public final class MenuTerminalTakes implements TerminalTakes {
         return Optional.of(new TakeAction(new Wireless(terminalItemId), request));
     }
 
+    @Override public Optional<Action> lookWireless(String terminalItemId, ItemRequest request) {
+        return Optional.of(new TakeAction(new Wireless(terminalItemId), request, true));
+    }
+
     /** 到网络跟前的办法：走到一台装着的终端点开，或拿出身上的无线终端打开。取货的其余步骤两者一样。 */
     private interface Access {
         /** 怎么打开终端界面；每次给一个新的打开动作（下单合成后要重新打开看成品）。 */
@@ -178,6 +182,8 @@ public final class MenuTerminalTakes implements TerminalTakes {
 
         private final Access access;
         private final ItemRequest request;
+        /** 只看一眼：等存货同步齐记下来就关上，什么都不拿。 */
+        private final boolean lookOnly;
         private MenuOpening opening;
         private final TransferSettlement settlement = new TransferSettlement();
         private Stage stage = Stage.OPEN;
@@ -219,8 +225,13 @@ public final class MenuTerminalTakes implements TerminalTakes {
         private PendingMenuAction putBackPending;
 
         TakeAction(Access access, ItemRequest request) {
+            this(access, request, false);
+        }
+
+        TakeAction(Access access, ItemRequest request, boolean lookOnly) {
             this.access = access;
             this.request = request;
+            this.lookOnly = lookOnly;
             this.opening = access.opening();
         }
 
@@ -299,6 +310,12 @@ public final class MenuTerminalTakes implements TerminalTakes {
             if (menu.busy()) return ActionStatus.running();
 
             List<Ae2TerminalMenu.StockEntry> stock = compat.networkStock(raw).orElse(List.of());
+            // 只看一眼：等存货表稳下来、记成看全了就去关界面，什么都不拿。
+            if (lookOnly) {
+                if (stockStillArriving(stock.size())) return ActionStatus.running();
+                compat.networkLinked(raw).ifPresent(linked -> access.remember(linked, stock, true));
+                return stopNow(null);
+            }
             SlotSnapshot cursor = SlotSnapshot.of(raw.getCarried());
             // 光标上挂着不是这次要取的东西：多半是有人动过光标，不是程序出错。不在上面叠，收场时由关界面放回背包。
             if (!cursor.isEmpty() && !wanted(cursor.stack())) {
