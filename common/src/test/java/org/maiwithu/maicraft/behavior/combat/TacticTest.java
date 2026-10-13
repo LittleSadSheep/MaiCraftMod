@@ -122,6 +122,16 @@ class TacticTest {
     }
 
     @Test
+    void unreachableShooterInRangeIsLeftBehind() {
+        // 骷髅走不到跟前、又射得到我，手上没弓：站着避开只会一直挨射，撤出它的射程。
+        Tactic.Memory unreachable = new Tactic.Memory(-1, false, false, Set.of(2), false, false);
+        Battlefield.Foe skeleton = foe(2, 6, ThreatAssessment.Kind.RANGED, false, true);
+        Battlefield.Foe shooting = new Battlefield.Foe(skeleton.threat(), true, true, true, false);
+        assertInstanceOf(Tactic.Withdraw.class, decide(me(20, true, false), unreachable, shooting));
+        assertInstanceOf(Tactic.Shoot.class, decide(me(20, true, true), unreachable, shooting), "有弓就射回去");
+    }
+
+    @Test
     void finishedWhenNothingLeft() {
         assertInstanceOf(Tactic.Finished.class, decide(me(20, true, false), Tactic.Memory.FRESH));
     }

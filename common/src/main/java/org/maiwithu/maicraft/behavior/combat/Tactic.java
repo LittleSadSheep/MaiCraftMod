@@ -123,6 +123,14 @@ public final class Tactic {
         // 4 挑目标。
         Battlefield.Foe target = pickTarget(field, memory);
         if (target == null) {
+            // 打不着、又射得到我的远程怪（隔着悬崖、水、走不到跟前的骷髅）：原地避开挨射没用，撤出它的射程和视线。
+            // 只管远程怪；别的玩家打我另有一套（退开、举盾、不自动还手）。
+            // 实机 10-13 骷髅走不到跟前，角色"没有能打的，先避开追兵"站着挨了三十秒箭，血从 15 掉到 1。
+            if (!memory.cornered() && field.chasers().stream()
+                    .anyMatch(foe -> foe.threat().kind() == ThreatAssessment.Kind.RANGED
+                            && (foe.attacker() || foe.imminent()))) {
+                return new Withdraw("够不着还在射我的远程怪，先撤出它的射程");
+            }
             boolean pressed = field.chasers().stream()
                     .anyMatch(foe -> foe.fusing() || foe.attacker() || foe.imminent());
             return pressed ? new KeepClear("没有能打的，先避开追兵") : new Finished();
