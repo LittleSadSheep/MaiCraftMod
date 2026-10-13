@@ -6,6 +6,8 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
+import java.util.function.Supplier;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -21,6 +23,9 @@ import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
+import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 
 /**
@@ -47,6 +52,10 @@ public final class MiningSource implements ItemSource {
     private final BackpackView backpack;
     private final OffhandContents offhand;
     private final ItemNeeds needs;
+    /** 成批干活前该先备哪把效率工具；没接上时照旧只在挖不了时备工具。 */
+    private ReadsWorkTools workTools = ReadsWorkTools.NONE;
+    /** 拿东西的引擎此刻在推进的那一串请求：正在为做这把工具挖料时，不再要求先有这把工具。 */
+    private Supplier<List<ItemRequest>> chain = List::of;
 
     public MiningSource(ScansMinables minables, CollectsBlocks collects, DigsStairsDown stairs,
             ReadsToolRequirements tools, PermissionCheck permission, BackpackView backpack, OffhandContents offhand,
@@ -59,6 +68,12 @@ public final class MiningSource implements ItemSource {
         this.backpack = backpack;
         this.offhand = offhand;
         this.needs = needs;
+    }
+
+    /** 接上效率工具的读端与引擎正在推进的请求串：成批砍树、挖石头前先备一把石制工具。 */
+    public void prepareWorkTools(ReadsWorkTools workTools, Supplier<List<ItemRequest>> chain) {
+        this.workTools = Objects.requireNonNull(workTools, "workTools");
+        this.chain = Objects.requireNonNull(chain, "chain");
     }
 
     @Override public String describe() {
@@ -119,7 +134,25 @@ public final class MiningSource implements ItemSource {
         // 一批：从最近的一格起把相邻的同种方块连成一片，要几件挖几格（一格至少掉一件，不把附近的矿一口气挖光）；
         // 原木只沿竖向连——像真人砍一棵树、挖一片矿，整批挖完再捡，不挖一格捡一格。挖少了引擎清点后会再来。
         List<MinableSpot> batch = batchOf(screened.allowed(), request.count());
-        toolStep(batch.getFirst().blockType(), request, permissions).ifPresent(steps::add);
+        String blockType = batch.getFirst().blockType();
+        Optional<Action> required = toolStep(blockType, request, permissions);
+        if (required.isPresent()) {
+            steps.add(required.get());
+        } else {
+            // 挖得动但成批干：先备一把石制工具（砍一片树先做石斧，拿木镐挖石头先换石镐）。开局什么都没有时
+            // 先徒手弄够做第一把工具的料（这一趟只挖那几件，引擎清点后再来，那时去备工具）；正在为做这把工具
+            // 挖料时不再要求先有它。工具只是建议：备不来照样徒手干。
+            Optional<String> workTool = workTools.toolFor(blockType, request.count()).filter(tool -> !inChain(tool));
+            if (workTool.isPresent()) {
+                int bootstrap = workTools.bootstrap(blockType);
+                if (bootstrap > 0) {
+                    batch = batchOf(screened.allowed(), Math.min(request.count(), bootstrap));
+                } else {
+                    steps.add(new TriesFirst(needs.actionFor(new ItemRequest(WantedItem.ofItem(workTool.get()), 1,
+                            "成批采掘" + request.wanted().describe() + "前先备一把顺手的工具"), permissions)));
+                }
+            }
+        }
         // 走过去、挖掉、整批挖完捡起掉出来的东西：不隔空挖，也不把矿丢在地上。
         Optional<Action> collect = collects.collectBatch(batch.stream().map(MinableSpot::pos).toList(), permissions);
         if (collect.isEmpty()) {
@@ -152,6 +185,44 @@ public final class MiningSource implements ItemSource {
         steps.add(stairs.digDown(blockType -> minables.dropsWanted(request.wanted(), blockType),
                 request.count(), permissions));
         return new StepwiseActions("往下挖楼梯找" + request.wanted().describe(), steps.toArray(Action[]::new));
+    }
+
+    // 引擎正在推进的请求里已经有要这把工具的（正在为做它挖料）：不再先要它，免得为做斧头先要斧头。
+    private boolean inChain(String toolId) {
+        for (ItemRequest outer : chain.get()) {
+            if (outer.wanted().matches(toolId, Set.of())) return true;
+        }
+        return false;
+    }
+
+    /** 备工具这一步只是建议：弄不来就算了，接着徒手干。 */
+    private static final class TriesFirst implements Action {
+        private final Action inner;
+
+        TriesFirst(Action inner) {
+            this.inner = inner;
+        }
+
+        @Override public ActionStatus tick(TickContext context) {
+            ActionStatus status = inner.tick(context);
+            return status instanceof ActionStatus.Failed ? ActionStatus.done() : status;
+        }
+
+        @Override public void pause() {
+            inner.pause();
+        }
+
+        @Override public void close() {
+            inner.close();
+        }
+
+        @Override public Interruptibility interruptibility() {
+            return inner.interruptibility();
+        }
+
+        @Override public String describe() {
+            return inner.describe() + "（备不来就徒手干）";
+        }
     }
 
     // 第一个需要工具的矿：身上没有合用的就先去弄一件；弄不来时这一步以问题失败，整串停在那里。

@@ -311,6 +311,95 @@ class MiningSourceTest {
         assertEquals(List.of(new BlockPos(3, 64, 0), new BlockPos(4, 64, 0), new BlockPos(5, 64, 0)), digs.batches.getFirst());
     }
 
+    /** 替身效率工具：成批砍原木该先备石斧；开局还要先徒手砍几根由 bootstrap 定。 */
+    private static ReadsWorkTools axeFirst(int bootstrap) {
+        return new ReadsWorkTools() {
+            @Override public Optional<String> toolFor(String blockTypeId, int work) {
+                return blockTypeId.endsWith("_log") ? Optional.of("minecraft:stone_axe") : Optional.empty();
+            }
+
+            @Override public int bootstrap(String blockTypeId) {
+                return bootstrap;
+            }
+        };
+    }
+
+    private static List<MinableSpot> tree(int height) {
+        List<MinableSpot> logs = new ArrayList<>();
+        for (int y = 0; y < height; y++) {
+            logs.add(new MinableSpot(new BlockPos(0, 64 + y, 0), "minecraft:oak_log", "minecraft:oak_log"));
+        }
+        return logs;
+    }
+
+    @Test
+    void 成批砍树先备一把石斧再砍() {
+        FakeDigs digs = new FakeDigs();
+        MiningSource source = source(new FakeMinables(tree(6), true), digs);
+        source.prepareWorkTools(axeFirst(0), List::of);
+        runAll(source.begin(new ItemRequest(WantedItem.ofItem("minecraft:oak_log"), 6, "做木板"),
+                new SourceQuote.Offer("采掘", 6, new AcquisitionCost(3, 6), null), CONTEXT).orElseThrow());
+        assertEquals("minecraft:stone_axe", needs.asked.getFirst().wanted().specifier());
+        assertEquals(6, digs.dug.size());
+    }
+
+    @Test
+    void 两手空空先徒手砍够做工具的那几根() {
+        FakeDigs digs = new FakeDigs();
+        MiningSource source = source(new FakeMinables(tree(6), true), digs);
+        source.prepareWorkTools(axeFirst(3), List::of);
+        runAll(source.begin(new ItemRequest(WantedItem.ofItem("minecraft:oak_log"), 6, "做木板"),
+                new SourceQuote.Offer("采掘", 6, new AcquisitionCost(3, 6), null), CONTEXT).orElseThrow());
+        assertTrue(needs.asked.isEmpty(), "这一趟不去备斧头");
+        assertEquals(3, digs.dug.size(), "只砍做工具要的三根，清点后再来");
+    }
+
+    @Test
+    void 正在为做石斧砍木头_不再先要石斧() {
+        FakeDigs digs = new FakeDigs();
+        MiningSource source = source(new FakeMinables(tree(6), true), digs);
+        source.prepareWorkTools(axeFirst(0),
+                () -> List.of(new ItemRequest(WantedItem.ofItem("minecraft:stone_axe"), 1, "成批采掘前先备一把顺手的工具")));
+        runAll(source.begin(new ItemRequest(WantedItem.ofItem("minecraft:oak_log"), 6, "做石斧的木棍"),
+                new SourceQuote.Offer("采掘", 6, new AcquisitionCost(3, 6), null), CONTEXT).orElseThrow());
+        assertTrue(needs.asked.isEmpty());
+    }
+
+    @Test
+    void 斧头备不来照样徒手砍() {
+        FakeDigs digs = new FakeDigs();
+        ItemNeeds failing = new ItemNeeds() {
+            @Override public Action actionFor(ItemRequest request, Permissions permissions) {
+                return new Action() {
+                    @Override public ActionStatus tick(TickContext context) {
+                        return ActionStatus.failed(Problem.of(Problem.Kind.NEED_ITEM, "没有圆石"));
+                    }
+
+                    @Override public String describe() {
+                        return "备石斧";
+                    }
+                };
+            }
+        };
+        PermissionCheck check = new PermissionCheck(
+                new Protection((dimension, x, y, z) -> Optional.empty(), () -> List.of(),
+                        name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self"),
+                new ReadsCreatureSituation() {
+                    @Override public Optional<CreatureSituation> situationOf(UUID entityId) {
+                        return Optional.empty();
+                    }
+                });
+        MiningSource source = new MiningSource(new FakeMinables(tree(6), true), digs, stairs, new FakeTools(), check,
+                backpack, offhand, failing);
+        source.prepareWorkTools(axeFirst(0), List::of);
+        Action action = source.begin(new ItemRequest(WantedItem.ofItem("minecraft:oak_log"), 6, "做木板"),
+                new SourceQuote.Offer("采掘", 6, new AcquisitionCost(3, 6), null), CONTEXT).orElseThrow();
+        ActionStatus status = ActionStatus.running();
+        for (int tick = 1; tick <= 100 && status instanceof ActionStatus.Running; tick++) status = action.tick(new StubTick(tick));
+        assertInstanceOf(ActionStatus.Done.class, status);
+        assertEquals(6, digs.dug.size());
+    }
+
     @Test
     void 原木只沿树干竖向成批_旁边的横梁不算() {
         // 砍树：树干 (0,64..66) 连成一批；旁边同高的一根 (1,64) 是横梁，不并进来。

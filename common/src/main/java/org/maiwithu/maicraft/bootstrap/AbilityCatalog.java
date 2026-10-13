@@ -89,6 +89,7 @@ import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
 import org.maiwithu.maicraft.behavior.acquire.ReadsCharacterPosition;
 import org.maiwithu.maicraft.behavior.acquire.ReadsItemRegistry;
 import org.maiwithu.maicraft.behavior.acquire.ReadsItemTags;
+import org.maiwithu.maicraft.behavior.acquire.LiveWorkTools;
 import org.maiwithu.maicraft.behavior.acquire.MiningSource;
 import org.maiwithu.maicraft.behavior.acquire.MenuRecipeRuns;
 import org.maiwithu.maicraft.behavior.acquire.ReadsToolRequirements;
@@ -677,6 +678,8 @@ public final class AbilityCatalog {
         innerNeeds.attach(acquisition);
         // 备料时不把外层正要的东西当原料用掉（做合金不先把做好的合金压成块）。
         craftSource.watchChain(acquisition::inProgress);
+        // 成批砍树挖石头前先备一把石制工具；正在为做这把工具挖料时不再先要它。
+        miningSource.prepareWorkTools(new LiveWorkTools(deps.context()), acquisition::inProgress);
         smeltSource.watchChain(acquisition::inProgress);
         // 饿了身上没吃的：吃饭的临时任务经同一个引擎去弄口粮。
         deps.survivalWiring().attachFood(acquisition);
