@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.ability.obtain;
 
 import java.util.ArrayList;
+import java.util.Locale;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -79,7 +80,10 @@ public final class ObtainAbility implements AbilityModule {
                         ParamSpec.of("radius", ParamType.INTEGER).range(1, MAX_RADIUS)
                                 .doc("容器与采掘的搜索范围（格）；给了就冻结在这个范围里").build(),
                         ParamSpec.of("max_distance", ParamType.INTEGER).range(1, Integer.MAX_VALUE)
-                                .doc("愿意为此走多远（格）").build()),
+                                .doc("愿意为此走多远（格）").build(),
+                        ParamSpec.of("prefer", ParamType.ITEM_LIST)
+                                .doc("倾向用的材料（物品 ID 或 # 标签的列表）：几种做法都行时用到它们的排前面，"
+                                        + "备料时沿配方链往下传；只影响先后，不禁用别的做法").build()),
                 Set.of(), ExecutionMode.CONTROLS_PLAYER, Set.of(), List.of(), Listing.LISTED);
     }
 
@@ -111,9 +115,11 @@ public final class ObtainAbility implements AbilityModule {
             return invalidGoal(invalid);
         }
         int count = count(params);
+        List<String> prefer = params.has("prefer")
+                ? params.list("prefer").stream().map(id -> id.toLowerCase(Locale.ROOT)).toList() : List.of();
         return new StepDecision.Run(new ObtainItems(wanted, count, scope(params),
                 goal.permissions(), purposeLabel(goal),
-                "再拿 " + count + " 个 " + wanted.specifier()));
+                "再拿 " + count + " 个 " + wanted.specifier(), prefer));
     }
 
     @Override public void registerTasks(TaskFactories factories) {

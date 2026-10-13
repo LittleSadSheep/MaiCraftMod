@@ -66,7 +66,7 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
         // 清点是只读判断，不需要动作；引擎的动作在进入 ACQUIRE 时才发起，许可随输入一起带过来。
         // 来源动作里点了但没能确认结果的交互、途中腾地方存了丢了什么，引擎直接记进本任务的结果。
         return phase == Phase.ACQUIRE
-                ? acquisition.need(new ItemRequest(input.wanted(), input.count(), input.purpose()),
+                ? acquisition.need(new ItemRequest(input.wanted(), input.count(), input.purpose(), input.prefer()),
                         input.permissions(), input.scope(), obtainedVia::add, records())
                 : null;
     }

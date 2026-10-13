@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.acquire;
 
+import java.util.List;
+
 /**
  * 一次拿东西的请求：要什么、要多少、拿来做什么。
  *
@@ -11,17 +13,24 @@ package org.maiwithu.maicraft.behavior.acquire;
  * @param wanted  想要的东西（一种物品或一个标签）
  * @param count   这次要多拿几件，至少为 1
  * @param purpose 用途标签，例如"施工备料"
+ * @param prefer  倾向用的材料（物品 ID 或 # 标签）：几种做法都行时用到它们的排前面，沿配方链往下传；没有为空
  */
-public record ItemRequest(WantedItem wanted, int count, String purpose) {
+public record ItemRequest(WantedItem wanted, int count, String purpose, List<String> prefer) {
 
     public ItemRequest {
         if (wanted == null) throw new IllegalArgumentException("请求里必须有想要的东西");
         if (count < 1) throw new IllegalArgumentException("要拿的数量至少为 1：" + count);
         if (purpose == null || purpose.isBlank()) throw new IllegalArgumentException("请求必须带用途标签");
+        prefer = prefer == null ? List.of() : List.copyOf(prefer);
     }
 
-    /** 同样要的东西，只要这么几件：还缺多少就问多少，用途不变。 */
+    /** 没有材料倾向的请求。 */
+    public ItemRequest(WantedItem wanted, int count, String purpose) {
+        this(wanted, count, purpose, List.of());
+    }
+
+    /** 同样要的东西，只要这么几件：还缺多少就问多少，用途、倾向不变。 */
     public ItemRequest just(int fewerCount) {
-        return new ItemRequest(wanted, fewerCount, purpose);
+        return new ItemRequest(wanted, fewerCount, purpose, prefer);
     }
 }

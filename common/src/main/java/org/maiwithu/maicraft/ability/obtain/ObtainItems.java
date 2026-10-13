@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.obtain;
 
+import java.util.List;
+
 import org.maiwithu.maicraft.behavior.acquire.ItemAcquisition;
 import org.maiwithu.maicraft.behavior.acquire.WantedItem;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -16,9 +18,15 @@ import org.maiwithu.maicraft.kernel.task.TaskInput;
  * @param permissions       这次任务的许可；来源备料与腾背包受同一份许可管
  * @param purpose           用途标签，写进结果与腾背包的备注，例如"按需要拿取"
  * @param describeText      给日志与面板的一句话，例如"再拿 8 个 minecraft:torch"
+ * @param prefer            倾向用的材料（物品 ID 或 # 标签）；没有为空
  */
 record ObtainItems(WantedItem wanted, int count, ItemAcquisition.Scope scope,
-        Permissions permissions, String purpose, String describeText) implements TaskInput {
+        Permissions permissions, String purpose, String describeText, List<String> prefer) implements TaskInput {
+
+    ObtainItems(WantedItem wanted, int count, ItemAcquisition.Scope scope, Permissions permissions, String purpose,
+            String describeText) {
+        this(wanted, count, scope, permissions, purpose, describeText, List.of());
+    }
 
     ObtainItems {
         if (wanted == null) throw new IllegalArgumentException("拿东西必须有想要的东西");
@@ -27,6 +35,7 @@ record ObtainItems(WantedItem wanted, int count, ItemAcquisition.Scope scope,
         if (permissions == null) throw new IllegalArgumentException("拿东西必须带这次的许可");
         if (purpose == null || purpose.isBlank()) throw new IllegalArgumentException("拿东西必须带用途标签");
         if (describeText == null || describeText.isBlank()) throw new IllegalArgumentException("任务输入必须有一句话描述");
+        prefer = prefer == null ? List.of() : List.copyOf(prefer);
     }
 
     @Override public String describe() {

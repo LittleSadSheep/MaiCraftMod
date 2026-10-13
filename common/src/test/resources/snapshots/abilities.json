@@ -39,7 +39,7 @@
       {
         "ability": "maicraft:obtain",
         "summary": "让背包里某样东西再多几件；可用 via 指定途径",
-        "parameters": "item: string, count: integer = 1, via?: string, radius?: integer, max_distance?: integer",
+        "parameters": "item: string, count: integer = 1, via?: string, radius?: integer, max_distance?: integer, prefer?: array",
         "targets": [],
         "mode": "controls_player"
       },
@@ -536,6 +536,12 @@
           "doc": "愿意为此走多远（格）",
           "min": 1,
           "max": 2147483647
+        },
+        {
+          "name": "prefer",
+          "type": "array",
+          "required": false,
+          "doc": "倾向用的材料（物品 ID 或 # 标签的列表）：几种做法都行时用到它们的排前面，备料时沿配方链往下传；只影响先后，不禁用别的做法"
         }
       ],
       "targets": [],

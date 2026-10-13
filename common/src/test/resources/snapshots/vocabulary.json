@@ -40,6 +40,7 @@
     "network": "接哪种网络：取值由已登记的网络读取器自报，例如 kinetic / me / energy",
     "operation": "一个能力内部的几种操作选哪一种，例如 enable、disable、status",
     "page": "分页看结果时的页码，从 0 起",
+    "prefer": "倾向用的材料（物品 ID 或 # 标签的列表）：几种做法都行时用到它们的排前面，只影响先后",
     "properties": "只放一格时要求的方块状态属性（JSON 对象），例如 {\"facing\":\"north\"}",
     "quest": "任务书里任务的编号（16 位十六进制，FTB 任务）",
     "radius": "工作或搜索范围，单位格",

@@ -69,6 +69,7 @@
 | `via` | | `craft` / `smelt` / `container` / `mine` / `harvest` / `trade`，联动模组接入的途径装了才有，以参数表列的为准；不给按代价自己挑 |
 | `radius` | | 容器与采掘的搜索范围（格），给了就冻结在范围内，上限 64 |
 | `max_distance` | | 愿意为此走多远（格）；太远的来源不参与 |
+| `prefer` | | 倾向用的材料（物品 ID 或 `#` 标签的列表）：几种做法都行时用到它们的排前面（例如做木板时 `["minecraft:spruce_log"]`），备料时沿配方链往下传；只影响先后，不禁用别的做法 |
 
 拿东西不针对某个东西做动作，所以不带 `target`；范围用 `radius` 与 `max_distance` 表达。
 许可（`permissions`）约束容器、就地放工作站、采掘与采集的挖掘，狩猎的逐只判断（`kill_animals` 与 `fight`）。

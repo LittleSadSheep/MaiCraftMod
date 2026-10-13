@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.acquire;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -202,7 +203,7 @@ public final class RecipeSource implements ItemSource {
         if (variants.size() > 1) {
             Map<WorkstationRecipe, Double> distances = new HashMap<>();
             for (WorkstationRecipe variant : variants) distances.put(variant, missingIngredientDistance(variant, request, context));
-            variants.sort(Comparator.comparingDouble(distances::get));
+            variants.sort(MaterialPreference.first(preferred(request), tags).thenComparingDouble(distances::get));
             if (variants.size() > MAX_VARIANTS) variants = new ArrayList<>(variants.subList(0, MAX_VARIANTS));
         }
         return variants;
@@ -233,10 +234,18 @@ public final class RecipeSource implements ItemSource {
                 .filter(recipe -> kinds.contains(recipe.kind()))
                 .filter(recipe -> !consumesWhatIsWanted(recipe, request.wanted()))
                 .filter(recipe -> !consumesOuterWanted(recipe))
-                .sorted(Comparator.comparingInt((WorkstationRecipe candidate) -> missingFor(candidate, request.count()))
+                .sorted(MaterialPreference.first(preferred(request), tags)
+                        .thenComparingInt((WorkstationRecipe candidate) -> missingFor(candidate, request.count()))
                         .thenComparingInt(candidate -> inInventory(candidate) ? 0 : 1)
                         .thenComparingInt(candidate -> candidate.ingredients().size()))
                 .toList();
+    }
+
+    // LLM 说的材料倾向：这次请求点的，加上外层还在做的请求点的（备料时沿配方链往下传）。
+    private Set<String> preferred(ItemRequest request) {
+        Set<String> prefer = new HashSet<>(request.prefer());
+        for (ItemRequest outer : chain.get()) prefer.addAll(outer.prefer());
+        return prefer;
     }
 
     // 照一种配方做的一整串：摆得进背包合成格的在背包里做，否则到设施上做（没有就先摆一个）。
