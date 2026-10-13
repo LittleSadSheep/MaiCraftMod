@@ -31,6 +31,10 @@ final class ChainedDig implements Action {
 
     private static final Logger LOG = LoggerFactory.getLogger(ChainedDig.class);
 
+    /** 挥不下去每隔这么多刻记一行。 */
+    private static final int STALL_LOG_TICKS = 100;
+    /** 挥不下去已经多少刻。 */
+    private int ticksStalled;
     /** 副格的方块更新最多等几刻：模组在同一刻挖完整批，更新随后几个包陆续到。 */
     static final int SETTLE_TICKS = 20;
     /** 要求的那一面这么多刻都打不中就不再挑面：站位偏了照样挖下去，形状不对由那一批的检查兜住。 */
@@ -62,6 +66,8 @@ final class ChainedDig implements Action {
     private int ticksWithoutSwing;
     private boolean faceRequired;
     private ActionStatus.Failed failure;
+    /** 上一次记下的"在等什么"：换了才再记一行。 */
+    private String lastWait = "";
     /** 这次为什么没连锁：给描述用。 */
     private String singleReason = "";
 
@@ -116,6 +122,10 @@ final class ChainedDig implements Action {
                 || status instanceof ActionStatus.Running running && running.progressed()) {
             return dug(context);
         }
+        // 挥不下去好几秒：记一行挖掘器此刻在做什么，实机对得上卡在哪。
+        if (!digging.swingPending() && ++ticksStalled % STALL_LOG_TICKS == 0) {
+            LOG.info("[连锁挖] {}：{} 刻还没挥下去，挖掘器在{}", trigger.toShortString(), ticksStalled, digging.describe());
+        }
         // 要求的面一直打不中（站位斜了、上一行还没挖开）：不再挑面，哪面看得见挖哪面。
         if (faceRequired && !digging.swingPending() && ++ticksWithoutSwing > FACE_GIVE_UP_TICKS) {
             faceRequired = false;
@@ -168,7 +178,14 @@ final class ChainedDig implements Action {
     private boolean gate(BlockHitResult hit) {
         if (hold == null || droppingChain) return true;
         ChainKeyHold.Readiness readiness = hold.ready(current, hit);
-        if (readiness instanceof ChainKeyHold.Readiness.Wait) return false;
+        if (readiness instanceof ChainKeyHold.Readiness.Wait wait) {
+            // 在等什么记一行（换了才记）：实机连锁卡住一分钟不挥第一下时，看得出卡在哪一步。
+            if (!wait.why().equals(lastWait)) {
+                lastWait = wait.why();
+                LOG.info("[连锁挖] {}：等着，{}", trigger.toShortString(), wait.why());
+            }
+            return false;
+        }
         if (readiness instanceof ChainKeyHold.Readiness.Chain chain) {
             batch = chain.batch();
             // 连没连锁、为什么没连，结果里看不出来：记一行，实机对得上屏幕上 FTB 面板跳没跳。
