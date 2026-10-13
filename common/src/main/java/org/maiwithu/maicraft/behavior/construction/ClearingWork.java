@@ -3,12 +3,15 @@ package org.maiwithu.maicraft.behavior.construction;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
@@ -40,6 +43,8 @@ final class ClearingWork extends ConstructionWork {
     private BlockState before;
     /** 挖之前触发格四周一圈里还排着要清的格和各自是什么：连锁挖顺带挖掉的，挖完逐格复查结算。 */
     private Map<BlockPos, String> around = Map.of();
+    /** 这一格挑的是一整片的中心：对准它的顶面挖，连锁的 3×3 正好是这一片；不是为 null，哪面看得见挖哪面。 */
+    private Direction chainFace;
 
     ClearingWork(ConstructionServices services, ConstructionSite site, TaskRecords records, Permissions permissions, List<PlannedCell> cells) {
         super(services, site, records);
@@ -56,7 +61,10 @@ final class ClearingWork extends ConstructionWork {
     // 挑下一格：没加载的跳过；受保护的、挖不动的记下来；都没问题就走过去。
     private ActionStatus nextCell() {
         while (!queue.isEmpty()) {
-            cell = queue.poll();
+            PlannedCell centre = services.digs() != null && services.digs().chains() ? squareCentre() : null;
+            chainFace = centre == null ? null : Direction.UP;
+            if (centre != null) queue.remove(centre);
+            cell = centre != null ? centre : queue.poll();
             BlockPos pos = cell.pos();
             if (!services.site().loaded(pos)) continue;
             before = services.site().state(pos);
@@ -75,7 +83,8 @@ final class ClearingWork extends ConstructionWork {
                 continue;
             }
             step = Step.APPROACH;
-            begin(services.close().toward(ApproachTarget.ofBlock(pos), permissions), "走到 " + pos.toShortString() + " 跟前");
+            ApproachTarget target = chainFace == null ? ApproachTarget.ofBlock(pos) : ApproachTarget.ofBlockFace(pos, chainFace);
+            begin(services.close().toward(target, permissions), "走到 " + pos.toShortString() + " 跟前");
             return ActionStatus.progressed();
         }
         cell = null;
@@ -115,7 +124,7 @@ final class ClearingWork extends ConstructionWork {
     // 挖这一格：装了连锁挖就按命中面 3×3 连锁（整片都是要清的格才连）；挖之前记下四周还排着的格，挖完复查。
     private ActionStatus dig() {
         around = queuedAround(cell.pos());
-        Optional<Action> digging = services.digs().digChained(cell.pos(), null,
+        Optional<Action> digging = services.digs().digChained(cell.pos(), chainFace,
                 BreakAccelerator.ChainShape.FACE_SQUARE, this::clearable);
         if (digging.isEmpty()) {
             site.unreachable(cell.pos(), "挖掘没接上，清不了");
@@ -125,6 +134,33 @@ final class ClearingWork extends ConstructionWork {
         step = Step.DIG;
         begin(digging.get(), "挖掉 " + cell.pos().toShortString());
         return ActionStatus.progressed();
+    }
+
+    // 装了连锁挖时先挑整片的中心：还没清的最上面一层里，同一层四周八格也都排着要清、都还在、头顶敞开的那一格，
+    // 对准它的顶面挖，模组的命中面 3×3 正好是这一片。原先按队列从角上那格挖起，3×3 一半落在图纸外，
+    // 整片不连锁（实机 10-13 两层 3×3 十八格只连了五格）。凑不出整片就照队列一格格来。
+    private PlannedCell squareCentre() {
+        Set<BlockPos> pending = new HashSet<>();
+        int top = Integer.MIN_VALUE;
+        for (PlannedCell planned : queue) {
+            BlockPos pos = planned.pos();
+            if (!services.site().loaded(pos) || services.site().state(pos).isAir()) continue;
+            pending.add(pos);
+            top = Math.max(top, pos.getY());
+        }
+        for (PlannedCell planned : queue) {
+            BlockPos pos = planned.pos();
+            if (pos.getY() != top || !pending.contains(pos) || pending.contains(pos.above())) continue;
+            if (!services.site().loaded(pos.above()) || !services.site().state(pos.above()).isAir()) continue;
+            boolean whole = true;
+            for (int dx = -1; dx <= 1 && whole; dx++) {
+                for (int dz = -1; dz <= 1 && whole; dz++) {
+                    whole = pending.contains(pos.offset(dx, 0, dz));
+                }
+            }
+            if (whole) return planned;
+        }
+        return null;
     }
 
     // 触发格四周（含斜角）一圈里还排着要清的格：命中面 3×3 不会超出这一圈。

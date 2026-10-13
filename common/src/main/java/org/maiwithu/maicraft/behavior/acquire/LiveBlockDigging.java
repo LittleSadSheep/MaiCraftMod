@@ -66,6 +66,11 @@ public final class LiveBlockDigging implements DigsBlocks {
         return gone(context.player(), cell);
     }
 
+    @Override
+    public boolean chains() {
+        return !accelerators.isEmpty();
+    }
+
     // 目标格没了：空气，或只剩流体（含水的方块挖掉后留下原来的水）。没加载时不冒充挖完了。
     private static boolean gone(PlayerContext player, BlockPos cell) {
         // 客户端世界的 hasChunkAt 永远答“加载着”，没加载的格读出来是空气、地表落在世界最底层；按区块真加载没加载判。

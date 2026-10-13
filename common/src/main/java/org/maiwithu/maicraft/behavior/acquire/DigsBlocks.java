@@ -31,6 +31,11 @@ public interface DigsBlocks {
         return dig(trigger);
     }
 
+    /** 装了连锁挖的模组：挑格、挑面时值得为连锁凑整片。没装时为假。 */
+    default boolean chains() {
+        return false;
+    }
+
     /** 这一格此刻已经没了（空气或只剩流体）：连锁挖顺带挖掉的格不用再走过去挖。读不到时答还在。 */
     default boolean gone(TickContext context, BlockPos cell) {
         return false;

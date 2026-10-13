@@ -162,10 +162,11 @@ class ConstructionTaskTest {
             return Optional.of(new Immediate(() -> world.put(target, AIR)));
         }
         // 连锁挖替身：模组那一批每一格清障都同意才整批挖掉，不然和普通地挖一样只挖触发格。
+        @Override public boolean chains() { return chain != null; }
         @Override public Optional<Action> digChained(BlockPos trigger, Direction face, BreakAccelerator.ChainShape shape,
                 Predicate<BlockPos> mayBreak) {
             if (chain == null) return dig(trigger);
-            List<BlockPos> batch = chain.batchFrom(trigger);
+            List<BlockPos> batch = chain.batchFrom(trigger, face);
             if (batch.size() < 2 || !batch.stream().allMatch(mayBreak)) return dig(trigger);
             return Optional.of(new Immediate(() -> {
                 chain.batches++;
@@ -390,9 +391,42 @@ class ConstructionTaskTest {
     /** 连锁挖替身：命中面 3×3 里触发格连着它东边一格一起挖，只在触发格是 (0,64,0) 时连。 */
     private static final class Chain {
         int batches;
-        List<BlockPos> batchFrom(BlockPos trigger) {
-            return trigger.equals(new BlockPos(0, 64, 0)) ? List.of(trigger, trigger.east()) : List.of();
+        /** 像 FTB 的小型方形：命中面上以触发格为中心的 3×3。为假时只认 (0,64,0) 连着东边一格。 */
+        boolean square;
+        List<BlockPos> batchFrom(BlockPos trigger, Direction face) {
+            if (!square) return trigger.equals(new BlockPos(0, 64, 0)) ? List.of(trigger, trigger.east()) : List.of();
+            List<BlockPos> batch = new ArrayList<>();
+            for (int a = -1; a <= 1; a++) {
+                for (int b = -1; b <= 1; b++) {
+                    // 点顶面是水平的一片；没指定面时按点侧面算，是竖着的一片（会伸到地面以上）。
+                    batch.add(face == Direction.UP ? trigger.offset(a, 0, b) : trigger.offset(a, b, 0));
+                }
+            }
+            return batch;
         }
+    }
+
+    @Test
+    void 连锁清障_先挑整片中心对准顶面() {
+        // 3×3 一层土要换成石头：先挑中间那格对准顶面挖，模组的 3×3 正好是这一片，一下挖掉，不从角上挖起。
+        Fake fake = new Fake().ground(63);
+        Chain chain = new Chain();
+        chain.square = true;
+        fake.chain = chain;
+        List<BlockPos> cells = new ArrayList<>();
+        for (int x = 0; x <= 2; x++) {
+            for (int z = 0; z <= 2; z++) {
+                BlockPos pos = new BlockPos(x, 64, z);
+                fake.world.put(pos, Blocks.DIRT.defaultBlockState());
+                cells.add(pos);
+            }
+        }
+        fake.carried.put("minecraft:stone", 9);
+        TaskResult result = run(fake, wall(STONE, cells.toArray(BlockPos[]::new)));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(1, chain.batches, "整片一下挖掉");
+        assertEquals(0, fake.digCalls, "没有逐格挖");
+        assertEquals(9, count(result, Change.Kind.BLOCK_BROKEN));
     }
 
     @Test
