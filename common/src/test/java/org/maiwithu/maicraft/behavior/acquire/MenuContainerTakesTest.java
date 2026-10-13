@@ -379,7 +379,7 @@ class MenuContainerTakesTest {
     }
 
     @Test
-    void reopeningAMachineChestStillLeavesHalfOfTheFullest() {
+    void 机器料箱回头再开_仍按最满时留一半() {
         // 补料箱 40 个，先要 32 个拿走 20 个；引擎还缺 12 个回头再开：按最满时的一半留，一件不拿，说清为什么。
         FakeBox box = new FakeBox();
         box.box.set(0, new ItemStack(Items.IRON_INGOT, 40));
