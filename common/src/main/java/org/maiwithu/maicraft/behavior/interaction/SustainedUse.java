@@ -177,6 +177,11 @@ public final class SustainedUse implements Action {
             result = InteractionResult.of(pending, "手持" + describeHeld() + "的持续使用没有开始");
             return failureFrom(result);
         }
+        // 一按就做成了、没进入持续使用（无线终端一右键就开界面）：不用按住，也没什么可松的，直接收场。
+        if (!player.usingItem() && done.observe(player) == InteractionConfirmation.Verdict.APPLIED) {
+            result = InteractionResult.applied("手持" + describeHeld() + "一按就做成了");
+            return ActionStatus.done();
+        }
         stage = Stage.HOLDING;
         return ActionStatus.progressed();
     }
@@ -195,6 +200,11 @@ public final class SustainedUse implements Action {
     private InteractionConfirmation startConfirmation() {
         ItemStack before = heldAtSubmission;
         return context -> {
+            // 要的结果一按就出来了（界面开了）也算开始了：无线终端右键只开界面，手上不变、也不进入使用，
+            // 原先只认"手上变了或正在使用"，终端电量满着时回回"持续使用没有开始"（实机 10-13 装水从 AE 拿不到）。
+            if (done.observe(context) == InteractionConfirmation.Verdict.APPLIED) {
+                return InteractionConfirmation.Verdict.APPLIED;
+            }
             if (before != null && InteractionConfirmation.heldItemChanged(hand, before).observe(context)
                     == InteractionConfirmation.Verdict.APPLIED) {
                 return InteractionConfirmation.Verdict.APPLIED;
