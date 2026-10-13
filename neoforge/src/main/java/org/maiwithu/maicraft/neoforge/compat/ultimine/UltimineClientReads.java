@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Optional;
 
 import com.mojang.blaze3d.platform.InputConstants;
+import dev.architectury.networking.NetworkManager;
 import dev.ftb.mods.ftbultimine.FTBUltimine;
 import dev.ftb.mods.ftbultimine.api.util.CanUltimineResult;
 import dev.ftb.mods.ftbultimine.client.FTBUltimineClient;
@@ -21,7 +22,6 @@ import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.core.BlockPos;
-import net.neoforged.neoforge.network.PacketDistributor;
 import org.lwjgl.glfw.GLFW;
 
 import org.maiwithu.maicraft.compat.ultimine.UltimineControls;
@@ -89,7 +89,9 @@ public final class UltimineClientReads implements UltimineControls {
     }
 
     @Override public void cycleShape(boolean next) {
-        PacketDistributor.sendToServer(new ModeChangedPacket(next));
+        // FTB 的包登记在 Architectury 的网络层里、发出去要包一层：和 FTB 自己滚轮切形状一样经它的 NetworkManager 发。
+        // 原先用 NeoForge 直接发，编码时类型对不上，客户端当场断线（实机 10-13 长程挖矿切"采矿通道"时掉线）。
+        NetworkManager.sendToServer(new ModeChangedPacket(next));
     }
 
     @Override public Selection selection() {
