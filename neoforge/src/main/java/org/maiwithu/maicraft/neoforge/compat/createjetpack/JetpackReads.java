@@ -29,6 +29,11 @@ public final class JetpackReads implements JetpackControls {
     /** 认得的喷气背包（CJItems 注册的两种能穿的）。 */
     private static final Set<String> JETPACKS = Set.of("create_jetpack:jetpack", "create_jetpack:netherite_jetpack");
 
+    public JetpackReads() {
+        // 开发环境里拿盾也能飞（FlightLib 的调试喷气背包）：登记联动时摘掉，实机测试和正式整合包一样只有真喷气背包能飞。
+        DevJetpackRemoval.removeInDevelopment();
+    }
+
     @Override public Optional<Pack> pack(LocalPlayer player) {
         ItemStack chest = player.getItemBySlot(EquipmentSlot.CHEST);
         int slot = -1;
