@@ -102,7 +102,8 @@ public final class MiningSource implements ItemSource {
         if (spots.isEmpty()) {
             return new SourceQuote.Unavailable(describe(),
                     "半径 " + searchRadius(context) + " 格内看得见的地方没有会掉出" + request.wanted().describe()
-                            + "的方块；埋在石头里的看不见，要先下矿洞、挖开或换个地方看看");
+                            + "的方块（只算地图上自然长的：机器零件、房子、平台这些搭出来的不拆）；埋在石头里的看不见，"
+                            + "要先下矿洞、挖开或换个地方看看");
         }
         PermittedSpots.Screen<MinableSpot> screened = PermittedSpots.screen(spots, MinableSpot::pos,
                 MinableSpot::blockType, context.permissions(), permission);

@@ -45,7 +45,9 @@ public final class ClientStairsDown implements DigsStairsDown {
         /** 挖不动的（基岩这类），或者还没加载、看不到的。 */
         UNBREAKABLE,
         /** 工作台、箱子、熔炉、床这类设施：挖得动也不为挖楼梯拆，换个方向挖。 */
-        FACILITY
+        FACILITY,
+        /** 搭出来的方块（平台、地板、机器垫着的那层）：不为挖楼梯拆，到天然地面上再挖。 */
+        BUILT
     }
 
     /** 挖楼梯要读的现场与走下一级的动作；生产实现读当刻的世界，测试用替身。 */
@@ -322,6 +324,8 @@ public final class ClientStairsDown implements DigsStairsDown {
                 case FLUID -> Problem.of(Problem.Kind.DANGER, "往下挖楼梯：前面 " + at(cell) + " 是 " + what + "，停在这里");
                 case FACILITY -> Problem.of(Problem.Kind.NOT_FOUND, "往下挖楼梯：前面 " + at(cell) + " 是设施 " + what
                         + "，不为挖楼梯拆它，停在这里");
+                case BUILT -> Problem.of(Problem.Kind.NOT_FOUND, "往下挖楼梯：前面 " + at(cell) + " 的 " + what
+                        + " 是搭出来的（平台、地板这类），不为挖楼梯拆它；到天然地面上再挖", "先走到天然的地面上");
                 default -> Problem.of(Problem.Kind.NOT_FOUND, "往下挖楼梯：前面 " + at(cell) + " 的 " + what
                         + " 挖不动，停在这里");
             };

@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.acquire;
 import java.util.Objects;
 import java.util.Optional;
 
+import java.util.HashMap;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -62,6 +63,10 @@ public final class LiveStairsSite implements ClientStairsDown.Site {
         if (state.hasBlockEntity() || state.getMenuProvider(level, cell) != null
                 || state.getBlock() instanceof BedBlock) {
             return ClientStairsDown.Ground.FACILITY;
+        }
+        // 搭出来的（平台、地板、机器垫着的那层）不为挖楼梯拆：站在主城平台上要石头，不从平台往下挖穿。
+        if (!NaturalBlocks.grown(state, cell, level, level::isLoaded, new HashMap<>())) {
+            return ClientStairsDown.Ground.BUILT;
         }
         return ClientStairsDown.Ground.DIGGABLE;
     }

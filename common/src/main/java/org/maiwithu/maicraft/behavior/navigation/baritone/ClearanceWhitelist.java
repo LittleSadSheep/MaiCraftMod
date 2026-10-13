@@ -101,12 +101,15 @@ public final class ClearanceWhitelist {
      */
     public static boolean allowsAt(BlockState state, BlockPos pos, BlockGetter world, Predicate<BlockPos> loaded,
             Map<BlockPos, Boolean> trunks) {
-        if (!allows(state)) return false;
-        if (state.getBlock() instanceof LeavesBlock && state.hasProperty(LeavesBlock.PERSISTENT)
-                && state.getValue(LeavesBlock.PERSISTENT)) {
-            return false;
+        // 名单清空表示这个实例不许自动清障：照旧什么都不清。
+        if (CURRENT.get().empty()) return state.isAir();
+        // 树叶、原木按长没长在树上认，模组的也算（名单只列了原版的）：实机在 BOP 冷杉林里缺原木，
+        // 冷杉树叶不在名单里挖不开，一千多个站位全被树叶挡住，一根都砍不下来。人放的树叶、房子的原木照旧不清。
+        if (state.getBlock() instanceof LeavesBlock) {
+            return !(state.hasProperty(LeavesBlock.PERSISTENT) && state.getValue(LeavesBlock.PERSISTENT));
         }
-        return !NaturalTrees.isLog(state) || NaturalTrees.partOfNaturalTree(pos, world, loaded, trunks);
+        if (NaturalTrees.isLog(state)) return NaturalTrees.partOfNaturalTree(pos, world, loaded, trunks);
+        return allows(state);
     }
 
     // 明确列举方块或引用实际同步的标签；不凭名称包含 stone、ore 等文字猜测模组机器是否属于自然地形。
@@ -124,6 +127,10 @@ public final class ClearanceWhitelist {
     }
 
     record Rules(Set<ResourceLocation> blocks, Set<TagKey<Block>> tags) {
+        boolean empty() {
+            return blocks.isEmpty() && tags.isEmpty();
+        }
+
         boolean allows(BlockState state) {
             return blocks.contains(BuiltInRegistries.BLOCK.getKey(state.getBlock())) || tags.stream().anyMatch(state::is);
         }

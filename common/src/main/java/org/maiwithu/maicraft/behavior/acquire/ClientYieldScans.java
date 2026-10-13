@@ -87,10 +87,11 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
             if (!exposed(current.level(), hit) || !ObservationVisibility.block(current.localPlayer(), hit)) {
                 continue;
             }
-            // 砍树只砍长着的树：没有树冠的原木是玩家搭的木屋、栅栏柱、横梁，不当候选。
+            // 只挖地图上自然长出来的：天然地形、矿石、长在树上的原木。机器零件、机壳、房子、平台、刷石机的圆石
+            // 这些搭出来的不管谁搭的都不拆，缺料先从 AE、箱子拿。砍树只砍长着的树，木屋、栅栏柱、横梁的原木不算。
             // 客户端世界的 hasChunkAt 永远答“加载着”，没加载的格读出来是空气、地表落在世界最底层；按区块真加载没加载判。
-            if (NaturalTrees.isLog(current.level().getBlockState(hit))
-                    && !NaturalTrees.partOfNaturalTree(hit, current.level(), current.level()::isLoaded, trunksChecked)) {
+            if (!NaturalBlocks.grown(current.level().getBlockState(hit), hit, current.level(), current.level()::isLoaded,
+                    trunksChecked)) {
                 continue;
             }
             // 箱子、熔炉、机器这类带方块实体的是摆着用的设施，不当矿挖：实机要箱子去建进料口，
