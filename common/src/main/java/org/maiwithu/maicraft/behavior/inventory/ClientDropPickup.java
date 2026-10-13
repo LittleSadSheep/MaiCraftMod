@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.inventory;
 
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -11,6 +12,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
@@ -97,6 +99,8 @@ public final class ClientDropPickup implements PicksUpDrops {
         private int picked;
         /** 不见了但服务器没说是本玩家收的：被别人捡走、并进了别的堆或消失了。 */
         private int vanished;
+        /** 背包装不下、没去捡的那几样（按名字）。 */
+        private final LinkedHashSet<String> noRoom = new LinkedHashSet<>();
         /** 开始捡那一刻的确认序号；只认这之后本玩家的拾取。 */
         private Long cursor;
         /** 还没看到新东西冒出来时已经等了几刻：掉落物要过一两刻才同步到客户端。 */
@@ -138,6 +142,11 @@ public final class ClientDropPickup implements PicksUpDrops {
                 // 拿到多少由上层按身上的重新清点。原先一见"不见了"就整个放弃，砍树挖了几格就不挖了。
                 // 捡到了一些、只剩个别够不着的（卡在树叶缝里）：不让一件东西挡住后面，算这一批做完，上层清点后还缺就再挖。
                 // 原先砍 10 根原木捡到 9 根，剩 1 根卡在树冠里，整个采掘被划掉，报"还差 1 个"。
+                if (!noRoom.isEmpty() && picked == 0 && missed == 0) {
+                    // 一件都没捡、掉的东西全是背包装不下的：如实说背包满了，不说成走不过去。
+                    return ActionStatus.failed(Problem.of(Problem.Kind.INVENTORY_FULL, "背包满了，掉出的 "
+                            + String.join("、", noRoom) + " 装不下，没捡", "腾出几格再捡"));
+                }
                 return missed == vanished || picked > 0 ? ActionStatus.done() : ActionStatus.failed(Problem.of(Problem.Kind.STUCK,
                         "有 " + (missed - vanished) + " 件掉出的东西没捡到（走不过去，或走到了还在地上）"
                                 + (vanished > 0 ? "，" + vanished + " 件不见了但不是自己收的（被别人捡走或消失）" : "")
@@ -153,6 +162,12 @@ public final class ClientDropPickup implements PicksUpDrops {
             Entity best = null;
             for (int id : fresh) {
                 Entity entity = player.clientLevel.getEntity(id);
+                // 背包装不下的（没有空格、同种的堆也满了）走过去也吸不进来：记下来，不白跑。
+                if (entity instanceof ItemEntity item && !fits(player, item.getItem())) {
+                    skip.add(id);
+                    noRoom.add(item.getItem().getHoverName().getString());
+                    continue;
+                }
                 if (entity != null && (best == null || entity.distanceToSqr(player) < best.distanceToSqr(player))) {
                     best = entity;
                 }
@@ -211,6 +226,15 @@ public final class ClientDropPickup implements PicksUpDrops {
         // 地上那件是一整堆（两件以上并在一起）。
         private static boolean wholePile(Entity drop) {
             return drop instanceof ItemEntity item && item.getItem().getCount() >= 2;
+        }
+
+        // 背包装得下这件：有空格，或同种同组件的那一堆还没满。只看主背包和快捷栏（拾取只往这里放）。
+        private static boolean fits(LocalPlayer player, ItemStack stack) {
+            for (ItemStack held : player.getInventory().items) {
+                if (held.isEmpty()) return true;
+                if (ItemStack.isSameItemSameComponents(held, stack) && held.getCount() < held.getMaxStackSize()) return true;
+            }
+            return false;
         }
 
         // 这一格头顶（上面一格）是树叶。
