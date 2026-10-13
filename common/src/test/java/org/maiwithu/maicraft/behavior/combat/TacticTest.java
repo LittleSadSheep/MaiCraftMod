@@ -132,6 +132,16 @@ class TacticTest {
     }
 
     @Test
+    void outnumberedWithdrawsBeforeTheHealthLineBreaks() {
+        // 六点血、一身铁甲（有效血量没破拒战线），被四只僵尸围着：按人数算打不过，趁还跑得动先撤。
+        Battlefield.Me armoured = new Battlefield.Me(0, 64, 0, 0.3, 6, 17, 3.0, true, true, false, 3, 0);
+        assertInstanceOf(Tactic.Withdraw.class, decide(armoured, Tactic.Memory.FRESH,
+                zombie(1, 3), zombie(2, 4), zombie(3, 5), zombie(4, 6)));
+        // 一只照打。
+        assertInstanceOf(Tactic.Melee.class, decide(armoured, Tactic.Memory.FRESH, zombie(1, 3)));
+    }
+
+    @Test
     void finishedWhenNothingLeft() {
         assertInstanceOf(Tactic.Finished.class, decide(me(20, true, false), Tactic.Memory.FRESH));
     }

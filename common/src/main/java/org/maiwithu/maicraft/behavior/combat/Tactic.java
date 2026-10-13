@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.combat;
 
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -108,6 +110,10 @@ public final class Tactic {
         if (memory.retreating() && !memory.cornered()) return new Withdraw("已在撤离，跑到甩开为止");
         // 3 打不过。
         if (!memory.cornered() && chased && me.belowRetreatLine()) return new Withdraw("血快见底，先撤离保命");
+        // 被两只以上会还手的围着、按人数和自己的血算打不过：趁还跑得动先撤，不等血掉到拒战线（有护甲时那条线
+        // 折回真血只剩三点）才跑——那时早被围住跑不掉了。实机 10-14 六点血、一身铁甲被四只尸壳围着，
+        // 没破血线就硬打，两下见底，退着还手被围死。
+        if (!memory.cornered() && chased && outnumbered(field)) return new Withdraw("被围着打不过，先撤");
         if (!memory.cornered() && !me.hasMelee() && !me.canShoot() && me.weaponScore() <= 0
                 && field.chasers().stream().anyMatch(Battlefield.Foe::fightsBack)) {
             return new Withdraw("手上没有任何武器，对面会还手");
@@ -146,6 +152,18 @@ public final class Tactic {
     private static double nearestFighter(Battlefield field) {
         return field.chasers().stream().filter(Battlefield.Foe::fightsBack)
                 .mapToDouble(Battlefield.Foe::distance).min().orElse(Double.POSITIVE_INFINITY);
+    }
+
+    // 两只以上会还手的追兵、照威胁评估打不过（按人数、种类和自己的血、甲、武器、口粮算）。
+    private static boolean outnumbered(Battlefield field) {
+        List<ThreatAssessment.Foe> foes = new ArrayList<>();
+        int fighters = 0;
+        for (Battlefield.Foe foe : field.chasers()) {
+            if (foe.fightsBack()) fighters++;
+            foes.add(new ThreatAssessment.Foe(foe.distance(), foe.threat().kind(), true, foe.threat().armed()));
+        }
+        return fighters >= 2
+                && ThreatAssessment.assess(field.me().side(true), foes).verdict() == ThreatAssessment.Verdict.OUTMATCHED;
     }
 
     // 站高了反而更挨打的：远程怪、会飞的、别的玩家。
