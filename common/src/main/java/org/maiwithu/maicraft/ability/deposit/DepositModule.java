@@ -84,7 +84,7 @@ public final class DepositModule implements AbilityModule {
                 storing,
                 new LiveDepositPlaces(scene, memory, contexts),
                 new NativeLidDigging(digs),
-                tags, network), backpack);
+                tags, network, new LiveOffhandClearing(contexts)), backpack);
     }
 
     @Override public AbilitySpec spec() {

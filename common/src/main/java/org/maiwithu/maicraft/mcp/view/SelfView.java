@@ -46,6 +46,8 @@ public final class SelfView {
         json.addProperty("on_ground", self.onGround());
         json.addProperty("in_water", self.inWater());
         if (self.heldItem() != null) json.addProperty("held", self.heldItem());
+        // 副手拿着的单列：盾、火把这类常备的，或者顺手攥着的零碎，整理背包时一眼看得出来。
+        if (self.offhandItem() != null) json.addProperty("offhand", self.offhandItem());
         JsonArray armor = new JsonArray();
         self.armor().forEach(armor::add);
         json.add("armor", armor);

@@ -187,6 +187,32 @@ class DepositTaskTest {
     }
 
     @Test
+    void 副手攥着该存的零碎_先放回背包一起存() {
+        // 副手拿着玫瑰石英：整理背包时先换回背包再存进箱子，不留在手里。
+        Rig rig = new Rig();
+        rig.carry(DIRT, 32);
+        rig.offhand = stack(SAND, 5);
+        FakeChest chest = rig.chest(NEAR, false);
+        TaskResult result = rig.run(rig.input(null, List.of(), null));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertTrue(rig.offhand.isEmpty(), "副手的东西放回了背包");
+        assertEquals(5, chest.total(SAND));
+        assertEquals(32, chest.total(DIRT));
+    }
+
+    @Test
+    void 副手的盾照旧留着() {
+        Rig rig = new Rig();
+        rig.carry(DIRT, 32);
+        rig.offhand = stack("minecraft:shield", 1);
+        FakeChest chest = rig.chest(NEAR, false);
+        TaskResult result = rig.run(rig.input(null, List.of(), null));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals("minecraft:shield", BuiltInRegistries.ITEM.getKey(rig.offhand.getItem()).toString());
+        assertEquals(32, chest.total(DIRT));
+    }
+
+    @Test
     void 第一只装满了换第二只() {
         Rig rig = new Rig();
         rig.carry(DIRT, 32);
@@ -324,6 +350,8 @@ class DepositTaskTest {
         int opens;
         /** 网络存储替身；没有为 null。 */
         NetworkStorage network;
+        /** 副手拿着的。 */
+        ItemStack offhand = ItemStack.EMPTY;
         private long tick;
 
         Rig() {
@@ -386,10 +414,40 @@ class DepositTaskTest {
                 opens++;
                 return new FakeOpening(chests.get(WorldPosition.here(at.getX(), at.getY(), at.getZ())));
             }, null), places, null, itemId -> itemId.equals("minecraft:oak_log") ? Set.of("minecraft:logs") : Set.of(),
-                    () -> Optional.ofNullable(network));
+                    () -> Optional.ofNullable(network), offhandClearing());
             DepositTask task = new DepositTask(input, services, backpack());
             task.start(tick());
             return task;
+        }
+
+        // 副手替身：拿着的那一堆换进背包第一个空格。
+        private DepositSeams.ClearsOffhand offhandClearing() {
+            return new DepositSeams.ClearsOffhand() {
+                @Override public Optional<BackpackStack> held() {
+                    return offhand.isEmpty() ? Optional.empty() : Optional.of(snapshot(offhand));
+                }
+
+                @Override public Optional<Action> intoBackpack() {
+                    return Optional.of(new Action() {
+                        @Override public ActionStatus tick(TickContext context) {
+                            player.set(player.indexOf(ItemStack.EMPTY), offhand);
+                            offhand = ItemStack.EMPTY;
+                            return ActionStatus.done();
+                        }
+
+                        @Override public String describe() {
+                            return "替身把副手的放回背包";
+                        }
+                    });
+                }
+            };
+        }
+
+        private static BackpackStack snapshot(ItemStack item) {
+            String id = BuiltInRegistries.ITEM.getKey(item.getItem()).toString();
+            return new BackpackStack(id, item.getCount(), item.getMaxStackSize(),
+                    id.endsWith("_pickaxe") || id.equals("minecraft:shield"), id.equals("minecraft:bread"), false,
+                    id.equals(COBBLE));
         }
 
         // 背包视图按替身背包现读：建材按方块物品认，食物与工具按名字认。
@@ -399,9 +457,7 @@ class DepositTaskTest {
                     List<BackpackStack> stacks = new ArrayList<>();
                     for (ItemStack item : player) {
                         if (item.isEmpty()) continue;
-                        String id = BuiltInRegistries.ITEM.getKey(item.getItem()).toString();
-                        stacks.add(new BackpackStack(id, item.getCount(), item.getMaxStackSize(),
-                                id.endsWith("_pickaxe"), id.equals("minecraft:bread"), false, id.equals(COBBLE)));
+                        stacks.add(snapshot(item));
                     }
                     return stacks;
                 }

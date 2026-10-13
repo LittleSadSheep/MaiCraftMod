@@ -5,6 +5,7 @@ import java.util.Optional;
 
 import net.minecraft.core.BlockPos;
 
+import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -20,6 +21,15 @@ final class DepositSeams {
     /** 挖开压住容器盖子的方块：走过去、挖掉、把掉出来的捡进包；挖不了时给空。 */
     interface DigsLid {
         Optional<Action> dig(BlockPos lidCell, Permissions permissions);
+    }
+
+    /** 副手：攥着什么，以及把它放回背包的动作。整理背包时副手的东西也一起存。 */
+    interface ClearsOffhand {
+        /** 副手此刻拿着的那一堆；空手为空。 */
+        Optional<BackpackStack> held();
+
+        /** 把副手那一堆换进背包一个空格的动作；背包没空格时给空。 */
+        Optional<Action> intoBackpack();
     }
 
     /** 目标对象落在哪：观察编号此刻的位置、记得的地点、角色脚下。 */

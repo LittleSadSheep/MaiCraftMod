@@ -46,7 +46,7 @@ import org.maiwithu.maicraft.kernel.task.TaskRecords;
 final class DepositTask extends PhasedTask<DepositTask.Phase> {
 
     /** 挑容器 → 清开盖子 → 存进去（走过去点开、搬、关上）→ 换下一只；存进网络时一样样存进去。 */
-    enum Phase { CHOOSE, DIG, STORE, NEXT, NETWORK }
+    enum Phase { CHOOSE, DIG, STORE, NEXT, NETWORK, OFFHAND }
 
     private final DepositInput input;
     private final DepositServices services;
@@ -64,6 +64,8 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
     /** 每只容器存进了什么：容器的叫法 → 物品 → 件数。 */
     private final Map<String, Map<String, Integer>> storedIn = new LinkedHashMap<>();
     private final List<Problem> openFailures = new ArrayList<>();
+    /** 副手看过了没有（只看一次）。 */
+    private boolean offhandChecked;
     /** 存进网络时已经交给网络存储试过的东西：存不进的不再试。 */
     private final Set<String> networkTried = new HashSet<>();
     /** 存进网络没成的原因；没有为 null。 */
@@ -93,11 +95,25 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
             case STORE -> store(context);
             case NEXT -> nextContainer();
             case NETWORK -> network(context);
+            case OFFHAND -> switch (runAction(context)) {
+                case ActionStatus.Running running -> Next.stay();
+                case ActionStatus.Done done -> Next.go(Phase.CHOOSE, "副手的东西放回背包了");
+                case ActionStatus.Failed failed -> {
+                    recordAttempt("把副手的东西放回背包", failed.problem().message());
+                    yield Next.go(Phase.CHOOSE, "副手的东西没放回去，先存背包里的");
+                }
+            };
         };
     }
 
     // 挑容器：先按身上的东西算好存什么；点名的容器只用它，一片地方就在那里 radius 内挑。
     private Next<Phase> choose() {
+        // 整理背包：副手攥着该存的东西（玫瑰石英这类）先放回背包，再一起算存什么；工具、火把、盾、吃的照旧留在副手。
+        if (!offhandChecked) {
+            offhandChecked = true;
+            Optional<Action> clear = offhandToBackpack();
+            if (clear.isPresent()) return goWith(Phase.OFFHAND, clear.get(), "先把副手的东西放回背包");
+        }
         if (!planned) {
             plan();
         }
@@ -122,6 +138,20 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
             case ContainerChooser.Pick.NotFound notFound ->
                 Next.fail(Problem.of(Problem.Kind.NOT_FOUND, notFound.searched(), null));
         };
+    }
+
+    // 副手那一堆按"存不存"同一套规矩判：要存就先换回背包一个空格；不该存、没接上、没空格都给空。
+    private Optional<Action> offhandToBackpack() {
+        DepositSeams.ClearsOffhand offhand = services.offhand();
+        if (offhand == null) return Optional.empty();
+        Optional<BackpackStack> held = offhand.held();
+        if (held.isEmpty()) return Optional.empty();
+        BiPredicate<String, String> taggedIn = services.tags() == null
+                ? (itemId, tagId) -> false : (itemId, tagId) -> services.tags().tagsOf(itemId).contains(tagId);
+        if (DepositDecider.choose(List.of(held.get()), input.itemIds(), input.count(), taggedIn).isEmpty()) {
+            return Optional.empty();
+        }
+        return offhand.intoBackpack();
     }
 
     // 存什么在开工时按身上的东西算一次：之后背包只会变少；标签经标签接缝判断。
@@ -408,6 +438,7 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
             case STORE -> "走过去点开容器、搬进去、关上";
             case NEXT -> "换下一只容器";
             case NETWORK -> "拿出无线终端存进网络";
+            case OFFHAND -> "把副手的东西放回背包";
         };
     }
 }

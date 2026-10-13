@@ -54,7 +54,9 @@ public final class ClientSelfSight implements SelfSight {
                 (int) player.getHealth(), player.getFoodData().getFoodLevel(),
                 player.getAirSupply(), player.getMaxAirSupply(),
                 heldItem(player), armor, effects,
-                player.onGround(), player.isInWater(), gearBars(player));
+                player.onGround(), player.isInWater(), gearBars(player),
+                // 副手单独报：整理背包、换手时看得出副手攥着什么（盾、火把、顺手捡的零碎）。
+                player.getOffhandItem().isEmpty() ? null : itemTypeId(player.getOffhandItem()));
     }
 
     // 六处装备格里画着条的东西：物品自己说画不画（isBarVisible）、画多长（满长 13），换成百分比，

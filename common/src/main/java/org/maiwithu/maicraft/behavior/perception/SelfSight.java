@@ -18,17 +18,26 @@ public interface SelfSight {
      * @param facingYaw 视角角：0 朝南，顺时针增大
      * @param heldItem 手上物品注册 ID，两手都空为 null
      * @param gearBars 身上装备与手里东西自己画的那条还剩多少（耐久、背罐的气、电量），物品不画条的不列
+     * @param offhandItem 副手拿着的物品注册 ID，空着为 null
      */
     record Facts(
             double x, double y, double z, float facingYaw,
             int health, int food, int air, int maxAir,
             String heldItem, List<String> armor, List<String> effects,
-            boolean onGround, boolean inWater, List<GearBar> gearBars) {
+            boolean onGround, boolean inWater, List<GearBar> gearBars, String offhandItem) {
 
         public Facts {
             armor = List.copyOf(armor);
             effects = List.copyOf(effects);
             gearBars = gearBars == null ? List.of() : List.copyOf(gearBars);
+        }
+
+        /** 不读副手的一份：离线测试用。 */
+        public Facts(double x, double y, double z, float facingYaw, int health, int food, int air, int maxAir,
+                     String heldItem, List<String> armor, List<String> effects, boolean onGround, boolean inWater,
+                     List<GearBar> gearBars) {
+            this(x, y, z, facingYaw, health, food, air, maxAir, heldItem, armor, effects, onGround, inWater, gearBars,
+                    null);
         }
 
         /** 不读物品条的一份：离线测试用。 */
