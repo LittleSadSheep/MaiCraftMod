@@ -14,6 +14,7 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.game.ClientHooks;
+import org.maiwithu.maicraft.behavior.landing.AirSteering;
 import org.maiwithu.maicraft.behavior.navigation.FlightLandings;
 import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
@@ -27,6 +28,8 @@ import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * 飞一段：（背包里的先换上）→ 打开飞行与悬停 → 沿空中的路飞，巡航按着疾跑 → 到落点正上方快速下降 → 落地 →
@@ -37,12 +40,21 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  */
 final class JetpackFlight implements TravelLeg {
 
+    private static final Logger LOG = LoggerFactory.getLogger(JetpackFlight.class);
+
     /** 飞的几步。 */
     enum Step { EQUIP, TAKEOFF, FLY, DESCEND, RESTORE, UNEQUIP, FINISHED }
 
     /** 离拐弯点这么近算到了（水平、上下）。 */
-    static final double REACHED_HORIZONTAL = 0.6;
-    static final double REACHED_VERTICAL = 0.7;
+    static final double REACHED_HORIZONTAL = 0.25;
+    static final double REACHED_VERTICAL = 0.35;
+    /**
+     * 往上、往下穿洞前要在这一列正中对准到这么近：身体 0.6 宽，一格宽的洞两边只各剩 0.2，
+     * 偏了就顶着洞沿上不去（实机 10-13 在两块活板门中间的空当底下顶住，重新找了三次路也飞不近）。
+     */
+    static final double CENTRED = 0.15;
+    /** 横着飞时高度差这么多以内才往前走：两格高的口子上下也只剩 0.2，先把高度对齐。 */
+    static final double LEVEL = 0.15;
     /** 这么多刻没飞近就重新找路，最多找三次。 */
     static final int STALL_TICKS = 60;
     static final int MAX_REPLANS = 3;
@@ -228,6 +240,8 @@ final class JetpackFlight implements TravelLeg {
             bestDistance = toLanding;
             lastGain = now;
         } else if (now - lastGain > STALL_TICKS) {
+            LOG.info("[喷气背包] 在 {} 飞了 {} 刻没飞近落点 {}，第 {} 次重新找路", player.blockPosition().toShortString(),
+                    STALL_TICKS, landing.toShortString(), replans + 1);
             if (++replans > MAX_REPLANS || !replan(level, player)) {
                 ending = Problem.of(Problem.Kind.STUCK, "飞到 " + player.blockPosition().toShortString()
                         + " 被挡住，重新找了 " + MAX_REPLANS + " 次路也飞不近");
@@ -236,11 +250,23 @@ final class JetpackFlight implements TravelLeg {
             lastGain = now;
         }
         if (horizontal > 0.3) input.lookAt(player, new Vec3(aim.x, player.getEyeY(), aim.z));
-        boolean forward = horizontal > 0.3;
+        // 路是一格一格的直段：竖着的一段先在这一列正中对准再升降，横着的一段先把高度对齐再往前，
+        // 身体碰不到洞沿、口子边。往哪边推按世界方向算、按此刻真实朝向折成前后左右：镜头像真人一样慢慢转，
+        // 原先按"朝前"推，镜头还没转过来就顺着旧朝向飞出去（实机 10-13 往反方向飞出七十多格）。
+        BlockPos previous = waypoint == 0 ? null : route.get(waypoint - 1);
+        boolean upright = previous == null || previous.getX() == next.getX() && previous.getZ() == next.getZ();
+        boolean levelled = Math.abs(rise) < LEVEL;
+        BlockPos steerTo = upright || levelled ? next : previous;
+        boolean centred = horizontal(position, Vec3.atBottomCenterOf(steerTo)) < CENTRED;
+        boolean up = rise > LEVEL && (!upright || centred);
+        boolean down = rise < -LEVEL && (!upright || centred);
+        boolean sprint = !upright && levelled && horizontal > 3;
         // 按键交给角色输入要用本刻的客户端刻号（不是世界时间）：原先传世界时间，飞第一段就内部错误
         // "input request is not for the active tick"。
-        input.applyMovement(new PlayerInput.Movement(forward ? 1.0f : 0.0f, 0.0f, rise > 0.3, rise < -0.3,
-                forward && horizontal > 3), context.clientTick());
+        input.applySteering(yaw -> {
+            PlayerInput.Movement push = AirSteering.movement(player, steerTo, yaw, false);
+            return new PlayerInput.Movement(push.forward(), push.strafe(), up, down, sprint);
+        }, player.getYRot(), context.clientTick());
         return ActionStatus.running();
     }
 
@@ -317,6 +343,8 @@ final class JetpackFlight implements TravelLeg {
         Optional<List<BlockPos>> found = JetpackMode.route(level, loaded, player.blockPosition(), landing);
         if (found.isEmpty()) return false;
         route = found.get();
+        LOG.info("[喷气背包] 从 {} 飞到 {}：拐弯点 {}", player.blockPosition().toShortString(), landing.toShortString(),
+                route.stream().map(BlockPos::toShortString).toList());
         waypoint = 0;
         bestDistance = Double.MAX_VALUE;
         return true;
