@@ -134,7 +134,9 @@ public final class ClientDropPickup implements PicksUpDrops {
                 stopWalking();
                 // 只有走过去了还躺在地上的才算没捡到；"不见了"多半是几块原木落地并成了一堆、并进去的那堆随后被收进包，
                 // 拿到多少由上层按身上的重新清点。原先一见"不见了"就整个放弃，砍树挖了几格就不挖了。
-                return missed == vanished ? ActionStatus.done() : ActionStatus.failed(Problem.of(Problem.Kind.STUCK,
+                // 捡到了一些、只剩个别够不着的（卡在树叶缝里）：不让一件东西挡住后面，算这一批做完，上层清点后还缺就再挖。
+                // 原先砍 10 根原木捡到 9 根，剩 1 根卡在树冠里，整个采掘被划掉，报"还差 1 个"。
+                return missed == vanished || picked > 0 ? ActionStatus.done() : ActionStatus.failed(Problem.of(Problem.Kind.STUCK,
                         "有 " + (missed - vanished) + " 件掉出的东西走过去了还在地上"
                                 + (vanished > 0 ? "，" + vanished + " 件不见了但不是自己收的（被别人捡走或消失）" : "")
                                 + "，先不捡了", null));
