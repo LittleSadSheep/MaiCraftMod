@@ -172,7 +172,9 @@ public final class WaterFillSource implements ItemSource {
         // 按阶段建下一个动作：空桶已在主手就跳过换手；舀的确认是主手变成水桶。
         private Action next(PlayerContext player) {
             return switch (stage) {
-                case APPROACH -> services.approach().toward(ApproachTarget.ofBlock(water), permissions);
+                // 走到能从上面看见水面的地方：按整格找站位时，寻路一直给不出路线（实机 572,79,125 舀水两次都卡在这）；
+                // 和 use 拿空桶点水面同一个靠近办法，朝上那一面。
+                case APPROACH -> services.approach().toward(ApproachTarget.ofBlockFace(water, Direction.UP), permissions);
                 case HAND -> {
                     if (player != null && player.localPlayer() != null
                             && player.localPlayer().getMainHandItem().is(Items.BUCKET)) {
