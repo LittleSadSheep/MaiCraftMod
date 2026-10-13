@@ -172,8 +172,9 @@ class SpacePlannerTest {
         // 整理背包往 AE 里放：附近有箱子也先存网络，有用的、零碎都存，不往地上扔。
         List<BackpackStack> stacks = List.of(stack("minecraft:chain", 32), stack("minecraft:spider_eye", 1));
         SpacePlanner.Scene scene = new SpacePlanner.Scene(stacks, 0, 2, Set.of(), true, 0, List.of(家门口的箱子), true);
-        assertEquals(List.of(new SpaceMove.ToNetwork(stack("minecraft:spider_eye", 1)),
-                new SpaceMove.ToNetwork(stack("minecraft:chain", 32))), SpacePlanner.plan(scene).moves());
+        // 两样攒成一步：终端打开一次存完再关。
+        assertEquals(List.of(new SpaceMove.ToNetwork(List.of(stack("minecraft:spider_eye", 1),
+                stack("minecraft:chain", 32)))), SpacePlanner.plan(scene).moves());
     }
 
     @Test

@@ -149,17 +149,22 @@ class DepositTaskTest {
     void 存进网络_拿出终端一样样存进去_不找箱子() {
         Rig rig = new Rig();
         rig.carry(DIRT, 32).carry(SAND, 16);
+        List<Integer> batches = new ArrayList<>();
         rig.network = new NetworkStorage() {
             @Override public boolean available() {
                 return true;
             }
 
-            @Override public Optional<Action> store(BackpackStack stack, String purpose, TaskRecords records) {
+            @Override public Optional<Action> store(List<BackpackStack> stacks, String purpose, TaskRecords records) {
+                batches.add(stacks.size());
                 return Optional.of(new Action() {
                     @Override public ActionStatus tick(TickContext context) {
-                        int moved = Math.min(stack.count(), rig.carried(stack.itemId()));
-                        rig.take(stack.itemId(), moved);
-                        records.change(new Change(Change.Kind.ITEM_STORED, stack.itemId(), moved, purpose + "：存进了网络"));
+                        for (BackpackStack stack : stacks) {
+                            int moved = Math.min(stack.count(), rig.carried(stack.itemId()));
+                            rig.take(stack.itemId(), moved);
+                            records.change(new Change(Change.Kind.ITEM_STORED, stack.itemId(), moved,
+                                    purpose + "：存进了网络"));
+                        }
                         return ActionStatus.done();
                     }
 
@@ -174,6 +179,7 @@ class DepositTaskTest {
         assertEquals(0, rig.carried(DIRT));
         assertEquals(0, rig.carried(SAND));
         assertEquals(0, rig.opens, "存进网络不去开箱子");
+        assertEquals(List.of(2), batches, "两样一次交给终端，不每样开关一次");
         assertEquals(48, stored(result));
     }
 

@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.compat;
 
 import java.util.Objects;
+import java.util.List;
 import java.util.Optional;
 import java.util.function.Supplier;
 
@@ -28,8 +29,8 @@ public final class CompatNetworkStorage implements NetworkStorage {
         return ask(storage::available, false);
     }
 
-    @Override public Optional<Action> store(BackpackStack stack, String purpose, TaskRecords records) {
-        return ask(() -> storage.store(stack, purpose, records), Optional.<Action>empty())
+    @Override public Optional<Action> store(List<BackpackStack> stacks, String purpose, TaskRecords records) {
+        return ask(() -> storage.store(stacks, purpose, records), Optional.<Action>empty())
                 .map(action -> CompatAction.of(module, action));
     }
 

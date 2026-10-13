@@ -216,24 +216,25 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
                 && (changes == Permissions.BlockChanges.NATURAL || changes == Permissions.BlockChanges.ANY);
     }
 
-    // 存进网络：一样样交给网络存储（拿出终端打开、快速移动进去、关上），存进的按背包少了几件记账；
-    // 一样存不进（没连上、放不下）就不再试别的，带着还剩多少收尾。
+    // 存进网络：还没存的几样一次交给网络存储（拿出终端打开一次、一样样快速移动进去、都存完才关上），
+    // 存进的按背包少了几件记账；存不进（没连上、样样放不下）就带着还剩多少收尾。
     private Next<Phase> nextToNetwork() {
         Optional<NetworkStorage> storage = services.network().get();
         if (storage.isEmpty() || !storage.get().available()) {
             return Next.fail(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "身上没有绑了访问点的无线终端，存不进网络",
                     "带上绑好访问点的无线终端，或改存进箱子（into=container）"));
         }
+        List<BackpackStack> batch = new ArrayList<>();
         for (Map.Entry<String, Integer> entry : wanted.entrySet()) {
             int left = entry.getValue() - confirmed.getOrDefault(entry.getKey(), 0);
             if (left <= 0 || networkTried.contains(entry.getKey())) continue;
             networkTried.add(entry.getKey());
-            Optional<Action> store = storage.get().store(new BackpackStack(entry.getKey(), left, 64, false, false,
-                    false, false), "存东西", networkLedger());
-            if (store.isEmpty()) continue;
-            return goWith(Phase.NETWORK, store.get(), "把 " + entry.getKey() + " 存进网络");
+            batch.add(new BackpackStack(entry.getKey(), left, 64, false, false, false, false));
         }
-        return finish();
+        if (batch.isEmpty()) return finish();
+        Optional<Action> store = storage.get().store(batch, "存东西", networkLedger());
+        if (store.isEmpty()) return finish();
+        return goWith(Phase.NETWORK, store.get(), "把 " + batch.size() + " 样东西存进网络");
     }
 
     private Next<Phase> network(TickContext context) {

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.inventory.spi;
 
+import java.util.List;
 import java.util.Optional;
 
 import org.maiwithu.maicraft.game.player.BackpackStack;
@@ -19,10 +20,11 @@ public interface NetworkStorage {
     boolean available();
 
     /**
-     * 把主背包里的一堆存进网络的动作：存进去并确认了算做完，终端打不开、没连上、网络放不下按问题失败；
+     * 把主背包里的几堆存进网络的动作：终端只开一次，一样样存完再关（像玩家开着终端一格格点进去，不每样开关一次）；
+     * 存进了至少一件算做完，终端打不开、没连上、样样都放不下按问题失败。某一样放不下记一笔试过，接着存下一样。
      * 确认存进去的（按背包少了几件记成存进了网络）与没能确认的交互由动作记进 records。身上没有终端时给空。
      *
      * @param purpose 为什么存，写进变化备注，例如"腾地方（捡起掉落的铁锭）"
      */
-    Optional<Action> store(BackpackStack stack, String purpose, TaskRecords records);
+    Optional<Action> store(List<BackpackStack> stacks, String purpose, TaskRecords records);
 }

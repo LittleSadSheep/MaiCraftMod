@@ -135,12 +135,15 @@ class InventorySpaceTest {
             return true;
         }
 
-        @Override public Optional<Action> store(BackpackStack stack, String purpose, TaskRecords records) {
+        @Override public Optional<Action> store(List<BackpackStack> stacks, String purpose, TaskRecords records) {
             return Optional.of(oneTick(() -> {
                 if (broken) return ActionStatus.failed(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "终端没连上 ME 网络"));
-                stored.add(stack.itemId());
-                backpack.removeOne(stack.itemId());
-                records.change(new Change(Change.Kind.ITEM_STORED, stack.itemId(), stack.count(), purpose + "：存进了网络"));
+                for (BackpackStack stack : stacks) {
+                    stored.add(stack.itemId());
+                    backpack.removeOne(stack.itemId());
+                    records.change(new Change(Change.Kind.ITEM_STORED, stack.itemId(), stack.count(),
+                            purpose + "：存进了网络"));
+                }
                 return ActionStatus.done();
             }));
         }

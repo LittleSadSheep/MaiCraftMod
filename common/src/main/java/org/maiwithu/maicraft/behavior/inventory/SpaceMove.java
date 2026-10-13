@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.inventory;
 
+import java.util.List;
+
 import org.maiwithu.maicraft.game.player.BackpackStack;
 
 /**
@@ -20,8 +22,11 @@ sealed interface SpaceMove {
     record ToKnownContainer(KnownContainer container, BackpackStack stack) implements SpaceMove {
     }
 
-    /** 把主背包里的一堆存进身上无线终端连着的网络。 */
-    record ToNetwork(BackpackStack stack) implements SpaceMove {
+    /** 把主背包里的几堆存进身上无线终端连着的网络：终端开一次存完。 */
+    record ToNetwork(List<BackpackStack> stacks) implements SpaceMove {
+        public ToNetwork {
+            stacks = List.copyOf(stacks);
+        }
     }
 
     /** 把主背包里的一堆丢到地上，从最不值钱的开始；数量是一整格。 */

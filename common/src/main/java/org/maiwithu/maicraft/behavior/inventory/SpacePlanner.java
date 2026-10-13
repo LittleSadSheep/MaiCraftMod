@@ -74,14 +74,16 @@ final class SpacePlanner {
         List<BackpackStack> movable = movableStacksWorthLeastFirst(scene);
         int containerIndex = 0;
         int carriedRoom = scene.carriedBackpackFreeSlots();
+        // 存网络的几堆攒成一步：终端打开一次存完再关，不每样开关一次。
+        List<BackpackStack> toNetwork = new ArrayList<>();
         for (BackpackStack stack : movable) {
             if (slotsFreed >= scene.slotsNeeded) {
-                return new Plan(List.copyOf(moves), null, null);
+                return new Plan(withNetwork(moves, toNetwork), null, null);
             }
             // 网络能存就先存进网络（玩家整理背包就是往 AE 里放）；再是随身背包、记得的容器，都不行才丢——
             // 有地方存就不往地上扔。有用的只存不丢：存不了就跳过，留给后面问。
             if (scene.networkStorage()) {
-                moves.add(new SpaceMove.ToNetwork(stack));
+                toNetwork.add(stack);
             } else if (carriedRoom > 0) {
                 moves.add(new SpaceMove.ToCarriedBackpack(stack));
                 carriedRoom--;
@@ -96,10 +98,18 @@ final class SpacePlanner {
             slotsFreed++;
         }
         if (slotsFreed >= scene.slotsNeeded) {
-            return new Plan(List.copyOf(moves), null, null);
+            return new Plan(withNetwork(moves, toNetwork), null, null);
         }
 
         return belowPreciousNotEnough(scene, slotsFreed);
+    }
+
+    // 攒下的存网络几堆作为一步接在合并之后。
+    private static List<SpaceMove> withNetwork(List<SpaceMove> moves, List<BackpackStack> toNetwork) {
+        if (toNetwork.isEmpty()) return List.copyOf(moves);
+        List<SpaceMove> all = new ArrayList<>(moves);
+        all.add(new SpaceMove.ToNetwork(toNetwork));
+        return List.copyOf(all);
     }
 
     // 散堆合并：只数"真能并出来"的格子——数量小的并进装得下它的最大堆，并到没有一堆装得下另一堆为止。

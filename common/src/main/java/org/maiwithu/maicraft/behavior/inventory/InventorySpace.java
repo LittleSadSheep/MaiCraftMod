@@ -199,8 +199,8 @@ public final class InventorySpace {
             return switch (move) {
                 case SpaceMove.MergeStacks merge -> stackMerger.map(merger -> merger.mergeOne(records));
                 case SpaceMove.ToCarriedBackpack(var stack) -> carriedBackpack.flatMap(pack -> pack.store(stack, records));
-                case SpaceMove.ToNetwork(var stack) -> network.get()
-                        .flatMap(storage -> storage.store(stack, "腾地方（" + purpose + "）", records));
+                case SpaceMove.ToNetwork(var stacks) -> network.get()
+                        .flatMap(storage -> storage.store(stacks, "腾地方（" + purpose + "）", records));
                 case SpaceMove.ToKnownContainer(var container, var stack) -> storing.map(parts -> {
                     storingStep = new StoresInContainer(container, List.of(stack.itemId()), storeLedger(stack),
                             permissions, parts);
@@ -307,7 +307,8 @@ public final class InventorySpace {
         return switch (move) {
             case SpaceMove.MergeStacks merge -> "合并散着的 " + merge.itemId();
             case SpaceMove.ToCarriedBackpack(var stack) -> "把 " + noteOf(stack) + " 放进随身背包";
-            case SpaceMove.ToNetwork(var stack) -> "把 " + noteOf(stack) + " 存进网络";
+            case SpaceMove.ToNetwork(var stacks) -> stacks.size() == 1 ? "把 " + noteOf(stacks.getFirst()) + " 存进网络"
+                    : "把 " + stacks.size() + " 样东西存进网络";
             case SpaceMove.ToKnownContainer(var container, var stack) -> "把 " + noteOf(stack) + " 存进 " + container.name();
             case SpaceMove.DropStack(var stack) -> "丢掉 " + noteOf(stack);
         };

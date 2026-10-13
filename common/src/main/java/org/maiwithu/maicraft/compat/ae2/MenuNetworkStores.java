@@ -26,7 +26,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 往 ME 网络里存东西的生产实现：拿出身上的无线终端打开（不用走路）→ 核对是无线终端的界面、等连接状态同步过来
- * → 把背包里那种东西一格格快速移动进网络（像玩家潜行点背包格）→ 关上。
+ * → 把要存的几样东西一样样、一格格快速移动进网络（像玩家潜行点背包格）→ 都存完才关上，不每样开关一次。
  *
  * <p>每一下按背包里那种东西一共少了几件结算，少了才记"存进了网络"；点了一会儿没少，是网络放不下（存储满了、
  * 不收这种东西），如实收场。没连上网络（超出访问点范围、没电）照抄界面上的原因收场，腾地方改走箱子或丢。
@@ -52,8 +52,9 @@ public final class MenuNetworkStores implements NetworkStorage {
         return carriedTerminal().isPresent();
     }
 
-    @Override public Optional<Action> store(BackpackStack stack, String purpose, TaskRecords records) {
-        return carriedTerminal().map(terminal -> new Storing(terminal, stack, purpose, records));
+    @Override public Optional<Action> store(List<BackpackStack> stacks, String purpose, TaskRecords records) {
+        if (stacks.isEmpty()) return Optional.empty();
+        return carriedTerminal().map(terminal -> new Storing(terminal, stacks, purpose, records));
     }
 
     // 身上（主背包、快捷栏、副手）第一件绑过访问点的无线终端的物品 ID。
@@ -72,11 +73,16 @@ public final class MenuNetworkStores implements NetworkStorage {
 
     private enum Stage { OPEN, SYNC, STORE, CLOSE, DONE }
 
-    /** 存一堆进网络：打开 → 等连上 → 一格格快速移动 → 关上，跨刻推进。 */
+    /** 存几堆进网络：打开 → 等连上 → 一样样一格格快速移动 → 关上，跨刻推进。 */
     private final class Storing implements Action {
 
         private final String terminal;
-        private final BackpackStack stack;
+        private final List<BackpackStack> stacks;
+        /** 正在存第几样。 */
+        private int current;
+        /** 这一样确认存进的件数。 */
+        private int storedThis;
+        private BackpackStack stack;
         private final String purpose;
         private final TaskRecords records;
         private final MenuOpening opening;
@@ -92,10 +98,13 @@ public final class MenuNetworkStores implements NetworkStorage {
         private int quiet;
         /** 收场的原因：一件都没存进时按它失败；存进了就算做完。 */
         private Problem stopReason;
+        /** 最近一样存不进的原因：样样都存不进时按它收场。 */
+        private Problem lastProblem;
 
-        Storing(String terminal, BackpackStack stack, String purpose, TaskRecords records) {
+        Storing(String terminal, List<BackpackStack> stacks, String purpose, TaskRecords records) {
             this.terminal = terminal;
-            this.stack = stack;
+            this.stacks = List.copyOf(stacks);
+            this.stack = this.stacks.getFirst();
             this.purpose = purpose;
             this.records = records;
             this.opening = new HeldItemMenuOpening(terminal, services.menuLayouts(), services.toMainhand(),
@@ -148,7 +157,7 @@ public final class MenuNetworkStores implements NetworkStorage {
             return ActionStatus.progressed();
         }
 
-        // 上一下少了几件就记账；没在等的话挑背包里下一格这种东西快速移动进网络，存够这一堆就关上。
+        // 上一下少了几件就记账；没在等的话挑背包里下一格这种东西快速移动进网络，存够这一样接着存下一样，都存完才关上。
         private ActionStatus storeNext() {
             Optional<MenuContent.Reading> reading = menu.reading();
             if (reading.isEmpty()) return finish(null);
@@ -158,26 +167,43 @@ public final class MenuNetworkStores implements NetworkStorage {
                 if (now < before) {
                     int moved = before - now;
                     stored += moved;
+                    storedThis += moved;
                     records.change(new Change(Change.Kind.ITEM_STORED, stack.itemId(), moved,
                             purpose + "：存进了 " + terminal + " 连着的网络"));
                     before = -1;
                 } else if (++quiet < SETTLE_TICKS) {
                     return ActionStatus.running();
                 } else {
+                    // 这一样放不下（存储满了、不收这种东西）：记一笔，接着存下一样。
                     before = -1;
-                    return stopNow(stored > 0 ? null : Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+                    return nextKind(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
                             "网络放不下 " + stack.itemId() + "（存储满了或不收这种东西）", null));
                 }
             }
-            if (stored >= stack.count()) return stopNow(null);
+            if (storedThis >= stack.count()) return nextKind(null);
             int index = slotHolding(reading.get().playerSnapshots());
             if (index < 0) {
-                return stopNow(stored > 0 ? null
+                return nextKind(storedThis > 0 ? null
                         : Problem.of(Problem.Kind.NEED_ITEM, "背包里已经没有 " + stack.itemId() + " 了", null));
             }
             // 本刻发不出去（上一下没结清、界面没画好、没有交互机会）就下一刻再点，不算点过。
             if (!menu.quickMove(reading.get().playerSlotIds().get(index))) return ActionStatus.running();
             before = now;
+            quiet = 0;
+            return ActionStatus.progressed();
+        }
+
+        // 这一样存完或存不进：存不进的记一笔试过；还有下一样就接着存，都过完了才关上。
+        private ActionStatus nextKind(Problem problem) {
+            if (problem != null) {
+                lastProblem = problem;
+                records.attempt("把 " + stack.itemId() + " 存进 " + terminal + " 连着的网络", problem.message());
+            }
+            if (++current >= stacks.size()) {
+                return stopNow(stored > 0 ? null : lastProblem);
+            }
+            stack = stacks.get(current);
+            storedThis = 0;
             quiet = 0;
             return ActionStatus.progressed();
         }
@@ -247,7 +273,9 @@ public final class MenuNetworkStores implements NetworkStorage {
         }
 
         @Override public String describe() {
-            return "把 " + stack.count() + " 个 " + stack.itemId() + " 存进 " + terminal + " 连着的网络";
+            return stacks.size() == 1
+                    ? "把 " + stack.count() + " 个 " + stack.itemId() + " 存进 " + terminal + " 连着的网络"
+                    : "把 " + stacks.size() + " 样东西存进 " + terminal + " 连着的网络（正在存 " + stack.itemId() + "）";
         }
     }
 }
