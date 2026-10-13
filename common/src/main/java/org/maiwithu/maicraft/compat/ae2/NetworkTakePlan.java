@@ -53,9 +53,11 @@ public final class NetworkTakePlan {
      */
     public static List<Ae2TerminalMenu.StockEntry> matching(List<Ae2TerminalMenu.StockEntry> stock,
             Predicate<ItemStack> wanted) {
+        // 网络里现成的桶装水先拿，拿空桶去装流体排在后面。
         return stock.stream()
                 .filter(entry -> entry.stored() > 0 && wanted.test(entry.sample()))
-                .sorted(Comparator.comparing((Ae2TerminalMenu.StockEntry entry) -> !plain(entry.sample()))
+                .sorted(Comparator.comparing(Ae2TerminalMenu.StockEntry::fillsBucket)
+                        .thenComparing((Ae2TerminalMenu.StockEntry entry) -> !plain(entry.sample()))
                         .thenComparing(Comparator.comparingLong(Ae2TerminalMenu.StockEntry::stored).reversed()))
                 .toList();
     }

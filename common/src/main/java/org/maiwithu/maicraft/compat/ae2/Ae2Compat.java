@@ -174,6 +174,11 @@ public final class Ae2Compat extends CompatModule {
         run("从 ME 终端取一件", () -> menus.takeOne(menu, serial));
     }
 
+    /** 拿网络里的空桶装一桶流体放进背包；见 {@link Ae2TerminalMenu#fillBucket}。 */
+    public void fillBucket(AbstractContainerMenu menu, long serial) {
+        run("从 ME 终端装一桶", () -> menus.fillBucket(menu, serial));
+    }
+
     /** 发一次把光标上的东西放回网络；见 {@link Ae2TerminalMenu#putBack}。 */
     public void putBack(AbstractContainerMenu menu) {
         run("把光标上的东西放回 ME 网络", () -> menus.putBack(menu));

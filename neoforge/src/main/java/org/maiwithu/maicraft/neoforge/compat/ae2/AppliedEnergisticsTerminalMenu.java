@@ -7,6 +7,7 @@ import java.util.Optional;
 
 import appeng.api.parts.IPartHost;
 import appeng.api.stacks.AEItemKey;
+import appeng.api.stacks.AEFluidKey;
 import appeng.helpers.InventoryAction;
 import appeng.helpers.WirelessTerminalMenuHost;
 import appeng.menu.me.common.GridInventoryEntry;
@@ -18,6 +19,8 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.ItemStack;
 
 import org.maiwithu.maicraft.compat.ae2.Ae2TerminalMenu;
 
@@ -52,7 +55,8 @@ public final class AppliedEnergisticsTerminalMenu implements Ae2TerminalMenu {
         return Optional.of(storage.getLinkStatus().connected());
     }
 
-    // 存货表由终端的界面画面建立并接收服务端的增量同步；只取物品条目，流体等不列。
+    // 存货表由终端的界面画面建立并接收服务端的增量同步；物品照列，有桶的流体（水、岩浆）按一桶一件列成装满的桶，
+    // 其余流体、化学品这类不列。
     @Override public Optional<List<StockEntry>> stock(AbstractContainerMenu menu) {
         if (!(menu instanceof MEStorageMenu storage)) return Optional.empty();
         IClientRepo repo = storage.getClientRepo();
@@ -62,6 +66,9 @@ public final class AppliedEnergisticsTerminalMenu implements Ae2TerminalMenu {
             if (entry.getWhat() instanceof AEItemKey item) {
                 entries.add(new StockEntry(entry.getSerial(), item.toStack(1),
                         Math.max(0, entry.getStoredAmount()), entry.isCraftable()));
+            } else if (entry.getWhat() instanceof AEFluidKey fluid && fluid.getFluid().getBucket() != Items.AIR) {
+                entries.add(new StockEntry(entry.getSerial(), new ItemStack(fluid.getFluid().getBucket()),
+                        Math.max(0, entry.getStoredAmount()) / AEFluidKey.AMOUNT_BUCKET, false, true));
             }
         }
         return Optional.of(List.copyOf(entries));
@@ -74,6 +81,11 @@ public final class AppliedEnergisticsTerminalMenu implements Ae2TerminalMenu {
 
     @Override public void takeOne(AbstractContainerMenu menu, long serial) {
         if (menu instanceof MEStorageMenu storage) storage.handleInteraction(serial, InventoryAction.PICKUP_SINGLE);
+    }
+
+    // 光标空着 Shift 点流体：网络里有空桶就拿一只装满放进背包（终端里给的"装满放进背包"那一下）。
+    @Override public void fillBucket(AbstractContainerMenu menu, long serial) {
+        if (menu instanceof MEStorageMenu storage) storage.handleInteraction(serial, InventoryAction.FILL_ITEM_MOVE_TO_PLAYER);
     }
 
     // 下单合成：和在终端里中键点那一条一样，服务端打开填数量的界面。

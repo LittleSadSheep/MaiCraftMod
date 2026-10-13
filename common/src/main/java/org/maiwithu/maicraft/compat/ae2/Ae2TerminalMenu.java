@@ -49,6 +49,13 @@ public interface Ae2TerminalMenu {
     /** 向服务端发"取一件到光标上"：光标上已有同一种东西时再叠一件，满一组就不再加。 */
     void takeOne(AbstractContainerMenu menu, long serial);
 
+    /**
+     * 光标空着时点流体那一条装一桶：网络里有空桶就拿一只装满，直接放进背包（Shift 点流体）。
+     * 网络里没有空桶时什么都不发生，调用方按背包前后对照会看到没动静。
+     */
+    default void fillBucket(AbstractContainerMenu menu, long serial) {
+    }
+
     /** 向服务端发"把光标上的东西放回网络"：等于在终端的网络格子空白处点一下；网络放不下的留在光标上。 */
     void putBack(AbstractContainerMenu menu);
 
@@ -85,12 +92,19 @@ public interface Ae2TerminalMenu {
      * @param sample    这种东西的样子（一件），组件与网络里的一致；比对"是不是同一种"用它
      * @param stored    网络里现有的件数
      * @param craftable 网络里有样板能做出它
+     * @param fillsBucket 这一条是流体（水、岩浆这类有桶的）：按一桶一件列，样子是装满的桶，
+     *                    取的时候像玩家拿空桶点它，装满一桶放进背包
      */
-    record StockEntry(long serial, ItemStack sample, long stored, boolean craftable) {
+    record StockEntry(long serial, ItemStack sample, long stored, boolean craftable, boolean fillsBucket) {
         public StockEntry {
             Objects.requireNonNull(sample, "sample");
             sample = sample.copyWithCount(1);
             if (stored < 0) throw new IllegalArgumentException("网络里的件数不能为负：" + stored);
+        }
+
+        /** 物品那一条。 */
+        public StockEntry(long serial, ItemStack sample, long stored, boolean craftable) {
+            this(serial, sample, stored, craftable, false);
         }
     }
 }

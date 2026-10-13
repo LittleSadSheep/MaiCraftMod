@@ -11,6 +11,7 @@ import java.util.function.Supplier;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
 
@@ -169,6 +170,9 @@ public final class MenuTerminalTakes implements TerminalTakes {
     /** 正在等确认的那一下是哪种取法。 */
     private enum Pending { STACK, ONE }
 
+    /** 把空桶放进网络后等它出现在存货里的期限（刻）。 */
+    private static final int BUCKET_WAIT_TICKS = 40;
+
     /** 从终端取货的动作：点开 → 等同步 → 逐笔取 → 关上，跨刻推进。 */
     private final class TakeAction implements Action {
 
@@ -320,6 +324,7 @@ public final class MenuTerminalTakes implements TerminalTakes {
                 return stopNow(nothingLeft());
             }
             int remaining = request.count() - confirmedTotal();
+            if (entry.fillsBucket() && cursor.isEmpty()) return fillBucket(entry, stock, reading.get(), raw, remaining);
             NetworkTakePlan.Move move = NetworkTakePlan.next(remaining, cursor, entry,
                     reading.get().playerSlotIds(), reading.get().playerSnapshots());
             return switch (move) {
@@ -332,6 +337,37 @@ public final class MenuTerminalTakes implements TerminalTakes {
                         "背包放不下从 " + access.describe() + " 取的" + request.wanted().describe(), null));
                 case NetworkTakePlan.Done done -> stopNow(remaining > 0 ? nothingLeft() : null);
             };
+        }
+
+        // 要的是一桶水（岩浆）而网络里存的是流体：像玩家拿空桶点终端里的水。网络里有空桶就直接点，
+        // AE 拿一只装满放进背包；没有就先把背包里的空桶放进网络再点；两边都没有空桶如实说。
+        // 原先只认物品，网络里明明有无限水也说"没有水桶"，角色转去舀了自己刷石机里的水。
+        private ActionStatus fillBucket(Ae2TerminalMenu.StockEntry entry, List<Ae2TerminalMenu.StockEntry> stock,
+                MenuContent.Reading reading, AbstractContainerMenu raw, int remaining) {
+            if (remaining <= 0) return stopNow(null);
+            boolean networkHasBucket = stock.stream()
+                    .anyMatch(other -> !other.fillsBucket() && other.stored() > 0 && other.sample().is(Items.BUCKET));
+            if (networkHasBucket) {
+                if (NetworkTakePlan.slotFor(entry.sample(), 1, reading.playerSlotIds(), reading.playerSnapshots()).isEmpty()) {
+                    return stopNow(Problem.of(Problem.Kind.INVENTORY_FULL,
+                            "背包放不下从 " + access.describe() + " 装的" + request.wanted().describe(), null));
+                }
+                return submit(Pending.STACK, entry, reading, raw, () -> compat.fillBucket(raw, entry.serial()));
+            }
+            // 背包里的空桶放进网络：放过一次还没在存货里出现就等一会儿，等不到如实说。
+            if (bucketOffered) {
+                return ++bucketWaited <= BUCKET_WAIT_TICKS ? ActionStatus.running()
+                        : stopNow(Problem.of(Problem.Kind.STUCK, "把空桶放进 " + access.describe() + " 的网络后一直没看到", null));
+            }
+            for (int i = 0; i < reading.playerSnapshots().size(); i++) {
+                SlotSnapshot slot = reading.playerSnapshots().get(i);
+                if (slot.isEmpty() || !slot.stack().is(Items.BUCKET)) continue;
+                if (!menu.quickMove(reading.playerSlotIds().get(i))) return ActionStatus.running();
+                bucketOffered = true;
+                return ActionStatus.progressed();
+            }
+            return stopNow(Problem.of(Problem.Kind.NEED_ITEM, access.describe() + " 的网络里有"
+                    + itemId(entry.sample()) + "要装的流体，可网络里和背包里都没有空桶", "先备一只空桶（三块铁锭）再来装"));
         }
 
         // 网络里有样板、能做出想要的东西的那一条（现货是零）。
@@ -623,6 +659,10 @@ public final class MenuTerminalTakes implements TerminalTakes {
             return Problem.of(Problem.Kind.NEED_ITEM,
                     access.describe() + " 的网络里没有" + request.wanted().describe() + "了", null);
         }
+
+        /** 为装流体把背包里的空桶放进网络了。 */
+        private boolean bucketOffered;
+        private int bucketWaited;
 
         private int confirmedTotal() {
             int total = 0;
