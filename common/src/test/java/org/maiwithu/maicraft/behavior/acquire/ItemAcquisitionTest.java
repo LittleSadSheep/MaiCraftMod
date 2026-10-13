@@ -462,4 +462,17 @@ class ItemAcquisitionTest {
                 .mapToLong(stack -> stack.count())
                 .sum();
     }
+
+    @Test
+    void 问远近时说不准有没有的排在记得有的后面() {
+        // 没读过的随身背包对什么都报"可能有"、距离 0；记得 AE 里有的报明确数量。远近按记得有的那家算。
+        ScriptedSource backpackUnknown = new ScriptedSource("随身背包", backpack)
+                .answer(new SourceQuote.Offer("随身背包", SourceQuote.Offer.UNKNOWN_COUNT, new AcquisitionCost(0, 3), "可能有"));
+        ScriptedSource known = new ScriptedSource("ME 终端", backpack)
+                .answer(new SourceQuote.Offer("ME 终端", 16, new AcquisitionCost(5, 3), "记得有"));
+        assertEquals(Optional.of(5d), engine(backpackUnknown, known).nearestDistanceBlocks(
+                new ItemRequest(WantedItem.ofItem("minecraft:spruce_log"), 1, "做木板"), PERMISSIONS));
+        assertEquals(Optional.of(ItemAcquisition.UNKNOWN_STOCK_BLOCKS), engine(backpackUnknown).nearestDistanceBlocks(
+                new ItemRequest(WantedItem.ofItem("minecraft:oak_log"), 1, "做木板"), PERMISSIONS));
+    }
 }

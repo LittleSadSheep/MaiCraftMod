@@ -177,6 +177,9 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
 
     // 问价不拿：照常问遍来源，只把最近一条路的距离报回去，不动手也不记任何事实。
     // 只有点名才做的途径（交易）照旧不参与：没人点名买东西，问价也不问它。
+    /** 问远近时，说不准有没有的报价按多走这么多格算：排在看得见、记得有的后面，但不比真远的地方更远。 */
+    static final double UNKNOWN_STOCK_BLOCKS = 32;
+
     @Override public Optional<Action> lookAround(ItemRequest request, Permissions permissions) {
         SourceContext context = new SourceContext(position.currentPosition(), permissions);
         for (ItemSource source : sources) {
@@ -193,7 +196,9 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         for (ItemSource source : sources) {
             if (!Scope.ALL.allows(source.via().name())) continue;
             if (source.quote(request, context) instanceof SourceQuote.Offer offer) {
-                double distance = offer.cost().distanceBlocks();
+                // 说不准有没有的（没开过的箱子、没读过的随身背包）排在看得见、记得有的后面：要任意木板时，
+                // 没读过的背包对每种原木都报"可能有"、距离 0，原先十几种木板分不出先后，AE 里的云杉排不进前十二种。
+                double distance = offer.cost().distanceBlocks() + (offer.countUnknown() ? UNKNOWN_STOCK_BLOCKS : 0);
                 if (nearest.isEmpty() || distance < nearest.get()) nearest = Optional.of(distance);
             }
         }
