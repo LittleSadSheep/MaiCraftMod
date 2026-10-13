@@ -228,7 +228,11 @@ public final class ClientStairsDown implements DigsStairsDown {
                     // 捡没捡全不停楼梯：掉进缝里的一两件不值得为它停手，够不够由引擎重新清点。
                     case PICK_UP -> nextStep();
                     // 看见的矿挖完了：长程挖矿到此收场，够不够由引擎重新清点。
-                    case MINE -> finish(status instanceof ActionStatus.Failed failed ? failed.problem() : null);
+                    // 没挖成要说清是在哪看见的矿、卡在哪：原先只剩一句"东西走过去了还在地上"，看不出挖到了矿。
+                    case MINE -> finish(status instanceof ActionStatus.Failed failed
+                            ? Problem.of(failed.problem().kind(), "长程挖矿在 " + at(feet) + " 看见了要的矿，去挖的时候："
+                                    + failed.problem().message(), failed.problem().suggestion())
+                            : null);
                     case LOOK -> throw new IllegalStateException("看下一级时手上不该有动作");
                 };
             }
