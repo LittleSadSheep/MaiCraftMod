@@ -370,7 +370,7 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         String far = String.join("、", unreached);
         return TaskResult.builder(status, summary + "；够不着 " + far)
                 .problem(Problem.of(Problem.Kind.UNREACHABLE, far + " 走不到跟前、也射不到（隔着悬崖、水或墙）",
-                        "带上弓和箭再来，或先搭路走到它那边"))
+                        "先搭路或绕到它那边；身上有弓的走到它二十格内再射"))
                 .remaining(unreached)
                 .details(details()).build();
     }

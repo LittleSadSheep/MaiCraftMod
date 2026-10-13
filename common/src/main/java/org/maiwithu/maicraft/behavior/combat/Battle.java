@@ -34,6 +34,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  */
 public final class Battle {
 
+    /** 有弓时走近到射程边上再往里留这么多格，到了就射。 */
+    private static final double BOW_APPROACH_MARGIN = 3.0;
     private static final Logger LOG = LoggerFactory.getLogger(Battle.class);
 
     /** 这一刻在做什么。 */
@@ -368,17 +370,7 @@ public final class Battle {
             else moves.step(context, target.id(), step);
             moved = !step.standing() || jumpNow;
         } else if (threat.kind() == ThreatAssessment.Kind.EXPLOSIVE) {
-            // 苦力怕不在眼前同一层的平地上（隔着坑、差着高、要绕路搭桥）：不寻路凑过去——绕路、搭桥时人慢，
-            // 它一贴近就点火，实机就是潜行着往苦力怕那边挪被炸。原地守在它的点火距离外，等它走到平地跟前再砍；
-            // 看不见或不在同一层的记成够不着，它真贴上来自卫会再接手。
-            dropWalk();
-            List<Footwork.Hazard> hazards = sideHazards(field, target.id(), SIDE_MARGIN);
-            hazards.add(new Footwork.Hazard(threat.x(), threat.z(), CombatGeometry.CREEPER_IGNITE + SIDE_MARGIN));
-            Footwork.Step step = Footwork.choose(me.x(), me.z(), new Footwork.Stance(null, hazards, false),
-                    moves.ground(context));
-            moves.step(context, target.id(), step);
-            moved = !step.standing();
-            if (!threat.visible() || Math.abs(threat.y() - me.y()) > LEVEL_GAP) unreachable.add(target.id());
+            moved = creeperFootwork(context, field, me, target, threat);
         } else {
             List<ThreatField.Threat> threats = pathThreats(field, -1);
             Vec3 focus = new Vec3(threat.x(), threat.y(), threat.z());
@@ -505,6 +497,37 @@ public final class Battle {
                     danger + CELL_SLACK, danger));
         }
         return threats;
+    }
+
+    // 苦力怕的走位：有弓、看得见、在射程外就走近到射程里；否则不寻路凑过去，守在点火距离外等它走过来。
+    // 返回这一刻脚动了没有。
+    private boolean creeperFootwork(TickContext context, Battlefield field, Battlefield.Me me, Battlefield.Foe target,
+                                    CombatSenses.Threat threat) {
+        boolean moved;
+        if (me.canShoot() && threat.visible()
+                && threat.distance() > RangedCombat.ENGAGE_RANGE - BOW_APPROACH_MARGIN) {
+            // 有弓、看得见、在射程外的苦力怕：走近到射程里再射，不当成够不着。走近只到射程边上，离它点火距离远着呢。
+            // 实机 10-14 点名一只三十多格外、高两三格的苦力怕，身上有弓有箭，原地就以"走不到跟前也射不到"收场。
+            List<ThreatField.Threat> threats = pathThreats(field, -1);
+            Vec3 focus = new Vec3(threat.x(), threat.y(), threat.z());
+            moved = follow(context, "走近射 " + target.id(), threat, () -> GoalCompiler.approachAvoiding(
+                    GoalCompiler.band(focus, RangedCombat.ENGAGE_RANGE - 2 * BOW_APPROACH_MARGIN,
+                            RangedCombat.ENGAGE_RANGE - BOW_APPROACH_MARGIN), threats));
+            if (lastWalkFailed) unreachable.add(target.id());
+        } else {
+            // 苦力怕不在眼前同一层的平地上（隔着坑、差着高、要绕路搭桥）：不寻路凑过去——绕路、搭桥时人慢，
+            // 它一贴近就点火，实机就是潜行着往苦力怕那边挪被炸。原地守在它的点火距离外，等它走到平地跟前再砍；
+            // 看不见或不在同一层的记成够不着，它真贴上来自卫会再接手。
+            dropWalk();
+            List<Footwork.Hazard> hazards = sideHazards(field, target.id(), SIDE_MARGIN);
+            hazards.add(new Footwork.Hazard(threat.x(), threat.z(), CombatGeometry.CREEPER_IGNITE + SIDE_MARGIN));
+            Footwork.Step step = Footwork.choose(me.x(), me.z(), new Footwork.Stance(null, hazards, false),
+                    moves.ground(context));
+            moves.step(context, target.id(), step);
+            moved = !step.standing();
+            if (!threat.visible() || Math.abs(threat.y() - me.y()) > LEVEL_GAP) unreachable.add(target.id());
+        }
+        return moved;
     }
 
     // 跟着一段寻路走：同一件事、目标没跑开就沿用，跑开三格以上或换了事才重新算路；走不通记下来。
