@@ -18,6 +18,7 @@ import org.maiwithu.maicraft.compat.ftbquests.FtbQuestsCompat;
 import org.maiwithu.maicraft.compat.jei.JeiCompat;
 import org.maiwithu.maicraft.compat.mekanism.MekanismCompat;
 import org.maiwithu.maicraft.compat.ponder.PonderCompat;
+import org.maiwithu.maicraft.compat.ultimine.UltimineCompat;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsGrid;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsPatterns;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsTerminalMenu;
@@ -45,6 +46,7 @@ import org.maiwithu.maicraft.neoforge.compat.ftbquests.FtbQuestsClientSends;
 import org.maiwithu.maicraft.neoforge.compat.jei.JeiClientReads;
 import org.maiwithu.maicraft.neoforge.compat.mekanism.MekanismClientReads;
 import org.maiwithu.maicraft.neoforge.compat.ponder.PonderClientReads;
+import org.maiwithu.maicraft.neoforge.compat.ultimine.UltimineClientReads;
 
 /**
  * 客户端一侧的联动清单：每个支持的模组一行（SupportedMod）——模组 ID、验证过的版本范围、怎么创建读写端与联动入口。
@@ -101,6 +103,10 @@ public final class ClientCompatCatalog {
                         () -> new SimulatedCompat(new SimulatedPartReads(), new SableStructureReads())),
                 // 通用机械：按 10.7.19 编译，实测实例装的是 10.7.19.85；装了 10.8 及以上不登记，实测通过后再放宽。
                 new SupportedMod<>(MekanismCompat.MOD_ID, "通用机械", new VerifiedVersions("10.7.19", "10.8"),
-                        () -> new MekanismCompat(new MekanismClientReads())));
+                        () -> new MekanismCompat(new MekanismClientReads())),
+                // FTB 连锁破坏：按 2101.1.15 编译，实测实例装的就是它；装了 2101.2 及以上不登记
+                // （当前形状要读它客户端的一个非公开字段，换了版本可能改名）。
+                new SupportedMod<>(UltimineCompat.MOD_ID, "FTB 连锁破坏", new VerifiedVersions("2101.1.15", "2101.2"),
+                        () -> new UltimineCompat(new UltimineClientReads())));
     }
 }
