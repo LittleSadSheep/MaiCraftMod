@@ -81,7 +81,13 @@ final class UltimineKeyHold implements ChainKeyHold {
         } else if (!origin.equals(hit.getBlockPos()) || face != hit.getDirection()) {
             return single(now, "准星换了格或换了面");
         }
-        if (!site.tool(context).identity().equals(toolIdentity)) return single(now, "手里的工具换了");
+        String tool = site.tool(context).identity();
+        if (!tool.equals(toolIdentity)) {
+            // 还没挥第一下：挖掘这时正在换顺手的工具（花岗岩换镐、换拆解机），按换好的那把重新认，
+            // 选区按新工具重新核、重新给观众看。原先一换就不连，实机 10-13 往下挖台阶最下一行回回"手里的工具换了"。
+            toolIdentity = tool;
+            admittedRevision = -1;
+        }
         if (controls.hudHidden()) return single(now, "界面被藏起来了（F1），观众看不到连锁的轮廓");
         if (!controls.serverListens()) return single(now, "服务器没装 FTB 连锁挖");
         if (!pressed && controls.heldByHand()) {
