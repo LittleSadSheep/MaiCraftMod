@@ -120,6 +120,23 @@ class TravelAbilityTest {
     }
 
     @Test
+    void tightRadiusAroundUnstandableTargetWidensToNearestStandableRing() {
+        // 床边 1 格：四周不是墙就是床，一格能站的都没有；放宽到最近有能站的那一圈（2 格），不然走路找不到终点。
+        StubWorld cramped = new StubWorld() {
+            @Override public boolean standable(int x, int y, int z) {
+                int dx = x - 5, dy = y - 70, dz = z - 5;
+                return y == 70 && dx * dx + dy * dy + dz * dz >= 4;
+            }
+        };
+        TravelAbility roomy = new TravelAbility(walks,
+                new DestinationResolver(cramped, name -> Optional.empty(), id -> Optional.empty()),
+                List::of, progress -> {}, null, cramped, List.of());
+        Goal request = goal(new Target.Position(5, 70, 5, null), "{\"radius\":1}");
+        StepDecision.Run run = assertInstanceOf(StepDecision.Run.class, roomy.decide(step(request)));
+        assertEquals(2.0, assertInstanceOf(TravelInput.class, run.input()).destination().radius());
+    }
+
+    @Test
     void noTerrainPermissionMeansWalkOnly() {
         Goal request = new Goal("maicraft:travel", null, new Target.Position(0, 64, 0, null),
                 params("{}"), Permissions.DEFAULT.mergedWith(Permissions.BlockChanges.NONE,
@@ -279,7 +296,7 @@ class TravelAbilityTest {
     }
 
     /** 现场替身：角色站在原点。 */
-    private record StubWorld() implements TravelWorldView {
+    private static class StubWorld implements TravelWorldView {
         @Override public WorldPosition currentSpot() {
             return new WorldPosition(0, 64, 0, null);
         }

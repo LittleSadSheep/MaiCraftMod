@@ -25,4 +25,9 @@ public interface TravelWorldView {
     default OptionalInt surfaceFeet(int x, int z) {
         return OptionalInt.empty();
     }
+
+    /** 人能不能站在这一格（脚在这格、头在上面一格、脚下踩得住）；没加载、读不到时答能，不凭空放宽目的地。 */
+    default boolean standable(int x, int y, int z) {
+        return true;
+    }
 }

@@ -7,6 +7,7 @@ import java.util.function.Supplier;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 
+import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.behavior.navigation.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.kernel.goal.Target;
@@ -35,6 +36,15 @@ public final class ClientTravelWorldView implements TravelWorldView {
         LocalPlayer player = current.localPlayer();
         return new WorldPosition((int) Math.floor(player.getX()), (int) Math.floor(player.getY()),
                 (int) Math.floor(player.getZ()), player.level().dimension().location().toString());
+    }
+
+    @Override
+    public boolean standable(int x, int y, int z) {
+        PlayerContext current = context.get();
+        if (current == null || current.level() == null) return true;
+        BlockPos feet = new BlockPos(x, y, z);
+        if (!current.level().isLoaded(feet)) return true;
+        return BlockPassability.isStandable(current.level(), feet);
     }
 
     @Override

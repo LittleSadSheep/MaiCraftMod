@@ -8,6 +8,7 @@ import org.maiwithu.maicraft.behavior.travel.DimensionTravelServices;
 import org.maiwithu.maicraft.behavior.travel.DimensionTravelTask;
 import org.maiwithu.maicraft.behavior.travel.JourneyTask;
 import org.maiwithu.maicraft.behavior.travel.ReadsPlacedBlocks;
+import org.maiwithu.maicraft.behavior.travel.TravelDestination;
 import org.maiwithu.maicraft.behavior.travel.TravelProgressListener;
 import org.maiwithu.maicraft.behavior.travel.TravelTask;
 import org.maiwithu.maicraft.behavior.travel.TravelWorldView;
@@ -24,6 +25,7 @@ import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.goal.TargetKind;
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.param.ParamSpec;
 import org.maiwithu.maicraft.kernel.param.ParamSpecs;
 import org.maiwithu.maicraft.kernel.param.ParamType;
@@ -62,6 +64,8 @@ public final class TravelAbility implements AbilityModule {
     private final TravelProgressListener progressListener;
     private final DimensionTravelServices dimensionServices;
     private final TravelWorldView world;
+    /** 目的地附近一格能站的都没有时最多再放宽几格。 */
+    private static final int ROOMY_EXTRA = 3;
     private final List<TravelMode> modes;
 
     /** 只走路：没有联动的出行方式，参数表里没有 via。 */
@@ -164,10 +168,11 @@ public final class TravelAbility implements AbilityModule {
             // 同维度：没有出行方式或指定只走路，就是出行任务；否则交给行程，近处走、远处比报价、给了 via 只用它。
             String via = choice.via();
             TerrainPermit permit = TerrainPermit.of(goal.permissions());
+            TravelDestination destination = roomy(ready.destination());
             if (modes.isEmpty() || TravelVia.WALK.name().equals(via)) {
-                return new StepDecision.Run(new TravelInput(ready.destination(), maxSeconds(goal), permit));
+                return new StepDecision.Run(new TravelInput(destination, maxSeconds(goal), permit));
             }
-            return new StepDecision.Run(new JourneyInput(new JourneyTask.Journey(ready.destination(), via,
+            return new StepDecision.Run(new JourneyInput(new JourneyTask.Journey(destination, via,
                     choice.options(), goal.permissions(), maxSeconds(goal)), permit));
         }
         if (resolution instanceof DestinationResolver.Resolution.CrossDimension cross) {
@@ -195,6 +200,34 @@ public final class TravelAbility implements AbilityModule {
 
     /** 用什么方式、给它的话；参数自相矛盾时带问题。 */
     private record Choice(String via, Map<String, String> options, Problem problem) {}
+
+    // 目的地附近 radius 格里一格能站的都没有（床、桌子、墙、实心方块里）：放宽到最近有能站的那一圈，最多再放三格。
+    // 不然走路找不到终点，换喷气背包在屋顶上来回绕（实机 10-13 去床边 1 格，床四周不是墙就是床本身）。
+    // 读不到现场（没加载、没给高度）照原样。
+    private TravelDestination roomy(TravelDestination destination) {
+        if (world == null || !destination.heightConfirmed()) return destination;
+        WorldPosition at = destination.position();
+        for (int extra = 0; extra <= ROOMY_EXTRA; extra++) {
+            double radius = Math.max(0, destination.radius()) + extra;
+            if (anyStandable(at, radius)) {
+                return extra == 0 ? destination : TravelDestination.confirmed(at, radius);
+            }
+        }
+        return destination;
+    }
+
+    private boolean anyStandable(WorldPosition at, double radius) {
+        int span = (int) Math.floor(radius);
+        for (int dx = -span; dx <= span; dx++) {
+            for (int dy = -span; dy <= span; dy++) {
+                for (int dz = -span; dz <= span; dz++) {
+                    if (dx * dx + dy * dy + dz * dz > radius * radius) continue;
+                    if (world.standable(at.x() + dx, at.y() + dy, at.z() + dz)) return true;
+                }
+            }
+        }
+        return false;
+    }
 
     // via 与各方式自己的参数凑一起：给了哪种方式的参数就是那种方式，via 给了别的就说清对不上。
     private Choice choose(ParamValues params) {
