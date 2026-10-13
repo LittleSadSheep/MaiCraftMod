@@ -473,7 +473,9 @@ public final class BlockDigger {
                 return res;
             }
         }
-        return null;
+        // 中心和六个面心都被挡：再按靠近时判断"看得见"的那一套在各个面上细找一遍。靠近说这里看得见、
+        // 挖掘只试七个点却说看不见，人就站在那里一直不挥（实机 10-13 坑道里看见的铁矿两格各干站十五秒）。
+        return FirstPersonInteractionTargeting.visibleBlockHit(level, player, eye, pos, reach, requiredFace);
     }
 
     /** 碰撞形状的中心；没有碰撞形状时退回整格中心。火没有碰撞，取它的底面高度：灭火要看火的根部。 */
