@@ -20,6 +20,7 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
 import org.maiwithu.maicraft.game.interaction.FirstPersonInteractionTargeting;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.world.InteractionRange;
 
 /**
  * 靠近时的世界只读视图的生产实现：站位判断要问的每一件事，从当刻的角色与真实世界读出来。
@@ -144,8 +145,10 @@ public final class LiveApproachWorld implements ApproachWorldView {
         if (state.isAir() || state.getBlock() instanceof LiquidBlock) {
             return pointVisible(level, player, eye, target.center());
         }
-        // 触及距离由够得着规则单独判，这里只问视线：给一个刚好盖过这段距离的上限。
-        double reach = eye.distanceTo(target.center()) + 2;
+        // 看得见的那部分要在伸手够得着的范围里：原先只问视线（上限放到中心距离加两格），够得着按方块最近的角算，
+        // 两样各自过了，可看得见的那一面其实在够不着的地方——实机 10-13 坑道里离铁矿 5.1 格就站定了，
+        // 挖掘器射线够不着，干站十五秒。看得见要按真实伸手距离射出去的那一下算。
+        double reach = InteractionRange.blockReach(player);
         // 放方块点的那一面：按外形上朝这个方向的表面判，和放置预测、出手瞄准同一条规则。
         if (target.face() != null) {
             return FirstPersonInteractionTargeting.visibleFaceHit(level, player, eye, cell, reach, target.face()) != null;
