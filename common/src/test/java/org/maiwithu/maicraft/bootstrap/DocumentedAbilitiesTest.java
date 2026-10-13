@@ -38,8 +38,8 @@ class DocumentedAbilitiesTest {
 
     /** 测试进程的工作目录是 common 模块；资料是打进包里的资源文件。 */
     private static final Path ASSETS = Path.of("src", "main", "resources", "assets", "maicraft");
-    // maicraft:能力名；maicraft://knowledge/... 这类资料地址不是能力，不算。
-    private static final Pattern MENTION = Pattern.compile("maicraft:(?!//)([a-z][a-z_]*)");
+    // maicraft:能力名；maicraft://knowledge/... 这类资料地址、#maicraft:foods/edible 这类带斜杠的标签不是能力，不算。
+    private static final Pattern MENTION = Pattern.compile("maicraft:(?!//)([a-z][a-z_]*)(?![a-z_/])");
 
     @TempDir
     Path tempDir;
