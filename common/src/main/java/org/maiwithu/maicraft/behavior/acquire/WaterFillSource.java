@@ -30,10 +30,12 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.ScanTargets;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -99,7 +101,7 @@ public final class WaterFillSource implements ItemSource {
         if (CarriedItems.matching(services.backpack(), null, WantedItem.ofItem(BUCKET), services.itemTags()) == 0) {
             steps.add(services.needs().actionFor(new ItemRequest(WantedItem.ofItem(BUCKET), 1, "装水要的空桶"), permissions));
         }
-        steps.add(new Scoop(water.getFirst(), permissions));
+        steps.add(new Scoop(water.getFirst(), permissions, context.records()));
         return Optional.of(new StepwiseActions("去水边装一桶水", steps.toArray(Action[]::new)));
     }
 
@@ -141,12 +143,15 @@ public final class WaterFillSource implements ItemSource {
 
         private final BlockPos water;
         private final Permissions permissions;
+        /** 舀了哪一格记进这次任务的结果：看得出舀的是野外的水，不是刷石机、机器里的。 */
+        private final TaskRecords records;
         private Stage stage = Stage.APPROACH;
         private Action current;
 
-        Scoop(BlockPos water, Permissions permissions) {
+        Scoop(BlockPos water, Permissions permissions, TaskRecords records) {
             this.water = water;
             this.permissions = permissions;
+            this.records = records;
         }
 
         @Override public ActionStatus tick(TickContext context) {
@@ -164,7 +169,13 @@ public final class WaterFillSource implements ItemSource {
             if (!(status instanceof ActionStatus.Done)) return status;
             current.close();
             current = null;
-            if (stage == Stage.SCOOP) return ActionStatus.done();
+            if (stage == Stage.SCOOP) {
+                if (records != null) {
+                    records.change(new Change(Change.Kind.OTHER, "minecraft:water", 1,
+                            "从 " + water.toShortString() + " 舀了一桶水（这格两边挨着水源，舀了会自己补回来）"));
+                }
+                return ActionStatus.done();
+            }
             stage = stage == Stage.APPROACH ? Stage.HAND : Stage.SCOOP;
             return ActionStatus.progressed();
         }

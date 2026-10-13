@@ -18,6 +18,8 @@ import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * 连锁挖一格：按住连锁键挖触发格，模组把整批一起挖掉；不连锁时就是普通地挖这一格。
@@ -26,6 +28,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 被打断时同样先松键，回来重新开一次连锁。哪些副格真挖掉了由调用方逐格复查。
  */
 final class ChainedDig implements Action {
+
+    private static final Logger LOG = LoggerFactory.getLogger(ChainedDig.class);
 
     /** 副格的方块更新最多等几刻：模组在同一刻挖完整批，更新随后几个包陆续到。 */
     static final int SETTLE_TICKS = 20;
@@ -167,9 +171,14 @@ final class ChainedDig implements Action {
         if (readiness instanceof ChainKeyHold.Readiness.Wait) return false;
         if (readiness instanceof ChainKeyHold.Readiness.Chain chain) {
             batch = chain.batch();
+            // 连没连锁、为什么没连，结果里看不出来：记一行，实机对得上屏幕上 FTB 面板跳没跳。
+            LOG.info("[连锁挖] {}：按住连锁键，一批 {} 格", trigger.toShortString(), batch.size());
             return true;
         }
-        if (readiness instanceof ChainKeyHold.Readiness.Single single) singleReason = single.why();
+        if (readiness instanceof ChainKeyHold.Readiness.Single single) {
+            singleReason = single.why();
+            LOG.info("[连锁挖] {}：不连锁，{}", trigger.toShortString(), singleReason);
+        }
         hold = null;
         return true;
     }
