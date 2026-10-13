@@ -20,6 +20,7 @@ import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.item.ArrowItem;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.ProjectileWeaponItem;
 import net.minecraft.world.level.LightLayer;
 
@@ -53,6 +54,7 @@ public final class PlayerReminders implements DamageObserver {
     private final WornGearReminder gear;
     private final FullInventoryReminder space;
     private final DarkAttacksReminder dark;
+    private final DarkWithoutTorchReminder unlit;
     private final CombatPressureReminder pressure;
     private final SleeplessReminder sleepless;
 
@@ -73,6 +75,7 @@ public final class PlayerReminders implements DamageObserver {
         this.gear = new WornGearReminder(board);
         this.space = new FullInventoryReminder(board);
         this.dark = new DarkAttacksReminder(board);
+        this.unlit = new DarkWithoutTorchReminder(board);
         this.pressure = new CombatPressureReminder(board);
         this.sleepless = new SleeplessReminder(board);
     }
@@ -141,6 +144,7 @@ public final class PlayerReminders implements DamageObserver {
         gear.clear();
         space.clear();
         dark.clear();
+        unlit.clear();
         pressure.clear();
         rest.clear();
         lastSlowTick = -1;
@@ -167,6 +171,16 @@ public final class PlayerReminders implements DamageObserver {
         for (String type : hostileTypesThisTick) {
             dark.observe(observation, type);
         }
+        unlit.observe(new DarkWithoutTorchReminder.Observation(tick, block, sky, carriedTorches()));
+    }
+
+    // 身上（主背包和副手）的火把数：自动补光就插这个。
+    private int carriedTorches() {
+        int total = player.getOffhandItem().is(Items.TORCH) ? player.getOffhandItem().getCount() : 0;
+        for (ItemStack stack : player.getInventory().items) {
+            if (stack.is(Items.TORCH)) total += stack.getCount();
+        }
+        return total;
     }
 
     // 个人统计每三十秒请求一次；有效的休息计数才交给规则，没有就撤下这一条。

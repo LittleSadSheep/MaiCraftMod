@@ -103,6 +103,21 @@ class ReminderBoardTest {
     }
 
     @Test
+    void 暗处待久了又没火把才提醒_有了火把或亮了就撤() {
+        DarkWithoutTorchReminder unlit = new DarkWithoutTorchReminder(board);
+        unlit.observe(new DarkWithoutTorchReminder.Observation(0, 0, 0, 0));
+        assertTrue(board.snapshot().isEmpty(), "刚进暗处不催");
+        unlit.observe(new DarkWithoutTorchReminder.Observation(100, 0, 0, 0));
+        unlit.observe(new DarkWithoutTorchReminder.Observation(200, 0, 0, 0));
+        assertEquals(DarkWithoutTorchReminder.ID, board.snapshot().getFirst().id());
+        unlit.observe(new DarkWithoutTorchReminder.Observation(220, 0, 0, 16));
+        assertTrue(board.snapshot().isEmpty(), "身上有火把了");
+        unlit.observe(new DarkWithoutTorchReminder.Observation(240, 0, 15, 0));
+        unlit.observe(new DarkWithoutTorchReminder.Observation(500, 0, 15, 0));
+        assertTrue(board.snapshot().isEmpty(), "露天不算暗处");
+    }
+
+    @Test
     void 黑暗里一分钟内被打三次才提醒_亮了就撤() {
         DarkAttacksReminder dark = new DarkAttacksReminder(board);
         var spot = new BlockPos(0, 64, 0);
