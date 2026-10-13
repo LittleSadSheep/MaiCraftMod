@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.BiFunction;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -28,6 +29,7 @@ import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.world.ContainerFeeds;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -60,6 +62,8 @@ public final class MenuContainerTakes implements ContainerTakes {
     private final Supplier<PlayerContext> contexts;
     /** 打开一只箱子的动作怎么建：按箱子位置与这次任务的许可。 */
     private final BiFunction<BlockPos, Permissions, MenuOpening> openings;
+    /** 这只容器是不是在给机器供料（进料箱、补料箱）：是的话最多拿走一半，给机器留着。 */
+    private final Predicate<BlockPos> feedsMachine;
 
     /**
      * @param layouts 认得出哪些界面：原版加上联动模组证明过的（例如模组的箱子）
@@ -72,10 +76,20 @@ public final class MenuContainerTakes implements ContainerTakes {
     /** 打开箱子的动作由调用方给：生产走靠近与右键点开，测试换成替身箱子。 */
     MenuContainerTakes(ReadsItemTags tags, WorldMemory memory, Supplier<PlayerContext> contexts,
             BiFunction<BlockPos, Permissions, MenuOpening> openings) {
+        this(tags, memory, contexts, openings, at -> {
+            PlayerContext player = contexts.get();
+            return player != null && player.level() != null && ContainerFeeds.feedsAutomation(player.level(), at);
+        });
+    }
+
+    /** 供料判断也由调用方给：测试换成替身。 */
+    MenuContainerTakes(ReadsItemTags tags, WorldMemory memory, Supplier<PlayerContext> contexts,
+            BiFunction<BlockPos, Permissions, MenuOpening> openings, Predicate<BlockPos> feedsMachine) {
         this.tags = Objects.requireNonNull(tags, "tags");
         this.memory = Objects.requireNonNull(memory, "memory");
         this.contexts = Objects.requireNonNull(contexts, "contexts");
         this.openings = Objects.requireNonNull(openings, "openings");
+        this.feedsMachine = Objects.requireNonNull(feedsMachine, "feedsMachine");
     }
 
     // 生产的打开方式：走到够得着的地方、右键点开、认领并等同步；走过去能动多少地形按这次任务的许可来。
@@ -105,6 +119,8 @@ public final class MenuContainerTakes implements ContainerTakes {
         private int waited;
         /** 刚打开时容器那一侧装着想要的东西的总件数：拿走多少按它与当刻的差算。 */
         private int startTotal = -1;
+        /** 这一只最多拿几件：给机器供料的箱子留一半，别的不限。 */
+        private int allowance = Integer.MAX_VALUE;
         /** 正在点的那一笔动手之前，容器那一侧想要的东西有几件；没有在点的为 -1。 */
         private int beforeMove = -1;
         /** 正在点的那一笔按计划要搬几件、要点哪几下：结算与交回"没能确认"时说得清。 */
@@ -163,12 +179,15 @@ public final class MenuContainerTakes implements ContainerTakes {
             MenuContent.Reading open = reading.get();
             if (startTotal < 0) {
                 startTotal = matchedTotal(open);
+                // 机器的进料箱、补料箱（下面挂着溜槽漏斗、旁边贴着往外抽的漏斗）能翻，但最多拿走一半，给机器留着，
+                // 不把人家搬空（用户 10-13 定）。出料箱不算，成品照样能拿完。
+                allowance = feedsMachine.test(at) ? startTotal / 2 : Integer.MAX_VALUE;
             }
             if (menu.busy()) return ActionStatus.running();
             if (beforeMove < 0) {
                 // 上一笔已结清：按还缺的件数盘下一笔要点的几下，冻结动手前容器那侧的总数再动手。
                 int now = matchedTotal(open);
-                int remaining = request.count() - (startTotal - now);
+                int remaining = Math.min(request.count(), allowance) - (startTotal - now);
                 Optional<ContainerTakePlan.Move> next = ContainerTakePlan.next(open, this::matches, remaining);
                 if (next.isEmpty()) return toClose(open);
                 beforeMove = now;

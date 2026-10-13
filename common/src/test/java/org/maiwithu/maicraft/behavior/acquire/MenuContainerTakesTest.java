@@ -365,11 +365,28 @@ class MenuContainerTakesTest {
         assertTrue(facts.get(0).contains("没能等到结算结果"));
     }
 
+    @Test
+    void 机器的补料箱最多拿一半_给机器留着() {
+        // 补料箱里 40 个，要 32 个：箱子在给机器供料，只拿 20 个，留 20 个。
+        FakeBox box = new FakeBox();
+        box.box.set(0, new ItemStack(Items.IRON_INGOT, 40));
+        Action take = takes(box, 32, true);
+        ActionStatus status = runToFinish(take);
+
+        assertInstanceOf(ActionStatus.Done.class, status);
+        assertEquals(20, box.carried(new ItemStack(Items.IRON_INGOT)), "只拿一半");
+        assertEquals(20, box.box.get(0).getCount(), "给机器留一半");
+    }
+
     /** 开好一只替身箱子、要 iron_ingot 这么几件的开箱取货动作。 */
     private Action takes(FakeBox box, int count) {
+        return takes(box, count, false);
+    }
+
+    private Action takes(FakeBox box, int count, boolean feedsMachine) {
         WorldMemory memory = new WorldMemory(new DocumentStore(temp.resolve("state.sqlite")), "world-1");
         MenuContainerTakes takes = new MenuContainerTakes(itemId -> Set.of(), memory, () -> null,
-                (at, permissions) -> new OpenAtOnce(box));
+                (at, permissions) -> new OpenAtOnce(box), at -> feedsMachine);
         return takes.take(new KnownContainer("家门口的箱子", WorldPosition.here(10, 64, 5), "minecraft:chest"),
                 new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), count, "工具准备"),
                 Permissions.DEFAULT).orElseThrow();
