@@ -760,6 +760,30 @@ class RecipeSourceTest {
         assertEquals("minecraft:spruce_log", asked.getFirst(), "先试附近有的云杉：" + asked);
     }
 
+    @Test
+    void 外层正要的东西不拿来当原料() {
+        // 实机：要安山合金，内层去弄"合金块"（拆块做法要它），做块的配方要 9 个合金——外层正要的东西，不算做法，
+        // 不再把刚做好的合金压成块白白压掉。
+        WorkstationRecipe block = new WorkstationRecipe("create:andesite_alloy_block", WorkstationRecipe.Kind.CRAFTING,
+                WantedItem.ofItem("create:andesite_alloy_block"), 1,
+                List.of(new WorkstationRecipe.IngredientStack(WantedItem.ofItem("create:andesite_alloy"), 9)), false);
+        ItemNeeds needs = (request, permissions) -> new Action() {
+            @Override public ActionStatus tick(TickContext context) {
+                return ActionStatus.done();
+            }
+
+            @Override public String describe() {
+                return "替身";
+            }
+        };
+        RecipeSource recipeSource = new RecipeSource(wanted -> List.of(block), memory(),
+                itemId -> 0, new InventoryRuns(), backpack, offhand, tags, needs);
+        recipeSource.watchChain(() -> List.of(new ItemRequest(WantedItem.ofItem("create:andesite_alloy"), 38, "做轴")));
+        SourceQuote quote = recipeSource.quote(
+                new ItemRequest(WantedItem.ofItem("create:andesite_alloy_block"), 1, "拆成合金"), CONTEXT);
+        assertInstanceOf(SourceQuote.Unavailable.class, quote, "做块要用外层正要的合金：不算做法");
+    }
+
     private int countOf(String itemId) {
         return backpack.stacks().stream()
                 .filter(stack -> stack.itemId().equals(itemId))

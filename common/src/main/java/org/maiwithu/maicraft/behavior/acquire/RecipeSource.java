@@ -4,8 +4,10 @@ package org.maiwithu.maicraft.behavior.acquire;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquisitionCost;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
@@ -75,6 +77,8 @@ public final class RecipeSource implements ItemSource {
     /** 就地摆工作站的接缝；没接上时附近没有设施就如实说没有，不放。 */
     private final SetsUpWorkstation placer;
     private final PermissionCheck permission;
+    /** 拿东西的引擎此刻在推进的那一串请求（外层在前）；没接上为空串。 */
+    private Supplier<List<ItemRequest>> chain = List::of;
 
     /** 只做给定几种配方的来源：合成一条路（含石切台），烧炼一条路，分开登记才分得开 via。 */
     public RecipeSource(Set<WorkstationRecipe.Kind> kinds, ReadsRecipes recipes, WorldMemory memory, ReadsFuels fuels,
@@ -104,6 +108,11 @@ public final class RecipeSource implements ItemSource {
     @Override public String describe() {
         return kinds.contains(WorkstationRecipe.Kind.SMELTING) && !kinds.contains(WorkstationRecipe.Kind.CRAFTING)
                 ? "烧炼" : "自己做";
+    }
+
+    /** 接上拿东西的引擎：它此刻在推进的那一串请求，备料时不把外层正要的东西当原料用掉。 */
+    public void watchChain(Supplier<List<ItemRequest>> chain) {
+        this.chain = Objects.requireNonNull(chain, "chain");
     }
 
     @Override public AcquireVia via() {
@@ -186,6 +195,7 @@ public final class RecipeSource implements ItemSource {
         return recipes.recipesProducing(request.wanted()).stream()
                 .filter(recipe -> kinds.contains(recipe.kind()))
                 .filter(recipe -> !consumesWhatIsWanted(recipe, request.wanted()))
+                .filter(recipe -> !consumesOuterWanted(recipe))
                 .sorted(Comparator.comparingInt((WorkstationRecipe candidate) -> missingFor(candidate, request.count()))
                         .thenComparingInt(candidate -> inInventory(candidate) ? 0 : 1)
                         .thenComparingInt(candidate -> candidate.ingredients().size()))
@@ -268,6 +278,15 @@ public final class RecipeSource implements ItemSource {
     }
 
     // 这条配方的原料里有没有一样本身就满足这次要的东西：有的话做它不会让要的东西变多。
+    // 外层正要的东西当这一步的原料：为了做安山合金去弄合金块，又拿身上刚做好的合金压成块——白白压掉。
+    // 实机要 38 个安山合金，引擎选了"合金块拆成合金"，把做好的合金压成一个块，拆的配方没解锁，76 块安山岩做的合金进了块里。
+    private boolean consumesOuterWanted(WorkstationRecipe recipe) {
+        for (ItemRequest outer : chain.get()) {
+            if (consumesWhatIsWanted(recipe, outer.wanted())) return true;
+        }
+        return false;
+    }
+
     private boolean consumesWhatIsWanted(WorkstationRecipe recipe, WantedItem wanted) {
         for (WorkstationRecipe.IngredientStack ingredient : recipe.ingredients()) {
             WantedItem item = ingredient.item();
