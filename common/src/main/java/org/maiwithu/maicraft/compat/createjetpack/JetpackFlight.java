@@ -263,6 +263,9 @@ final class JetpackFlight implements TravelLeg {
         boolean centred = horizontal(position, Vec3.atBottomCenterOf(steerTo)) < CENTRED;
         boolean up = rise > LEVEL && (!upright || centred);
         boolean down = rise < -LEVEL && (!upright || centred);
+        // 站在地上对准：走路一按就冲过头，在中心两边来回晃，一直对不准、起不了飞（实机 10-13 坑道里台阶底下
+        // 晃了四轮"飞了 60 刻没飞近"）。地上没对准时按着潜行慢慢挪；潜行在地上不会让喷气背包往下。
+        boolean creep = upright && !centred && player.onGround();
         boolean sprint = !upright && levelled && horizontal > 3;
         // 镜头只在横着飞一大段时转向那一段的尽头；对准、升降、拐弯这些近处的细调不转头。原先每刻都盯着下一个
         // 拐弯点，人一冲过头瞄点就跑到身后，镜头来回打转，按键朝向跟着乱，喷气背包推力又大，一下飞出几十格
@@ -283,7 +286,7 @@ final class JetpackFlight implements TravelLeg {
             PlayerInput.Movement push = AirSteering.movement(player, steerTo, yaw, false);
             float forward = Math.abs(push.forward()) < DEAD_ZONE ? 0.0f : push.forward();
             float strafe = Math.abs(push.strafe()) < DEAD_ZONE ? 0.0f : push.strafe();
-            return new PlayerInput.Movement(forward, strafe, up, down, sprint);
+            return new PlayerInput.Movement(forward, strafe, up, down || creep, sprint);
         }, player.getYRot(), context.clientTick());
         return ActionStatus.running();
     }
