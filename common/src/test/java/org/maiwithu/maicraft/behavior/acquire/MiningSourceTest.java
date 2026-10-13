@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.acquire;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -83,6 +84,10 @@ class MiningSourceTest {
         @Override public boolean dropsWanted(WantedItem wanted, String blockTypeId) {
             return blockTypeId.equals("minecraft:stone");
         }
+        // 连锁逐格核：64 层都是天然煤矿，只有 x=4 那格是搭出来的。
+        @Override public Optional<String> minableAt(WantedItem wanted, BlockPos pos) {
+            return pos.getY() == 64 && pos.getX() != 4 ? Optional.of("minecraft:coal_ore") : Optional.empty();
+        }
     }
 
     /** 替身：记下要往下挖几格、哪些方块算数，动作当场做完。 */
@@ -123,6 +128,15 @@ class MiningSourceTest {
 
         /** 成批收：一批记一次，格子按先后记进 dug。 */
         final List<List<BlockPos>> batches = new ArrayList<>();
+
+        /** 来源交来的连锁判断：连锁挖到的格能不能挖。 */
+        Predicate<BlockPos> chainable;
+
+        @Override public Optional<Action> collectBatch(List<BlockPos> cells, Permissions permissions,
+                Predicate<BlockPos> chainable) {
+            this.chainable = chainable;
+            return collectBatch(cells, permissions);
+        }
 
         @Override public Optional<Action> collectBatch(List<BlockPos> cells, Permissions permissions) {
             if (!wired) return Optional.empty();
@@ -184,6 +198,21 @@ class MiningSourceTest {
         assertEquals(2, offer.obtainableCount());
         assertEquals(3.0, offer.cost().distanceBlocks(), 0.001);
         assertTrue(offer.risk().contains("不一定掉一件"));
+    }
+
+    @Test
+    void 连锁挖整条矿脉_每格都要天然_会掉要的_在范围里() {
+        FakeDigs digs = new FakeDigs();
+        backpack.add("minecraft:iron_pickaxe", 1);
+        Action action = source(new FakeMinables(List.of(coalAt(3, 0)), true), digs)
+                .begin(new ItemRequest(WantedItem.ofItem("minecraft:coal"), 1, "火把"),
+                        new SourceQuote.Offer("采掘", 1, new AcquisitionCost(3, 1), null), CONTEXT)
+                .orElseThrow();
+        runAll(action);
+        assertTrue(digs.chainable.test(new BlockPos(2, 64, 0)), "旁边埋着的天然煤矿一起挖");
+        assertFalse(digs.chainable.test(new BlockPos(4, 64, 0)), "搭出来的那格不连锁");
+        assertFalse(digs.chainable.test(new BlockPos(3, 63, 0)), "不掉煤的不连锁");
+        assertFalse(digs.chainable.test(new BlockPos(300, 64, 0)), "超出这次找的范围不连锁");
     }
 
     @Test

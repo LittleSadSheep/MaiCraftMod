@@ -2,6 +2,9 @@
 package org.maiwithu.maicraft.behavior.acquire;
 
 import java.util.List;
+import java.util.Optional;
+
+import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 /**
@@ -30,4 +33,12 @@ public interface ScansMinables {
 
     /** 挖掉这种方块会不会掉想要的东西：往下挖楼梯时数挖到了几格用。 */
     boolean dropsWanted(WantedItem wanted, String blockTypeId);
+
+    /**
+     * 这一格是不是缺料时能挖的那种、挖了会掉想要的东西：地图上自然长的、不是设施；是的话给方块注册 ID。
+     * 连锁挖整条矿脉时逐格核用——连锁的预览是模组画给玩家看的，埋着的那几格也算看见了，这里不再要求露在外面。
+     */
+    default Optional<String> minableAt(WantedItem wanted, BlockPos pos) {
+        return Optional.empty();
+    }
 }

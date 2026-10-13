@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.Objects;
 import java.util.Optional;
@@ -21,6 +22,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -154,8 +156,10 @@ public final class MiningSource implements ItemSource {
                 }
             }
         }
-        // 走过去、挖掉、整批挖完捡起掉出来的东西：不隔空挖，也不把矿丢在地上。
-        Optional<Action> collect = collects.collectBatch(batch.stream().map(MinableSpot::pos).toList(), permissions);
+        // 走过去、挖掉、整批挖完捡起掉出来的东西：不隔空挖，也不把矿丢在地上。装了连锁挖时整条矿脉、
+        // 整根树干一下挖掉（可能比要的多，像玩家用连锁那样），掉落物集中在挖的那一格，挖完一起捡。
+        Optional<Action> collect = collects.collectBatch(batch.stream().map(MinableSpot::pos).toList(), permissions,
+                chainable(request, context));
         if (collect.isEmpty()) {
             // 收的入口接不上，一步都还没动：整串放弃，由引擎换别的路。
             return Optional.empty();
@@ -186,6 +190,25 @@ public final class MiningSource implements ItemSource {
         steps.add(stairs.digDown(blockType -> minables.dropsWanted(request.wanted(), blockType),
                 request.count(), permissions));
         return new StepwiseActions("往下挖楼梯找" + request.wanted().describe(), steps.toArray(Action[]::new));
+    }
+
+    /**
+     * 连锁挖一起挖到的每一格都要过：在这次愿意找的范围里、地图上自然长的、挖了掉要的东西、许可准挖。
+     * 连锁的预览是模组画给玩家看的，埋在里面的那几格也算看见了；有一格不过就不连锁，只挖手上那一格。
+     */
+    private Predicate<BlockPos> chainable(ItemRequest request, SourceContext context) {
+        WorldPosition here = context.characterAt();
+        int radius = searchRadius(context);
+        Permissions permissions = context.permissions();
+        return pos -> {
+            double dx = pos.getX() - here.x();
+            double dy = pos.getY() - here.y();
+            double dz = pos.getZ() - here.z();
+            if (dx * dx + dy * dy + dz * dz > (double) radius * radius) return false;
+            Optional<String> blockType = minables.minableAt(request.wanted(), pos);
+            return blockType.isPresent() && permission.blockAllowed(permissions, PermissionCheck.WorldAction.DIG_BLOCK,
+                    WorldPosition.here(pos.getX(), pos.getY(), pos.getZ()), blockType.get()).isEmpty();
+        };
     }
 
     // 引擎正在推进的请求里已经有要这把工具的（正在为做它挖料）：不再先要它，免得为做斧头先要斧头。

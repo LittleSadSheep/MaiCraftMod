@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.acquire;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Predicate;
 
 import net.minecraft.core.BlockPos;
 
@@ -41,5 +42,16 @@ public interface CollectsBlocks {
         }
         return steps.isEmpty() ? Optional.empty()
                 : Optional.of(new StepwiseActions("一格一格收 " + cells.size() + " 格", steps.toArray(Action[]::new)));
+    }
+
+    /**
+     * 同上，挖的时候用连锁挖：装了连锁挖的模组时，挖一格按住连锁键把和它连着的同种方块（整条矿脉、整根树干）一起挖掉，
+     * 模组给出的那一批每一格 chainable 都同意才连锁；一起挖掉的格不用再走过去挖，掉落物整批挖完一起捡。
+     * 没有连锁实现的接缝照常一格一格收。
+     *
+     * @param chainable 连锁挖到的这一格能不能挖：天然长的、会掉要的东西的、许可准挖的
+     */
+    default Optional<Action> collectBatch(List<BlockPos> cells, Permissions permissions, Predicate<BlockPos> chainable) {
+        return collectBatch(cells, permissions);
     }
 }

@@ -2,14 +2,18 @@
 package org.maiwithu.maicraft.behavior.acquire;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Predicate;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
+import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import org.maiwithu.maicraft.behavior.inventory.PicksUpDrops;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -121,6 +125,47 @@ class ClientCollectsBlocksTest {
         assertTrue(status instanceof ActionStatus.Done, status.toString());
         assertTrue(stuck.closed, "挖不下来的那一格收了尾");
         assertTrue(log.contains("捡"), "挖下来的照样去捡");
+    }
+
+    @Test
+    void 连锁挖一下挖掉整根树干_其余几格不再走过去_挖完捡一次() {
+        // 装了连锁挖：第一根原木连锁时整根树干一起没了，后两格已经空了，不再走过去挖；掉落物挖完一起捡。
+        Set<BlockPos> gone = new HashSet<>();
+        List<Predicate<BlockPos>> asked = new ArrayList<>();
+        BringsPlayerClose close = (target, permissions) -> new Step("走", ActionStatus.done());
+        DigsBlocks digs = new DigsBlocks() {
+            @Override public Optional<Action> dig(BlockPos target) {
+                return Optional.of(new Step("挖一格", ActionStatus.done()));
+            }
+            @Override public Optional<Action> digChained(BlockPos trigger, Direction face,
+                    BreakAccelerator.ChainShape shape, Predicate<BlockPos> mayBreak) {
+                asked.add(mayBreak);
+                assertEquals(BreakAccelerator.ChainShape.CONNECTED, shape, "采掘连锁相连的同种方块");
+                return Optional.of(new Action() {
+                    @Override public ActionStatus tick(TickContext context) {
+                        gone.addAll(List.of(ORE, ORE.above(), ORE.above(2)));
+                        log.add("连锁挖");
+                        return ActionStatus.done();
+                    }
+                    @Override public String describe() { return "连锁挖"; }
+                });
+            }
+            @Override public boolean gone(TickContext context, BlockPos cell) {
+                return gone.contains(cell);
+            }
+        };
+        PicksUpDrops drops = new PicksUpDrops() {
+            @Override public Set<Integer> nearby() { return Set.of(); }
+            @Override public Action pickUpNewSince(Set<Integer> before) { return new Step("捡", ActionStatus.done()); }
+        };
+        Predicate<BlockPos> natural = pos -> pos.getX() == ORE.getX();
+        Action collect = new ClientCollectsBlocks(close, digs, drops)
+                .collectBatch(List.of(ORE, ORE.above(), ORE.above(2)), Permissions.DEFAULT, natural).orElseThrow();
+        ActionStatus status = ActionStatus.running();
+        for (int i = 0; i < 50 && !(status instanceof ActionStatus.Done); i++) status = collect.tick(null);
+        assertTrue(status instanceof ActionStatus.Done, status.toString());
+        assertEquals(List.of("走", "连锁挖", "捡"), log);
+        assertEquals(List.of(natural), asked, "连锁时每一格都交给来源给的判断");
     }
 
     @Test

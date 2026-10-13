@@ -135,6 +135,20 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
     }
 
     @Override
+    public Optional<String> minableAt(WantedItem wanted, BlockPos pos) {
+        if (notInWorld()) return Optional.empty();
+        PlayerContext current = context();
+        // 客户端世界的 hasChunkAt 永远答“加载着”，没加载的格读出来是空气；按区块真加载没加载判。
+        if (!current.level().isLoaded(pos)) return Optional.empty();
+        BlockState state = current.level().getBlockState(pos);
+        // 和找候选同一套：只挖地图上自然长的、不拆设施；挖了掉的正是要的东西才算。
+        if (state.isAir() || state.hasBlockEntity()) return Optional.empty();
+        if (!NaturalBlocks.grown(state, pos, current.level(), current.level()::isLoaded, new HashMap<>())) return Optional.empty();
+        String blockTypeId = blockTypeIdOf(current, pos);
+        return expand(wanted).contains(VanillaBlockDrops.droppedBy(blockTypeId)) ? Optional.of(blockTypeId) : Optional.empty();
+    }
+
+    @Override
     public List<CropSpot> mature(WantedItem wanted, WorldPosition center, int radiusBlocks) {
         if (notInWorld()) {
             return List.of();
