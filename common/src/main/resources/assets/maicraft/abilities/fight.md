@@ -26,7 +26,8 @@
 | `retreat` | 撤离收场时为什么撤（血快见底、手上没有武器……） |
 | `threatVerdict` | 开打前的威胁评估结论：winnable / risky / outmatched |
 | `weapon` | 实际拿着打的那件 |
-| `hits` | 确认打中的下数（服务器确认了才算） |
+| `hits` | 确认打中的下数（近战，服务器确认了才算） |
+| `shots` | 射出去几箭（弓、弩、联动远程武器；箭中没中服务器不单独回话，不算进 `hits`） |
 | `reachIssue` | 点名目标里走不到跟前、也射不到的 |
 | `lootGained` | 拾荒捡到的物品 |
 

@@ -76,6 +76,8 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     private String weaponUsed = "空手";
     /** 确认打中的下数（原生攻击得到服务器确认才算）。 */
     private int hits;
+    /** 射出去几箭（弓、弩、联动远程）。 */
+    private int shots;
     /** 为什么撤的：撤离收场时写进结果。 */
     private String retreatWhy;
     private Battle battle;
@@ -182,6 +184,8 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         Battle.Moment moment = battle.tick(context);
         if (moment.struck() || moment.fired()) weaponUsed = moves.mainHand(context);
         if (moment.struck()) hits++;
+        // 射出去的箭另记：箭中没中服务器不单独回话，不混进"确认打中"的下数里（实机 10-14 拿弓清掉三只尸壳，hits 写 0 看着像没打）。
+        if (moment.fired()) shots++;
         if (moment.targetId() >= 0 && moment.state() != Battle.State.EVADING) rememberEngaged(context, moment.targetId());
         if (moment.progressed()) recordProgress(moment.doing());
         return switch (moment.state()) {
@@ -423,7 +427,7 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         for (SeenTargets.Locked locked : named) {
             if (battle != null && battle.unreachable().contains(locked.entityId())) unreached.add(describeOf(locked));
         }
-        return new FightDetails(List.copyOf(defeated), lostTrack, fled, verdictName(), weaponUsed, hits, unreached,
+        return new FightDetails(List.copyOf(defeated), lostTrack, fled, verdictName(), weaponUsed, hits, shots, unreached,
                 retreatWhy, lootGained);
     }
 
@@ -479,7 +483,7 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
      * @param retreat    撤离收场时为什么撤；没撤为空
      */
     record FightDetails(List<String> defeated, List<String> lostTrack, boolean fled, String threatVerdict,
-                        String weapon, int hits, List<String> reachIssue, String retreat,
+                        String weapon, int hits, int shots, List<String> reachIssue, String retreat,
                         List<String> lootGained) implements ResultDetails {
         FightDetails {
             defeated = List.copyOf(defeated);
