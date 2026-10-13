@@ -22,7 +22,6 @@ import org.maiwithu.maicraft.ability.design.DesignModule;
 import org.maiwithu.maicraft.ability.design.api.DesignStore;
 import org.maiwithu.maicraft.ability.chat.ReadsChatEcho;
 import org.maiwithu.maicraft.ability.enchant.EnchantModule;
-import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import org.maiwithu.maicraft.behavior.interaction.spi.DismantleTool;
 import org.maiwithu.maicraft.behavior.construction.spi.PlacementRules;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
@@ -388,10 +387,6 @@ public final class AbilityCatalog {
                 new LiveApproachWorld(deps.context()), deps.walks(), permission);
         // 换手读端提前建好：用东西的备手、进食的换手、装备的穿卸共用同一套界面搬运。
         ClientMovesToMainhand toMainhand = new ClientMovesToMainhand(deps.context());
-        // 挖一格与捡掉落物共用一套：采集、拿东西时挖矿收庄稼、存东西挖开盖子，都是"走过去、挖掉、捡起这一下掉出来的"。
-        LiveBlockDigging digging = new LiveBlockDigging(deps.digging());
-        ClientDropPickup drops = new ClientDropPickup(deps.context(), deps.walks(), deps.dropConfirmations());
-        ClientCollectsBlocks collects = new ClientCollectsBlocks(bringsClose, digging, drops);
         // 拿到物品引擎的内需入口先建好：用东西缺了要用的东西去拿一件、来源备料缺原料缺工具，都回到同一个引擎，
         // 引擎在登记拿到物品时建好再接上。
         DeferredInnerNeeds innerNeeds = new DeferredInnerNeeds();
@@ -405,6 +400,11 @@ public final class AbilityCatalog {
                 new LiveHoldsSneak(deps.inputs(), deps.context()), innerNeeds, deps.protection(), deps.itemTags(),
                 deps.compat().menuLayouts(), deps.blockScans(), new SessionServerReads(deps.session()),
                 deps.backpack());
+        // 挖一格与捡掉落物共用一套：采集、拿东西时挖矿收庄稼、存东西挖开盖子，都是"走过去、挖掉、捡起这一下掉出来的"。
+        // 联动的连锁挖进世界时建一次：采掘整脉、清障一片、开路一行都经这一份按住连锁键挖，没装就是空表、逐格挖。
+        LiveBlockDigging digging = new LiveBlockDigging(deps.digging(), deps.compat().breakAccelerators(playerServices));
+        ClientDropPickup drops = new ClientDropPickup(deps.context(), deps.walks(), deps.dropConfirmations());
+        ClientCollectsBlocks collects = new ClientCollectsBlocks(bringsClose, digging, drops);
         // 丢弃落点避让与走开读端：丢弃能力与腾地方的丢弃共用同一份，
         // 谁丢的都登记进同一本账，走路时一并绕开，不把刚丢出去的又吸回来。
         DropAvoidance dropAvoidance = new DropAvoidance();
@@ -489,11 +489,10 @@ public final class AbilityCatalog {
 
     /**
      * 施工服务按每次任务的许可拼一份：现场、靠近、放置、点击、挖掘、内需、备手、许可、记账、走到，
-     * 联动的连锁挖、扳手拆机器件与放置规则也在内；建造与机器施工都用这一个。联动的两样进世界时建一次，
-     * 每次施工共用，没装就是空表、清障逐格挖。
+     * 扳手拆机器件与放置规则也在内；建造与机器施工都用这一个。连锁挖在共用的挖掘里（清障按命中面 3×3 连锁），
+     * 扳手进世界时建一次，每次施工共用，没装就是空表、照原来的挖。
      */
     private static Function<Permissions, ConstructionServices> constructionServices(Deps deps, Shared shared) {
-        List<BreakAccelerator> accelerators = deps.compat().breakAccelerators(shared.playerServices());
         List<DismantleTool> dismantlers = deps.compat().dismantleTools(shared.playerServices());
         // 放置规则不用玩家行为：登记表里的整张表原样交给施工（换物品、对着哪格放、等哪几格）与放置预测（放下后自改）。
         List<PlacementRules> placementRules = deps.compat().placementRules();
@@ -504,7 +503,7 @@ public final class AbilityCatalog {
                     shared.digging(), shared.innerNeeds(), new LiveHolds(shared.toMainhand(), deps.context()),
                     new PermissionGuards(() -> shared.permission(), permissions, site::dimension),
                     new MemoryLedger(deps.memory(), site::dimension), new LiveTravels(deps.walks()),
-                    accelerators, dismantlers, placementRules);
+                    dismantlers, placementRules);
         };
     }
 

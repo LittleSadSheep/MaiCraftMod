@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.survival;
 
+import java.util.function.Predicate;
+
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.phys.BlockHitResult;
 
 import org.maiwithu.maicraft.game.interaction.BlockDigger;
 import org.maiwithu.maicraft.game.interaction.InteractionSender;
@@ -23,6 +27,8 @@ public final class NativeBlockBreaking implements BlockBreaking {
     private final MenuActions menuActions;
     private BlockDigger digger;
     private BlockPos cell;
+    private Direction face;
+    private Predicate<BlockHitResult> gate = hit -> true;
     /** 最近一刻的角色上下文；收尾时还属于本刻就用它停手，过期了就把停手留到下一刻。 */
     private PlayerContext lastContext;
 
@@ -37,6 +43,23 @@ public final class NativeBlockBreaking implements BlockBreaking {
     }
 
     @Override
+    public void fromFace(Direction required) {
+        face = required;
+        if (digger != null) digger.requiredFace(required);
+    }
+
+    @Override
+    public void beforeFirstSwing(Predicate<BlockHitResult> check) {
+        gate = check == null ? hit -> true : check;
+        if (digger != null) digger.beforeBreak(gate);
+    }
+
+    @Override
+    public boolean swingPending() {
+        return digger != null && digger.hasPendingBreak();
+    }
+
+    @Override
     public ActionStatus tick(TickContext context) {
         PlayerContext player = context.player();
         lastContext = player;
@@ -45,6 +68,17 @@ public final class NativeBlockBreaking implements BlockBreaking {
         }
         if (digger == null) {
             digger = new BlockDigger(player.localPlayer(), sender, menuActions, player.input());
+            digger.requiredFace(face);
+            digger.beforeBreak(gate);
+        }
+        // 挥下去的那一下还没确认、方块在客户端已经没了（原版先在本地把方块挖掉）：射线已经打不中它，
+        // 只等游戏确认这一下，不再对着空气重新挖。连锁键要按到这里结清才松。
+        if (digger.hasPendingBreak() && cell.equals(digger.current())
+                && player.level() != null && player.level().getBlockState(cell).isAir()) {
+            return switch (digger.settleGone(player, true)) {
+                case BROKE_TARGET, BROKE_OCCLUDER -> ActionStatus.progressed();
+                case PROGRESSING, NO_SHOT -> ActionStatus.running();
+            };
         }
         // 挖得动就推进；一格真挖开了才算进展。暂时够不着（NO_SHOT）不算失败也不算进展，
         // 由刨出任务按"多久没进展算卡住"统一收口。

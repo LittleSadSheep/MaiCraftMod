@@ -78,7 +78,8 @@ class ConstructionTaskTest {
         final Set<String> unobtainable = new HashSet<>();
         final List<BlockPos> temporaries = new ArrayList<>();
         final List<String> siteNotes = new ArrayList<>();
-        final List<BreakAccelerator> accelerators = new ArrayList<>();
+        /** 装了的连锁挖替身；为空时连锁挖一格就是普通地挖。 */
+        Chain chain;
         final List<DismantleTool> dismantlers = new ArrayList<>();
         final List<PlacementRules> rules = new ArrayList<>();
         /** 每次放的放法与放到的格，按出手顺序。 */
@@ -160,6 +161,17 @@ class ConstructionTaskTest {
             digCalls++;
             return Optional.of(new Immediate(() -> world.put(target, AIR)));
         }
+        // 连锁挖替身：模组那一批每一格清障都同意才整批挖掉，不然和普通地挖一样只挖触发格。
+        @Override public Optional<Action> digChained(BlockPos trigger, Direction face, BreakAccelerator.ChainShape shape,
+                Predicate<BlockPos> mayBreak) {
+            if (chain == null) return dig(trigger);
+            List<BlockPos> batch = chain.batchFrom(trigger);
+            if (batch.size() < 2 || !batch.stream().allMatch(mayBreak)) return dig(trigger);
+            return Optional.of(new Immediate(() -> {
+                chain.batches++;
+                for (BlockPos pos : batch) world.put(pos, AIR);
+            }));
+        }
         @Override public Action actionFor(ItemRequest request, Permissions permissions) {
             String item = request.wanted().itemId();
             if (unobtainable.contains(item)) return new Failing("附近找不到 " + item);
@@ -176,7 +188,7 @@ class ConstructionTaskTest {
         @Override public Action toward(ApproachTarget target, Permissions permissions) { return new Immediate(() -> { }); }
 
         ConstructionServices services() {
-            return new ConstructionServices(this, this, this, this, this, this, this, this, this, null, accelerators, dismantlers, rules);
+            return new ConstructionServices(this, this, this, this, this, this, this, this, this, null, dismantlers, rules);
         }
     }
 
@@ -375,50 +387,42 @@ class ConstructionTaskTest {
         assertEquals(1, count(result, Change.Kind.BLOCK_CHANGED), "按了一次开关");
     }
 
-    /** 连锁挖替身：从触发格起往东连三格一起挖，只在触发格是 (0,64,0) 时连。 */
-    private static final class Chain implements BreakAccelerator {
-        final Fake fake;
+    /** 连锁挖替身：命中面 3×3 里触发格连着它东边一格一起挖，只在触发格是 (0,64,0) 时连。 */
+    private static final class Chain {
         int batches;
-        Chain(Fake fake) { this.fake = fake; }
-        @Override public List<BlockPos> wouldBreakWith(BlockPos trigger) {
-            return trigger.equals(new BlockPos(0, 64, 0)) ? List.of(trigger, trigger.east(), trigger.east(2)) : List.of();
-        }
-        @Override public Optional<Action> breakBatch(BlockPos trigger) {
-            return Optional.of(new Immediate(() -> {
-                batches++;
-                for (BlockPos pos : wouldBreakWith(trigger)) fake.world.put(pos, AIR);
-            }));
+        List<BlockPos> batchFrom(BlockPos trigger) {
+            return trigger.equals(new BlockPos(0, 64, 0)) ? List.of(trigger, trigger.east()) : List.of();
         }
     }
 
     @Test
     void 连锁挖_整批都是要清的格才用() {
         Fake fake = new Fake().ground(63);
-        Chain chain = new Chain(fake);
-        fake.accelerators.add(chain);
-        for (int x = 0; x <= 2; x++) fake.world.put(new BlockPos(x, 64, 0), Blocks.DIRT.defaultBlockState());
-        fake.carried.put("minecraft:stone", 3);
-        TaskResult result = run(fake, wall(STONE, new BlockPos(0, 64, 0), new BlockPos(1, 64, 0), new BlockPos(2, 64, 0)));
+        Chain chain = new Chain();
+        fake.chain = chain;
+        for (int x = 0; x <= 1; x++) fake.world.put(new BlockPos(x, 64, 0), Blocks.DIRT.defaultBlockState());
+        fake.carried.put("minecraft:stone", 2);
+        TaskResult result = run(fake, wall(STONE, new BlockPos(0, 64, 0), new BlockPos(1, 64, 0)));
         assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
-        assertEquals(1, chain.batches, "三格都要清，一批挖掉");
+        assertEquals(1, chain.batches, "两格都要清，一批挖掉");
         assertEquals(0, fake.digCalls, "没有逐格挖");
-        assertEquals(3, count(result, Change.Kind.BLOCK_BROKEN));
-        assertEquals(3, count(result, Change.Kind.BLOCK_PLACED));
+        assertEquals(2, count(result, Change.Kind.BLOCK_BROKEN), "连锁顺带挖掉的那一格也逐格结算");
+        assertEquals(2, count(result, Change.Kind.BLOCK_PLACED));
     }
 
     @Test
     void 连锁挖的批里有一格不是要清的_整批不用() {
         Fake fake = new Fake().ground(63);
-        Chain chain = new Chain(fake);
-        fake.accelerators.add(chain);
-        for (int x = 0; x <= 2; x++) fake.world.put(new BlockPos(x, 64, 0), Blocks.DIRT.defaultBlockState());
-        fake.carried.put("minecraft:stone", 2);
-        // 蓝图只要前两格，第三格的泥土不是要清的：模组按形状一起挖没法跳过它，所以整批不用。
-        TaskResult result = run(fake, wall(STONE, new BlockPos(0, 64, 0), new BlockPos(1, 64, 0)));
+        Chain chain = new Chain();
+        fake.chain = chain;
+        for (int x = 0; x <= 1; x++) fake.world.put(new BlockPos(x, 64, 0), Blocks.DIRT.defaultBlockState());
+        fake.carried.put("minecraft:stone", 1);
+        // 蓝图只要第一格，东边那格泥土不是要清的：模组按形状一起挖没法跳过它，所以整批不用。
+        TaskResult result = run(fake, wall(STONE, new BlockPos(0, 64, 0)));
         assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
         assertEquals(0, chain.batches);
-        assertEquals(2, fake.digCalls, "退回逐格挖");
-        assertEquals(Blocks.DIRT, fake.state(new BlockPos(2, 64, 0)).getBlock(), "不该挖的格没动");
+        assertEquals(1, fake.digCalls, "退回只挖这一格");
+        assertEquals(Blocks.DIRT, fake.state(new BlockPos(1, 64, 0)).getBlock(), "不该挖的格没动");
     }
 
     @Test

@@ -5,6 +5,10 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.Item;
 import org.maiwithu.maicraft.behavior.interaction.spi.DismantleTool;
 import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
+import org.maiwithu.maicraft.behavior.interaction.spi.ChainKeyHold;
+import org.maiwithu.maicraft.game.player.PlayerContext;
+import net.minecraft.world.phys.BlockHitResult;
+import java.util.function.Predicate;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -188,7 +192,7 @@ class CompatSlotsTest {
     }
 
     @Test
-    void 拆方块的两个槽进世界才建_停用后给不出批也不认领方块() {
+    void 拆方块的两个槽进世界才建_停用后开不出连锁也不认领方块() {
         Contributing module = new Contributing() {
             @Override public void contribute(CompatRegistry registry) {
                 registry.breakAccelerator(this, services -> new Chain());
@@ -200,25 +204,27 @@ class CompatSlotsTest {
         DismantleTool wrench = registry.dismantleTools(NO_SERVICES).getFirst();
         assertInstanceOf(CompatBreakAccelerator.class, chain);
         assertInstanceOf(CompatDismantleTool.class, wrench);
-        assertEquals(2, chain.wouldBreakWith(AT).size(), "停用前照常给批");
+        ChainKeyHold hold = chain.hold(BreakAccelerator.ChainShape.CONNECTED, pos -> true).orElseThrow();
+        assertInstanceOf(ChainKeyHold.Readiness.Chain.class, hold.ready(null, null), "停用前照常给批");
         assertEquals(Items.STICK, wrench.toolFor(null).orElseThrow());
-        Action batch = chain.breakBatch(AT).orElseThrow();
         breakModule(module);
-        assertTrue(chain.wouldBreakWith(AT).isEmpty(), "停用后给不出批，清障退回逐格挖");
-        assertTrue(chain.breakBatch(AT).isEmpty());
+        assertTrue(chain.hold(BreakAccelerator.ChainShape.CONNECTED, pos -> true).isEmpty(), "停用后开不出连锁，逐格挖");
+        assertInstanceOf(ChainKeyHold.Readiness.Single.class, hold.ready(null, null), "挖到一半停用：只挖这一格");
+        assertFalse(hold.keep(null), "停用后键算丢了，调用方停手");
+        assertTrue(hold.release(null), "停用后松键答已松开，不卡住下一次挖");
         assertTrue(wrench.toolFor(null).isEmpty(), "停用后不再认领方块");
         assertTrue(wrench.dismantle(AT).isEmpty());
-        assertEquals(Problem.Kind.UNSUPPORTED, assertInstanceOf(ActionStatus.Failed.class, batch.tick(null)).problem().kind(),
-                "交出的动作推进到一半停用按不支持收场");
     }
 
-    /** 连锁挖替身：触发格连着它东边一格一起挖。 */
+    /** 连锁挖替身：触发格连着它东边一格一起挖，按着就一直按着。 */
     private static class Chain implements BreakAccelerator {
-        @Override public List<BlockPos> wouldBreakWith(BlockPos trigger) { return List.of(trigger, trigger.east()); }
-        @Override public Optional<Action> breakBatch(BlockPos trigger) {
-            return Optional.of(new Action() {
-                @Override public ActionStatus tick(TickContext context) { return ActionStatus.done(); }
-                @Override public String describe() { return "连锁挖"; }
+        @Override public Optional<ChainKeyHold> hold(ChainShape shape, Predicate<BlockPos> mayBreak) {
+            return Optional.of(new ChainKeyHold() {
+                @Override public Readiness ready(PlayerContext context, BlockHitResult hit) {
+                    return new Readiness.Chain(List.of(AT, AT.east()));
+                }
+                @Override public boolean keep(PlayerContext context) { return true; }
+                @Override public boolean release(PlayerContext context) { return true; }
             });
         }
     }

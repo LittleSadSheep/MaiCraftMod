@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.acquire;
 
+import java.util.List;
 import java.util.Optional;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
+import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import org.maiwithu.maicraft.behavior.survival.BlockBreaking;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -22,13 +26,22 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * <p>原生挖掘每挖开一格只报一次进展、从不自己说做完（它也给刨出这种逐刻换格子的用）；
  * 这里每刻看一眼目标格：变成空气，或者只剩原来泡着的水（含水方块挖掉后留下的流体），就是挖完了。
  * 挖的许可（动谁的方块）由调用方的许可检查先把关，到这里的一格都是获准动土的。
+ *
+ * <p>装了连锁挖的模组时，连锁挖一格按住连锁键挖，整批交给模组一起挖掉；没装就和普通地挖一样。
  */
 public final class LiveBlockDigging implements DigsBlocks {
 
     private final Supplier<BlockBreaking> diggings;
+    private final List<BreakAccelerator> accelerators;
 
     public LiveBlockDigging(Supplier<BlockBreaking> diggings) {
+        this(diggings, List.of());
+    }
+
+    /** @param accelerators 联动的挖掘加速（连锁挖）；没装时为空表，连锁挖一格就是普通地挖 */
+    public LiveBlockDigging(Supplier<BlockBreaking> diggings, List<BreakAccelerator> accelerators) {
         this.diggings = diggings;
+        this.accelerators = List.copyOf(accelerators);
     }
 
     @Override
@@ -39,22 +52,36 @@ public final class LiveBlockDigging implements DigsBlocks {
         return Optional.of(new UntilGone(target.immutable(), digging));
     }
 
+    @Override
+    public Optional<Action> digChained(BlockPos trigger, Direction face, BreakAccelerator.ChainShape shape,
+            Predicate<BlockPos> mayBreak) {
+        // 没有连锁挖的模组：普通地挖这一格，不挑面（只挖一格时哪面看得见挖哪面）。
+        if (accelerators.isEmpty()) return dig(trigger);
+        return Optional.of(new ChainedDig(trigger, face, shape, mayBreak, accelerators, diggings.get(),
+                (context, cell) -> gone(context.player(), cell)));
+    }
+
+    @Override
+    public boolean gone(TickContext context, BlockPos cell) {
+        return gone(context.player(), cell);
+    }
+
+    // 目标格没了：空气，或只剩流体（含水的方块挖掉后留下原来的水）。没加载时不冒充挖完了。
+    private static boolean gone(PlayerContext player, BlockPos cell) {
+        // 客户端世界的 hasChunkAt 永远答“加载着”，没加载的格读出来是空气、地表落在世界最底层；按区块真加载没加载判。
+        if (player == null || player.level() == null || !player.level().isLoaded(cell)) return false;
+        BlockState now = player.level().getBlockState(cell);
+        return now.isAir() || now.getBlock() instanceof LiquidBlock;
+    }
+
     /** 挖到目标格没了才做完：每刻先看现场，还在就再挖一刻。 */
     private record UntilGone(BlockPos cell, BlockBreaking digging) implements Action {
 
         @Override public ActionStatus tick(TickContext context) {
-            if (gone(context.player())) {
+            if (gone(context.player(), cell)) {
                 return ActionStatus.done();
             }
             return digging.tick(context);
-        }
-
-        // 目标格没了：空气，或只剩流体（含水的方块挖掉后留下原来的水）。没加载时不冒充挖完了。
-        private boolean gone(PlayerContext player) {
-            // 客户端世界的 hasChunkAt 永远答“加载着”，没加载的格读出来是空气、地表落在世界最底层；按区块真加载没加载判。
-            if (player == null || player.level() == null || !player.level().isLoaded(cell)) return false;
-            BlockState now = player.level().getBlockState(cell);
-            return now.isAir() || now.getBlock() instanceof LiquidBlock;
         }
 
         @Override public void pause() {
