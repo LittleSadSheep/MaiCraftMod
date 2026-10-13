@@ -2,9 +2,11 @@
 package org.maiwithu.maicraft.ability.find;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -17,6 +19,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.boss.EnderDragonPart;
 import net.minecraft.world.level.block.Block;
+import org.maiwithu.maicraft.behavior.acquire.NaturalTrees;
 import org.maiwithu.maicraft.behavior.perception.ClientEntitySight;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
@@ -96,19 +99,21 @@ final class LiveFinder implements FindsAround {
                 Math.max(1, Math.min(MAX_CHUNK_RADIUS, input.radius() / 16 + 1)), BUILD_BUDGET);
         List<Hit> hits = new ArrayList<>();
         Set<String> seen = new HashSet<>();
+        // 同一棵树的原木只数一次树冠：键是树干顶。
+        Map<BlockPos, Boolean> trunks = new HashMap<>();
         for (BlockPos pos : result.hits()) {
-            confirmBlock(level, player, pos, targets, center, input.radius(), hits, seen);
+            confirmBlock(level, player, pos, targets, center, input.radius(), hits, seen, trunks);
         }
         // 刚放下的方块可能还没进扫描游标：最近同步的变化优先补查一遍，不能刚放下就找不到。
         for (BlockPos pos : scans.recentWrites(level)) {
-            confirmBlock(level, player, pos, targets, center, input.radius(), hits, seen);
+            confirmBlock(level, player, pos, targets, center, input.radius(), hits, seen, trunks);
         }
         return new Round(List.copyOf(hits), result.complete(), false);
     }
 
     /** 复核一格是不是真目标（索引可能过时）、在不在半径里、看不看得见，都过才收。 */
     private void confirmBlock(ClientLevel level, LocalPlayer player, BlockPos pos, Set<Block> targets,
-            BlockPos center, int radius, List<Hit> hits, Set<String> seen) {
+            BlockPos center, int radius, List<Hit> hits, Set<String> seen, Map<BlockPos, Boolean> trunks) {
         double dx = pos.getX() - center.getX();
         double dy = pos.getY() - center.getY();
         double dz = pos.getZ() - center.getZ();
@@ -125,9 +130,17 @@ final class LiveFinder implements FindsAround {
         }
         if (seen.add(pos.getX() + "," + pos.getY() + "," + pos.getZ())) {
             String typeId = BuiltInRegistries.BLOCK.getKey(state).toString();
-            hits.add(Hit.place(FindInput.FindKind.BLOCK, typeId,
-                    WorldPosition.here(pos.getX(), pos.getY(), pos.getZ())));
+            hits.add(new Hit(FindInput.FindKind.BLOCK, typeId, WorldPosition.here(pos.getX(), pos.getY(), pos.getZ()),
+                    -1, false, null, treeTrait(level, pos, trunks)));
         }
+    }
+
+    // 原木写明长没长在树上：村里木屋的屋顶、地板，玩家搭的木屋、栅栏柱和树上的原木是同一种方块，
+    // 不写出来就会当树砍（实机找原木时找到村庄木屋的原木屋顶，挖了三根）。
+    private static Map<String, String> treeTrait(ClientLevel level, BlockPos pos, Map<BlockPos, Boolean> trunks) {
+        if (!NaturalTrees.isLog(level.getBlockState(pos))) return Map.of();
+        return Map.of("tree", NaturalTrees.partOfNaturalTree(pos, level, level::isLoaded, trunks)
+                ? "长在树上" : "不是树上长的（房子、木屋、栅栏柱这类搭出来的原木）");
     }
 
     /** 找实体：渲染范围内按类型数一遍，多部件折叠到主体，受保护的带保护事实。 */

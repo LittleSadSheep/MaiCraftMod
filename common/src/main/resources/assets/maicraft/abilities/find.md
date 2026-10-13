@@ -19,7 +19,7 @@
 
 | 字段 | 含义 |
 | --- | --- |
-| `found` | 命中列表，由近到远：观察编号 `id`、类型 `type`、位置 `position`、三维距离 `distance`、高低差 `dy`、方位 `direction` 与 `compass`；实体命中另有是否受保护 `creature_protected` 与原因 `protection_reason` |
+| `found` | 命中列表，由近到远：观察编号 `id`、类型 `type`、位置 `position`、三维距离 `distance`、高低差 `dy`、方位 `direction` 与 `compass`；实体命中另有是否受保护 `creature_protected` 与原因 `protection_reason`；找原木时 `traits.tree` 写明是长在树上，还是房子、木屋、栅栏柱这类搭出来的（别人家的房子别拆） |
 | `searched_radius` | 实际查过的半径（格） |
 | `search_complete` | 愿意找的范围扫完了没有 |
 | `count_by_type` | 给了多种类型时，按类型分别找到几个 |
