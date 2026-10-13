@@ -151,7 +151,10 @@ final class ClearingWork extends ConstructionWork {
         for (PlannedCell planned : queue) {
             BlockPos pos = planned.pos();
             if (pos.getY() != top || !pending.contains(pos) || pending.contains(pos.above())) continue;
-            if (!services.site().loaded(pos.above()) || !services.site().state(pos.above()).isAir()) continue;
+            // 头顶长着草、花这类一碰就掉的也算敞开（野外草地上几乎格格都有）。
+            if (!services.site().loaded(pos.above())) continue;
+            BlockState above = services.site().state(pos.above());
+            if (!above.isAir() && !above.canBeReplaced()) continue;
             boolean whole = true;
             for (int dx = -1; dx <= 1 && whole; dx++) {
                 for (int dz = -1; dz <= 1 && whole; dz++) {
