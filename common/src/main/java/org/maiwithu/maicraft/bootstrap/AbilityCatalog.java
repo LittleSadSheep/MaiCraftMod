@@ -294,7 +294,7 @@ public final class AbilityCatalog {
 
         // 用东西：读世界、组装交互、靠近、备手、去拿缺的东西、观察编号、附近搜索、动作栏提示语、
         // 走到没加载的坐标、捡掉出的东西、看点开的界面都接上了。
-        registry.register(useModule(deps, shared.bringClose(), shared.toMainhand(), shared.innerNeeds(),
+        registry.register(useModule(deps, shared.space(), shared.bringClose(), shared.toMainhand(), shared.innerNeeds(),
                 shared.refusals()));
 
         // 进食：把食物换到主手走背包界面的原生搬运；手上不是食物时能换手了。
@@ -619,11 +619,12 @@ public final class AbilityCatalog {
     }
 
     /** 用东西能力的一份：游戏拒绝读端看动作栏与服务端确认流，与睡觉能力共用一份。 */
-    private static UseModule useModule(Deps deps, LiveApproaches bringsClose, ClientMovesToMainhand toMainhand,
-            ItemNeeds needs, ClientGameRefusals refusals) {
+    private static UseModule useModule(Deps deps, InventorySpace space, LiveApproaches bringsClose,
+            ClientMovesToMainhand toMainhand, ItemNeeds needs, ClientGameRefusals refusals) {
+        // 要空手却腾不出格子时，用和拿东西同一份背包空间先腾一格。
         return UseModule.live(deps.context(), deps.interactions(), bringsClose, toMainhand, needs,
                 deps::scene, deps.blockScans(), refusals, deps.walks(), deps.dropConfirmations(), deps.memory(), deps::protection,
-                deps.creatures());
+                deps.creatures(), space);
     }
 
     /**

@@ -22,6 +22,9 @@ import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
+import org.maiwithu.maicraft.game.player.BackpackView;
+import org.maiwithu.maicraft.game.player.BackpackStack;
+import org.maiwithu.maicraft.behavior.inventory.InventorySpace;
 import org.maiwithu.maicraft.behavior.approach.ProtectedCells;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
@@ -259,6 +262,22 @@ class UseTaskTest {
     }
 
     @Test
+    void 要空手却背包满了_先腾一格再备手() {
+        // 从机械手上拿东西要空手，快捷栏和背包都满：先腾一格，再回头腾空手，照常出手。
+        Rig rig = new Rig();
+        rig.world.blocks.put(LEVER, "minecraft:lever");
+        rig.hand.plans.add(new UseSeams.HandPlan.Cannot(Problem.of(Problem.Kind.INVENTORY_FULL, "腾不出空手")));
+        rig.space = new InventorySpace(new BackpackView() {
+            @Override public List<BackpackStack> stacks() { return List.of(); }
+            @Override public int usedSlots() { return 35; }
+            @Override public int totalSlots() { return 36; }
+        }, Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
+        rig.interactions.applied("拉杆扳动了");
+        TaskResult result = rig.run(rig.input(position(LEVER), null, null, null, 1));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+    }
+
+    @Test
     void 被打断与被取消时_交给基类的交互动作跟着暂停与收尾() {
         Rig rig = new Rig();
         rig.world.blocks.put(LEVER, "minecraft:lever");
@@ -407,6 +426,8 @@ class UseTaskTest {
         final FakeInteractions interactions = new FakeInteractions();
         final FakeClose close = new FakeClose();
         final FakeHand hand = new FakeHand();
+        /** 背包空间：替身背包总是有一格空着，腾一格立刻做完。 */
+        InventorySpace space;
         final FakeNeeds needs = new FakeNeeds();
         final Map<String, ResolvesSeen.Resolved> seen = new HashMap<>();
         final FakeRefusal refusal = new FakeRefusal();
@@ -436,7 +457,7 @@ class UseTaskTest {
             };
             UseServices services = new UseServices(world, interactions, close, hand, needs,
                     id -> Optional.ofNullable(seen.get(id)), search, refusal, FakeSignEditor::open,
-                    drops, travel, menus, null, others);
+                    drops, travel, menus, null, others, space);
             UseTask task = new UseTask(input, services);
             task.start(tick());
             return task;

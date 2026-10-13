@@ -94,7 +94,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
             case RESOLVE -> resolve();
             case TRAVEL -> travel(context);
             case FETCH -> fetch(context);
-            case HAND -> follow(context, this::handReady);
+            case HAND -> follow(context, this::afterHand);
             case APPROACH -> follow(context, this::interactNow);
             case INTERACT -> interact(context);
             case WRITE -> follow(context, this::signWritten);
@@ -186,8 +186,18 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
             case UseSeams.HandPlan.Ready ready -> handReady();
             case UseSeams.HandPlan.Move move -> goWith(Phase.HAND, move.action(), "把要用的东西换到手上");
             case UseSeams.HandPlan.NotCarried notCarried -> fetchMissing();
-            case UseSeams.HandPlan.Cannot cannot -> stop(cannot.problem());
+            case UseSeams.HandPlan.Cannot cannot -> cannot.problem().kind() == Problem.Kind.INVENTORY_FULL
+                    && !roomMade && services.space() != null ? makeRoom() : stop(cannot.problem());
         };
+    }
+
+    // 要空手却快捷栏、背包都满了：像玩家一样先腾一格（存进网络、箱子或丢零碎），再回来备手；只腾一次。
+    // 原先直接说"腾不出空手"，从机械手、置物台上拿东西的一步就停了。
+    private Next<Phase> makeRoom() {
+        roomMade = true;
+        rePrepare = true;
+        return goWith(Phase.HAND, services.space().makeRoom(1, "腾出空手去用东西", Set.of(), input.permissions(),
+                records()), "背包满了，先腾一格好空出手");
     }
 
     private Next<Phase> fetchMissing() {
@@ -217,6 +227,15 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     }
 
     // 手准备好了：只对手上的东西用就直接出手；空桶点到流动的流体改舀附近同种的源格；然后靠近。
+    // 备手这一步做完：刚腾完格子就回头重新备手（这时才腾得出空手），否则手上已经好了。
+    private Next<Phase> afterHand() {
+        if (rePrepare) {
+            rePrepare = false;
+            return prepareHand();
+        }
+        return handReady();
+    }
+
     private Next<Phase> handReady() {
         recordProgress(input.item() == null ? "空手准备好了" : "把 " + input.item() + " 拿到了手上");
         if (target == null) {
@@ -241,6 +260,9 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
 
     /** 上一次出手被挡住时站的那一格：换站位时不再站它；没被挡过为 null。 */
     private BlockPos blockedStand;
+    /** 为空出手腾过一次格子了；腾完要回头重新备手。 */
+    private boolean roomMade;
+    private boolean rePrepare;
 
     // 靠近：方块按格子、实体按它此刻的包围盒；实体已经不在了就是目标没了。
     // 写告示牌时目标带上"只站正面那一侧"，站位候选由站位判断按它筛，不再站到背面去写。
