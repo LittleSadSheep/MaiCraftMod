@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.acquire;
 
+import java.util.Map;
+import java.util.LinkedHashMap;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
 
@@ -34,6 +36,23 @@ public final class CarriedItems {
                     .orElse(0);
         }
         return total;
+    }
+
+    /** 身上（主背包与副手）想要的东西按物品分开数：要一类（标签）时说得出拿到的是哪几样。 */
+    public static Map<String, Integer> matchingByItem(BackpackView backpack, OffhandContents offhand,
+            WantedItem wanted, ReadsItemTags tags) {
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        for (var stack : backpack.stacks()) {
+            if (wanted.matches(stack.itemId(), tags.tagsOf(stack.itemId()))) {
+                counts.merge(stack.itemId(), stack.count(), Integer::sum);
+            }
+        }
+        if (offhand != null) {
+            offhand.heldInOffhand()
+                    .filter(stack -> wanted.matches(stack.itemId(), tags.tagsOf(stack.itemId())))
+                    .ifPresent(stack -> counts.merge(stack.itemId(), stack.count(), Integer::sum));
+        }
+        return counts;
     }
 
     /** 身上有没有一件够格的工具：挖矿前先看它，缺了才去准备。 */

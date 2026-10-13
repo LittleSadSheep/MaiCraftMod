@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import org.maiwithu.maicraft.behavior.perception.SceneSelf;
 import org.maiwithu.maicraft.behavior.perception.SelfSight;
 import org.maiwithu.maicraft.game.player.BackpackStack;
+import org.maiwithu.maicraft.game.player.ReadsFoodValues;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.kernel.goal.GoalRun;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -31,6 +32,12 @@ public final class SelfView {
      */
     public static JsonObject of(SceneSelf self, String dimension, BackpackView backpack, GoalRun mainGoal, String doing,
                                 Boolean automationControls, boolean playerTookOver) {
+        return of(self, dimension, backpack, null, mainGoal, doing, automationControls, playerTookOver);
+    }
+
+    /** @param foods 读食物数值；读不到为 null，背包里的吃的就不写补多少 */
+    public static JsonObject of(SceneSelf self, String dimension, BackpackView backpack, ReadsFoodValues foods,
+                                GoalRun mainGoal, String doing, Boolean automationControls, boolean playerTookOver) {
         JsonObject json = new JsonObject();
         JsonObject position = new JsonObject();
         position.addProperty("x", Math.round(self.x() * 10) / 10.0);
@@ -67,7 +74,7 @@ public final class SelfView {
             json.add("gear_bars", bars);
         }
         if (backpack != null) {
-            json.add("inventory", inventory(backpack));
+            json.add("inventory", inventory(backpack, foods));
             json.addProperty("free_slots", backpack.freeSlots());
         }
         // 谁在操作角色：在玩家手上时主任务不推进。玩家按 F8 收回的，要等玩家再按 F8 交回，
@@ -83,7 +90,7 @@ public final class SelfView {
         return json;
     }
 
-    private static JsonArray inventory(BackpackView backpack) {
+    private static JsonArray inventory(BackpackView backpack, ReadsFoodValues foods) {
         Map<String, Integer> merged = new LinkedHashMap<>();
         for (BackpackStack stack : backpack.stacks()) {
             merged.merge(stack.itemId(), stack.count(), Integer::sum);
@@ -93,9 +100,27 @@ public final class SelfView {
             JsonObject entry = new JsonObject();
             entry.addProperty("item", item);
             entry.addProperty("count", count);
+            // 吃的写上吃一个补多少、可能带什么效果：模组食物认不全，挑哪样吃、要不要先烤看这一项。
+            if (foods != null) foods.of(item).ifPresent(food -> entry.add("food", food(food)));
             list.add(entry);
         });
         return list;
+    }
+
+    private static JsonObject food(ReadsFoodValues.FoodValue value) {
+        JsonObject food = new JsonObject();
+        food.addProperty("nutrition", value.nutrition());
+        food.addProperty("saturation", Math.round(value.saturation() * 10) / 10.0);
+        food.addProperty("eat_seconds", Math.round(value.eatSeconds() * 10) / 10.0);
+        if (value.canAlwaysEat()) food.addProperty("edible_when_full", true);
+        if (!value.effects().isEmpty()) {
+            JsonArray effects = new JsonArray();
+            for (ReadsFoodValues.FoodEffect effect : value.effects()) {
+                effects.add(effect.name() + (effect.beneficial() ? "（有益）" : "（有害）"));
+            }
+            food.add("effects", effects);
+        }
+        return food;
     }
 
     /** 手上在做的目标（主任务）一句话；没有时说"空闲"，免得 LLM 以为没读到。 */

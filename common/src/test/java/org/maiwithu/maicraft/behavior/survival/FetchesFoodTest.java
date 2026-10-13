@@ -97,6 +97,23 @@ class FetchesFoodTest {
     }
 
     @Test
+    void 叫得出名字的几类都没有_再找能吃的一大类() {
+        // 面包、熟肉、熟鱼、蔬菜、水果都弄不到，箱子里只有模组食物：按"能吃的口粮"一大类去拿，不饿着。
+        FakeNeeds needs = new FakeNeeds(Map.of("#maicraft:foods/edible", 12d));
+        FetchesFood fetch = new FetchesFood(needs, 1200);
+        assertInstanceOf(ActionStatus.Done.class, fetch.tick(at(0)));
+        assertEquals(List.of("#maicraft:foods/edible"), needs.asked);
+    }
+
+    @Test
+    void 叫得出名字的有就先拿它_不拿生肉这类() {
+        FakeNeeds needs = new FakeNeeds(Map.of("#maicraft:foods/edible", 2d, "#c:foods/bread", 20d));
+        FetchesFood fetch = new FetchesFood(needs, 1200);
+        assertInstanceOf(ActionStatus.Done.class, fetch.tick(at(0)));
+        assertEquals(List.of("#c:foods/bread"), needs.asked);
+    }
+
+    @Test
     void 哪儿都没有现成口粮如实说() {
         FetchesFood fetch = new FetchesFood(new FakeNeeds(Map.of()), 1200);
         ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, fetch.tick(at(0)));

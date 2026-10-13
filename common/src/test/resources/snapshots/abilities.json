@@ -494,7 +494,7 @@
           "name": "item",
           "type": "string",
           "required": true,
-          "doc": "要多拿的物品 ID，或 # 开头的标签"
+          "doc": "要多拿的物品 ID，或 # 开头的标签；#maicraft:foods/edible 是能吃的口粮一大类（含模组食物）"
         },
         {
           "name": "count",

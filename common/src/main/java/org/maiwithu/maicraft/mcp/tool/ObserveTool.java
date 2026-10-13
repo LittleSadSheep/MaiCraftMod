@@ -8,6 +8,8 @@ import com.google.gson.FieldNamingPolicy;
 import org.maiwithu.maicraft.behavior.reminder.Reminder;
 import org.maiwithu.maicraft.behavior.perception.Scene;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
+import org.maiwithu.maicraft.game.player.ClientFoodValues;
+import org.maiwithu.maicraft.game.player.ReadsFoodValues;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.GoalRun;
 import org.maiwithu.maicraft.kernel.goal.GoalRunTable;
@@ -109,8 +111,10 @@ public final class ObserveTool implements McpTool {
         String doing = main == null ? null : table.doing(main.id()).orElse(null);
         Boolean automation = player == null || player.input() == null ? null : player.input().automationOwnsControls();
         boolean tookOver = player != null && player.input() != null && player.input().humanTookOver();
-        JsonObject view = SelfView.of(currentScene.self(), dimension, player == null ? null : player.backpack(), main, doing,
-                automation, tookOver);
+        // 背包里的吃的按游戏的食物组件写上补多少、有什么效果。
+        ReadsFoodValues foods = player == null || player.localPlayer() == null ? null : new ClientFoodValues(player.localPlayer());
+        JsonObject view = SelfView.of(currentScene.self(), dimension, player == null ? null : player.backpack(), foods,
+                main, doing, automation, tookOver);
         // 还成立的提醒原样交出：一句话、证据数值与阈值、可以考虑的做法；没有提醒时是空数组。
         view.add("reminders", REMINDER_JSON.toJsonTree(reminders.get()));
         return view;

@@ -23,8 +23,11 @@ import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
  */
 public final class HarvestSource implements ItemSource {
 
-    /** 找作物的半径：再远就不算田边顺手收，宁可去别处拿。 */
-    public static final int SEARCH_RADIUS_BLOCKS = 48;
+    /**
+     * 找作物的半径：村庄的田常在一百格内，人会走过去收；原先 48 格，基地离村里的麦田 68 格，
+     * 要面包时说"附近没有熟了的小麦"，宁可饿着。
+     */
+    public static final int SEARCH_RADIUS_BLOCKS = 96;
 
     private final ScansMatureCrops crops;
     private final CollectsBlocks collects;

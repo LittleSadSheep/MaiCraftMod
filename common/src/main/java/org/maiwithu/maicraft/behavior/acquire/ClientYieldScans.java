@@ -24,6 +24,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.CropBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
+import org.maiwithu.maicraft.game.player.EverydayFood;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.BlockScanService;
 import org.maiwithu.maicraft.game.world.ObservationVisibility;
@@ -47,7 +48,7 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
     private static final int WANT = 64;
     // 采掘只认看得见的：最近的几十格里可能全是埋在石头里的，露在洞壁上的排得更远，候选要多取一些再筛。
     private static final int MINABLE_WANT = 512;
-    private static final int MAX_CHUNK_RADIUS = 4;
+    private static final int MAX_CHUNK_RADIUS = 6;
     private static final int BUILD_BUDGET = 4096;
 
     private final BlockScanService scans;
@@ -190,6 +191,10 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
     private static List<String> expand(WantedItem wanted) {
         if (!wanted.isTag()) {
             return List.of(wanted.itemId());
+        }
+        // 能吃的口粮按食物组件认，不在注册表的标签里：直接给全部口粮，反查哪些作物、方块掉它们。
+        if (EverydayFood.TAG.equals(wanted.tagId())) {
+            return EverydayFood.all();
         }
         ResourceLocation tagId = ResourceLocation.tryParse(wanted.tagId().toLowerCase(Locale.ROOT));
         if (tagId == null) {

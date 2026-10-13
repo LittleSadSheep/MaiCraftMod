@@ -10,6 +10,7 @@ import java.util.Set;
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.WantedItem;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
+import org.maiwithu.maicraft.game.player.EverydayFood;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -57,7 +58,7 @@ final class FetchesFood implements Action {
             if (nearest.isEmpty()) {
                 if (lastFailure != null) return ActionStatus.failed(lastFailure);
                 return ActionStatus.failed(Problem.of(Problem.Kind.NEED_ITEM,
-                        "饿了，身上没有口粮，附近、箱子里、网络里也都没找到现成的面包、熟肉、熟鱼、蔬菜或水果",
+                        "饿了，身上没有口粮，附近、箱子里、网络里也都没找到现成的面包、熟肉、熟鱼、蔬菜、水果或别的能吃的",
                         "给角色一些普通食物，或种地、养殖"));
             }
             tried.add(nearest.get().wanted().specifier());
@@ -75,11 +76,17 @@ final class FetchesFood implements Action {
         return status;
     }
 
-    // 挨类问一句要走多远（只问价不拿）：问得出的里面挑最近的；都问不出给空。
+    // 挨类问一句要走多远（只问价不拿）：问得出的里面挑最近的；面包、熟肉这几类都弄不到，
+    // 再问"能吃的口粮"一大类（模组食物、生肉都算），不因为叫不出名字就饿着。
     private Optional<ItemRequest> nearestKind() {
+        Optional<ItemRequest> named = nearestOf(KINDS);
+        return named.isPresent() ? named : nearestOf(List.of(EverydayFood.TAG));
+    }
+
+    private Optional<ItemRequest> nearestOf(List<String> kinds) {
         ItemRequest best = null;
         double bestDistance = Double.MAX_VALUE;
-        for (String kind : KINDS) {
+        for (String kind : kinds) {
             if (tried.contains(WantedItem.ofTag(kind).specifier())) continue;
             ItemRequest request = new ItemRequest(WantedItem.ofTag(kind), COUNT, "饿了，弄点吃的");
             Optional<Double> distance = needs.nearestDistanceBlocks(request, Permissions.DEFAULT);

@@ -2,7 +2,9 @@
 package org.maiwithu.maicraft.ability.obtain;
 
 import java.util.LinkedHashSet;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import org.maiwithu.maicraft.behavior.acquire.CarriedItems;
@@ -45,6 +47,8 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
     private final ObtainItems input;
     /** 任务开始时身上有几件；结算"这次拿到几件"的基准。 */
     private int carriedAtStart;
+    /** 开工时身上这一类按物品分开的件数：要一类时算拿到的是哪几样。 */
+    private Map<String, Integer> byItemAtStart = Map.of();
     /** 实际拿到东西的途径，按拿到先后排，一条不重复。 */
     private final Set<String> obtainedVia = new LinkedHashSet<>();
 
@@ -77,6 +81,7 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
     // 先记下身上原有几件：这次拿到几件按它算，原有的不算这次拿到的。
     private Next<Phase> countPhase() {
         carriedAtStart = CarriedItems.matching(backpack, offhand, input.wanted(), tags);
+        byItemAtStart = CarriedItems.matchingByItem(backpack, offhand, input.wanted(), tags);
         return Next.go(Phase.ACQUIRE, "身上原有 " + carriedAtStart + " 个，再去各来源弄 "
                 + input.count() + " 个");
     }
@@ -100,14 +105,14 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
         String item = input.wanted().describe();
         if (failure == null) {
             return Next.done(TaskResult.builder(TaskResult.Status.DONE,
-                    "拿到了：这次经 " + viaText() + " 拿到 " + gained + " 个" + item
+                    "拿到了：这次经 " + viaText() + " 拿到 " + gained + " 个" + item + whichOnes()
                             + "，身上现在有 " + carried + " 个")
                     .details(details()).build());
         }
         if (gained > 0) {
             int stillNeeded = input.count() - gained;
             return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL,
-                    "部分拿到：经 " + viaText() + " 拿到 " + gained + " 个" + item
+                    "部分拿到：经 " + viaText() + " 拿到 " + gained + " 个" + item + whichOnes()
                             + "，还差 " + stillNeeded + " 个")
                     .problem(failure)
                     .remaining(List.of("还差 " + stillNeeded + " 个" + item))
@@ -118,6 +123,17 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
 
     @Override protected ResultDetails details() {
         return new ObtainedVia(List.copyOf(obtainedVia));
+    }
+
+    // 要的是一类（标签）时说清拿到的是哪几样：要"能吃的"拿回来面包还是生牛肉，下一步怎么吃、要不要烤不一样。
+    private String whichOnes() {
+        if (!input.wanted().isTag()) return "";
+        List<String> parts = new ArrayList<>();
+        CarriedItems.matchingByItem(backpack, offhand, input.wanted(), tags).forEach((itemId, count) -> {
+            int gained = count - byItemAtStart.getOrDefault(itemId, 0);
+            if (gained > 0) parts.add(itemId + " " + gained + " 个");
+        });
+        return parts.isEmpty() ? "" : "（" + String.join("、", parts) + "）";
     }
 
     // 一条都没拿到时结果里不编途径：summary 说清是失败，细节给空列表。

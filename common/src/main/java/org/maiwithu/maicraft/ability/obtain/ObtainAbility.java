@@ -70,7 +70,7 @@ public final class ObtainAbility implements AbilityModule {
                 AbilityDoc.forAbility("obtain"),
                 ParamSpecs.of(
                         ParamSpec.of("item", ParamType.ITEM_OR_TAG).required()
-                                .doc("要多拿的物品 ID，或 # 开头的标签").build(),
+                                .doc("要多拿的物品 ID，或 # 开头的标签；#maicraft:foods/edible 是能吃的口粮一大类（含模组食物）").build(),
                         ParamSpec.of("count", ParamType.INTEGER).defaultValue(1L).range(1, Integer.MAX_VALUE)
                                 .doc("再多拿几件（不是背包里的总数）").build(),
                         ParamSpec.of("via", ParamType.CHOICE)

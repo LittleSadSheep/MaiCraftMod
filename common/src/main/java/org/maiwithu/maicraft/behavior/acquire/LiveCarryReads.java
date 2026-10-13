@@ -19,6 +19,7 @@ import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.ClientBackpackView;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.game.player.EverydayFood;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /**
@@ -54,6 +55,8 @@ public final class LiveCarryReads {
                     // 遍历物品挂着的标签键：注册表持有者直接给全部标签，不用猜哪个命名空间。
                     item.builtInRegistryHolder().tags()
                             .forEach(tag -> names.add(tag.location().toString()));
+                    // 能吃的口粮这一大类按物品自己的食物组件认，模组食物不用一样样点名。
+                    if (EverydayFood.is(item)) names.add(EverydayFood.TAG);
                     return Set.copyOf(names);
                 })
                 .orElse(Set.of());
@@ -85,6 +88,9 @@ public final class LiveCarryReads {
 
             @Override
             public boolean tagHasItems(String tagId) {
+                if (EverydayFood.TAG.equals(tagId.startsWith("#") ? tagId.substring(1) : tagId)) {
+                    return !EverydayFood.all().isEmpty();
+                }
                 var key = TagKey.create(Registries.ITEM, parse(tagId.startsWith("#") ? tagId.substring(1) : tagId));
                 return BuiltInRegistries.ITEM.getTag(key)
                         .map(set -> !set.stream().toList().isEmpty()).orElse(false);
