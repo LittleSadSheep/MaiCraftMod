@@ -14,7 +14,7 @@ import org.maiwithu.maicraft.kernel.task.Urgency;
  * 回去捡尸体：死了身上的东西撒在死的地方，五分钟就消失。真人一重生就往回跑，不等想清楚下一步干什么。
  *
  * <p>每刻记下活着时的样子（在哪、哪个维度、身上有几件）；重生后（换了一个身体、上一个身体是死的）
- * 身上的东西比死前少了，就记下这次死亡。离消失还有时间、同一个维度、离得不太远时尽快插进来：
+ * 等背包同步过来，身上的东西比死前少了，就记下这次死亡（开着死亡不掉落时身上没少，不回去）。离消失还有时间、同一个维度、离得不太远时尽快插进来：
  * 走到死的地方，把附近地上的东西捡起来，再回去干活。一次死亡只回去一次，捡不全也不再回头。
  */
 public final class LostItemsNeed implements SurvivalNeed {
@@ -55,9 +55,11 @@ public final class LostItemsNeed implements SurvivalNeed {
     private PlayerNow last;
     /** 还没回去捡的那次死亡。 */
     private Death pending;
+    /** 刚重生、还在等背包同步过来再比身上少没少的那次死亡。 */
+    private Death settling;
     /** 看到重生的那一刻（游戏刻）。 */
     private long respawnedAt;
-    /** 重生后先等这么久（刻）再动身。 */
+    /** 重生后先等这么久（刻）再动身；背包内容也在这段时间里等它到。 */
     static final long SETTLE_TICKS = 40;
 
     public LostItemsNeed(ReadsPlayer players, RecoversDrops recovery, TaskEventSink events) {
@@ -72,13 +74,21 @@ public final class LostItemsNeed implements SurvivalNeed {
     public Urgency urgency(TickContext context) {
         PlayerNow now = players.read(context);
         if (now == null) return null;
-        if (last != null && last.identity() != now.identity() && players.died(last.identity())
-                && last.carriedStacks() > now.carriedStacks()) {
-            // 换了个身体、旧的是死的、身上比死前少了：刚重生，东西撒在死的地方。
-            pending = new Death(last.x(), last.y(), last.z(), last.dimension(), last.gameTick(), last.carriedStacks());
+        if (last != null && last.identity() != now.identity() && players.died(last.identity())) {
+            // 换了个身体、旧的是死的：刚重生。身上少没少先不比，等背包同步过来。
+            settling = new Death(last.x(), last.y(), last.z(), last.dimension(), last.gameTick(), last.carriedStacks());
+            pending = null;
             respawnedAt = now.gameTick();
         }
         last = now;
+        if (settling != null) {
+            // 重生后服务器把背包内容发过来比新身体晚一点：刚换身体那一刻读出来是空的，
+            // 开着死亡不掉落也像东西全撒了（实机 10-13 开着死亡不掉落，重生后照样跑回去捡尸体）。
+            // 背包到了（读数不为零）或等满了再比：身上比死前少了，东西才是撒在死的地方。
+            if (now.carriedStacks() == 0 && now.gameTick() < respawnedAt + SETTLE_TICKS) return null;
+            if (now.carriedStacks() < settling.carriedStacks()) pending = settling;
+            settling = null;
+        }
         if (pending == null) return null;
         // 刚重生那一两秒世界还没就绪（区块、身体、走到都在换新），稍等再动身。
         if (now.gameTick() < respawnedAt + SETTLE_TICKS) return null;

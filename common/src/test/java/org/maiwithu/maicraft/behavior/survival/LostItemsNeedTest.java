@@ -94,6 +94,20 @@ class LostItemsNeedTest {
     }
 
     @Test
+    void waitsForTheInventoryToArriveBeforeCallingItLost() {
+        Object first = new Object();
+        Object second = new Object();
+        at(player(first, 10, "minecraft:overworld", 100, 12));
+        players.dead.add(first);
+        // 开着死亡不掉落：重生那一刻背包内容还没同步过来，读出来是空的；下一刻到了，一件没少。
+        assertNull(at(player(second, 40, "minecraft:overworld", 140, 0)), "背包还没到，先不下结论");
+        assertNull(at(player(second, 40, "minecraft:overworld", 141, 12)), "背包到了，身上没少");
+        assertNull(at(player(second, 40, "minecraft:overworld", 141 + LostItemsNeed.SETTLE_TICKS, 12)),
+                "过了等候也不回去捡");
+        assertNull(recovered);
+    }
+
+    @Test
     void givesUpWhenTheDropsAreAboutToVanish() {
         Object first = new Object();
         Object second = new Object();
