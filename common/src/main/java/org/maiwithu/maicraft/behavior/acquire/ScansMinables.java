@@ -41,4 +41,9 @@ public interface ScansMinables {
     default Optional<String> minableAt(WantedItem wanted, BlockPos pos) {
         return Optional.empty();
     }
+
+    /** 想要的东西是哪种知道生成高度的矿石掉的（铁矿、钻石矿这类，见 OreHeights）；不是为空。长程挖矿按它往下挖。 */
+    default Optional<String> depositOre(WantedItem wanted) {
+        return Optional.empty();
+    }
 }

@@ -10,6 +10,7 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.Set;
 
 import net.minecraft.core.BlockPos;
@@ -33,6 +34,8 @@ import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 /**
  * 采掘的来源：挖掉会掉出想要的东西的方块（矿石、地表的石头这类），只算看得见的——不透视，埋在石头里的不算。
  * 石头是例外：谁都知道它埋在脚下，附近看不见时就从脚下往下挖楼梯去找，挖够了停在楼梯底。
+ * 知道在哪几层生成的矿（铁、钻石这类，见 OreHeights）附近看不见时长程挖矿：往下挖台阶到矿最多的那层，
+ * 再横着挖通道，看见了就挖；装了连锁挖时台阶、通道一行一行连锁挖，矿整脉连锁挖。
  * 做出来的加工品（铁锭、木板这类）没有方块直接掉它，明确回答"这里给不了"，
  * 不装作能挖；挖矿要的工具（合用的镐）缺了就先按同一套需求去弄，用途标签写清是采掘要用的。
  * 挖哪几格由许可说了算：别人搭的、玩家放的，一格都不动。
@@ -45,6 +48,10 @@ public final class MiningSource implements ItemSource {
     private static final String BURIED_STONE = "minecraft:stone";
     /** 往下挖楼梯的代价估计：土层一般三四格厚，挖到石头前大概要挖这么多级。 */
     private static final int STAIRS_STEPS_GUESS = 4;
+    /** 长程挖矿到了那一层以后横着挖多远能看见矿的估计。 */
+    private static final int PROSPECT_TUNNEL_GUESS = 32;
+    /** 长程挖矿每走一步看多远：通道壁、挖穿的洞里露出来的矿。 */
+    private static final int SIGHT_RADIUS_BLOCKS = 24;
 
     private final ScansMinables minables;
     private final CollectsBlocks collects;
@@ -101,6 +108,8 @@ public final class MiningSource implements ItemSource {
         if (spots.isEmpty() && minables.buriedUnderfoot(request.wanted())) {
             return stairsQuote(request, context);
         }
+        Optional<Deposit> deposit = spots.isEmpty() ? deposit(request, context) : Optional.empty();
+        if (deposit.isPresent()) return prospectQuote(request, context, deposit.get());
         if (spots.isEmpty()) {
             return new SourceQuote.Unavailable(describe(),
                     "半径 " + searchRadius(context) + " 格内看得见的地方没有会掉出" + request.wanted().describe()
@@ -127,6 +136,8 @@ public final class MiningSource implements ItemSource {
         if (spots.isEmpty() && minables.buriedUnderfoot(request.wanted())) {
             return Optional.of(digStairs(request, context.permissions()));
         }
+        Optional<Deposit> deposit = spots.isEmpty() ? deposit(request, context) : Optional.empty();
+        if (deposit.isPresent()) return prospect(request, context, deposit.get());
         PermittedSpots.Screen<MinableSpot> screened = PermittedSpots.screen(spots, MinableSpot::pos,
                 MinableSpot::blockType, context.permissions(), permission);
         if (screened.allowed().isEmpty()) {
@@ -159,7 +170,7 @@ public final class MiningSource implements ItemSource {
         // 走过去、挖掉、整批挖完捡起掉出来的东西：不隔空挖，也不把矿丢在地上。装了连锁挖时整条矿脉、
         // 整根树干一下挖掉（可能比要的多，像玩家用连锁那样），掉落物集中在挖的那一格，挖完一起捡。
         Optional<Action> collect = collects.collectBatch(batch.stream().map(MinableSpot::pos).toList(), permissions,
-                chainable(request, context));
+                chainable(request, context.characterAt(), searchRadius(context), permissions));
         if (collect.isEmpty()) {
             // 收的入口接不上，一步都还没动：整串放弃，由引擎换别的路。
             return Optional.empty();
@@ -183,6 +194,79 @@ public final class MiningSource implements ItemSource {
                         + riskNote(BURIED_STONE));
     }
 
+    /** 长程挖矿要找的矿：哪种矿石、生成范围、在哪一层横着挖。 */
+    private record Deposit(String ore, OreHeights.Band band, int workingY) {}
+
+    // 附近看不见、但知道这种矿在哪几层生成：同一个维度、角色没在生成范围以下（不往上爬）才长程挖。
+    private Optional<Deposit> deposit(ItemRequest request, SourceContext context) {
+        Optional<String> ore = minables.depositOre(request.wanted());
+        if (ore.isEmpty()) return Optional.empty();
+        Optional<OreHeights.Band> band = OreHeights.of(ore.get());
+        if (band.isEmpty()) return Optional.empty();
+        String dimension = context.characterAt().dimension();
+        if (dimension != null && !dimension.equals(band.get().dimension())) return Optional.empty();
+        OptionalInt workingY = OreHeights.workingY(band.get(), context.characterAt().y());
+        if (workingY.isEmpty()) return Optional.empty();
+        return Optional.of(new Deposit(ore.get(), band.get(), workingY.getAsInt()));
+    }
+
+    // 长程挖矿的报价：要挖天然方块，change_blocks 不到 natural 就说清要开哪一档；代价按往下几级加一段通道估。
+    private SourceQuote prospectQuote(ItemRequest request, SourceContext context, Deposit deposit) {
+        Permissions.BlockChanges changes = context.permissions().changeBlocks();
+        if (changes == Permissions.BlockChanges.NONE || changes == Permissions.BlockChanges.TEMPORARY) {
+            return new SourceQuote.NeedsApproval(describe(), Problem.of(Problem.Kind.NEED_APPROVAL,
+                    "附近看不见" + deposit.band().name() + "；长程挖矿要挖天然方块，这次任务的 change_blocks 只是 " + changes.name(),
+                    "把 change_blocks 提到 natural 或 any"));
+        }
+        int depth = Math.max(0, context.characterAt().y() - deposit.workingY());
+        return new SourceQuote.Offer(describe(), request.count(),
+                new AcquisitionCost(depth + PROSPECT_TUNNEL_GUESS, depth + PROSPECT_TUNNEL_GUESS),
+                prospectPlan(context, deposit) + "，看见了就挖；" + riskNote(deposit.ore()));
+    }
+
+    // 说给 LLM 听的打算：往下挖到哪层、还是在这一层横着挖。
+    private static String prospectPlan(SourceContext context, Deposit deposit) {
+        OreHeights.Band band = deposit.band();
+        String where = band.name() + "在 Y " + band.minY() + " 到 " + band.maxY() + " 生成，Y=" + band.peakY() + " 最多";
+        return deposit.workingY() < context.characterAt().y()
+                ? "附近看不见；" + where + "，往下挖三格高的台阶到 Y=" + deposit.workingY() + "，再横着挖两格高的通道找"
+                : "附近看不见；" + where + "，就在这一层（Y=" + deposit.workingY() + "）横着挖两格高的通道找";
+    }
+
+    // 长程挖矿：先备好挖这种矿的镐，往下挖台阶、横着挖通道，看见了就把看见的那一片挖了捡起来。
+    private Optional<Action> prospect(ItemRequest request, SourceContext context, Deposit deposit) {
+        Permissions permissions = context.permissions();
+        String dimension = context.characterAt().dimension();
+        DigsStairsDown.Tunnel tunnel = new DigsStairsDown.Tunnel(deposit.workingY(), deposit.band().minY(),
+                blockType -> minables.dropsWanted(request.wanted(), blockType), request.count(),
+                feet -> !inSight(request, at(feet, dimension), permissions).isEmpty(),
+                feet -> mineInSight(request, at(feet, dimension), permissions));
+        Optional<Action> digging = stairs.tunnelToward(tunnel, permissions);
+        if (digging.isEmpty()) return Optional.empty();
+        List<Action> steps = new ArrayList<>();
+        toolStep(deposit.ore(), request, permissions).ifPresent(steps::add);
+        steps.add(digging.get());
+        return Optional.of(new StepwiseActions("长程挖矿找" + request.wanted().describe(), steps.toArray(Action[]::new)));
+    }
+
+    // 站在通道里看得见的、许可准挖的那几格要的矿。
+    private List<MinableSpot> inSight(ItemRequest request, WorldPosition here, Permissions permissions) {
+        List<MinableSpot> spots = minables.minable(request.wanted(), here, SIGHT_RADIUS_BLOCKS);
+        return PermittedSpots.screen(spots, MinableSpot::pos, MinableSpot::blockType, permissions, permission).allowed();
+    }
+
+    // 看见了：从最近那格起连一批，整脉连锁挖了、挖完一起捡；看见的都不许挖为空。
+    private Optional<Action> mineInSight(ItemRequest request, WorldPosition here, Permissions permissions) {
+        List<MinableSpot> seen = inSight(request, here, permissions);
+        if (seen.isEmpty()) return Optional.empty();
+        List<BlockPos> batch = batchOf(seen, request.count()).stream().map(MinableSpot::pos).toList();
+        return collects.collectBatch(batch, permissions, chainable(request, here, SEARCH_RADIUS_BLOCKS, permissions));
+    }
+
+    private static WorldPosition at(BlockPos feet, String dimension) {
+        return new WorldPosition(feet.getX(), feet.getY(), feet.getZ(), dimension);
+    }
+
     // 先备好挖石头的镐（身上没有才去弄），再往下挖楼梯；挖到会掉想要东西的方块才算数。
     private Action digStairs(ItemRequest request, Permissions permissions) {
         List<Action> steps = new ArrayList<>();
@@ -196,10 +280,7 @@ public final class MiningSource implements ItemSource {
      * 连锁挖一起挖到的每一格都要过：在这次愿意找的范围里、地图上自然长的、挖了掉要的东西、许可准挖。
      * 连锁的预览是模组画给玩家看的，埋在里面的那几格也算看见了；有一格不过就不连锁，只挖手上那一格。
      */
-    private Predicate<BlockPos> chainable(ItemRequest request, SourceContext context) {
-        WorldPosition here = context.characterAt();
-        int radius = searchRadius(context);
-        Permissions permissions = context.permissions();
+    private Predicate<BlockPos> chainable(ItemRequest request, WorldPosition here, int radius, Permissions permissions) {
         return pos -> {
             double dx = pos.getX() - here.x();
             double dy = pos.getY() - here.y();

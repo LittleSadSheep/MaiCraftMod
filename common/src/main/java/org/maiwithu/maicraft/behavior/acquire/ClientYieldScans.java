@@ -149,6 +149,16 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
     }
 
     @Override
+    public Optional<String> depositOre(WantedItem wanted) {
+        for (String productId : expand(wanted)) {
+            for (String blockTypeId : VanillaBlockDrops.blocksDropping(productId)) {
+                if (OreHeights.of(blockTypeId).isPresent()) return Optional.of(blockTypeId);
+            }
+        }
+        return Optional.empty();
+    }
+
+    @Override
     public List<CropSpot> mature(WantedItem wanted, WorldPosition center, int radiusBlocks) {
         if (notInWorld()) {
             return List.of();

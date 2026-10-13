@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.acquire;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -13,11 +14,13 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Predicate;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import org.maiwithu.maicraft.behavior.inventory.PicksUpDrops;
 import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
@@ -104,6 +107,32 @@ class ClientStairsDownTest {
                 dug.add(target);
                 types.add(world.type(target));
                 world.placed.put(target, "minecraft:air");
+            }));
+        }
+
+        /** 装了连锁挖时才连锁；记下每次连锁的形状、命中面和挖掉了几格。 */
+        boolean chaining;
+        final List<String> chains = new ArrayList<>();
+
+        @Override public Optional<Action> digChained(BlockPos trigger, Direction face,
+                BreakAccelerator.ChainShape shape, Predicate<BlockPos> mayBreak) {
+            if (!chaining) return dig(trigger);
+            boolean down = shape == BreakAccelerator.ChainShape.DOWNWARD_LINE;
+            Direction heading = face.getAxis().isVertical() ? world.facing : face.getOpposite();
+            List<BlockPos> line = new ArrayList<>();
+            for (int k = 0; k < 64; k++) {
+                BlockPos cell = trigger.relative(heading, k).below(down ? k : 0);
+                if (world.type(cell).equals("minecraft:air")) break;
+                line.add(cell);
+            }
+            if (line.size() < 2 || !line.stream().allMatch(mayBreak)) return dig(trigger);
+            return Optional.of(done("连锁挖", () -> {
+                chains.add(shape + " " + face + " " + line.size());
+                for (BlockPos cell : line) {
+                    dug.add(cell);
+                    types.add(world.type(cell));
+                    world.placed.put(cell, "minecraft:air");
+                }
             }));
         }
     }
@@ -254,6 +283,72 @@ class ClientStairsDownTest {
         for (long t = 100; digs.dug.size() < 2; t++) action.tick(new Tick(t));
 
         assertEquals(new BlockPos(10, 63, -1), digs.dug.get(1));
+    }
+
+    /** 长程挖矿：挖到 targetY 横着挖；站到 sightAt 这一格就看得见矿，看见了去挖（记一笔就做完）。 */
+    private final List<BlockPos> minedFrom = new ArrayList<>();
+
+    private ActionStatus prospect(int targetY, int floorY, BlockPos sightAt) {
+        DigsStairsDown.Tunnel tunnel = new DigsStairsDown.Tunnel(targetY, floorY,
+                type -> type.equals("minecraft:iron_ore"), 3, feet -> feet.equals(sightAt),
+                feet -> Optional.of(done("挖看见的铁矿", () -> minedFrom.add(feet))));
+        Action action = stairs().tunnelToward(tunnel, Permissions.DEFAULT).orElseThrow();
+        for (long t = 0; t < 20000; t++) {
+            ActionStatus status = action.tick(new Tick(t));
+            if (!(status instanceof ActionStatus.Running)) return status;
+        }
+        throw new AssertionError("长程挖矿一直没收场");
+    }
+
+    @Test
+    void 长程挖矿_挖台阶到那一层再横着挖_看见矿就去挖() {
+        // 从地面 64 层朝北挖台阶到 56 层（八级），转向东在 56 层横着挖，走到 (4,56,-8) 看见了铁矿。
+        ActionStatus status = prospect(56, 0, new BlockPos(4, 56, -8));
+        assertInstanceOf(ActionStatus.Done.class, status);
+        assertEquals(List.of(new BlockPos(4, 56, -8)), minedFrom, "看见了就去挖");
+        assertTrue(world.walkedTo.contains(new BlockPos(0, 56, -8)), "第八级落到 56 层：" + world.walkedTo);
+        assertTrue(world.walkedTo.contains(new BlockPos(1, 56, -8)), "到了那一层转个向横着走：" + world.walkedTo);
+        assertTrue(digs.dug.contains(new BlockPos(1, 57, -8)) && !digs.dug.contains(new BlockPos(1, 55, -8)),
+                "横着的通道只挖齐头、齐脚两格，不挖脚下");
+    }
+
+    @Test
+    void 长程挖矿横着挖满一段还没看见_如实说停在通道尽头() {
+        world.feet = new BlockPos(0, 56, 0);
+        for (int z = -80; z <= 0; z++) {
+            for (int y = 55; y <= 58; y++) world.placed.put(new BlockPos(0, y, z), "minecraft:stone");
+            world.placed.put(new BlockPos(0, 56, z), z == 0 ? "minecraft:air" : "minecraft:stone");
+            world.placed.put(new BlockPos(0, 57, z), z == 0 ? "minecraft:air" : "minecraft:stone");
+        }
+        ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, prospect(56, 0, null));
+        assertEquals(Problem.Kind.NOT_FOUND, failed.problem().kind());
+        assertTrue(failed.problem().message().contains("横着挖了 " + ClientStairsDown.LEVEL_STEPS), failed.problem().message());
+    }
+
+    @Test
+    void 装了连锁挖_往下三行各连锁一次_横着两行各连锁一次() {
+        digs.chaining = true;
+        ActionStatus status = prospect(40, 0, new BlockPos(6, 40, -24));
+        assertInstanceOf(ActionStatus.Done.class, status);
+        // 往北挖台阶：齐头、齐脚两行对着迎面（朝南那面），脚下那行对着顶面；到 40 层转向东横着挖，两行对着朝西那面。
+        assertTrue(digs.chains.stream().anyMatch(c -> c.startsWith("DOWNWARD_LINE south")), digs.chains.toString());
+        assertTrue(digs.chains.stream().anyMatch(c -> c.startsWith("DOWNWARD_LINE up")), digs.chains.toString());
+        assertTrue(digs.chains.stream().anyMatch(c -> c.startsWith("STRAIGHT_LINE west")), digs.chains.toString());
+        assertEquals(List.of(new BlockPos(6, 40, -24)), minedFrom);
+        assertTrue(digs.chains.size() < digs.dug.size(), "连锁一下挖开一长条，不是一格一格挖");
+    }
+
+    @Test
+    void 连锁的那一行挨着岩浆_那一行不连锁_走到跟前拐个弯接着挖() {
+        digs.chaining = true;
+        // 脚下那一行的斜线在第六级挨着岩浆：这一行不连锁、逐格挖；别的两行不挨着照样连锁。
+        // 挖到第五级看清第六级挨着岩浆，不往那边挖，拐个弯接着往下。
+        world.placed.put(new BlockPos(1, 58, -6), "minecraft:lava");
+        prospect(40, 0, null);
+        assertFalse(digs.dug.contains(new BlockPos(0, 58, -6)), "挨着岩浆的那一格不挖");
+        assertTrue(digs.chains.getFirst().startsWith("DOWNWARD_LINE south"),
+                "第一级脚下那行的斜线挨着岩浆不连，先连的是齐脚那行：" + digs.chains);
+        assertTrue(world.walkedTo.stream().anyMatch(cell -> cell.getX() < 0), "拐弯接着挖：" + world.walkedTo);
     }
 
     @Test

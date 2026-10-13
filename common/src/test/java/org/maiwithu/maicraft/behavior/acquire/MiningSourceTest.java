@@ -84,16 +84,33 @@ class MiningSourceTest {
         @Override public boolean dropsWanted(WantedItem wanted, String blockTypeId) {
             return blockTypeId.equals("minecraft:stone");
         }
+        // 粗铁是铁矿掉的，知道铁矿在哪几层生成：附近看不见时长程挖矿。
+        @Override public Optional<String> depositOre(WantedItem wanted) {
+            return "minecraft:raw_iron".equals(wanted.itemId()) ? Optional.of("minecraft:iron_ore") : Optional.empty();
+        }
         // 连锁逐格核：64 层都是天然煤矿，只有 x=4 那格是搭出来的。
         @Override public Optional<String> minableAt(WantedItem wanted, BlockPos pos) {
             return pos.getY() == 64 && pos.getX() != 4 ? Optional.of("minecraft:coal_ore") : Optional.empty();
         }
     }
 
-    /** 替身：记下要往下挖几格、哪些方块算数，动作当场做完。 */
+    /** 替身：记下要往下挖几格、哪些方块算数，动作当场做完；长程挖矿记下往哪一层挖。 */
     private static final class FakeStairs implements DigsStairsDown {
         int wantedCells;
         Predicate<String> yields;
+        Tunnel tunnel;
+
+        @Override public Optional<Action> tunnelToward(Tunnel tunnel, Permissions permissions) {
+            this.tunnel = tunnel;
+            return Optional.of(new Action() {
+                @Override public ActionStatus tick(TickContext context) {
+                    return ActionStatus.done();
+                }
+                @Override public String describe() {
+                    return "长程挖矿";
+                }
+            });
+        }
 
         @Override public Action digDown(Predicate<String> yields, int wantedCells,
                 Permissions permissions) {
@@ -309,6 +326,76 @@ class MiningSourceTest {
         assertEquals(3, stairs.wantedCells);
         assertTrue(stairs.yields.test("minecraft:stone"));
         assertTrue(!stairs.yields.test("minecraft:dirt"), "挖开的土不算挖到圆石");
+    }
+
+    @Test
+    void 附近看不见铁矿_报长程挖矿_往下挖到铁矿最多的那层() {
+        SourceQuote quote = source(new FakeMinables(List.of(), true, false), new FakeDigs())
+                .quote(new ItemRequest(WantedItem.ofItem("minecraft:raw_iron"), 3, "铁锭"), CONTEXT);
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, quote);
+        assertTrue(offer.risk().contains("往下挖三格高的台阶到 Y=16"), offer.risk());
+        assertTrue(offer.risk().contains("两格高的通道"), offer.risk());
+    }
+
+    @Test
+    void 长程挖矿也要许可挖天然方块() {
+        SourceContext onlyTemporary = new SourceContext(WorldPosition.here(0, 64, 0),
+                Permissions.DEFAULT.mergedWith(Permissions.BlockChanges.TEMPORARY, null, null, null, null, null));
+        SourceQuote quote = source(new FakeMinables(List.of(), true, false), new FakeDigs())
+                .quote(new ItemRequest(WantedItem.ofItem("minecraft:raw_iron"), 3, "铁锭"), onlyTemporary);
+        SourceQuote.NeedsApproval approval = assertInstanceOf(SourceQuote.NeedsApproval.class, quote);
+        assertTrue(approval.problem().message().contains("change_blocks"), approval.problem().message());
+    }
+
+    @Test
+    void 在铁矿生成范围以下_不往上挖() {
+        SourceContext deep = new SourceContext(WorldPosition.here(0, -70, 0), Permissions.DEFAULT);
+        SourceQuote quote = source(new FakeMinables(List.of(), true, false), new FakeDigs())
+                .quote(new ItemRequest(WantedItem.ofItem("minecraft:raw_iron"), 3, "铁锭"), deep);
+        assertInstanceOf(SourceQuote.Unavailable.class, quote);
+    }
+
+    @Test
+    void 长程挖矿_先备镐_往16层挖_斜线不出铁矿的生成范围_看见了就去挖() {
+        FakeDigs digs = new FakeDigs();
+        Action action = source(new FakeMinables(List.of(), true, false), digs)
+                .begin(new ItemRequest(WantedItem.ofItem("minecraft:raw_iron"), 3, "铁锭"),
+                        new SourceQuote.Offer("采掘", 3, new AcquisitionCost(80, 80), null), CONTEXT)
+                .orElseThrow();
+        runAll(action);
+        assertEquals("minecraft:iron_pickaxe", needs.asked.getFirst().wanted().itemId(), "先备挖铁矿的镐");
+        assertEquals(16, stairs.tunnel.targetY());
+        assertEquals(-64, stairs.tunnel.floorY());
+        assertEquals(3, stairs.tunnel.wantedCells());
+    }
+
+    /** 替身：一开始附近看不见铁矿，挖进通道以后看见一格。 */
+    private static final class SeenLater implements ScansMinables {
+        List<MinableSpot> spots = List.of();
+        @Override public List<MinableSpot> minable(WantedItem wanted, WorldPosition center, int radiusBlocks) { return spots; }
+        @Override public boolean anyBlockDrops(WantedItem wanted) { return true; }
+        @Override public boolean scanComplete() { return true; }
+        @Override public boolean buriedUnderfoot(WantedItem wanted) { return false; }
+        @Override public boolean dropsWanted(WantedItem wanted, String blockTypeId) { return blockTypeId.equals("minecraft:iron_ore"); }
+        @Override public Optional<String> depositOre(WantedItem wanted) { return Optional.of("minecraft:iron_ore"); }
+    }
+
+    @Test
+    void 长程挖矿看见铁矿_从站的地方连一批整脉连锁挖了() {
+        SeenLater minables = new SeenLater();
+        FakeDigs digs = new FakeDigs();
+        backpack.add("minecraft:iron_pickaxe", 1);
+        runAll(source(minables, digs).begin(new ItemRequest(WantedItem.ofItem("minecraft:raw_iron"), 3, "铁锭"),
+                new SourceQuote.Offer("采掘", 3, new AcquisitionCost(80, 80), null), CONTEXT).orElseThrow());
+        BlockPos feet = new BlockPos(0, 16, -40);
+        assertFalse(stairs.tunnel.inSight().test(feet), "还没看见");
+        BlockPos ore = new BlockPos(2, 16, -41);
+        minables.spots = List.of(new MinableSpot(ore, "minecraft:iron_ore", "minecraft:raw_iron"));
+        assertTrue(stairs.tunnel.inSight().test(feet));
+        runAll(stairs.tunnel.mineInSight().apply(feet).orElseThrow());
+        assertEquals(List.of(List.of(ore)), digs.batches);
+        assertTrue(digs.chainable != null, "看见的那片按整脉连锁挖");
+        assertTrue(stairs.tunnel.yields().test("minecraft:iron_ore"), "通道正好穿过铁矿也算挖到了");
     }
 
     @Test
