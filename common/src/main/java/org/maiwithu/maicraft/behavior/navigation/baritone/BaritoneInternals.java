@@ -79,6 +79,8 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
     private Supplier<List<FlyUpGear>> flyUps = List::of;
     /** 镜头离引擎要的精确瞄点差这么多度以内算转到位：平滑镜头收敛到 0.3° 吸附，留点余量。 */
     private static final float AIM_SETTLED_DEGREES = 3.0f;
+    /** 寻路挖一格的额外代价（刻）：走一格约 4.6 刻，30 约等于多走六七格。 */
+    static final double BREAK_PENALTY = 30.0;
     /** 本刻引擎要的精确瞄点（挖、放）；没要为 null。走到运行按它判断镜头转到位没有，没到位左右键不出手。 */
     private Float precisionYaw;
     private Float precisionPitch;
@@ -314,6 +316,10 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
         TerrainSwitches switches = TerrainSwitches.of(permit);
         settings.allowBreak.value = switches.allowBreak();
         settings.allowBreakAnyway.value = List.of();
+        // 挖一格额外算多走六七格：住在别人世界里，挖是绕不开时的下策，不是抄近道的手段。
+        // 穿一堵墙、从地板底下钻进屋要挖好几格，十几格内有门就走门；地下没路可绕时该挖照挖。
+        // 引擎默认只算 2（挖掘机器人的取值），实机回家从屋外挖到地板底下钻进屋，不走门（用户 10-13）。
+        settings.blockBreakAdditionalPenalty.value = BREAK_PENALTY;
         settings.allowPlace.value = switches.allowPlace();
         settings.allowParkourPlace.value = switches.allowParkourPlace();
         settings.allowDownward.value = switches.allowDownward();
