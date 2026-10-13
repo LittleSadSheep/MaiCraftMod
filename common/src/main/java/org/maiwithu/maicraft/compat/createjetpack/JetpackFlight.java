@@ -55,6 +55,10 @@ final class JetpackFlight implements TravelLeg {
     static final double CENTRED = 0.15;
     /** 横着飞时高度差这么多以内才往前走：两格高的口子上下也只剩 0.2，先把高度对齐。 */
     static final double LEVEL = 0.15;
+    /** 横着飞离拐弯点还有这么远（格）才转镜头看过去。 */
+    static final double CRUISE_LOOK = 2.0;
+    /** 往某个方向的推力小于这么多就不按。 */
+    static final float DEAD_ZONE = 0.15f;
     /** 这么多刻没飞近就重新找路，最多找三次。 */
     static final int STALL_TICKS = 60;
     static final int MAX_REPLANS = 3;
@@ -249,7 +253,6 @@ final class JetpackFlight implements TravelLeg {
             }
             lastGain = now;
         }
-        if (horizontal > 0.3) input.lookAt(player, new Vec3(aim.x, player.getEyeY(), aim.z));
         // 路是一格一格的直段：竖着的一段先在这一列正中对准再升降，横着的一段先把高度对齐再往前，
         // 身体碰不到洞沿、口子边。往哪边推按世界方向算、按此刻真实朝向折成前后左右：镜头像真人一样慢慢转，
         // 原先按"朝前"推，镜头还没转过来就顺着旧朝向飞出去（实机 10-13 往反方向飞出七十多格）。
@@ -261,11 +264,26 @@ final class JetpackFlight implements TravelLeg {
         boolean up = rise > LEVEL && (!upright || centred);
         boolean down = rise < -LEVEL && (!upright || centred);
         boolean sprint = !upright && levelled && horizontal > 3;
+        // 镜头只在横着飞一大段时转向那一段的尽头；对准、升降、拐弯这些近处的细调不转头。原先每刻都盯着下一个
+        // 拐弯点，人一冲过头瞄点就跑到身后，镜头来回打转，按键朝向跟着乱，喷气背包推力又大，一下飞出几十格
+        // （实机 10-13 从小屋南门口一冲飞到北边三十格外）。
+        if (!upright && levelled && horizontal > CRUISE_LOOK) {
+            input.lookAt(player, new Vec3(aim.x, player.getEyeY(), aim.z));
+        }
+        if (now % 20 == 0) {
+            Vec3 velocity = player.getDeltaMovement();
+            LOG.info("[喷气背包] 飞行中：在 {}，速度 {}，朝向 {}°，往第 {}/{} 个拐弯点 {}（{}）", String.format("%.1f, %.1f, %.1f",
+                    position.x, position.y, position.z), String.format("%.2f, %.2f, %.2f", velocity.x, velocity.y, velocity.z),
+                    Math.round(player.getYRot()), waypoint, route.size(), next.toShortString(), upright ? "升降" : "横飞");
+        }
         // 按键交给角色输入要用本刻的客户端刻号（不是世界时间）：原先传世界时间，飞第一段就内部错误
         // "input request is not for the active tick"。
         input.applySteering(yaw -> {
+            // 推力是开关量（按着就满推力）：差得很少时不按，免得来回抖。
             PlayerInput.Movement push = AirSteering.movement(player, steerTo, yaw, false);
-            return new PlayerInput.Movement(push.forward(), push.strafe(), up, down, sprint);
+            float forward = Math.abs(push.forward()) < DEAD_ZONE ? 0.0f : push.forward();
+            float strafe = Math.abs(push.strafe()) < DEAD_ZONE ? 0.0f : push.strafe();
+            return new PlayerInput.Movement(forward, strafe, up, down, sprint);
         }, player.getYRot(), context.clientTick());
         return ActionStatus.running();
     }
