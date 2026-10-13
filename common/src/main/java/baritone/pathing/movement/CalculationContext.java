@@ -63,6 +63,8 @@ import org.maiwithu.maicraft.behavior.landing.LandingAid;
 import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationProtection;
 import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationObstacles;
 import org.maiwithu.maicraft.behavior.navigation.baritone.MaiCraftGoals;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import org.maiwithu.maicraft.behavior.navigation.baritone.ClearanceWhitelist;
 import org.maiwithu.maicraft.behavior.navigation.HazardEscapePolicy;
 
@@ -107,6 +109,8 @@ public class CalculationContext {
     public final BetterWorldBorder worldBorder;
     /** Frozen task safety policy; safe for the calculation worker. */
     public final NavigationProtection.Snapshot maicraftPolicy;
+    /** 这次算路里查过的树干（键是树干顶）：同一棵树的原木挖不挖只数一次叶子。 */
+    private final Map<BlockPos, Boolean> trunksChecked = new ConcurrentHashMap<>();
     /** 这次算路能用的落地办法：出发前取一份，搜索全程一致；会摔伤的一跳只有落点接得住人才收。 */
     public final LandingOptions landingOptions;
     /** 这一趟一次最多能飞上几格（穿着、气够的喷气背包）；不能飞为 0。算路开始时读一次，整趟按它算。 */
@@ -358,7 +362,11 @@ public class CalculationContext {
 
     public double breakCostMultiplierAt(int x, int y, int z, BlockState current) {
         // 名单外障碍不作为可挖路线候选，让搜索直接选择绕行；地形许可和例外名单不能越过这道限制。
-        if (!ClearanceWhitelist.allows(current)) return COST_INF;
+        // 原木要长在天然树上、树叶要自然长的才算地形：房子的原木地板、屋顶不挖，从门走。
+        if (!ClearanceWhitelist.allowsAt(current, new BlockPos(x, y, z), bsi.access,
+                pos -> bsi.worldContainsLoadedChunk(pos.getX(), pos.getZ()), trunksChecked)) {
+            return COST_INF;
+        }
         if (!allowBreak && !allowBreakAnyway.contains(current.getBlock())) {
             return COST_INF;
         }

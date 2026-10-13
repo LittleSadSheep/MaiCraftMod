@@ -20,6 +20,12 @@ import net.minecraft.tags.TagKey;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.Map;
+import java.util.function.Predicate;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.block.LeavesBlock;
+import org.maiwithu.maicraft.behavior.acquire.NaturalTrees;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -83,6 +89,25 @@ public final class ClearanceWhitelist {
 
     /** 已经是空气就无需清障；其他格严格按类型匹配，替换许可、流体和保护格仍由各执行段另行核验。 */
     public static boolean allows(BlockState state) { return state.isAir() || CURRENT.get().allows(state); }
+
+    /**
+     * 这一格能不能当地形清掉：类型在名单里，原木还得长在天然树上、树叶得是自然长的。
+     * 村里木屋的原木地板、原木屋顶，玩家用原木搭的房子、人放的树叶都不算地形，寻路不挖、看不见也不挖开。
+     * 实机里角色困在村庄木屋里，名单只认类型，把原木地板挖了个坑、又把原木屋顶拆开钻出去。
+     *
+     * @param world  读这一格周围的方块（算路在后台线程上读它自己那份）
+     * @param loaded 哪些格读得到
+     * @param trunks 一次算路里查过的树干（键是树干顶），同一棵树不重复数叶子
+     */
+    public static boolean allowsAt(BlockState state, BlockPos pos, BlockGetter world, Predicate<BlockPos> loaded,
+            Map<BlockPos, Boolean> trunks) {
+        if (!allows(state)) return false;
+        if (state.getBlock() instanceof LeavesBlock && state.hasProperty(LeavesBlock.PERSISTENT)
+                && state.getValue(LeavesBlock.PERSISTENT)) {
+            return false;
+        }
+        return !NaturalTrees.isLog(state) || NaturalTrees.partOfNaturalTree(pos, world, loaded, trunks);
+    }
 
     // 明确列举方块或引用实际同步的标签；不凭名称包含 stone、ore 等文字猜测模组机器是否属于自然地形。
     static Rules parse(List<String> entries) {

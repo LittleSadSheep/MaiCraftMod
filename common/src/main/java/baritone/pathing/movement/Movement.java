@@ -157,7 +157,8 @@ public abstract class Movement implements IMovement, MovementHelper {
             ctx.getSelectedBlock().ifPresent(pos -> {
                 // 身体卡墙也不能擅自拆名单外建筑，仍由正常路线重新寻找出口；保护按此刻读到的这格方块问。
                 BlockState stuckIn = BlockStateInterface.get(ctx, pos);
-                if (!NavigationProtection.protects(pos, stuckIn) && ClearanceWhitelist.allows(stuckIn)) {
+                if (!NavigationProtection.protects(pos, stuckIn)
+                        && ClearanceWhitelist.allowsAt(stuckIn, pos, ctx.world(), ctx.world()::isLoaded, new HashMap<>())) {
                     MovementHelper.switchToBestToolFor(ctx, stuckIn);
                     currentState.setInput(Input.CLICK_LEFT, true);
                 }
@@ -210,7 +211,8 @@ public abstract class Movement implements IMovement, MovementHelper {
                 // Protection forbids mutation, not walking through air or using a doorway.
                 // 路线算好后有人换上名单外方块、或这格现在是像玩家放的门时，立即使这一段失效并重算绕路，不继续挥镐。
                 BlockState inTheWay = BlockStateInterface.get(ctx, blockPos);
-                if (NavigationProtection.protects(blockPos, inTheWay) || !ClearanceWhitelist.allows(inTheWay)) {
+                if (NavigationProtection.protects(blockPos, inTheWay)
+                        || !ClearanceWhitelist.allowsAt(inTheWay, blockPos, ctx.world(), ctx.world()::isLoaded, new HashMap<>())) {
                     state.setStatus(MovementStatus.UNREACHABLE);
                     return true;
                 }
