@@ -84,7 +84,7 @@ final class ScaffoldStaging {
     }
 
     // 有耐久的（工具、武器、盔甲、盾、打火石）、能吃的、桶、火把、不死图腾、正要用的不挪；别的零碎可以换进背包。
-    private static Holding holding(ItemStack stack, ItemsToKeep keeps) {
+    static Holding holding(ItemStack stack, ItemsToKeep keeps) {
         if (stack.isEmpty()) return Holding.EMPTY;
         String id = itemId(stack);
         boolean keep = stack.isDamageableItem() || stack.has(DataComponents.FOOD)
