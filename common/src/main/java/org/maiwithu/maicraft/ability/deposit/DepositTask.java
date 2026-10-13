@@ -57,6 +57,8 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
     private final Map<String, Integer> confirmed = new LinkedHashMap<>();
     /** 放进去就被容器下面的溜槽、漏斗抽走的件数：离开了背包，没留在容器里。 */
     private final Map<String, Integer> passed = new LinkedHashMap<>();
+    /** 存进网络的那一行在"存进了哪"里的叫法。 */
+    private static final String NETWORK_NAME = "ME 网络";
     /** 放过东西的容器（含放进去就被抽走、一件没留下的）。 */
     private final Set<String> putInto = new LinkedHashSet<>();
     /** 每只容器存进了什么：容器的叫法 → 物品 → 件数。 */
@@ -223,7 +225,7 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
             @Override public void change(Change change) {
                 if (change.kind() == Change.Kind.ITEM_STORED) {
                     confirmed.merge(change.what(), change.count(), Integer::sum);
-                    storedIn.computeIfAbsent("ME 网络", ignored -> new LinkedHashMap<>())
+                    storedIn.computeIfAbsent(NETWORK_NAME, ignored -> new LinkedHashMap<>())
                             .merge(change.what(), change.count(), Integer::sum);
                 }
                 records.change(change);
@@ -300,7 +302,7 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
             Set<String> touched = new LinkedHashSet<>(storedIn.keySet());
             touched.addAll(putInto);
             return Next.done(TaskResult.done(drained == 0
-                    ? "存进了 " + storedIn.size() + " 只容器，要存的都存进去了"
+                    ? "存进了" + whereStored() + "，要存的都存进去了"
                     : "放进了 " + touched.size() + " 只容器，要存的都离开了背包" + drainedNote));
         }
         deposited += drained;
@@ -312,6 +314,14 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
         }
         return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL,
                 "存进了 " + deposited + " 件，还有 " + (total - deposited) + " 件没存下").problem(why).build());
+    }
+
+    // 存到了哪：只存进网络说"ME 网络"，只存进容器说几只容器，两样都有就都说。
+    private String whereStored() {
+        boolean network = storedIn.containsKey(NETWORK_NAME);
+        int containers = storedIn.size() - (network ? 1 : 0);
+        if (network && containers == 0) return " ME 网络";
+        return " " + containers + " 只容器" + (network ? "和 ME 网络" : "");
     }
 
     // 存放的账：确认一笔记一笔变化，对不上的进未确认，试过的办法进 attempts。
