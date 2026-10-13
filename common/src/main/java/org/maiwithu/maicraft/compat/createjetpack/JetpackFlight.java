@@ -253,6 +253,13 @@ final class JetpackFlight implements TravelLeg {
             }
             lastGain = now;
         }
+        steer(context, input, player, position, next, aim, horizontal, rise, now);
+        return ActionStatus.running();
+    }
+
+    // 往下一个拐弯点推一刻：竖着的先对准再升降、横着的先对高再走，按真实朝向折成按键；横飞一大段才转镜头。
+    private void steer(PlayerContext context, PlayerInput input, LocalPlayer player, Vec3 position, BlockPos next,
+            Vec3 aim, double horizontal, double rise, long now) {
         // 路是一格一格的直段：竖着的一段先在这一列正中对准再升降，横着的一段先把高度对齐再往前，
         // 身体碰不到洞沿、口子边。往哪边推按世界方向算、按此刻真实朝向折成前后左右：镜头像真人一样慢慢转，
         // 原先按"朝前"推，镜头还没转过来就顺着旧朝向飞出去（实机 10-13 往反方向飞出七十多格）。
@@ -288,7 +295,6 @@ final class JetpackFlight implements TravelLeg {
             float strafe = Math.abs(push.strafe()) < DEAD_ZONE ? 0.0f : push.strafe();
             return new PlayerInput.Movement(forward, strafe, up, down || creep, sprint);
         }, player.getYRot(), context.clientTick());
-        return ActionStatus.running();
     }
 
     // 落点正上方：下面是水或不高就直接关掉落，否则照快速下降的做法。
