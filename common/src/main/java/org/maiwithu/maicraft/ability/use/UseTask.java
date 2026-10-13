@@ -263,6 +263,8 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     /** 为空出手腾过一次格子了；腾完要回头重新备手。 */
     private boolean roomMade;
     private boolean rePrepare;
+    /** 出手前核过一回手上的东西了：被换掉就换回来，只回头这一次。 */
+    private boolean handRechecked;
 
     // 靠近：方块按格子、实体按它此刻的包围盒；实体已经不在了就是目标没了。
     // 写告示牌时目标带上"只站正面那一侧"，站位候选由站位判断按它筛，不再站到背面去写。
@@ -280,6 +282,14 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
 
     // 出手前冻结现场：动作栏原有的话、脚边原有的掉落物，之后才认得出哪些是这一下带来的。
     private Next<Phase> interactNow() {
+        // 走过去的路上引擎挖、垫方块会换手上的东西（换上镐、垫脚料）：出手前再核一遍，不对就先换回来再出手，只回头一次。
+        // 实机 10-13 拿着水桶走过去，到了手上变成原子拆解机，对草地右键没反应，还被它的电量变化当成生效。
+        if (input.item() != null && !handRechecked
+                && !(services.hand().hold(input.item()) instanceof UseSeams.HandPlan.Ready)) {
+            handRechecked = true;
+            recordAttempt("靠近目标", "走到了，手上的东西被换掉了，先把 " + input.item() + " 换回手上");
+            return prepareHand();
+        }
         return switch (services.interactions().build(target, input.writesText())) {
             case UseSeams.Built.CannotAim cannot -> aimFailed(cannot.problem());
             case UseSeams.Built.Ready ready -> {

@@ -121,7 +121,7 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
             return new UseSeams.Built.Ready(brush, brush::result, gesture, held, menuBefore, null);
         }
         Optional<ItemUseAim.Aim> planned = ItemUseAim.aim(gesture, cell, natureOf(state),
-                aroundOf(level, player, cell, state));
+                aroundOf(level, player, cell, state), target.face());
         if (planned.isEmpty()) {
             return new UseSeams.Built.CannotAim(whyNoAim(gesture, target));
         }

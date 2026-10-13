@@ -143,6 +143,14 @@ public final class ItemUseAim {
      * 倒流体、点火的每个可能落格都会落到自己身上——这最后一种由靠近换站位解决，不在这里硬点。
      */
     public static Optional<Aim> aim(Gesture gesture, BlockPos target, CellNature nature, Around around) {
+        return aim(gesture, target, nature, around, null);
+    }
+
+    /**
+     * 同上，点名了点目标的哪一面：倒流体、点火落在这一面外面那一格（"对草地顶面倒水"就倒在草地上面），
+     * 不再按朝向角色的那一面猜；没点名为 null。
+     */
+    public static Optional<Aim> aim(Gesture gesture, BlockPos target, CellNature nature, Around around, Direction face) {
         return switch (gesture) {
             // 刷子点目标本身，按住直到刷完；做成以那一格变回普通方块为准。
             case EMPTY_HAND, USE_TARGET ->
@@ -150,10 +158,10 @@ public final class ItemUseAim {
             case BRUSH ->
                 Optional.of(new Aim(target, target, Confirmation.BLOCK_TURNS_INTO, "点目标本身，按住直到刷完"));
             case SCOOP -> aimScoop(nature, target);
-            case POUR -> aimEffect(gesture, target, nature, around, Confirmation.HAND_EMPTIES_OR_FLUID_APPEARS);
+            case POUR -> aimEffect(gesture, target, nature, around, Confirmation.HAND_EMPTIES_OR_FLUID_APPEARS, face);
             case IGNITE -> around.ignitesItself()
                     ? Optional.of(new Aim(target, target, Confirmation.FIRE_APPEARS, "点着目标本身"))
-                    : aimEffect(gesture, target, nature, around, Confirmation.FIRE_APPEARS);
+                    : aimEffect(gesture, target, nature, around, Confirmation.FIRE_APPEARS, face);
             case TRANSFORM_TOOL -> aimTransform(target, nature, around);
             case UNSUPPORTED -> Optional.empty();
         };
@@ -178,7 +186,7 @@ public final class ItemUseAim {
      * 点它朝向角色的面，效果落在那个面外面的格子。效果格不能和身体重叠。
      */
     private static Optional<Aim> aimEffect(Gesture gesture, BlockPos target, CellNature nature,
-            Around around, Confirmation confirmation) {
+            Around around, Confirmation confirmation, Direction face) {
         String doing = gesture == Gesture.POUR ? "倒" : "点火";
         if (nature == CellNature.AIR_OR_REPLACEABLE) {
             return supportFace(target, around)
@@ -186,7 +194,9 @@ public final class ItemUseAim {
                             "点 " + support.toShortString() + " 朝向目标的支撑面，把" + doing + "到 " + target.toShortString()));
         }
         if (nature != CellNature.SOLID) return Optional.empty();
-        Direction towardPlayer = faceToward(around.feet(), target);
+        // 点名了哪一面就落在那一面外面：实机 10-13 站在草地边上"对草地顶面倒水"，按朝向角色的面猜成了侧面，
+        // 侧面外面是脚下那块地、看不见，回回"看不到任何一面"。
+        Direction towardPlayer = face != null ? face : faceToward(around.feet(), target);
         BlockPos effect = target.relative(towardPlayer);
         if (overlapsPlayer(effect, around.feet())) return Optional.empty();
         return Optional.of(new Aim(target, effect, confirmation,

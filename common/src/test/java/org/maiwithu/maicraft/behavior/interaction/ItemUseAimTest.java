@@ -80,6 +80,16 @@ class ItemUseAimTest {
     }
 
     @Test
+    void pouringOnANamedFaceLandsOutsideThatFace() {
+        // 点名了顶面：倒在目标上面那一格，不按朝向角色的侧面猜（侧面外面可能就是脚下的地）。
+        Optional<ItemUseAim.Aim> aim = ItemUseAim.aim(ItemUseAim.Gesture.POUR, target,
+                ItemUseAim.CellNature.SOLID, around(Set.of(), Set.of(), false, false), Direction.UP);
+        assertTrue(aim.isPresent());
+        assertEquals(target, aim.get().clickCell());
+        assertEquals(target.above(), aim.get().effectCell());
+    }
+
+    @Test
     void pouringOnOwnFeetIsRefused() {
         // 目标在脚下：朝上的面外一格正是自己站的格子，不点，交给靠近换站位。
         BlockPos below = feet.below();
