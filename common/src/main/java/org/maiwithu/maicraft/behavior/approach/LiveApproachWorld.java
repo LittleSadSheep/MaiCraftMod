@@ -17,6 +17,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
+import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
 import org.maiwithu.maicraft.game.interaction.FirstPersonInteractionTargeting;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 
@@ -65,7 +66,10 @@ public final class LiveApproachWorld implements ApproachWorldView {
     public boolean solidFloor(BlockPos feet) {
         Level level = level();
         BlockPos below = feet.below();
-        return level != null && !level.getBlockState(below).getCollisionShape(level, below).isEmpty();
+        // 脚下要是寻路认的地面（和走路用的同一套）：床、台阶外的矮方块顶上，人其实陷在下面那一格里，寻路也不往上站。
+        // 原先有碰撞就算，睡觉挑了床顶上那一格当站位，寻路走不上去，"推进了 600 刻都没有新进展"（实机 10-13）。
+        return level != null && !level.getBlockState(below).getCollisionShape(level, below).isEmpty()
+                && BlockPassability.canWalkOn(level, below);
     }
 
     @Override
