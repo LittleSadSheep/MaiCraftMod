@@ -288,7 +288,12 @@ public final class MerchantTradeTakes implements TradesWithMerchants {
                 return toClose();
             }
             waitTicks = 0;
-            if (!menu.selectTradeOffer(currentOffer.listIndex())) return ActionStatus.running();
+            if (!menu.selectTradeOffer(currentOffer.listIndex())) {
+                // 这一刻点不了（界面还没画出来、交互机会用掉了）：下一刻重新挑报价再点。原先记着这一条就只等，
+                // 再也不点，实机 10-14 停在"在看农民的报价"上一分钟到超时，一个面包没买。
+                currentOffer = null;
+                return ActionStatus.running();
+            }
             stage = Stage.VERIFY_SELECT;
             return ActionStatus.progressed();
         }
