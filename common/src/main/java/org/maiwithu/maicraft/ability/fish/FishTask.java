@@ -86,9 +86,7 @@ class FishTask extends PhasedTask<FishTask.Phase> {
         int aimSettled;
         /** 等咬钩推进了几刻：被打断的时间天然不计。 */
         int waitTicks;
-        /** 上一次推进等咬钩的刻号：两刻隔了一截说明被生存需求插过队。 */
-        long lastWaitTick = Long.MIN_VALUE;
-        /** 最近一刻钩还挂着：被打断时据此决定恢复后要不要先收竿。 */
+        /** 最近一刻钩还挂着。 */
         boolean hookSeen;
     }
 
@@ -252,12 +250,9 @@ class FishTask extends PhasedTask<FishTask.Phase> {
     private Next<Phase> waitBite(TickContext context) {
         cast.hookSeen = services.hooks().hasHook();
         cast.waitTicks++;
-        // 隔了一截才恢复推进：中间被生存需求插过队，挂着钩的那几刻咬了没收，先收掉再重抛。
-        if (cast.lastWaitTick != Long.MIN_VALUE && context.gameTick() > cast.lastWaitTick + 1 && cast.hookSeen) {
-            cast.lastWaitTick = context.gameTick();
-            return beginReel(ReelReason.ABANDON, "让位期间咬了没收的一竿", true);
-        }
-        cast.lastWaitTick = context.gameTick();
+        // 中间被别的事插过队、错过了一口，不用收竿重抛：原版鱼跑了会再来咬，钩还在水里就接着等，像人一样。
+        // 原先按世界时间隔了一截就当"让位期间咬了没收"，收竿重抛；服务器同步时间一跳就误判，
+        // 实机 10-14 一竿刚抛下就收、收了又抛，像右键连点器，连着五次就判抛竿失败收场。
         BiteWatch.Verdict verdict = BiteWatch.judge(new BiteWatch.BiteFacts(cast.hookSeen,
                 services.hooks().isBiting(), services.hooks().hookedEntity(),
                 services.hooks().hookInWater(), cast.waitTicks));
