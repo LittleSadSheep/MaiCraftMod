@@ -84,19 +84,18 @@ class TradeSourceTest {
     }
 
     @Test
-    void 有名字与圈养的村民是别人的_不搭话() {
+    void 有名字的村民是别人的_住在屋里围栏边的照常交易() {
         // 有名字的：处境里写着 bonded。
         ReadsCreatureSituation named = uuid -> Optional.of(
                 new ReadsCreatureSituation.CreatureSituation(false, false, true, false, false, false));
         TradeSource source = source((center, radius) -> List.of(farmer(1, 8, false, true)), named);
         assertTrue(assertInstanceOf(SourceQuote.Unavailable.class, source.quote(request(), CONTEXT))
                 .reason().contains("别人的"), "有名字的该按别人的排除");
-        // 圈养的：围栏里的牲畜是有主的。
+        // 圈着的：村民本来就住在屋里、围栏边上，交易所也是为交易圈起来的，照常交易（实机村里的农民被当成圈着买不到）。
         ReadsCreatureSituation fenced = uuid -> Optional.of(
                 new ReadsCreatureSituation.CreatureSituation(false, false, false, false, false, true));
         TradeSource enclosed = source((center, radius) -> List.of(farmer(1, 8, false, true)), fenced);
-        assertTrue(assertInstanceOf(SourceQuote.Unavailable.class, enclosed.quote(request(), CONTEXT))
-                .reason().contains("别人的"), "圈养的该按别人的排除");
+        assertInstanceOf(SourceQuote.Offer.class, enclosed.quote(request(), CONTEXT), "圈着的村民照常交易");
     }
 
     @Test

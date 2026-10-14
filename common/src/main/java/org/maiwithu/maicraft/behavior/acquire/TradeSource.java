@@ -20,8 +20,8 @@ import org.maiwithu.maicraft.kernel.task.Action;
  * 交易的来源：和附近已加载的村民与流浪商人换东西。
  *
  * <p>村里的村民各做各行，要什么找做这行的。候选只有成年、有业的村民与流浪商人——
- * 无业和傻子的开不出交易界面；有名字、被驯服、拴着绳、圈养着的，以及角色记住的玩家地盘里的，
- * 是别人的，不去搭话。报价只有开了界面才看得见，所以问价时如实报"有多少要开了才知道"，
+ * 无业和傻子的开不出交易界面；有名字、拴着绳、放在船或矿车里的，以及角色记住的玩家地盘里的，
+ * 是别人的，不去搭话。圈着不算：村民本来就住在屋里、围栏边上，交易所也是为了交易才圈起来的。报价只有开了界面才看得见，所以问价时如实报"有多少要开了才知道"，
  * 排在数量明确的来源后面。村子在哪归勘察与出行：只跟已经加载的村民交易，不自己跑图找村子。
  *
  * <p>交易不伤人也不改方块，不需要专门的许可；报价收稀有消耗品的照 use_rare_items 挡，
@@ -104,9 +104,12 @@ public final class TradeSource implements ItemSource {
         if (!merchant.opensTrading()) {
             return merchant.describe() + "没有做买卖的营生，开不出交易界面，不搭话";
         }
-        var situation = creatures.situationOf(merchant.uuid());
-        if (situation.isPresent() && situation.get().bondedToSomeone()) {
-            return merchant.describe() + "有名字或被拴着、圈着，是别人的，不搭话";
+        // 有名字、拴着绳、被人装进船或矿车：是别人的，不搭话。圈着不算——村民住在屋里、围栏边上，
+        // 实机 10-14 村里的农民站在屋旁被当成"圈着"，拿着绿宝石一个面包也买不到。地盘归记住的区域和受保护地标管。
+        var situation = creatures.situationOf(merchant.uuid())
+                .filter(found -> found.named() || found.tamed() || found.leashed() || found.inVehicle());
+        if (situation.isPresent()) {
+            return merchant.describe() + "有名字或被拴着，是别人的，不搭话";
         }
         for (var region : regions.regions()) {
             if (region.contains(merchant.at())) {
