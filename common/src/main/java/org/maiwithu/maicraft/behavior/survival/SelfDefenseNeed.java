@@ -5,6 +5,7 @@ import org.maiwithu.maicraft.behavior.combat.BattleMoves;
 import org.maiwithu.maicraft.behavior.combat.CombatGeometry;
 import org.maiwithu.maicraft.behavior.combat.CombatSenses;
 import org.maiwithu.maicraft.behavior.combat.ThreatAssessment;
+import org.maiwithu.maicraft.behavior.inventory.PicksUpDrops;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -53,6 +54,8 @@ public final class SelfDefenseNeed implements SurvivalNeed {
     private final Predicate<UUID> trusted;
     /** 夜里退无可退、打不过时挖坑自保：和夜晚需求同一套挖三填一；没接上为 null。 */
     private final NightfallNeed.BurrowMoves shelter;
+    /** 打完捡这一仗掉出来的东西、射出去的箭：和采集、打猎同一套捡掉落物；没接上为 null。 */
+    private PicksUpDrops drops;
 
     /** @param moves 出手与走位怎么落地；生产用原生攻击与走到，测试换替身。 */
     public SelfDefenseNeed(CombatSenses senses, BattleMoves moves, TaskEventSink events) {
@@ -72,6 +75,17 @@ public final class SelfDefenseNeed implements SurvivalNeed {
         this.events = events;
         this.trusted = trusted;
         this.shelter = shelter;
+    }
+
+    /** 打完顺手捡掉落物和自己的箭：接上捡掉落物的那一套。 */
+    public SelfDefenseNeed pickingUp(PicksUpDrops pickup) {
+        this.drops = pickup;
+        return this;
+    }
+
+    /** 捡掉落物的那一套；没接上为 null。 */
+    PicksUpDrops drops() {
+        return drops;
     }
 
     /** 接得住挖坑自保吗。 */

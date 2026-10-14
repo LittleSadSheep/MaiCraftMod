@@ -12,6 +12,7 @@
     "GuiOverlayMessageAccessor",
     "AbstractSignEditScreenAccessor",
     "FishingHookAccessor",
+    "AbstractArrowAccessor",
     "ClientLevelBlockChangeMixin",
     "GameRendererCameraMixin",
     "MouseHandlerControlMixin",

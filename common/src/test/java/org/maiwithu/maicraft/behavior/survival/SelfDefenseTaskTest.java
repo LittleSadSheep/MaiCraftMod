@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
 
@@ -20,6 +21,7 @@ import org.maiwithu.maicraft.behavior.combat.CombatSenses;
 import org.maiwithu.maicraft.behavior.combat.Footwork;
 import org.maiwithu.maicraft.behavior.combat.ThreatAssessment;
 import org.maiwithu.maicraft.behavior.combat.WeaponChoice;
+import org.maiwithu.maicraft.behavior.inventory.PicksUpDrops;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
@@ -152,6 +154,34 @@ class SelfDefenseTaskTest {
         var details = assertInstanceOf(SelfDefenseTask.DefenseDetails.class, finished.details());
         assertEquals(moves.strikes, details.hits());
         assertEquals("minecraft:iron_sword", details.weapon());
+    }
+
+    @Test
+    void afterAFightItPicksUpWhatTheFightDroppedBeforeWalkingBack() {
+        // 开打时脚边已经躺着 7 号：不是这一仗的。打完观察一阵没新威胁，捡这一仗新掉出来的（替身两刻捡完），再回打点。
+        Senses senses = new Senses();
+        senses.threats.add(zombie(1, 2, 2));
+        Moves moves = new Moves();
+        Events events = new Events();
+        List<Set<Integer>> asked = new ArrayList<>();
+        int[] pickTicks = {0};
+        PicksUpDrops drops = new PicksUpDrops() {
+            @Override public Set<Integer> nearby() { return Set.of(7); }
+
+            @Override public Action pickUpNewSince(Set<Integer> before) {
+                asked.add(before);
+                return new Fixed(() -> ++pickTicks[0] >= 2 ? ActionStatus.done() : ActionStatus.progressed());
+            }
+        };
+        SelfDefenseNeed need = new SelfDefenseNeed(senses, moves, events).pickingUp(drops);
+        SelfDefenseTask task = (SelfDefenseTask) need.createTask(new Tick(0));
+        task.start(new Tick(0));
+        run(task, 0, 3);
+        senses.threats.clear();
+        TickResult result = run(task, 3, 3 + SelfDefenseTask.WATCH_TICKS + 10);
+        assertEquals(TaskResult.Status.DONE, assertInstanceOf(TickResult.Finished.class, result).result().status());
+        assertEquals(List.of(Set.of(7)), asked, "只捡一次，开打前就躺着的不算");
+        assertEquals(2, pickTicks[0]);
     }
 
     @Test

@@ -20,6 +20,7 @@ import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.world.ArrowPickups;
 import org.maiwithu.maicraft.game.world.DropConfirmations;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -28,7 +29,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 捡起掉出来的东西的生产实现：动手后脚边新冒出来的掉落物（挖下的矿、剪下的羊毛），
- * 一件件走过去让原版拾取吸进包。
+ * 一件件走过去让原版拾取吸进包。自己射出去插在近处地上的箭也算这一下带出来的，一起捡回来。
  *
  * <p>只捡这一下带出来的：动手前就躺在地上的东西不是这次的，不去碰。走路交给走到（不挖不垫，
  * 不会为捡一团羊毛走下悬崖）；东西进没进包以地上那件消失为准，限时没捡到如实失败，
@@ -66,7 +67,8 @@ public final class ClientDropPickup implements PicksUpDrops {
         Set<Integer> ids = new HashSet<>();
         if (player == null) return ids;
         for (Entity entity : player.clientLevel.entitiesForRendering()) {
-            if (entity instanceof ItemEntity && entity.distanceToSqr(player) <= NEARBY_BLOCKS * NEARBY_BLOCKS) {
+            if ((entity instanceof ItemEntity || ArrowPickups.retrievable(entity, player))
+                    && entity.distanceToSqr(player) <= NEARBY_BLOCKS * NEARBY_BLOCKS) {
                 ids.add(entity.getId());
             }
         }
@@ -129,7 +131,7 @@ public final class ClientDropPickup implements PicksUpDrops {
                 current = null;
             } else if (current != null && ++waited > (clearingLeaves ? OPEN_UP_GIVE_UP_TICKS : GIVE_UP_TICKS)) {
                 skip.add(current);
-                missed++;
+                gaveUp(drop);
                 current = null;
             }
             if (current == null && !pickNext(player)) {
@@ -163,9 +165,10 @@ public final class ClientDropPickup implements PicksUpDrops {
             for (int id : fresh) {
                 Entity entity = player.clientLevel.getEntity(id);
                 // 背包装不下的（没有空格、同种的堆也满了）走过去也吸不进来：记下来，不白跑。
-                if (entity instanceof ItemEntity item && !fits(player, item.getItem())) {
+                ItemStack stack = entity instanceof ItemEntity item ? item.getItem() : ArrowPickups.item(entity);
+                if (!stack.isEmpty() && !fits(player, stack)) {
                     skip.add(id);
-                    noRoom.add(item.getItem().getHoverName().getString());
+                    noRoom.add(stack.getHoverName().getString());
                     continue;
                 }
                 if (entity != null && (best == null || entity.distanceToSqr(player) < best.distanceToSqr(player))) {
@@ -198,8 +201,9 @@ public final class ClientDropPickup implements PicksUpDrops {
             // 掉的是一整堆也一样（连锁挖一条矿脉，掉落物都落在一格、并成一堆，常滚进挖空的矿洞里够不着）：
             // 为一整堆挖开一格天然方块去拿是值得的，真人也会；单件的照旧不为它挖土开路。
             // 实机 10-13 长程挖矿连锁挖了 8 格铁矿，8 个粗铁滚进旁边的空洞，"走过去了还在地上"整趟白干。
+            // 箭不为它扒树叶、挖土：够不着就算了。
             if (walked instanceof ActionStatus.Done && !clearingLeaves && ++besideTicks > STUCK_BESIDE_TICKS
-                    && (underLeaves(drop.level(), cell) || wholePile(drop))) {
+                    && drop instanceof ItemEntity && (underLeaves(drop.level(), cell) || wholePile(drop))) {
                 clearingLeaves = true;
                 waited = 0;
                 stopWalking();
@@ -216,11 +220,16 @@ public final class ClientDropPickup implements PicksUpDrops {
             if (walked instanceof ActionStatus.Failed) {
                 // 走不过去就别指望它自己吸过来了：放弃这一件，挑下一件。
                 skip.add(current);
-                missed++;
+                gaveUp(drop);
                 current = null;
                 stopWalking();
             }
             return ActionStatus.progressed();
+        }
+
+        // 放弃这一件：掉落物记成没捡到；自己的箭够不着就算了，不让这一批算没捡完。
+        private void gaveUp(Entity drop) {
+            if (drop == null || drop instanceof ItemEntity) missed++;
         }
 
         // 地上那件是一整堆（两件以上并在一起）。

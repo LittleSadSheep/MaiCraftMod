@@ -265,8 +265,9 @@ public final class Bootstrap {
                                 || BaritoneInternals.flyingUp()),
                 // 自家人打角色只发事件、不停工；别的玩家打角色退开举盾、停下等 LLM 决定。
                 // 夜里撤不掉又打不过：自卫接同一套挖三填一。
+                // 打完把这一仗掉出来的东西和射出去的箭捡回来：用回去捡尸体的同一套捡掉落物。
                 new SelfDefenseNeed(combatSenses, new LiveBattleMoves(walks, interactions.heldProjection(), ranged), events,
-                        trusted, LiveNightAndEdgeMoves.burrow(burrow, events)),
+                        trusted, LiveNightAndEdgeMoves.burrow(burrow, events)).pickingUp(lostDrops),
                 new HungerNeed(new LiveHungerView(foods, keeps), foodMoves, events),
                 new DarknessNeed(new LiveDarkView(lightLevels),
                         new LiveTorchMoves(interactions, hands, protection, Set.of()), followLighting),

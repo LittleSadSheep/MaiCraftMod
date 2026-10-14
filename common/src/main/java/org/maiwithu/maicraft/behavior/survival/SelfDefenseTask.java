@@ -34,7 +34,8 @@ import org.maiwithu.maicraft.kernel.task.CloseReason;
 
 /**
  * 自卫插曲：谁威胁角色就打谁，打完回到开打的原地。怎么打全交给战斗引擎（{@link Battle}），和点名战斗是同一个；
- * 这里只记插曲的账：打点、开始与结束事件、危险消失后观察一阵、打完走回打点、回不去就暂停主任务说明停在哪。
+ * 这里只记插曲的账：打点、开始与结束事件、危险消失后观察一阵、捡这一仗掉出来的东西和射出去的箭、打完走回打点、
+ * 回不去就暂停主任务说明停在哪。
  *
  * <p>名单无差别：正在追我的都打（会分裂的怪裂开后新个体天然进来）。不追出打点 16 格（只比水平距离）去打没在打我的；
  * 正压着我打的、远处射我的不受这个限制。危险消失后再观察两秒（跑得几乎一样快的怪会在边界上一进一出）；
@@ -47,8 +48,11 @@ import org.maiwithu.maicraft.kernel.task.CloseReason;
  */
 final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements DisplacedTask {
 
-    /** 自卫的阶段：打 → 危险消失后的观察期 → 走回打点。撤离在打的阶段里由引擎做；夜里退无可退时挖坑熬到天亮。 */
-    enum Phase { ENGAGE, SHELTER, WATCH, RETURN }
+    /**
+     * 自卫的阶段：打 → 危险消失后的观察期 → 捡这一仗掉出来的东西和射出去的箭 → 走回打点。
+     * 撤离在打的阶段里由引擎做；夜里退无可退时挖坑熬到天亮。
+     */
+    enum Phase { ENGAGE, SHELTER, WATCH, PICKUP, RETURN }
 
     /** 打点圆心到追击上限（只比水平距离）。 */
     static final double CHASE_LIMIT = 16.0;
@@ -78,6 +82,10 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
     private final Set<Integer> strangers = new LinkedHashSet<>();
     /** 这一场打掉了谁、拿什么打、挥中几下、射了几箭。 */
     private final DefenseTally tally = new DefenseTally();
+    /** 开打时身边已经躺着的掉落物：不是这一仗的，打完不去捡。没接捡掉落物为 null。 */
+    private Set<Integer> dropsBefore;
+    /** 正在捡这一仗掉出来的东西。 */
+    private Action pickup;
 
     SelfDefenseTask(CombatSenses senses, BattleMoves moves, TaskEventSink events, SelfDefenseNeed need) {
         super("自卫", Phase.ENGAGE, new ProgressTracker(STUCK_AFTER_TICKS, Long.MAX_VALUE));
@@ -122,6 +130,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
             case ENGAGE -> engage(context);
             case SHELTER -> shelter(context);
             case WATCH -> watch(context);
+            case PICKUP -> pickUp(context);
             case RETURN -> back(context);
         };
     }
@@ -131,6 +140,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
             healthAtStart = senses.profile(context).health();
             double[] self = moves.selfPosition(context);
             System.arraycopy(self, 0, anchor, 0, 3);
+            if (need.drops() != null) dropsBefore = need.drops().nearby();
             events.publish(TaskEvent.Kind.TEMPORARY_TASK_STARTED,
                     "被威胁，插入自卫：打点在 " + Math.round(self[0]) + ", " + Math.round(self[1]) + ", " + Math.round(self[2]));
         }
@@ -209,10 +219,36 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
             return Next.go(Phase.ENGAGE, "又有威胁出现，继续打");
         }
         if (--watchTicksLeft <= 0) {
-            return Next.go(Phase.RETURN, "观察期内没有新威胁，走回打点");
+            // 真出过手才捡：只躲开、只撤离的没东西可捡。
+            boolean fought = tally.hits() > 0 || tally.shots() > 0;
+            return dropsBefore != null && fought ? Next.go(Phase.PICKUP, "观察期内没有新威胁，捡这一仗掉出来的东西")
+                    : Next.go(Phase.RETURN, "观察期内没有新威胁，走回打点");
         }
         recordProgress("观察期还剩 " + watchTicksLeft + " 刻");
         return Next.stay();
+    }
+
+    // 打完像玩家一样把这一仗掉出来的东西、自己射出去插在近处的箭捡回来，再走回打点；捡的时候又有威胁就回去打。
+    // 捡不到的（走不过去、够不着）不算自卫没做成，照样走回打点。实机 10-14 一晚上自卫射掉二十多支箭，一支没捡。
+    private Next<Phase> pickUp(TickContext context) {
+        Battle.Moment moment = battle.tick(context);
+        if (moment.state() != Battle.State.FINISHED) {
+            closePickup();
+            return Next.go(Phase.ENGAGE, "捡东西时又有威胁出现，继续打");
+        }
+        if (pickup == null) pickup = need.drops().pickUpNewSince(dropsBefore);
+        ActionStatus status = pickup.tick(context);
+        if (status instanceof ActionStatus.Running running) {
+            if (running.progressed()) recordProgress(pickup.describe());
+            return Next.stay();
+        }
+        closePickup();
+        return Next.go(Phase.RETURN, "这一仗掉出来的东西捡完了，走回打点");
+    }
+
+    private void closePickup() {
+        if (pickup != null) pickup.close();
+        pickup = null;
     }
 
     private Next<Phase> back(TickContext context) {
@@ -293,6 +329,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
     @Override
     public Interruptibility interruptibility(TickContext context) {
         if (burrow != null) return burrow.interruptibility(context);
+        if (pickup != null) return pickup.interruptibility();
         return walkBack != null ? walkBack.interruptibility() : battle.interruptibility();
     }
 
@@ -307,6 +344,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         public void pause() {
             battle.pause();
             if (walkBack != null) walkBack.pause();
+            if (pickup != null) pickup.pause();
             if (burrow != null) burrow.pause();
         }
 
@@ -316,6 +354,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
             battle.close();
             if (walkBack != null) walkBack.close();
             walkBack = null;
+            closePickup();
             if (burrow != null) keepFacts(burrow.close(phase() == Phase.SHELTER ? CloseReason.CANCELLED : CloseReason.FINISHED));
             burrow = null;
         }
@@ -323,6 +362,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         @Override
         public String describe() {
             if (burrow != null) return burrow.describe();
+            if (pickup != null) return pickup.describe();
             return walkBack != null ? walkBack.describe() : battle.describe();
         }
     }

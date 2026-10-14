@@ -11,7 +11,10 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.protocol.game.ClientboundTakeItemEntityPacket;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.projectile.AbstractArrow;
+import net.minecraft.world.item.ItemStack;
 
 /**
  * 掉落物的事实确认：只记服务器新增的掉落实体，和明确发给本玩家的拾取包（谁收的、收了几件）。
@@ -69,8 +72,10 @@ public final class DropConfirmations {
     public void entityAdded(LocalPlayer player, ClientLevel level, int entityId) {
         if (player == null || player.clientLevel != level) return;
         observeWorld(player);
-        if (!(level.getEntity(entityId) instanceof ItemEntity item)) return;
-        births.put(item.getUUID(), new Birth(++sequence, level.getGameTime()));
+        // 掉落物，和射出去的箭（打完要捡回来的，也按开打前后分新旧）。
+        Entity added = level.getEntity(entityId);
+        if (!(added instanceof ItemEntity) && !(added instanceof AbstractArrow)) return;
+        births.put(added.getUUID(), new Birth(++sequence, level.getGameTime()));
         while (births.size() > MAX_EVENTS) births.remove(births.keySet().iterator().next());
     }
 
@@ -80,9 +85,12 @@ public final class DropConfirmations {
                 || packet.getAmount() <= 0) return;
         observeWorld(player);
         // 必须在原版处理前读：处理后原实体可能已被移除。收取者不是本玩家的一概不记，不沿用原版视觉效果的默认。
-        if (!(level.getEntity(packet.getItemId()) instanceof ItemEntity item)) return;
-        String itemId = BuiltInRegistries.ITEM.getKey(item.getItem().getItem()).toString();
-        pickups.addLast(new Pickup(++sequence, level.getGameTime(), item.getUUID(), item.getId(),
+        // 收的是掉落物，或是插在地上的箭（走过去捡回来的）。
+        Entity taken = level.getEntity(packet.getItemId());
+        ItemStack stack = taken instanceof ItemEntity item ? item.getItem() : ArrowPickups.item(taken);
+        if (taken == null || stack.isEmpty()) return;
+        String itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+        pickups.addLast(new Pickup(++sequence, level.getGameTime(), taken.getUUID(), taken.getId(),
                 packet.getAmount(), itemId));
         while (pickups.size() > MAX_EVENTS) pickups.removeFirst();
     }
