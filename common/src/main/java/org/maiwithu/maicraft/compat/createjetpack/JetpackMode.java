@@ -41,10 +41,11 @@ final class JetpackMode implements TravelMode {
     static final int OVERHEAD_TICKS = 80;
     static final int EQUIP_TICKS = 40;
     /**
-     * 贴着头顶飞（坑道、矿洞、低矮的屋里）每格按这么多刻算：喷气背包在里面得一点点挪，比走路慢得多，
-     * 这样能走就走出去，走不通才在里面飞。实机 10-13 从坑道台阶底下起飞回家，在一格宽的坑道里对不准、来回晃。
+     * 飞不开的格子（贴着头顶的坑道、矿洞、低矮屋里，贴着地面蹭）每格按这么多刻算：喷气背包在里面得一点点挪，
+     * 比走路慢得多，这样能走就走，走不通才在里面飞。实机 10-13 从坑道台阶底下起飞回家，在一格宽的坑道里来回晃；
+     * 10-14 林子里五十格的路一路贴地飞，在树干边上蹭了四十秒。
      */
-    static final int CRAMPED_TICKS_PER_BLOCK = 20;
+    static final int SLOW_TICKS_PER_BLOCK = 20;
     /** 气要比飞完这一段多出这么多秒。 */
     static final int AIR_MARGIN_SECONDS = 7;
     /** 找空中路最多展开多少格。 */
@@ -85,9 +86,9 @@ final class JetpackMode implements TravelMode {
                     : "目标附近没看到能落脚、上面留得出净空的地方（或那一片还没加载），或看过的空中飞不过去");
             return;
         }
-        int cramped = FlightRoutes.cramped(level, plan.get().route());
-        long ticks = Math.round(Math.max(0, plan.get().length() - cramped) / CRUISE_BLOCKS_PER_TICK)
-                + (long) cramped * CRAMPED_TICKS_PER_BLOCK + OVERHEAD_TICKS + (pack.get().worn() ? 0 : EQUIP_TICKS);
+        int slow = FlightRoutes.slowCells(level, plan.get().route());
+        long ticks = Math.round(Math.max(0, plan.get().length() - slow) / CRUISE_BLOCKS_PER_TICK)
+                + (long) slow * SLOW_TICKS_PER_BLOCK + OVERHEAD_TICKS + (pack.get().worn() ? 0 : EQUIP_TICKS);
         double needSeconds = ticks / 20.0 + AIR_MARGIN_SECONDS;
         if (pack.get().secondsLeft() < needSeconds) {
             sink.decline(Problem.Kind.UNREACHABLE, "背罐里的气只够飞 " + Math.round(pack.get().secondsLeft())

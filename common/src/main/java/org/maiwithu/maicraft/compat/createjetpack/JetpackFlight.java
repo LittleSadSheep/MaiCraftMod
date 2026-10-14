@@ -59,6 +59,8 @@ final class JetpackFlight implements TravelLeg {
     static final double CRUISE_LOOK = 2.0;
     /** 往某个方向的推力小于这么多就不按。 */
     static final float DEAD_ZONE = 0.15f;
+    /** 地上潜行对准这么多刻没挪近就先飞起来。 */
+    static final int CREEP_STALL_TICKS = 10;
     /** 这么多刻没飞近就重新找路，最多找三次。 */
     static final int STALL_TICKS = 60;
     static final int MAX_REPLANS = 3;
@@ -88,6 +90,9 @@ final class JetpackFlight implements TravelLeg {
     private int replans;
     private long lastGain;
     private double bestDistance = Double.MAX_VALUE;
+    /** 地上潜行对准时离中心最近到过多少、之后多少刻没再挪近：挪不动就先飞起来在空中对准。 */
+    private double creepBest = Double.MAX_VALUE;
+    private int creepStalled;
     private float lastHealth = -1;
     private boolean stopRequested;
     /** 这一段要结束时报的问题（气不够、挨打、开关拨不动）；正常落到落点为 null。 */
@@ -231,8 +236,12 @@ final class JetpackFlight implements TravelLeg {
         Vec3 aim = Vec3.atBottomCenterOf(next);
         double horizontal = horizontal(position, aim);
         double rise = aim.y - position.y;
-        if (horizontal < REACHED_HORIZONTAL && Math.abs(rise) < REACHED_VERTICAL) {
+        // 起飞那一格就是脚下这一格：人在这一格里就算到了，不在地上对它的正中（脚下若是坑边，潜行挪不过去）。
+        boolean takeoffCell = waypoint == 0 && player.blockPosition().equals(next);
+        if (takeoffCell || horizontal < REACHED_HORIZONTAL && Math.abs(rise) < REACHED_VERTICAL) {
             waypoint++;
+            creepBest = Double.MAX_VALUE;
+            creepStalled = 0;
             return ActionStatus.progressed();
         }
         // 落点正上方、往下是直直一大段：换快速下降，不慢慢飘。
@@ -273,6 +282,17 @@ final class JetpackFlight implements TravelLeg {
         // 站在地上对准：走路一按就冲过头，在中心两边来回晃，一直对不准、起不了飞（实机 10-13 坑道里台阶底下
         // 晃了四轮"飞了 60 刻没飞近"）。地上没对准时按着潜行慢慢挪；潜行在地上不会让喷气背包往下。
         boolean creep = upright && !centred && player.onGround();
+        // 潜行挪了半秒还没挪近（潜行在坑边、坎边会被拦住，实机 10-14 林子里站在坑边一动不动四十秒）：
+        // 不在地上对了，先飞起来在空中对准。
+        if (creep) {
+            if (horizontal < creepBest - 0.02) {
+                creepBest = horizontal;
+                creepStalled = 0;
+            } else if (++creepStalled > CREEP_STALL_TICKS) {
+                creep = false;
+                up = true;
+            }
+        }
         boolean sprint = !upright && levelled && horizontal > 3;
         // 镜头只在横着飞一大段时转向那一段的尽头；对准、升降、拐弯这些近处的细调不转头。原先每刻都盯着下一个
         // 拐弯点，人一冲过头瞄点就跑到身后，镜头来回打转，按键朝向跟着乱，喷气背包推力又大，一下飞出几十格
@@ -288,12 +308,14 @@ final class JetpackFlight implements TravelLeg {
         }
         // 按键交给角色输入要用本刻的客户端刻号（不是世界时间）：原先传世界时间，飞第一段就内部错误
         // "input request is not for the active tick"。
+        boolean lift = up;
+        boolean sneak = down || creep;
         input.applySteering(yaw -> {
             // 推力是开关量（按着就满推力）：差得很少时不按，免得来回抖。
             PlayerInput.Movement push = AirSteering.movement(player, steerTo, yaw, false);
             float forward = Math.abs(push.forward()) < DEAD_ZONE ? 0.0f : push.forward();
             float strafe = Math.abs(push.strafe()) < DEAD_ZONE ? 0.0f : push.strafe();
-            return new PlayerInput.Movement(forward, strafe, up, down || creep, sprint);
+            return new PlayerInput.Movement(forward, strafe, lift, sneak, sprint);
         }, player.getYRot(), context.clientTick());
     }
 

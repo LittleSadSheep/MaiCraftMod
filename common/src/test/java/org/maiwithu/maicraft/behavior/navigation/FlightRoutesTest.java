@@ -52,15 +52,32 @@ class FlightRoutesTest {
     }
 
     @Test
-    void 坑道里贴着头顶飞的格子数得出来() {
-        // 一条东西向的坑道：x=0..9 头上压着石头；从坑道口往东飞 6 格再往上爬 3 格出竖井口。
+    void 飞不开的格子数得出来() {
+        // 一条东西向的坑道：x=0..9 头上压着石头；起落两头不算，中间 5 格都飞不开。
         Grid grid = new Grid();
         for (int x = 0; x <= 9; x++) grid.put(new BlockPos(x, 67, 0), Blocks.STONE.defaultBlockState());
         List<BlockPos> tunnel = List.of(new BlockPos(0, 65, 0), new BlockPos(6, 65, 0));
-        assertEquals(6, FlightRoutes.cramped(grid, tunnel), "坑道里每一格头上都压着");
-        // 竖井往上：头上是空的，不算。
+        assertEquals(5, FlightRoutes.slowCells(grid, tunnel), "坑道里每一格头上都压着");
+        // 竖井往上：头上脚下都是空的，不算。
         List<BlockPos> shaft = List.of(new BlockPos(20, 65, 0), new BlockPos(20, 75, 0));
-        assertEquals(0, FlightRoutes.cramped(grid, shaft));
+        assertEquals(0, FlightRoutes.slowCells(grid, shaft));
+        // 贴着地面横飞：脚下一路是石头，也算飞不开。
+        for (int x = 30; x <= 40; x++) grid.put(new BlockPos(x, 64, 0), Blocks.STONE.defaultBlockState());
+        assertEquals(9, FlightRoutes.slowCells(grid, List.of(new BlockPos(30, 65, 0), new BlockPos(40, 65, 0))));
+    }
+
+    @Test
+    void 长路先升到开阔处再平飞() {
+        // 一大片平地：贴地飞每格都要多算，路线会升起来离开地面再平飞，到头再落下。
+        Grid grid = new Grid();
+        for (int x = -20; x <= 40; x++) {
+            for (int z = -20; z <= 40; z++) grid.put(new BlockPos(x, 64, z), Blocks.STONE.defaultBlockState());
+        }
+        Optional<List<BlockPos>> route = FlightRoutes.find(grid, ALL_LOADED, new BlockPos(0, 65, 0),
+                new BlockPos(36, 65, 0), BOUNDS, 50_000);
+        assertTrue(route.isPresent());
+        assertTrue(route.get().stream().anyMatch(cell -> cell.getY() >= 67), "离开地面飞：" + route.get());
+        assertTrue(FlightRoutes.slowCells(grid, route.get()) <= 4, "贴地的只剩起落几格：" + route.get());
     }
 
     @Test

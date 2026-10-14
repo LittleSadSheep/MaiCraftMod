@@ -24,6 +24,12 @@ import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
  */
 public final class FlightRoutes {
 
+    /**
+     * 贴着地面、贴着头顶的格子每格多算这么多步：喷气背包贴地飞就是在地上蹭，绕树、上坎都得一点点挪；
+     * 人会先升到开阔的空中再平飞。实机 10-14 林子里飞五十格，路线一路贴地，在树干边上蹭了四十秒没飞起来。
+     */
+    private static final int HUGGING_EXTRA = 2;
+
     private FlightRoutes() {}
 
     /**
@@ -58,21 +64,27 @@ public final class FlightRoutes {
                 next.setWithOffset(at, direction);
                 if (!bounds.contains(next.getX() + 0.5, next.getY() + 0.5, next.getZ() + 0.5)) continue;
                 long nextKey = next.asLong();
-                if (here + 1 >= cost.get(nextKey)) continue;
+                // 贴地、贴顶的格子多算几步，路线就会先升到开阔处再平飞；起落两头免不了贴地，照算。
+                int step = here + 1 + (hugging(view, next) ? HUGGING_EXTRA : 0);
+                if (step >= cost.get(nextKey)) continue;
                 if (!open(view, loaded, next)) continue;
-                cost.put(nextKey, here + 1);
+                cost.put(nextKey, step);
                 parent.put(nextKey, key);
-                open.add(new long[]{nextKey, here + 1 + distance(next, to)});
+                open.add(new long[]{nextKey, step + distance(next, to)});
             }
         }
         return Optional.empty();
     }
 
     /**
-     * 这条路（拐弯点）上有几格是贴着头顶飞的：头上一格就是实心——坑道、矿洞、低矮的屋里。竖井、露天不算。
-     * 喷气背包在这种地方得一点点挪，人一般走出去再飞；出行方式估时用它把这几格算慢。
+     * 这条路（拐弯点）上除去起落两头，有几格是飞不开的：头上一格就是实心（坑道、矿洞、低矮的屋里），
+     * 或离脚下的实心不到两格（贴着地面蹭）。竖井、开阔的空中不算。喷气背包在这种地方得一点点挪，
+     * 人一般走过去，或先升到开阔处再飞；出行方式估时用它把这几格算慢。
      */
-    public static int cramped(BlockGetter view, List<BlockPos> route) {
+    public static int slowCells(BlockGetter view, List<BlockPos> route) {
+        if (route.isEmpty()) return 0;
+        BlockPos start = route.getFirst();
+        BlockPos end = route.getLast();
         int count = 0;
         for (int i = 1; i < route.size(); i++) {
             BlockPos from = route.get(i - 1);
@@ -82,11 +94,19 @@ public final class FlightRoutes {
             for (int step = 1; step <= steps; step++) {
                 BlockPos cell = from.offset((to.getX() - from.getX()) * step / steps,
                         (to.getY() - from.getY()) * step / steps, (to.getZ() - from.getZ()) * step / steps);
-                BlockPos ceiling = cell.above(2);
-                if (!view.getBlockState(ceiling).getCollisionShape(view, ceiling).isEmpty()) count++;
+                if (!cell.equals(start) && !cell.equals(end) && hugging(view, cell)) count++;
             }
         }
         return count;
+    }
+
+    // 这一格飞不开：头顶紧挨着实心方块，或离脚下的实心不到两格（贴着地面、树根、坎子蹭）。
+    private static boolean hugging(BlockGetter view, BlockPos feet) {
+        return solid(view, feet.above(2)) || solid(view, feet.below()) || solid(view, feet.below(2));
+    }
+
+    private static boolean solid(BlockGetter view, BlockPos pos) {
+        return !view.getBlockState(pos).getCollisionShape(view, pos).isEmpty();
     }
 
     /** 人能飘在这一格：脚、头两格都看过、没有碰撞、不是流体与危险格。 */
