@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.sleep;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -21,6 +22,9 @@ import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.survival.NightfallNeed;
+import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
+import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
+import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -46,12 +50,16 @@ public final class LiveBedFinder implements BedScanner, NightfallNeed.ReadsBedAv
     /** 床边不许有怪的判定盒：水平八格、垂直五格，与原版拒绝入睡的检查同盒。 */
     private static final double HOSTILE_HORIZONTAL = 8.0;
     private static final double HOSTILE_VERTICAL = 5.0;
+    /** 自己睡过的床离这么远（格）以内也算附近：夜里离家不远就回家睡，走二三十秒的路。 */
+    private static final double REMEMBERED_BED_RANGE = 128.0;
 
     private final Supplier<PlayerContext> context;
     private final BlockScanService scans;
     private final Protection protection;
     private final BackpackView backpack;
     private final OffhandContents offhand;
+    /** 记住睡过的床；没接上为 null。 */
+    private final WorldMemory memory;
     /** 注册表里全部种类的床；第一次找床时取一次，方块注册那时早已完成。 */
     private List<Block> bedBlocks;
 
@@ -59,7 +67,8 @@ public final class LiveBedFinder implements BedScanner, NightfallNeed.ReadsBedAv
     private ClientLevel registeredLevel;
 
     public LiveBedFinder(Supplier<PlayerContext> context, BlockScanService scans, Protection protection,
-            BackpackView backpack, OffhandContents offhand) {
+            BackpackView backpack, OffhandContents offhand, WorldMemory memory) {
+        this.memory = memory;
         this.context = context;
         this.scans = scans;
         this.protection = protection;
@@ -104,7 +113,31 @@ public final class LiveBedFinder implements BedScanner, NightfallNeed.ReadsBedAv
                 candidates.add(bed);
             }
         }
+        rememberedBeds(level, center, current, protectedLandmarks, seen, candidates);
         return new BedScan(candidates, found.complete());
+    }
+
+    // 自己睡过的床（家里那张）：不在附近两个区块里也算候选，夜里离家不远就回家睡，不在野外现找现做。
+    // 床还在、那一片加载着才算；拆掉了的不去。实机 10-14 离家八十格天黑了，家里的床不算，一夜反复去弄一张新床。
+    private void rememberedBeds(ClientLevel level, BlockPos center, PlayerContext current, Set<String> landmarks,
+            Set<BlockPos> seen, List<BedCandidate> candidates) {
+        if (memory == null) return;
+        for (MemoryRecord record : memory.recordsNear(here(center), REMEMBERED_BED_RANGE)) {
+            if (record.kind() != MemoryKind.WORKSTATION || !record.blockType().endsWith("_bed")) continue;
+            BlockPos cell = new BlockPos(record.position().x(), record.position().y(), record.position().z());
+            if (!level.isLoaded(cell) || !(level.getBlockState(cell).getBlock() instanceof BedBlock)) continue;
+            BedCandidate bed = inspect(level, cell, current, landmarks);
+            if (seen.add(bed.cell())) candidates.add(bed);
+        }
+    }
+
+    @Override
+    public void sleptIn(BlockPos bed) {
+        PlayerContext current = context.get();
+        if (memory == null || current == null || current.level() == null) return;
+        Block block = current.level().getBlockState(bed).getBlock();
+        if (!(block instanceof BedBlock)) return;
+        memory.rememberWorkstationUsed(here(bed), BuiltInRegistries.BLOCK.getKey(block).toString(), Instant.now());
     }
 
     @Override

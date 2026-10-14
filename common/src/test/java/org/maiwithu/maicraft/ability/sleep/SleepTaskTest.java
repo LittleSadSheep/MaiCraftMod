@@ -50,6 +50,7 @@ class SleepTaskTest {
     private static final class FakeScanner implements BedScanner {
         private final Deque<BedScan> scans = new ArrayDeque<>();
         List<Set<BlockPos>> askedExclusions = new ArrayList<>();
+        final List<BlockPos> sleptIn = new ArrayList<>();
 
         void offer(BedScan scan) {
             scans.add(scan);
@@ -60,6 +61,11 @@ class SleepTaskTest {
                 Set<String> protectedLandmarks) {
             askedExclusions.add(excluded);
             return scans.isEmpty() ? new BedScan(List.of(), true) : scans.remove();
+        }
+
+        @Override
+        public void sleptIn(BlockPos bed) {
+            sleptIn.add(bed);
         }
     }
 
@@ -242,6 +248,8 @@ class SleepTaskTest {
         assertEquals(SleepDetails.BedSource.WORLD, details.bedSource());
         assertEquals(List.of(BED_A), usesBeds.clicked);
         assertEquals(List.of(BED_A), approaches.targets);
+        // 躺下了就记住这张床，下次夜里离它不远就回来睡。
+        assertEquals(List.of(BED_A), scanner.sleptIn);
     }
 
     @Test

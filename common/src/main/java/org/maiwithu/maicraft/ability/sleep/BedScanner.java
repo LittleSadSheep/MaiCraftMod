@@ -23,6 +23,9 @@ public interface BedScanner {
      */
     BedScan scan(TickContext context, Set<BlockPos> excluded, Set<String> protectedLandmarks);
 
+    /** 在这张床上躺下了：记下来，下次夜里离它不远就回来睡。 */
+    default void sleptIn(BlockPos bed) {}
+
     /** 一次扫描的结果。 */
     record BedScan(List<BedCandidate> candidates, boolean complete) {
     }

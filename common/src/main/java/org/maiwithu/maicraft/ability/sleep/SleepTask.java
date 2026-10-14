@@ -191,6 +191,8 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
         }
         if (status instanceof ActionStatus.Done) {
             enteredSleep = true;
+            // 躺下了：记住这张床，下次夜里离家不远就回这张床睡。
+            if (scanner != null && chosenBed != null) scanner.sleptIn(chosenBed);
             return afterFellAsleep(context);
         }
         Problem refusal = ((ActionStatus.Failed) status).problem();

@@ -17,6 +17,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
+import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.behavior.survival.AutoSleep;
 import org.maiwithu.maicraft.behavior.survival.NightfallNeed;
 import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
@@ -79,7 +80,7 @@ public final class SleepModule implements AbilityModule, NightfallNeed.NightRest
     public SleepModule(Supplier<PlayerContext> context, BlockScanService scans, Protection protection,
             BackpackView backpack, OffhandContents offhand,
             Interactions interactions, BringsPlayerClose approaches, CollectsBlocks collects,
-            ReadsRememberedPlaces rememberedPlaces, DestinationResolver destinations,
+            WorldMemory rememberedPlaces, DestinationResolver destinations,
             ItemNeeds obtain, Supplier<Optional<String>> refusalTexts) {
         this(context, scans, protection, backpack, offhand, interactions, approaches, collects, rememberedPlaces,
                 destinations, obtain, refusalTexts, new AutoSleep());
@@ -89,11 +90,12 @@ public final class SleepModule implements AbilityModule, NightfallNeed.NightRest
     public SleepModule(Supplier<PlayerContext> context, BlockScanService scans, Protection protection,
             BackpackView backpack, OffhandContents offhand,
             Interactions interactions, BringsPlayerClose approaches, CollectsBlocks collects,
-            ReadsRememberedPlaces rememberedPlaces, DestinationResolver destinations,
+            WorldMemory rememberedPlaces, DestinationResolver destinations,
             ItemNeeds obtain, Supplier<Optional<String>> refusalTexts, AutoSleep autoSleep) {
         this.autoSleep = Objects.requireNonNull(autoSleep, "autoSleep");
         this.context = Objects.requireNonNull(context, "context");
-        this.beds = new LiveBedFinder(context, scans, protection, backpack, offhand);
+        // 找床也看世界记忆里自己睡过的床，躺下后记住这一张。
+        this.beds = new LiveBedFinder(context, scans, protection, backpack, offhand, rememberedPlaces);
         this.interactions = Objects.requireNonNull(interactions, "interactions");
         this.placer = new ClientBedPlacer(interactions,
                 new ClientMovesToMainhand(context), context);
