@@ -15,7 +15,7 @@ import java.util.Objects;
  * 再和这条记录上次的处境比较，把变化发成任务事件。目标推进器因此不用在每个分支里记得发事件。
  *
  * <p>sequence 的每一步都有自己的目标运行记录，但 LLM 只认识自己下达的那个编号：
- * 步骤的提问、暂停、结束都记在整个 sequence 的编号上，步骤开始不单独发事件。
+ * 步骤的提问、暂停、结束都记在整个 sequence 的编号上，步骤开始不单独发事件；步骤结束的消息带上第几步与能力。
  *
  * <p>只在客户端线程使用。
  */
@@ -69,8 +69,11 @@ public final class EventPublishingGoalRunStore implements GoalRunStore {
                 }
             }
             case PAUSED -> log.append(TaskEvent.Kind.PAUSED, id, "暂停：" + describe(run), null);
-            case FINISHED -> log.append(step ? TaskEvent.Kind.STEP_FINISHED : TaskEvent.Kind.FINISHED,
-                    id, run.result().summary(), run.result().status());
+            // sequence 的一步做完记在整件 sequence 的编号上，结论句前带上第几步、哪个能力：连着几步结论一样
+            // （一格一格施工每步都是"按图建好了"）时，读事件的人也分得清做完的是哪一步。
+            case FINISHED -> log.append(step ? TaskEvent.Kind.STEP_FINISHED : TaskEvent.Kind.FINISHED, id,
+                    step ? run.goal().stepLabel(run.stepOfParent()) + "：" + run.result().summary() : run.result().summary(),
+                    run.result().status());
         }
     }
 

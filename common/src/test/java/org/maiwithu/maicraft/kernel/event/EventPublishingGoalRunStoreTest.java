@@ -86,5 +86,27 @@ class EventPublishingGoalRunStoreTest {
         assertEquals(sequence.id(), events.get(1).goalRunId());
         assertEquals(sequence.id(), events.get(2).goalRunId());
         assertEquals(TaskResult.Status.FAILED, events.get(2).status());
+        assertEquals("第 1 步（maicraft:test）：没拆", events.get(2).message());
+    }
+
+    @Test
+    void stepsWithTheSameConclusionStillTellWhichStepFinished() throws InterruptedException {
+        // 一格一格施工时每一步的结论都是同一句：事件里带上第几步与目的，读的人分得清做完了哪一步。
+        TaskEventLog log = new TaskEventLog();
+        EventPublishingGoalRunStore store = new EventPublishingGoalRunStore(new InMemoryGoalRunStore(), log);
+        GoalRun sequence = new GoalRun(store.nextId(), GOAL);
+        store.save(sequence);
+        Goal wall = new Goal("maicraft:build", "砌东墙", null, ParamValues.EMPTY, null, null, null);
+        for (int index = 0; index < 2; index++) {
+            GoalRun step = new GoalRun(store.nextId(), wall, sequence.id(), index);
+            store.save(step);
+            step.finish(TaskResult.done("按图建好了"), 500 + index);
+            store.save(step);
+        }
+
+        List<String> finished = events(log).stream()
+                .filter(event -> event.kind() == TaskEvent.Kind.STEP_FINISHED).map(TaskEvent::message).toList();
+        assertEquals(List.of("第 1 步（maicraft:build，砌东墙）：按图建好了", "第 2 步（maicraft:build，砌东墙）：按图建好了"),
+                finished);
     }
 }

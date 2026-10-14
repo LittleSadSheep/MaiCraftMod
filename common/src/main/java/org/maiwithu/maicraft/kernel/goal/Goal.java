@@ -47,4 +47,13 @@ public record Goal(
     public static Goal of(String ability, Target target, ParamValues params) {
         return new Goal(ability, null, target, params, Permissions.DEFAULT, List.of(), OnFailure.STOP);
     }
+
+    /**
+     * 这个目标作为 sequence 第 index 步（从 0 数）时的叫法，例如"第 3 步（maicraft:build，砌东墙）"。
+     * 整件 sequence 结论里没做成、没开始的步骤，与每一步做完时发的事件都用它，同一步在两处叫法一样。
+     */
+    public String stepLabel(int index) {
+        String reason = purpose == null || purpose.isBlank() ? "" : "，" + purpose;
+        return "第 " + (index + 1) + " 步（" + ability + reason + "）";
+    }
 }

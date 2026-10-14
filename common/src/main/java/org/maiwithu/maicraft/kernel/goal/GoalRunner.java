@@ -704,10 +704,9 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, KeepsTempTaskFa
         return notStarted;
     }
 
+    // 没做成、没开始的步骤按"第几步（能力，目的）"列出，和每一步做完时发的事件叫法一样。
     private String stepLabel(int index) {
-        Goal step = goal.steps().get(index);
-        String purpose = step.purpose() == null ? "" : "，" + step.purpose();
-        return "第 " + (index + 1) + " 步（" + step.ability() + purpose + "）";
+        return goal.steps().get(index).stepLabel(index);
     }
 
     /** 当前任务已经结算完，把两件事之间的空当清出来。 */
