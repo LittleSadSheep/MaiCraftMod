@@ -181,6 +181,9 @@ public final class MerchantTradeTakes implements TradesWithMerchants {
                 step.close();
                 step = null;
                 stage = Stage.CLICK;
+                // 走到了只是这一步做完，交易还没开始：报进展，不把走路的"做完"当成整笔交易做完。
+                // 实机 10-14 走到农民跟前就收场，"做完了，但一件都没拿到"，界面一次没点开。
+                return ActionStatus.progressed();
             }
             return status;
         }
@@ -214,6 +217,8 @@ public final class MerchantTradeTakes implements TradesWithMerchants {
                 }
                 waitTicks = 0;
                 stage = Stage.WAIT_SYNC;
+                // 点开界面只是这一步做完：接着等报价，不把它当成整笔交易做完。
+                return ActionStatus.progressed();
             }
             return status;
         }
