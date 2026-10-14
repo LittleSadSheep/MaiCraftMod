@@ -372,6 +372,8 @@ public final class Bootstrap {
         private boolean startupAutomationPending;
         /** 上一刻自动化是否拿着角色；变了就记一行日志，排查"下了目标却不动"时先看这里。 */
         private boolean automationOwned;
+        // 每刻推进的各子系统各包一层：哪个抛了异常只跳过它这一刻，不把整个客户端带崩。
+        private final TickGuard tickGuard = new TickGuard();
 
         ClientEntry(LoaderEnvironment loader, List<SupportedMod<CompatModule>> compatCatalog) {
             this.abilities = new AbilityRegistry(new TaskFactories(), loader::isModLoaded);
@@ -627,14 +629,15 @@ public final class Bootstrap {
         @Override public void tickEnd(Minecraft minecraft) {
             // 先核对这一刻谁能操作角色，再推进世界扫描与控制循环，最后把本刻输入写进玩家。
             var context = playerControl.beginTick();
-            if (minecraft.level != null) blockScans.tick(minecraft.level);
-            keepWorldScopeFresh(minecraft, context);
+            // 下面每一项各自兜底：某一项这一刻出错只跳过它，后面的照常推进，游戏不崩。
+            if (minecraft.level != null) tickGuard.run("方块扫描", () -> blockScans.tick(minecraft.level));
+            tickGuard.run("进出世界", () -> keepWorldScopeFresh(minecraft, context));
             if (context.isEmpty()) clientWork.drain(null);
             context.ifPresent(current -> tickInWorld(minecraft, current));
             // 与服务端的会话跟着每个客户端刻推进。
-            session.tick(minecraft);
+            tickGuard.run("服务端会话", () -> session.tick(minecraft));
             // 调试面板最后取现状：这一刻控制循环与会话都推进完了，读到的是这一刻的结果。
-            if (debugPanel != null) debugPanel.tick(minecraft);
+            if (debugPanel != null) tickGuard.run("调试面板", () -> debugPanel.tick(minecraft));
         }
 
         /** 进世界建现场、退世界丢现场：世界记忆按世界身份分开，感知场景不跨世界残留。
@@ -703,17 +706,20 @@ public final class Bootstrap {
             }
             // 世界扫描：感知各读端读当刻的观察事实，整理进场景；顺序在控制循环之前。
             WorldScope scope = worldScope[0];
+            // 感知出错（世界记忆读不到、某个读端碰到没见过的方块实体）只跳过这一刻的观察，下一刻再看。
             if (scope != null) {
-                scope.observe(current, minecraft.level.getGameTime());
+                tickGuard.run("世界扫描", () -> scope.observe(current, minecraft.level.getGameTime()));
             }
             long gameTick = minecraft.level.getGameTime();
             // 装备耐久的基准每刻扫一遍：打空事件到了才说得出坏的是哪一件。
-            if (equipmentConfirmations != null) equipmentConfirmations.observe(current.localPlayer());
+            if (equipmentConfirmations != null) {
+                tickGuard.run("装备耐久基准", () -> equipmentConfirmations.observe(current.localPlayer()));
+            }
             // 提醒每刻看一遍角色：人自己玩的时候也照样看，LLM 该知道的事不因控制权换手断掉。
-            if (reminders != null) reminders.tick(current);
+            if (reminders != null) tickGuard.run("提醒", () -> reminders.tick(current));
             // 挨打的片段到点发、维度变了发：人自己玩的时候也照样发。
-            if (hurtEpisodes != null) hurtEpisodes.tick(current);
-            if (dimensionChanges != null) dimensionChanges.tick(current);
+            if (hurtEpisodes != null) tickGuard.run("挨打片段", () -> hurtEpisodes.tick(current));
+            if (dimensionChanges != null) tickGuard.run("换维度", () -> dimensionChanges.tick(current));
             clientWork.drain(new ClientTickContext(gameTick, current));
             boolean owned = playerControl.input().automationOwnsControls();
             if (owned != automationOwned) {
@@ -726,11 +732,15 @@ public final class Bootstrap {
             }
             if (owned) {
                 // 主任务被临时任务带离原地、回不去：目标挂成暂停并发事件，LLM 才知道身体停着。
-                if (controlLoop.tick(new ClientTickContext(gameTick, current)) instanceof ControlLoop.Decision.Parked
-                        && goals != null) {
-                    goals.mainParked();
-                }
+                // 控制循环外面也兜一层：任务里的异常内核自己收，需求判断这类出错只跳过这一刻。
+                tickGuard.run("控制循环", () -> {
+                    if (controlLoop.tick(new ClientTickContext(gameTick, current)) instanceof ControlLoop.Decision.Parked
+                            && goals != null) {
+                        goals.mainParked();
+                    }
+                });
             }
+            // 本刻输入无论前面谁出错都要写进角色并收尾这一刻的控制边界。
             playerControl.endTick(current);
         }
 
