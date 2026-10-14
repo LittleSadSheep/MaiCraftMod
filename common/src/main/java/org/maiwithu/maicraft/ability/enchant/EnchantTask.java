@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Problem;
+import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.result.ResultDetails;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -92,9 +93,30 @@ final class EnchantTask extends PhasedTask<EnchantTask.Phase> {
                 prepare.menu = prepare.opening.opened().orElseThrow();
                 return Next.go(Phase.MENU_WORK, "附魔台界面开着、内容同步完了");
             });
-            case MENU_WORK -> runActionThen(context, this::finishEnchant);
+            case MENU_WORK -> menuWork(context);
         };
     }
+
+    // 在附魔台前干活：被怪打断、界面被关掉了，还没按下去就回去重新打开接着附，像人打完怪回到台子前；
+    // 已经按下去的不重来。实机 10-14 附魔到一半被自卫打断，回来报"界面被换掉了"整单失败。
+    private Next<Phase> menuWork(TickContext context) {
+        return switch (runAction(context)) {
+            case ActionStatus.Running running -> Next.stay();
+            case ActionStatus.Done done -> finishEnchant();
+            case ActionStatus.Failed failed -> {
+                if (failed.problem().kind() == Problem.Kind.TARGET_GONE && work != null && work.spentLevels() == 0
+                        && reopens < MAX_REOPENS) {
+                    reopens++;
+                    yield Next.go(Phase.OPEN, "附魔台界面被打断关掉了，还没按下去，回去重新打开");
+                }
+                yield Next.fail(failed.problem());
+            }
+        };
+    }
+
+    /** 界面被打断关掉后最多回去重开几次。 */
+    private static final int MAX_REOPENS = 2;
+    private int reopens;
 
     /** 台子解析：点名的那格就是那一个，不给就在半径内找最近的；分刻扫描没完不说没有。 */
     private Next<Phase> findTable(TickContext context) {
