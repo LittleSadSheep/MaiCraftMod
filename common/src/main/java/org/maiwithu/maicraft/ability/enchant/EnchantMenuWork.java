@@ -284,6 +284,9 @@ final class EnchantMenuWork implements Action {
         return ActionStatus.progressed();
     }
 
+    /** 取回后背包对不上时最多再等这么多刻同步。 */
+    private static final int RETRIEVE_SETTLE_TICKS = 20;
+
     // 取回：成品与剩余青金石搬回背包，核对「原物减一、成品加一、青金石实扣」。
     private ActionStatus retrieve() {
         var reading = menu.reading();
@@ -296,10 +299,16 @@ final class EnchantMenuWork implements Action {
         Map<String, Integer> after = countsFrom(reading.get().playerSnapshots());
         int originalBefore = backpackBefore.getOrDefault(original.itemId(), 0);
         int lapisBefore = backpackBefore.getOrDefault(LAPIS, 0);
-        boolean originalGone = after.getOrDefault(original.itemId(), 0) == originalBefore - 1;
         boolean lapisSpent = after.getOrDefault(LAPIS, 0) == lapisBefore - spentLapis;
-        boolean resultIn = after.getOrDefault(result.itemId(), 0)
+        // 附魔前后是同一种东西（铁剑附完还是铁剑）：按种类数是一出一进、净数不变；不同种（书附完成附魔书）才各算各的。
+        // 原先同种也按"原物少一、成品多一"各数一遍，两条永远凑不齐，附上了也判"取回的对不上"。
+        boolean sameKind = original.itemId().equals(result.itemId());
+        boolean originalGone = sameKind ? after.getOrDefault(original.itemId(), 0) == originalBefore
+                : after.getOrDefault(original.itemId(), 0) == originalBefore - 1;
+        boolean resultIn = sameKind || after.getOrDefault(result.itemId(), 0)
                 == backpackBefore.getOrDefault(result.itemId(), 0) + 1;
+        // 背包侧同步偶尔晚到：对不上先多等一秒，还对不上再如实说。
+        if ((!originalGone || !lapisSpent || !resultIn) && quietTicks < RETRIEVE_SETTLE_TICKS) return ActionStatus.running();
         if (!originalGone || !lapisSpent || !resultIn) {
             return fail(Problem.of(Problem.Kind.STUCK,
                     "取回的对不上：原物减一=" + originalGone + "、青金石实扣=" + lapisSpent + "、成品进包=" + resultIn));
