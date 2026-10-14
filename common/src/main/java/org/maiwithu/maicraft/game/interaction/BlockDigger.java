@@ -8,6 +8,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
@@ -235,10 +236,10 @@ public final class BlockDigger {
                 return DigResult.NO_SHOT;
             }
         }
-        // 挖到一半换了手中物品或其附带数据，就取消旧挖掘，以免继续使用旧工具的进度。
+        // 挖到一半换了手中工具（换了物品或附魔这类附带数据），就取消旧挖掘，以免继续使用旧工具的进度。
+        // 耐久不算换工具：修补附魔吸经验、服务端同步把耐久改了，原版不重置挖掘，这里也接着挖，进度不清零。
         if (pending != null && !pending.terminal() && destroyingItem != null
-                && !ItemStack.isSameItemSameComponents(
-                        destroyingItem, player.getMainHandItem())) {
+                && !sameToolIgnoringWear(destroyingItem, player.getMainHandItem())) {
             cancel(context);
             return DigResult.PROGRESSING;
         }
@@ -333,10 +334,20 @@ public final class BlockDigger {
         } else {
             submitToolSelection(context);
         }
-        // 存活引用而非副本:主手栈原地变异(修补吸经验改耐久)时引用相等,
-        // 不触发重置;只有真正换持(不同栈对象且物品/组件不同)才重开。
+        // 记下开挖时的主手；第一下出手时再按当时的主手存一份。比较时不看耐久，修补吸经验改耐久不触发重开。
         destroyingItem = player.getMainHandItem();
         return true;
+    }
+
+    // 两件手持物是不是同一件工具：物品与附带数据都一样，只差耐久也算同一件。
+    static boolean sameToolIgnoringWear(ItemStack before, ItemStack now) {
+        if (ItemStack.isSameItemSameComponents(before, now)) return true;
+        if (!ItemStack.isSameItem(before, now)) return false;
+        ItemStack beforeUnworn = before.copy();
+        ItemStack nowUnworn = now.copy();
+        beforeUnworn.remove(DataComponents.DAMAGE);
+        nowUnworn.remove(DataComponents.DAMAGE);
+        return ItemStack.isSameItemSameComponents(beforeUnworn, nowUnworn);
     }
 
     // 工具在快捷栏就切换选中格；在背包第 9～35 格则先显示背包，再与当前快捷栏格交换。
