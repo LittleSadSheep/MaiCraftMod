@@ -2,7 +2,9 @@
 package org.maiwithu.maicraft.game.interaction;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.LeavesBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
@@ -10,14 +12,14 @@ import net.minecraft.world.phys.HitResult;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /**
- * 近战时准星前面挡着草、花这类没有碰撞、一碰就掉的方块：原版准星先点到它，打不着后面的怪。
- * 像人一样先一刀把它砍掉，下一下再打目标。只砍这种一下就掉的，别的方块不碰。
- * 实机 10-14 点名杀羊，羊就在两格外，眼前一丛高草把准星挡住，三十秒一下没挥。
+ * 近战时准星前面挡着草、花、树上长的树叶：原版准星先点到它，打不着后面的怪。
+ * 像人一样先把它砍掉（草一下就掉，树叶要砍几下），再打目标。只砍这些天然长的，火把、红石、人放的树叶不碰。
+ * 实机 10-14 点名杀羊，羊卡在树冠里，准星一直点在树叶上，三十秒一下没挥。
  */
 final class PlantClearing {
 
-    /** 砍一下最多等这么多刻确认；到时还没掉就停手。 */
-    private static final int TIMEOUT_TICKS = 10;
+    /** 砍一格最多砍这么多刻；空手砍树叶六刻、剑四刻，到时还没掉就停手。 */
+    private static final int TIMEOUT_TICKS = 20;
 
     private final InteractionSender sender;
     private PendingInteraction pending;
@@ -27,10 +29,16 @@ final class PlantClearing {
         this.sender = sender;
     }
 
-    /** 正在砍挡路的植物：这一刻不出手打目标。 */
+    /** 正在砍挡路的植物：这一刻接着砍（树叶要按住砍几刻），不出手打目标。 */
     boolean busy(PlayerContext context) {
         if (pending == null) return false;
-        if (!pending.terminal()) pending = sender.poll(context, pending);
+        if (!pending.terminal()) {
+            try {
+                pending = sender.continueBreaking(context, pending);
+            } catch (IllegalStateException noChance) {
+                // 这一刻没有交互机会：下一刻接着砍。
+            }
+        }
         if (pending.terminal()) {
             pending = null;
             ticks = 0;
@@ -40,7 +48,7 @@ final class PlantClearing {
         return true;
     }
 
-    /** 准星打到的是挡路的小植物就开砍，返回真；不是、或这一刻砍不了返回假。 */
+    /** 准星打到的是挡路的草叶就开砍，返回真；不是、或这一刻砍不了返回假。 */
     boolean clear(PlayerContext context, HitResult aimed) {
         if (!(aimed instanceof BlockHitResult hit) || hit.getType() != HitResult.Type.BLOCK
                 || !trivial(context.level(), hit.getBlockPos()) || !context.canInteractThisTick()) {
@@ -68,10 +76,13 @@ final class PlantClearing {
         ticks = 0;
     }
 
-    // 没有碰撞、一下就掉、不是流体：草、花、蕨这类。
+    // 树上长的树叶（人放的不算）；没有碰撞的草、蕨、藤蔓、花。流体、火把、红石线这类不碰。
     private static boolean trivial(Level level, BlockPos pos) {
         BlockState state = level.getBlockState(pos);
-        return state.getCollisionShape(level, pos).isEmpty() && state.getDestroySpeed(level, pos) == 0.0f
-                && state.getFluidState().isEmpty();
+        if (state.getBlock() instanceof LeavesBlock) {
+            return !(state.hasProperty(LeavesBlock.PERSISTENT) && state.getValue(LeavesBlock.PERSISTENT));
+        }
+        return state.getCollisionShape(level, pos).isEmpty() && state.getFluidState().isEmpty()
+                && !state.isAir() && (state.is(BlockTags.REPLACEABLE) || state.is(BlockTags.FLOWERS));
     }
 }

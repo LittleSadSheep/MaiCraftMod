@@ -476,7 +476,7 @@ public final class Interaction {
         HitResult aimed = nativeRaytrace(player, InteractionRange.entityReach(player));
         if (!(aimed instanceof EntityHitResult entityHit)
                 || entityHit.getEntity() != entity) {
-            if (plants.clear(context, aimed)) return attackWait("先砍掉挡在前面的草");
+            if (plants.clear(context, aimed)) return attackWait("先砍掉挡在前面的草叶");
             return attackWait("准星打到的是 " + (aimed instanceof EntityHitResult hit ? hit.getEntity().getType().getDescriptionId()
                     : aimed instanceof BlockHitResult hit && hit.getType() == HitResult.Type.BLOCK
                     ? "方块 " + hit.getBlockPos().toShortString() : "空气") + "，眼睛离瞄点 "
