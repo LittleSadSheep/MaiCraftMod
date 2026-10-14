@@ -62,11 +62,16 @@ public final class Retreat {
         }
     }
 
-    /** 甩开了：三十二格内没有这次参与追击的、也没有新近打过我的。 */
+    /** 甩开了：三十二格内没有这次参与追击的（追没追着都算）、也没有新近打过我的。 */
     boolean escaped(Battlefield field) {
         remember(field);
         for (Battlefield.Foe foe : field.chasers()) {
             if (pursuers.contains(foe.id()) || foe.attacker()) return false;
+        }
+        // 这次追我的还在三十二格内：这一刻没在"追"（没对着我、隔着坡看不见）也没甩开，它转眼又追上来。
+        // 实机 10-14 低血被尸壳追，每跑二三十格就算甩开、收手站住，尸壳追上来又跑，三分钟跑出两百多格，最后被追上。
+        for (Battlefield.Foe foe : field.foes()) {
+            if (pursuers.contains(foe.id())) return false;
         }
         // 还看得见、会还手的就在 10 格内：这一刻它只是没在"追"（目标一闪一闪），不算甩开。原先撤一步就算甩开，
         // 自卫刚收场下一刻又插进来，一秒里"已撤离，离打点 0 格"好几回，赶路的主任务跟着走走停停。

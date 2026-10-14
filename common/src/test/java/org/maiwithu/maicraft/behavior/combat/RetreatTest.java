@@ -63,6 +63,17 @@ class RetreatTest {
         assertTrue(retreat.escaped(field()), "三秒都没再露面才算甩开");
     }
 
+    @Test
+    void aPursuerStillWithinRangeIsNotShakenOffEvenWhenNotChasing() {
+        Retreat retreat = new Retreat();
+        Battlefield start = field(foe(1, 6, true));
+        retreat.begin("血快见底", start);
+        // 跑出去二十多格，那只尸壳这一刻没在追（隔着坡），但还在三十二格内：没甩开。
+        CombatSenses.Threat far = new CombatSenses.Threat(1, UUID.randomUUID(), "minecraft:husk", 24, 64, 0,
+                24, ThreatAssessment.Kind.MELEE, false, false, false);
+        assertFalse(retreat.escaped(field(new Battlefield.Foe(far, false, false, true, false))));
+    }
+
     private static Battlefield field(Battlefield.Foe... foes) {
         Battlefield.Me me = new Battlefield.Me(0, 64, 0, 0.3, 4, 0, 3, true, true, false, 3, 0);
         return new Battlefield(me, List.of(foes));
