@@ -15,6 +15,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.levelgen.structure.Structure;
+import org.maiwithu.maicraft.behavior.explore.StructureClues;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /**
@@ -79,8 +80,11 @@ final class LiveExploreTypes implements ReadsExploreTypes {
     @Override
     public boolean structureExists(String selector) {
         ResourceLocation id = ResourceLocation.tryParse(selector.toLowerCase(Locale.ROOT));
-        return id != null && worldRegistry(Registries.STRUCTURE)
-                .map(registry -> registry.containsKey(id)).orElse(false);
+        if (id == null) return false;
+        // 结构注册表只在服务端有，客户端读不到：读不到就按有没有线索档案认（原版常见结构都有）。
+        // 原先硬取注册表抛"Missing registry"，实机 10-14 在下界带着要塞留意清单跑图，一开就程序出错。
+        return worldRegistry(Registries.STRUCTURE).map(registry -> registry.containsKey(id))
+                .orElseGet(() -> StructureClues.known(id.toString()));
     }
 
     private <T> boolean tagHasEntries(Registry<T> registry, TagKey<T> tag) {
@@ -95,6 +99,6 @@ final class LiveExploreTypes implements ReadsExploreTypes {
         if (current == null || current.level() == null) {
             return Optional.empty();
         }
-        return Optional.of(current.level().registryAccess().registryOrThrow(key));
+        return current.level().registryAccess().registry(key);
     }
 }

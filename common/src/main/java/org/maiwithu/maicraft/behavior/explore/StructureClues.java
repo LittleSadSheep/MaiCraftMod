@@ -243,13 +243,14 @@ public final class StructureClues {
 
     /** 下界与末地的结构：地狱砖、黑石与紫珀的成片组合。 */
     private static void registerNetherAndEnd(Map<String, Profile> out) {
-        register(out, new Profile("minecraft:nether_fortress", 18, 18,
+        // 原版下界要塞的结构 ID 是 minecraft:fortress；旧写法 nether_fortress 也认。
+        register(out, new Profile("minecraft:fortress", 18, 18,
                 List.of(new Group("brick_mass", 16,
                                 List.of("minecraft:nether_bricks", "minecraft:nether_brick_fence",
                                         "minecraft:nether_brick_stairs")),
                         new Group("fortress_fittings", 2,
                                 List.of("minecraft:nether_brick_fence", "minecraft:nether_brick_stairs")))),
-                "minecraft:nether_fortress");
+                "minecraft:fortress", "minecraft:nether_fortress");
 
         register(out, new Profile("minecraft:bastion_remnant", 18, 13,
                 List.of(new Group("gilded_signature", 1, List.of("minecraft:gilded_blackstone")),
