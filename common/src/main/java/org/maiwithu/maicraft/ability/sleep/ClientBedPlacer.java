@@ -97,7 +97,10 @@ public final class ClientBedPlacer implements PlacesBed {
                         "身边没有能放床的两格空位（要空格与结实的地面），不硬放", null);
                 return ActionStatus.failed(failure);
             }
-            if (moving == null) {
+            // 床已经拿在主手：不用换（换手对已在主手的给空），直接放。
+            boolean inHand = bedItemId.equals(BuiltInRegistries.ITEM.getKey(
+                    current.localPlayer().getMainHandItem().getItem()).toString());
+            if (moving == null && !inHand) {
                 Optional<Action> move = toMainhand.actionToMainhand(bedItemId);
                 if (move.isEmpty()) {
                     failure = Problem.of(Problem.Kind.NEED_ITEM, "把床换到主手的搬运还没接上，放不了", null);
@@ -106,7 +109,7 @@ public final class ClientBedPlacer implements PlacesBed {
                 moving = move.get();
                 return ActionStatus.running();
             }
-            ActionStatus status = moving.tick(tick);
+            ActionStatus status = moving == null ? ActionStatus.done() : moving.tick(tick);
             if (status instanceof ActionStatus.Running) {
                 return status;
             }

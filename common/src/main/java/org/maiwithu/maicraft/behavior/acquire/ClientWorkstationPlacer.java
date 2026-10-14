@@ -120,7 +120,11 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation {
                         "身边没有能放" + displayName() + "的空位（要空格与结实的地面），不硬放", null);
                 return ActionStatus.failed(failure);
             }
-            if (moving == null) {
+            // 刚做好的设施常直接落在选中的那一格、已经拿在主手：不用换（换手对已在主手的给空）。
+            // 实机 10-14 现做的熔炉就在主手上，被当成"身上没有熔炉，放不了"，烤肉白做了一台熔炉。
+            boolean inHand = blockType.equals(BuiltInRegistries.ITEM.getKey(
+                    current.localPlayer().getMainHandItem().getItem()).toString());
+            if (moving == null && !inHand) {
                 Optional<Action> move = toMainhand.actionToMainhand(blockType);
                 if (move.isEmpty()) {
                     failure = Problem.of(Problem.Kind.NEED_ITEM,
@@ -130,7 +134,7 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation {
                 moving = move.get();
                 return ActionStatus.running();
             }
-            ActionStatus status = moving.tick(tick);
+            ActionStatus status = moving == null ? ActionStatus.done() : moving.tick(tick);
             if (status instanceof ActionStatus.Running) {
                 return status;
             }
