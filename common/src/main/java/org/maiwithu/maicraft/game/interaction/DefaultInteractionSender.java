@@ -440,7 +440,8 @@ public final class DefaultInteractionSender implements InteractionSender {
         if (context.localPlayer().isUsingItem()
                 && context.localPlayer().getUsedItemHand() != InteractionHand.MAIN_HAND)
             throw new IllegalStateException("main-hand cancellation cannot stop an offhand action");
-        int replacement = (context.localPlayer().getInventory().selected + 1) % 9;
+        // 切到剑斧、空格这类，别切到挨着弓的那格箭上（停手后一直拿着箭走）。
+        int replacement = UseCancelSlot.pick(context.localPlayer().getInventory());
         // 切槽和本地停止是同步动作；这里确认的是已提交的取消操作，不是箭命中或服务器确认。
         InteractionConfirmation stopped = new InteractionConfirmation() {
             public Verdict observe(PlayerContext c) {
