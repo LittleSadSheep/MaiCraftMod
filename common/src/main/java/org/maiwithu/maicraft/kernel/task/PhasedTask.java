@@ -299,6 +299,10 @@ public abstract class PhasedTask<P extends Enum<P>> implements Task {
                 phase = go.phase();
                 entered = false;
                 enterIfNeeded();
+                // 收尾途中换了阶段：新阶段的动作没被叫过先停稳，不叫的话它按默认说"停好了"，
+                // 新阶段刚起飞目标就在半空被暂停。所以对新动作补叫一次；收尾标记照旧留着，
+                // 新阶段没有动作（站着等）时就算停稳，子类靠 stopping() 也不会再往前开新的一段。
+                if (stopping && action != null) action.stopSafely();
                 LOG.debug("{}：{} → {}（{}）", label, from, phase, go.why());
                 // 换阶段记一笔给面板：在两个阶段之间来回跳时，一眼就能从"经过"里看出来。
                 if (recentPhases.size() == RECENT_PHASE_CHANGES) recentPhases.removeFirst();

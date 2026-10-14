@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -46,6 +47,58 @@ class PhasedTaskTest {
         @Override protected List<String> remaining() {
             return List.of("躺下");
         }
+    }
+
+    /** 停下前要先落地的动作替身：被叫先停稳后，落地了才算停稳；没被叫过时按默认说"没在收尾"。 */
+    static final class Flying implements Action {
+        private final ActionStatus status;
+        boolean asked;
+        boolean landed;
+
+        Flying(ActionStatus status) {
+            this.status = status;
+        }
+
+        @Override public ActionStatus tick(TickContext context) {
+            return status;
+        }
+
+        @Override public boolean stopSafely() {
+            asked = true;
+            return true;
+        }
+
+        @Override public boolean stoppedSafely() {
+            return !asked || landed;
+        }
+
+        @Override public String describe() {
+            return "飞着";
+        }
+    }
+
+    @Test
+    void safeStopCarriesIntoNextPhaseAction() {
+        // 收尾途中换了阶段、新阶段又起飞：新动作也得被叫先停稳，落地前不算停好，不能在半空被暂停。
+        Flying approach = new Flying(ActionStatus.done());
+        Flying lieDown = new Flying(ActionStatus.running());
+        var task = new PhasedTask<Phase>("测试", Phase.APPROACH, new ProgressTracker(100, 1000)) {
+            @Override protected Action enter(Phase phase) {
+                return phase == Phase.APPROACH ? approach : lieDown;
+            }
+
+            @Override protected Next<Phase> tick(Phase phase, TickContext context) {
+                return phase == Phase.APPROACH ? runActionThen(context, () -> Next.go(Phase.LIE_DOWN, "到了"))
+                        : runActionThen(context, () -> Next.done(TaskResult.done("躺下了")));
+            }
+        };
+        task.start(new TestTick(0));
+        assertTrue(task.stopSafely());
+        task.tick(new TestTick(1));
+        assertTrue(lieDown.asked);
+        assertFalse(task.stoppedSafely());
+        lieDown.landed = true;
+        assertTrue(task.stoppedSafely());
     }
 
     private static TickResult runUntilFinished(Task task, int maxTicks) {
