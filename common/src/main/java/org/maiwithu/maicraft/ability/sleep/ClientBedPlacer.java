@@ -135,8 +135,13 @@ public final class ClientBedPlacer implements PlacesBed {
             now.removeAll(alreadyThere);
             for (BlockPos cell : now) {
                 BlockState state = current.level().getBlockState(cell);
-                if (state.getValue(BedBlock.PART) == BedPart.HEAD) {
-                    placedHead = cell.immutable();
+                // 点支撑面放床，落在支撑格上面的是床尾，床头顺着朝向伸出去一格，不挨着支撑格：从床尾顺朝向找床头。
+                // 原先只在支撑格四周找床头，回回"没找到放下的床"，现做的床放好了却说不知道床头在哪。
+                BlockPos head = state.getValue(BedBlock.PART) == BedPart.HEAD ? cell
+                        : cell.relative(state.getValue(BedBlock.FACING));
+                BlockState headState = current.level().getBlockState(head);
+                if (headState.hasProperty(BedBlock.PART) && headState.getValue(BedBlock.PART) == BedPart.HEAD) {
+                    placedHead = head.immutable();
                     return ActionStatus.done();
                 }
             }
