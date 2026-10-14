@@ -96,6 +96,8 @@ public final class MerchantTradeTakes implements TradesWithMerchants {
         /** 动作开始时身上有几件：请求的 count 是"这次再多几件"，买够以它为基准。 */
         private int carriedAtStart = -1;
         private boolean logged;
+        /** 收尾关界面没确认：不再认领会话，直接请游戏关、等它真关上。 */
+        private boolean forceClose;
         /** 正在点的这一笔动手前身上有几件：结果进没进背包按它的差算。 */
         private int carriedAtTakeStart;
         private int waitTicks;
@@ -401,18 +403,26 @@ public final class MerchantTradeTakes implements TradesWithMerchants {
 
         /** 关界面：会话从头用到尾；关上后按接下来该做什么分流（凑付款、换村民、收场）。 */
         private ActionStatus closeMenu(TickContext tick) {
-            if (session == null && MenuSession.claim(menu) instanceof MenuSession.Claim.Owned owned) {
+            if (session == null && !forceClose && MenuSession.claim(menu) instanceof MenuSession.Claim.Owned owned) {
                 session = owned.session();
             }
             if (session != null) {
-                return switch (session.closeNow(menu, tick.player().clientTick())) {
-                    case MenuSession.Closing.Closed closed -> afterClosed();
-                    case MenuSession.Closing.Failed failed -> {
-                        unconfirmed.add("关" + merchant.describe() + "的交易界面没能确认，付款格余货交给游戏还回背包");
-                        yield afterClosed();
+                switch (session.closeNow(menu, tick.player().clientTick())) {
+                    case MenuSession.Closing.Closed closed -> {
+                        return afterClosed();
                     }
-                    default -> ActionStatus.running();
-                };
+                    case MenuSession.Closing.Failed failed -> {
+                        // 收尾没确认就请游戏再关一次、等它真关上：原先就此收场，交易界面一直开着，付款格里的绿宝石
+                        // 留在界面上，背包里看着一块都没了（实机 10-14 买完面包十块绿宝石"不见了"，下一件事关掉界面才回来）。
+                        session = null;
+                        forceClose = true;
+                        waitTicks = 0;
+                    }
+                    default -> {
+                        return ActionStatus.running();
+                    }
+                }
+                if (session != null) return ActionStatus.running();
             }
             // 认领不了会话（光标上挂着不是自己拿的东西）：照样请游戏关一次，东西由原版的关闭流程还回背包。
             menu.requestClose();
@@ -428,6 +438,7 @@ public final class MerchantTradeTakes implements TradesWithMerchants {
         /** 界面关上之后：缺付款去凑（凑完回到同一个村民接着买），有没能确认的收场，否则换村民。 */
         private ActionStatus afterClosed() {
             session = null;
+            forceClose = false;
             menu = null;
             if (fetchingFor != null) {
                 fetching = needs.actionFor(new ItemRequest(WantedItem.ofItem(fetchingFor.itemId()),
