@@ -25,6 +25,8 @@ import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.maiwithu.maicraft.game.menu.MenuActions;
 import org.maiwithu.maicraft.game.menu.PendingMenuAction;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -38,6 +40,8 @@ import org.maiwithu.maicraft.game.world.InteractionRange;
  * 交互提交、容器界面与按键入口都从构造函数传入；每刻推进时传入当刻的角色上下文。
  */
 public final class Interaction {
+
+    private static final Logger LOG = LoggerFactory.getLogger(Interaction.class);
 
     public enum Status { RUNNING, DONE, FAILED }
     public enum Button { ATTACK, USE }
@@ -122,6 +126,8 @@ public final class Interaction {
     private boolean hardFail;         // 一次点击遇到不可恢复错误时阻止后续操作。
     private String failReason = "interaction failed";
     private String lastUseResult = "not fired";
+    /** 近战上一次记下的"还没出手"原因。 */
+    private String lastAttackWait = "";
     /** 仅在单次实体交互实例中保留并平滑瞄准点。 */
     private Vec3 trackedEntityAim;
 
@@ -461,19 +467,20 @@ public final class Interaction {
         Vec3 aimPoint = stableEntityAimPoint(entity);
         playerInput.lookAt(player, aimPoint);
         if (!aimReady(aimPoint)) {
-            return false;
+            return attackWait("镜头还没转到");
         }
         // 近战遵守当前身体的真实实体触及属性，不能沿用右键方块的四点五格范围。
         HitResult aimed = nativeRaytrace(player, InteractionRange.entityReach(player));
         if (!(aimed instanceof EntityHitResult entityHit)
                 || entityHit.getEntity() != entity) {
-            return false;
+            return attackWait("准星打到的是 " + describeAimed(aimed) + "，眼睛离瞄点 "
+                    + String.format("%.2f", player.getEyePosition().distanceTo(aimPoint)) + " 格");
         }
         boolean recovering = entity instanceof LivingEntity living
                 && living.hurtTime > 0;
         // 刚换武器、目标还在短暂无敌期，或攻击条没恢复到位，都先等；否则伤害会被吞掉或打折。
         if (recovering || player.getAttackStrengthScale(0.0f) < ATTACK_READY || !context.canInteractThisTick()) {
-            return false;
+            return attackWait(recovering ? "它刚挨过打" : "攻击条还没回满或这一刻没有交互机会");
         }
         pending = sender.attack(
                 context,
@@ -481,6 +488,21 @@ public final class Interaction {
                 InteractionConfirmation.entityStruck(player, entity),
                 CONFIRM_TIMEOUT_TICKS);
         return false;
+    }
+
+    // 近战这一下为什么还没出手：换了原因才记一行，实机对得上卡在哪一关（10-14 点名杀羊三十秒没挥，看不出原因）。
+    private boolean attackWait(String why) {
+        if (!why.equals(lastAttackWait)) {
+            lastAttackWait = why;
+            LOG.info("[近战] 打 {} 还没出手：{}", entity == null ? "?" : entity.getType().getDescriptionId(), why);
+        }
+        return false;
+    }
+
+    private static String describeAimed(HitResult aimed) {
+        if (aimed instanceof EntityHitResult hit) return "实体 " + hit.getEntity().getType().getDescriptionId();
+        if (aimed instanceof BlockHitResult hit && hit.getType() == HitResult.Type.BLOCK) return "方块 " + hit.getBlockPos().toShortString();
+        return "空气";
     }
 
     private boolean settleAttack(PlayerContext context) {
