@@ -4,6 +4,8 @@ package org.maiwithu.maicraft.kernel.param;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParseException;
+import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
 
 import java.util.ArrayList;
@@ -26,7 +28,7 @@ import java.util.regex.Pattern;
  * <ul>
  *   <li>显式的 null 与省略同义；</li>
  *   <li>未声明的参数直接报错，并列出可用的参数名；</li>
- *   <li>少数宽松写法（整数字符串、布尔字符串、选项大小写、单个字符串当作一项列表）统一接受，
+ *   <li>少数宽松写法（整数字符串、布尔字符串、选项大小写、单个字符串当作一项列表、整段写成字符串的 JSON 对象或数组）统一接受，
  *       并在 notes 里说明做过什么；其余一律严格校验；</li>
  *   <li>同一请求的所有错误一次报全。</li>
  * </ul>
@@ -125,23 +127,41 @@ public final class ParamSpecs {
             case ITEM_OR_TAG, BLOCK_OR_TAG -> resource(name, element, true, errors, notes);
             case ENTITY_TYPE -> resource(name, element, false, errors, notes);
             case ITEM_LIST, BLOCK_LIST, TEXT_LIST, ENTITY_TYPE_LIST -> list(param, element, errors, notes);
-            case JSON_OBJECT -> jsonObject(name, element, errors);
-            case JSON_ARRAY -> jsonArray(name, element, errors);
+            case JSON_OBJECT -> structured(name, element, true, errors, notes);
+            case JSON_ARRAY -> structured(name, element, false, errors, notes);
         };
     }
 
-    // 结构化正文只认形状：对象或数组原样交给能力，字符串、数字这类不收。
-    // 结构化正文只认形状：对象与数组各是一种类型，说明里报的类型名与收的形状一致，严格按类型校验的客户端不会把对的拒掉。
-    private static JsonElement jsonObject(String name, JsonElement element, List<ParamError> errors) {
-        if (element.isJsonObject()) return element.deepCopy();
-        errors.add(new ParamError(name, name + " 必须是 JSON 对象", "JSON 对象", ReceivedShape.of(element)));
+    // 结构化正文按形状收：对象与数组各是一种类型，说明里报的类型名与收的形状一致，严格按类型校验的客户端不会把对的拒掉。
+    // 整段 JSON 写成字符串传来的，内容正好是要的形状就照收，并在 notes 里说明：有的模型调工具时会把参数里
+    // 没写结构的嵌套数组弄坏（数组被包成 {"item": …}、数字变成字符串），把整张图纸、整份逐格清单写成字符串
+    // 是调用方唯一能原样传到的办法。字符串读不成 JSON 时把读到哪坏了一起报回去，调用方照着改那一处。
+    private static JsonElement structured(String name, JsonElement element, boolean object,
+                                          List<ParamError> errors, List<String> notes) {
+        String shape = object ? "JSON 对象" : "JSON 数组";
+        if (object ? element.isJsonObject() : element.isJsonArray()) return element.deepCopy();
+        String unreadable = null;
+        if (isString(element)) {
+            try {
+                JsonElement parsed = JsonParser.parseString(element.getAsString());
+                if (object ? parsed.isJsonObject() : parsed.isJsonArray()) {
+                    notes.add(name + "：字符串里的 JSON 按" + (object ? "对象" : "数组") + "处理");
+                    return parsed;
+                }
+            } catch (JsonParseException broken) {
+                unreadable = firstLine(broken.getMessage());
+            }
+        }
+        String message = name + " 必须是 " + shape + (unreadable == null ? "" : "；字符串里的 JSON 读不懂：" + unreadable);
+        errors.add(new ParamError(name, message, shape, ReceivedShape.of(element)));
         return null;
     }
 
-    private static JsonElement jsonArray(String name, JsonElement element, List<ParamError> errors) {
-        if (element.isJsonArray()) return element.deepCopy();
-        errors.add(new ParamError(name, name + " 必须是 JSON 数组", "JSON 数组", ReceivedShape.of(element)));
-        return null;
+    // 解析器的报错第一行写明坏在第几行第几列；后面的排错链接对调用方没用。
+    private static String firstLine(String text) {
+        if (text == null) return "格式不对";
+        int end = text.indexOf('\n');
+        return end < 0 ? text : text.substring(0, end);
     }
 
     private static Long integer(ParamSpec param, JsonElement element, List<ParamError> errors, List<String> notes) {

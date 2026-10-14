@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.kernel.param;
 
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
 
@@ -95,13 +96,46 @@ class ParamSpecsTest {
         result.params().json("drawing").getAsJsonObject().remove("objects");
         assertTrue(result.params().json("drawing").getAsJsonObject().has("objects"), "改副本不影响存着的参数");
         assertEquals("drawing", result.params().toJson().entrySet().iterator().next().getKey());
-        // 形状对不上各报各的：对象参数不收数组，数组参数不收对象，字符串和数字都不是结构化正文。
+        // 形状对不上各报各的：对象参数不收数组，数组参数不收对象，读不成 JSON 的文字和数字都不是结构化正文。
         assertFalse(spec.parse(JsonParser.parseString("{\"drawing\":[1]}").getAsJsonObject()).ok(), "对象参数不收数组");
         assertFalse(spec.parse(JsonParser.parseString("{\"drawing\":{},\"cells\":{}}").getAsJsonObject()).ok(), "数组参数不收对象");
         assertFalse(spec.parse(JsonParser.parseString("{\"drawing\":\"text\"}").getAsJsonObject()).ok());
         assertFalse(spec.parse(JsonParser.parseString("{\"drawing\":3}").getAsJsonObject()).ok());
         assertEquals("object", ParamType.JSON_OBJECT.schemaType());
         assertEquals("array", ParamType.JSON_ARRAY.schemaType());
+    }
+
+    @Test
+    void structuredTextWrittenAsAStringIsReadWhenItHasTheRightShape() {
+        // 模型调工具时嵌套数组会被弄坏，调用方把整张图纸、整份逐格清单写成字符串传：内容形状对就照收，notes 里说一句。
+        ParamSpecs spec = ParamSpecs.of(
+                ParamSpec.of("drawing", ParamType.JSON_OBJECT).required().doc("图纸正文").build(),
+                ParamSpec.of("cells", ParamType.JSON_ARRAY).doc("逐格清单").build());
+        JsonObject raw = new JsonObject();
+        raw.addProperty("drawing", "{\"objects\":[{\"location\":[2.5,1.5,2.5]}]}");
+        raw.addProperty("cells", "[{\"offset\":[0,0,0],\"block\":\"minecraft:stone\"}]");
+        ParseResult result = spec.parse(raw);
+
+        assertTrue(result.ok(), () -> result.errors().toString());
+        assertEquals(3, result.params().json("drawing").getAsJsonObject().getAsJsonArray("objects")
+                .get(0).getAsJsonObject().getAsJsonArray("location").size());
+        assertEquals("minecraft:stone", result.params().json("cells").getAsJsonArray()
+                .get(0).getAsJsonObject().get("block").getAsString());
+        assertEquals(List.of("drawing：字符串里的 JSON 按对象处理", "cells：字符串里的 JSON 按数组处理"), result.notes());
+
+        // 字符串里的形状照样要对：对象参数里写成数组的字符串不收。
+        JsonObject wrongShape = new JsonObject();
+        wrongShape.addProperty("drawing", "[1]");
+        assertFalse(spec.parse(wrongShape).ok());
+
+        // 字符串读不成 JSON：报错里带上坏在哪，调用方照着改那一处，不用整段重写。
+        JsonObject broken = new JsonObject();
+        broken.addProperty("drawing", "{\"objects\":[1,");
+        ParseResult unreadable = spec.parse(broken);
+        assertFalse(unreadable.ok());
+        String message = unreadable.errors().getFirst().message();
+        assertTrue(message.startsWith("drawing 必须是 JSON 对象；字符串里的 JSON 读不懂："), message);
+        assertFalse(message.contains("\n"), message);
     }
 
     @Test
