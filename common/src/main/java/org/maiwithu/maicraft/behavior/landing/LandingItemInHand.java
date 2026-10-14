@@ -123,8 +123,21 @@ final class LandingItemInHand {
     /** 放弃备料：打开过的背包要关上，关好之前 cleanupPending 为真。 */
     void abandon(PlayerContext context, String reason) {
         move = null;
+        // 下次再备料从头计时：被打断（自卫插进来打了一架）的那段不算进十秒。实机 10-14 换水桶换到一半被僵尸打断，
+        // 打完回来接着换，计时连着打架的时间一起算，没换完就判超时。
+        startedTick = Long.MIN_VALUE;
         if (!inventoryTouched || closing != null) return;
-        closing = context.menuActions().closeForTaskBoundary(context, 20, reason);
+        // 交出身体时手里的现场可能已经不是这一刻的（换了别的事在推进）：关不了就交给下一件事，
+        // 开工前会先关掉留下的界面。原先拿过期现场去关背包抛错，正在打的自卫跟着出错收场，站着被僵尸打死。
+        if (context == null || !context.isCurrent()) {
+            inventoryTouched = false;
+            return;
+        }
+        try {
+            closing = context.menuActions().closeForTaskBoundary(context, 20, reason);
+        } catch (IllegalArgumentException | IllegalStateException stale) {
+            inventoryTouched = false;
+        }
     }
 
     boolean cleanupPending(PlayerContext context) {
