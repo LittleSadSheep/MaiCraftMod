@@ -2,6 +2,8 @@
 package org.maiwithu.maicraft.behavior.explore;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -24,6 +26,17 @@ class RadiusVerdictTest {
         assertEquals(RadiusVerdict.Verdict.WITHIN, RADIUS.judge(247.9));
         assertEquals(RadiusVerdict.Verdict.REACHED, RADIUS.judge(248));
         assertEquals(RadiusVerdict.Verdict.REACHED, RADIUS.judge(260));
+    }
+
+    @Test
+    void 走到判定带附近没有新落点就算跑到头() {
+        // 半径 100：判定带 92，差不到 16 格（76 起）算附近；走到 80 多格西边没新落点了就收工，不转去别的方向。
+        RadiusVerdict verdict = new RadiusVerdict(100);
+        assertTrue(verdict.nearlyReached(80));
+        assertFalse(verdict.nearlyReached(60));
+        // 半径小时附近的宽度按四分之一算：半径 32，判定带 28，20 起算附近。
+        assertTrue(new RadiusVerdict(32).nearlyReached(21));
+        assertFalse(new RadiusVerdict(32).nearlyReached(15));
     }
 
     @Test

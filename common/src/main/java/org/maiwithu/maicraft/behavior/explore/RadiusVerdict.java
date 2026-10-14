@@ -29,6 +29,15 @@ public record RadiusVerdict(double maxDistance) {
         return completionBand();
     }
 
+    /**
+     * 最远走到过判定带附近（差不到 min(16, 半径/4) 格）：这个方向再往外已经没有新落点时，就算说好的范围跑到头了，
+     * 收工，不换出发点、转方位去别的方向跑。实机 10-14 "往西探一百格"走到八十多格，西边没有新落点了，
+     * 换出发点又转了一圈方位，最后停在北边九十格。
+     */
+    public boolean nearlyReached(double farthest) {
+        return farthest >= completionBand() - Math.min(16, maxDistance / 4);
+    }
+
     /** 身体离探索原点 given 距离时的判定。 */
     public Verdict judge(double distanceFromOrigin) {
         if (distanceFromOrigin > maxDistance + HARD_BOUND_BUFFER) {

@@ -269,7 +269,8 @@ public final class ExploreTask extends PhasedTask<ExploreTask.Phase> implements 
             planLeg(new LegState(LegKind.WAYPOINT, chosen.get().column()));
             return Next.go(Phase.WALK, "朝选出的航点走一段");
         }
-        // 这一圈选不出航点：换出发点或换方位，都不行就如实收场。
+        // 这一圈选不出航点：已走到判定带附近就算跑到头了，不转去别的方向；不然换出发点或换方位，都不行就如实收场。
+        if (radius.nearlyReached(sampling.maxSelfDistance)) return conclude(SelfConclusion.RADIUS_REACHED);
         return applyEscalation(LegEscalation.nextAfterFailedShift(
                 sector.angleDegrees() < 360, history.originShifts, history.rotations));
     }
