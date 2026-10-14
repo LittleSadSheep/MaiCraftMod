@@ -146,6 +146,12 @@ class SelfDefenseTaskTest {
         assertTrue(finished.summary().contains("回到打点"));
         assertFalse(task.cannotResumeInPlace());
         assertTrue(events.messages.get(0).contains("插入自卫"), events.messages.toString());
+        // 收场交代拿什么打、挥中几下（替身世界里看不到实体倒下，不写打掉了谁）。
+        String last = events.messages.get(events.messages.size() - 1);
+        assertTrue(last.contains("拿 minecraft:iron_sword 挥中 " + moves.strikes + " 下"), last);
+        var details = assertInstanceOf(SelfDefenseTask.DefenseDetails.class, finished.details());
+        assertEquals(moves.strikes, details.hits());
+        assertEquals("minecraft:iron_sword", details.weapon());
     }
 
     @Test

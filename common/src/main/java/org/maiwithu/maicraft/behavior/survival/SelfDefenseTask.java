@@ -76,6 +76,8 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
     private boolean displaced;
     /** 这次打过角色的陌生玩家（实体编号）：不还手，收场时暂停主任务等 LLM 决定。 */
     private final Set<Integer> strangers = new LinkedHashSet<>();
+    /** 这一场打掉了谁、拿什么打、挥中几下、射了几箭。 */
+    private final DefenseTally tally = new DefenseTally();
 
     SelfDefenseTask(CombatSenses senses, BattleMoves moves, TaskEventSink events, SelfDefenseNeed need) {
         super("自卫", Phase.ENGAGE, new ProgressTracker(STUCK_AFTER_TICKS, Long.MAX_VALUE));
@@ -133,6 +135,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
                     "被威胁，插入自卫：打点在 " + Math.round(self[0]) + ", " + Math.round(self[1]) + ", " + Math.round(self[2]));
         }
         Battle.Moment moment = battle.tick(context);
+        tally.note(context, moment, senses, moves);
         if (moment.progressed()) recordProgress(moment.doing());
         if (moment.cornered() && !reportedCornered) {
             reportedCornered = true;
@@ -194,12 +197,14 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         events.publish(TaskEvent.Kind.NEED_UNHANDLED, "被玩家 " + who + " 打了：退到够不着的地方举着盾，没有还手；"
                 + "主任务已暂停，等你决定（要还手就用 fight 点名他，不理就让主任务继续）");
         return Next.done(TaskResult.builder(TaskResult.Status.DONE, "被玩家 " + who + " 打了，没有还手，停下等指示")
-                .details(new DefenseDetails(distanceFromAnchor(context), heartsLost(context))).build());
+                .details(details(distanceFromAnchor(context), heartsLost(context))).build());
     }
 
     // 观察期：引擎照样每刻看一眼，又有要打的就回去打；走不到又不打我的引擎自己不理。
     private Next<Phase> watch(TickContext context) {
         Battle.Moment moment = battle.tick(context);
+        // 最后一只刚倒下时引擎已经收手：观察期里接着看它倒没倒，别漏记。
+        tally.note(context, moment, senses, moves);
         if (moment.state() != Battle.State.FINISHED) {
             return Next.go(Phase.ENGAGE, "又有威胁出现，继续打");
         }
@@ -216,9 +221,9 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         if (drift < 1.5) {
             need.ignoreUnreachable(battle.unreachable(), context.gameTick());
             events.publish(TaskEvent.Kind.TEMPORARY_TASK_FINISHED,
-                    "自卫结束，回到打点；位移 " + Math.round(drift) + " 格，掉了约 " + Math.round(heartsLost) + " 颗心");
+                    "自卫结束，回到打点；" + tally.describe() + "位移 " + Math.round(drift) + " 格，掉了约 " + Math.round(heartsLost) + " 颗心");
             return Next.done(TaskResult.builder(TaskResult.Status.DONE, "自卫结束，回到打点继续干活")
-                    .details(new DefenseDetails(drift, heartsLost)).build());
+                    .details(details(drift, heartsLost)).build());
         }
         if (walkBack == null) {
             BlockPos cell = BlockPos.containing(anchor[0], anchor[1], anchor[2]);
@@ -232,11 +237,11 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
             double[] self = moves.selfPosition(context);
             String where = Math.round(self[0]) + ", " + Math.round(self[1]) + ", " + Math.round(self[2]);
             events.publish(TaskEvent.Kind.NEED_UNHANDLED,
-                    "自卫结束但走不回打点（还差 " + Math.round(drift) + " 格），停在了 " + where
+                    "自卫结束但走不回打点（还差 " + Math.round(drift) + " 格），停在了 " + where + "；" + tally.describe()
                             + "；主任务已暂停，等下一步指示");
             return Next.done(TaskResult.builder(TaskResult.Status.DONE,
                             "自卫结束；人停在了 " + where + "，回不去原来的打点")
-                    .details(new DefenseDetails(drift, heartsLost)).build());
+                    .details(details(drift, heartsLost)).build());
         }
         if (status instanceof ActionStatus.Running running && running.progressed()) {
             recordProgress(walkBack.describe());
@@ -253,10 +258,11 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
     private Next<Phase> escaped(TickContext context, String why) {
         displaced = true;
         double drift = distanceFromAnchor(context);
-        String summary = "已撤离，甩开了追兵（" + (why == null ? "打不过" : why) + "），离打点 " + Math.round(drift) + " 格";
+        String summary = "已撤离，甩开了追兵（" + (why == null ? "打不过" : why) + "），" + tally.describe()
+                + "离打点 " + Math.round(drift) + " 格";
         events.publish(TaskEvent.Kind.TEMPORARY_TASK_FINISHED, summary + "；主任务停在半路等下一步指示");
         return Next.done(TaskResult.builder(TaskResult.Status.DONE, summary)
-                .details(new DefenseDetails(drift, heartsLost(context))).build());
+                .details(details(drift, heartsLost(context))).build());
     }
 
     private double heartsLost(TickContext context) {
@@ -321,6 +327,17 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         }
     }
 
-    /** 自卫的结果细节：位移与红心差。 */
-    record DefenseDetails(double driftBlocks, double heartsLost) implements ResultDetails {}
+    private DefenseDetails details(double drift, double heartsLost) {
+        return new DefenseDetails(drift, heartsLost, tally.defeated(), tally.weapon(), tally.hits(), tally.shots());
+    }
+
+    /**
+     * 自卫的结果细节：位移、红心差，打掉了谁（"种类 ×只数"）、拿什么打、确认挥中几下、射了几箭。
+     */
+    record DefenseDetails(double driftBlocks, double heartsLost, List<String> defeated, String weapon, int hits,
+                          int shots) implements ResultDetails {
+        DefenseDetails {
+            defeated = List.copyOf(defeated);
+        }
+    }
 }
