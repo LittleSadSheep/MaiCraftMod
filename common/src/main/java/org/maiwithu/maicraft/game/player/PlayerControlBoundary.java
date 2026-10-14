@@ -82,7 +82,10 @@ public final class PlayerControlBoundary {
             // 同一连接、同一身份的死亡重生延续自动控制许可，使恢复思考期间也能自卫；活体替换和换服不继承。
             boolean respawned = samePlayerRespawn(previousPlayer, player);
             if (respawned) respawns++;
-            boolean preserveControl = input.automationControlRequested() && respawned;
+            // 过传送门换维度，原版也会换一个新的本地玩家对象：同一连接、同一身份，自动控制照样延续。
+            // 原先只认死亡重生，实机 10-14 一进下界控制权就回到玩家手上，控制循环停下，人站在下界门口不动。
+            boolean preserveControl = input.automationControlRequested()
+                    && (respawned || samePlayerNewDimension(previousPlayer, player));
             input.playerReplaced(player, preserveControl);
             observedPlayer = player;
             playerEpoch = nextRevision(playerEpoch, "body epoch");
@@ -293,6 +296,15 @@ public final class PlayerControlBoundary {
                 && previous.connection != null && previous.connection == replacement.connection
                 && previous.getUUID() != null && previous.getUUID().equals(replacement.getUUID())
                 && previous.getEntityData() != null && previous.isDeadOrDying();
+    }
+
+    // 同一连接、同一身份、换了维度的替换是过传送门，不是换了人。
+    static boolean samePlayerNewDimension(LocalPlayer previous, LocalPlayer replacement) {
+        return previous != null && replacement != null && previous != replacement
+                && previous.connection != null && previous.connection == replacement.connection
+                && previous.getUUID() != null && previous.getUUID().equals(replacement.getUUID())
+                && previous.level() != null && replacement.level() != null
+                && !previous.level().dimension().equals(replacement.level().dimension());
     }
 
     private static long nextRevision(long value, String label) {
