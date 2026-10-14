@@ -100,9 +100,15 @@ public final class FlightRoutes {
         return count;
     }
 
-    // 这一格飞不开：头顶紧挨着实心方块，或离脚下的实心不到两格（贴着地面、树根、坎子蹭）。
+    // 这一格飞不开：头顶紧挨着实心方块，离脚下的实心不到两格（贴着地面、树根、坎子蹭），
+    // 或身子旁边紧挨着树干、树叶、墙（在林子里穿行，喷气背包有惯性，一拐弯就蹭上）。
+    // 实机 10-14 林子里贴着树冠底下飞，三十多个拐弯点，冲过头又蹭在树叶上停住，连着重找路。
     private static boolean hugging(BlockGetter view, BlockPos feet) {
-        return solid(view, feet.above(2)) || solid(view, feet.below()) || solid(view, feet.below(2));
+        if (solid(view, feet.above(2)) || solid(view, feet.below()) || solid(view, feet.below(2))) return true;
+        for (Direction side : Direction.Plane.HORIZONTAL) {
+            if (solid(view, feet.relative(side)) || solid(view, feet.above().relative(side))) return true;
+        }
+        return false;
     }
 
     private static boolean solid(BlockGetter view, BlockPos pos) {

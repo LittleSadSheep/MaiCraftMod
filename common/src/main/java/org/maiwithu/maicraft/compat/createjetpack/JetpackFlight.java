@@ -274,7 +274,9 @@ final class JetpackFlight implements TravelLeg {
         // 原先按"朝前"推，镜头还没转过来就顺着旧朝向飞出去（实机 10-13 往反方向飞出七十多格）。
         BlockPos previous = waypoint == 0 ? null : route.get(waypoint - 1);
         boolean upright = previous == null || previous.getX() == next.getX() && previous.getZ() == next.getZ();
-        boolean levelled = Math.abs(rise) < LEVEL;
+        // 高度没对齐到正好，但照现在的高度往前挪一格碰不到东西：边飞边调高度，不悬在原地对高度。
+        // 悬停时高度总在上下晃，对不进正负 0.15 格就一直不往前，实机 10-14 停在一格上来回升降、连着重找路。
+        boolean levelled = Math.abs(rise) < LEVEL || !upright && clearAhead(player, aim);
         BlockPos steerTo = upright || levelled ? next : previous;
         boolean centred = horizontal(position, Vec3.atBottomCenterOf(steerTo)) < CENTRED;
         boolean up = rise > LEVEL && (!upright || centred);
@@ -317,6 +319,14 @@ final class JetpackFlight implements TravelLeg {
             float strafe = Math.abs(push.strafe()) < DEAD_ZONE ? 0.0f : push.strafe();
             return new PlayerInput.Movement(forward, strafe, lift, sneak, sprint);
         }, player.getYRot(), context.clientTick());
+    }
+
+    // 照现在的高度朝瞄点平着挪最多一格，身子碰不碰得到方块。
+    private static boolean clearAhead(LocalPlayer player, Vec3 aim) {
+        Vec3 flat = new Vec3(aim.x - player.getX(), 0, aim.z - player.getZ());
+        double length = flat.length();
+        if (length < 1e-3) return true;
+        return player.level().noCollision(player, player.getBoundingBox().move(flat.scale(Math.min(1.0, length) / length)));
     }
 
     // 落点正上方：下面是水或不高就直接关掉落，否则照快速下降的做法。
