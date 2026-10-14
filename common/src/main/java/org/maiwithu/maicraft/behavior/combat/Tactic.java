@@ -137,8 +137,10 @@ public final class Tactic {
                             && (foe.attacker() || foe.imminent()))) {
                 return new Withdraw("够不着还在射我的远程怪，先撤出它的射程");
             }
+            // 残血不砍的苦力怕走近了也算压着：先避开它，不当"打完了"收手站着等它过来。
             boolean pressed = field.chasers().stream()
-                    .anyMatch(foe -> foe.fusing() || foe.attacker() || foe.imminent());
+                    .anyMatch(foe -> foe.fusing() || foe.attacker() || foe.imminent()
+                            || foe.threat().kind() == ThreatAssessment.Kind.EXPLOSIVE && foe.distance() <= URGENT_CREEPER);
             return pressed ? new KeepClear("没有能打的，先避开追兵") : new Finished();
         }
         // 5 打法。
@@ -179,8 +181,17 @@ public final class Tactic {
         boolean canShoot = me.canShoot() && !memory.bowGivenUp() && foe.threat().visible()
                 && foe.distance() <= RangedCombat.ENGAGE_RANGE;
         if (foe.fusing() && !canShoot) return false;
+        // 血不到一半又射不了：不凑上去砍苦力怕（凑到三格它就点着，残血挨一下就没了），离它远点、让它过去。
+        // 实机 10-14 箭打光了，残血还凑近砍苦力怕，三格点着引信再躲，爆炸就在身边。
+        if (foe.threat().kind() == ThreatAssessment.Kind.EXPLOSIVE && !canShoot
+                && me.health() <= CREEPER_MELEE_MIN_HEALTH) {
+            return false;
+        }
         return !memory.unreachable().contains(foe.id()) || canShoot;
     }
+
+    /** 血到这条线（含）以下、又射不了时，不凑上去砍苦力怕。 */
+    static final double CREEPER_MELEE_MIN_HEALTH = 10.0;
 
     // 急的先：近处看得见的苦力怕 → 马上要打到我的 → 点名的那一批 → 其余；同档近的先，同距按编号定。
     private static int urgency(Battlefield.Foe foe) {

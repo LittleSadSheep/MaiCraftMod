@@ -58,6 +58,10 @@ class TacticTest {
                 "空手、对面会还手就撤");
         assertInstanceOf(Tactic.Melee.class, decide(me(20, false, false), Tactic.Memory.FRESH, creeper(1, 5, false)),
                 "没点引信的苦力怕不还手，空手也能打");
+        assertInstanceOf(Tactic.KeepClear.class, decide(me(8, true, false), Tactic.Memory.FRESH, creeper(1, 5, false)),
+                "残血又射不了：不凑上去砍苦力怕，先避开它");
+        assertInstanceOf(Tactic.Shoot.class, decide(me(8, true, true), Tactic.Memory.FRESH, creeper(1, 5, false)),
+                "残血有弓照射");
     }
 
     @Test
