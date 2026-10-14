@@ -87,6 +87,10 @@ public final class PlayerControlBoundary {
             boolean preserveControl = input.automationControlRequested()
                     && (respawned || samePlayerNewDimension(previousPlayer, player));
             input.playerReplaced(player, preserveControl);
+            // 换了身体（重生、过门、换世界、退出）：旧身体上还在等确认的点击与菜单操作按不确定结清，
+            // 不让旧结果落到新身体上，也不让一条没人推进的等待挡住新身体的第一次出手。
+            if (interactionSender != null) interactionSender.revokeForBoundary("the local player was replaced");
+            if (menuActions != null) menuActions.revokeForBoundary("the local player was replaced");
             observedPlayer = player;
             playerEpoch = nextRevision(playerEpoch, "body epoch");
         }
@@ -115,6 +119,13 @@ public final class PlayerControlBoundary {
             if (controlChanged) {
                 // 控制权变化先让上一刻的旧上下文失效，再让外界看到这一刻的状态。
                 mutationClaimedTick = tickRevision;
+                // 控制权换手时结清旧等待：旧点击不能算到新操作者头上。人收回角色（F8）时还要把自动化开着的
+                // 箱子界面按原版关掉、光标上的东西还回去，人接手时不用自己收拾；交给自动化时不动人开着的界面。
+                if (interactionSender != null) interactionSender.revokeForBoundary("control ownership changed before native confirmation");
+                if (menuActions != null) {
+                    if (ownedAfter) menuActions.revokeForBoundary("control ownership changed before menu confirmation");
+                    else menuActions.revokeForHumanHandoff(player, "control ownership changed before menu confirmation");
+                }
             }
         }
         updateWindowControl(input.effectiveAutomationRequested());
@@ -269,6 +280,9 @@ public final class PlayerControlBoundary {
     /** 客户端停止时归还输入，并让以前发出的所有上下文失效。 */
     public void shutdown() {
         requireClientThread();
+        // 客户端停机：还在等确认的点击与菜单操作一并按不确定结清，停机后没人再推进它们。
+        if (interactionSender != null) interactionSender.revokeForBoundary("the client is stopping");
+        if (menuActions != null) menuActions.revokeForBoundary("the client is stopping");
         input.shutdown();
         restoreMouseOnRelease = false;
         updateWindowControl(false);

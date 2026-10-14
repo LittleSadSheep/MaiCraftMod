@@ -461,7 +461,7 @@ public final class DefaultMenuActions implements MenuActions {
     }
 
     /** 换角色或交还控制权时结束旧等待，并走原版关闭交还菜单。 */
-    public void revokeForBoundary(String reason) {
+    @Override public void revokeForBoundary(String reason) {
         if (active != null && !active.terminal()) active.finish(PendingMenuAction.Status.UNCERTAIN, reason);
         closingMenu = null;
         visibility.reset();
@@ -471,7 +471,7 @@ public final class DefaultMenuActions implements MenuActions {
      * 向玩家交还菜单前，先通过原版关闭流程处理鼠标上携带的物品。
      * 服务端会将它归还背包或执行原版溢出处理，再由自动化释放菜单控制权。
      */
-    public void revokeForHumanHandoff(LocalPlayer player, String reason) {
+    @Override public void revokeForHumanHandoff(LocalPlayer player, String reason) {
         // 人工接管时结束旧等待并走原版关闭；光标上的物品由游戏正常返还或按溢出规则处理。
         if (active != null && !active.terminal()) {
             active.finish(PendingMenuAction.Status.UNCERTAIN, reason);

@@ -622,7 +622,7 @@ public final class DefaultInteractionSender implements InteractionSender {
     }
 
     /** 换角色或交还控制权时结束旧等待：旧结果不再可信，这里只改等待记录，不再次发世界操作。 */
-    public void revokeForBoundary(String reason) {
+    @Override public void revokeForBoundary(String reason) {
         clearMainHandCancellation(); // 交还角色后，旧取消不得切换新操作者的槽位。
         if (active != null && !active.terminal()) {
             active.finish(PendingInteraction.Status.UNCERTAIN, reason);

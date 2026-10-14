@@ -134,4 +134,10 @@ public interface InteractionSender {
      * 原任务对象已经没了，只能由这里接着做完；新任务开始之前先结清，占掉本刻交互机会时新任务等下一刻。
      */
     default void advance(PlayerContext context) {}
+
+    /**
+     * 换了身体、控制权换手或客户端停机时由控制权边界调：旧的等待按效果不确定结清，不再发任何世界操作。
+     * 旧结果不能算到新操作者头上，也不能让一条没人推进的等待挡住后面的提交。
+     */
+    default void revokeForBoundary(String reason) {}
 }

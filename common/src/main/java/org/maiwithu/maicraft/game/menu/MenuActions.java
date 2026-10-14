@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.game.menu;
 
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.crafting.RecipeHolder;
 
@@ -88,4 +89,15 @@ public interface MenuActions {
      * 原任务对象已经没了，关闭要靠这里一刻一刻推进到界面真的关上；新任务开始之前先结清。
      */
     default void advance(PlayerContext context) {}
+
+    /** 换了身体或客户端停机时由控制权边界调：旧的菜单等待按效果不确定结清，界面状态记录清掉。 */
+    default void revokeForBoundary(String reason) {}
+
+    /**
+     * 人按 F8 收回角色时由控制权边界调：旧等待按不确定结清，自动化点开的界面走原版关闭，
+     * 光标上挂着的东西由游戏照原版规则还回背包或掉出来；人接手时面前不留一个开着的箱子。
+     */
+    default void revokeForHumanHandoff(LocalPlayer player, String reason) {
+        revokeForBoundary(reason);
+    }
 }
