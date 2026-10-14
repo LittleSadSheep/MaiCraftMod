@@ -135,7 +135,7 @@ public final class Battle {
     /** 上一段寻路走不通：逼近的那只记成走不到。 */
     private boolean lastWalkFailed;
 
-    /** @param radius 看多远的战场：自卫用警戒半径，区域清扫用清扫半径；撤离时自动看三十二格 */
+    /** @param radius 看多远的战场：自卫用警戒半径，区域清扫用清扫半径；撤离时自动看四十格 */
     public Battle(CombatSenses senses, BattleMoves moves, Battlefield.Roster roster, double radius) {
         this.senses = senses;
         this.moves = moves;

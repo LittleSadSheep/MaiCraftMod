@@ -17,7 +17,7 @@ class RetreatTest {
     @Test
     void havenIsAwayFromTheChasers() {
         int[] haven = Retreat.haven(0, 64, 0, 5, 0, 0, (x, y, z) -> y == 64);
-        assertEquals(-32, haven[0], "追兵在东，往西三十二格");
+        assertEquals(-40, haven[0], "追兵在东，往西四十格");
         assertEquals(0, haven[2]);
     }
 
@@ -68,7 +68,7 @@ class RetreatTest {
         Retreat retreat = new Retreat();
         Battlefield start = field(foe(1, 6, true));
         retreat.begin("血快见底", start);
-        // 跑出去二十多格，那只尸壳这一刻没在追（隔着坡），但还在三十二格内：没甩开。
+        // 跑出去二十多格，那只尸壳这一刻没在追（隔着坡），但还在四十格内：没甩开。
         CombatSenses.Threat far = new CombatSenses.Threat(1, UUID.randomUUID(), "minecraft:husk", 24, 64, 0,
                 24, ThreatAssessment.Kind.MELEE, false, false, false);
         assertFalse(retreat.escaped(field(new Battlefield.Foe(far, false, false, true, false))));

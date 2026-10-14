@@ -218,7 +218,7 @@ class BattleTest {
         assertEquals(1, moves.walks.size());
         assertTrue(moves.walks.get(0).goal().center().getX() < -20, "往背离僵尸的西边跑，实际 "
                 + moves.walks.get(0).goal().center());
-        // 回了血也不回头；僵尸被甩到三十二格外才算甩开。
+        // 回了血也不回头；僵尸被甩到四十格外才算甩开。
         senses.health = 20;
         assertEquals(Battle.State.RETREATING, fight.tick(new Tick(1)).state());
         senses.threats.clear();

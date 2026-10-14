@@ -53,8 +53,11 @@ public final class ThreatAssessment {
     /** 拒战线：折算后的有效血量低于它就撤（约两颗心的有效血量，挨一下就没了）。 */
     public static final double RETREAT_LINE_EFFECTIVE_HEALTH = 8.0;
 
-    /** 逃跑判定距离：所有参与追击的都在它之外才算甩掉；必须远大于警戒半径。 */
-    public static final double FLEE_CLEAR_DISTANCE = 32.0;
+    /**
+     * 逃跑判定距离：所有参与追击的都在它之外才算甩掉；必须远大于警戒半径，也要比僵尸、尸壳盯人的 35 格远，
+     * 不然它们还盯着我、转眼又追上来。实机 10-14 撤到三十二格外算甩开、站下吃东西，尸壳七秒后追到又打一仗。
+     */
+    public static final double FLEE_CLEAR_DISTANCE = 40.0;
 
     /** 自卫警戒半径：被攻击、锁定、点引信的威胁在这个范围内就构成"正在被威胁"。 */
     public static final double VIGILANCE_RADIUS = 14.0;
