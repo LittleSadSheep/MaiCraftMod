@@ -147,7 +147,10 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation {
             Block block = blockOf(blockType).orElseThrow();
             BlockPos support = spot.below();
             alreadyThere = holding(current, support, block);
-            placing = interactions.useBlock(support, placedAround(support, block, alreadyThere));
+            // 放格里长着草、花这类一碰就换掉的：像人一样直接点那丛草，东西就顶替它放下。点下面的地面会被草挡住，
+            // 实机 10-14 河边草地上放工作台，回回"看不到方块的任何一面"，鱼竿一直做不出来。
+            BlockPos clickAt = current.level().getBlockState(spot).isAir() ? support : spot;
+            placing = interactions.useBlock(clickAt, placedAround(support, block, alreadyThere));
             return ActionStatus.progressed();
         }
 
@@ -203,7 +206,8 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation {
 
         private boolean placeableAt(PlayerContext current, BlockPos cell) {
             BlockState state = current.level().getBlockState(cell);
-            if (!state.isAir() && !state.canBeReplaced()) {
+            // 空着，或长着草、花这类可被顶替的；水、岩浆里不放（点不到，放下去也泡着）。
+            if (!state.isAir() && !state.canBeReplaced() || !state.getFluidState().isEmpty()) {
                 return false;
             }
             // 角色自己站的两格、别的生物占着的格子，原版不让把方块放进去。
