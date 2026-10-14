@@ -366,6 +366,23 @@ class ItemAcquisitionTest {
     }
 
     @Test
+    void 背包没空格但能并进半堆_不腾地方直接拿() {
+        // 身上已有 30 块圆石、背包没空格：再要 5 块能并进这一堆，不该先腾格子（这里也腾不出来）。
+        FakeBackpack full = new FakeBackpack(1, new BackpackStack(
+                "minecraft:cobblestone", 30, 64, false, false, false, true));
+        InventorySpace space = new InventorySpace(full, Optional.empty(), Optional.empty(),
+                Optional.empty(), Optional.empty(), Optional.empty());
+        ScriptedSource chest = new ScriptedSource("记得的箱子", full)
+                .answer(new SourceQuote.Offer("记得的箱子", 5, new AcquisitionCost(5, 4), null));
+        ItemAcquisition acquisition = new ItemAcquisition(List.of(chest), full, offhand, tags,
+                new FixedSpot(0, 64, 0), Optional.of(space), ItemAcquisition.DEFAULT_MAX_DEPTH);
+        ActionStatus status = runToSettlement(
+                acquisition.need(new ItemRequest(WantedItem.ofItem("minecraft:cobblestone"), 5, "垫脚"), PERMISSIONS));
+        assertInstanceOf(ActionStatus.Done.class, status);
+        assertEquals(1, chest.begunTimes());
+    }
+
+    @Test
     void 备料转圈当场拒绝() {
         // 来源推进时又回到引擎要同样的东西：引擎认出转圈，嵌套的那一下当场失败。
         NestingSource iron = new NestingSource("minecraft:iron_ingot",

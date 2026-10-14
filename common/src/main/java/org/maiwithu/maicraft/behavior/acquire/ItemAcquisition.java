@@ -18,6 +18,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.inventory.InventorySpace;
+import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Change;
@@ -392,6 +393,11 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             if (space.isEmpty()) {
                 return startStep();
             }
+            // 要拿的东西能全并进身上已有的半堆（挖圆石时身上已有 30 块）：不用空格，直接去拿，
+            // 不为它先存箱子或丢东西。只认确切物品；按标签要的不知道会拿到哪种，照旧先腾一格。
+            if (room == null && fitsIntoPartialStacks(target - CarriedItems.matching(backpack, offhand, request, tags))) {
+                return startStep();
+            }
             if (room == null) {
                 Set<String> keep = request.wanted().isTag() ? Set.of() : Set.of(request.wanted().itemId());
                 room = space.get().makeRoom(1, request.purpose(), keep, permissions,
@@ -414,6 +420,17 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                                     "背包腾不出来，装不下为「" + request.purpose() + "」要拿的东西：" + failed.problem().message()));
                 }
             };
+        }
+
+        // 背包里同种物品的半堆还能再并进几件，够装下这次还缺的就不用腾空格。
+        private boolean fitsIntoPartialStacks(int stillNeeded) {
+            if (request.wanted().isTag() || stillNeeded <= 0) return false;
+            String itemId = request.wanted().itemId();
+            int mergeable = 0;
+            for (BackpackStack stack : backpack.stacks()) {
+                if (stack.itemId().equals(itemId)) mergeable += Math.max(0, stack.maxStackSize() - stack.count());
+            }
+            return mergeable >= stillNeeded;
         }
 
         // 推进当前来源一步；做完就回到清点，做砸了把这个来源划掉、换计划里的下一个。
