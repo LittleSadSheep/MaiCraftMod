@@ -33,7 +33,8 @@ final class FindSettlement {
             Map<String, Integer> byType, String hiddenLead) {
         Problem problem = Problem.of(Problem.Kind.NOT_FOUND,
                 searched(input) + (hiddenLead == null ? "" : "；" + hiddenLead),
-                "走近一些再找，或先用出行到大概念有的地方再找；要搜更大的范围要靠勘察，还没有");
+                "走近一些再找，或先出行到大概会有的地方再找；更大的一片用 explore 跑一趟（路过的产地线索会记下）；"
+                        + "埋在石头里的矿看不见，要拿到它直接用 obtain，会自己往下挖着找");
         if (found.isEmpty()) {
             return TaskResult.failed("寻找：这一片没有找到" + String.join("、", input.selectors()), problem);
         }
