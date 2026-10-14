@@ -27,6 +27,7 @@ import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.ReportsUnconfirmed;
 import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.slf4j.LoggerFactory;
 
 /**
  * 交易的生产实现：逐个走到村民跟前右键搭话，按界面上的报价一连买，买够或都试完为止。
@@ -94,6 +95,7 @@ public final class MerchantTradeTakes implements TradesWithMerchants {
         private TradeOffers.View currentOffer;
         /** 动作开始时身上有几件：请求的 count 是"这次再多几件"，买够以它为基准。 */
         private int carriedAtStart = -1;
+        private boolean logged;
         /** 正在点的这一笔动手前身上有几件：结果进没进背包按它的差算。 */
         private int carriedAtTakeStart;
         private int waitTicks;
@@ -117,6 +119,17 @@ public final class MerchantTradeTakes implements TradesWithMerchants {
         }
 
         @Override public ActionStatus tick(TickContext tick) {
+            ActionStatus status = step(tick);
+            // 收场记一行：买到几件、每个村民卡在哪。实机 10-14 买面包的结果只有"做完了，但一件都没拿到"，看不出卡在哪。
+            if (!(status instanceof ActionStatus.Running) && !logged) {
+                logged = true;
+                LoggerFactory.getLogger(MerchantTradeTakes.class).info("[交易] 买{}收场：{}，买到 {} 件；{}",
+                        request.wanted().describe(), status.getClass().getSimpleName(), bought(), deadEnds);
+            }
+            return status;
+        }
+
+        private ActionStatus step(TickContext tick) {
             if (carriedAtStart < 0) carriedAtStart = carriedWanted();
             if (stage != Stage.NEXT_MERCHANT && ++merchantTicks > GIVE_UP_TICKS) {
                 deadEnds.add("在" + (merchant == null ? "村民" : merchant.describe()) + "身上超时");
@@ -251,8 +264,13 @@ public final class MerchantTradeTakes implements TradesWithMerchants {
             Optional<TradeOffers.View> next = TradeOffers.nextBuy(TradeOffers.eligible(
                     offers.get(), request.wanted(), tags, permissions.useRareItems()));
             if (next.isEmpty()) {
-                deadEnds.add(merchant.describe() + "这里卖" + request.wanted().describe()
-                        + "的报价都买不了（没货或付款超出许可）");
+                // 说清这个村民到底卖什么：卖不卖要的东西，结果里一眼看得出来。
+                List<String> sells = offers.get().stream().map(TradeOffers.View::resultItemId).distinct().toList();
+                boolean sellsIt = offers.get().stream()
+                        .anyMatch(offer -> request.wanted().matches(offer.resultItemId(), tags.tagsOf(offer.resultItemId())));
+                deadEnds.add(merchant.describe() + (sellsIt ? "卖" + request.wanted().describe()
+                        + "的报价都买不了（没货或付款超出许可）" : "不卖" + request.wanted().describe())
+                        + "，他卖的是：" + String.join("、", sells));
                 return toNextMerchantOrEnd();
             }
             currentOffer = next.get();
