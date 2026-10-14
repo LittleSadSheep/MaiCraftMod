@@ -9,6 +9,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -61,6 +62,14 @@ public interface FirstPersonScene {
 
     /** 按手里物品自己的射线规则，现在的准星使用下去会不会正好作用到 target 这一格。 */
     boolean heldItemPointsAt(BlockPos target, InteractionHand hand);
+
+    /**
+     * 实体身上从现在的眼睛看得见的一点：中心被草、栏杆挡着就试上半身、顶上、两侧，射线一路没碰到方块的那一点。
+     * 都被挡着时给中心，交给准星核对如实报被挡。默认（离线替身）就是中心。
+     */
+    default Vec3 visibleEntityPoint(Entity entity) {
+        return entity.getBoundingBox().getCenter();
+    }
 
     /** 目标格当前状态；格子未加载时返回 null，不能把没加载当成没有。 */
     BlockState blockAt(BlockPos pos);

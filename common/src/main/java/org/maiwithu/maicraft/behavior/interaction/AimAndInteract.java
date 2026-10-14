@@ -155,7 +155,7 @@ public final class AimAndInteract implements Action {
         return submit(player, scene, hit);
     }
 
-    // 瞄准点：方块取现在看得见的那个部位，实体取碰撞箱中心；方块一面都看不到时为 null。
+    // 瞄准点：方块取现在看得见的那个部位，实体取身上看得见的一点（中心被草挡着就瞄上半身、顶上）；方块一面都看不到时为 null。
     private Vec3 planAim(FirstPersonScene scene) {
         if (target instanceof InteractionTarget.BlockTarget block) {
             BlockHitResult visible = gesture == Gesture.USE_HELD_ITEM
@@ -165,7 +165,7 @@ public final class AimAndInteract implements Action {
                     : scene.visibleHit(block.pos());
             return visible == null ? null : visible.getLocation();
         }
-        return ((InteractionTarget.EntityTarget) target).entity().getBoundingBox().getCenter();
+        return scene.visibleEntityPoint(((InteractionTarget.EntityTarget) target).entity());
     }
 
     // 转到位后准星点到了别的：按现在的位置重新找瞄准点再试；次数用完就是站位问题。

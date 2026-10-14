@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.interaction;
 
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -78,6 +80,24 @@ public final class LiveFirstPersonScene implements FirstPersonScene {
         Vec3 end = eye.add(player.getViewVector(1.0f).scale(InteractionRange.blockReach(player)));
         BlockHitResult hit = FirstPersonInteractionTargeting.bucketRay(player.level(), player, eye, end, item);
         return FirstPersonInteractionTargeting.acceptsBucketHit(player.level(), target, item, hit);
+    }
+
+    // 依次试中心、上半身、顶上、靠近我的一侧：射线一路没碰到方块的第一点。剪羊毛时羊站在草丛里，
+    // 瞄中心正好被脚边的草挡住（实机 10-14 "射线命中了方块"，换了站位还是草）；人会瞄羊背。
+    @Override public Vec3 visibleEntityPoint(Entity entity) {
+        AABB box = entity.getBoundingBox().deflate(0.05);
+        Vec3 eye = player.getEyePosition();
+        Vec3 center = box.getCenter();
+        Vec3 near = new Vec3(Math.max(box.minX, Math.min(eye.x, box.maxX)), center.y,
+                Math.max(box.minZ, Math.min(eye.z, box.maxZ)));
+        Vec3[] candidates = {center, new Vec3(center.x, box.minY + box.getYsize() * 0.75, center.z),
+                new Vec3(center.x, box.maxY, center.z), near, new Vec3(near.x, box.maxY, near.z)};
+        for (Vec3 point : candidates) {
+            BlockHitResult blocked = player.level().clip(new ClipContext(eye, point, ClipContext.Block.OUTLINE,
+                    ClipContext.Fluid.NONE, player));
+            if (blocked.getType() == HitResult.Type.MISS) return point;
+        }
+        return center;
     }
 
     @Override public BlockState blockAt(BlockPos pos) {
