@@ -74,6 +74,8 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
     private int watchTicksLeft;
     private boolean reportedCornered;
     private Action walkBack;
+    /** 刚决定换去的阶段：外壳在换阶段时被基类收尾，靠它分清是换阶段还是任务真结束。 */
+    private Phase goingTo;
     /** 夜里挖坑熬着的那一次挖三填一。 */
     private Task burrow;
     /** 撤离后人不在原地，或收尾走不回打点，或被陌生玩家打了：主任务不能悄悄续上。 */
@@ -135,6 +137,12 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         };
     }
 
+    // 换阶段都走这里：先记下要去哪，外壳收尾时据此决定战斗引擎留不留着。
+    private Next<Phase> go(Phase to, String why) {
+        goingTo = to;
+        return Next.go(to, why);
+    }
+
     private Next<Phase> engage(TickContext context) {
         if (healthAtStart < 0) {
             healthAtStart = senses.profile(context).health();
@@ -154,7 +162,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         return switch (moment.state()) {
             case ESCAPED -> escaped(context, moment.retreatWhy());
             case FINISHED -> strangers.isEmpty() ? watchFirst() : stoppedByStranger(context);
-            case NEEDS_SHELTER -> Next.go(Phase.SHELTER, moment.doing());
+            case NEEDS_SHELTER -> go(Phase.SHELTER, moment.doing());
             default -> Next.stay();
         };
     }
@@ -164,14 +172,14 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
     private Next<Phase> shelter(TickContext context) {
         if (burrow == null) {
             burrow = need.shelter();
-            if (burrow == null) return Next.go(Phase.ENGAGE, "挖不了坑，背水一战");
+            if (burrow == null) return go(Phase.ENGAGE, "挖不了坑，背水一战");
             burrow.start(context);
         }
         if (burrow instanceof BurrowInTask digging && digging.exposedWhileWaiting()) {
             TaskResult stopped = burrow.close(CloseReason.FINISHED);
             burrow = null;
             keepFacts(stopped);
-            return Next.go(Phase.ENGAGE, "坑挖不成，回去背水一战");
+            return go(Phase.ENGAGE, "坑挖不成，回去背水一战");
         }
         if (burrow.tick(context) instanceof TickResult.Finished finished) {
             // 有了结果照内核的规矩收个尾，再把它交代的变化并进自卫的结果。
@@ -192,7 +200,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
 
     private Next<Phase> watchFirst() {
         watchTicksLeft = WATCH_TICKS;
-        return Next.go(Phase.WATCH, "威胁暂时消失，观察一阵");
+        return go(Phase.WATCH, "威胁暂时消失，观察一阵");
     }
 
     // 被没点名的玩家打了：退开举盾、没有还手，他停手后不走回打点、不接着干活——停下来等 LLM 决定还不还手。
@@ -216,13 +224,13 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         // 最后一只刚倒下时引擎已经收手：观察期里接着看它倒没倒，别漏记。
         tally.note(context, moment, senses, moves);
         if (moment.state() != Battle.State.FINISHED) {
-            return Next.go(Phase.ENGAGE, "又有威胁出现，继续打");
+            return go(Phase.ENGAGE, "又有威胁出现，继续打");
         }
         if (--watchTicksLeft <= 0) {
             // 真出过手才捡：只躲开、只撤离的没东西可捡。
             boolean fought = tally.hits() > 0 || tally.shots() > 0;
-            return dropsBefore != null && fought ? Next.go(Phase.PICKUP, "观察期内没有新威胁，捡这一仗掉出来的东西")
-                    : Next.go(Phase.RETURN, "观察期内没有新威胁，走回打点");
+            return dropsBefore != null && fought ? go(Phase.PICKUP, "观察期内没有新威胁，捡这一仗掉出来的东西")
+                    : go(Phase.RETURN, "观察期内没有新威胁，走回打点");
         }
         recordProgress("观察期还剩 " + watchTicksLeft + " 刻");
         return Next.stay();
@@ -234,7 +242,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         Battle.Moment moment = battle.tick(context);
         if (moment.state() != Battle.State.FINISHED) {
             closePickup();
-            return Next.go(Phase.ENGAGE, "捡东西时又有威胁出现，继续打");
+            return go(Phase.ENGAGE, "捡东西时又有威胁出现，继续打");
         }
         if (pickup == null) pickup = need.drops().pickUpNewSince(dropsBefore);
         ActionStatus status = pickup.tick(context);
@@ -243,7 +251,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
             return Next.stay();
         }
         closePickup();
-        return Next.go(Phase.RETURN, "这一仗掉出来的东西捡完了，走回打点");
+        return go(Phase.RETURN, "这一仗掉出来的东西捡完了，走回打点");
     }
 
     private void closePickup() {
@@ -257,7 +265,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         if (battle.tick(context).state() != Battle.State.FINISHED) {
             if (walkBack != null) walkBack.close();
             walkBack = null;
-            return Next.go(Phase.ENGAGE, "走回打点的路上又有威胁，回去应对");
+            return go(Phase.ENGAGE, "走回打点的路上又有威胁，回去应对");
         }
         double drift = distanceFromAnchor(context);
         double heartsLost = heartsLost(context);
@@ -357,8 +365,12 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
 
         @Override
         public void close() {
-            // 换阶段或任务结束时基类收尾外壳：出手、寻路、拉了一半的弓收尾，盾放下。
-            battle.close();
+            // 换阶段或任务结束时基类收尾外壳。打、观察、捡东西、走回打点这几段都靠同一个战斗引擎盯着威胁，
+            // 在它们之间换阶段时引擎不收尾，举着的盾、走位接着用，边界上进一出的怪不用多等几刻重建出手；
+            // 换去挖坑（坑里不推进引擎）或任务真结束时才收尾：出手、寻路、拉了一半的弓收尾，盾放下。
+            boolean battleGoesOn = goingTo != null && goingTo != Phase.SHELTER;
+            goingTo = null;
+            if (!battleGoesOn) battle.close();
             if (walkBack != null) walkBack.close();
             walkBack = null;
             closePickup();
