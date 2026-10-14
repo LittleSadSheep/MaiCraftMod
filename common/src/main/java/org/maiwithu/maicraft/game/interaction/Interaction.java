@@ -715,15 +715,15 @@ public final class Interaction {
     // 近战目标在移动时稍微朝它前方瞄，并把瞄点留在身体框内。
     // 相邻帧只移动一部分瞄点，避免怪物小幅晃动就带着镜头猛抖。
     private Vec3 stableEntityAimPoint(Entity target) {
-        AABB box = target.getBoundingBox();
-        Vec3 center = box.getCenter();
         Vec3 motion = target.getDeltaMovement();
         double leadTicks = Mth.clamp(player.distanceTo(target) * 0.35, 0.6, 1.5);
-        Vec3 wanted = center.add(
+        AABB box = target.getBoundingBox().move(
                 motion.x * leadTicks,
                 motion.y * Math.min(leadTicks, 0.75),
                 motion.z * leadTicks);
-        wanted = insetClamp(wanted, box);
+        // 瞄准它身上离眼睛最近的那一点（往里收一点），不瞄中心：对着中心那条射线到身上要走得更远，
+        // 矮的羊、站在三格边上的怪够得着却打不着，一直等不到出手（实机 10-14 点名杀羊，站在 3.1 格外三十秒没挥）。
+        Vec3 wanted = insetClamp(player.getEyePosition(), box);
         if (trackedEntityAim == null || trackedEntityAim.distanceToSqr(wanted) > 4.0) {
             trackedEntityAim = wanted;
         } else {
