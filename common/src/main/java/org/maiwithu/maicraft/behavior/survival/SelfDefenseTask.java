@@ -252,6 +252,13 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
     }
 
     private Next<Phase> back(TickContext context) {
+        // 走回打点的路上照样盯着：又有怪冲过来（尤其苦力怕）就回去打、去躲。原先这一段不看威胁，
+        // 自卫"还在做"、需求又插不进来，实机 10-14 撤离后往回走，苦力怕走到跟前点着引信，一下没躲被炸死。
+        if (battle.tick(context).state() != Battle.State.FINISHED) {
+            if (walkBack != null) walkBack.close();
+            walkBack = null;
+            return Next.go(Phase.ENGAGE, "走回打点的路上又有威胁，回去应对");
+        }
         double drift = distanceFromAnchor(context);
         double heartsLost = heartsLost(context);
         if (drift < 1.5) {

@@ -227,6 +227,25 @@ class SelfDefenseTaskTest {
     }
 
     @Test
+    void aNewThreatOnTheWayBackIsFoughtNotIgnored() {
+        // 打完往回走（离打点 8 格，路还在走），又冲过来一只僵尸：回去应对，不闷头往回走。
+        Senses senses = new Senses();
+        senses.threats.add(zombie(1, 2, 2));
+        Moves moves = new Moves();
+        SelfDefenseNeed need = new SelfDefenseNeed(senses, moves, new Events());
+        SelfDefenseTask task = (SelfDefenseTask) need.createTask(new Tick(0));
+        task.start(new Tick(0));
+        task.tick(new Tick(0));
+        senses.threats.clear();
+        moves.at[0] = 8;
+        run(task, 1, SelfDefenseTask.WATCH_TICKS + 5);
+        int strikesBefore = moves.strikes;
+        senses.threats.add(zombie(2, 9, 1));
+        run(task, SelfDefenseTask.WATCH_TICKS + 5, SelfDefenseTask.WATCH_TICKS + 10);
+        assertTrue(moves.strikes > strikesBefore, "走回去的路上又被追上：照打");
+    }
+
+    @Test
     void cannotWalkBackSaysWhereItStopped() {
         Senses senses = new Senses();
         senses.threats.add(zombie(1, 2, 2));
