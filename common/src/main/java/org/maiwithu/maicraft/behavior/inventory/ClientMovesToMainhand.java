@@ -9,6 +9,7 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 
 import org.maiwithu.maicraft.game.menu.MenuActions;
@@ -135,6 +136,14 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
     }
 
     /** 换手动作：界面搬运 → 关界面 → 副手交换 → 选中，逐刻推进；收进背包也走前两步加一次选中核对。 */
+    // 主背包（第 9 到 35 格）里这种东西在哪一格；没有为 -1。
+    private static int mainSlotOf(Inventory inventory, Item item) {
+        for (int slot = 9; slot <= 35; slot++) {
+            if (inventory.getItem(slot).is(item)) return slot;
+        }
+        return -1;
+    }
+
     private final class MoveAction implements Action {
         /** 这次搬的是什么，给日志与描述的一句话。 */
         private final String what;
@@ -146,6 +155,9 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
         private PendingMenuAction menuPending;
         private PendingInteraction selectPending;
         private Problem failure;
+        /** 要搬的是哪种东西：换的时候对不上，按它现在在哪一格再换一次。 */
+        private final Item item;
+        private boolean retried;
 
         MoveAction(String what, int sourceSlot) {
             this(what, sourceSlot, -1);
@@ -155,6 +167,9 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
             this.what = what;
             this.slot = sourceSlot;
             this.hotbarTarget = hotbarTarget;
+            PlayerContext context = contexts.get();
+            this.item = context == null || context.localPlayer() == null || sourceSlot < 0 || sourceSlot > 40 ? null
+                    : context.localPlayer().getInventory().getItem(sourceSlot).getItem();
             // 已经在快捷栏的选中那一格就行；副手的先做原生交换（要关着界面），主背包的先开界面搬运。
             this.stage = sourceSlot == 40 ? Stage.OFFHAND_SWAP
                     : sourceSlot >= 0 && sourceSlot <= 8 ? Stage.SELECTING
@@ -198,6 +213,25 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
                 return ActionStatus.running();
             }
             if (menuPending.status() != PendingMenuAction.Status.CONFIRMED_APPLIED) {
+                // 换的时候别的格子正好在变（刚合成完关背包，合成格的余料正退回背包、落进了要换的那一格）：
+                // 对不上不急着认输，按东西现在在哪一格再换一次，只再试一回。实机 10-14 现做的工作台换到快捷栏报对不上，做鱼竿整趟放弃。
+                Inventory inventory = player.localPlayer().getInventory();
+                int target = hotbarTarget >= 0 ? hotbarTarget : VanillaHotbar.swapTarget(inventory.selected);
+                boolean landed = item != null && inventory.getItem(target).is(item);
+                int now = item == null || landed ? -1 : mainSlotOf(inventory, item);
+                if (menuPending.status() == PendingMenuAction.Status.DIVERGED && !retried && (landed || now >= 0)) {
+                    retried = true;
+                    if (landed) {
+                        // 东西其实已经到了快捷栏那一格，只是别的格子跟着变了：照换成了往下走。
+                        slot = target;
+                        menuPending = player.menuActions().close(player, STEP_TIMEOUT_TICKS);
+                        stage = Stage.CLOSING;
+                        return ActionStatus.running();
+                    }
+                    slot = now;
+                    menuPending = null;
+                    return ActionStatus.running();
+                }
                 return fail("换到快捷栏没能确认：" + menuPending.detail());
             }
             // 换完东西就在选中的快捷栏格了；把界面关上再回到世界操作。
