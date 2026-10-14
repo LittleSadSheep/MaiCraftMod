@@ -14,10 +14,11 @@ import org.maiwithu.maicraft.kernel.task.TaskInput;
  * @param declaredType 目标对象带来的方块 ID（配 position 目标用）；没有为 null
  * @param expectedItem 认为会掉出的东西，用于确认捡没捡到；没有为 null，按实际掉落记录
  * @param permissions  这次任务的许可；动哪一格由它说了算
+ * @param named        目标是 LLM 用观察编号点名的：点名即许可，玩家放的也照挖；按坐标给的走完整的保护检查
  * @param describeText 给日志与面板的一句话，例如"采集 b7 的方块"
  */
 record GatherSpot(WorldPosition at, boolean drop, String declaredType,
-        String expectedItem, Permissions permissions, String describeText) implements TaskInput {
+        String expectedItem, Permissions permissions, boolean named, String describeText) implements TaskInput {
 
     GatherSpot {
         if (at == null) throw new IllegalArgumentException("采集必须有位置");

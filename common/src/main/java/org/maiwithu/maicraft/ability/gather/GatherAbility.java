@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.ability.gather;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.Set;
 
 import org.maiwithu.maicraft.behavior.acquire.DigsBlocks;
@@ -100,7 +101,7 @@ public final class GatherAbility implements AbilityModule {
             // 观察编号在册与否当场能查：不在册或已失效，都是"目标没了"，不猜、不当成参数写岔。
             return seen.lookup(seenId.id())
                     .map(found -> (StepDecision) new StepDecision.Run(new GatherSpot(found.at(), !found.block(),
-                            null, expectedItem, goal.permissions(),
+                            null, expectedItem, goal.permissions(), true,
                             "采集 " + seenId.id() + (found.block() ? " 处的方块" : " 的掉落物"))))
                     .orElseGet(() -> gone("观察编号 " + seenId.id() + " 对应的东西不在了（失效、走远或被拆）"));
         }
@@ -117,14 +118,20 @@ public final class GatherAbility implements AbilityModule {
     // 坐标目标：y 可以省略，找这一柱列的顶面；整列没加载就说不清，不瞎猜高度。
     private Optional<GatherSpot> resolvePosition(Target.Position position, ParamValues params, String expectedItem,
             Permissions permissions) {
-        int y = position.y() != null ? position.y()
-                : world.surfaceY(position.x(), position.z()).orElse(-1);
-        if (y < 0) {
-            return Optional.empty();
+        // 给了高度就用（深板岩层、钻石层在 0 以下，负高度是合法的一格）；没给才找这一柱列的顶面，找不到才说不清。
+        int y;
+        if (position.y() != null) {
+            y = position.y();
+        } else {
+            OptionalInt top = world.surfaceY(position.x(), position.z());
+            if (top.isEmpty()) {
+                return Optional.empty();
+            }
+            y = top.getAsInt();
         }
         String declared = params.has("block") ? params.text("block") : null;
         WorldPosition at = new WorldPosition(position.x(), y, position.z(), position.dimension());
-        return Optional.of(new GatherSpot(at, false, declared, expectedItem, permissions,
+        return Optional.of(new GatherSpot(at, false, declared, expectedItem, permissions, false,
                 "采集 (" + position.x() + ", " + y + ", " + position.z() + ") 的方块"));
     }
 

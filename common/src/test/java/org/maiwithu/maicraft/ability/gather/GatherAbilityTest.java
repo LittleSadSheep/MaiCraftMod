@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.ability.gather;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -142,6 +143,17 @@ class GatherAbilityTest {
         GatherSpot spot = assertInstanceOf(GatherSpot.class, run.input());
         assertEquals(3, spot.at().x());
         assertEquals(false, spot.drop(), "b 开头是方块，不是掉落物");
+        assertTrue(spot.named(), "观察编号点名的目标，挖时点名即许可");
+    }
+
+    @Test
+    void 给了负高度的坐标照常落成一格() {
+        // 深板岩层、钻石层在 0 以下：负高度是合法的一格，不能当成"找不到顶面"拒掉。
+        Target.Position deep = new Target.Position(10, -58, 10, null);
+        StepDecision.Run run = assertInstanceOf(StepDecision.Run.class, decide(deep));
+        GatherSpot spot = assertInstanceOf(GatherSpot.class, run.input());
+        assertEquals(-58, spot.at().y());
+        assertFalse(spot.named(), "按坐标给的走完整的保护检查");
     }
 
     @Test

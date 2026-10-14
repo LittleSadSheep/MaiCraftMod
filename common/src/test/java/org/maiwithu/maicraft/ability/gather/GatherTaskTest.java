@@ -203,7 +203,7 @@ class GatherTaskTest {
     }
 
     private GatherSpot blockSpot(String expectedItem) {
-        return new GatherSpot(AT, false, null, expectedItem, PERMS, "采集测试方块");
+        return new GatherSpot(AT, false, null, expectedItem, PERMS, false, "采集测试方块");
     }
 
     private PermissionCheck permission() {
@@ -256,6 +256,29 @@ class GatherTaskTest {
     }
 
     @Test
+    void 点名的玩家放的方块照挖_按坐标给的不动() {
+        // 一格看着像玩家放的石头：按坐标给的照旧拒绝；LLM 用观察编号点名后点名即许可，照挖，不再原样拒绝让它打转。
+        PermissionCheck guarded = new PermissionCheck(
+                new Protection((dimension, x, y, z) -> Optional.empty(), () -> List.of(),
+                        name -> Optional.empty(), (position, blockType) -> true, "self"),
+                entityId -> Optional.empty());
+        FakeBackpack byPosition = new FakeBackpack();
+        FakeActions positionActions = new FakeActions(byPosition, "minecraft:cobblestone", 1);
+        TaskResult refused = run(new GatherTask(blockSpot(null), positionActions, positionActions, new NoToolsNeeded(),
+                new FakeWorld("minecraft:stone", false), null, positionActions, guarded, byPosition, null, PERMS));
+        assertEquals(TaskResult.Status.FAILED, refused.status());
+        assertTrue(positionActions.log.stream().noneMatch(line -> line.startsWith("挖")), "按坐标给的不该动手挖");
+
+        FakeBackpack byName = new FakeBackpack();
+        FakeActions namedActions = new FakeActions(byName, "minecraft:cobblestone", 1);
+        GatherSpot named = new GatherSpot(AT, false, null, null, PERMS, true, "采集 b7 处的方块");
+        TaskResult dug = run(new GatherTask(named, namedActions, namedActions, new NoToolsNeeded(),
+                new FakeWorld("minecraft:stone", false), null, namedActions, guarded, byName, null, PERMS));
+        assertEquals(TaskResult.Status.DONE, dug.status(), dug.summary());
+        assertTrue(namedActions.log.stream().anyMatch(line -> line.startsWith("挖")), "点名的应当挖");
+    }
+
+    @Test
     void 补种失败保留已收进度() {
         FakeBackpack backpack = new FakeBackpack();
         FakeActions actions = new FakeActions(backpack, "minecraft:wheat", 1);
@@ -300,7 +323,7 @@ class GatherTaskTest {
     void 现场对不上声明的方块就如实说() {
         FakeBackpack backpack = new FakeBackpack();
         FakeActions actions = new FakeActions(backpack, "minecraft:cobblestone", 1);
-        GatherSpot spot = new GatherSpot(AT, false, "minecraft:diamond_ore", null, PERMS, "采集测试方块");
+        GatherSpot spot = new GatherSpot(AT, false, "minecraft:diamond_ore", null, PERMS, false, "采集测试方块");
         GatherTask task = new GatherTask(spot, actions, actions, new IronPickRequired(),
                 new FakeWorld("minecraft:stone", false), null, actions, permission(), backpack, null, PERMS);
         TaskResult result = run(task);
@@ -327,7 +350,7 @@ class GatherTaskTest {
                 };
             }
         };
-        GatherSpot spot = new GatherSpot(AT, true, null, "minecraft:rotten_flesh", PERMS, "捡起 e9");
+        GatherSpot spot = new GatherSpot(AT, true, null, "minecraft:rotten_flesh", PERMS, false, "捡起 e9");
         GatherTask task = new GatherTask(spot, actions, actions, new NoToolsNeeded(),
                 new FakeWorld(null, false), null, actions, permission(), backpack, null, PERMS);
         TaskResult result = run(task);

@@ -149,11 +149,15 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
         return permissionOr("是一格普通方块，挖");
     }
 
-    // 动手前过一次许可：别人搭的、玩家放的，一格都不动。许可过了才记下脚边原有的掉落物、开挖。
+    // 动手前过一次许可：按坐标给的，别人搭的、玩家放的一格都不动；LLM 用观察编号点名的，点名即许可
+    // （和照明、施工一样），不然拒绝里叫它"用观察编号点名"、照做了还是同一句拒绝，LLM 会在这里打转。
+    // 许可过了才记下脚边原有的掉落物、开挖。
     private Next<Phase> permissionOr(String why) {
-        Optional<Problem> refusal = permission.blockAllowed(permissions,
-                PermissionCheck.WorldAction.DIG_BLOCK, spot.at(), liveType);
-        if (refusal.isPresent()) return Next.fail(refusal.get());
+        if (!spot.named()) {
+            Optional<Problem> refusal = permission.blockAllowed(permissions,
+                    PermissionCheck.WorldAction.DIG_BLOCK, spot.at(), liveType);
+            if (refusal.isPresent()) return Next.fail(refusal.get());
+        }
         Optional<Action> dig = digs.dig(asBlock(spot.at()));
         if (dig.isEmpty()) {
             return Next.fail(Problem.of(Problem.Kind.UNSUPPORTED, "挖方块的现场动作还没接上，采不了"));
