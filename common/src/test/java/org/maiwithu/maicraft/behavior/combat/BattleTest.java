@@ -67,7 +67,10 @@ class BattleTest {
         boolean night;
         /** 出手被拒（原生攻击没得到确认）。 */
         boolean rejecting;
+        /** 交互入口被上一下举盾占着：出手抛"还在等确认"。 */
+        boolean busy;
         int keptAim;
+        int lowered;
 
         @Override public boolean night(TickContext context) { return night; }
 
@@ -87,6 +90,7 @@ class BattleTest {
 
         @Override public Action strike(TickContext context, int entityId) {
             return new Instant(() -> {
+                if (busy) throw new IllegalStateException("a native action is already awaiting confirmation");
                 strikes++;
                 return rejecting ? ActionStatus.failed(Problem.of(Problem.Kind.REFUSED_BY_GAME, "没确认"))
                         : ActionStatus.done();
@@ -104,7 +108,7 @@ class BattleTest {
         @Override public boolean hasMeleeWeapon(TickContext context) { return true; }
         @Override public boolean attackReady(TickContext context) { return true; }
         @Override public void guard(TickContext context, double distance, boolean aboutToStrike) {}
-        @Override public void lowerGuard() {}
+        @Override public void lowerGuard() { lowered++; }
         @Override public Footwork.Ground ground(TickContext context) { return (dx, dz) -> Footwork.Footing.FLAT; }
         @Override public void step(TickContext context, int faceEntityId, Footwork.Step step) { steps.add(step); }
 
@@ -225,6 +229,33 @@ class BattleTest {
         assertTrue(t - 2 >= Retreat.REMEMBER_TICKS, "看不见后又跑了 " + (t - 2) + " 刻");
         assertEquals(Battle.State.ESCAPED, escaped.state());
         assertEquals("血快见底，先撤离保命", escaped.retreatWhy());
+    }
+
+    @Test
+    void aPursuerAFewBlocksBehindDoesNotStopTheRun() {
+        // 血少撤离，僵尸跟在三格外、还够不着我：接着跑、盾放下，不停下来退着还手（人跑得比僵尸快）。
+        Senses senses = new Senses();
+        senses.threats.add(zombie(1, 3));
+        senses.health = 4;
+        Moves moves = new Moves();
+        Battle.Moment running = battle(senses, moves).tick(new Tick(0));
+        assertEquals("撤离：血快见底，先撤离保命", running.doing());
+        assertEquals(1, moves.walks.size());
+        assertEquals(0, moves.strikes);
+        assertTrue(moves.lowered > 0, "跑的时候盾放下，举着盾疾跑不了");
+    }
+
+    @Test
+    void aBusyInteractionSkipsTheSwingInsteadOfEndingTheFight() {
+        // 被追上（贴着我）要还手，交互入口还被举盾占着：这一刀不挥，仗照打，不抛错。
+        Senses senses = new Senses();
+        senses.threats.add(zombie(1, 1));
+        senses.health = 4;
+        Moves moves = new Moves();
+        moves.busy = true;
+        Battle.Moment caught = battle(senses, moves).tick(new Tick(0));
+        assertEquals("撤离途中被追上，退着还手", caught.doing());
+        assertFalse(caught.struck());
     }
 
     @Test

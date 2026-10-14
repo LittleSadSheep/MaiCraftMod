@@ -232,7 +232,9 @@ public final class Battle {
         }
         Battlefield.Me me = field.me();
         Battlefield.Foe pursuer = nearestChaser(field);
-        if (pursuer != null && pursuer.threat().visible() && pursuer.imminent()) {
+        // 真被追上（它已经够得着我）才停下退着还手；只是跟在后面几格就接着疾跑——人跑起来比僵尸快，
+        // 停下来还手反倒被围上。实机 10-14 四只尸壳跟在三格外，角色每隔一下就停下还手，十几秒被追死。
+        if (pursuer != null && pursuer.threat().visible() && pursuer.threat().canHitMe()) {
             dropWalk();
             boolean inReach = pursuer.threat().withinReach(me.reach());
             boolean struck = inReach && swing(context, pursuer.id(), me);
@@ -245,7 +247,8 @@ public final class Battle {
                     false, pursuer.id(), retreat.why(), cornered);
         }
         dropStrike();
-        if (pursuer != null) moves.guard(context, pursuer.distance(), false);
+        // 跑的时候盾放下：举着盾走路只有两成速度、也疾跑不了。实机 10-14 撤离时一路举盾，被尸壳贴着追死。
+        moves.lowerGuard();
         if (walk == null) {
             double cx = 0;
             double cz = 0;
@@ -561,7 +564,14 @@ public final class Battle {
             strike = moves.strike(context, targetId);
             strikeTarget = targetId;
         }
-        ActionStatus status = strike.tick(context);
+        ActionStatus status;
+        try {
+            status = strike.tick(context);
+        } catch (IllegalStateException busy) {
+            // 上一下举盾还在等确认，交互入口这一刻不收这一刀：下一刻再挥。不能因此把整场自卫掀翻——
+            // 实机 10-14 撤离途中被追上还手，刚举的盾没结清，挥刀抛错，自卫出错结束，站着被尸壳打死。
+            return false;
+        }
         if (status instanceof ActionStatus.Done) {
             dropStrike();
             rejects = 0;
