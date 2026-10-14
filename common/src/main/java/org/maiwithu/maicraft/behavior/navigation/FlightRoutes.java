@@ -68,6 +68,27 @@ public final class FlightRoutes {
         return Optional.empty();
     }
 
+    /**
+     * 这条路（拐弯点）上有几格是贴着头顶飞的：头上一格就是实心——坑道、矿洞、低矮的屋里。竖井、露天不算。
+     * 喷气背包在这种地方得一点点挪，人一般走出去再飞；出行方式估时用它把这几格算慢。
+     */
+    public static int cramped(BlockGetter view, List<BlockPos> route) {
+        int count = 0;
+        for (int i = 1; i < route.size(); i++) {
+            BlockPos from = route.get(i - 1);
+            BlockPos to = route.get(i);
+            // 相邻两个拐弯点之间是沿一根轴的直线：一格一格看过去。
+            int steps = from.distManhattan(to);
+            for (int step = 1; step <= steps; step++) {
+                BlockPos cell = from.offset((to.getX() - from.getX()) * step / steps,
+                        (to.getY() - from.getY()) * step / steps, (to.getZ() - from.getZ()) * step / steps);
+                BlockPos ceiling = cell.above(2);
+                if (!view.getBlockState(ceiling).getCollisionShape(view, ceiling).isEmpty()) count++;
+            }
+        }
+        return count;
+    }
+
     /** 人能飘在这一格：脚、头两格都看过、没有碰撞、不是流体与危险格。 */
     public static boolean open(BlockGetter view, Predicate<BlockPos> loaded, BlockPos feet) {
         return clear(view, loaded, feet) && clear(view, loaded, feet.above());

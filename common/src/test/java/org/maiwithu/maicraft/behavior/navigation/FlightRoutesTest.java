@@ -52,6 +52,18 @@ class FlightRoutesTest {
     }
 
     @Test
+    void 坑道里贴着头顶飞的格子数得出来() {
+        // 一条东西向的坑道：x=0..9 头上压着石头；从坑道口往东飞 6 格再往上爬 3 格出竖井口。
+        Grid grid = new Grid();
+        for (int x = 0; x <= 9; x++) grid.put(new BlockPos(x, 67, 0), Blocks.STONE.defaultBlockState());
+        List<BlockPos> tunnel = List.of(new BlockPos(0, 65, 0), new BlockPos(6, 65, 0));
+        assertEquals(6, FlightRoutes.cramped(grid, tunnel), "坑道里每一格头上都压着");
+        // 竖井往上：头上是空的，不算。
+        List<BlockPos> shaft = List.of(new BlockPos(20, 65, 0), new BlockPos(20, 75, 0));
+        assertEquals(0, FlightRoutes.cramped(grid, shaft));
+    }
+
+    @Test
     void 没看过的格不当空气() {
         Predicate<BlockPos> onlyNear = pos -> pos.getX() < 5;
         assertFalse(FlightRoutes.find(new Grid(), onlyNear, new BlockPos(0, 65, 0), new BlockPos(10, 65, 0),
