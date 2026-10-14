@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.find;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -20,6 +21,7 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.boss.EnderDragonPart;
 import net.minecraft.world.level.block.Block;
 import org.maiwithu.maicraft.behavior.acquire.NaturalTrees;
+import org.maiwithu.maicraft.behavior.explore.StructureClues;
 import org.maiwithu.maicraft.behavior.perception.ClientEntitySight;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
@@ -45,6 +47,8 @@ final class LiveFinder implements FindsAround {
     // 与感知读端同一套预算：一刻扫不完就分刻扫；半径换算成区块圈数封顶。
     private static final int MAX_CHUNK_RADIUS = 8;
     private static final int BUILD_BUDGET = 4096;
+    /** 看结构地表特征时一次要几处证据：凑一个村庄的组合够用。 */
+    private static final int CLUE_WANT = 64;
 
     private final BlockScanService scans;
     private final Supplier<PlayerContext> context;
@@ -212,7 +216,10 @@ final class LiveFinder implements FindsAround {
         return String.join("、", reasons);
     }
 
-    /** 找结构：查世界记忆里记过的产地线索；线索只是"这附近大概有"，到场要亲眼确认。 */
+    /**
+     * 找结构：查世界记忆里记过的产地线索；没记过就看看眼前这一片凑不凑得齐它的地表特征。
+     * 线索只是"这附近大概有"，到场要亲眼确认。
+     */
     private Round structureLeads(FindInput input, BlockPos center, String dimension) {
         WorldPosition here = new WorldPosition(center.getX(), center.getY(), center.getZ(), dimension);
         List<Hit> hits = new ArrayList<>();
@@ -228,8 +235,42 @@ final class LiveFinder implements FindsAround {
                 hits.add(Hit.place(FindInput.FindKind.STRUCTURE, selector, record.position()));
             }
         }
-        // 线索是记忆不是扫描：问完记忆这一轮就完了，没有记过的线索如实按没有交代。
-        return new Round(List.copyOf(hits), true, false);
+        // 记忆里没有：像人一样看看眼前这一片。
+        boolean complete = hits.isEmpty() ? liveClues(input, center, dimension, hits) : true;
+        return new Round(List.copyOf(hits), complete, false);
+    }
+
+    // 没记过线索时看眼前这一片：已加载、半径内凑得齐这种结构的地表特征（村庄的土径与钟、床和工作方块），
+    // 其中有看得见的，就报一条"这附近大概有"的线索并记进世界记忆。线索只认得出是哪一类（村庄不分变体）。
+    // 实机 10-14 人就站在针叶林村庄边上，没有记过线索，找村庄一无所获。返回这一片扫完了没有。
+    private boolean liveClues(FindInput input, BlockPos center, String dimension, List<Hit> hits) {
+        PlayerContext current = context.get();
+        ClientLevel level = current == null ? null : current.level();
+        LocalPlayer player = current == null ? null : current.localPlayer();
+        if (level == null || player == null) return true;
+        boolean complete = true;
+        for (String selector : input.selectors()) {
+            Optional<StructureClues.Resolved> resolved = StructureClues.resolve(selector);
+            if (resolved.isEmpty()) continue;
+            registered.ensure(level, resolved.get().unionBlocks());
+            var result = scans.query(level, center, resolved.get().unionBlocks(), CLUE_WANT,
+                    Math.max(1, Math.min(MAX_CHUNK_RADIUS, input.radius() / 16 + 1)), BUILD_BUDGET);
+            complete &= result.complete();
+            List<StructureClues.Evidence> evidence = new ArrayList<>();
+            boolean seen = false;
+            for (BlockPos hit : result.hits()) {
+                evidence.add(new StructureClues.Evidence(hit, level.getBlockState(hit).getBlock()));
+                seen = seen || ObservationVisibility.block(player, hit);
+            }
+            if (!seen) continue;
+            String structure = resolved.get().profile().structureId();
+            StructureClues.anchorOf(resolved.get(), evidence).ifPresent(anchor -> {
+                WorldPosition at = new WorldPosition(anchor.getX(), anchor.getY(), anchor.getZ(), dimension);
+                memory.siteSeen(at, List.of(structure), Instant.now());
+                hits.add(Hit.place(FindInput.FindKind.STRUCTURE, structure, at));
+            });
+        }
+        return complete;
     }
 
     /** 线索关键词与要找的 ID 对得上吗：整 ID、ID 的路径，或关键词出现在路径里，都算提到过。 */

@@ -80,7 +80,8 @@ public final class FindModule implements AbilityModule {
                     ParamSpec.of("entity", ParamType.ENTITY_TYPE_LIST)
                             .doc("找哪种实体（类型 ID，可给几种）；与 block、blocks、structure 三选一").build(),
                     ParamSpec.of("structure", ParamType.TEXT)
-                            .doc("找哪种结构（命名空间 ID）；按记过的产地线索找，到附近还要亲眼确认；"
+                            .doc("找哪种结构（命名空间 ID）；按记过的产地线索找，没记过就看眼前这一片凑不凑得齐它的地表特征，"
+                                    + "到附近还要亲眼确认；"
                                     + "与 block、blocks、entity 三选一").build(),
                     ParamSpec.of("count", ParamType.INTEGER)
                             .range(1, 32).defaultValue(1L)
