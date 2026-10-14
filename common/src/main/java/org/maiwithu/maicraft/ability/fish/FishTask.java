@@ -163,6 +163,12 @@ class FishTask extends PhasedTask<FishTask.Phase> {
     }
 
     private Next<Phase> takeRod(TickContext context) {
+        // 鱼竿已经拿在主手（换手对已在主手的给空）：不用换，直接去找钓点。实机 10-14 现做的鱼竿正拿在手上，
+        // 回回报"换不到主手，换手这条路还没接上"，一竿没抛。
+        var player = context.player().localPlayer();
+        if (action() == null && player != null && player.getMainHandItem().is(Items.FISHING_ROD)) {
+            return Next.go(Phase.FIND_SPOT, "鱼竿已经在主手上");
+        }
         if (action() == null) {
             // 身上有竿（上一阶段核对过）却换不到主手：换手这条还没接上，如实交代。
             return Next.fail(Problem.of(Problem.Kind.UNSUPPORTED, "鱼竿换不到主手，换手这条路还没接上"));
