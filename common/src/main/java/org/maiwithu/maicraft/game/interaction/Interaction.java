@@ -473,7 +473,9 @@ public final class Interaction {
         HitResult aimed = nativeRaytrace(player, InteractionRange.entityReach(player));
         if (!(aimed instanceof EntityHitResult entityHit)
                 || entityHit.getEntity() != entity) {
-            return attackWait("准星打到的是 " + describeAimed(aimed) + "，眼睛离瞄点 "
+            return attackWait("准星打到的是 " + (aimed instanceof EntityHitResult hit ? hit.getEntity().getType().getDescriptionId()
+                    : aimed instanceof BlockHitResult hit && hit.getType() == HitResult.Type.BLOCK
+                    ? "方块 " + hit.getBlockPos().toShortString() : "空气") + "，眼睛离瞄点 "
                     + String.format("%.2f", player.getEyePosition().distanceTo(aimPoint)) + " 格");
         }
         boolean recovering = entity instanceof LivingEntity living
@@ -497,12 +499,6 @@ public final class Interaction {
             LOG.info("[近战] 打 {} 还没出手：{}", entity == null ? "?" : entity.getType().getDescriptionId(), why);
         }
         return false;
-    }
-
-    private static String describeAimed(HitResult aimed) {
-        if (aimed instanceof EntityHitResult hit) return "实体 " + hit.getEntity().getType().getDescriptionId();
-        if (aimed instanceof BlockHitResult hit && hit.getType() == HitResult.Type.BLOCK) return "方块 " + hit.getBlockPos().toShortString();
-        return "空气";
     }
 
     private boolean settleAttack(PlayerContext context) {
