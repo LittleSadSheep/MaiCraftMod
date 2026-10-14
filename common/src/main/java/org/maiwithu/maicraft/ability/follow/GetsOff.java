@@ -36,7 +36,8 @@ final class GetsOff implements Action {
             input.halt(me);
             return ActionStatus.failed(Problem.of(Problem.Kind.STUCK, "按住潜行两秒还没从载具上下来"));
         }
-        input.applyMovement(new PlayerInput.Movement(0.0f, 0.0f, false, true, false), context.gameTick());
+        // 按键用本刻的客户端刻号，不用世界时间（两者不同，传错了输入层判过期抛错）。
+        input.applyMovement(new PlayerInput.Movement(0.0f, 0.0f, false, true, false), last.clientTick());
         return ActionStatus.running();
     }
 

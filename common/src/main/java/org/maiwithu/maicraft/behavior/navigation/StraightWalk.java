@@ -86,7 +86,8 @@ public final class StraightWalk implements Action {
         }
         input.lookAt(player, new Vec3(target.x, player.getEyeY(), target.z));
         boolean jump = climb && target.y - player.getY() > 0.55 && distance < 1.6 && player.onGround();
-        input.applyMovement(new PlayerInput.Movement(1.0f, 0.0f, jump, false, false), tick.gameTick());
+        // 按键用本刻的客户端刻号，不用世界时间（两者不同，传错了输入层判过期抛错）。
+        input.applyMovement(new PlayerInput.Movement(1.0f, 0.0f, jump, false, false), current.clientTick());
         return gained ? ActionStatus.progressed() : ActionStatus.running();
     }
 

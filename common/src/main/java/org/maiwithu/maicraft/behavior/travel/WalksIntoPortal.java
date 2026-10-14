@@ -67,7 +67,9 @@ public final class WalksIntoPortal implements Action {
                     "走近时门还在，直走时门方块没了（被人拆了或塌了）"));
         }
         input.lookAt(player, Vec3.atCenterOf(entrance));
-        input.applyMovement(new PlayerInput.Movement(1.0f, 0.0f, false, false, false), tick.gameTick());
+        // 按键交给角色输入要用本刻的客户端刻号，不是世界时间：原先传世界时间，直走进门第一刻就内部错误
+        // "input request is not for the active tick"，实机 10-14 三次都进不了下界。
+        input.applyMovement(new PlayerInput.Movement(1.0f, 0.0f, false, false, false), current.clientTick());
         return ActionStatus.running();
     }
 
