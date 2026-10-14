@@ -132,7 +132,9 @@ public final class MerchantTradeTakes implements TradesWithMerchants {
         private ActionStatus step(TickContext tick) {
             if (carriedAtStart < 0) carriedAtStart = carriedWanted();
             if (stage != Stage.NEXT_MERCHANT && ++merchantTicks > GIVE_UP_TICKS) {
-                deadEnds.add("在" + (merchant == null ? "村民" : merchant.describe()) + "身上超时");
+                // 写清耗在哪一步：走过去、点开、等报价还是买（实机 10-14 只写"超时"，看不出卡在哪）。
+                deadEnds.add("在" + (merchant == null ? "村民" : merchant.describe()) + "身上超时（卡在"
+                        + (step != null ? step.describe() : describe()) + "）");
                 leaveMenu();
                 stage = Stage.NEXT_MERCHANT;
             }
