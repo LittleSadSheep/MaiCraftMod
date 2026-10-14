@@ -54,6 +54,11 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
      * 原先十秒，实机走去三十多格外的床、睡醒走回原位都在半路以"没进展"收场，人留在半路。
      */
     private static final int STUCK_AFTER_TICKS = 600;
+    /**
+     * 附近的床最多等扫描扫一分钟：床区大、索引第一次建时要扫好几秒，等着时照样算有进展，
+     * 不被"三十秒没进展"判卡住；一分钟还没扫完就如实说扫不完，不无限等。
+     */
+    private static final int MAX_SCAN_WAIT_TICKS = 20 * 60;
     /** 最多做一刻钟：选床扫描加绕路走近，再长就是路线或床本身有问题。 */
     private static final long MAX_TICKS = 20L * 60 * 15;
 
@@ -76,6 +81,8 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
     private SleepDetails.BedSource bedSource = SleepDetails.BedSource.WORLD;
     private final Set<BlockPos> excluded;
     private int bedTries;
+    /** 选床时等方块扫描扫完已经等了几刻。 */
+    private int scanWaitTicks;
     private boolean enteredSleep;
     private boolean nightSkippedBySleep;
 
@@ -165,8 +172,15 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
             return Next.go(Phase.APPROACH, "选中了一张床，走过去");
         }
         if (!scan.complete()) {
+            // 扫描还没扫完不能当成"没有床"：接着等，等的时候记进展；等太久才如实收场。
+            if (++scanWaitTicks > MAX_SCAN_WAIT_TICKS) {
+                return Next.fail(Problem.of(Problem.Kind.STUCK,
+                        "附近的床扫了一分钟还没扫完，选不出床", "换个床少一点的地方，或用 target 指定一张床"));
+            }
+            recordProgress("还在扫附近的床");
             return Next.stay();
         }
+        scanWaitTicks = 0;
         // 附近没有能用的床：身上有就放自带的，没有就先去弄一张；弄不到时拿床那条路自己给原因。
         if (carriedBed.get().isPresent() && placer.placeCarriedBed().isPresent()) {
             return Next.go(Phase.PLACE_BED, "附近没有能用的床，放自带的");
