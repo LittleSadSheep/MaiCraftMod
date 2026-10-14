@@ -19,6 +19,8 @@ import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 
 import java.util.Set;
 
+import net.minecraft.world.level.block.LeavesBlock;
+
 /**
  * 用喷气背包直接飞上高处：从脚下这一格竖着往上飞到落脚处的高度，再横着挪一格落到那一格上。
  * 像玩家一样，悬崖、高台不再一块块垫圆石往上搭；身上有穿着的喷气背包、背罐里气够才有这一步（见 {@link CalculationContext#flyUpMaxBlocks}）。
@@ -100,8 +102,11 @@ public class MovementFlyUp extends Movement {
                 return MovementHelper.fullyPassable(context, x, y, z);
             }
 
+            // 落脚处不落在树冠上：人背着喷气背包不会飞上树顶去走，实机 10-14 林子里飞上二十格高的树冠，
+            // 在树顶上跳来跳去，最后要靠水桶接住才能下来。
             @Override public boolean floor(int x, int y, int z) {
-                return MovementHelper.canWalkOn(context, x, y, z);
+                return MovementHelper.canWalkOn(context, x, y, z)
+                        && !(context.get(x, y, z).getBlock() instanceof LeavesBlock);
             }
 
             @Override public boolean forbidden(int x, int y, int z) {

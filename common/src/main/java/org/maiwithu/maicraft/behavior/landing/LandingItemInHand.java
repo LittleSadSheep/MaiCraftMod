@@ -14,6 +14,8 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * 把接住自己要用的东西拿到手上：主手或副手已经拿着就直接用；在快捷栏就选中那一格；
@@ -88,6 +90,10 @@ final class LandingItemInHand {
         if (startedTick == Long.MIN_VALUE) startedTick = context.clientTick();
         if (move == null && acceptHeld(player)) return true;
         if (context.clientTick() - startedTick > PREPARE_LIMIT_TICKS) {
+            // 记一行卡在哪：实机 10-14 水桶在主背包，十秒没换到手上，日志里看不出是没开出背包还是换手没确认。
+            LoggerFactory.getLogger(LandingItemInHand.class).info("[落地] {} 十秒没拿到手上：{}，主手 {}，在第 {} 格",
+                    itemId, move == null ? "还没开始换" : move.describe(),
+                    BuiltInRegistries.ITEM.getKey(player.getMainHandItem().getItem()), carriedSlot(player));
             return fail(context, "把落地要用的东西拿到手上超过十秒还没好");
         }
         if (move == null) {
