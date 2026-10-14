@@ -196,7 +196,12 @@ final class EnchantMenuWork implements Action {
         EnchantMenuFacts.Snapshot snapshot = reads.readMenu();
         if (snapshot == null) return menuChanged();
         if (quote != null && quote.stillMatches(snapshot)) {
-            if (++offerStableTicks >= OFFER_STABLE_TICKS) return ActionStatus.progressed();
+            // 报价稳住了就去按：原先这里只报了进展、没换到提交那一步，一直停在等报价稳定上，
+            // 实机 10-14 剑和青金石放在台子上十几分钟一动不动。
+            if (++offerStableTicks >= OFFER_STABLE_TICKS) {
+                step = Step.SUBMIT;
+                return ActionStatus.progressed();
+            }
             return ActionStatus.running();
         }
         quote = EnchantQuote.freeze(snapshot);
