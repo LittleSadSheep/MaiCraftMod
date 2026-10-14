@@ -132,7 +132,12 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
                 }
                 ActionStatus status = runAction(context);
                 yield switch (status) {
-                    case ActionStatus.Running running -> Next.stay();
+                    case ActionStatus.Running running -> {
+                        // 走在去床的路上就是进展：回家睡要走一两百格，不能走了半分钟就被当成卡住。
+                        // 实机 10-14 夜里从河边回家睡，走到半路"推进了 600 刻都没有新进展"收场。
+                        if (running.progressed()) recordProgress("在去床的路上");
+                        yield Next.stay();
+                    }
                     case ActionStatus.Done done -> Next.go(Phase.LIE_DOWN, "到床边了");
                     case ActionStatus.Failed failed -> onApproachRefused(failed.problem());
                 };
