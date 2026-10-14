@@ -5,6 +5,7 @@ import baritone.behavior.PathingBehavior;
 import baritone.pathing.movement.movements.MovementFall;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Predicate;
 
 import net.minecraft.client.player.LocalPlayer;
@@ -116,6 +117,14 @@ final class WalkLanding {
         MovementFall fall = currentFall(pathing);
         if (fall != null && fall != checkedFall && player.onGround() && player.blockPosition().equals(fall.getSrc())) {
             checkedFall = fall;
+            // 穿着有气的喷气背包：这一跳开悬停刹住落下去，不从背包里翻水桶。翻水桶要开背包，
+            // 实机 10-14 换水桶时被僵尸打断，背包开了又关、自卫和走路来回抢，最后站在崖边被打死。
+            Optional<CatchesFall> brake = BaritoneInternals.fallBrake(context);
+            if (brake.isPresent()) {
+                rescue = brake.get();
+                plannedFall = fall;
+                return true;
+            }
             List<LandingPlan> plans = fall.landingPlans();
             if (!plans.isEmpty()) {
                 rescue = LandingRescue.planned(plans, protectedNow(player),

@@ -591,6 +591,8 @@ public final class Bootstrap {
             walks.stowBeforeWalking(() -> compat.stowsBeforeWalking());
             // 能直接飞上高处的装备（喷气背包）交给寻路：算路时拿它和垫方块往上搭比哪个省事。
             walks.flyUpGear(() -> compat.flyUpGears());
+            // 能刹住往下跳的装备（穿着有气的喷气背包）也交给寻路：计划内的往下跳用它刹住，不翻背包找水桶。
+            walks.fallBrakes(() -> compat.fallBrakes());
             tools = goalTools(abilities, goals, clientWork, taskEvents, chatEvents, () -> worldScope[0], recentCalls,
                     lookupTool(), () -> reminders == null ? List.of() : reminders.snapshot());
             try {

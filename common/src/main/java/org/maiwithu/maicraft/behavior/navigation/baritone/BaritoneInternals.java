@@ -35,6 +35,8 @@ import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.spi.FlyUpGear;
+import org.maiwithu.maicraft.behavior.landing.CatchesFall;
+import org.maiwithu.maicraft.behavior.landing.spi.FallBrake;
 import org.maiwithu.maicraft.behavior.navigation.spi.StowBeforeWalking;
 import org.maiwithu.maicraft.behavior.navigation.debug.NavigationPathSnapshot;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
@@ -77,6 +79,8 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
     private Supplier<List<StowBeforeWalking>> stows = List::of;
     /** 能直接飞上高处的装备（联动登记，喷气背包）；进世界、联动加载后接上，之前没有。 */
     private Supplier<List<FlyUpGear>> flyUps = List::of;
+    /** 不用放东西就能刹住往下跳的装备（穿着有气的喷气背包）。 */
+    private Supplier<List<FallBrake>> fallBrakes = List::of;
     /** 镜头离引擎要的精确瞄点差这么多度以内算转到位：平滑镜头收敛到 0.3° 吸附，留点余量。 */
     private static final float AIM_SETTLED_DEGREES = 3.0f;
     /** 寻路挖一格的额外代价（刻）：走一格约 4.6 刻，30 约等于多走六七格。 */
@@ -104,6 +108,22 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
     /** 接上联动登记的能直接飞上高处的装备。 */
     public void flyUpGear(Supplier<List<FlyUpGear>> flyUps) {
         this.flyUps = flyUps;
+    }
+
+    /** 接上联动登记的能刹住往下跳的装备。 */
+    public void fallBrakes(Supplier<List<FallBrake>> brakes) {
+        this.fallBrakes = brakes;
+    }
+
+    /** 走路里计划好的往下跳：身上有刹得住的装备就给一份刹车，没有为空。 */
+    static Optional<CatchesFall> fallBrake(PlayerContext context) {
+        BaritoneInternals internals = ATTACHED.get();
+        if (internals == null || context == null) return Optional.empty();
+        for (FallBrake brake : internals.fallBrakes.get()) {
+            Optional<CatchesFall> braking = brake.brake(context);
+            if (braking.isPresent()) return braking;
+        }
+        return Optional.empty();
     }
 
     /**
