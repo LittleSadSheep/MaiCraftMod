@@ -128,6 +128,7 @@ public final class Interaction {
     private String lastUseResult = "not fired";
     /** 近战上一次记下的"还没出手"原因。 */
     private String lastAttackWait = "";
+    private final PlantClearing plants;
     /** 仅在单次实体交互实例中保留并平滑瞄准点。 */
     private Vec3 trackedEntityAim;
 
@@ -136,6 +137,7 @@ public final class Interaction {
                         InteractionHand hand, Timing timing) {
         this.player = player;
         this.sender = sender;
+        this.plants = new PlantClearing(sender);
         this.menuActions = menuActions;
         this.playerInput = playerInput;
         this.button = button;
@@ -464,6 +466,7 @@ public final class Interaction {
             return false;
         }
         playerInput.halt(player);
+        if (plants.busy(context)) return false;
         Vec3 aimPoint = stableEntityAimPoint(entity);
         playerInput.lookAt(player, aimPoint);
         if (!aimReady(aimPoint)) {
@@ -473,6 +476,7 @@ public final class Interaction {
         HitResult aimed = nativeRaytrace(player, InteractionRange.entityReach(player));
         if (!(aimed instanceof EntityHitResult entityHit)
                 || entityHit.getEntity() != entity) {
+            if (plants.clear(context, aimed)) return attackWait("先砍掉挡在前面的草");
             return attackWait("准星打到的是 " + (aimed instanceof EntityHitResult hit ? hit.getEntity().getType().getDescriptionId()
                     : aimed instanceof BlockHitResult hit && hit.getType() == HitResult.Type.BLOCK
                     ? "方块 " + hit.getBlockPos().toShortString() : "空气") + "，眼睛离瞄点 "
@@ -726,12 +730,7 @@ public final class Interaction {
                 >= Math.cos(Math.toRadians(7.0));
     }
 
-    /**
-     * 瞄准目标当前碰撞箱内部，并沿测得的移动方向稍作提前。保留上次瞄准点可平滑数据包间的速度噪声；
-     * 每次都将预测点限制在内缩碰撞箱中，防止提前量过大而使原生准星错过目标。
-     */
-    // 近战目标在移动时稍微朝它前方瞄，并把瞄点留在身体框内。
-    // 相邻帧只移动一部分瞄点，避免怪物小幅晃动就带着镜头猛抖。
+    // 近战瞄点：按它的移动稍往前提，落在内缩的身体框里；相邻帧只挪一部分，怪小幅晃动时镜头不猛抖。
     private Vec3 stableEntityAimPoint(Entity target) {
         Vec3 motion = target.getDeltaMovement();
         double leadTicks = Mth.clamp(player.distanceTo(target) * 0.35, 0.6, 1.5);
@@ -780,6 +779,7 @@ public final class Interaction {
     // 普通方块／实体点击的未确认记录没有在此退役，外层结束时仍需处理它。
     public void stop(PlayerContext context) {
         if (digger != null) digger.cancel(context);
+        plants.stop(context);
         if (pending != null && pending.kind() == PendingInteraction.Kind.USE_ITEM
                 && player.isUsingItem() && !releasing) {
             // 本刻没有交互机会时不发松开：按住使用键的投影两刻内自然过期，原版就看到松键。
