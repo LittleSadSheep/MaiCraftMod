@@ -23,6 +23,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.Map;
 import java.util.function.Predicate;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.core.Direction;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.LeavesBlock;
 import org.maiwithu.maicraft.behavior.acquire.NaturalTrees;
@@ -109,7 +111,21 @@ public final class ClearanceWhitelist {
             return !(state.hasProperty(LeavesBlock.PERSISTENT) && state.getValue(LeavesBlock.PERSISTENT));
         }
         if (NaturalTrees.isLog(state)) return NaturalTrees.partOfNaturalTree(pos, world, loaded, trunks);
+        // 挨着传送门方块的（门框的黑曜石）是门的一部分，不算地形：拆了门就没了。
+        // 实机 10-14 进门失败后为了自己建门去挖黑曜石，把旁边那扇亮着的门框整个拆了。
+        if (state.is(Blocks.OBSIDIAN) && touchesPortal(pos, world, loaded)) return false;
         return allows(state);
+    }
+
+    // 这一格六面有没有挨着传送门方块（下界门、末地门）。
+    private static boolean touchesPortal(BlockPos pos, BlockGetter world, Predicate<BlockPos> loaded) {
+        for (Direction side : Direction.values()) {
+            BlockPos next = pos.relative(side);
+            if (!loaded.test(next)) continue;
+            BlockState near = world.getBlockState(next);
+            if (near.is(Blocks.NETHER_PORTAL) || near.is(Blocks.END_PORTAL)) return true;
+        }
+        return false;
     }
 
     // 明确列举方块或引用实际同步的标签；不凭名称包含 stone、ore 等文字猜测模组机器是否属于自然地形。
