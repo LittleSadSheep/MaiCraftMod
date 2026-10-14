@@ -40,7 +40,7 @@ import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 
 /**
- * 施工能力：按图纸在 target 处施工。design_id / cells / block 三选一（结构文件 file 还没接上），
+ * 施工能力：按图纸在 target 处施工。design_id / cells / block / file（结构文件，经 StructureImport 读进来）四选一，
  * target 是锚点，rotation 绕锚点转。自己只做参数核对、锚点解析和把蓝图落到锚点；
  * 核对、备料、清障、砌筑、倒桶、验收、收回临时方块都是施工引擎的事，结果也是它的结果。
  */
@@ -55,10 +55,10 @@ public final class BuildModule implements AbilityModule {
             "按图纸、逐格清单、结构文件或单格在 target 处施工：缺料自己拿、挡着的挖掉、从底往上砌、够不着就垫临时方块再收走",
             AbilityDoc.forAbility("build"),
             ParamSpecs.of(
-                    ParamSpec.of("design_id", ParamType.TEXT).doc("按 design 存的图纸施工（三选一）").build(),
+                    ParamSpec.of("design_id", ParamType.TEXT).doc("按 design 存的图纸施工（四选一）").build(),
                     ParamSpec.of("cells", ParamType.JSON_ARRAY)
-                            .doc("逐格蓝图（三选一）：[{\"offset\":[x,y,z],\"block\":\"minecraft:stone\",\"properties\":{...}}]，block 为 minecraft:air 表示清空，水源、岩浆源表示倒桶").build(),
-                    ParamSpec.of("block", ParamType.BLOCK_OR_TAG).doc("只放一格（三选一）：放在 target 那一格").build(),
+                            .doc("逐格蓝图（四选一）：[{\"offset\":[x,y,z],\"block\":\"minecraft:stone\",\"properties\":{...}}]，block 为 minecraft:air 表示清空，水源、岩浆源表示倒桶").build(),
+                    ParamSpec.of("block", ParamType.BLOCK_OR_TAG).doc("只放一格（四选一）：放在 target 那一格").build(),
                     ParamSpec.of("properties", ParamType.JSON_OBJECT).doc("配 block：要求的方块状态属性，例如 {\"facing\":\"north\"}").build(),
                     ParamSpec.of("file", ParamType.TEXT).doc("schematics 目录下的结构文件名（四选一）：.nbt / .snbt / .litematic / .schem，或 design 导出的 .json；摆设实体不装").build(),
                     ParamSpec.of("rotation", ParamType.INTEGER).range(0, 270).defaultValue(0).doc("绕锚点转 0 / 90 / 180 / 270 度；只配 design_id 或 file").build()),

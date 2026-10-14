@@ -784,19 +784,19 @@
           "name": "design_id",
           "type": "string",
           "required": false,
-          "doc": "按 design 存的图纸施工（三选一）"
+          "doc": "按 design 存的图纸施工（四选一）"
         },
         {
           "name": "cells",
           "type": "array",
           "required": false,
-          "doc": "逐格蓝图（三选一）：[{\"offset\":[x,y,z],\"block\":\"minecraft:stone\",\"properties\":{...}}]，block 为 minecraft:air 表示清空，水源、岩浆源表示倒桶"
+          "doc": "逐格蓝图（四选一）：[{\"offset\":[x,y,z],\"block\":\"minecraft:stone\",\"properties\":{...}}]，block 为 minecraft:air 表示清空，水源、岩浆源表示倒桶"
         },
         {
           "name": "block",
           "type": "string",
           "required": false,
-          "doc": "只放一格（三选一）：放在 target 那一格"
+          "doc": "只放一格（四选一）：放在 target 那一格"
         },
         {
           "name": "properties",
