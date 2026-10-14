@@ -443,6 +443,11 @@ public final class ControlLoop {
         }
         LOG.info("任务结束：{}（{}）", frame.task.describe(), finished.result().summary());
         stack.remove(frame);
+        // 插进来的临时任务做完要说一声的（夜里自己睡了一觉）：发一条事件，LLM 才知道时间跳了、人挪过。
+        if (frame.from != null && frame.task instanceof AnnouncesFinish announces) {
+            String note = announces.finishedNote(finished.result());
+            if (note != null) events.publish(TaskEvent.Kind.TEMPORARY_TASK_FINISHED, note);
+        }
         // 临时任务做成的事发生在主任务身上：插了一支灯、垫了一块料，把交代的结果递给主任务记账，
         // 不让变化跟着临时任务的结果一起消失。
         if (frame.from != null && !stack.isEmpty()

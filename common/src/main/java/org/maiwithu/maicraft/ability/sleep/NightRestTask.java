@@ -19,6 +19,7 @@ import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.kernel.interrupt.AnnouncesFinish;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -34,7 +35,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * （多人生存里常见），视为已经度过这一夜，直接结清回去干活。放在记住的"家"区域里的床不收：
  * 收床会让重生点失效，家里的床留着当重生点。
  */
-final class NightRestTask extends SleepTask {
+final class NightRestTask extends SleepTask implements AnnouncesFinish {
 
     /**
      * 醒来后留出的同步时间：醒来的实体包与时间包不同刻到达，等它们对齐再走动。游戏事实。
@@ -223,5 +224,16 @@ final class NightRestTask extends SleepTask {
         }
         var at = now.player().localPlayer().blockPosition();
         return at.distSqr(new BlockPos(homeSpot.x(), homeSpot.y(), homeSpot.z())) <= 4;
+    }
+
+    // 夜里自己去睡了一觉要告诉 LLM：时间一下跳到天亮、人挪过地方，不说它就不知道。实机 10-14 角色夜里自己睡了两回，
+    // 事件流里一条都没有，测试员下 sleep 只看到"现在睡不了"，前后对不上。没睡成也说一声为什么。
+    @Override
+    public String finishedNote(TaskResult result) {
+        if (result.details() instanceof SleepDetails details && details.enteredSleep()) {
+            return "天黑了，自己去床上睡了一觉" + (details.nightSkippedBySleep() ? "，一觉睡到了天亮" : "")
+                    + "；" + result.summary();
+        }
+        return result.status() == TaskResult.Status.DONE ? null : "天黑了想去睡，没睡成：" + result.summary();
     }
 }
