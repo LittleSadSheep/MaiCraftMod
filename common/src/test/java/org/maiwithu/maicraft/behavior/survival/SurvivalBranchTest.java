@@ -36,6 +36,13 @@ class SurvivalBranchTest {
         // 受了伤、不到回血线（18）：溢出也吃，血才回得来（实机 13 点血、饱食度 17 一直不回血）。
         assertEquals(Urgency.LATER, HungerNeed.assess(new HungerNeed.Facts(17, false, 5, true)));
         assertNull(HungerNeed.assess(new HungerNeed.Facts(18, false, 5, true)), "到了回血线就不用吃");
+        // 伤得重（血不到一半）、没有普通食物、不到回血线：趁空当吃一口腐肉过线，或去弄吃的（实机两点血揣着腐肉不回血）。
+        HungerNeed.Facts hurt = new HungerNeed.Facts(14, false, 0, true, true, 4);
+        assertEquals(Urgency.LATER, HungerNeed.assess(hurt));
+        assertTrue(hurt.junkReachesRegen(), "14 加腐肉的 4 刚好到回血线");
+        assertFalse(new HungerNeed.Facts(10, false, 0, true, true, 4).junkReachesRegen(), "吃了也不到线：去弄吃的");
+        assertNull(HungerNeed.assess(new HungerNeed.Facts(14, false, 0, true, false, 4)), "只是掉了点血不为腐肉停手");
+        assertNull(HungerNeed.assess(new HungerNeed.Facts(18, false, 0, true, true, 4)), "到了回血线自己会回");
     }
 
     @Test

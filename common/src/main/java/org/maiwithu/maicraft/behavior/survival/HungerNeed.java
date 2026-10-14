@@ -26,10 +26,28 @@ public final class HungerNeed implements SurvivalNeed {
      *
      * @param smallestPlainNutrition 身上普通食物里补得最少的那件的营养值；身上没有普通食物时为 0
      */
-    public record Facts(int food, boolean losingHealth, int smallestPlainNutrition, boolean injured) {
+    public record Facts(int food, boolean losingHealth, int smallestPlainNutrition, boolean injured,
+                        boolean badlyHurt, int bestJunkNutrition) {
 
         public Facts(int food, boolean losingHealth, int smallestPlainNutrition) {
             this(food, losingHealth, smallestPlainNutrition, false);
+        }
+
+        public Facts(int food, boolean losingHealth, int smallestPlainNutrition, boolean injured) {
+            this(food, losingHealth, smallestPlainNutrition, injured, false, 0);
+        }
+
+        /**
+         * 为回血吃一口：伤得重（血不到一半）、饱食度不到回血线、身上没有普通食物。腐肉这类垃圾食物吃一口
+         * 就过回血线就吃它，不然去弄点吃的——人残血时不会揣着腐肉干等。
+         */
+        public boolean eatsToHeal() {
+            return badlyHurt && food < NATURAL_REGEN_FOOD && !carryingEdible();
+        }
+
+        /** 回血时吃垃圾食物值不值：吃一口就能过回血线。 */
+        public boolean junkReachesRegen() {
+            return bestJunkNutrition > 0 && food + bestJunkNutrition >= NATURAL_REGEN_FOOD;
         }
 
         /** 身上有没有饿了就能顺手吃的普通食物。 */
@@ -51,6 +69,11 @@ public final class HungerNeed implements SurvivalNeed {
         // （实机 13 点血、饱食度 17，揣着面包一直不回血）。
         if (facts.carryingEdible() && (facts.food() + facts.smallestPlainNutrition() <= 20
                 || facts.injured() && facts.food() < NATURAL_REGEN_FOOD)) {
+            return Urgency.LATER;
+        }
+        // 伤得重、饱食度不到回血线、身上没普通食物：一直不回血。趁空当吃一口腐肉过回血线，或去弄点吃的。
+        // 实机 10-14 两点多血、饱食度 14、身上六块腐肉，残血站了几分钟不回血。
+        if (facts.eatsToHeal()) {
             return Urgency.LATER;
         }
         return null;

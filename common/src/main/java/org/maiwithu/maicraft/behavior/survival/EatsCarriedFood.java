@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.survival;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.function.Supplier;
 import java.util.Optional;
@@ -67,10 +68,11 @@ public final class EatsCarriedFood implements EatSoonTask.FoodMoves {
     @Override
     public Action eating(HungerNeed.Facts hunger) {
         // 按饥饿处境挑：平时只吃补得刚好的普通食物，饱食度见底在掉血才什么都吃；正要用的那几件不算口粮。
-        return FoodPicker.forHunger(FoodPicker.carried(backpack.stacks(), foods, keeps), hunger.food(),
-                        hunger.losingHealth())
-                .map(food -> (Action) new BiteAction(food))
-                .orElse(null);
+        // 伤得重又没普通食物、腐肉这类吃一口就过回血线：吃它回血。
+        List<FoodPicker.Carried> carried = FoodPicker.carried(backpack.stacks(), foods, keeps);
+        Optional<String> pick = FoodPicker.forHunger(carried, hunger.food(), hunger.losingHealth());
+        if (pick.isEmpty() && hunger.eatsToHeal() && hunger.junkReachesRegen()) pick = FoodPicker.autoPick(carried);
+        return pick.map(food -> (Action) new BiteAction(food)).orElse(null);
     }
 
     @Override

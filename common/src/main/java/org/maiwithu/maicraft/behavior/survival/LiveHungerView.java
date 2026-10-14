@@ -47,7 +47,13 @@ public final class LiveHungerView implements HungerNeed.ReadsFacts {
                 .min().orElse(0);
         // 掉了一颗心以上算受了伤：饱食度不到回血线时宁可溢出一点也吃，血才回得来。
         boolean injured = self.getHealth() <= self.getMaxHealth() - 2;
-        return new HungerNeed.Facts(food, food <= 0, smallest, injured);
+        // 血不到一半算伤得重：没有普通食物时，腐肉这类垃圾食物吃一口能过回血线也吃。
+        boolean badlyHurt = self.getHealth() <= self.getMaxHealth() / 2;
+        int bestJunk = backpack == null ? 0 : FoodPicker.carried(backpack.stacks(), foods, keeps).stream()
+                .filter(candidate -> FoodPicker.junk(candidate.value()))
+                .mapToInt(candidate -> candidate.value().nutrition())
+                .max().orElse(0);
+        return new HungerNeed.Facts(food, food <= 0, smallest, injured, badlyHurt, bestJunk);
     }
 
     private static LocalPlayer self(TickContext context) {

@@ -158,7 +158,9 @@ public final class EatSoonTask extends PhasedTask<EatSoonTask.Phase> {
 
     // 吃不上：发事件把事实告诉 LLM，以没做成收场；主任务照常继续。
     private Next<Phase> giveUp(Problem problem) {
-        events.publish(TaskEvent.Kind.NEED_UNHANDLED, "饿了但没吃上：" + problem.message() + "；先回去继续干活");
+        // 为回血吃（不饿、伤得重）和真饿着分开说，不把残血想吃一口说成饿了。
+        String why = latest != null && !hungry(latest) && latest.eatsToHeal() ? "伤得重想吃点东西回血，但没吃上：" : "饿了但没吃上：";
+        events.publish(TaskEvent.Kind.NEED_UNHANDLED, why + problem.message() + "；先回去继续干活");
         return Next.fail(problem);
     }
 
