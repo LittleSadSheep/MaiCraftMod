@@ -110,6 +110,8 @@ public final class Battle {
     private boolean retreating;
     private boolean cornered;
     private final Set<Integer> unreachable = new HashSet<>();
+    /** 其中因为走不到跟前记下的（不是挥了被拒的）：它自己贴上来就不再算走不到。 */
+    private final Set<Integer> walkedOut = new HashSet<>();
     /** 上一刻每只的距离：估它冲过来多快，拉弓的距离带按它留。 */
     private final Map<Integer, Double> lastDistance = new HashMap<>();
     private String doing = "观察战场";
@@ -144,9 +146,19 @@ public final class Battle {
     }
 
     public Moment tick(TickContext context) {
+        // 撤离时看四十格，这次的追兵一时没在追（隔着坡看不见）也留在场上，甩没甩开才看得准。
         Battlefield field = Battlefield.read(senses, moves, context,
-                retreating ? ThreatAssessment.FLEE_CLEAR_DISTANCE : radius, roster);
+                retreating ? ThreatAssessment.FLEE_CLEAR_DISTANCE : radius, roster,
+                retreating ? retreat.pursuers() : Set.of());
         if (retreating) retreat.noteChasers(field);
+        // 走不到而记下的那只自己贴上来了（看得见、够得着）：不再当走不到，照常近身打，不对着贴脸的怪拉弓。
+        // 实机 10-14 一只尸壳被记成走不到，贴到 0.6 格时还在拉弓射它。
+        for (Battlefield.Foe foe : field.foes()) {
+            if (walkedOut.contains(foe.id()) && foe.threat().visible() && foe.threat().withinReach(field.me().reach())) {
+                walkedOut.remove(foe.id());
+                unreachable.remove(foe.id());
+            }
+        }
         // 被打下柱顶（击退、柱子被炸）：不再算站在高处。
         if (perched && field.me().y() < perchY - 0.5) perched = false;
         boolean mayPillar = !pillarTried && cornered && moves.canPillar(context);
@@ -379,7 +391,7 @@ public final class Battle {
             Vec3 focus = new Vec3(threat.x(), threat.y(), threat.z());
             moved = follow(context, "逼近 " + target.id(), threat,
                     () -> GoalCompiler.approachAvoiding(GoalCompiler.band(focus, 0, band.outer()), threats));
-            if (lastWalkFailed) unreachable.add(target.id());
+            if (lastWalkFailed) cannotWalkTo(target.id());
         }
         String what = (inReach ? "打 " : "逼近 ") + threat.type();
         return new Moment(State.FIGHTING, what, struck || moved, struck, false, target.id(), null, cornered);
@@ -460,7 +472,7 @@ public final class Battle {
         trimTicks++;
         double trim = Math.min(band.outer() - Math.max(band.inner() + 0.1, MIN_OUTER), (trimTicks / TRIM_EVERY) * TRIM_STEP);
         if (trimTicks > TRIM_GIVE_UP) {
-            unreachable.add(targetId);
+            cannotWalkTo(targetId);
             trimTicks = 0;
         }
         return trim <= 0 ? band : new Footwork.Band(band.x(), band.z(), band.inner(), band.outer() - trim);
@@ -516,7 +528,7 @@ public final class Battle {
             moved = follow(context, "走近射 " + target.id(), threat, () -> GoalCompiler.approachAvoiding(
                     GoalCompiler.band(focus, RangedCombat.ENGAGE_RANGE - 2 * BOW_APPROACH_MARGIN,
                             RangedCombat.ENGAGE_RANGE - BOW_APPROACH_MARGIN), threats));
-            if (lastWalkFailed) unreachable.add(target.id());
+            if (lastWalkFailed) cannotWalkTo(target.id());
         } else {
             // 苦力怕不在眼前同一层的平地上（隔着坑、差着高、要绕路搭桥）：不寻路凑过去——绕路、搭桥时人慢，
             // 它一贴近就点火，实机就是潜行着往苦力怕那边挪被炸。原地守在它的点火距离外，等它走到平地跟前再砍；
@@ -528,7 +540,7 @@ public final class Battle {
                     moves.ground(context));
             moves.step(context, target.id(), step);
             moved = !step.standing();
-            if (!threat.visible() || Math.abs(threat.y() - me.y()) > LEVEL_GAP) unreachable.add(target.id());
+            if (!threat.visible() || Math.abs(threat.y() - me.y()) > LEVEL_GAP) cannotWalkTo(target.id());
         }
         return moved;
     }
@@ -588,6 +600,12 @@ public final class Battle {
             }
         }
         return false;
+    }
+
+    // 走不到它跟前（寻路走不通、收紧站位也够不着、苦力怕隔着坑）：记成够不着，有弓去射、没弓换下一只。
+    private void cannotWalkTo(int id) {
+        unreachable.add(id);
+        walkedOut.add(id);
     }
 
     private void retarget(int id) {

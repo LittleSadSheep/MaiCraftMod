@@ -55,6 +55,11 @@ public final class Retreat {
         return why;
     }
 
+    /** 这次参与追击的（实体编号）。 */
+    Set<Integer> pursuers() {
+        return Set.copyOf(pursuers);
+    }
+
     /** 新冒出来追我的也算进这次的追兵。 */
     void noteChasers(Battlefield field) {
         for (Battlefield.Foe foe : field.chasers()) {

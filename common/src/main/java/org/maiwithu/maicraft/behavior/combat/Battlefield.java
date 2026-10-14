@@ -119,6 +119,16 @@ public record Battlefield(Me me, List<Foe> foes) {
     /** 读一份战场：给定半径内的追兵与名单上的，按威胁先后排好。 */
     public static Battlefield read(CombatSenses senses, BattleMoves moves, TickContext context,
                                    double radius, Roster roster) {
+        return read(senses, moves, context, radius, roster, Set.of());
+    }
+
+    /**
+     * 同上，另把 keep 里的这几只也留在场上，哪怕这一刻没在追我、名单上也不要：撤离时这次的追兵一时看不见、
+     * 没亮攻击标记也还在后面，甩没甩开要看得到它们。实机 10-14 尸壳隔着坡一时看不见，就被当成不在场，
+     * 它还在七格外就报"甩开了追兵"、站住，转眼又被追上。
+     */
+    public static Battlefield read(CombatSenses senses, BattleMoves moves, TickContext context,
+                                   double radius, Roster roster, Set<Integer> keep) {
         CombatSenses.CombatProfile profile = senses.profile(context);
         double[] at = moves.selfPosition(context);
         int weaponScore = profile.weapon().map(WeaponChoice::scoreOf).orElse(0);
@@ -134,7 +144,7 @@ public record Battlefield(Me me, List<Foe> foes) {
             boolean attacker = attackers.contains(threat.uuid());
             boolean chasing = CombatSenses.threatening(threat, List.copyOf(attackers));
             boolean wanted = roster.wanted(threat, attacker, chasing);
-            if (!chasing && !wanted) continue;
+            if (!chasing && !wanted && !keep.contains(threat.entityId())) continue;
             foes.add(new Foe(threat, chasing, attacker, wanted, roster.primary(threat)));
             seen.add(threat.entityId());
         }

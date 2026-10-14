@@ -246,6 +246,23 @@ class BattleTest {
     }
 
     @Test
+    void aPursuerHiddenBehindAHillIsStillBehindMe() {
+        // 撤离途中追兵隔着坡一时看不见、没亮攻击标记（这一刻不算"在追"），但还在十二格外：不算甩开，接着跑。
+        Senses senses = new Senses();
+        senses.threats.add(zombie(1, 6));
+        senses.health = 4;
+        Moves moves = new Moves();
+        Battle fight = battle(senses, moves);
+        assertEquals(Battle.State.RETREATING, fight.tick(new Tick(0)).state());
+        senses.threats.clear();
+        senses.threats.add(new CombatSenses.Threat(1, UUID.randomUUID(), "minecraft:zombie", 12, 64, 0, 12,
+                ThreatAssessment.Kind.MELEE, false, false, false));
+        for (int t = 1; t <= Retreat.REMEMBER_TICKS + 20; t++) {
+            assertEquals(Battle.State.RETREATING, fight.tick(new Tick(t)).state(), "第 " + t + " 刻");
+        }
+    }
+
+    @Test
     void aBusyInteractionSkipsTheSwingInsteadOfEndingTheFight() {
         // 被追上（贴着我）要还手，交互入口还被举盾占着：这一刀不挥，仗照打，不抛错。
         Senses senses = new Senses();
