@@ -29,8 +29,14 @@ public interface ScansMerchants {
      * @param describe     给人看的一句话，例如"工具匠村民""流浪商人""傻子村民"
      * @param baby         是不是幼年：幼年的右键开不出交易界面
      * @param opensTrading 成年且有业（或流浪商人）：右键能不能开出交易界面是游戏事实，读端按职业标好
+     * @param sleeping     正躺在床上睡觉：睡着的村民右键不搭话，天亮才做买卖
      */
     record MerchantSpot(int entityId, UUID uuid, WorldPosition at, String describe,
-            boolean baby, boolean opensTrading) {
+            boolean baby, boolean opensTrading, boolean sleeping) {
+
+        public MerchantSpot(int entityId, UUID uuid, WorldPosition at, String describe, boolean baby,
+                            boolean opensTrading) {
+            this(entityId, uuid, at, describe, baby, opensTrading, false);
+        }
     }
 }

@@ -49,7 +49,7 @@ public final class ClientMerchantScans implements ScansMerchants {
             found.add(new MerchantSpot(entity.getId(), entity.getUUID(),
                     WorldPosition.here((int) Math.floor(entity.getX()), (int) Math.floor(entity.getY()),
                             (int) Math.floor(entity.getZ())),
-                    describe(villager), villager.isBaby(), canTrade(villager)));
+                    describe(villager), villager.isBaby(), canTrade(villager), villager.isSleeping()));
         }
         LocalPlayer player = current.localPlayer();
         found.sort(Comparator.comparingDouble(spot -> {

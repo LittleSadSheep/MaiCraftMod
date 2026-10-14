@@ -104,6 +104,11 @@ public final class TradeSource implements ItemSource {
         if (!merchant.opensTrading()) {
             return merchant.describe() + "没有做买卖的营生，开不出交易界面，不搭话";
         }
+        // 夜里村民躺在床上睡觉，右键不搭话：像人一样等天亮再来，不走到床边点了又点。
+        // 实机 10-14 夜里找农民买面包，农民在屋里睡着，走过去耗到超时，旁边的武器匠也点不开。
+        if (merchant.sleeping()) {
+            return merchant.describe() + "正在睡觉，睡着的村民不做买卖，天亮了再来";
+        }
         // 有名字、拴着绳、被人装进船或矿车：是别人的，不搭话。圈着不算——村民住在屋里、围栏边上，
         // 实机 10-14 村里的农民站在屋旁被当成"圈着"，拿着绿宝石一个面包也买不到。地盘归记住的区域和受保护地标管。
         var situation = creatures.situationOf(merchant.uuid())

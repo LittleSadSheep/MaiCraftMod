@@ -70,6 +70,15 @@ class TradeSourceTest {
     }
 
     @Test
+    void 睡着的村民天亮再来() {
+        TradeSource asleep = source((center, radius) -> List.of(
+                new ScansMerchants.MerchantSpot(1, new UUID(0, 1), WorldPosition.here(8, 64, 0),
+                        "farmer 村民", false, true, true)), NOBODY);
+        assertTrue(assertInstanceOf(SourceQuote.Unavailable.class, asleep.quote(request(), CONTEXT))
+                .reason().contains("睡觉"));
+    }
+
+    @Test
     void 无业与傻子的村民被排除并写明原因() {
         TradeSource noJob = source((center, radius) -> List.of(
                 new ScansMerchants.MerchantSpot(1, new UUID(0, 1), WorldPosition.here(8, 64, 0),
