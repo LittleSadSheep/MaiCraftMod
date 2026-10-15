@@ -100,6 +100,8 @@ final class BaritoneWalkRun implements WalkRun {
     private final NavigationStallMemory stalls = new NavigationStallMemory();
     /** 路线前方被正在动的东西挡着时原地等它过去。 */
     private final MovingObstacleWait obstacleWait = new MovingObstacleWait();
+    /** 只有半截路时看人有没有离目标更近：半分钟没更近就交还上层换个去处。 */
+    private final PartialRouteWatch partialRoute = new PartialRouteWatch();
     /** 刚列了新障碍、还没能安全撤路线：落地站稳后重算一次绕行。 */
     private boolean replanWhenSafe;
     /** 引擎本刻请求的按键是否读出来过；用于区分排队与真正在走。 */
@@ -272,6 +274,7 @@ final class BaritoneWalkRun implements WalkRun {
         target = next;
         goal = next.goal();
         engineGoal = new MaiCraftGoalAdapter(goal);
+        partialRoute.reset();
         progress.retarget(goal);
         probe.cancel();
         probe = new TerrainProbe(engineGoal, permit);
@@ -590,7 +593,21 @@ final class BaritoneWalkRun implements WalkRun {
         } else if (!progress.stopRequested() && routePresent
                 && displacement.stalledTicks(context.clientTick()) > STALL_LIMIT_TICKS) {
             progress.fail(Problem.of(Problem.Kind.STUCK, "沿路线行走时长时间没有进展", null), feet);
+        } else if (!progress.stopRequested() && partialRouteStalled(engine, feet, context.clientTick())) {
+            progress.fail(Problem.of(Problem.Kind.STUCK,
+                    "路线到不了目标，只能往那边走半截，来回走了半分钟也没离目标更近", null), feet);
         }
+    }
+
+    // 引擎手上这条路的终点不在目标里（半截路）：看离目标的估价有没有变小；整路到得了就从头算。
+    private boolean partialRouteStalled(IBaritone engine, BlockPos feet, long tick) {
+        var route = engine.getPathingBehavior().getCurrent();
+        if (route == null) return false;
+        if (route.getPath().getGoal().isInGoal(route.getPath().getDest())) {
+            partialRoute.reset();
+            return false;
+        }
+        return partialRoute.stalled(engineGoal.heuristic(feet.getX(), feet.getY(), feet.getZ()), tick);
     }
 
     // 引擎说没有路：不许挖的先别认输，做一次"假如允许挖垫"的只读复算，等它回来再定——
