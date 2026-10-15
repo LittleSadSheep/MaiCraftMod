@@ -18,7 +18,6 @@ import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilitySpec;
 import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
 import org.maiwithu.maicraft.kernel.ability.Listing;
-import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.param.ParamSpec;
@@ -84,12 +83,13 @@ public final class FishModule implements AbilityModule {
         }
         long maxSeconds = step.goal().params().has("max_seconds") ? step.goal().params().integer("max_seconds") : 0;
         int count = step.goal().params().has("count") ? (int) step.goal().params().integer("count") : 0;
-        return new StepDecision.Run(new FishInput(count, maxSeconds));
+        return new StepDecision.Run(new FishInput(count, maxSeconds, step.goal().permissions()));
     }
 
     @Override public void registerTasks(TaskFactories factories) {
+        // 走去钓位、弄鱼竿、腾背包都按这次目标的许可：change_blocks=none 的钓鱼走路不挖，允许动贵重品才动。
         factories.register(FishInput.class, input -> input.count() > 0
-                ? new FishTask(input, services, Permissions.DEFAULT)
-                : new FishTask.StandingFish(input, services, Permissions.DEFAULT));
+                ? new FishTask(input, services, input.permissions())
+                : new FishTask.StandingFish(input, services, input.permissions()));
     }
 }

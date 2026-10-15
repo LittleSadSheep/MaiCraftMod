@@ -22,6 +22,7 @@ import org.maiwithu.maicraft.game.menu.MenuActions;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
 import org.maiwithu.maicraft.kernel.goal.Goal;
+import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.goal.Target;
@@ -106,9 +107,9 @@ class FishModuleTest {
                 null, null, null, null, null, null);
         TaskFactories factories = new TaskFactories();
         module.registerTasks(factories);
-        Task standing = factories.create(new FishInput(0, 0));
+        Task standing = factories.create(new FishInput(0, 0, Permissions.DEFAULT));
         assertInstanceOf(Standing.class, standing, "不给 count 的任务豁免内核的兜底时限");
-        Task counted = factories.create(new FishInput(3, 0));
+        Task counted = factories.create(new FishInput(3, 0, Permissions.DEFAULT));
         assertFalse(counted instanceof Standing, "钓满 count 的任务有做完的时刻");
     }
 
@@ -121,7 +122,7 @@ class FishModuleTest {
         FishModule module = new FishModule(() -> context, noRod, null, null, null, null, null);
         TaskFactories factories = new TaskFactories();
         module.registerTasks(factories);
-        Task task = factories.create(new FishInput(1, 0));
+        Task task = factories.create(new FishInput(1, 0, Permissions.DEFAULT));
         task.start(NO_PLAYER);
         TaskResult result = null;
         for (int i = 0; i < 20 && result == null; i++) {
