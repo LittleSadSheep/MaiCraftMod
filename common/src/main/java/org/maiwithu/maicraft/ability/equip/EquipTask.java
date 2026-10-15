@@ -44,6 +44,10 @@ final class EquipTask extends PhasedTask<EquipTask.Phase> {
     private final List<String> unconfirmedSlots = new ArrayList<>();
     /** 确认完成了的栏位数。 */
     private int settled;
+    /** 动作当场失败（界面没开上、那件没找到）的栏位：穿上时它们没穿上，要列进还差的。 */
+    private final List<String> failedSlots = new ArrayList<>();
+    /** 最近一次动作失败的原因：一个栏位都没弄成时整件事按它失败。 */
+    private Problem lastFailure;
     /** 当前动手的栏位，以及动手前栏位里是什么（卸下记账用）。 */
     private GearSlotName currentSlot;
     private String wornAtStart;
@@ -96,6 +100,8 @@ final class EquipTask extends PhasedTask<EquipTask.Phase> {
             case ActionStatus.Done done -> afterHandled(slot);
             case ActionStatus.Failed failed -> {
                 processed.add(slot);
+                failedSlots.add(slot.paramName());
+                lastFailure = failed.problem();
                 recordAttempt((input.unequip() ? "取下 " : "穿上 ") + slot.paramName(),
                         failed.problem().message());
                 yield nextSlotOrSettle();
@@ -155,8 +161,21 @@ final class EquipTask extends PhasedTask<EquipTask.Phase> {
     private Next<Phase> settle() {
         List<String> worn = stillWornNow();
         String label = input.unequip() ? "卸下" : "穿上";
-        if (unconfirmedSlots.isEmpty() && worn.isEmpty()) {
+        // 一个栏位都没弄成、又都是动作当场失败：按失败收场带上原因，不把"0 个栏位"说成完成。
+        if (settled == 0 && unconfirmedSlots.isEmpty() && lastFailure != null) {
+            return Next.fail(lastFailure);
+        }
+        // 穿上时动作失败的栏位没穿上（卸下失败的栏位还穿着，由 stillWornNow 列出）。
+        List<String> notWorn = input.unequip() ? List.of() : failedSlots;
+        if (unconfirmedSlots.isEmpty() && worn.isEmpty() && notWorn.isEmpty()) {
             return Next.done(TaskResult.done(label + "完成（" + settled + " 个栏位）"));
+        }
+        if (!notWorn.isEmpty()) {
+            List<String> left = new ArrayList<>(notWorn.stream().map(s -> "穿上 " + s).toList());
+            unconfirmedSlots.forEach(s -> left.add("确认 " + s + " 的穿上结果"));
+            return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL,
+                            "穿上做了一部分：" + String.join("、", notWorn) + " 没穿上")
+                    .problem(lastFailure).remaining(left).build());
         }
         if (worn.isEmpty()) {
             return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL,

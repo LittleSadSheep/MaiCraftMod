@@ -69,6 +69,8 @@ class EquipTaskTest {
         boolean wearSucceeds = true;
         /** 动作第一次 tick 就做完。 */
         boolean instant = true;
+        /** 不为 null 时动作当场失败（界面没开上、那件没找到），带这个原因。 */
+        Problem fails;
 
         StubGearChanges(FakeEquipment equipment) { this.equipment = equipment; }
 
@@ -91,6 +93,7 @@ class EquipTaskTest {
             private boolean done;
             GearAction(Runnable effect) { this.effect = effect; }
             @Override public ActionStatus tick(TickContext context) {
+                if (fails != null) return ActionStatus.failed(fails);
                 if (!done) {
                     effect.run();
                     done = true;
@@ -170,6 +173,20 @@ class EquipTaskTest {
         assertTrue(result instanceof TickResult.Finished finished
                 && finished.result().status() == TaskResult.Status.PARTIAL);
         assertTrue(!((TickResult.Finished) result).result().unconfirmed().isEmpty());
+    }
+
+    @Test
+    void 穿上动作当场失败_按失败收场不说完成() {
+        // 界面没开上：一个栏位都没穿成，不能回"穿上完成（0 个栏位）"，按失败带上原因。
+        FakeEquipment equipment = new FakeEquipment();
+        StubGearChanges gear = new StubGearChanges(equipment);
+        gear.fails = Problem.of(Problem.Kind.NEED_ITEM, "背包里没找到 " + HELMET);
+        TickResult result = run(new EquipTask(new EquipInput(false, GearSlotName.HEAD, HELMET, null),
+                equipment, Optional.empty(), Optional.of(gear)), 10);
+        TaskResult failed = ((TickResult.Finished) result).result();
+        assertEquals(TaskResult.Status.FAILED, failed.status());
+        assertEquals(Problem.Kind.NEED_ITEM, failed.problem().kind());
+        assertTrue(equipment.slot(GearSlotName.HEAD).isEmpty());
     }
 
     @Test
