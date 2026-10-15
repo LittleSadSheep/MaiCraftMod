@@ -33,6 +33,8 @@ public record AcquireVia(String name, String description) {
     public static final AcquireVia TRADE = new AcquireVia("trade", "和村民交易（会花绿宝石等付款，只有点名 via=trade 才做）");
     /** 打掉会掉出它的动物或生物：动物照 kill_animals、敌对生物照 fight 判许可。 */
     public static final AcquireVia HUNT = new AcquireVia("hunt", "打掉会掉出它的动物或生物");
+    /** 走过去拆回角色自己放下的床、工作台、熔炉（家附近的不收）。 */
+    public static final AcquireVia RECLAIM = new AcquireVia("reclaim", "拆回自己放下的床、工作台、熔炉（家附近的不收）");
 
 
     /**

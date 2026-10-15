@@ -26,6 +26,10 @@ public final class Protection {
 
     /** 地标保护的半径：地标是一个点，点周围的这片都算它的地盘。 */
     static final double LANDMARK_RADIUS = 8.0;
+    /** 记住的"家"叫这个名字。 */
+    static final String HOME = "家";
+    /** "家"的范围：离记住的家这么近就算家里。玩家常识。 */
+    public static final double HOME_RADIUS_BLOCKS = 8.0;
 
     private final ReadsBlockOwnership ownership;
     private final RemembersRegions regions;
@@ -139,6 +143,27 @@ public final class Protection {
         return ownership.whoPlaced(position.dimension(), position.x(), position.y(), position.z())
                 .map(placedBy -> placedBy.playerId().equals(selfPlayerId))
                 .orElse(false);
+    }
+
+    /**
+     * 这一格的归属问到了没有：没问到时记下要问，过一两刻再来看。收回自己放下的东西前先等它问到，
+     * 拿不准是不是自己放的就不动。
+     */
+    public boolean ownershipKnown(WorldPosition position) {
+        return ownership.known(position.dimension(), position.x(), position.y(), position.z());
+    }
+
+    /**
+     * 这一格是不是在记住的"家"附近：家记过、离它不到 {@link #HOME_RADIUS_BLOCKS} 格就算。
+     * 家里的床是重生点，家里的台子、炉子是摆好用的，收回自己放下的东西时不拆这些。
+     */
+    public boolean insideHome(WorldPosition position) {
+        Optional<WorldPosition> home = places.place(HOME);
+        if (home.isEmpty()) return false;
+        double dx = home.get().x() - position.x();
+        double dy = home.get().y() - position.y();
+        double dz = home.get().z() - position.z();
+        return Math.sqrt(dx * dx + dy * dy + dz * dz) <= HOME_RADIUS_BLOCKS;
     }
 
     /** 按名字找地标的位置；没记过就给空，调用方先去找到它再回来检查。 */

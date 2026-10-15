@@ -565,7 +565,7 @@
           "name": "via",
           "type": "string",
           "required": false,
-          "doc": "只走指定途径，不给就按总代价自己挑：container 记得的箱子、现场看到的容器；craft 工作台上做出来（含石切台）；smelt 熔炉里烧出来（记得附近有高炉、烟熏炉时在那里烧，快一倍）；mine 挖掉会掉出它的方块；harvest 收成熟的作物；trade 和村民交易（会花绿宝石等付款，只有点名 via=trade 才做）；hunt 打掉会掉出它的动物或生物；fill 拿空桶去水边装一桶（只舀舀了会自己补回来的水）",
+          "doc": "只走指定途径，不给就按总代价自己挑：container 记得的箱子、现场看到的容器；craft 工作台上做出来（含石切台）；smelt 熔炉里烧出来（记得附近有高炉、烟熏炉时在那里烧，快一倍）；mine 挖掉会掉出它的方块；harvest 收成熟的作物；trade 和村民交易（会花绿宝石等付款，只有点名 via=trade 才做）；hunt 打掉会掉出它的动物或生物；fill 拿空桶去水边装一桶（只舀舀了会自己补回来的水）；reclaim 拆回自己放下的床、工作台、熔炉（家附近的不收）",
           "choices": [
             "container",
             "craft",
@@ -574,7 +574,8 @@
             "harvest",
             "trade",
             "hunt",
-            "fill"
+            "fill",
+            "reclaim"
           ]
         },
         {

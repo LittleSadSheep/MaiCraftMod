@@ -38,7 +38,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 来源换别的路，不挪用别人的方块也不隔空放。对着支撑方块点一下，方块落在哪一格由点到的面决定，
  * 所以按实际落下的那一格记成"亲眼看到的工作站"，后面到那里动手、下次找设施都用这条记忆。
  */
-public final class ClientWorkstationPlacer implements SetsUpWorkstation {
+public final class ClientWorkstationPlacer implements SetsUpWorkstation, ReadsBlockTypes {
 
     /** 找放格的范围：身边两格以内，再远放下也不好走过去用。 */
     private static final int REACH_BLOCKS = 2;
@@ -68,6 +68,21 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation {
         // 客户端世界的 hasChunkAt 永远答“加载着”，没加载的格读出来是空气、地表落在世界最底层；按区块真加载没加载判。
         if (!current.level().isLoaded(pos)) return false;
         return !blockType.equals(BuiltInRegistries.BLOCK.getKey(current.level().getBlockState(pos).getBlock()).toString());
+    }
+
+    @Override
+    public Optional<String> blockTypeAt(WorldPosition at) {
+        PlayerContext current = context.get();
+        if (current == null || current.level() == null) return Optional.empty();
+        BlockPos pos = new BlockPos(at.x(), at.y(), at.z());
+        // 只读同一维度、真加载着的那一格：读不到的不下结论，空气就是"那里没东西了"。
+        if (at.dimension() != null && !at.dimension().equals(current.level().dimension().location().toString())) {
+            return Optional.empty();
+        }
+        if (!current.level().isLoaded(pos)) return Optional.empty();
+        BlockState state = current.level().getBlockState(pos);
+        if (state.isAir()) return Optional.empty();
+        return Optional.of(BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
     }
 
     @Override

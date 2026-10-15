@@ -96,6 +96,7 @@ import org.maiwithu.maicraft.behavior.acquire.MenuRecipeRuns;
 import org.maiwithu.maicraft.behavior.acquire.ReadsToolRequirements;
 import org.maiwithu.maicraft.behavior.acquire.RecipeRuns;
 import org.maiwithu.maicraft.behavior.acquire.RecipeSource;
+import org.maiwithu.maicraft.behavior.acquire.ReclaimSource;
 import org.maiwithu.maicraft.behavior.acquire.TradeSource;
 import org.maiwithu.maicraft.behavior.acquire.WaterFillSource;
 import org.maiwithu.maicraft.behavior.acquire.WorkstationRecipe;
@@ -689,7 +690,9 @@ public final class AbilityCatalog {
                 new HuntSource(new ClientCreatureScans(deps.context()), deps.creatures(), permission,
                         deps.itemTags(), hunts),
                 // 缺水桶时拿空桶去池塘、河边舀（只舀舀了会自己补回来的水，不碰机器里的）。
-                new WaterFillSource(playerServices)));
+                new WaterFillSource(playerServices),
+                // 自己放下的床、工作台、熔炉按路程算一条来路：野外那张床拆回来，不为一张床去打羊、打鱿鱼。
+                new ReclaimSource(deps.memory(), placer, deps.protection(), permission, collects, deps.itemTags())));
         // 联动来源进世界时带着这一份玩家行为建：缺东西去拿也回到同一个引擎（内需入口），许可原样传下去。
         sources.addAll(deps.compat().itemSources(playerServices));
         ItemAcquisition acquisition = new ItemAcquisition(sources,
