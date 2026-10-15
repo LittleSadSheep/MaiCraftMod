@@ -61,7 +61,8 @@ class AssemblyTest {
         // 钓鱼与附魔也接上了：钓位几何、咬钩收竿、装料与报价都组合玩家行为层已有的模型。
         // 组装载具也接上了：物理组装器的办法由登记表按装了的 Simulated 建，离线一份没有也照常登记（如实说用不了）。
         // 驾驶载具同样：无线红石打字机驾驶由登记表按装了的 Simulated 建，离线没有也照常登记。
-        assertEquals(Set.of("use", "eat", "equip", "drop", "obtain", "gather", "deposit", "sleep", "design", "build",
+        // 寻死也接上了：读角色与地形、走到、直接按键、换手、瞄准交互与穿卸都用共用的那一套。
+        assertEquals(Set.of("use", "eat", "equip", "drop", "suicide", "obtain", "gather", "deposit", "sleep", "design", "build",
                 "machine_inspect", "machine_review", "machine_configure", "machine_run",
                 "machine_build", "machine_connect", "light",
                 "fight", "follow", "wait", "travel", "find", "explore", "chat", "remember", "sequence", "quest", "vehicle_assemble",

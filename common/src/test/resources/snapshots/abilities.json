@@ -37,6 +37,13 @@
         "mode": "controls_player"
       },
       {
+        "ability": "maicraft:suicide",
+        "summary": "开着死亡不掉落时主动死一次，回出生点或床边",
+        "parameters": "via?: string, radius: integer = 24, max_seconds: integer = 120, keep_inventory_confirmed?: boolean",
+        "targets": [],
+        "mode": "controls_player"
+      },
+      {
         "ability": "maicraft:obtain",
         "summary": "让背包里某样东西再多几件；可用 via 指定途径",
         "parameters": "item: string, count: integer = 1, via?: string, radius?: integer, max_distance?: integer, prefer?: array",
@@ -485,6 +492,55 @@
       "required_mods": [],
       "knowledge": [],
       "doc_resource": "assets/maicraft/abilities/drop.md"
+    },
+    {
+      "ability": "maicraft:suicide",
+      "summary": "开着死亡不掉落时主动死一次，回出生点或床边",
+      "parameters": [
+        {
+          "name": "via",
+          "type": "string",
+          "required": false,
+          "doc": "死法：lava 现成岩浆 / fall 摔得死的落差 / cactus 仙人掌 / hostile_mob 敌对生物 / fire 随身点火 / lava_bucket 随身倒岩浆；不给按死得快慢自己挑，给了只用它",
+          "choices": [
+            "lava",
+            "fall",
+            "fire",
+            "cactus",
+            "hostile_mob",
+            "lava_bucket"
+          ]
+        },
+        {
+          "name": "radius",
+          "type": "integer",
+          "required": false,
+          "doc": "找现成死法的范围（格）",
+          "default": 24,
+          "min": 4,
+          "max": 64
+        },
+        {
+          "name": "max_seconds",
+          "type": "integer",
+          "required": false,
+          "doc": "最多花多少秒去死；死亡、暂停、穿回护甲的时间不算",
+          "default": 120,
+          "min": 10,
+          "max": 600
+        },
+        {
+          "name": "keep_inventory_confirmed",
+          "type": "boolean",
+          "required": false,
+          "doc": "你确认这个服务器开着死亡不掉落；连别人的服务器时给 true，单人世界以游戏规则为准"
+        }
+      ],
+      "targets": [],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/suicide.md"
     },
     {
       "ability": "maicraft:obtain",

@@ -69,7 +69,8 @@ public final class ParamNames {
             Map.entry("angle_degrees", "扇形开口角（度），1..360；配 direction 使用，有方向默认 90"),
             Map.entry("min_distance", "忽略更近的目标匹配，单位格；有方向默认 16"),
             Map.entry("minimum_light", "验收亮度：方块光要达到的等级（1..15）；crops 档默认 9，其余默认 8；随行补光取 1..13"),
-            Map.entry("coverage", "验收范围档：all 全部样本达标 / most 九成达标 / crops 只按作物与耕地验收（全部达标）"));
+            Map.entry("coverage", "验收范围档：all 全部样本达标 / most 九成达标 / crops 只按作物与耕地验收（全部达标）"),
+            Map.entry("keep_inventory_confirmed", "调用方确认这个服务器开着死亡不掉落（keepInventory）；游戏读得到真实规则时以规则为准"));
 
     private ParamNames() {}
 

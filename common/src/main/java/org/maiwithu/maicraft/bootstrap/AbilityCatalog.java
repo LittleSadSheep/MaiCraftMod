@@ -56,6 +56,7 @@ import org.maiwithu.maicraft.ability.quest.QuestModule;
 import org.maiwithu.maicraft.ability.remember.RememberAbility;
 import org.maiwithu.maicraft.ability.sequence.SequenceModule;
 import org.maiwithu.maicraft.ability.sleep.SleepModule;
+import org.maiwithu.maicraft.ability.suicide.SuicideModule;
 import org.maiwithu.maicraft.ability.travel.TravelAbility;
 import org.maiwithu.maicraft.ability.use.UseModule;
 import org.maiwithu.maicraft.ability.wait.WaitModule;
@@ -317,6 +318,8 @@ public final class AbilityCatalog {
                         TossArc.catchHeightOf(deps.context().get(), cell), permissions, shared.bringClose(),
                         shared.toMainhand(), FirstPersonScene::of)));
 
+        // 寻死：脱甲收图腾、挑死法走过去、重生后按原件穿回，见 registerSuicide。
+        registerSuicide(registry, deps, shared);
         // 拿到物品：身上的不算来源（引擎开场就清点），已实现的途径都登记，见 obtainModule。
         // 看不见石头时往下挖楼梯：挖一格、捡这一级掉的东西与采掘共用一套，走下一级只走不改地形。
         ClientStairsDown stairs = new ClientStairsDown(new LiveStairsSite(deps.walks()), shared.digging(),
@@ -453,6 +456,16 @@ public final class AbilityCatalog {
                         id -> deps.scene().seen().gameEntityOf(id)))) {
             registry.register(module);
         }
+    }
+
+    /**
+     * 寻死：脱甲收图腾、挑死法走过去、重生后按原件穿回。穿卸与换手和装备共用一套，
+     * 保护判断与许可检查点是这个世界的那一份。
+     */
+    private static void registerSuicide(AbilityRegistry registry, Deps deps, Shared shared) {
+        registry.register(SuicideModule.live(deps.context(), deps.walks(), deps.interactions(), shared.toMainhand(),
+                new ClientGearChanges(deps.context(), shared.toMainhand()), deps.effects(), deps.protection(),
+                shared.permission()));
     }
 
     /**
