@@ -67,17 +67,28 @@ public final class EatsCarriedFood implements EatSoonTask.FoodMoves {
 
     @Override
     public Action eating(HungerNeed.Facts hunger) {
-        // 按饥饿处境挑：平时只吃补得刚好的普通食物，饱食度见底在掉血才什么都吃；正要用的那几件不算口粮。
-        // 伤得重又没普通食物、腐肉这类吃一口就过回血线：吃它回血。
+        return pick(hunger).map(food -> (Action) new BiteAction(food)).orElse(null);
+    }
+
+    @Override
+    public boolean carriesBite(HungerNeed.Facts hunger) {
+        // 弄吃的路上每刻问一句：只挑不动手，挑得出来就回去吃这一口。
+        return pick(hunger).isPresent();
+    }
+
+    // 按饥饿处境挑：平时只吃补得刚好的普通食物（没坏效果的生肉也是），饱食度见底在掉血才什么都吃；正要用的那几件不算口粮。
+    // 伤得重又没普通食物、腐肉生鸡肉这类吃一口就过回血线：吃它回血。
+    private Optional<String> pick(HungerNeed.Facts hunger) {
         List<FoodPicker.Carried> carried = FoodPicker.carried(backpack.stacks(), foods, keeps);
         Optional<String> pick = FoodPicker.forHunger(carried, hunger.food(), hunger.losingHealth());
         if (pick.isEmpty() && hunger.eatsToHeal() && hunger.junkReachesRegen()) pick = FoodPicker.autoPick(carried);
-        return pick.map(food -> (Action) new BiteAction(food)).orElse(null);
+        return pick;
     }
 
     @Override
     public Action fetching(long budgetTicks) {
-        // 饿了身上没吃的：经拿东西的引擎有预算地弄几件现成口粮（网络、箱子、做、打猎）；引擎还没接上给 null，任务如实说。
+        // 饿了身上没吃的：经拿东西的引擎有预算地弄几件现成口粮（网络、箱子、做、打猎），弄到第一件能吃的吃饭任务就叫停先吃；
+        // 引擎还没接上给 null，任务如实说。
         return sources.get().map(needs -> (Action) new FetchesFood(needs, budgetTicks)).orElse(null);
     }
 

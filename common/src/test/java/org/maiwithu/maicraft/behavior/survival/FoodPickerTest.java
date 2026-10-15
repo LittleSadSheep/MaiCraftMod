@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.survival;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -121,5 +122,18 @@ class FoodPickerTest {
         assertEquals(1, spare.size());
         assertEquals("minecraft:dried_kelp", spare.getFirst().itemId());
         assertEquals(2, spare.getFirst().count());
+    }
+
+    @Test
+    void 没坏效果的生肉饿了伤了就直接吃_生鸡肉不算普通食物() {
+        // 10-15 直播：三颗心、饱食度 11，身上只有生羊肉和生鸡肉。生羊肉没坏效果，是普通食物，直接吃不先去烤；
+        // 生鸡肉带饥饿效果，没饿到掉血不吃。
+        FoodValue mutton = food("minecraft:mutton", 2, 1.2f);
+        FoodValue chicken = food("minecraft:chicken", 2, 1.2f, new FoodEffect("minecraft:hunger", false));
+        assertTrue(FoodPicker.plain(mutton));
+        assertFalse(FoodPicker.plain(chicken));
+        assertEquals(Optional.of("minecraft:mutton"), FoodPicker.forHunger(
+                List.of(carried("minecraft:chicken", 1, chicken), carried("minecraft:mutton", 1, mutton)), 11, false));
+        assertEquals(Optional.empty(), FoodPicker.forHunger(List.of(carried("minecraft:chicken", 1, chicken)), 11, false));
     }
 }

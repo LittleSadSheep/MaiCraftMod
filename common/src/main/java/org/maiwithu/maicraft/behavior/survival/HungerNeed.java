@@ -12,6 +12,9 @@ import org.maiwithu.maicraft.kernel.task.Urgency;
  *
  * <p>三档阈值（原版事实）：饱食度满 20；6 及以下不能疾跑；0 时身体开始扣血。
  * 临时任务组合进食的流程——本需求只负责"什么时候吃、弄不到怎么办"，不重写进食。
+ *
+ * <p>弄不到怎么办：弄吃的问遍各处都没有，这一回饿先歇一分钟不插（身上有了吃的、处境更急了照插），
+ * 没吃上的事这一回只跟 LLM 说一次；不饿了这一回就算过去（见 {@link HungerBout}）。
  */
 public final class HungerNeed implements SurvivalNeed {
 
@@ -88,6 +91,8 @@ public final class HungerNeed implements SurvivalNeed {
     private final ReadsFacts reader;
     private final EatSoonTask.FoodMoves moves;
     private final TaskEventSink events;
+    /** 眼下这一回饿：说没说过、歇不歇着；不饿了就清掉。 */
+    private final HungerBout bout = new HungerBout();
 
     /** @param moves 吃与弄吃的怎么落地；生产组合进食与采集的行为模型，测试换替身。 */
     public HungerNeed(ReadsFacts reader, EatSoonTask.FoodMoves moves,
@@ -102,12 +107,22 @@ public final class HungerNeed implements SurvivalNeed {
     @Override
     public Urgency urgency(TickContext context) {
         Facts facts = reader.read(context);
-        return facts == null ? null : assess(facts);
+        if (facts == null) return null;
+        Urgency urgency = assess(facts);
+        if (urgency == null) {
+            // 不饿了：这一回过去了，下回饿了重新跟 LLM 说、重新找吃的。
+            bout.over();
+            return null;
+        }
+        // 刚问遍各处都没弄到吃的：歇着的这一分钟里不插，手上的活照常干；身上有了这会儿能吃的
+        // （捡到、别人给的）或处境更急了，马上照常插进来。
+        if (bout.resting(context.gameTick(), urgency) && !moves.carriesBite(facts)) return null;
+        return urgency;
     }
 
     @Override
     public Task createTask(TickContext context) {
-        // 插进来的这一刻读一次处境，吃饭任务一开始就按它挑吃什么。
-        return new EatSoonTask(moves, reader, events, reader.read(context));
+        // 插进来的这一刻读一次处境，吃饭任务一开始就按它挑吃什么；这一回饿的记账跟着交过去。
+        return new EatSoonTask(moves, reader, events, reader.read(context), bout);
     }
 }

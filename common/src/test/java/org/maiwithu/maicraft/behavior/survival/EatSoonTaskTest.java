@@ -123,10 +123,51 @@ class EatSoonTaskTest {
         assertEquals(0, events.size(), "进食在正常推进，不发打扰的事件");
     }
 
+    @Test
+    void eatsTheFirstFetchedBiteWithoutWaitingForTheFullBatch() {
+        // 10-15 直播：三颗心去弄 8 件熟肉，烤好第一块熟羊肉后揣着它接着追鸡，一分钟没弄满就收场。
+        // 现在弄到第一件这会儿能吃的就收掉弄吃的动作，回来先吃这一口。
+        FetchThenBite moves = new FetchThenBite(3, null);
+        TaskResult result = run(moves, facts(5, false), () -> facts(5, moves.carrying));
+
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertTrue(result.summary().contains("吃了一口"), result.summary());
+        assertEquals(3, moves.fetchTicks, "第一件到手后不再接着弄");
+        assertEquals(1, moves.fetchClosed, "弄吃的动作要收尾");
+        assertEquals(1, moves.bites);
+    }
+
+    @Test
+    void tellsTheLlmOncePerHungerBoutUnlessItGetsMoreUrgent() {
+        // 10-15 直播：哪儿都弄不到吃的，二十秒里报了三次、每次一千多字。同一回饿只说一次；饿到掉血是新的事实，再说一次。
+        HungerBout bout = new HungerBout();
+        Problem nowhere = Problem.of(Problem.Kind.NEED_ITEM, "问过各来源都拿不到");
+        for (int i = 0; i < 3; i++) {
+            TaskResult result = run(new FetchThenBite(-1, nowhere), facts(5, false), () -> facts(5, false), bout);
+            assertEquals(TaskResult.Status.FAILED, result.status());
+        }
+        assertEquals(1, events.size(), "同样急时只说一次：" + events);
+        assertTrue(events.getFirst().contains("过一分钟再找"), events.getFirst());
+
+        HungerNeed.Facts starving = new HungerNeed.Facts(0, true, 0);
+        run(new FetchThenBite(-1, nowhere), starving, () -> starving, bout);
+        assertEquals(2, events.size(), "饿到掉血了要再说一次");
+
+        bout.over();
+        run(new FetchThenBite(-1, nowhere), facts(5, false), () -> facts(5, false), bout);
+        assertEquals(3, events.size(), "不饿过一回之后再饿是新的一回");
+    }
+
     // 插进来时读到 initial，之后每刻读到 now 的最新值；推进到结束，最多一百刻。
-    private TaskResult run(Bites bites, HungerNeed.Facts initial, Supplier<HungerNeed.Facts> now) {
-        EatSoonTask task = new EatSoonTask(bites, context -> now.get(),
-                (kind, message) -> events.add(message), initial);
+    private TaskResult run(EatSoonTask.FoodMoves moves, HungerNeed.Facts initial, Supplier<HungerNeed.Facts> now) {
+        return run(moves, initial, now, new HungerBout());
+    }
+
+    // 同上，几次插进来共用同一回饿的记账。
+    private TaskResult run(EatSoonTask.FoodMoves moves, HungerNeed.Facts initial, Supplier<HungerNeed.Facts> now,
+                           HungerBout bout) {
+        EatSoonTask task = new EatSoonTask(moves, context -> now.get(),
+                (kind, message) -> events.add(message), initial, bout);
         TickContext context = new SurvivalFakes.TestTick(player);
         task.start(context);
         for (int i = 0; i < 100; i++) {
@@ -192,6 +233,53 @@ class EatSoonTaskTest {
         @Override
         public Action fetching(long budgetTicks) {
             return null;
+        }
+    }
+
+    /**
+     * 先弄后吃的替身：弄吃的动作推进到第几刻时第一件吃的进了身上（-1 为一直没弄到），或一上来就以给定问题失败；
+     * 身上有了吃的才给吃一口的动作，一口当刻吃完。记下弄吃的推了几刻、收尾了几次、吃了几口。
+     */
+    static final class FetchThenBite implements EatSoonTask.FoodMoves {
+        private final int deliverAt;
+        private final Problem failWith;
+        boolean carrying;
+        int fetchTicks;
+        int fetchClosed;
+        int bites;
+
+        FetchThenBite(int deliverAt, Problem failWith) {
+            this.deliverAt = deliverAt;
+            this.failWith = failWith;
+        }
+
+        @Override
+        public Action eating(HungerNeed.Facts hunger) {
+            if (!carrying) return null;
+            return new Action() {
+                @Override public ActionStatus tick(TickContext context) {
+                    bites++;
+                    return ActionStatus.done();
+                }
+
+                @Override public String describe() { return "吃一口"; }
+            };
+        }
+
+        @Override
+        public Action fetching(long budgetTicks) {
+            return new Action() {
+                @Override public ActionStatus tick(TickContext context) {
+                    if (failWith != null) return ActionStatus.failed(failWith);
+                    fetchTicks++;
+                    if (fetchTicks == deliverAt) carrying = true;
+                    return ActionStatus.progressed();
+                }
+
+                @Override public void close() { fetchClosed++; }
+
+                @Override public String describe() { return "去弄熟肉"; }
+            };
         }
     }
 }

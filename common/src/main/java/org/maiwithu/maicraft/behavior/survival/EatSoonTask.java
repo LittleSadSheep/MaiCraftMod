@@ -19,7 +19,11 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  *
  * <p>一次只吃一口：吃完还饿，饥饿需求下一次报急时自然再插进来，按急迫程度决定是立刻接着吃
  * 还是等手上的活到了空当。吃不上、弄不到就以没做成收场并发事件把事实告诉 LLM，
- * 控制循环据此缓一阵再插；主任务不受影响，饿着肚子回去继续干活。
+ * 控制循环据此缓一阵再插；主任务不受影响，饿着肚子回去继续干活。同一回饿只说一次，
+ * 弄吃的问遍各处都没有就歇一分钟再找（见 {@link HungerBout}）。
+ *
+ * <p>弄吃的时弄到第一件这会儿能吃的就回来先吃这一口，不等凑满一次要弄的件数：
+ * 三颗心时揣着刚烤好的熟羊肉接着去追鸡，只会在半路被怪打断。
  *
  * <p>确认只认真的：一口的动作做完后再读一次处境，饱食度过线才说"吃上了"——
  * "还不算饿"从来不是"吃上了"的证据。谎报一次进展，死亡态不再恢复的饿度会让
@@ -49,12 +53,25 @@ public final class EatSoonTask extends PhasedTask<EatSoonTask.Phase> {
 
         /** 弄一件能直接吃的：给预算（刻）；还没接入时为 null。 */
         Action fetching(long budgetTicks);
+
+        /**
+         * 身上此刻有没有这会儿该吃的一口（和 {@link #eating} 挑的是同一样）。弄吃的路上每刻问一句，
+         * 弄到第一件就回来先吃；饥饿需求歇着不找吃的时，也靠它看身上是不是已经有吃的了。
+         */
+        default boolean carriesBite(HungerNeed.Facts hunger) {
+            Action bite = eating(hunger);
+            if (bite == null) return false;
+            bite.close();
+            return true;
+        }
     }
 
     private final FoodMoves moves;
     private final HungerNeed.ReadsFacts reader;
     private final TaskEventSink events;
     private final long fetchBudgetTicks;
+    /** 这一回饿：跨几次插进来记着说没说过、该不该歇着。 */
+    private final HungerBout bout;
 
     /** 最近一刻读到的饥饿处境：进入"吃一口"时按它挑吃什么。 */
     private HungerNeed.Facts latest;
@@ -62,15 +79,21 @@ public final class EatSoonTask extends PhasedTask<EatSoonTask.Phase> {
     private boolean fetchedSomething;
 
     EatSoonTask(FoodMoves moves, HungerNeed.ReadsFacts reader, TaskEventSink events, HungerNeed.Facts initial) {
-        this(moves, reader, events, initial, DEFAULT_FETCH_BUDGET_TICKS);
+        this(moves, reader, events, initial, new HungerBout());
     }
 
     EatSoonTask(FoodMoves moves, HungerNeed.ReadsFacts reader, TaskEventSink events,
-                HungerNeed.Facts initial, long fetchBudgetTicks) {
+                HungerNeed.Facts initial, HungerBout bout) {
+        this(moves, reader, events, initial, bout, DEFAULT_FETCH_BUDGET_TICKS);
+    }
+
+    EatSoonTask(FoodMoves moves, HungerNeed.ReadsFacts reader, TaskEventSink events,
+                HungerNeed.Facts initial, HungerBout bout, long fetchBudgetTicks) {
         super("吃饭", Phase.EAT, new ProgressTracker(STUCK_AFTER_TICKS, Long.MAX_VALUE));
         this.moves = Objects.requireNonNull(moves, "moves");
         this.reader = Objects.requireNonNull(reader, "reader");
         this.events = Objects.requireNonNull(events, "events");
+        this.bout = Objects.requireNonNull(bout, "bout");
         this.latest = initial;
         this.fetchBudgetTicks = fetchBudgetTicks;
     }
@@ -107,8 +130,9 @@ public final class EatSoonTask extends PhasedTask<EatSoonTask.Phase> {
             }
             if (latest != null && latest.carryingEdible()) {
                 // 身上有普通食物却给不出吃的动作（进食流程没接上）：以"不支持"收场，控制循环据此缓一阵再插，
-                // 不在每个空当都插进来又立刻收场。真饿着才发事件把事实告诉 LLM，只是想垫一口就不打扰。
-                if (hungry(latest)) {
+                // 不在每个空当都插进来又立刻收场。真饿着才发事件把事实告诉 LLM，只是想垫一口就不打扰；
+                // 同一回饿只说一次。
+                if (hungry(latest) && bout.tell(HungerNeed.assess(latest))) {
                     events.publish(TaskEvent.Kind.NEED_UNHANDLED,
                             "饿了但进食还没接上流程，吃不了一口；主任务照常继续");
                 }
@@ -140,11 +164,17 @@ public final class EatSoonTask extends PhasedTask<EatSoonTask.Phase> {
         };
     }
 
-    // 弄吃的：没接上或弄不到都如实收场；弄到了回去吃。
+    // 弄吃的：没接上或弄不到都如实收场；弄到第一件这会儿能吃的就回来先吃，不等凑满。
     private Next<Phase> fetch(TickContext context) {
         if (action() == null) {
             return giveUp(Problem.of(Problem.Kind.NEED_ITEM,
                     "饿了，身上没有这会儿该吃的东西，弄吃的还没接上", "给角色一些普通食物"));
+        }
+        // 上一刻打到的第一块肉、烤好的第一块熟肉、取到的第一块面包已经在身上：换阶段时收掉弄吃的动作，回来先吃这一口。
+        // 凑够口粮的事不在饿着、伤着的时候做，吃完还饿由下一次报急再插。
+        if (moves.carriesBite(latest)) {
+            fetchedSomething = true;
+            return Next.go(Phase.EAT, "弄到能吃的了，先回来吃一口");
         }
         return switch (runAction(context)) {
             case ActionStatus.Running running -> Next.stay();
@@ -152,15 +182,27 @@ public final class EatSoonTask extends PhasedTask<EatSoonTask.Phase> {
                 fetchedSomething = true;
                 yield Next.go(Phase.EAT, "弄到吃的了，回来吃");
             }
-            case ActionStatus.Failed failed -> giveUp(failed.problem());
+            case ActionStatus.Failed failed -> {
+                // 问遍各处都弄不到（不是弄到一半超了预算）：这一回饿先歇一分钟再找，不几秒一问把手上的活停停走走。
+                boolean nothingFound = failed.problem().kind() != Problem.Kind.STUCK;
+                if (nothingFound) bout.restFromFetching(context.gameTick(), HungerNeed.assess(latest));
+                yield giveUp(failed.problem(), nothingFound);
+            }
         };
     }
 
-    // 吃不上：发事件把事实告诉 LLM，以没做成收场；主任务照常继续。
     private Next<Phase> giveUp(Problem problem) {
-        // 为回血吃（不饿、伤得重）和真饿着分开说，不把残血想吃一口说成饿了。
-        String why = latest != null && !hungry(latest) && latest.eatsToHeal() ? "伤得重想吃点东西回血，但没吃上：" : "饿了但没吃上：";
-        events.publish(TaskEvent.Kind.NEED_UNHANDLED, why + problem.message() + "；先回去继续干活");
+        return giveUp(problem, false);
+    }
+
+    // 吃不上：这一回饿还没跟 LLM 说过（或处境更急了）才发事件把事实说一次，以没做成收场；主任务照常继续。
+    private Next<Phase> giveUp(Problem problem, boolean resting) {
+        if (bout.tell(latest == null ? null : HungerNeed.assess(latest))) {
+            // 为回血吃（不饿、伤得重）和真饿着分开说，不把残血想吃一口说成饿了。
+            String why = latest != null && !hungry(latest) && latest.eatsToHeal() ? "伤得重想吃点东西回血，但没吃上：" : "饿了但没吃上：";
+            String then = resting ? "；先回去继续干活，过一分钟再找吃的" : "；先回去继续干活";
+            events.publish(TaskEvent.Kind.NEED_UNHANDLED, why + problem.message() + then);
+        }
         return Next.fail(problem);
     }
 

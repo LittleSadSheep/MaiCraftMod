@@ -21,14 +21,14 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 /**
  * 饿了身上没吃的：像玩家一样去弄点现成的口粮。按面包、熟肉、熟鱼、蔬菜、水果几类挨个问拿东西的引擎哪一类最近
  * （网络里、箱子里有就拿，没有再做、再打猎），挑最近的那一类拿几件；有预算，超时或哪儿都没有如实说。
- * 原先这一步没接上，饿了身上没吃的就只报"弄吃的还没接上"，AE 里明明有面包也饿着。
+ * 没弄满也不要紧：吃饭任务每刻看身上，弄到第一件这会儿能吃的（打到的生肉、烤好的第一块熟肉）就把这里叫停、先吃。
  */
 final class FetchesFood implements Action {
 
     /** 口粮按这几类找（通用物品标签）；一样近时排前面的先。 */
     static final List<String> KINDS = List.of("c:foods/bread", "c:foods/cooked_meat", "c:foods/cooked_fish",
             "c:foods/vegetable", "c:foods/fruit");
-    /** 一次弄几件：够吃一阵，不囤。 */
+    /** 一次问几件：箱子、网络里一把拿够吃一阵，不囤；要打猎、烧炼的弄到第一件就会被叫停先吃。 */
     static final int COUNT = 8;
 
     private final ItemNeeds needs;

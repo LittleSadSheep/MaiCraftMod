@@ -64,7 +64,8 @@ public final class FoodPicker {
 
     /**
      * 普通食物：吃了不带任何效果、饱腹时也不能吃。金苹果、紫颂果这类饱腹也能吃的要么珍贵、要么吃了会传送，
-     * 腐肉、毒马铃薯、河豚带害，都不算；饿了顺手吃只吃这一类。
+     * 腐肉、毒马铃薯、河豚带害，都不算；饿了顺手吃只吃这一类。生羊肉、生牛肉、生猪排、生鲑鱼、生鳕鱼这类
+     * 没坏效果的生肉也是普通食物：饿了、伤重时身上只有它就直接吃，不先去烤；生鸡肉带饥饿效果，归垃圾食物。
      */
     public static boolean plain(ReadsFoodValues.FoodValue value) {
         return value.nutrition() > 0 && value.effects().isEmpty() && !value.canAlwaysEat();
