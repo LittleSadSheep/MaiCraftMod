@@ -50,7 +50,10 @@ public final class LiveBedFinder implements BedScanner, NightfallNeed.ReadsBedAv
     /** 床边不许有怪的判定盒：水平八格、垂直五格，与原版拒绝入睡的检查同盒。 */
     private static final double HOSTILE_HORIZONTAL = 8.0;
     private static final double HOSTILE_VERTICAL = 5.0;
-    /** 自己睡过的床离这么远（格）以内也算附近：夜里离家不远就回家睡，走二三十秒的路。 */
+    /**
+     * 自己睡过的床离这么远（格）以内也算附近：叫去睡觉时离家不远就回家睡，走二三十秒的路。
+     * 夜里自己去睡另有更近的限（见选床的夜里最远距离），这么远的床夜里不去。
+     */
     private static final double REMEMBERED_BED_RANGE = 128.0;
 
     private final Supplier<PlayerContext> context;
@@ -142,13 +145,14 @@ public final class LiveBedFinder implements BedScanner, NightfallNeed.ReadsBedAv
 
     @Override
     public boolean bedReady(TickContext tick) {
-        // 今晚有床 = 身上带着一张，或附近已扫到的候选里有能用的。身上有床夜休会放下来睡。
+        // 今晚有床 = 身上带着一张，或夜里肯走过去的那么近（32 格）有能用的。身上有床夜休会放下来睡；
+        // 远处的床（自己睡过的家里那张也一样）夜里不去，不算今晚有床，夜晚改按挖坑、找掩体熬夜。
         if (carriedBed().isPresent()) {
             return true;
         }
         // 夜休没有这次任务的许可，地标保护按没给额外地标算。
         BedScan scan = scan(tick, Set.of(), Set.of());
-        return BedChooser.choose(scan.candidates(), Set.of(), null).isPresent();
+        return BedChooser.choose(scan.candidates(), Set.of(), null, BedChooser.NIGHT_WALK_LIMIT_BLOCKS).isPresent();
     }
 
     /** 身上（主背包加副手）带着的床；夜休放下它睡，公开睡觉备床也算数。 */

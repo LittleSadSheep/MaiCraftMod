@@ -221,6 +221,26 @@ class SleepTaskTest {
                 sleepWindow, sharedExclusions);
     }
 
+    private static NightRestTask nightRest(FakeScanner scanner, StubPlacer placer, StubObtain obtain,
+            StubApproaches approaches, StubUsesBeds usesBeds, Supplier<Optional<String>> carried,
+            NightRestTask.ReadsSleepState sleepState) {
+        return new NightRestTask(new SleepInput(null), Permissions.DEFAULT, scanner, placer, obtain, approaches,
+                usesBeds, () -> null, carried, (cell, permissions) -> Optional.empty(), place -> Optional.empty(),
+                sleepState, moment -> true, new HashSet<>());
+    }
+
+    // 推进若干刻，任务提前结束就交出结果；没结束返回 null。
+    private static TaskResult runTicks(Task task, int ticks) {
+        TickContext context = tick();
+        task.start(context);
+        for (int i = 0; i < ticks; i++) {
+            if (task.tick(context) instanceof TickResult.Finished finished) {
+                return finished.result();
+            }
+        }
+        return null;
+    }
+
     private static TaskResult runToCompletion(Task task) {
         TickContext context = tick();
         task.start(context);
@@ -452,5 +472,40 @@ class SleepTaskTest {
         assertEquals(List.of(BED_A, BED_A, BED_B), approaches.targets);
         assertEquals(List.of(BED_A, BED_A, BED_B), usesBeds.clicked);
         assertTrue(scanner.askedExclusions.getLast().contains(BED_A), "换过站位还被拒的床排除掉");
+    }
+
+    @Test
+    void nightRestPlacesTheCarriedBedInsteadOfWalkingToAFarBed() {
+        // 实机 10-15：家里那张床在 130 格外，夜里不去；身上带着床就地放下睡。
+        FakeScanner scanner = new FakeScanner();
+        scanner.offer(new BedScanner.BedScan(
+                List.of(new BedCandidate(BED_B, false, false, false, 130)), true));
+        StubPlacer placer = new StubPlacer();
+        BlockPos placedHead = new BlockPos(1, 64, 1);
+        placer.offer(placedHead);
+        StubApproaches approaches = new StubApproaches();
+        StubUsesBeds usesBeds = new StubUsesBeds();
+        NightRestTask rest = nightRest(scanner, placer, new StubObtain(), approaches, usesBeds,
+                () -> Optional.of("minecraft:white_bed"), moment -> true);
+        assertNull(runTicks(rest, 20), "睡着了就在床上等天亮");
+        assertEquals(List.of(placedHead), approaches.targets);
+        assertEquals(List.of(placedHead), usesBeds.clicked);
+    }
+
+    @Test
+    void nightRestWithoutANearbyOrCarriedBedEndsInsteadOfFetchingOne() {
+        // 远处有床、身上没床：夜里不走过去，也不摸黑去弄床，如实结束，交给夜晚挖坑、找掩体熬夜。
+        FakeScanner scanner = new FakeScanner();
+        scanner.offer(new BedScanner.BedScan(
+                List.of(new BedCandidate(BED_B, false, false, false, 130)), true));
+        StubObtain obtain = new StubObtain();
+        StubApproaches approaches = new StubApproaches();
+        TaskResult result = runTicks(nightRest(scanner, new StubPlacer(), obtain, approaches, new StubUsesBeds(),
+                Optional::empty, moment -> false), 20);
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertEquals(Problem.Kind.NOT_FOUND, result.problem().kind());
+        assertTrue(result.problem().message().contains("32 格内没有能睡的床"));
+        assertNull(obtain.last, "夜里不去弄床");
+        assertTrue(approaches.targets.isEmpty(), "远处的床不去");
     }
 }

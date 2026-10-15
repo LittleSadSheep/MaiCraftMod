@@ -31,6 +31,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 /**
  * 夜间自动休息的临时任务：记住现在的站位，找床睡下，等自然醒，收回自己放下的床，
  * 再回到原来的站位继续干活。睡不成也要回到站位，不能把角色留在别人屋里或半路上。
+ * 夜里只去 32 格以内的床，更远的不去：身上带着床就就地放下睡，没有就结束，交给夜晚去挖坑、找掩体熬夜。
  *
  * <p>醒来的实体包和时间包不在同一刻到达，醒来后先等它们对齐再动；去床途中夜晚被别人先睡过
  * （多人生存里常见），视为已经度过这一夜，直接结清回去干活。放在记住的"家"区域里的床不收：
@@ -111,6 +112,19 @@ final class NightRestTask extends SleepTask implements AnnouncesFinish {
     protected Next<Phase> onNoLongerSleepTime() {
         return Next.done(TaskResult.builder(TaskResult.Status.DONE, "这一夜已经过去，不用睡了")
                 .details(new SleepDetails(false, SleepDetails.BedSource.WORLD, null, false, true)).build());
+    }
+
+    // 夜里只去 32 格以内的床：更远的（包括自己睡过的家里那张）不去，身上有床就地放下睡。
+    @Override
+    protected double bedWalkLimit() {
+        return BedChooser.NIGHT_WALK_LIMIT_BLOCKS;
+    }
+
+    // 近处没床、身上也没带：夜里不摸黑去弄床，如实结束；夜晚这项需求随后按"今晚没床"改挖坑、找掩体熬夜。
+    @Override
+    protected Next<Phase> noBedNearby() {
+        return onFail(Problem.of(Problem.Kind.NOT_FOUND, (int) BedChooser.NIGHT_WALK_LIMIT_BLOCKS
+                + " 格内没有能睡的床，身上也没带床：夜里不走远路去睡，也不摸黑去弄床", null));
     }
 
     // 躺下了：不在这里结束，转去等自然醒。

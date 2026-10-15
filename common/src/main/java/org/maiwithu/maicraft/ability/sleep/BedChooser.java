@@ -22,6 +22,13 @@ public final class BedChooser {
     /** 床区半径：给了目标对象时只在这片范围里选床，太远的床不算"这片"的。玩家常识。 */
     static final int BED_AREA_RADIUS_BLOCKS = 16;
 
+    /**
+     * 夜里自己去睡最远走多远（格，直线）：天黑了路上刷怪，走一百多格去睡上一晚野外那张床，半路被僵尸打掉大半血，
+     * 睡完还要再走回来。更远的床夜里不去：身上带着床就就地放下睡，没有就按夜晚的老办法挖坑或找掩体熬夜。
+     * 所有者定的数。类别：玩家常识。
+     */
+    public static final double NIGHT_WALK_LIMIT_BLOCKS = 32;
+
     private BedChooser() {}
 
     /**
@@ -30,7 +37,15 @@ public final class BedChooser {
      */
     public static Optional<BedCandidate> choose(List<BedCandidate> candidates, Set<BlockPos> excluded,
             WorldPosition bedArea) {
-        List<BedCandidate> usable = usable(candidates, excluded, bedArea);
+        return choose(candidates, excluded, bedArea, Double.MAX_VALUE);
+    }
+
+    /** 同上，再只留离角色不超过 {@code maxDistance} 格的床：夜里自己去睡只走近处的床。 */
+    public static Optional<BedCandidate> choose(List<BedCandidate> candidates, Set<BlockPos> excluded,
+            WorldPosition bedArea, double maxDistance) {
+        List<BedCandidate> usable = usable(candidates, excluded, bedArea).stream()
+                .filter(bed -> bed.distance() <= maxDistance)
+                .toList();
         return usable.isEmpty() ? Optional.empty() : Optional.of(usable.getFirst());
     }
 

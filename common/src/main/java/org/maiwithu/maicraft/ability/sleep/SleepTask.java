@@ -171,7 +171,8 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
             return Next.fail(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "这个维度的床会爆炸，睡不了", null));
         }
         BedScanner.BedScan scan = scanner.scan(context, excluded, permissions.protectedLandmarks());
-        Optional<BedCandidate> chosen = BedChooser.choose(scan.candidates(), excluded, input.bedArea());
+        Optional<BedCandidate> chosen = BedChooser.choose(scan.candidates(), excluded, input.bedArea(),
+                bedWalkLimit());
         if (chosen.isPresent()) {
             chosenBed = chosen.get().cell();
             bedTries++;
@@ -194,6 +195,16 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
         if (carriedBed.get().isPresent() && placer.placeCarriedBed().isPresent()) {
             return Next.go(Phase.PLACE_BED, "附近没有能用的床，放自带的");
         }
+        return noBedNearby();
+    }
+
+    /** 选床最远走多远（格，直线）：公开睡觉不另设限，床区半径与扫描范围自己有边；夜休只走近处的床。 */
+    protected double bedWalkLimit() {
+        return Double.MAX_VALUE;
+    }
+
+    /** 附近没有能用的床、身上也没有：公开睡觉先去弄一张；夜休改写成不在夜里去弄床。 */
+    protected Next<Phase> noBedNearby() {
         return Next.go(Phase.GET_BED, "附近没有床、身上也没有，先弄一张");
     }
 
