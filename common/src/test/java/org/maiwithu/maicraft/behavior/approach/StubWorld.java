@@ -26,9 +26,15 @@ final class StubWorld implements ApproachWorldView {
     final Set<BlockPos> unloaded = new HashSet<>();
     /** 看不见的默认反面：只对声明为挡住的眼睛位置回答看不见。 */
     BiPredicate<Vec3, ApproachTarget> hidden = (eye, target) -> false;
+    /** 人在脚下那一格里的精确位置；不摆时按格子底面中心。 */
+    Vec3 position;
 
     @Override public BlockPos currentFeet() {
         return feet;
+    }
+
+    @Override public Vec3 currentPosition() {
+        return position != null ? position : ApproachWorldView.super.currentPosition();
     }
 
     @Override public Vec3 currentEye() {

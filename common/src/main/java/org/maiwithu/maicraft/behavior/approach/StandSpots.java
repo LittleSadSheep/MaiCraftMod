@@ -39,6 +39,13 @@ public final class StandSpots {
     /** 床距离的高度差上限：服务端对床横向卡三格、高度只允许差两格。类别：游戏事实。 */
     private static final int BED_VERTICAL_LIMIT = 2;
 
+    /**
+     * 挑床边的候选站位时横向要留的余量（格）：走到站位只保证站进那一格，人常停在进格子那一侧的边上，
+     * 离床最远能比格子中心多出半格；原版按人的精确位置量床距，离床三格的那一圈停在外沿就"床太远了"。
+     * 所以候选只挑横向两格以内的格子，走到哪一边都够得着。类别：游戏事实（原版床距按精确位置量）。
+     */
+    private static final double BED_CELL_SLACK = 0.5;
+
     /** 原版 Q 丢出的东西从眼睛下方这么多格出手。类别：游戏事实。 */
     private static final double TOSS_RELEASE_DROP = 0.3;
 
@@ -99,7 +106,8 @@ public final class StandSpots {
         // 写告示牌这类只站正面的目标，人已经站在背面时先报背面：在这里点下去编辑的是背面那一面。
         String behind = sideFailure(feet, target);
         if (behind != null) return Optional.of(behind);
-        String reachFailure = reachFailure(target, reach, feet, world.currentEye());
+        // 已经站在这里：床距按人此刻的精确位置量，不留余量，和原版点床时的判定一模一样。
+        String reachFailure = reachFailure(target, reach, world.currentPosition(), 0.0, world.currentEye());
         if (reachFailure != null) return Optional.of(reachFailure);
         if (!world.visibleFrom(world.currentEye(), target)) return Optional.of("看不见");
         return Optional.empty();
@@ -122,7 +130,8 @@ public final class StandSpots {
             return;
         }
         Vec3 eye = new Vec3(feet.getX() + 0.5, feet.getY() + reach.eyeHeight(), feet.getZ() + 0.5);
-        String tooFar = reachFailure(target, reach, feet, eye);
+        // 还没走过去：按格子中心估，床距留出"停在格子哪一边都够得着"的余量。
+        String tooFar = reachFailure(target, reach, Vec3.atBottomCenterOf(feet), BED_CELL_SLACK, eye);
         if (tooFar != null) {
             rejected.add(new RejectedSpot(feet, tooFar));
             return;
@@ -164,14 +173,20 @@ public final class StandSpots {
         return Mth.degreesDifferenceAbs(target.frontYaw().floatValue(), angleFromSign) > 90.0F ? "背面" : null;
     }
 
-    /** 够得着检查：按交互种类取距离规则，返回失败项，够得着返回 null。 */
-    private static String reachFailure(ApproachTarget target, ReachRules reach, BlockPos feet, Vec3 eye) {
+    /**
+     * 够得着检查：按交互种类取距离规则，返回失败项，够得着返回 null。
+     *
+     * @param standing 脚底的位置：已经站着就是精确位置，候选站位取格子底面中心
+     * @param bedSlack 床距横向要留的余量：候选站位留出停在格子边上的半格，已经站着不留
+     */
+    private static String reachFailure(ApproachTarget target, ReachRules reach, Vec3 standing, double bedSlack,
+                                       Vec3 eye) {
         return switch (target.kind()) {
             // 方块与实体：从眼睛到目标边缘的直线距离不超属性值，和角色自己伸手判定同源。
             case BLOCK -> eye.distanceTo(nearestPoint(target.bounds(), eye)) > reach.blockRange() ? "够不着" : null;
             case ENTITY -> eye.distanceTo(nearestPoint(target.bounds(), eye)) > reach.entityRange() ? "够不着" : null;
             // 床：服务端按床底面中心分轴卡距离，横向不超过床距离档，高度差不超过两格。
-            case BED -> bedOutOfRange(feet, target.block(), reach.bedDistance()) ? "够不着" : null;
+            case BED -> bedOutOfRange(standing, target.block(), reach.bedDistance() - bedSlack) ? "够不着" : null;
             // 往一格里扔：不看交互距离，看出手点比接住东西的地方高多少、离那一格多近。
             case TOSS -> tossFailure(target, eye);
         };
@@ -196,10 +211,11 @@ public final class StandSpots {
                 Math.clamp(point.z, box.minZ, box.maxZ));
     }
 
-    private static boolean bedOutOfRange(BlockPos feet, BlockPos bed, int bedDistance) {
-        int dx = Math.abs(feet.getX() - bed.getX());
-        int dy = Math.abs(feet.getY() - bed.getY());
-        int dz = Math.abs(feet.getZ() - bed.getZ());
-        return dx > bedDistance || dz > bedDistance || dy > BED_VERTICAL_LIMIT;
+    // 原版量床距：人脚底的位置和床那一格的底面中心比，东西、南北各不超过横向上限，高度差不超过两格。
+    private static boolean bedOutOfRange(Vec3 standing, BlockPos bed, double horizontalLimit) {
+        Vec3 bottom = Vec3.atBottomCenterOf(bed);
+        return Math.abs(standing.x - bottom.x) > horizontalLimit
+                || Math.abs(standing.z - bottom.z) > horizontalLimit
+                || Math.abs(standing.y - bottom.y) > BED_VERTICAL_LIMIT;
     }
 }

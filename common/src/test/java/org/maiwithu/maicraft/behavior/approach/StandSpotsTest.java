@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.approach;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 
 import org.junit.jupiter.api.Test;
 
@@ -77,11 +78,34 @@ class StandSpotsTest {
     void 床按服务端距离分轴卡() {
         ApproachTarget bed = ApproachTarget.ofBed(new BlockPos(0, 60, 0));
         StandSpots.Ranking ranking = find(bed);
-        // 横向差四格超出床距离档；横向差三格、高度差两格正好在服务端允许的边上。
+        // 横向差四格超出床距离档；横向差两格、高度差两格走到格子哪一边都在服务端允许的范围里。
         assertEquals("够不着", failureAt(ranking, new BlockPos(4, 60, 0)));
-        assertTrue(ranking.spots().stream().anyMatch(spot -> spot.feet().equals(new BlockPos(3, 62, 0))));
+        assertTrue(ranking.spots().stream().anyMatch(spot -> spot.feet().equals(new BlockPos(2, 62, 0))));
         // 高度差三格超出床距离档；候选只在目标上下两格内找，直接核对站在那里行不行。
         world.feet = new BlockPos(0, 63, 0);
+        assertEquals(Optional.of("够不着"), StandSpots.checkArrival(bed, REACH, world, guarded));
+    }
+
+    @Test
+    void 离床三格的那一圈不当候选_走进去停在外沿就点不着床() {
+        // 实机 10-15：从远处走来，站进离床三格的那一格就停在进格子那一侧的边上，离床底面中心三格多，
+        // 点床被原版以"床太远了"拒绝。挑候选时这一圈不要，横向两格以内的才要。
+        ApproachTarget bed = ApproachTarget.ofBed(new BlockPos(0, 60, 0));
+        StandSpots.Ranking ranking = find(bed);
+        assertEquals("够不着", failureAt(ranking, new BlockPos(3, 60, 0)));
+        assertEquals("够不着", failureAt(ranking, new BlockPos(0, 60, -3)));
+        assertTrue(ranking.spots().stream().anyMatch(spot -> spot.feet().equals(new BlockPos(2, 60, 2))));
+    }
+
+    @Test
+    void 已经站着时按人的精确位置核对床距() {
+        ApproachTarget bed = ApproachTarget.ofBed(new BlockPos(0, 60, 0));
+        world.feet = new BlockPos(3, 60, 0);
+        // 站在离床三格那一格靠床的一边：离床底面中心 2.8 格，原版让睡。
+        world.position = new Vec3(3.3, 60, 0.5);
+        assertEquals(Optional.empty(), StandSpots.checkArrival(bed, REACH, world, guarded));
+        // 同一格靠外的一边：离床底面中心 3.4 格，原版说床太远了，这里也不能当成到了。
+        world.position = new Vec3(3.9, 60, 0.5);
         assertEquals(Optional.of("够不着"), StandSpots.checkArrival(bed, REACH, world, guarded));
     }
 

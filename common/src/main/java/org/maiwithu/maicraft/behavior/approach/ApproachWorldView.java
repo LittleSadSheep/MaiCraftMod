@@ -16,6 +16,15 @@ public interface ApproachWorldView {
     /** 角色此刻的眼睛位置；潜行降下的眼高在这里如实反映。 */
     Vec3 currentEye();
 
+    /**
+     * 角色此刻脚底的精确位置。原版量床距按它量，不按脚下那一格：人站在格子靠外的一边，离床就比格子中心远半格，
+     * 点床会被以"床太远了"拒绝。默认取脚下那一格的底面中心，只摆格子的替身不用另写。
+     */
+    default Vec3 currentPosition() {
+        BlockPos feet = currentFeet();
+        return feet == null ? Vec3.ZERO : Vec3.atBottomCenterOf(feet);
+    }
+
     /** 角色此刻是否踩在地面上；跳跃与坠落中都不算落地。 */
     boolean onGround();
 

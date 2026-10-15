@@ -51,6 +51,13 @@ public final class LiveApproachWorld implements ApproachWorldView {
         return current == null || current.localPlayer() == null ? Vec3.ZERO : current.localPlayer().getEyePosition();
     }
 
+    // 走到站位后核对床距用人的精确位置：原版就是拿它和床那一格的底面中心比的。
+    @Override
+    public Vec3 currentPosition() {
+        PlayerContext current = context.get();
+        return current == null || current.localPlayer() == null ? Vec3.ZERO : current.localPlayer().position();
+    }
+
     @Override
     public boolean onGround() {
         PlayerContext current = context.get();
