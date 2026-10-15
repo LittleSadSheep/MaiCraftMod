@@ -6,6 +6,7 @@ import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilitySpec;
 import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
 import org.maiwithu.maicraft.kernel.ability.Listing;
+import org.maiwithu.maicraft.kernel.interrupt.SurvivalNeedsOff;
 import org.maiwithu.maicraft.kernel.param.ParamSpecs;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
@@ -40,7 +41,7 @@ final class GoalTestAbility implements AbilityModule {
     }
 
     /** 替身任务：逐刻返回约定结局；被提前收尾时如实交代被取消；可以约定启动就出错。 */
-    static final class ScriptedGoalTask implements Task {
+    static final class ScriptedGoalTask implements Task, SurvivalNeedsOff {
         private final TickResult ending;
         private final RuntimeException startError;
         /** 被提前收尾时交出的结果；没设过按取消交代。 */
@@ -52,6 +53,8 @@ final class GoalTestAbility implements AbilityModule {
         boolean needsSafeStop;
         boolean stopping;
         boolean landed;
+        /** 此刻自己要不要关掉生存需求（寻死这类从收护具到死）。 */
+        boolean needsOff;
 
         ScriptedGoalTask(TickResult ending) {
             this(ending, null);
@@ -88,6 +91,10 @@ final class GoalTestAbility implements AbilityModule {
 
         @Override public boolean stoppedSafely() {
             return !stopping || landed;
+        }
+
+        @Override public boolean survivalNeedsOff() {
+            return needsOff;
         }
 
         @Override public TaskResult close(CloseReason reason) {

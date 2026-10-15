@@ -88,13 +88,14 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, KeepsTempTaskFa
     private enum Ending { PAUSE, CANCEL }
 
     /**
-     * 这件事的许可关掉了生存需求（survival_needs=off，寻死这类）：控制循环据此不插任何生存需求。
-     * sequence 正在跑某一步时按那一步的许可。
+     * 目标在跑，且许可关掉了生存需求（survival_needs=off）或手上的能力任务此刻自己要关（寻死从收护具到死）：控制循环据此不插任何生存需求。
+     * sequence 正在跑某一步时按那一步；暂停、等回答的目标不关，被打了照样还手。
      */
-    @Override
-    public boolean survivalNeedsOff() {
+    @Override public boolean survivalNeedsOff() {
+        if (run.state() != GoalRunState.RUNNING) return false;
         if (stepRunner != null) return stepRunner.survivalNeedsOff();
-        return goal.permissions().survivalNeeds() == Permissions.SurvivalNeeds.OFF;
+        return goal.permissions().survivalNeeds() == Permissions.SurvivalNeeds.OFF
+                || child != null && !child.finished() && child.running() instanceof SurvivalNeedsOff own && own.survivalNeedsOff();
     }
 
     /**

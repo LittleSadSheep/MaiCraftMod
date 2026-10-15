@@ -241,6 +241,28 @@ class GoalRunTableTest {
 
         assertTrue(table.launch(suicide, null).runner().survivalNeedsOff());
         assertFalse(table.launch(GOAL, null).runner().survivalNeedsOff());
+
+        // 许可写了 off 的目标暂停后不关：停着等恢复时被打了照样还手。
+        GoalRunner paused = table.launch(suicide, null).runner();
+        table.pause(paused.run().id());
+        assertFalse(paused.survivalNeedsOff());
+    }
+
+    @Test
+    void runningTaskThatTurnsSurvivalNeedsOffIsHeardUntilTheGoalPauses() {
+        // 寻死这类：能力任务尝试期间自己声明关掉，许可不用写；任务说开就开，目标暂停后也开。
+        ability.shared().keepRunning("寻死");
+        ability.next(new StepDecision.Run(new GoalTestAbility.TestInput("寻死")));
+        GoalRunner runner = table.launch(GOAL, null).runner();
+        runTicks(2);
+        GoalTestAbility.ScriptedGoalTask task = ability.shared().created.get("寻死");
+        assertFalse(runner.survivalNeedsOff(), "任务没说要关就不关");
+
+        task.needsOff = true;
+        assertTrue(runner.survivalNeedsOff(), "任务说要关就关");
+
+        table.pause(runner.run().id());
+        assertFalse(runner.survivalNeedsOff(), "暂停的目标不关");
     }
 
     @Test
