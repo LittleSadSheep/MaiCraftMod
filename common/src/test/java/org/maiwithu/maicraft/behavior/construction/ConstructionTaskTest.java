@@ -24,6 +24,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import org.junit.jupiter.api.BeforeAll;
@@ -87,6 +88,10 @@ class ConstructionTaskTest {
         final List<BlockPos> placedOrder = new ArrayList<>();
         /** 倒过的桶（物品名），按倒的先后。 */
         final List<String> pouredItems = new ArrayList<>();
+        /** 点下去方块落成了、交互却报出岔子的格：模拟确认说不清，方块其实已经在那里。 */
+        final Set<BlockPos> clickFailsAfterPlacing = new HashSet<>();
+        /** 像保护判断里"像玩家放的门"那条推断：现场是门就当别人的东西，归属记录还没到。 */
+        boolean doorsLookPlayerMade;
         int digCalls;
         BlockPos feet = new BlockPos(5, 64, 5);
 
@@ -130,14 +135,16 @@ class ConstructionTaskTest {
         final Map<BlockPos, BlockState> turnTo = new HashMap<>();
 
         @Override public Click place(PlannedCell cell, PlacementPrediction.Placement placement, boolean sneak, PlacementConfirmation confirmation) {
-            return click(() -> {
+            Runnable effect = () -> {
                 sneakedAt.put(cell.pos(), sneak);
                 clicks.add(placement);
                 placedOrder.add(cell.pos());
                 world.put(cell.pos(), placement.predicted());
-                for (var effect : PlacementPrediction.generatedBy(cell.pos(), placement.predicted())) world.put(effect.pos(), effect.expected());
+                for (var half : PlacementPrediction.generatedBy(cell.pos(), placement.predicted())) world.put(half.pos(), half.expected());
                 carried.merge(BuiltInRegistries.ITEM.getKey(cell.item()).toString(), -1, Integer::sum);
-            });
+            };
+            if (clickFailsAfterPlacing.contains(cell.pos())) return new Click(new FailingAfter(effect, "交互结果出乎预料"), () -> null);
+            return click(effect);
         }
         @Override public Click pour(PlannedCell cell, InteractionConfirmation confirmation) {
             return click(() -> {
@@ -180,7 +187,9 @@ class ConstructionTaskTest {
         }
         @Override public ConstructionSeams.HoldPlan hold(String itemId) { return new ConstructionSeams.HoldPlan.Ready(); }
         @Override public Optional<Problem> allows(PermissionCheck.WorldAction action, BlockPos pos, String blockType) {
-            return protectedCells.contains(pos) ? Optional.of(Problem.of(Problem.Kind.NEED_APPROVAL, pos.toShortString() + " 是玩家的东西")) : Optional.empty();
+            boolean guessed = doorsLookPlayerMade && state(pos).getBlock() instanceof DoorBlock;
+            return protectedCells.contains(pos) || guessed
+                    ? Optional.of(Problem.of(Problem.Kind.NEED_APPROVAL, pos.toShortString() + " 是玩家的东西")) : Optional.empty();
         }
         @Override public void siteStarted(Blueprint blueprint) { siteNotes.add("开工"); }
         @Override public void temporaryPlaced(BlockPos pos, String blockType, String purpose) { temporaries.add(pos); }
@@ -197,6 +206,15 @@ class ConstructionTaskTest {
     private record Immediate(Runnable effect) implements Action {
         @Override public ActionStatus tick(TickContext context) { effect.run(); return ActionStatus.done(); }
         @Override public String describe() { return "替身动作"; }
+    }
+
+    /** 先把方块落下去、再报出岔子的动作：世界变了，交互的结论却说不清。 */
+    private record FailingAfter(Runnable effect, String why) implements Action {
+        @Override public ActionStatus tick(TickContext context) {
+            effect.run();
+            return ActionStatus.failed(Problem.of(Problem.Kind.UNSUPPORTED, why));
+        }
+        @Override public String describe() { return "替身出岔子"; }
     }
 
     private record Failing(String why) implements Action {
@@ -374,6 +392,44 @@ class ConstructionTaskTest {
         assertEquals(1, details(result).cells().get("poured"));
         assertEquals(1, count(result, Change.Kind.ITEM_CONSUMED));
         assertEquals(1, fake.carried("minecraft:bucket"));
+    }
+
+    @Test
+    void 门其实装上了只是交互报出岔子_先认对上不当受保护也不垫临时方块() {
+        // 直播里第一扇门装在了这一格，结果却说出乎预料，又在旁边垫了一块，最后说这格是玩家放的不动。
+        Fake fake = new Fake().ground(63);
+        BlockPos at = new BlockPos(0, 64, 0);
+        fake.carried.put("minecraft:spruce_door", 2);
+        fake.carried.put("minecraft:cobblestone", 8);
+        fake.clickFailsAfterPlacing.add(at);
+        fake.doorsLookPlayerMade = true;
+        TaskResult result = run(fake, new Blueprint(DIM, at, List.of(PlannedCell.block(at, Blocks.SPRUCE_DOOR.defaultBlockState(), Set.of()))));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(0, details(result).cells().get("protected"), "自己刚装好的门不算玩家的东西");
+        assertTrue(details(result).problems().isEmpty(), "对上了的格不留问题");
+        assertEquals(1, fake.clicks.size(), "门已经在了，不从别的面再点");
+        assertEquals(1, details(result).cells().get("placed"), "这一下点成的，照放好记");
+        assertEquals(1, count(result, Change.Kind.BLOCK_PLACED));
+        assertEquals(8, fake.carried("minecraft:cobblestone"), "不为它垫临时方块");
+        assertTrue(fake.temporaries.isEmpty());
+    }
+
+    @Test
+    void 早先记成受保护的格_验收时现场对上了就按对上收下() {
+        // 开工时那一格挡着、被当成别人的；后来别人换成了要的方块：验收先认对上，不再报受保护。
+        Fake fake = new Fake().ground(63);
+        BlockPos at = new BlockPos(0, 64, 0);
+        fake.world.put(at, Blocks.DIRT.defaultBlockState());
+        fake.protectedCells.add(at);
+        Blueprint blueprint = wall(STONE, at);
+        ConstructionSite site = new ConstructionSite(blueprint);
+        site.check(fake);
+        site.exclude(at, CellEnding.PROTECTED, "是玩家的东西");
+        fake.world.put(at, STONE);
+        site.check(fake);
+        assertEquals(CellEnding.MATCHES, site.ending(at));
+        assertTrue(site.allSettled());
+        assertTrue(site.problemGroups().isEmpty());
     }
 
     @Test

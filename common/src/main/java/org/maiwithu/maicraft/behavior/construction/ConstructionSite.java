@@ -49,17 +49,24 @@ final class ConstructionSite {
         return placements;
     }
 
-    /** 对图核一遍，更新每格的结局；这次放过、清过、倒过的仍记原来的结局。返回没加载的格。 */
+    /**
+     * 对图核一遍，更新每格的结局；这次放过、清过、倒过的仍记原来的结局。返回没加载的格。
+     * 先认"这一格已经对上了"再看别的：早先记成受保护、够不着、没能确认的格，现场已经是要的样子
+     * （上一下其实放成了、别人先放好了），就按对上收下，那一格记过的问题一并撤掉。
+     */
     List<BlockPos> check(ReadsBlocks world) {
         BlueprintCheck.Result result = BlueprintCheck.compare(blueprint, world, Set.of());
         List<BlockPos> unloaded = new ArrayList<>();
         for (PlannedCell cell : blueprint.cells()) {
             CellState state = result.states().get(cell.pos());
             if (state == CellState.UNKNOWN) unloaded.add(cell.pos());
+            if (state == CellState.MATCHES) {
+                settleMatching(cell.pos());
+                continue;
+            }
             if (excluded.contains(cell.pos())) continue;
             CellEnding prior = endings.get(cell.pos());
             endings.put(cell.pos(), switch (state) {
-                case MATCHES -> prior == CellEnding.PLACED || prior == CellEnding.CLEARED || prior == CellEnding.POURED ? prior : CellEnding.MATCHES;
                 case WRONG_BLOCK -> CellEnding.WRONG_BLOCK;
                 case WRONG_STATE -> CellEnding.WRONG_STATE;
                 case MISSING -> CellEnding.MISSING;
@@ -68,10 +75,29 @@ final class ConstructionSite {
                     excluded.add(cell.pos());
                     yield CellEnding.CHECKED_BY_MACHINE;
                 }
-                case EXTRA -> prior;
+                case MATCHES, EXTRA -> prior;
             });
         }
         return unloaded;
+    }
+
+    /**
+     * 动手前再看一眼现场：这一格已经是要的样子就按对上收下，不再问保护、不再去点或去挖。
+     * 结局只按开工时核对的记着，中途放成了的（确认说不清、被打断回来）不重核就会被当成还缺。
+     */
+    boolean alreadyMatches(PlannedCell cell, ReadsBlocks world) {
+        if (!world.loaded(cell.pos()) || !PlacementPrediction.complete(cell, world.state(cell.pos()))) return false;
+        settleMatching(cell.pos());
+        return true;
+    }
+
+    // 现场对上了：这次放过、清过、倒过的仍记原来的结局，其余记对上；不再算不碰的格，记过的问题撤掉。
+    private void settleMatching(BlockPos pos) {
+        CellEnding prior = endings.get(pos);
+        endings.put(pos, prior == CellEnding.PLACED || prior == CellEnding.CLEARED || prior == CellEnding.POURED ? prior : CellEnding.MATCHES);
+        excluded.remove(pos);
+        problems.values().forEach(cells -> cells.remove(pos));
+        problems.values().removeIf(List::isEmpty);
     }
 
     /** 这一格这次不碰了：受保护或做不了，记原因。 */

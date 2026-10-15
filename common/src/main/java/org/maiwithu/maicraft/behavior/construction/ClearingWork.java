@@ -58,7 +58,7 @@ final class ClearingWork extends ConstructionWork {
         return nextCell();
     }
 
-    // 挑下一格：没加载的跳过；受保护的、挖不动的记下来；都没问题就走过去。
+    // 挑下一格：没加载的跳过；现场已经对上的收下；受保护的、挖不动的记下来；都没问题就走过去。
     private ActionStatus nextCell() {
         while (!queue.isEmpty()) {
             PlannedCell centre = services.digs() != null && services.digs().chains() ? squareCentre() : null;
@@ -69,6 +69,8 @@ final class ClearingWork extends ConstructionWork {
             if (!services.site().loaded(pos)) continue;
             before = services.site().state(pos);
             if (before.isAir()) continue;
+            // 要清的格现场已经是要的样子（上一轮其实放成了、别人先换好了）：先认下，不再问保护也不挖。
+            if (site.alreadyMatches(cell, services.site())) continue;
             if (services.site().unbreakable(pos)) {
                 site.exclude(pos, CellEnding.IMPOSSIBLE, "挖不动（基岩或世界边界）");
                 continue;

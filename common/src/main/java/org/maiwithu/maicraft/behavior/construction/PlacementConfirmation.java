@@ -10,6 +10,7 @@ import java.util.function.Predicate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.Property;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.BackpackStack;
@@ -67,27 +68,44 @@ public final class PlacementConfirmation implements InteractionConfirmation {
     /**
      * 只看世界：相关格没加载就等；全都和出手前一样，服务端确认到了就是没生效，没到就再等；
      * 主格放好或有进展、另一半也对上就是生效；变成别的样子是出乎预料。
+     *
+     * <p>作者没点名的朝向、铰链按原版落法接受：人走到跟前转了身、点的位置偏了一点，门朝向和铰链就和
+     * 出手前试算的不一样，这仍是放好了。两格方块的主格只核对方块种类和上下半（门下半、床脚），
+     * 另一半按主格此刻的样子去找、去比。
      */
     public Verdict observe(Predicate<BlockPos> loaded, Function<BlockPos, BlockState> states, boolean acknowledged) {
-        if (!loaded.test(cell.pos()) || generated.stream().anyMatch(effect -> !loaded.test(effect.pos()))) return Verdict.PENDING;
+        if (!loaded.test(cell.pos())) return Verdict.PENDING;
         BlockState old = before.get(cell.pos());
         BlockState live = states.apply(cell.pos());
+        List<PlacementPrediction.GeneratedCell> effects = effectsOf(live);
+        if (effects.stream().anyMatch(effect -> !loaded.test(effect.pos()))) return Verdict.PENDING;
         boolean unchanged = live.equals(old);
         boolean complete = PlacementPrediction.complete(cell, live) || PlacementPrediction.isProgress(cell, old, live);
-        if (!generated.isEmpty() && predicted != null) complete &= samePlacement(live, predicted);
+        if (!effects.isEmpty() && predicted != null) complete &= sameBlockAndHalf(live, predicted);
         boolean diverged = !complete && !unchanged;
-        for (var effect : generated) {
+        for (var effect : effects) {
             BlockState was = before.get(effect.pos());
             BlockState now = states.apply(effect.pos());
             boolean matches = samePlacement(now, effect.expected());
+            // 床头落到了试算以外的方向时出手前没记那一格：原版只往能放进去的格里放床头，还能放进去就当没动过。
+            boolean untouched = was == null ? now.canBeReplaced() : now.equals(was);
             complete &= matches;
-            unchanged &= now.equals(was);
-            diverged |= !matches && !now.equals(was);
+            unchanged &= untouched;
+            diverged |= !matches && !untouched;
         }
         if (unchanged) return acknowledged ? Verdict.NOT_APPLIED : Verdict.PENDING;
         if (complete) return Verdict.APPLIED;
         // 门的上半可能晚一刻才同步：它还没变时继续等，不因为确认号到了就判错。
         return diverged ? Verdict.DIVERGED : Verdict.PENDING;
+    }
+
+    // 另一半该在哪、该是什么样：主格已经落成同一种方块时按它此刻的朝向与铰链推（床头跟着床脚朝向走），
+    // 主格还没变就按出手前的试算。
+    private List<PlacementPrediction.GeneratedCell> effectsOf(BlockState live) {
+        BlockState basis = predicted != null ? predicted : cell.state();
+        if (live.getBlock() != basis.getBlock()) return generated;
+        List<PlacementPrediction.GeneratedCell> fromLive = PlacementPrediction.generatedBy(cell.pos(), live);
+        return fromLive.isEmpty() ? generated : fromLive;
     }
 
     /** 加上耗材这一证据：方块变了但一件都没扣就继续等；扣了却说没生效也要等同一单，不换角度再点。 */
@@ -118,6 +136,19 @@ public final class PlacementConfirmation implements InteractionConfirmation {
         if (live.getBlock() != expected.getBlock()) return false;
         for (Property<?> property : expected.getProperties()) {
             if (!placementProperty(property)) continue;
+            if (!live.hasProperty(property) || !live.getValue(property).equals(expected.getValue(property))) return false;
+        }
+        return true;
+    }
+
+    /**
+     * 两格方块的主格对不对：同一种方块，上下半（门的下半、床脚）一致。朝向、铰链由原版按人站的方向和点的位置定，
+     * 作者点名了才算数，那由放好没有的核对管，这里不再拿出手前的试算去比。
+     */
+    static boolean sameBlockAndHalf(BlockState live, BlockState expected) {
+        if (live.getBlock() != expected.getBlock()) return false;
+        for (Property<?> property : List.of(BlockStateProperties.DOUBLE_BLOCK_HALF, BlockStateProperties.BED_PART)) {
+            if (!expected.hasProperty(property)) continue;
             if (!live.hasProperty(property) || !live.getValue(property).equals(expected.getValue(property))) return false;
         }
         return true;

@@ -15,6 +15,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BedPart;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.DoorHingeSide;
 import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
@@ -63,6 +64,50 @@ class PlacementConfirmationTest {
         assertEquals(Verdict.APPLIED, confirmation.observe(live::containsKey, live::get, true), "右铰链是原版落法，不算错");
         live.put(BlockPos.ZERO.above(), Blocks.STONE.defaultBlockState());
         assertEquals(Verdict.DIVERGED, confirmation.observe(live::containsKey, live::get, true), "上半变成了别的东西");
+    }
+
+    @Test
+    void 没点名朝向铰链的门_转了身放成别的朝向也算放好() {
+        // 出手前试算朝北、左铰链；人走到跟前转了身，原版放成朝东、右铰链：作者没点名，只核对种类和上下半。
+        BlockState lower = Blocks.SPRUCE_DOOR.defaultBlockState().setValue(BlockStateProperties.DOUBLE_BLOCK_HALF, DoubleBlockHalf.LOWER);
+        BlockState predicted = lower.setValue(BlockStateProperties.HORIZONTAL_FACING, Direction.NORTH)
+                .setValue(BlockStateProperties.DOOR_HINGE, DoorHingeSide.LEFT);
+        BlockState landed = lower.setValue(BlockStateProperties.HORIZONTAL_FACING, Direction.EAST)
+                .setValue(BlockStateProperties.DOOR_HINGE, DoorHingeSide.RIGHT);
+        var cell = PlannedCell.block(BlockPos.ZERO, lower, Set.of());
+        var confirmation = new PlacementConfirmation(cell, Map.of(BlockPos.ZERO, AIR, BlockPos.ZERO.above(), AIR), predicted, -1);
+        Map<BlockPos, BlockState> live = new HashMap<>(Map.of(BlockPos.ZERO, landed, BlockPos.ZERO.above(), AIR));
+        assertEquals(Verdict.PENDING, confirmation.observe(live::containsKey, live::get, true), "上半还没同步：等");
+        live.put(BlockPos.ZERO.above(), landed.setValue(BlockStateProperties.DOUBLE_BLOCK_HALF, DoubleBlockHalf.UPPER));
+        assertEquals(Verdict.APPLIED, confirmation.observe(live::containsKey, live::get, true), "朝向、铰链是原版落法，不算出乎预料");
+        live.put(BlockPos.ZERO.above(), Blocks.STONE.defaultBlockState());
+        assertEquals(Verdict.DIVERGED, confirmation.observe(live::containsKey, live::get, true), "上半变成了别的东西仍是出乎预料");
+    }
+
+    @Test
+    void 点名了朝向的门_放成别的朝向仍是出乎预料() {
+        BlockState north = Blocks.OAK_DOOR.defaultBlockState().setValue(BlockStateProperties.DOUBLE_BLOCK_HALF, DoubleBlockHalf.LOWER)
+                .setValue(BlockStateProperties.HORIZONTAL_FACING, Direction.NORTH);
+        BlockState east = north.setValue(BlockStateProperties.HORIZONTAL_FACING, Direction.EAST);
+        var cell = PlannedCell.block(BlockPos.ZERO, north, Set.of("facing"));
+        var confirmation = new PlacementConfirmation(cell, Map.of(BlockPos.ZERO, AIR, BlockPos.ZERO.above(), AIR), north, -1);
+        Map<BlockPos, BlockState> live = Map.of(BlockPos.ZERO, east,
+                BlockPos.ZERO.above(), east.setValue(BlockStateProperties.DOUBLE_BLOCK_HALF, DoubleBlockHalf.UPPER));
+        assertEquals(Verdict.DIVERGED, confirmation.observe(live::containsKey, live::get, true));
+    }
+
+    @Test
+    void 没点名朝向的床_床头跟着现场的床脚朝向找() {
+        // 试算床头朝北，落下来朝东：出手前没记东边那格，它原来能放进去，现在是床头，就是放好了。
+        BlockState foot = Blocks.WHITE_BED.defaultBlockState().setValue(BlockStateProperties.BED_PART, BedPart.FOOT);
+        BlockState predicted = foot.setValue(BlockStateProperties.HORIZONTAL_FACING, Direction.NORTH);
+        BlockState landed = foot.setValue(BlockStateProperties.HORIZONTAL_FACING, Direction.EAST);
+        var cell = PlannedCell.block(BlockPos.ZERO, foot, Set.of());
+        var confirmation = new PlacementConfirmation(cell, Map.of(BlockPos.ZERO, AIR, BlockPos.ZERO.north(), AIR), predicted, -1);
+        Map<BlockPos, BlockState> live = new HashMap<>(Map.of(BlockPos.ZERO, landed, BlockPos.ZERO.north(), AIR, BlockPos.ZERO.east(), AIR));
+        assertEquals(Verdict.PENDING, confirmation.observe(live::containsKey, live::get, true), "床头还没同步：等");
+        live.put(BlockPos.ZERO.east(), landed.setValue(BlockStateProperties.BED_PART, BedPart.HEAD));
+        assertEquals(Verdict.APPLIED, confirmation.observe(live::containsKey, live::get, true));
     }
 
     @Test

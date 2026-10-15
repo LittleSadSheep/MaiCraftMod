@@ -32,9 +32,12 @@ public abstract class BlockItemPlaceBlockMixin {
         MinecraftServer server = player.serverLevel().getServer();
         BlockOwnershipRecord ownership = ServerLinkServices.ownership(server);
         if (ownership == null) return;
-        ownership.recordPlacement(player.serverLevel().dimension().location().toString(),
-                context.getClickedPos(), player.getUUID(),
-                Integer.toUnsignedLong(server.getTickCount()));
+        String dimension = player.serverLevel().dimension().location().toString();
+        long tick = Integer.toUnsignedLong(server.getTickCount());
+        ownership.recordPlacement(dimension, context.getClickedPos(), player.getUUID(), tick);
+        // 门的上半、床头是原版顺带放下的，不走这个钩子：记在同一个人名下，客户端问到的整扇门、整张床都是这个人放的。
+        BlockOwnershipRecord.otherHalf(context.getClickedPos(), state)
+                .ifPresent(half -> ownership.recordPlacement(dimension, half, player.getUUID(), tick));
         ServerConfirmations confirmations = ServerLinkServices.confirmations(server);
         if (confirmations != null) confirmations.placed(player, context.getClickedPos(), state);
     }

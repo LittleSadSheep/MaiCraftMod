@@ -18,6 +18,8 @@ public final class ReceivedConfirmations {
                                      String blockId, long serverTick) {}
 
     private final ArrayDeque<ServerConfirmation> confirmations = new ArrayDeque<>();
+    /** 一共收下过几条：读的一方记住上次读到第几条，下一刻只看新来的。 */
+    private long total;
 
     public void receive(JsonObject envelope) {
         try {
@@ -28,6 +30,7 @@ public final class ReceivedConfirmations {
                     position.get("x").getAsInt(), position.get("y").getAsInt(), position.get("z").getAsInt(),
                     ServerCapabilityState.text(envelope, "block"),
                     envelope.has("serverTick") ? envelope.get("serverTick").getAsLong() : -1));
+            total++;
             while (confirmations.size() > MAX_CONFIRMATIONS) confirmations.removeFirst();
         } catch (RuntimeException malformed) {
             // 缺字段的确认不可信，直接丢弃；不影响其余确认。
@@ -36,5 +39,10 @@ public final class ReceivedConfirmations {
 
     public List<ServerConfirmation> recent() {
         return List.copyOf(confirmations);
+    }
+
+    /** 从连上起一共收下过几条确认（含已经让位的旧确认）。 */
+    public long total() {
+        return total;
     }
 }

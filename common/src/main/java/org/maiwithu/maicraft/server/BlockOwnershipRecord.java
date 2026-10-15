@@ -13,6 +13,11 @@ import java.util.UUID;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.block.BedBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BedPart;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.IntArrayTag;
 import net.minecraft.nbt.ListTag;
@@ -63,6 +68,21 @@ public final class BlockOwnershipRecord {
             unindex(dimension, position);
             dirty = true;
         }
+    }
+
+    /**
+     * 放下这个方块时原版顺带放下的另一半：门、高花的上半在正上方，床头在床脚朝向的那一格；单格方块给空。
+     * 这一半不经放置钩子，要由放的人一并记上，不然整扇门只有下半有主，上半被当成"不知道是谁的"。
+     */
+    public static Optional<BlockPos> otherHalf(BlockPos position, BlockState placed) {
+        if (placed.hasProperty(BlockStateProperties.DOUBLE_BLOCK_HALF)
+                && placed.getValue(BlockStateProperties.DOUBLE_BLOCK_HALF) == DoubleBlockHalf.LOWER) {
+            return Optional.of(position.above());
+        }
+        if (placed.getBlock() instanceof BedBlock && placed.getValue(BlockStateProperties.BED_PART) == BedPart.FOOT) {
+            return Optional.of(position.relative(BedBlock.getConnectedDirection(placed)));
+        }
+        return Optional.empty();
     }
 
     /** 查一格是谁放的；没记到（太久远或本模组装上之前放的）返回空。 */

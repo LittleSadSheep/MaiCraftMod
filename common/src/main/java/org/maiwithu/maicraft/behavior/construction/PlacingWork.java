@@ -87,7 +87,7 @@ final class PlacingWork extends ConstructionWork {
         return nextCell();
     }
 
-    // 挑下一格：已经对了的跳过；没材料的记缺；没有可点的面先放一放；受保护的不动。
+    // 挑下一格：已经对了的跳过（现场对上了就收下）；没材料的记缺；没有可点的面先放一放；受保护的不动。
     private ActionStatus nextCell() {
         while (true) {
             // 主队列空了就补一轮；补不出来（都放一放的格也处理完了）就是这一阶段做完。
@@ -97,6 +97,12 @@ final class PlacingWork extends ConstructionWork {
             PlannedCell cell = pollNearest();
             boolean temporary = temporaries.contains(cell.pos());
             if (temporary ? TemporaryBlocks.solid(services.site(), cell.pos()) : !site.needsWork(cell.pos())) continue;
+            // 先认这一格已经对上了再问别的：上一下其实放成了（确认说不清、被打断又回来），就不再缺料、问保护或再去点，
+            // 免得自己刚装好的门被当成"玩家放的"记成受保护，还在旁边垫临时方块。
+            if (!temporary && site.alreadyMatches(cell, services.site())) {
+                progressThisRound = true;
+                continue;
+            }
             String itemId = itemId(cell);
             if (!services.site().creative() && services.site().carried(itemId) <= 0) {
                 if (!temporary) site.problem("缺 " + itemId, cell.pos());
@@ -237,6 +243,21 @@ final class PlacingWork extends ConstructionWork {
     }
 
     private ActionStatus tryNextCandidate() {
+        // 上一面没点成（出岔子、说没生效）再换一面之前先看现场：方块其实已经落成要的样子，就收下这一格，
+        // 不再从别的面点一个已经占着的格，也不为它垫临时方块。是这一下点成的（耗材也扣了）就照放好记账，
+        // 结果里写明放了，不让 LLM 看着"没有变化"再去猜门到底装上没有。
+        if (!attempt.temporary && landedAnyway()) {
+            int used = materialBefore < 0 ? 0 : materialBefore - services.site().carried(itemId(attempt.cell));
+            consumed += used;
+            progressThisRound = true;
+            records.change(new Change(Change.Kind.BLOCK_PLACED, itemId(attempt.cell), 1, attempt.cell.pos().toShortString()));
+            return finish();
+        }
+        if (!attempt.temporary && site.alreadyMatches(attempt.cell, services.site())) {
+            attempt = null;
+            progressThisRound = true;
+            return nextCell();
+        }
         if (!attempt.hasNext()) {
             // 每一面都试过了：先放一放，做别的格再回头。
             deferred.add(attempt.cell);
@@ -371,6 +392,14 @@ final class PlacingWork extends ConstructionWork {
             }
             case UNEXPECTED, UNCONFIRMED -> unconfirmed(cell, itemId, result.scene());
         };
+    }
+
+    // 这一格点过一下，现场已经是要的样子，身上的耗材也少了（创造模式不看耗材）：就是这一下放成的。
+    private boolean landedAnyway() {
+        PlannedCell cell = attempt.cell;
+        if (attempt.confirmation == null || !services.site().loaded(cell.pos())
+                || !PlacementPrediction.complete(cell, services.site().state(cell.pos()))) return false;
+        return materialBefore < 0 || services.site().carried(itemId(cell)) < materialBefore;
     }
 
     // 这样放出来能不能拿扳手转到要的样子：规则说转得到、身上有那件工具才算。

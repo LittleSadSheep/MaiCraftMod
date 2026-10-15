@@ -10,13 +10,39 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Optional;
 import java.util.UUID;
+import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.server.Bootstrap;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.properties.BedPart;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 /** 方块归属记录的离线场景：写入、按维度查询、覆盖与容量淘汰。 */
 class BlockOwnershipRecordTest {
     private static final String OVERWORLD = "minecraft:overworld";
     private static final String NETHER = "minecraft:the_nether";
+
+    @BeforeAll
+    static void bootMinecraft() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+    }
+
+    @Test
+    void 门的上半和床头是原版顺带放的另一半() {
+        // 放门、放床只经过一次放置钩子：另一半由放的人一并记上，整扇门、整张床都有主。
+        BlockPos at = new BlockPos(17, 63, 15);
+        var door = Blocks.SPRUCE_DOOR.defaultBlockState().setValue(BlockStateProperties.DOUBLE_BLOCK_HALF, DoubleBlockHalf.LOWER);
+        assertEquals(Optional.of(at.above()), BlockOwnershipRecord.otherHalf(at, door));
+        var bed = Blocks.WHITE_BED.defaultBlockState().setValue(BlockStateProperties.BED_PART, BedPart.FOOT)
+                .setValue(BlockStateProperties.HORIZONTAL_FACING, Direction.EAST);
+        assertEquals(Optional.of(at.east()), BlockOwnershipRecord.otherHalf(at, bed));
+        assertTrue(BlockOwnershipRecord.otherHalf(at, Blocks.STONE.defaultBlockState()).isEmpty());
+    }
 
     @Test
     void 记录之后能查到是谁放的() {

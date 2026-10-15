@@ -147,8 +147,9 @@ public final class WorldScope {
         this.kinds = new FacilityKinds(new RegistryBlockTags());
         this.scene = new Scene(memory, kinds);
         this.facilitySight = new ClientNearbyBlocksSight(blockScans, () -> observing, kinds);
-        // 保护判断：归属记录按区块问服务端（还没问到的按受保护处理），区域读每刻抄一份的快照，地标问世界记忆；
-        this.ownership = new OwnershipMap(session);
+        // 保护判断：归属记录按区块问服务端（还没问到的按受保护处理；自己刚放下的按服务端推来的确认当刻记上），
+        // 区域读每刻抄一份的快照，地标问世界记忆；
+        this.ownership = new OwnershipMap(session, minecraft.player.getUUID().toString());
         this.regions = new RegionsSnapshot(memory);
         this.regions.refresh();
         // 自家人：所有者在实例配置里列的信任玩家；名单写名字的，按在线玩家对上编号。
