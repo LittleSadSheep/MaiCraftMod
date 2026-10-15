@@ -41,6 +41,7 @@ import org.maiwithu.maicraft.game.player.ReadsEquipment;
 import org.maiwithu.maicraft.game.player.ReadsFoodValues;
 import org.maiwithu.maicraft.game.player.ReadsHunger;
 import org.maiwithu.maicraft.kernel.result.Change;
+import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -273,6 +274,19 @@ class EatTaskTest {
                 && finished.result().status() == TaskResult.Status.DONE, () -> "应该吃完：" + result);
         assertEquals(1, ((TickResult.Finished) result).result().changes().stream()
                 .filter(change -> change.kind() == Change.Kind.ITEM_CONSUMED).mapToInt(change -> change.count()).sum());
+    }
+
+    @Test
+    void 开吃前就已经饱了_按失败说已经饱了() {
+        // 点名吃面包时饱食度已满：一件没吃，按"已经饱了"失败，不回"部分完成，吃了 0 件"。
+        Rig rig = new Rig().bread(2, 0);
+        rig.hunger.foodLevel = 20;
+        rig.worldStep = Rig::confirmAnythingPending;
+        TickResult result = rig.run(rig.task(1), 60);
+        TaskResult failed = ((TickResult.Finished) result).result();
+        assertEquals(TaskResult.Status.FAILED, failed.status());
+        assertEquals(Problem.Kind.WRONG_TIME, failed.problem().kind());
+        assertTrue(failed.problem().message().contains("已经饱了"), failed.problem().message());
     }
 
     @Test

@@ -120,8 +120,13 @@ final class EatTask extends PhasedTask<EatTask.Phase> {
                             "吃完了 " + eaten + " 件 " + input.itemId())
                     .details(new EatDetails(List.copyOf(effectsGained))).build());
         }
-        // 吃着吃着饱了：普通食物吃不下剩下的，如实按做成的一部分结束。
+        // 一件还没吃就已经饱了：这种食物饱腹时原版不让开始吃，按"已经饱了"失败，和决定阶段的说法一致，
+        // 不回"部分完成，吃了 0 件"。吃着吃着饱了：普通食物吃不下剩下的，如实按做成的一部分结束。
         if (hunger.hungerMechanicsOn() && hunger.foodLevel() >= 20 && !edibleWhenFull()) {
+            if (eaten == 0) {
+                return Next.fail(Problem.of(Problem.Kind.WRONG_TIME, "已经饱了（饱食度 " + hunger.foodLevel()
+                        + "/20），" + input.itemId() + " 饱腹时吃不下", "等饿了再吃"));
+            }
             return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL,
                             "吃了 " + eaten + " 件 " + input.itemId() + "，已经饱了，剩下的吃不下")
                     .remaining("再吃 " + unitsLeft() + " 件 " + input.itemId())
