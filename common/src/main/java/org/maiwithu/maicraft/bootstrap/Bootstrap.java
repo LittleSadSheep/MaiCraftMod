@@ -420,13 +420,15 @@ public final class Bootstrap {
             // 一次伤害包两处要：自卫的伤害证据，与提醒（黑暗里挨打、战斗压力）。
             CombatMemory memory = combatMemory;
             PlayerReminders playerReminders = reminders;
-            // 挨打的片段与换维度两种事件：主播从 events 里知道角色挨了打、换了维度；挨打的攻击者看得见时带观察编号。
+            // 挨打的片段与换维度：攻击者看得见时带观察编号；碰着方块扎的先由吃过亏的方块认出、记下，那一句才说得出是它。
             hurtEpisodes = new HurtEpisodes(taskEvents, entityId -> worldScope[0] == null ? Optional.empty()
-                    : worldScope[0].scene().seen().idOfEntity(entityId));
+                    : worldScope[0].scene().seen().idOfEntity(entityId), type -> worldScope[0] == null
+                    ? Optional.empty() : worldScope[0].pains().culpritOf(type));
             dimensionChanges = new DimensionChanges(taskEvents);
             HurtEpisodes hurts = hurtEpisodes;
             ClientHooks.registerDamageObserver((player, source, tick) -> {
                 memory.hurt(player, source, tick);
+                if (worldScope[0] != null) worldScope[0].pains().hurt(player, source, tick);
                 playerReminders.hurt(player, source, tick);
                 hurts.hurt(player, source, tick);
             });

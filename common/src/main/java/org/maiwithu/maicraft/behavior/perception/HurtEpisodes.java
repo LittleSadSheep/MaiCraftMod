@@ -37,6 +37,8 @@ public final class HurtEpisodes implements DamageObserver {
 
     private final TaskEventSink events;
     private final Function<Integer, Optional<String>> seenIdOf;
+    /** 没有攻击者的伤（原版 msgId）是碰着哪种方块扎的、记没记下：一句话里带上。 */
+    private final Function<String, Optional<String>> culpritOf;
     private final Map<String, Episode> open = new LinkedHashMap<>();
     private Float lastHealth;
     private String lastHitKey;
@@ -46,8 +48,15 @@ public final class HurtEpisodes implements DamageObserver {
      * @param seenIdOf 游戏实体编号 → 这会儿的观察编号（看得见才有），消息里带上让 LLM 能指它
      */
     public HurtEpisodes(TaskEventSink events, Function<Integer, Optional<String>> seenIdOf) {
+        this(events, seenIdOf, type -> Optional.empty());
+    }
+
+    /** @param culpritOf 没有攻击者的伤是碰着哪种方块扎的（吃过亏的方块认出来的），认不出为空 */
+    public HurtEpisodes(TaskEventSink events, Function<Integer, Optional<String>> seenIdOf,
+                        Function<String, Optional<String>> culpritOf) {
         this.events = Objects.requireNonNull(events, "events");
         this.seenIdOf = Objects.requireNonNull(seenIdOf, "seenIdOf");
+        this.culpritOf = Objects.requireNonNull(culpritOf, "culpritOf");
     }
 
     /**
@@ -135,7 +144,12 @@ public final class HurtEpisodes implements DamageObserver {
 
     private void publish(Episode episode, float health) {
         if (episode.hits == 0 && episode.lost <= 0f) return;
-        events.publish(TaskEvent.Kind.HURT, describe(episode.hit, episode.hits, episode.lost, health));
+        String line = describe(episode.hit, episode.hits, episode.lost, health);
+        // 没人打、碰着方块扎的：说出是哪种方块、记没记下绕开，LLM 不用再猜"biomesoplenty.bramble 伤"是什么。
+        if (episode.hit.attacker() == null && !episode.hit.key().equals(UNSEEN)) {
+            line += culpritOf.apply(episode.hit.damageType()).map(culprit -> "（" + culprit + "）").orElse("");
+        }
+        events.publish(TaskEvent.Kind.HURT, line);
     }
 
     /** 一段挨打的一句话，纯函数：谁、什么伤、几下、掉了多少、还剩多少；没伤害包的写明只看到血掉了。 */

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.navigation.util;
 
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.tags.FluidTags;
@@ -34,6 +35,7 @@ import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import net.minecraft.world.item.Items;
+import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationHazards;
 import org.maiwithu.maicraft.game.world.InitTag;
 
 /**
@@ -262,8 +264,9 @@ public final class BlockPassability {
             // 熔岩属于危险液体；水在上方通行判定中已被排除，但本身不是伤害危险。
             return fluid.getType().getBucket() == Items.LAVA_BUCKET;
         }
-        // 非液体危险方块名单，角色绝不能寻路进入；岩浆块也会因接触造成伤害。
-        return state.is(Blocks.MAGMA_BLOCK)
+        // 非液体危险方块名单，角色绝不能寻路进入；岩浆块也会因接触造成伤害。吃过亏记下的方块（模组荆棘这类）同样算。
+        return NavigationHazards.learned(state)
+                || state.is(Blocks.MAGMA_BLOCK)
                 || state.is(Blocks.CACTUS)
                 || state.is(Blocks.SWEET_BERRY_BUSH)
                 || state.getBlock() instanceof BaseFireBlock
@@ -279,7 +282,8 @@ public final class BlockPassability {
     public static boolean avoidWalkingInto(BlockGetter level, BlockPos pos) {
         BlockState state = level.getBlockState(pos);
         if (!state.getFluidState().isEmpty()) return true;
-        return state.is(Blocks.MAGMA_BLOCK)
+        return NavigationHazards.learned(state)
+                || state.is(Blocks.MAGMA_BLOCK)
                 || state.is(Blocks.CACTUS)
                 || state.is(Blocks.SWEET_BERRY_BUSH)
                 || state.getBlock() instanceof BaseFireBlock

@@ -15,6 +15,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.client.player.LocalPlayer;
 
+import org.maiwithu.maicraft.behavior.navigation.PainfulBlocks;
 import org.maiwithu.maicraft.behavior.construction.ShowsPreview;
 import org.maiwithu.maicraft.behavior.lighting.FollowLighting;
 import org.maiwithu.maicraft.behavior.lighting.LightingWorld;
@@ -84,6 +85,7 @@ public final class WorldScope {
     private final BlockScanService blockScans;
     private final SubtitleFeed subtitles;
     private final WorldMemory memory;
+    private final PainfulBlocks pains;
     /** 这个世界的保护判断：能力挑方块、生存需求挖三填一都问它，归属查询的在途请求只留一份。 */
     private final Protection protection;
     /** 自家人：存储能不能用、被打要不要停工都按这一份。 */
@@ -139,6 +141,8 @@ public final class WorldScope {
         // 世界记忆与目标运行存在同一个文档库里，按世界身份分开；目标读回时按能力清单的参数规格整理参数。
         DocumentStore documents = new DocumentStore(identity.databaseFile());
         this.memory = new WorldMemory(documents, identity.key());
+        // 吃过亏的方块：碰着就掉血的那几种记在所有世界共用的一份里，进世界读出来交给寻路绕开。
+        this.pains = new PainfulBlocks(documents);
         this.goalRuns = new DocumentGoalRunStore(documents, identity.key(), abilities);
         this.kinds = new FacilityKinds(new RegistryBlockTags());
         this.scene = new Scene(memory, kinds);
@@ -255,6 +259,10 @@ public final class WorldScope {
     }
 
     /** 世界记忆：宿主查询与能力共用的那份。 */
+    public PainfulBlocks pains() {
+        return pains;
+    }
+
     public WorldMemory memory() {
         return memory;
     }

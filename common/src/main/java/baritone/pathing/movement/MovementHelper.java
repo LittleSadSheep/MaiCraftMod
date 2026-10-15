@@ -62,6 +62,7 @@ import static baritone.api.utils.RotationUtils.DEG_TO_RAD_F;
 import static baritone.pathing.movement.Movement.HORIZONTALS_BUT_ALSO_DOWN_____SO_EVERY_DIRECTION_EXCEPT_UP;
 import static baritone.pathing.precompute.Ternary.*;
 import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
+import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationHazards;
 import org.maiwithu.maicraft.behavior.navigation.HazardEscapePolicy;
 
 /**
@@ -428,7 +429,9 @@ public interface MovementHelper extends ActionCosts, Helper {
                 || block instanceof BaseFireBlock
                 || block == Blocks.END_PORTAL
                 || block == Blocks.COBWEB
-                || block == Blocks.BUBBLE_COLUMN;
+                || block == Blocks.BUBBLE_COLUMN
+                // 吃过亏记下的方块（荆棘这类）：斜着走、跑酷落地也不蹭进去。
+                || NavigationHazards.learned(state);
     }
 
     /**
