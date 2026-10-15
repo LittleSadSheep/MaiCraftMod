@@ -70,6 +70,20 @@ public final class LiveFightMoves implements FightMoves {
 
     @Override public Action walk(GoalCompiler.Compiled goal) { return battle.walk(goal); }
 
+    // 下面这些引擎后来才加的本事也照原样交给战斗引擎的生产动手：出手时走位不动镜头、走过去先把剑斧拿到手上、
+    // 跳劈、撤不掉时垫高或天黑挖坑、把飞来的火球打回去。原先点名战斗没转过去，这几样只在自卫里有。
+    @Override
+    public void stepKeepingAim(TickContext context, Footwork.Step step) {
+        battle.stepKeepingAim(context, step);
+    }
+
+    @Override public void arm(TickContext context, double distance) { battle.arm(context, distance); }
+    @Override public Posture posture(TickContext context) { return battle.posture(context); }
+    @Override public boolean canPillar(TickContext context) { return battle.canPillar(context); }
+    @Override public boolean night(TickContext context) { return battle.night(context); }
+    @Override public Action returnProjectile(int projectileId) { return battle.returnProjectile(projectileId); }
+    @Override public Action pillarUp(TickContext context) { return battle.pillarUp(context); }
+
     @Override public double[] selfPosition(TickContext context) { return battle.selfPosition(context); }
 
     @Override
