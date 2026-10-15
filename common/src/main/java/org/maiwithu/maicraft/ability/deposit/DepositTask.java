@@ -385,9 +385,11 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
         };
     }
 
+    // 要存的都离开背包了没有：确认存进去的加上放进去就被下面漏斗抽走的，够数就不再去开剩下的容器。
     private boolean allStored() {
         return wanted.entrySet().stream()
-                .allMatch(entry -> confirmed.getOrDefault(entry.getKey(), 0) >= entry.getValue());
+                .allMatch(entry -> confirmed.getOrDefault(entry.getKey(), 0)
+                        + passed.getOrDefault(entry.getKey(), 0) >= entry.getValue());
     }
 
     private Next<Phase> goWith(Phase phase, Action action, String why) {
