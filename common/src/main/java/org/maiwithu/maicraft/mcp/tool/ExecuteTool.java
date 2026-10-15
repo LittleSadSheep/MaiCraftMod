@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.mcp.tool;
 import com.google.gson.JsonObject;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
+import org.maiwithu.maicraft.kernel.goal.DocumentGoalRunStore;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.GoalRun;
 import org.maiwithu.maicraft.kernel.goal.GoalRunTable;
@@ -12,6 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -74,6 +76,12 @@ public final class ExecuteTool implements McpTool {
         if (!reading.ok()) {
             return ToolReply.error(reading.code(), "目标有 " + reading.errors().size() + " 处问题", reading.errors(), null);
         }
+        // 控制角色的目标要存盘才能暂停、提问和重启后恢复：存不下的大图纸当场按参数问题拒，说清怎么改，
+        // 不等下达后存盘失败只回一句程序错误。只读分析、只改记忆的（design 本身）当场做完，不受这条限制。
+        if (controlsPlayer(reading.goal())) {
+            Optional<String> tooLarge = DocumentGoalRunStore.tooLargeToSave(reading.goal());
+            if (tooLarge.isPresent()) return ToolReply.error(ErrorCode.INVALID_PARAMETER, tooLarge.get());
+        }
         if (Boolean.TRUE.equals(dryRun)) {
             JsonObject data = new JsonObject();
             data.addProperty("plan_id", keepPlan(reading.goal()));
@@ -84,9 +92,12 @@ public final class ExecuteTool implements McpTool {
         return start(reading.goal(), requestKey, notes);
     }
 
+    private boolean controlsPlayer(Goal goal) {
+        return registry.find(goal.ability()).orElseThrow().spec().mode() == ExecutionMode.CONTROLS_PLAYER;
+    }
+
     private JsonObject start(Goal goal, String requestKey, List<String> notes) {
-        ExecutionMode mode = registry.find(goal.ability()).orElseThrow().spec().mode();
-        if (mode != ExecutionMode.CONTROLS_PLAYER) {
+        if (!controlsPlayer(goal)) {
             // 只读分析、只改记忆：当场做完，不交给控制循环，手上的主任务照常进行。
             GoalRun run = clientThread.call(context -> table.runAside(goal, context));
             return ToolReply.ok(ResultJson.goalRun(run, null, null), notes, null);

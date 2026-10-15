@@ -150,6 +150,21 @@ class ToolsTest {
     }
 
     @Test
+    void executeRefusesGoalsTooLargeToSaveAndSaysHowToShrinkThem() {
+        // 一个目标存盘超过上限（这里拿超长的 purpose 顶替大图纸）：当场按参数问题拒，说清多大、先存成图纸再按 design_id 下达，
+        // 不等下达后存盘失败只回一句程序错误。dry_run 也一样拒。
+        String huge = "砌".repeat(30000);
+        JsonObject refused = call("execute", "{\"goal\": {\"ability\": \"use\", \"purpose\": \"" + huge + "\"}}");
+        assertEquals("invalid_parameter", errorCode(refused));
+        String message = refused.getAsJsonObject("error").get("message").getAsString();
+        assertTrue(message.contains("design_id"), message);
+        assertEquals("invalid_parameter", errorCode(call("execute",
+                "{\"goal\": {\"ability\": \"use\", \"purpose\": \"" + huge + "\"}, \"dry_run\": true}")));
+        // 存得下的照常下达。
+        data(call("execute", "{\"goal\": {\"ability\": \"use\", \"purpose\": \"砌墙\"}}"));
+    }
+
+    @Test
     void executeReportsEveryMistakeAndStartsGoodGoals() {
         assertEquals("invalid_parameter", errorCode(call("execute",
                 "{\"goal\": {\"ability\": \"maicraft:use\", \"parameters\": {\"count\": 0}}}")));

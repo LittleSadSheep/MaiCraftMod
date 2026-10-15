@@ -12,6 +12,7 @@ import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -80,7 +81,12 @@ final class GoalRunCodec {
         }
     }
 
-    private JsonObject goal(Goal goal) {
+    /** 这个目标照存盘格式写出来有多少字节（UTF-8）：下达前拿它和每个目标的存盘上限比。 */
+    static int savedBytes(Goal goal) {
+        return goal(goal).toString().getBytes(StandardCharsets.UTF_8).length;
+    }
+
+    private static JsonObject goal(Goal goal) {
         JsonObject json = new JsonObject();
         json.addProperty("ability", goal.ability());
         if (goal.purpose() != null) json.addProperty("purpose", goal.purpose());

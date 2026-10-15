@@ -16,6 +16,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.UnaryOperator;
 
 /**
@@ -37,6 +38,12 @@ public final class DocumentGoalRunStore implements GoalRunStore {
     // 还没结束的目标同时只有寥寥几条（主任务、暂停的、sequence 正在跑的那一步），超出按坏了处理，不做截断。
     private static final int DOCUMENT_LIMIT = 262144;
 
+    /**
+     * 每个控制角色的目标存盘最多占多少字节。目标要存盘才能暂停、提问、重启后恢复；几条没结束的目标共用一份
+     * {@link #DOCUMENT_LIMIT}，sequence 的每一步还要各存一份，单个目标占到四分之一就不收，免得一个大图纸把后面的下达顶掉。
+     */
+    public static final int GOAL_LIMIT = DOCUMENT_LIMIT / 4;
+
     private final DocumentStore documents;
     private final String worldKey;
     private final GoalRunCodec codec;
@@ -46,6 +53,22 @@ public final class DocumentGoalRunStore implements GoalRunStore {
         this.documents = Objects.requireNonNull(documents, "documents");
         this.worldKey = Objects.requireNonNull(worldKey, "worldKey");
         this.codec = new GoalRunCodec(Objects.requireNonNull(registry, "registry"));
+    }
+
+    /**
+     * 下达前核对目标存不存得下：超过 {@link #GOAL_LIMIT} 时给一句说清多大、怎么办的话，存得下为空。
+     * 大的几乎都是直接塞进参数的逐格 cells、整张图纸或蓝图，先用 design 存成图纸再按 design_id 下达就小了。
+     */
+    public static Optional<String> tooLargeToSave(Goal goal) {
+        int bytes = GoalRunCodec.savedBytes(goal);
+        if (bytes <= GOAL_LIMIT) return Optional.empty();
+        return Optional.of("这个目标太大存不下：整份约 " + kilobytes(bytes) + " KB，每个目标存盘最多 "
+                + kilobytes(GOAL_LIMIT) + " KB（目标要存盘才能暂停、提问、重启后接着做）。"
+                + "参数里的逐格 cells、整张图纸或蓝图先用 design 存成图纸，再按 design_id 下达；或把它拆成几块分几次下达");
+    }
+
+    private static long kilobytes(int bytes) {
+        return Math.round(bytes / 1024.0);
     }
 
     @Override public long nextId() {
