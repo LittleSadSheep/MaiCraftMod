@@ -123,17 +123,30 @@ public final class RememberAbility implements AbilityModule {
                         Problem.of(Problem.Kind.INVALID_PARAMETER, "坐标缺 y",
                                 "先走到那里再用 here 记，或把确认过的高度补上")));
             }
-            String dimension = position.dimension() == null
-                    ? characterPosition.currentPosition().dimension() : position.dimension();
+            // 没写维度按角色此刻所在的维度记；角色不在世界里读不到维度，如实说。
+            String dimension = position.dimension();
+            if (dimension == null) {
+                WorldPosition here = characterPosition.currentPosition();
+                if (here == null) return notInWorld();
+                dimension = here.dimension();
+            }
             return plan(name, new WorldPosition(position.x(), position.y(), position.z(), dimension));
         }
         if (kind instanceof Target.Here) {
-            return plan(name, characterPosition.currentPosition());
+            WorldPosition here = characterPosition.currentPosition();
+            return here == null ? notInWorld() : plan(name, here);
         }
         // player、direction、previous 不接受：玩家用它的观察编号走 seen；previous 内核还没记各步的位置。
         return new StepDecision.Finish(TaskResult.failed("记地点不接受这种目标对象",
                 Problem.of(Problem.Kind.UNSUPPORTED, "接受的种类：here、seen、landmark、position",
                         "玩家在场景里有观察编号，用 seen 指它")));
+    }
+
+    // 角色不在世界里（退出、换世界途中）读不到自己的位置：记不了 here，也定不了没写维度的坐标在哪个维度。
+    private static StepDecision notInWorld() {
+        return new StepDecision.Finish(TaskResult.failed("角色不在世界里，读不到自己在哪",
+                Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "角色此刻不在世界里，记不了 here 或没写维度的坐标",
+                        "进了世界再记，或给坐标写上维度")));
     }
 
     /** 位置已落实：位置没变就直接完成，否则开一个写记忆的任务，覆盖前记在哪随输入带上。 */

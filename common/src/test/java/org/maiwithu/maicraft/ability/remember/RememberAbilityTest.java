@@ -129,6 +129,18 @@ class RememberAbilityTest {
     }
 
     @Test
+    void outOfWorldSaysSoInsteadOfCrashing() {
+        // 角色不在世界里读不到自己的位置：记 here、记没写维度的坐标都如实说，不冒成程序错误。
+        RememberAbility away = new RememberAbility(memory, () -> null, id -> Optional.empty());
+        StepDecision.Finish here = assertInstanceOf(StepDecision.Finish.class,
+                away.decide(step(goal(null, "{\"name\":\"家\"}"))));
+        assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, here.result().problem().kind());
+        StepDecision.Finish position = assertInstanceOf(StepDecision.Finish.class,
+                away.decide(step(goal(new Target.Position(1, 64, 2, null), "{\"name\":\"矿口\"}"))));
+        assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, position.result().problem().kind());
+    }
+
+    @Test
     void recordingTheSameSpotAgainFinishesWithoutWriting() {
         memory.remember("家", new WorldPosition(12, 64, -8, "minecraft:overworld"));
 
