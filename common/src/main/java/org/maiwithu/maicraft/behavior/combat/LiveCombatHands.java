@@ -71,30 +71,42 @@ public final class LiveCombatHands {
     }
 
     /**
-     * 走过去的路上把最好的剑斧拿到手上：在主背包就开背包换，换的那几刻不挥。只在对手离得够远时开始，
-     * 贴脸了不为换武器开背包（照旧拿快捷栏里最好的打）。实机 10-13 铁剑在主背包，出手的那一刻离僵尸不到四格，
+     * 走过去的路上把最好的剑斧拿到手上：在快捷栏就按数字键，在主背包就开背包换进快捷栏的空格再选中（不挤掉手里的镐），
+     * 这一下只开个头，之后每刻由 {@link #finishArming} 推进。只在对手离得够远时开始，贴脸了不为换武器开背包
+     * （照旧拿快捷栏里最好的打）；已经在换就不再开新的。实机 10-13 铁剑在主背包，出手的那一刻离僵尸不到四格，
      * 一路拿着火把打，半分钟没打死，被尸壳打死。
      */
     public void arm(TickContext context, double distance) {
         LocalPlayer self = self(context);
-        if (self == null) return;
-        if (arming != null) {
-            if (arming.tick(context) instanceof ActionStatus.Running) return;
-            arming.close();
-            arming = null;
-            return;
-        }
+        if (self == null || arming != null) return;
         if (distance <= ARM_DISTANCE) return;
         WeaponChoice.Picked best = WeaponChoice.pickMelee(WeaponCarriedReader.read(self), false);
         if (best.weapon() == WeaponChoice.Weapon.BARE_HANDS || best.slot() == self.getInventory().selected) return;
-        arming = hands.actionToMainhand(best.itemId()).orElse(null);
+        arming = hands.weaponToMainhand(best.itemId()).orElse(null);
     }
 
-    /** 不打了：盾放下，换到一半的武器也收尾。 */
-    public void stand() {
-        shield.close();
+    /**
+     * 换到一半的武器接着换：换武器一旦开始就做完，"打完了"、贴到跟前都不中途收掉（实机 10-15 自卫一秒里"逼近↔打完了"
+     * 来回切，背包开了又关，最后空手挨了六下）。每刻战斗开头推进一次；返回这一刻还在换——手腾不出来，不挥不射。
+     */
+    public boolean finishArming(TickContext context) {
+        if (arming == null) return false;
+        self(context);
+        if (arming.tick(context) instanceof ActionStatus.Running) return true;
+        arming.close();
+        arming = null;
+        return false;
+    }
+
+    /** 这一仗真结束了（任务收尾、被替换）：换到一半的也收尾，开着的背包交给原版关上。 */
+    public void stopArming() {
         if (arming != null) arming.close();
         arming = null;
+    }
+
+    /** 不打了：盾放下。换到一半的武器不在这里收，由 {@link #finishArming} 接着换完。 */
+    public void stand() {
+        shield.close();
     }
 
     private LocalPlayer self(TickContext context) {

@@ -66,6 +66,32 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
     }
 
     /**
+     * 把打架用的武器拿到手上，不挤掉手里拿着的：在快捷栏就按数字键选中它；在主背包就开背包把它换进快捷栏的空格
+     * （没有空格换进放零碎东西的那格，按 {@link HotbarSwapTarget} 挑），关上背包再按数字键选中那一格——
+     * 手里的镐留在原来那格，挖矿时不用再开背包换回来，下回打架武器已在快捷栏，按数字键就切过去。
+     * 快捷栏九格全是工具、吃的这类不能动的，就换进最靠右、不是手上那格的一格。副手的经原生副手交换换到手上。
+     * 已经在手上、身上没有、穿在盔甲格里时给空。
+     */
+    public Optional<Action> weaponToMainhand(String itemId) {
+        PlayerContext context = contexts.get();
+        if (context == null || context.localPlayer() == null) return Optional.empty();
+        int source = findItem(context.localPlayer(), itemId);
+        if (source == ALREADY_SELECTED || source == NOT_CARRIED || source >= 36 && source <= 39) return Optional.empty();
+        if (source < FIRST_MAIN_SLOT || source > LAST_MAIN_SLOT) {
+            // 已在快捷栏（按数字键）或在副手（原生副手交换）：和普通换到主手一样，不开背包。
+            return Optional.of(new MoveAction("把 " + itemId + " 换到主手", source));
+        }
+        Inventory inventory = context.localPlayer().getInventory();
+        int selected = VanillaHotbar.swapTarget(inventory.selected);
+        int target = HotbarSwapTarget.pick(HotbarSwapTarget.hotbar(inventory.items, ItemsToKeep.NOTHING), selected);
+        if (target < 0) target = selected == LAST_HOTBAR_SLOT ? LAST_HOTBAR_SLOT - 1 : LAST_HOTBAR_SLOT;
+        return Optional.of(new MoveAction("把 " + itemId + " 换进快捷栏第 " + target + " 格拿到手上", source, target, true));
+    }
+
+    /** 原版换快捷栏的点击只认 0~8 格，最右一格是 8。 */
+    private static final int LAST_HOTBAR_SLOT = 8;
+
+    /**
      * 把背包指定那一格（0~35）上的东西弄到主手：同种的东西有好几件时拿的就是这一格的那件。
      * 那一格已经是选中的快捷栏格时给空（不用换）；格号不在主背包与快捷栏范围、或那一格空着时也给空。
      */
@@ -165,6 +191,8 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
         private int slot;
         /** 换到快捷栏的哪一格；-1 表示选中的那一格，换完还要选中它（换到主手）。 */
         private final int hotbarTarget;
+        /** 换到指定那一格后还要按数字键选中它（打架换武器：换进空格再选中，不挤掉手里的）。 */
+        private final boolean selectAfter;
         private Stage stage;
         private PendingMenuAction menuPending;
         private PendingInteraction selectPending;
@@ -178,9 +206,14 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
         }
 
         MoveAction(String what, int sourceSlot, int hotbarTarget) {
+            this(what, sourceSlot, hotbarTarget, false);
+        }
+
+        MoveAction(String what, int sourceSlot, int hotbarTarget, boolean selectAfter) {
             this.what = what;
             this.slot = sourceSlot;
             this.hotbarTarget = hotbarTarget;
+            this.selectAfter = selectAfter;
             PlayerContext context = contexts.get();
             this.item = context == null || context.localPlayer() == null || sourceSlot < 0 || sourceSlot > 40 ? null
                     : context.localPlayer().getInventory().getItem(sourceSlot).getItem();
@@ -266,8 +299,9 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
                 return fail("背包界面没能关上：" + menuPending.detail());
             }
             menuPending = null;
-            // 只是挪到快捷栏指定格的：界面关上就完了，选不选那一格交给要用它的人。
-            if (hotbarTarget >= 0) return ActionStatus.done();
+            // 只是挪到快捷栏指定格的：界面关上就完了，选不选那一格交给要用它的人；
+            // 打架换武器的换进空格后接着按数字键选中那一格。
+            if (hotbarTarget >= 0 && !selectAfter) return ActionStatus.done();
             stage = Stage.SELECTING;
             return ActionStatus.running();
         }

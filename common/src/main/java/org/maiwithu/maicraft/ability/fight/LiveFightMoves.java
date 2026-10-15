@@ -79,6 +79,15 @@ public final class LiveFightMoves implements FightMoves {
     }
 
     @Override public void arm(TickContext context, double distance) { battle.arm(context, distance); }
+    @Override public boolean finishArming(TickContext context) { return battle.finishArming(context); }
+    @Override public void stopArming() { battle.stopArming(); }
+
+    @Override
+    public void stepAimingStrike(TickContext context, int entityId, Footwork.Step step) {
+        battle.stepAimingStrike(context, entityId, step);
+    }
+
+    @Override public boolean crosshairOn(TickContext context, int entityId) { return battle.crosshairOn(context, entityId); }
     @Override public Posture posture(TickContext context) { return battle.posture(context); }
     @Override public boolean canPillar(TickContext context) { return battle.canPillar(context); }
     @Override public boolean night(TickContext context) { return battle.night(context); }

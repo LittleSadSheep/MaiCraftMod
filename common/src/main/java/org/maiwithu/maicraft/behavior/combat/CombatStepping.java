@@ -17,6 +17,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 
+import org.maiwithu.maicraft.game.interaction.MeleeAim;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
 import org.maiwithu.maicraft.game.world.EndermanGaze;
@@ -76,7 +77,21 @@ public final class CombatStepping {
         move(tick, faceEntityId, step, true);
     }
 
+    /**
+     * 同 {@link #move}，但镜头压在出手要瞄的那一点上（它身上离眼睛最近的那一点），不是身体中心：
+     * 跳劈起跳前、往上升时用，往下落那几刻出手不用再转镜头。实机 10-15 跳劈落下那几刻镜头从身体中心转到瞄点
+     * 转不到位就落地、再跳，跳半天一刀没砍出去。
+     */
+    public static void moveAimingStrike(TickContext tick, int entityId, Footwork.Step step) {
+        move(tick, entityId, step, false, true);
+    }
+
     private static void move(TickContext tick, int faceEntityId, Footwork.Step step, boolean avertGaze) {
+        move(tick, faceEntityId, step, avertGaze, false);
+    }
+
+    private static void move(TickContext tick, int faceEntityId, Footwork.Step step, boolean avertGaze,
+                             boolean strikePoint) {
         PlayerContext player = tick.player();
         LocalPlayer self = player == null ? null : player.localPlayer();
         if (self == null) return;
@@ -105,10 +120,11 @@ public final class CombatStepping {
             yaw = (float) Math.toDegrees(Math.atan2(step.dz(), step.dx())) - 90;
             pitch = 0;
         } else {
-            Vec3 delta = target.position().subtract(self.position());
-            yaw = (float) Math.toDegrees(Math.atan2(delta.z, delta.x)) - 90;
             Vec3 eye = self.getEyePosition();
-            Vec3 aim = target.getBoundingBox().getCenter();
+            // 平常看它身体中心；跳劈要出手前看出手的那一点，偏航也按那一点算（贴脸时和脚下中心差得不少）。
+            Vec3 aim = strikePoint ? MeleeAim.point(self, target) : target.getBoundingBox().getCenter();
+            Vec3 delta = strikePoint ? aim.subtract(eye) : target.position().subtract(self.position());
+            yaw = (float) Math.toDegrees(Math.atan2(delta.z, delta.x)) - 90;
             pitch = (float) -Math.toDegrees(Math.atan2(aim.y - eye.y, Math.hypot(aim.x - eye.x, aim.z - eye.z)));
         }
         if (avertGaze) pitch = avertedPitch(self, yaw, pitch);

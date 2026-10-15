@@ -148,6 +148,15 @@ public record Battlefield(Me me, List<Foe> foes, DragonArena arena) {
      */
     public static Battlefield read(CombatSenses senses, BattleMoves moves, TickContext context,
                                    double radius, Roster roster, Set<Integer> keep) {
+        return read(senses, moves, context, radius, roster, keep, new StillChasing());
+    }
+
+    /**
+     * 同上，另按这一仗记着的"开打后还在追我的"读：先前追过我、还没放下的那只，这一刻攻击标记暗了也照样算追兵，
+     * 走到视野半径外几格内也照样看着；读完把这一刻看到的交回去，记下谁还朝我来、谁该放下了。
+     */
+    static Battlefield read(CombatSenses senses, BattleMoves moves, TickContext context,
+                            double radius, Roster roster, Set<Integer> keep, StillChasing still) {
         CombatSenses.CombatProfile profile = senses.profile(context);
         double[] at = moves.selfPosition(context);
         int weaponScore = profile.weapon().map(WeaponChoice::scoreOf).orElse(0);
@@ -158,15 +167,25 @@ public record Battlefield(Me me, List<Foe> foes, DragonArena arena) {
         for (CombatSenses.Attacker attacker : senses.recentAttackers(context)) attackers.add(attacker.uuid());
         List<Foe> foes = new ArrayList<>();
         Set<Integer> seen = new HashSet<>();
-        for (CombatSenses.Threat threat : senses.threats(context, radius)) {
+        List<StillChasing.Sighting> sightings = new ArrayList<>();
+        double sight = still.any() ? radius + StillChasing.EDGE_MARGIN : radius;
+        for (CombatSenses.Threat threat : senses.threats(context, sight)) {
             if (roster.ignores(threat)) continue;
+            boolean held = still.holds(threat.entityId());
+            // 视野半径外多看的那几格只为先前追过我的：看它是走了还是在边上晃，新冒出来的照旧只认视野里的。
+            if (threat.distance() > radius && !held) continue;
             boolean attacker = attackers.contains(threat.uuid());
-            boolean chasing = CombatSenses.threatening(threat, List.copyOf(attackers));
+            boolean chasingNow = CombatSenses.threatening(threat, List.copyOf(attackers));
+            // 开打后追过我、还朝我来的：攻击标记一闪一闪也照样算追兵，不让这一仗"逼近↔打完了"来回切。
+            boolean chasing = chasingNow || held;
             boolean wanted = roster.wanted(threat, attacker, chasing);
             if (!chasing && !wanted && !keep.contains(threat.entityId())) continue;
-            foes.add(new Foe(threat, chasing, attacker, wanted, roster.primary(threat)));
+            Foe foe = new Foe(threat, chasing, attacker, wanted, roster.primary(threat));
+            foes.add(foe);
+            sightings.add(new StillChasing.Sighting(foe, chasingNow));
             seen.add(threat.entityId());
         }
+        still.observe(sightings, me.x(), me.z());
         // 点名的动物、玩家不在敌对列表里：按编号补读，照样算身板与够不够得着。
         for (int id : roster.namedIds()) {
             if (seen.contains(id)) continue;

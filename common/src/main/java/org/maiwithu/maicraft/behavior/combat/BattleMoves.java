@@ -32,12 +32,24 @@ public interface BattleMoves {
     void guard(TickContext context, double distance, boolean aboutToStrike);
 
     /**
-     * 还在走过去、离对手够远时，先把最好的近战武器拿到手上（在主背包就开背包换）：出手那一刻贴着脸，
-     * 就不为换武器开背包了。没有剑斧、已经在手上就什么都不做。
+     * 还在走过去、离对手够远时，开始把最好的近战武器拿到手上（在主背包就开背包换进快捷栏的空格再选中）：
+     * 出手那一刻贴着脸，就不为换武器开背包了。没有剑斧、已经在手上、已经在换就什么都不做；之后由
+     * {@link #finishArming} 每刻推进。
      */
     default void arm(TickContext context, double distance) {}
 
-    /** 不打了：盾放下。 */
+    /**
+     * 换到一半的武器接着换：换武器一旦开始就做完，"打完了"、贴到跟前都不中途收掉。每刻战斗开头推进一次；
+     * 返回这一刻还在换（手腾不出来，不挥不射）。没接上时按没在换。
+     */
+    default boolean finishArming(TickContext context) {
+        return false;
+    }
+
+    /** 这一仗真结束了（任务收尾、被替换）：换到一半的武器也收尾，开着的背包交给原版关上。 */
+    default void stopArming() {}
+
+    /** 不打了：盾放下（换到一半的武器不收，接着换完）。 */
     void lowerGuard();
 
     /** 当刻脚下的路：走位挑方向用。 */
@@ -52,6 +64,19 @@ public interface BattleMoves {
      */
     default void stepKeepingAim(TickContext context, Footwork.Step step) {
         step(context, -1, step);
+    }
+
+    /**
+     * 迈一步，镜头压在出手要瞄的那一点上（它身上离眼睛最近、往里收一点的那一点，跟出手时瞄的是同一点）：
+     * 跳劈起跳前、往上升时这样看着，往下落那几刻不用再转镜头就能砍。没接上时同普通迈步。
+     */
+    default void stepAimingStrike(TickContext context, int entityId, Footwork.Step step) {
+        step(context, entityId, step);
+    }
+
+    /** 准星此刻正落在这只身上：够得着的距离内，眼睛顺着视线先碰到的就是它。没接上时按没有。 */
+    default boolean crosshairOn(TickContext context, int entityId) {
+        return false;
     }
 
     /** 交给寻路走一段（只走不改地形）。 */

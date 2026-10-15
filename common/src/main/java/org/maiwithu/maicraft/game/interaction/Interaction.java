@@ -8,7 +8,6 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
@@ -730,33 +729,16 @@ public final class Interaction {
                 >= Math.cos(Math.toRadians(7.0));
     }
 
-    // 近战瞄点：按它的移动稍往前提，落在内缩的身体框里；相邻帧只挪一部分，怪小幅晃动时镜头不猛抖。
+    // 近战瞄点：瞄它身上离眼睛最近的那一点（按 MeleeAim 算）；相邻帧只挪一部分，怪小幅晃动时镜头不猛抖。
     private Vec3 stableEntityAimPoint(Entity target) {
-        Vec3 motion = target.getDeltaMovement();
-        double leadTicks = Mth.clamp(player.distanceTo(target) * 0.35, 0.6, 1.5);
-        AABB box = target.getBoundingBox().move(
-                motion.x * leadTicks,
-                motion.y * Math.min(leadTicks, 0.75),
-                motion.z * leadTicks);
-        // 瞄准它身上离眼睛最近的那一点（往里收一点），不瞄中心：对着中心那条射线到身上要走得更远，
-        // 矮的羊、站在三格边上的怪够得着却打不着，一直等不到出手（实机 10-14 点名杀羊，站在 3.1 格外三十秒没挥）。
-        Vec3 wanted = insetClamp(player.getEyePosition(), box);
+        AABB box = MeleeAim.leadBox(player, target);
+        Vec3 wanted = MeleeAim.insetClamp(player.getEyePosition(), box);
         if (trackedEntityAim == null || trackedEntityAim.distanceToSqr(wanted) > 4.0) {
             trackedEntityAim = wanted;
         } else {
-            trackedEntityAim = insetClamp(trackedEntityAim.lerp(wanted, 0.55), box);
+            trackedEntityAim = MeleeAim.insetClamp(trackedEntityAim.lerp(wanted, 0.55), box);
         }
         return trackedEntityAim;
-    }
-
-    private static Vec3 insetClamp(Vec3 point, AABB box) {
-        double insetX = Math.min(0.12, box.getXsize() * 0.18);
-        double insetY = Math.min(0.16, box.getYsize() * 0.18);
-        double insetZ = Math.min(0.12, box.getZsize() * 0.18);
-        return new Vec3(
-                Mth.clamp(point.x, box.minX + insetX, box.maxX - insetX),
-                Mth.clamp(point.y, box.minY + insetY, box.maxY - insetY),
-                Mth.clamp(point.z, box.minZ + insetZ, box.maxZ - insetZ));
     }
 
     /** 从眼部沿当前视线发射射线，并确认首先命中指定方块。 */

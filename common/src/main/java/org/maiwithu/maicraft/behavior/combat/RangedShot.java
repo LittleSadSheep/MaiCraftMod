@@ -164,7 +164,8 @@ public final class RangedShot implements Action, RangedCombat.Fires {
             if (weapon.isEmpty()) return fail("身上没有能射的：没有弓和箭，也没有弩");
             crossbow = weapon.get().weapon() != WeaponChoice.Weapon.READY_BOW;
             if (weapon.get().slot() != self.getInventory().selected) {
-                arming = hands.actionToMainhand(weapon.get().itemId()).orElse(null);
+                // 弓弩在主背包就换进快捷栏的空格再选中，不挤掉手里的镐；在快捷栏就按数字键切过去。
+                arming = hands.weaponToMainhand(weapon.get().itemId()).orElse(null);
                 if (arming == null) return fail("没能把" + weapon.get().itemId() + "拿到手上");
             }
         }

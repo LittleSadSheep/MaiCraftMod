@@ -11,6 +11,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.boss.enderdragon.EnderDragon;
 import net.minecraft.world.item.ShieldItem;
+import net.minecraft.world.phys.EntityHitResult;
 
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
 import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
@@ -20,6 +21,8 @@ import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
 import org.maiwithu.maicraft.behavior.navigation.util.ClientSurfaceHeight;
+import org.maiwithu.maicraft.game.interaction.Interaction;
+import org.maiwithu.maicraft.game.world.InteractionRange;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -137,6 +140,16 @@ public final class LiveBattleMoves implements BattleMoves {
     }
 
     @Override
+    public boolean finishArming(TickContext context) {
+        return hands.finishArming(context);
+    }
+
+    @Override
+    public void stopArming() {
+        hands.stopArming();
+    }
+
+    @Override
     public void lowerGuard() {
         hands.stand();
     }
@@ -154,6 +167,19 @@ public final class LiveBattleMoves implements BattleMoves {
     @Override
     public void stepKeepingAim(TickContext context, Footwork.Step step) {
         CombatStepping.move(context, CombatStepping.KEEP_AIM, step);
+    }
+
+    @Override
+    public void stepAimingStrike(TickContext context, int entityId, Footwork.Step step) {
+        CombatStepping.moveAimingStrike(context, entityId, step);
+    }
+
+    // 准星落在它身上：按近战的真实触及距离从眼睛顺着视线打一条原生射线，先碰到的实体就是它才算。
+    @Override
+    public boolean crosshairOn(TickContext context, int entityId) {
+        var self = context.player() == null ? null : context.player().localPlayer();
+        return self != null && Interaction.nativeRaytrace(self, InteractionRange.entityReach(self))
+                instanceof EntityHitResult hit && hit.getEntity().getId() == entityId;
     }
 
     // 没有昼夜的维度（下界、末地）不算天黑：那里挖坑等不到天亮。实机 10-15 下界被恶魂打，

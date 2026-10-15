@@ -25,7 +25,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 近战出手一次：先把挑好的近战武器拿到主手，再原生攻击（充能够格才挥、换手当刻与目标无敌帧不挥）。
  *
  * <p>挑哪件按武器挑选的唯一判断（剑斧里每秒伤害最高的，对手举盾时斧优先）。在快捷栏就按一下数字键；
- * 在主背包里时，对手还在四格外才打开背包换到手上，贴脸了不为换武器开背包，改拿快捷栏里最好的那件
+ * 在主背包里时，对手还在四格外才打开背包把它换进快捷栏的空格再选中（不挤掉手里的镐），贴脸了不为换武器开背包，改拿快捷栏里最好的那件
  * （比手里的强才换）。身上没有剑斧就用手里现有的打。换不成也照样出手，不因此停下。
  * 原先挑好的武器只拿来算"打不打得过"，从没换到手上，结果里还写成用的是它。
  */
@@ -91,7 +91,8 @@ public final class MeleeStrike implements Action {
         }
         if (best.slot() == self.getInventory().selected) return Optional.empty();
         if (!betterThanHeld(best, carried, self, shielding)) return Optional.empty();
-        return hands.actionToMainhand(best.itemId());
+        // 在快捷栏按数字键选中；在主背包就换进快捷栏的空格（或放零碎的格）再选中，手里的镐留在原格。
+        return hands.weaponToMainhand(best.itemId());
     }
 
     // 挑中的比手里拿着的强才换：手里已经是一样好的剑斧，别为一样的东西来回切；手里不是剑斧就换。

@@ -71,6 +71,38 @@ class BattleTest {
         boolean busy;
         int keptAim;
         int lowered;
+        /** 换武器还要几刻换完；开始换的次数；真收尾的次数。 */
+        int swapTicks;
+        int armStarts;
+        int armStops;
+        /** 起跳、上升时镜头压在出手点上的次数；准星在不在它身上；出手一直没结果（还在瞄、还在等充能）。 */
+        int aimedStrike;
+        boolean crosshair;
+        boolean strikeHangs;
+
+        @Override public void arm(TickContext context, double distance) {
+            if (swapTicks > 0 || distance <= 4) return;
+            armStarts++;
+            swapTicks = 3;
+        }
+
+        @Override public boolean finishArming(TickContext context) {
+            if (swapTicks <= 0) return false;
+            swapTicks--;
+            return true;
+        }
+
+        @Override public void stopArming() {
+            armStops++;
+            swapTicks = 0;
+        }
+
+        @Override public void stepAimingStrike(TickContext context, int entityId, Footwork.Step step) {
+            aimedStrike++;
+            steps.add(step);
+        }
+
+        @Override public boolean crosshairOn(TickContext context, int entityId) { return crosshair; }
 
         @Override public boolean night(TickContext context) { return night; }
 
@@ -91,6 +123,7 @@ class BattleTest {
         @Override public Action strike(TickContext context, int entityId) {
             return new Instant(() -> {
                 if (busy) throw new IllegalStateException("a native action is already awaiting confirmation");
+                if (strikeHangs) return ActionStatus.running();
                 strikes++;
                 return rejecting ? ActionStatus.failed(Problem.of(Problem.Kind.REFUSED_BY_GAME, "没确认"))
                         : ActionStatus.done();
@@ -426,5 +459,150 @@ class BattleTest {
         senses.threats.clear();
         assertEquals(Battle.State.FINISHED, fight.tick(new Tick(1)).state());
         assertFalse(fight.retreating());
+    }
+
+    /** 在东边 x 格处的僵尸：看不看得见、亮没亮攻击标记由调用方定。 */
+    private static CombatSenses.Threat zombie(int id, double x, boolean visible, boolean aggressive) {
+        return new CombatSenses.Threat(id, new UUID(0, id), "minecraft:zombie", x, 64, 0, Math.abs(x),
+                ThreatAssessment.Kind.MELEE, false, visible, aggressive, 0.3, Math.max(0, Math.abs(x) - 0.3),
+                Math.abs(x) < 1.43, 2.02, false);
+    }
+
+    @Test
+    void aChaserWhoseAttackMarkFlickersIsNotDeclaredGone() {
+        // 十三格外的僵尸找不到路，攻击标记一秒一闪；它还在往我这边挪：一直是追兵，不"逼近↔打完了"来回切。
+        Senses senses = new Senses();
+        senses.threats.add(zombie(1, 13, true, true));
+        Moves moves = new Moves();
+        Battle fight = battle(senses, moves);
+        assertEquals(Battle.State.FIGHTING, fight.tick(new Tick(0)).state());
+        double x = 13;
+        for (int t = 1; t <= 100; t++) {
+            x -= 0.05;
+            senses.threats.set(0, zombie(1, x, true, t % 20 == 0));
+            assertEquals(Battle.State.FIGHTING, fight.tick(new Tick(t)).state(), "第 " + t + " 刻");
+        }
+        // 它掉头走了、标记也暗着：满三秒才算打完，不是下一刻就收手。
+        int t = 101;
+        Battle.Moment moment;
+        do {
+            x += 0.05;
+            senses.threats.set(0, zombie(1, x, true, false));
+            moment = fight.tick(new Tick(t++));
+        } while (moment.state() == Battle.State.FIGHTING && t < 400);
+        assertEquals(Battle.State.FINISHED, moment.state());
+        assertTrue(t - 101 >= StillChasing.LET_GO_TICKS, "走开后又看了 " + (t - 101) + " 刻");
+    }
+
+    @Test
+    void aChaserWanderingAtTheEdgeOfSightIsStillWatched() {
+        // 追过我的那只走到视野半径外一点点：还在边上晃，接着看着它，不当它走了。
+        Senses senses = new Senses();
+        senses.threats.add(zombie(1, 13.5, true, true));
+        Moves moves = new Moves();
+        Battle fight = battle(senses, moves);
+        fight.tick(new Tick(0));
+        senses.threats.set(0, zombie(1, 14.6, true, false));
+        assertEquals(Battle.State.FIGHTING, fight.tick(new Tick(1)).state(), "出了视野一格：还在看着");
+        // 死了（不在场上了）：当场打完，不等三秒。
+        senses.threats.clear();
+        assertEquals(Battle.State.FINISHED, fight.tick(new Tick(2)).state());
+    }
+
+    @Test
+    void aWeaponSwapOnceStartedIsFinishedEvenAfterTheFightEnds() {
+        Senses senses = new Senses();
+        senses.threats.add(zombie(1, 8));
+        Moves moves = new Moves();
+        Battle fight = battle(senses, moves);
+        fight.tick(new Tick(0));
+        assertEquals(1, moves.armStarts, "还远着：路上先换武器");
+        // 下一刻它死了、这一仗打完了：换到一半的接着换完，不收掉。
+        senses.threats.clear();
+        for (int t = 1; t <= 5; t++) assertEquals(Battle.State.FINISHED, fight.tick(new Tick(t)).state());
+        assertEquals(0, moves.swapTicks, "打完了也接着换完");
+        assertEquals(0, moves.armStops, "打完了不收掉换到一半的武器");
+        fight.close();
+        assertEquals(1, moves.armStops, "这一仗真结束才收尾");
+    }
+
+    @Test
+    void noSwingWhileTheWeaponIsStillBeingSwapped() {
+        // 换武器开了个头，它就冲到了跟前：换完再砍，不拿着半路的手乱挥，也不重开一次换武器。
+        Senses senses = new Senses();
+        senses.threats.add(zombie(1, 8));
+        Moves moves = new Moves();
+        Battle fight = battle(senses, moves);
+        fight.tick(new Tick(0));
+        senses.threats.set(0, zombie(1, 2.6));
+        fight.tick(new Tick(1));
+        assertEquals(0, moves.strikes, "还在换：这一刻不挥");
+        for (int t = 2; t <= 5; t++) fight.tick(new Tick(t));
+        assertTrue(moves.strikes > 0, "换完就砍");
+        assertEquals(1, moves.armStarts);
+    }
+
+    @Test
+    void takeOffAndRiseAimAtTheStrikePoint() {
+        Senses senses = new Senses();
+        senses.threats.add(zombie(1, 2.6));
+        Moves moves = new Moves();
+        Battle fight = battle(senses, moves);
+        moves.posture = new BattleMoves.Posture(true, false, true, 0.6f);
+        fight.tick(new Tick(0));
+        moves.posture = new BattleMoves.Posture(false, false, false, 0.7f);
+        fight.tick(new Tick(1));
+        assertEquals(2, moves.aimedStrike, "起跳、往上升时镜头都压在出手点上");
+    }
+
+    @Test
+    void twoLeapsWithoutASwingThenStandsAndSwingsForAWhile() {
+        Senses senses = new Senses();
+        senses.threats.add(zombie(1, 2.6));
+        Moves moves = new Moves();
+        moves.strikeHangs = true;
+        Battle fight = battle(senses, moves);
+        int t = 0;
+        for (int leap = 0; leap < 2; leap++) {
+            moves.posture = new BattleMoves.Posture(true, false, true, 0.6f);
+            fight.tick(new Tick(t++));
+            assertTrue(moves.lastStep().jump(), "第 " + (leap + 1) + " 跳");
+            moves.posture = new BattleMoves.Posture(false, false, false, 0.7f);
+            fight.tick(new Tick(t++));
+            moves.posture = new BattleMoves.Posture(false, true, false, 0.8f);
+            fight.tick(new Tick(t++));
+        }
+        // 两跳都一刀没砍出去，落地：这一阵站着砍，不再起跳。
+        int swingsBefore = moves.keptAim;
+        moves.posture = new BattleMoves.Posture(true, false, true, 0.6f);
+        for (int i = 0; i < 20; i++) {
+            fight.tick(new Tick(t++));
+            assertFalse(moves.lastStep().jump(), "站着砍的这一阵不跳");
+        }
+        assertTrue(moves.keptAim > swingsBefore, "站着出手");
+    }
+
+    @Test
+    void landingWithAFullBarAndTheCrosshairOnItStrikesStanding() {
+        // 斧子充能跟不上一跳：往下落时还没满，落地满了、准星正在它身上——站着直接砍，不再起跳。
+        Senses senses = new Senses();
+        senses.threats.add(zombie(1, 2.6));
+        Moves moves = new Moves();
+        moves.strikeHangs = true;
+        moves.crosshair = true;
+        Battle fight = battle(senses, moves);
+        moves.posture = new BattleMoves.Posture(true, false, true, 0.6f);
+        fight.tick(new Tick(0));
+        moves.posture = new BattleMoves.Posture(false, true, false, 0.8f);
+        fight.tick(new Tick(1));
+        moves.strikeHangs = false;
+        moves.posture = new BattleMoves.Posture(true, false, true, 1f);
+        fight.tick(new Tick(2));
+        assertFalse(moves.lastStep().jump(), "落地满条：不再起跳");
+        assertEquals(1, moves.strikes, "站着直接砍");
+        // 砍完接着跳劈。
+        moves.posture = new BattleMoves.Posture(true, false, true, 0.6f);
+        fight.tick(new Tick(3));
+        assertTrue(moves.lastStep().jump());
     }
 }
