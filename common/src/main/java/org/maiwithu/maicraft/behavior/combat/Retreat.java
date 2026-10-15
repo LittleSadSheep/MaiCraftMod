@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.combat;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -10,7 +13,8 @@ import java.util.Set;
  * 撤离：往哪跑、甩没甩开、跑不动了没有。点名战斗与自卫用同一份。
  *
  * <p>往哪跑：以所有追兵位置的重心为反方向，左右九十度内依次试八个方向、四十格外，挑已加载、脚下踩得住、
- * 身子两格空的落点交给寻路，寻路同样尽量不进追兵的危险半径。上一条路走不通就从下一个方向试起，不反复撞同一堵墙。
+ * 身子两格空的落点交给寻路，寻路同样尽量不进追兵的危险半径；知道家（或打点）在哪时，这几个落点里挑离家最近的。
+ * 上一条路走不通就换下一个方向，不反复撞同一堵墙。
  *
  * <p>甩开：四十格内没有正在追我的才算，只认这次参与了追击的与新近打过我的——远处没参与的怪不让这次逃跑无限延长。
  * 开始了就跑到甩开，回了一点血不回头；身体真走出两格才清失败账，连续三次走不通才承认退无可退、背水一战。
@@ -142,24 +146,56 @@ public final class Retreat {
     }
 
     /**
+     * 挑一个落点，往家（没记过家就往打点）那一侧跑：同样背离追兵重心、在左右九十度的八个方向里，挑能站、离家最近的那个；
+     * 上一条走不通就按离家远近换下一个。实机 10-15 夜里低血撤离五次，每次只按追兵反方向跑，越跑离家越远，最远到西边 130 格外。
+     * 不知道家和打点在哪（toward 为 null）时同 {@link #haven(double, double, double, double, double, int, Probe)}。
+     *
+     * @param toward 家或打点的水平位置 {x, z}
+     */
+    static int[] haven(double x, double y, double z, double fromX, double fromZ, int turns, Probe probe,
+                       double[] toward) {
+        if (toward == null) return haven(x, y, z, fromX, fromZ, turns, probe);
+        double base = awayAngle(x, z, fromX, fromZ);
+        List<int[]> landings = new ArrayList<>();
+        for (double offset : OFFSETS) {
+            int[] landing = landingAt(x, y, z, base + Math.toRadians(offset), probe);
+            if (landing != null) landings.add(landing);
+        }
+        if (landings.isEmpty()) return null;
+        // 按整格比远近，一样远时保持正背离在前（排序是稳定的）：人就站在打点上时，八个落点离打点一样远（落点取整差不到一格），
+        // 照旧正背离着跑。
+        landings.sort(Comparator.comparingLong(landing -> Math.round(Math.hypot(landing[0] - toward[0], landing[2] - toward[1]))));
+        return landings.get(turns % landings.size());
+    }
+
+    /**
      * 挑一个落点：背离追兵重心，从第 turns 个方向试起，返回第一个能站的 {x, y, z}；都不行为 null（交给"离开追兵"的寻路）。
      */
     static int[] haven(double x, double y, double z, double fromX, double fromZ, int turns, Probe probe) {
+        double base = awayAngle(x, z, fromX, fromZ);
+        for (int i = 0; i < OFFSETS.length; i++) {
+            int[] landing = landingAt(x, y, z, base + Math.toRadians(OFFSETS[(i + turns) % OFFSETS.length]), probe);
+            if (landing != null) return landing;
+        }
+        return null;
+    }
+
+    // 背离追兵重心的方向（弧度）；人正好站在重心上时随便取一个。
+    private static double awayAngle(double x, double z, double fromX, double fromZ) {
         double awayX = x - fromX;
         double awayZ = z - fromZ;
         if (Math.hypot(awayX, awayZ) < 1.0e-4) {
             awayX = 1;
             awayZ = 0;
         }
-        double base = Math.atan2(awayZ, awayX);
-        for (int i = 0; i < OFFSETS.length; i++) {
-            double angle = base + Math.toRadians(OFFSETS[(i + turns) % OFFSETS.length]);
-            int cx = (int) Math.round(x + Math.cos(angle) * REACH_OUT);
-            int cz = (int) Math.round(z + Math.sin(angle) * REACH_OUT);
-            int[] landing = standableNear(cx, (int) Math.floor(y), cz, probe);
-            if (landing != null) return landing;
-        }
-        return null;
+        return Math.atan2(awayZ, awayX);
+    }
+
+    // 朝这个方向四十格外的那一列里找能站的落脚处。
+    private static int[] landingAt(double x, double y, double z, double angle, Probe probe) {
+        int cx = (int) Math.round(x + Math.cos(angle) * REACH_OUT);
+        int cz = (int) Math.round(z + Math.sin(angle) * REACH_OUT);
+        return standableNear(cx, (int) Math.floor(y), cz, probe);
     }
 
     // 这一列上离原高度最近的能站处：先试同高，再上下各试到四格。

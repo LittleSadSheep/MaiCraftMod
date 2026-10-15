@@ -33,6 +33,8 @@ public final class GoalRun {
     private int stepIndex;
     /** 在等回答的问题；没有问题挂着时为 null。暂停时问题照样挂着。 */
     private Question question;
+    /** 这次为什么暂停（被临时任务带离原地）；没说原因、没暂停时为 null。不存盘。 */
+    private String whyPaused;
     /** 这次推进里 LLM 已经给过的回答，按先后顺序。 */
     private final List<String> answers = new ArrayList<>();
     /**
@@ -125,10 +127,29 @@ public final class GoalRun {
         state = GoalRunState.PAUSED;
     }
 
+    /**
+     * 记下这次为什么暂停（被自卫撤离带离打点、停在哪）：暂停事件与目标此刻在做什么都带上它，LLM 才知道不是游戏重连。
+     * 只在这一局里有，不存盘；恢复推进时清掉。
+     */
+    public void noteWhyPaused(String why) {
+        whyPaused = why;
+    }
+
+    /** 这次为什么暂停；LLM 自己叫停、重启后读回的没有。 */
+    public String whyPaused() {
+        return whyPaused;
+    }
+
+    /** 接在暂停说明后面的原因：有原因时是"分隔 + 原因"，没有时是空串。 */
+    public String pauseNote(String separator) {
+        return whyPaused == null ? "" : separator + whyPaused;
+    }
+
     /** 恢复推进：还挂着问题的回到等回答，其余回到推进。 */
     public void resume() {
         requireState(GoalRunState.PAUSED, "恢复");
         state = question != null ? GoalRunState.AWAITING_ANSWER : GoalRunState.RUNNING;
+        whyPaused = null;
     }
 
     /** 结束并定下结果；结束只发生一次，之后本记录封存。 */

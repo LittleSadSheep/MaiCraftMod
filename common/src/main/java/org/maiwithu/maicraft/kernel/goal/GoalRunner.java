@@ -392,9 +392,7 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, KeepsTempTaskFa
         return child != null && !child.finished() && child.stopSafely();
     }
 
-    @Override public boolean stoppedSafely() {
-        return child == null || child.finished() || child.stoppedSafely();
-    }
+    @Override public boolean stoppedSafely() { return child == null || child.finished() || child.stoppedSafely(); }
 
     // 生存需求看到的是目标手上正在跑的那个能力任务：原先只看到目标外壳，打架时自卫照样插进来抢、
     // 照明施工时随行补光往验收范围里插野火把、出行时插火把按"找空当"而不是"落地站稳就插"。
@@ -403,9 +401,10 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, KeepsTempTaskFa
         return running == null ? this : running.activeTask();
     }
 
-    // 目标能不能在新地点接着做，看手上正在做的那一步。
+    // 能不能在新地点接着做：能力说在哪做都一样（去某地、拿东西）就能，两件事之间也一样；别的看手上正在做的那一步。
     @Override public boolean resumesAnywhere() {
-        return child != null && !child.finished() && child.resumesAnywhere();
+        return goal.steps().isEmpty() && registry.find(goal.ability()).map(AbilityModule::resumesAnywhere).orElse(false)
+                || child != null && !child.finished() && child.resumesAnywhere();
     }
 
     @Override public TaskResult close(CloseReason reason) {
@@ -454,7 +453,7 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, KeepsTempTaskFa
     @Override public String describe() {
         return switch (run.state()) {
             case AWAITING_ANSWER -> "目标 " + goal.ability() + " 在等回答：" + run.question().text();
-            case PAUSED -> "目标 " + goal.ability() + " 已暂停（第 " + run.stepIndex() + " 步）";
+            case PAUSED -> "目标 " + goal.ability() + " 已暂停（第 " + run.stepIndex() + " 步）" + run.pauseNote("：");
             case FINISHED -> "目标 " + goal.ability() + " 已结束：" + result.summary();
             case RUNNING -> child != null && !child.finished()
                     ? "目标 " + goal.ability() + (ending == null ? "" : ending == Ending.PAUSE ? "（先到安全的地方再暂停）"

@@ -102,7 +102,7 @@ public final class GoalRunTable {
      * 控制循环说主任务被临时任务带离原地、停在了半路：把这个目标挂成暂停，事件流发一条"暂停"，
      * LLM 才知道要看现场、决定接着做还是换办法（原先目标一直显示在跑，身体却停着，没人知道）。
      */
-    public void mainParked() {
+    public void mainParked(String why) {
         if (mainRunId == -1) return;
         GoalRunner runner = runners.get(mainRunId);
         if (runner == null || runner.run().state() != GoalRunState.RUNNING) return;
@@ -113,6 +113,8 @@ public final class GoalRunTable {
             mainRunId = -1;
             return;
         }
+        // 为什么停、离原来的岗位几格、停在哪写进这条目标：暂停事件和目标此刻在做什么都带上，LLM 不必猜是不是游戏重连了。
+        runner.run().noteWhyPaused(why);
         runner.pauseParked();
     }
 

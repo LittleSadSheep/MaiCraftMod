@@ -71,6 +71,7 @@ import org.maiwithu.maicraft.behavior.survival.LiveHungerView;
 import org.maiwithu.maicraft.behavior.survival.LiveNightAndEdgeMoves;
 import org.maiwithu.maicraft.behavior.survival.LiveBurrow;
 import org.maiwithu.maicraft.behavior.permission.Protection;
+import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
 import org.maiwithu.maicraft.behavior.survival.BlockBreaking;
 import org.maiwithu.maicraft.behavior.survival.LiveAirRoutes;
 import org.maiwithu.maicraft.behavior.survival.LiveCeilingDigs;
@@ -253,7 +254,7 @@ public final class Bootstrap {
             SurvivalWiring survivalWiring, ItemsToKeep keeps, Supplier<Protection> protection,
             FollowLighting followLighting, ReadsLightLevels lightLevels, ClientMovesToMainhand hands,
             ModRangedWeapons ranged, Function<PlayerContext, CatchesFall> fallRescues, Predicate<UUID> trusted,
-            PicksUpDrops lostDrops) {
+            PicksUpDrops lostDrops, Supplier<ReadsRememberedPlaces> places) {
         // 角色死亡这类循环自身的处境变化也从同一条事件流出去；死亡决策从挂载口交给目标运行表。
         ControlLoop loop = new ControlLoop(List.of(
                 new DigOutNeed(new SurvivalSituation.FromPlayer(),
@@ -263,11 +264,10 @@ public final class Bootstrap {
                 new FallNeed(new SurvivalSituation.FromPlayer(), fallRescues,
                         () -> BaritoneInternals.landingInProgress() || ClientHooks.flightControlled()
                                 || BaritoneInternals.flyingUp()),
-                // 自家人打角色只发事件、不停工；别的玩家打角色退开举盾、停下等 LLM 决定。
-                // 夜里撤不掉又打不过：自卫接同一套挖三填一。
-                // 打完把这一仗掉出来的东西和射出去的箭捡回来：用回去捡尸体的同一套捡掉落物。
+                // 自家人打角色只发事件、不停工；别的玩家打角色退开举盾、停下等 LLM 决定。夜里撤不掉又打不过接同一套挖三填一。
+                // 打完把这一仗掉出来的东西和射出去的箭捡回来（用回去捡尸体的同一套）；撤离往记过的"家"那一侧跑。
                 new SelfDefenseNeed(combatSenses, new LiveBattleMoves(walks, interactions.heldProjection(), ranged), events,
-                        trusted, LiveNightAndEdgeMoves.burrow(burrow, events)).pickingUp(lostDrops),
+                        trusted, LiveNightAndEdgeMoves.burrow(burrow, events)).pickingUp(lostDrops).knowingHome(places),
                 new HungerNeed(new LiveHungerView(foods, keeps), foodMoves, events),
                 new DarknessNeed(new LiveDarkView(lightLevels),
                         new LiveTorchMoves(interactions, hands, protection, Set.of()), followLighting),
@@ -544,8 +544,8 @@ public final class Bootstrap {
                     FallRescues.withBrakes(() -> compat.fallBrakes()),
                     // 自家人按进世界时读的实例配置认；还没进世界时谁都不算。
                     uuid -> worldScope[0] != null && worldScope[0].trustedPlayers().includes(uuid.toString()),
-                    // 回去捡尸体用和采集、打猎同一套捡掉落物。
-                    new ClientDropPickup(now, walks, dropConfirmations));
+                    // 回去捡尸体用和采集、打猎同一套捡掉落物；自卫撤离往当前世界记忆里记过的"家"那一侧跑。
+                    new ClientDropPickup(now, walks, dropConfirmations), () -> worldScope[0] == null ? null : worldScope[0].memory());
         }
 
         /**
@@ -736,9 +736,9 @@ public final class Bootstrap {
                 // 主任务被临时任务带离原地、回不去：目标挂成暂停并发事件，LLM 才知道身体停着。
                 // 控制循环外面也兜一层：任务里的异常内核自己收，需求判断这类出错只跳过这一刻。
                 tickGuard.run("控制循环", () -> {
-                    if (controlLoop.tick(new ClientTickContext(gameTick, current)) instanceof ControlLoop.Decision.Parked
+                    if (controlLoop.tick(new ClientTickContext(gameTick, current)) instanceof ControlLoop.Decision.Parked parked
                             && goals != null) {
-                        goals.mainParked();
+                        goals.mainParked(parked.where());
                     }
                 });
             }

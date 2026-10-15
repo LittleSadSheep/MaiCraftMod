@@ -39,9 +39,11 @@ import org.maiwithu.maicraft.kernel.task.CloseReason;
  *
  * <p>名单无差别：正在追我的都打（会分裂的怪裂开后新个体天然进来）。不追出打点 16 格（只比水平距离）去打没在打我的；
  * 正压着我打的、远处射我的不受这个限制。危险消失后再观察两秒（跑得几乎一样快的怪会在边界上一进一出）；
- * 撤离甩开了就是这次处理好了，人已不在原地，主任务不在这里悄悄续上。
+ * 撤离往家（没记过家就往打点）那一侧跑，甩开了就是这次处理好了，人已不在原地：守着原地的主任务停下等 LLM，
+ * 去某地、拿东西这类在哪做都一样的从新地点接着做（由主任务自己声明），停下时说清为什么停、离打点几格、停在哪。
  *
  * <p>夜里撤不掉又打不过：接夜晚需求那套挖三填一，挖坑封顶熬到天亮再爬回地面；坑挖不成就回去背水一战。
+ * 甩开了追兵、可天黑了血又低：同样就地挖坑熬到天亮再走回打点，不停在野地里等下一只。
  *
  * <p>被没点名的玩家打：不还手，只退到他够不着外、举着盾；他停手后停下来等 LLM 决定（还手就 fight 点名他，
  * 不理就让主任务继续），不自己走回去接着干活。自家人打角色只发事件、不停工。
@@ -80,6 +82,13 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
     private Task burrow;
     /** 撤离后人不在原地，或收尾走不回打点，或被陌生玩家打了：主任务不能悄悄续上。 */
     private boolean displaced;
+    /** 主任务为什么停、离打点几格、人停在哪：交给控制循环写进主任务的暂停说明。 */
+    private String displacedWhy;
+    /** 被陌生玩家打了：不管主任务在哪做都一样，都停下等 LLM 决定还不还手。 */
+    private boolean awaitsOrders;
+    /** 甩开了追兵、天黑血低，正在就地挖坑熬夜：挖不成就照撤离收场；记着这次撤离的原因。 */
+    private boolean shelteringAfterEscape;
+    private String escapedWhy;
     /** 这次打过角色的陌生玩家（实体编号）：不还手，收场时暂停主任务等 LLM 决定。 */
     private final Set<Integer> strangers = new LinkedHashSet<>();
     /** 这一场打掉了谁、拿什么打、挥中几下、射了几箭。 */
@@ -106,6 +115,8 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         }, ThreatAssessment.VIGILANCE_RADIUS);
         // 夜里退无可退、打不过：引擎报要挖坑，这里接夜晚需求那套挖三填一。
         if (need.offersShelter()) battle.offerShelter();
+        // 撤离往家那一侧跑；没记过家就往打点（开打时干活的地方）那一侧，不一路往野外越跑越远。
+        battle.retreatToward(context -> need.home(context).orElse(new double[] {anchor[0], anchor[2]}));
     }
 
     // 名单：正在追我的都打；出打点 16 格、又没在打我的不追（守在打点附近），正压着我打的、远处射我的照打；
@@ -172,13 +183,18 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
     private Next<Phase> shelter(TickContext context) {
         if (burrow == null) {
             burrow = need.shelter();
-            if (burrow == null) return go(Phase.ENGAGE, "挖不了坑，背水一战");
+            if (burrow == null) {
+                // 甩开追兵后想挖坑熬夜却挖不了：照撤离收场，不回头去找已经甩掉的怪。
+                return shelteringAfterEscape ? leaveDisplaced(context, escapedWhy)
+                        : go(Phase.ENGAGE, "挖不了坑，背水一战");
+            }
             burrow.start(context);
         }
         if (burrow instanceof BurrowInTask digging && digging.exposedWhileWaiting()) {
             TaskResult stopped = burrow.close(CloseReason.FINISHED);
             burrow = null;
             keepFacts(stopped);
+            if (shelteringAfterEscape) return leaveDisplaced(context, escapedWhy);
             return go(Phase.ENGAGE, "坑挖不成，回去背水一战");
         }
         if (burrow.tick(context) instanceof TickResult.Finished finished) {
@@ -206,12 +222,14 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
     // 被没点名的玩家打了：退开举盾、没有还手，他停手后不走回打点、不接着干活——停下来等 LLM 决定还不还手。
     private Next<Phase> stoppedByStranger(TickContext context) {
         displaced = true;
+        awaitsOrders = true;
         List<String> names = new ArrayList<>();
         for (int id : strangers) {
             names.add(senses.entityById(context, id) instanceof Player player
                     ? player.getName().getString() : "实体 " + id);
         }
         String who = String.join("、", names);
+        displacedWhy = "被玩家 " + who + " 打了，没有还手，" + whereNow(context);
         events.publish(TaskEvent.Kind.NEED_UNHANDLED, "被玩家 " + who + " 打了：退到够不着的地方举着盾，没有还手；"
                 + "主任务已暂停，等你决定（要还手就用 fight 点名他，不理就让主任务继续）");
         return Next.done(TaskResult.builder(TaskResult.Status.DONE, "被玩家 " + who + " 打了，没有还手，停下等指示")
@@ -287,9 +305,10 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
             need.ignoreUnreachable(battle.unreachable(), context.gameTick());
             double[] self = moves.selfPosition(context);
             String where = Math.round(self[0]) + ", " + Math.round(self[1]) + ", " + Math.round(self[2]);
+            displacedWhy = "自卫打完走不回打点，" + whereNow(context);
+            // 守着原地的主任务会暂停等下一步指示（暂停说明里写着为什么停）；在哪做都一样的从这里接着做。
             events.publish(TaskEvent.Kind.NEED_UNHANDLED,
-                    "自卫结束但走不回打点（还差 " + Math.round(drift) + " 格），停在了 " + where + "；" + tally.describe()
-                            + "；主任务已暂停，等下一步指示");
+                    "自卫结束但走不回打点（还差 " + Math.round(drift) + " 格），停在了 " + where + "；" + tally.describe());
             return Next.done(TaskResult.builder(TaskResult.Status.DONE,
                             "自卫结束；人停在了 " + where + "，回不去原来的打点")
                     .details(details(drift, heartsLost)).build());
@@ -304,16 +323,54 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         return Next.stay();
     }
 
-    // 撤离成功：甩开了追兵，这次被攻击就算处理好了（记完成）。记成失败会让生存需求缓一阵，
-    // 缓着的那几秒再被追上就是站着挨打。人已经不在开打的原地，主任务不能在这里悄悄续上。
+    // 撤离成功：甩开了追兵。天黑了血又低：不停在野地里等下一只，就地挖坑封起来熬到天亮，再走回打点。
+    // 实机 10-15 夜里低血撤离五次，每次甩开就停在野地里，转眼又被下一只追上。
     private Next<Phase> escaped(TickContext context, String why) {
+        if (!shelteringAfterEscape && need.offersShelter() && moves.night(context) && lowAfterEscape(context)) {
+            shelteringAfterEscape = true;
+            escapedWhy = why;
+            recordProgress("甩开了追兵，天黑血低，就地挖坑熬到天亮");
+            return go(Phase.SHELTER, "甩开了追兵，天黑血低，就地挖坑熬到天亮");
+        }
+        return leaveDisplaced(context, why);
+    }
+
+    // 甩开了追兵，这次被攻击就算处理好了（记完成）。记成失败会让生存需求缓一阵，缓着的那几秒再被追上就是站着挨打。
+    // 人已经不在开打的原地：守着原地的主任务停下等 LLM（暂停说明里写为什么停、离打点几格、停在哪），
+    // 在哪做都一样的从新地点接着做——这由主任务自己声明，这里只交代事实。
+    private Next<Phase> leaveDisplaced(TickContext context, String why) {
         displaced = true;
+        String reason = why == null ? "打不过" : why;
+        displacedWhy = "自卫撤离（" + reason + "）甩开了追兵，" + whereNow(context);
         double drift = distanceFromAnchor(context);
-        String summary = "已撤离，甩开了追兵（" + (why == null ? "打不过" : why) + "），" + tally.describe()
+        String summary = "已撤离，甩开了追兵（" + reason + "），" + tally.describe()
                 + "离打点 " + Math.round(drift) + " 格";
-        events.publish(TaskEvent.Kind.TEMPORARY_TASK_FINISHED, summary + "；主任务停在半路等下一步指示");
+        events.publish(TaskEvent.Kind.TEMPORARY_TASK_FINISHED, summary + "，人在 " + here(context));
         return Next.done(TaskResult.builder(TaskResult.Status.DONE, summary)
                 .details(details(drift, heartsLost(context))).build());
+    }
+
+    /** 甩开追兵后有效血量（含护甲折算）到这条线以下，天黑了就地挖坑熬夜：不到半血。 */
+    static final double LOW_AFTER_ESCAPE = 10.0;
+
+    private boolean lowAfterEscape(TickContext context) {
+        CombatSenses.CombatProfile profile = senses.profile(context);
+        return ThreatAssessment.effectiveHealth(profile.health(), profile.armorPoints()) <= LOW_AFTER_ESCAPE;
+    }
+
+    // 主任务暂停说明里的那半句：离打点几格、人停在哪、打点在哪。
+    private String whereNow(TickContext context) {
+        return "离打点 " + Math.round(distanceFromAnchor(context)) + " 格，人停在 " + here(context)
+                + "（打点在 " + anchorSpot() + "）";
+    }
+
+    private String here(TickContext context) {
+        double[] self = moves.selfPosition(context);
+        return Math.round(self[0]) + ", " + Math.round(self[1]) + ", " + Math.round(self[2]);
+    }
+
+    private String anchorSpot() {
+        return Math.round(anchor[0]) + ", " + Math.round(anchor[1]) + ", " + Math.round(anchor[2]);
     }
 
     private double heartsLost(TickContext context) {
@@ -338,7 +395,12 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
 
     @Override
     public String stoppedWhere() {
-        return Math.round(anchor[0]) + ", " + Math.round(anchor[1]) + ", " + Math.round(anchor[2]);
+        return displacedWhy != null ? displacedWhy : "打点在 " + anchorSpot();
+    }
+
+    @Override
+    public boolean waitsForOrders() {
+        return awaitsOrders;
     }
 
     @Override

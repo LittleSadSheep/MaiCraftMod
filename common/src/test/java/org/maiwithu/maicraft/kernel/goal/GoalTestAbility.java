@@ -151,6 +151,8 @@ final class GoalTestAbility implements AbilityModule {
     List<TaskResult> taskResultsSeen = List.of();
     /** 这个替身能力的钩子；默认不做特殊处理。 */
     AbilityHooks hooks = AbilityHooks.NONE;
+    /** 这个替身能力在哪做都一样（像去某地、拿东西）；默认守着原地。 */
+    boolean anywhere;
 
     GoalTestAbility(String id) {
         this(id, new SharedTasks());
@@ -192,6 +194,10 @@ final class GoalTestAbility implements AbilityModule {
 
     @Override public AbilityHooks hooks() {
         return hooks;
+    }
+
+    @Override public boolean resumesAnywhere() {
+        return anywhere;
     }
 
     /** 已启动的任务输入，按顺序。 */

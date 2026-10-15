@@ -465,10 +465,11 @@ public final class ControlLoop {
             failureStreaks.remove(frame.from);
         }
         // 临时任务回不到原来的岗位时不让主任务在新地点悄悄续上：停住等 LLM 决定。
-        // 去某地、跑图这类本来就在挪地方的主任务不停：从新地点接着走就是了（原先一被撤离就停在半路，
-        // 也没人告诉 LLM，远程出行走走停停）。
+        // 去某地、拿东西这类在哪做都一样的主任务不停：从新地点接着做就是了（原先一被撤离就停在半路，
+        // 也没人告诉 LLM，远程出行走走停停）。临时任务说要等 LLM 发话的（被陌生玩家打了）照样停。
         if (frame.task instanceof DisplacedTask displaced && displaced.cannotResumeInPlace()
-                && !stack.isEmpty() && stack.getFirst().from == null && !stack.getFirst().task.resumesAnywhere()) {
+                && !stack.isEmpty() && stack.getFirst().from == null
+                && (displaced.waitsForOrders() || !stack.getFirst().task.resumesAnywhere())) {
             stack.getFirst().paused = true;
             parkedWhere = displaced.stoppedWhere();
             return new Decision.Parked(stack.getFirst().task, parkedWhere);

@@ -9,6 +9,7 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
@@ -121,6 +122,8 @@ public final class Battle {
     /** 被拒的那个站位与还要绕开它几刻。 */
     private double[] rejectedAt;
     private int sidestepTicks;
+    /** 撤离往哪一侧靠：家（没记过家就是打点）的水平位置 {x, z}；不知道时为空，只按追兵反方向跑。 */
+    private Function<TickContext, double[]> homeSide = context -> null;
     /** 调用方接得住"挖坑自保"（自卫交给挖三填一）；一仗只要一次。 */
     private boolean offersShelter;
     private boolean shelterAsked;
@@ -141,13 +144,13 @@ public final class Battle {
     private boolean swingSettled;
     /** 上一段寻路走不通：逼近的那只记成走不到。 */
     private boolean lastWalkFailed;
-    /** 打龙的脚和手；这一仗不打龙为 null。 */
-    private final DragonCombat dragon;
-    /** 上一刻是按龙的打法做的：能不能被打断问打龙那边。 */
     /** 开打后追过我、还朝我来的：攻击标记一闪一闪也照样算追兵，离开或看不见满三秒才放下。 */
     private final StillChasing still = new StillChasing();
     /** 这一刻手上在换武器（开了背包换进快捷栏、按数字键选中）：不挥、不射、不接火球，等换完。 */
     private boolean swapping;
+    /** 打龙的脚和手；这一仗不打龙为 null。 */
+    private final DragonCombat dragon;
+    /** 上一刻是按龙的打法做的：能不能被打断问打龙那边。 */
     private boolean dragonActive;
 
     /** @param radius 看多远的战场：自卫用警戒半径，区域清扫用清扫半径；撤离时自动看四十格 */
@@ -161,12 +164,12 @@ public final class Battle {
 
     public Moment tick(TickContext context) {
         // 撤离时看四十格，这次的追兵一时没在追（隔着坡看不见）也留在场上，甩没甩开才看得准。
+        // 开打后追过我、还朝我来的那只照样算追兵（攻击标记一秒一闪也不让这一仗"逼近↔打完了"来回切）。
         Battlefield field = Battlefield.read(senses, moves, context,
                 retreating ? ThreatAssessment.FLEE_CLEAR_DISTANCE : radius, roster,
                 retreating ? retreat.pursuers() : Set.of(), still);
         // 换武器开始了就做完：每刻先推进换到一半的那次，"打完了"、贴到跟前都不中途收掉；换的这几刻手腾不出来。
         swapping = moves.finishArming(context);
-        // 开打后追过我、还朝我来的那只照样算追兵（攻击标记一秒一闪也不让这一仗"逼近↔打完了"来回切）。
         if (retreating) retreat.noteChasers(field);
         // 打龙：先记战况（水晶少了哪颗、龙倒没倒下、回血回到哪儿），再定打法。
         if (dragon != null) dragon.observe(context, field);
@@ -337,8 +340,9 @@ public final class Battle {
                 cx = remembered[0];
                 cz = remembered[1];
             }
+            // 往家（没记过家就往打点）那一侧跑：背离追兵的左右九十度里挑离家最近的落点，不一路往野外越跑越远。
             int[] haven = Retreat.haven(me.x(), me.y(), me.z(), cx, cz, retreat.turns(),
-                    (x, y, z) -> moves.standable(context, x, y, z));
+                    (x, y, z) -> moves.standable(context, x, y, z), homeSide.apply(context));
             List<ThreatField.Threat> threats = pathThreats(field, -1);
             GoalCompiler.Compiled goal = haven != null
                     ? GoalCompiler.approachAvoiding(GoalCompiler.near(new BlockPos(haven[0], haven[1], haven[2]), 2.0), threats)
@@ -407,11 +411,11 @@ public final class Battle {
         boolean swinging = inReach && !holdSwing && !swapping;
         swingSettled = false;
         boolean struck = swinging && swing(context, target.id(), me);
+        if (swingSettled) leap.swung();
         if (!inReach) {
             dropStrike();
             // 还够不着、离得也够远：路上先把剑斧拿到手上，到跟前一出手就是它。
             moves.arm(context, threat.distance());
-        if (swingSettled) leap.swung();
         }
         if (threat.dangerRadius() > 0) moves.guard(context, threat.distance(), inReach && me.attackReady());
         else moves.lowerGuard();
@@ -435,13 +439,13 @@ public final class Battle {
                     moves.ground(context));
             if (jumpNow) step = new Footwork.Step(step.dx(), step.dz(), true, false);
             // 这一刻手上正瞄着出手：脚照迈，镜头留给出手的瞄点（它跟着对方横移、夹在碰撞箱里）。
+            // 跳劈起跳前、往上升时镜头先压在出手那一点上，往下落那几刻不用再转镜头就能砍。
             if (swinging) moves.stepKeepingAim(context, step);
+            else if (holdSwing) moves.stepAimingStrike(context, target.id(), step);
             else moves.step(context, target.id(), step);
             moved = !step.standing() || jumpNow;
         } else if (threat.kind() == ThreatAssessment.Kind.EXPLOSIVE) {
-            // 跳劈起跳前、往上升时镜头先压在出手那一点上，往下落那几刻不用再转镜头就能砍。
             moved = creeperFootwork(context, field, me, target, threat);
-            else if (holdSwing) moves.stepAimingStrike(context, target.id(), step);
         } else {
             List<ThreatField.Threat> threats = pathThreats(field, -1);
             Vec3 focus = new Vec3(threat.x(), threat.y(), threat.z());
@@ -646,6 +650,7 @@ public final class Battle {
         if (status instanceof ActionStatus.Done) {
             dropStrike();
             rejects = 0;
+            swingSettled = true;
             return true;
         }
         if (status instanceof ActionStatus.Failed) {
@@ -655,7 +660,6 @@ public final class Battle {
             sidestepTicks = REJECT_SIDESTEP_TICKS;
             if (++rejects >= MAX_REJECTS) {
                 unreachable.add(targetId);
-            swingSettled = true;
                 rejects = 0;
                 sidestepTicks = 0;
             }
@@ -698,10 +702,6 @@ public final class Battle {
 
     /** 这一仗真结束了（任务收尾、换去挖坑）：手脚都收尾，换到一半的武器也收尾、开着的背包交给原版关上。 */
     public void close() {
-        dropReturn();
-        dropStrike();
-        dropWalk();
-        if (pillar != null) pillar.close();
         standDown();
         moves.stopArming();
     }
@@ -709,6 +709,10 @@ public final class Battle {
     // 不打了（打完了、甩开了、交去挖坑）：出手、寻路、垫高、拉了一半的弓都收尾，盾放下；换到一半的武器不收，
     // 下一刻接着换完——打完了的观察期、走回打点时照样每刻推进它。
     private void standDown() {
+        dropReturn();
+        dropStrike();
+        dropWalk();
+        if (pillar != null) pillar.close();
         pillar = null;
         bow.close();
         if (dragon != null) dragon.close();
@@ -726,6 +730,14 @@ public final class Battle {
     /** 打龙这一仗到此刻的战况；不打龙为空。 */
     public Optional<DragonCombat.Report> dragonReport() {
         return dragon == null ? Optional.empty() : Optional.of(dragon.report());
+    }
+
+    /**
+     * 撤离往哪一侧靠：每次挑撤离落点时问一次家（没记过家就给打点）的水平位置 {x, z}，给空就只按追兵反方向跑。
+     * 自卫给它，点名战斗不给。
+     */
+    public void retreatToward(Function<TickContext, double[]> side) {
+        homeSide = side == null ? context -> null : side;
     }
 
     /** 调用方接得住挖坑自保：夜里退无可退、打不过时引擎报 {@link State#NEEDS_SHELTER} 交给它。 */

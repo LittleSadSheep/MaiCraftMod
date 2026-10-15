@@ -250,6 +250,12 @@ public final class TravelAbility implements AbilityModule {
         return new Choice(via != null ? via : owner, options, null);
     }
 
+    // 出行本来就在挪地方：被自卫撤离带离原地后，从新地点接着往目的地走；两件事之间（看现场决定下一件做什么）也一样。
+    @Override
+    public boolean resumesAnywhere() {
+        return true;
+    }
+
     @Override
     public void registerTasks(TaskFactories factories) {
         factories.register(TravelInput.class, input -> {

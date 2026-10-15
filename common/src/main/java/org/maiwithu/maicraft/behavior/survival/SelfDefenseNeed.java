@@ -6,16 +6,20 @@ import org.maiwithu.maicraft.behavior.combat.CombatGeometry;
 import org.maiwithu.maicraft.behavior.combat.CombatSenses;
 import org.maiwithu.maicraft.behavior.combat.ThreatAssessment;
 import org.maiwithu.maicraft.behavior.inventory.PicksUpDrops;
+import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.interrupt.SurvivalNeed;
 import org.maiwithu.maicraft.kernel.interrupt.ThreatResponder;
 import org.maiwithu.maicraft.kernel.task.Task;
@@ -56,6 +60,8 @@ public final class SelfDefenseNeed implements SurvivalNeed {
     private final NightfallNeed.BurrowMoves shelter;
     /** 打完捡这一仗掉出来的东西、射出去的箭：和采集、打猎同一套捡掉落物；没接上为 null。 */
     private PicksUpDrops drops;
+    /** 记过的地点（当前世界的世界记忆）：撤离往"家"那一侧跑；没接上、不在世界里时为 null。 */
+    private Supplier<ReadsRememberedPlaces> places = () -> null;
 
     /** @param moves 出手与走位怎么落地；生产用原生攻击与走到，测试换替身。 */
     public SelfDefenseNeed(CombatSenses senses, BattleMoves moves, TaskEventSink events) {
@@ -87,6 +93,29 @@ public final class SelfDefenseNeed implements SurvivalNeed {
     PicksUpDrops drops() {
         return drops;
     }
+
+    /** 撤离时往家那一侧跑：接上记过的地点（LLM 用 remember 记的"家"）。 */
+    public SelfDefenseNeed knowingHome(Supplier<ReadsRememberedPlaces> places) {
+        this.places = places == null ? () -> null : places;
+        return this;
+    }
+
+    /** 记过的"家"在这个维度里的水平位置 {x, z}；没记过、在别的维度、不在世界里为空。 */
+    Optional<double[]> home(TickContext context) {
+        ReadsRememberedPlaces memory = places.get();
+        if (memory == null) return Optional.empty();
+        Optional<WorldPosition> home = memory.place(HOME);
+        if (home.isEmpty()) return Optional.empty();
+        String here = context.player() == null || context.player().level() == null ? null
+                : context.player().level().dimension().location().toString();
+        // 没写维度的地点按"记的时候所在的维度"算，和哪个维度都对得上；写了的要和此刻所在的维度一样。
+        String there = home.get().dimension();
+        if (there != null && here != null && !there.equals(here)) return Optional.empty();
+        return Optional.of(new double[] {home.get().x() + 0.5, home.get().z() + 0.5});
+    }
+
+    /** 家的地点名：和夜里认"家里的床"是同一个名字。 */
+    static final String HOME = "家";
 
     /** 接得住挖坑自保吗。 */
     boolean offersShelter() {

@@ -34,6 +34,24 @@ class RetreatTest {
     }
 
     @Test
+    void havenLeansTowardHomeWithinTheNinetyDegreesAwayFromTheChasers() {
+        // 追兵在东、家在北边一百格：背离追兵的左右九十度里挑离家最近的——往北跑，不往正西越跑越远。
+        int[] haven = Retreat.haven(0, 64, 0, 5, 0, 0, (x, y, z) -> y == 64, new double[] {0, -100});
+        assertEquals(0, haven[0]);
+        assertEquals(-40, haven[2], "往北四十格");
+        // 家就在追兵身后（正东）：最多偏到九十度，不往追兵那边钻。
+        int[] behind = Retreat.haven(0, 64, 0, 5, 0, 0, (x, y, z) -> y == 64, new double[] {100, 0});
+        assertTrue(behind[0] <= 0, "不朝追兵那边跑，实际 " + behind[0] + "," + behind[2]);
+        // 这条走不通：按离家远近换下一个。
+        int[] next = Retreat.haven(0, 64, 0, 5, 0, 1, (x, y, z) -> y == 64, new double[] {0, -100});
+        assertTrue(next[2] < 0 && next[0] < 0, "换到次近的西北方向，实际 " + next[0] + "," + next[2]);
+        // 人就站在打点上：八个落点离打点一样远，照旧正背离着跑。
+        int[] atAnchor = Retreat.haven(0, 64, 0, 5, 0, 0, (x, y, z) -> y == 64, new double[] {0, 0});
+        assertEquals(-40, atAnchor[0]);
+        assertEquals(0, atAnchor[2]);
+    }
+
+    @Test
     void escapeCountsOnlyThisRetreatsPursuersAndFreshAttackers() {
         Retreat retreat = new Retreat();
         Battlefield start = field(foe(1, 12, false));

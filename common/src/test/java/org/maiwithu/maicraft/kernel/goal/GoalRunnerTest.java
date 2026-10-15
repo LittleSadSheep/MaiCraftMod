@@ -596,11 +596,31 @@ class GoalRunnerTest {
         InMemoryGoalRunStore store = new InMemoryGoalRunStore();
         GoalRunner runner = flyingGoal(ability, store);
 
+        runner.run().noteWhyPaused("自卫撤离（血快见底，先撤离保命）甩开了追兵，离打点 38 格，人停在 -49, 69, 97（打点在 -69, 70, 64）");
         runner.pauseParked();
 
         assertEquals(GoalRunState.PAUSED, runner.run().state());
         assertFalse(runner.windingDown());
         assertEquals(GoalRunState.PAUSED, store.unfinished().get(0).state(), "暂停后存盘");
+        // 为什么停、离打点几格、停在哪写进目标此刻在做什么：LLM 不必猜是不是游戏重连了。
+        assertTrue(runner.describe().contains("自卫撤离") && runner.describe().contains("离打点 38 格"),
+                runner.describe());
+        // 恢复推进后原因就不再挂着。
+        runner.resumeGoal();
+        assertNull(runner.run().whyPaused());
+    }
+
+    @Test
+    void anAbilityThatWorksAnywhereResumesAnywhereEvenBetweenTasks() {
+        // 拿东西、去某地在哪做都一样：两件事之间（看现场决定下一件做什么）被自卫撤离带走，也从新地点接着做。
+        GoalTestAbility ability = new GoalTestAbility("maicraft:test");
+        GoalRunner runner = launch(Goal.of("maicraft:test", null, null), ability, new InMemoryGoalRunStore(),
+                new TestMemory());
+        runner.start(TICK0);
+        runner.tick(new GoalTestTick(101));
+        assertFalse(runner.resumesAnywhere(), "守着原地的能力：两件事之间不能在新地点续上");
+        ability.anywhere = true;
+        assertTrue(runner.resumesAnywhere(), "在哪做都一样的能力：两件事之间也能");
     }
 
     @Test

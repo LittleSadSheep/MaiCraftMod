@@ -68,7 +68,8 @@ public final class EventPublishingGoalRunStore implements GoalRunStore {
                     log.append(TaskEvent.Kind.ASKED, id, question, null);
                 }
             }
-            case PAUSED -> log.append(TaskEvent.Kind.PAUSED, id, "暂停：" + describe(run), null);
+            // 被临时任务带离原地停下的，带上为什么停、停在哪：LLM 不必猜是不是游戏重连了。
+            case PAUSED -> log.append(TaskEvent.Kind.PAUSED, id, "暂停：" + describe(run) + run.pauseNote("；"), null);
             // sequence 的一步做完记在整件 sequence 的编号上，结论句前带上第几步、哪个能力：连着几步结论一样
             // （一格一格施工每步都是"按图建好了"）时，读事件的人也分得清做完的是哪一步。
             case FINISHED -> log.append(step ? TaskEvent.Kind.STEP_FINISHED : TaskEvent.Kind.FINISHED, id,

@@ -122,6 +122,11 @@ public final class ObtainAbility implements AbilityModule {
                 "再拿 " + count + " 个 " + wanted.specifier(), prefer));
     }
 
+    // 拿东西在哪做都一样：被自卫撤离带离原地后，从新地点重新看现场接着拿，不停在半路等 LLM。
+    @Override public boolean resumesAnywhere() {
+        return true;
+    }
+
     @Override public void registerTasks(TaskFactories factories) {
         factories.register(ObtainItems.class, input ->
                 new ObtainTask(input, acquisition, backpack, offhand, tags));

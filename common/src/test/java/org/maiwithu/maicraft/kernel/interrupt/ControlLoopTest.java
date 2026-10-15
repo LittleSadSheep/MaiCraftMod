@@ -255,6 +255,18 @@ class ControlLoopTest {
         assertFalse(moving.tick(TICK) instanceof ControlLoop.Decision.Parked, "出行不因被撤离而停住");
         assertNull(moving.parkedWhere());
         assertSame(travel, assertAdvanced(moving.tick(TICK)).task());
+
+        // 被陌生玩家打了：还不还手由 LLM 定，在哪做都一样的主任务也停下等它发话。
+        FakeTask travelAgain = new FakeTask("去某地", Interruptibility.WORKING) {
+            @Override public boolean resumesAnywhere() {
+                return true;
+            }
+        };
+        ControlLoop hit = new ControlLoop(List.of(FakeNeed.of("自卫",
+                () -> new MovedTask("自卫临时", true), Urgency.NOW, null)));
+        hit.setMainTask(travelAgain);
+        assertAdvancedIsTempTask(hit.tick(TICK), "自卫");
+        assertTrue(hit.tick(TICK) instanceof ControlLoop.Decision.Parked, "等 LLM 发话的：出行也停住");
     }
 
     @Test
@@ -730,13 +742,25 @@ class ControlLoopTest {
 
     /** 被撤离的临时任务替身：第二刻做完，收尾时人已经回不到原来的岗位。 */
     static final class MovedTask extends FakeTask implements DisplacedTask {
+        private final boolean waitsForOrders;
+
         MovedTask(String name) {
+            this(name, false);
+        }
+
+        /** @param waitsForOrders 要等 LLM 发话（被陌生玩家打了）：主任务在哪做都一样也停下 */
+        MovedTask(String name, boolean waitsForOrders) {
             super(name, Interruptibility.WORKING);
+            this.waitsForOrders = waitsForOrders;
             finishingAfter(2);
         }
 
         @Override public boolean cannotResumeInPlace() {
             return true;
+        }
+
+        @Override public boolean waitsForOrders() {
+            return waitsForOrders;
         }
 
         @Override public String stoppedWhere() {

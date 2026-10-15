@@ -34,6 +34,15 @@ public interface AbilityModule {
         return false;
     }
 
+    /**
+     * 这个能力的目标被临时任务（自卫撤离、跑回去捡东西）带离原地后，能不能从新地点直接接着做：去某地、拿东西这类
+     * 在哪做都一样的能；施工、挖指定的格这类守着一个地方的不能，回不去就停下等 LLM 定。默认不能。
+     * 目标在两件事之间（看现场决定下一件做什么）时也按它答，不只看手上正在跑的那一步。
+     */
+    default boolean resumesAnywhere() {
+        return false;
+    }
+
     /** 本能力的特殊处理；绝大多数能力用不到。 */
     default AbilityHooks hooks() {
         return AbilityHooks.NONE;

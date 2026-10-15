@@ -26,6 +26,7 @@ import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -73,6 +74,8 @@ class SelfDefenseTaskTest {
         int walks;
         ActionStatus walkStatus = ActionStatus.progressed();
         boolean night;
+        /** 交给寻路的第一段：撤离往哪跑看它。 */
+        GoalCompiler.Compiled firstWalk;
 
         @Override public boolean night(TickContext context) { return night; }
 
@@ -94,6 +97,7 @@ class SelfDefenseTaskTest {
 
         @Override public Action walk(GoalCompiler.Compiled goal) {
             walks++;
+            if (firstWalk == null) firstWalk = goal;
             return new Fixed(() -> walkStatus);
         }
 
@@ -202,6 +206,65 @@ class SelfDefenseTaskTest {
         assertEquals(TaskResult.Status.DONE, finished.status(), "甩开了追兵就是这次被攻击处理好了");
         assertTrue(finished.summary().contains("已撤离") && finished.summary().contains("血快见底"), finished.summary());
         assertTrue(task.cannotResumeInPlace(), "人已经不在开打的原地");
+        // 主任务的暂停说明：为什么停、离打点几格、人停在哪，不让 LLM 以为是游戏重连。
+        String why = task.stoppedWhere();
+        assertTrue(why.contains("自卫撤离") && why.contains("离打点 30 格") && why.contains("人停在 -30, 64, 0"), why);
+        assertFalse(task.waitsForOrders(), "在哪做都一样的主任务可以从新地点接着做");
+    }
+
+    @Test
+    void retreatRunsTowardHome() {
+        // 僵尸在东边，记过的家在北边一百格：背离僵尸的左右九十度里往离家最近的北边跑，不往正西越跑越远。
+        Senses senses = new Senses();
+        senses.threats.add(zombie(1, 6, 6));
+        senses.health = 4;
+        Moves moves = new Moves();
+        SelfDefenseNeed need = new SelfDefenseNeed(senses, moves, TaskEventSink.NONE)
+                .knowingHome(() -> name -> name.equals("家") ? Optional.of(WorldPosition.here(0, 64, -100))
+                        : Optional.empty());
+        SelfDefenseTask task = (SelfDefenseTask) need.createTask(new Tick(0));
+        task.start(new Tick(0));
+        run(task, 0, 2);
+        assertTrue(moves.firstWalk.goal().center().getZ() < -20, "往北跑，实际 " + moves.firstWalk.goal().center());
+    }
+
+    @Test
+    void shakenOffAtNightWithLowHealthDigsInInsteadOfStandingInTheWild() {
+        Senses senses = new Senses();
+        senses.threats.add(zombie(1, 6, 6));
+        senses.health = 4;
+        Moves moves = new Moves();
+        moves.night = true;
+        int[] dug = {0};
+        NightfallNeed.BurrowMoves shelter = () -> new Task() {
+            int ticks;
+
+            @Override public TickResult tick(TickContext context) {
+                dug[0]++;
+                return ++ticks < 3 ? TickResult.RUNNING
+                        : TickResult.finished(TaskResult.done("熬过了夜，回到了地面"));
+            }
+
+            @Override public TaskResult close(CloseReason reason) { return TaskResult.done("收尾"); }
+            @Override public void pause() {}
+            @Override public String describe() { return "挖三填一"; }
+        };
+        SelfDefenseNeed need = new SelfDefenseNeed(senses, moves, TaskEventSink.NONE, uuid -> false, shelter);
+        SelfDefenseTask task = (SelfDefenseTask) need.createTask(new Tick(0));
+        task.start(new Tick(0));
+        run(task, 0, 2);
+        // 跑出去三十格甩开了：天黑、血还低，就地挖坑熬到天亮，不站在野地里等下一只。
+        moves.at[0] = -30;
+        senses.threats.clear();
+        run(task, 2, 10);
+        assertTrue(dug[0] > 0, "甩开后天黑血低：挖坑熬夜");
+        // 天亮爬出来：走回打点收场，主任务原地接着做。
+        moves.at[0] = 0;
+        TaskResult finished = assertInstanceOf(TickResult.Finished.class,
+                run(task, 10, 10 + SelfDefenseTask.WATCH_TICKS + 10)).result();
+        assertEquals(TaskResult.Status.DONE, finished.status(), finished.summary());
+        assertTrue(finished.summary().contains("回到打点"), finished.summary());
+        assertFalse(task.cannotResumeInPlace());
     }
 
     @Test
@@ -262,7 +325,9 @@ class SelfDefenseTaskTest {
                 run(task, 1, SelfDefenseTask.WATCH_TICKS + 10)).result();
         assertTrue(finished.summary().contains("回不去"), finished.summary());
         assertTrue(task.cannotResumeInPlace());
-        assertTrue(events.messages.stream().anyMatch(m -> m.contains("主任务已暂停")), events.messages.toString());
+        assertTrue(events.messages.stream().anyMatch(m -> m.contains("走不回打点")), events.messages.toString());
+        String why = task.stoppedWhere();
+        assertTrue(why.contains("走不回打点") && why.contains("离打点 8 格") && why.contains("人停在 8, 64, 0"), why);
     }
 
     /** 东边 x 格处、刚打过角色的另一位玩家。 */
@@ -291,6 +356,7 @@ class SelfDefenseTaskTest {
         TaskResult finished = assertInstanceOf(TickResult.Finished.class, run(task, 5, 10)).result();
         assertTrue(finished.summary().contains("没有还手"), finished.summary());
         assertTrue(task.cannotResumeInPlace(), "主任务暂停等指示");
+        assertTrue(task.waitsForOrders(), "还不还手由 LLM 定：在哪做都一样的主任务也停下");
         assertTrue(events.messages.stream().anyMatch(m -> m.contains("fight 点名")), events.messages.toString());
     }
 
