@@ -228,7 +228,7 @@ public final class WorldMemory implements RemembersPlaces, RemembersRegions, Rem
         return Optional.ofNullable(readBook().places().get(name));
     }
 
-    /** 记下或更新一条记忆；同一个位置同一类东西只留合并后的一条。 */
+    /** 记下或更新一条记忆；同一个东西（产地按片认，其余按格认）只留合并后的一条。 */
     private void upsert(MemoryRecord incoming) {
         modify(book -> book.withRecord(incoming));
     }
@@ -250,11 +250,16 @@ public final class WorldMemory implements RemembersPlaces, RemembersRegions, Rem
 
     private MemoryBook readBook() {
         if (book == null) {
+            MemoryBook stored;
             try {
-                book = codec.decode(documents.read(SCOPE, worldKey, DOCUMENT_KEY, DOCUMENT_LIMIT));
+                stored = codec.decode(documents.read(SCOPE, worldKey, DOCUMENT_KEY, DOCUMENT_LIMIT));
             } catch (IOException failure) {
                 throw new UncheckedIOException("world_memory_read_failed", failure);
             }
+            // 读进来先把同一个东西的多条记录并成一条（早先存下的同一片树林可能有上百条"这里有木头"）；
+            // 并过就记成改过，下次存盘写回并好的册子。
+            book = stored.withDuplicatesMerged();
+            dirty = book != stored;
         }
         return book;
     }

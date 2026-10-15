@@ -4,9 +4,12 @@ package org.maiwithu.maicraft.behavior.worldmemory;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -175,6 +178,43 @@ class WorldMemoryTest {
         var reopened = new WorldMemory(store, "a".repeat(64));
         assertEquals(List.of("minecraft:coal"),
                 reopened.recordAt(MemoryKind.CONTAINER, CHEST).orElseThrow().contents());
+    }
+
+    @Test
+    void 边走边看同一片树林_只记一条产地线索(@TempDir Path temp) {
+        var memory = memory(temp);
+        // 角色在一片树林里走动，感知每次刷新都把看到的树林中心记一笔，中心每次挪一两格。
+        for (int step = 0; step < 50; step++) {
+            memory.siteSeen(new WorldPosition(5 + step % 7, 64, 3 + step % 5, "minecraft:overworld"),
+                    List.of("木头"), NOW.plusSeconds(step));
+        }
+        // 走到另一个空间格里看到的树林是另一片。
+        memory.siteSeen(new WorldPosition(200, 64, 3, "minecraft:overworld"), List.of("木头"), NOW);
+        List<MemoryRecord> records = memory.allRecords();
+        assertEquals(2, records.size());
+        assertTrue(records.stream().anyMatch(record -> record.position().equals(
+                new WorldPosition(5, 64, 3, "minecraft:overworld"))), "同一片留第一次记下的位置");
+    }
+
+    @Test
+    void 早先存下的重复产地_读进来并成一条并写回(@TempDir Path temp) throws IOException {
+        DocumentStore store = store(temp);
+        String world = "a".repeat(64);
+        // 按片认之前存下的册子：同一片树林记了 30 条，另有一只箱子。
+        List<MemoryRecord> stored = new ArrayList<>();
+        for (int i = 0; i < 30; i++) {
+            stored.add(new MemoryRecord(MemoryKind.SITE, new WorldPosition(i, 64, i, "minecraft:overworld"), null,
+                    List.of("木头"), MemoryOrigin.SEEN, NOW.plusSeconds(i)));
+        }
+        stored.add(new MemoryRecord(MemoryKind.CONTAINER, CHEST, "minecraft:chest", null, MemoryOrigin.SEEN, NOW));
+        MemoryCodec codec = new MemoryCodec();
+        store.write(WorldMemory.SCOPE, world, "memory", codec.encode(new MemoryBook(stored, Map.of(), Map.of())), false);
+
+        var memory = new WorldMemory(store, world);
+        assertEquals(2, memory.allRecords().size());
+        // 并过的册子存盘写回，文档里也只剩两条。
+        memory.flush();
+        assertEquals(2, codec.decode(store.read(WorldMemory.SCOPE, world, "memory", 1 << 20)).records().size());
     }
 
     @Test

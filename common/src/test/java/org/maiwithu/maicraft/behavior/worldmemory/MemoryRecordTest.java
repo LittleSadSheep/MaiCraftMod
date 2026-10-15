@@ -112,4 +112,48 @@ class MemoryRecordTest {
         assertThrows(IllegalArgumentException.class, () -> container.mergedWith(elsewhere));
         assertThrows(IllegalArgumentException.class, () -> container.mergedWith(workstation));
     }
+
+    @Test
+    void 同一片树林的中心挪了几格_还是同一片产地() {
+        // 边走边看，树林中心从 (10,64,-5) 挪到 (13,66,-9)：同一个 64×64×32 空间格、同样内容，算同一片。
+        var first = site(10, 64, -5, "木头", MemoryOrigin.SEEN, EARLIER);
+        var moved = site(13, 66, -9, "木头", MemoryOrigin.SEEN, LATER);
+        assertTrue(first.sameThing(moved));
+        // 内容不同不是同一条线索；跨过空间格边界的是另一片。
+        assertFalse(first.sameThing(site(13, 66, -9, "minecraft:coal_ore", MemoryOrigin.SEEN, LATER)));
+        assertFalse(site(63, 64, 0, "木头", MemoryOrigin.SEEN, EARLIER)
+                .sameThing(site(64, 64, 0, "木头", MemoryOrigin.SEEN, LATER)));
+        // 负坐标按格向下取整：-1 与 -64 同一格，-1 与 0 不是。
+        assertTrue(site(-1, 64, -1, "木头", MemoryOrigin.SEEN, EARLIER)
+                .sameThing(site(-64, 64, -64, "木头", MemoryOrigin.SEEN, LATER)));
+        assertFalse(site(-1, 64, 0, "木头", MemoryOrigin.SEEN, EARLIER)
+                .sameThing(site(0, 64, 0, "木头", MemoryOrigin.SEEN, LATER)));
+        // 容器要找回那一格，挪一格就是另一只。
+        var chest = new MemoryRecord(MemoryKind.CONTAINER, POS, "minecraft:chest", null, MemoryOrigin.SEEN, EARLIER);
+        var nextChest = new MemoryRecord(MemoryKind.CONTAINER, new WorldPosition(11, 64, -5, "minecraft:overworld"),
+                "minecraft:chest", null, MemoryOrigin.SEEN, LATER);
+        assertFalse(chest.sameThing(nextChest));
+    }
+
+    @Test
+    void 同一片产地合并_远望留原位置_到访换成落点且不退回() {
+        var first = site(10, 64, -5, "木头", MemoryOrigin.SEEN, EARLIER);
+        var seenAgain = site(13, 64, -9, "木头", MemoryOrigin.SEEN, LATER);
+        var merged = first.mergedWith(seenAgain);
+        // 同样是远望：位置留原来的，坐标不随角色走动跳；时刻取新的。
+        assertEquals(first.position(), merged.position());
+        assertEquals(LATER, merged.recordedAt());
+
+        var visited = site(20, 64, -2, "木头", MemoryOrigin.VISITED, LATER);
+        var landed = first.mergedWith(visited);
+        assertEquals(visited.position(), landed.position());
+        assertSame(MemoryOrigin.VISITED, landed.origin());
+        // 到访过的再被远望一眼，落点不换回远望的位置。
+        assertEquals(visited.position(), landed.mergedWith(seenAgain).position());
+    }
+
+    private static MemoryRecord site(int x, int y, int z, String what, MemoryOrigin origin, Instant when) {
+        return new MemoryRecord(MemoryKind.SITE, new WorldPosition(x, y, z, "minecraft:overworld"), null,
+                List.of(what), origin, when);
+    }
 }

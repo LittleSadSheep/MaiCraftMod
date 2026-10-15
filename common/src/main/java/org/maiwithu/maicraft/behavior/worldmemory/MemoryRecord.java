@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.worldmemory;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 /**
@@ -23,12 +24,36 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 public record MemoryRecord(MemoryKind kind, WorldPosition position, String blockType,
         List<String> contents, MemoryOrigin origin, Instant recordedAt) {
 
+    /** 产地线索按片认的空间格：64 格见方、32 格高，同一格里同样内容的线索算同一片。 */
+    private static final int SITE_AREA_WIDTH = 64;
+    private static final int SITE_AREA_HEIGHT = 32;
+
     /**
      * 两个位置是不是同一格：坐标一样，维度一样或有一边没写。没写维度的位置是"当时所在的维度"——
      * 看见一只箱子时记的位置不带维度，开箱后记的带维度，说的是同一只箱子，不能当成两只。
      */
     public static boolean sameSpot(WorldPosition first, WorldPosition second) {
         return first.x() == second.x() && first.y() == second.y() && first.z() == second.z()
+                && (first.dimension() == null || second.dimension() == null
+                        || first.dimension().equals(second.dimension()));
+    }
+
+    /**
+     * 两条记忆说的是不是同一个东西。容器、工作站、机器、临时方块要找回那一格，同种类同一格才算同一个；
+     * 产地线索只给大概位置，同样内容、同一维度、落在同一个 64×64×32 空间格里就算同一片——
+     * 角色边走边看，同一片树林的中心每次挪一两格，不能挪一下就多记一条"这里有木头"。
+     */
+    public boolean sameThing(MemoryRecord other) {
+        if (kind != other.kind) return false;
+        if (kind != MemoryKind.SITE) return sameSpot(position, other.position);
+        return Objects.equals(contents, other.contents) && sameArea(position, other.position);
+    }
+
+    // 同一个产地空间格：按格向下取整分块，负坐标也落在对的格里；维度的认法与 sameSpot 一样。
+    private static boolean sameArea(WorldPosition first, WorldPosition second) {
+        return Math.floorDiv(first.x(), SITE_AREA_WIDTH) == Math.floorDiv(second.x(), SITE_AREA_WIDTH)
+                && Math.floorDiv(first.y(), SITE_AREA_HEIGHT) == Math.floorDiv(second.y(), SITE_AREA_HEIGHT)
+                && Math.floorDiv(first.z(), SITE_AREA_WIDTH) == Math.floorDiv(second.z(), SITE_AREA_WIDTH)
                 && (first.dimension() == null || second.dimension() == null
                         || first.dimension().equals(second.dimension()));
     }
@@ -55,19 +80,26 @@ public record MemoryRecord(MemoryKind kind, WorldPosition position, String block
     }
 
     /**
-     * 把一次新的观察合并进这条旧记忆，得到更新后的记忆；同一位置同一类东西只留这一条。
+     * 把一次新的观察合并进这条旧记忆，得到更新后的记忆；同一个东西只留这一条（怎样算同一个见 {@link #sameThing}）。
      *
-     * <p>合并规则（触发条件：同一个位置、同一个种类又记了一条）：
+     * <p>合并规则（触发条件：同一个东西又记了一条）：
      * 记录时刻取新的；来源取更强的（远望到了升级成到访，到访与亲手用过也不会退回去）；
      * 这次确认过的内容覆盖旧的，这次没确认过（contents 为 null）就保留旧内容——
      * 路过又看了一眼不算打开过，不能把当初开箱看到的清单抹掉。
+     * 同一片产地落在不同格时，到访核实的落点比远望的大概位置准，来源更强才换成新位置；
+     * 同样是远望就留原来的位置，坐标不随角色走动来回跳。
      */
     public MemoryRecord mergedWith(MemoryRecord newer) {
-        if (kind != newer.kind || !sameSpot(position, newer.position)) {
-            throw new IllegalArgumentException("只有同一个位置、同一个种类的记忆才能合并");
+        if (!sameThing(newer)) {
+            throw new IllegalArgumentException("只有同一个东西的记忆才能合并");
         }
-        // 两条里有一条没写维度时，合并后留下写了维度的那个说法。
-        WorldPosition spot = newer.position.dimension() != null ? newer.position : position;
+        WorldPosition spot;
+        if (sameSpot(position, newer.position)) {
+            // 两条里有一条没写维度时，合并后留下写了维度的那个说法。
+            spot = newer.position.dimension() != null ? newer.position : position;
+        } else {
+            spot = MemoryOrigin.stronger(origin, newer.origin) != origin ? newer.position : position;
+        }
         return new MemoryRecord(kind, spot,
                 newer.blockType != null ? newer.blockType : blockType,
                 newer.contents != null ? newer.contents : contents,

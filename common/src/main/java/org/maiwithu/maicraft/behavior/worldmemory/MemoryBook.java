@@ -26,23 +26,33 @@ record MemoryBook(List<MemoryRecord> records, Map<String, WorldPosition> places,
     }
 
     /**
-     * 记下或更新一条记忆：同一种类、同一个位置已有的那条先合并（来源取更强、确认过的内容覆盖），
-     * 再放进册子；别的记录不动。
+     * 记下或更新一条记忆：说的是同一个东西的已有记录（同一片产地可能早先记了好几条）按先后并成一条，
+     * 再并进这次的观察（来源取更强、确认过的内容覆盖），放回册子；别的记录不动。
      */
     MemoryBook withRecord(MemoryRecord incoming) {
         List<MemoryRecord> next = new ArrayList<>();
-        MemoryRecord merged = incoming;
+        MemoryRecord earlier = null;
         for (MemoryRecord existing : records) {
-            boolean sameThing = existing.kind() == incoming.kind()
-                    && MemoryRecord.sameSpot(existing.position(), incoming.position());
-            if (sameThing) {
-                merged = existing.mergedWith(incoming);
+            if (existing.sameThing(incoming)) {
+                earlier = earlier == null ? existing : earlier.mergedWith(existing);
             } else {
                 next.add(existing);
             }
         }
-        next.add(merged);
+        next.add(earlier == null ? incoming : earlier.mergedWith(incoming));
         return new MemoryBook(next, places, regions);
+    }
+
+    /**
+     * 把册子里说的是同一个东西的记录并成一条：同一片产地按片认之前存下的记忆里，
+     * 同一片树林可能记了上百条，读进来时收拢一次，之后的查询和存盘都只看并好的。没有可并的原册返回。
+     */
+    MemoryBook withDuplicatesMerged() {
+        MemoryBook merged = new MemoryBook(List.of(), places, regions);
+        for (MemoryRecord record : records) {
+            merged = merged.withRecord(record);
+        }
+        return merged.records().size() == records.size() ? this : merged;
     }
 
     /** 记住一个按名字叫的地点；同名地点用新位置覆盖旧位置。 */
