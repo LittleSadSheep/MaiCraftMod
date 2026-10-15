@@ -16,6 +16,7 @@ import net.minecraft.world.phys.Vec3;
 
 import net.minecraft.client.player.LocalPlayer;
 
+import org.maiwithu.maicraft.behavior.navigation.GroundSteering;
 import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
@@ -40,6 +41,8 @@ public final class WalksIntoPortal implements Action {
     private final Block portalBlock;
     private final BlockPos entrance;
     private final Set<Long> portalCells;
+    /** 离门正前方那一格的中心这么近就算站好了。 */
+    private static final double ALIGNED_WITHIN = 0.3;
     /** 已经站到门正前方那一格的中间了，接下来正对着门走进去。 */
     private boolean aligned;
 
@@ -71,21 +74,34 @@ public final class WalksIntoPortal implements Action {
             return ActionStatus.failed(Problem.of(Problem.Kind.TARGET_GONE,
                     "走近时门还在，直走时门方块没了（被人拆了或塌了）"));
         }
+        if (player == null) return ActionStatus.running();
         // 先走到门正前方那一格的中间，再正对着门走进去：斜着朝门格中心走，身子会蹭在门框的黑曜石上，
         // 实机 10-14 两个门口都"直走了 20 秒没能走进门格"。
         Vec3 front = aligned ? null : frontOf(player);
-        if (front != null && player != null && Math.hypot(front.x - player.getX(), front.z - player.getZ()) > 0.3) {
+        if (front != null && Math.hypot(front.x - player.getX(), front.z - player.getZ()) > ALIGNED_WITHIN) {
             input.lookAt(player, new Vec3(front.x, player.getEyeY(), front.z));
-            input.applyMovement(new PlayerInput.Movement(1.0f, 0.0f, false, false, false), current.clientTick());
-            return ActionStatus.running();
+            return walkToward(current, player, front, false);
         }
         aligned = true;
         input.lookAt(player, Vec3.atCenterOf(entrance));
         // 门框底下那一排黑曜石把门抬高了一格：站在地上要跳一下才迈得进去，像人一样跳进门。
-        boolean jump = player != null && entrance.getY() > player.getY() + 0.5 && player.onGround();
+        boolean jump = entrance.getY() > player.getY() + 0.5 && player.onGround();
+        return walkToward(current, player, Vec3.atCenterOf(entrance), jump);
+    }
+
+    // 朝地上一点挪：朝着目标按键、离得近按得轻、前面是岩浆或火就停下不迈（要进的门本身不算）。
+    // 实机 10-15 下界门口原先按"镜头朝哪就往前走"，转身那几秒一路往西走进岩浆湖烧死。
+    private ActionStatus walkToward(PlayerContext current, LocalPlayer player, Vec3 target, boolean jump) {
+        double dx = target.x - player.getX();
+        double dz = target.z - player.getZ();
+        if (GroundSteering.hazardAhead(player.level(), player.position(), dx, dz, state -> state.is(portalBlock))) {
+            current.input().halt(player);
+            return ActionStatus.running();
+        }
         // 按键交给角色输入要用本刻的客户端刻号，不是世界时间：原先传世界时间，直走进门第一刻就内部错误
         // "input request is not for the active tick"，实机 10-14 三次都进不了下界。
-        input.applyMovement(new PlayerInput.Movement(1.0f, 0.0f, jump, false, false), current.clientTick());
+        current.input().applySteering(yaw -> GroundSteering.keys(dx, dz, yaw, jump), player.getYRot(),
+                current.clientTick());
         return ActionStatus.running();
     }
 

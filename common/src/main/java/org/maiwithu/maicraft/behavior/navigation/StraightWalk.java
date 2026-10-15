@@ -16,7 +16,7 @@ import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
- * 直线走几步：面朝一点按住前进，走到离它水平不到容差就停住。寻路看不见的地面（电梯轿厢、移动装置、船的甲板）上
+ * 直线走几步：看着一点、朝它按键挪过去，走到离它水平不到容差就停住。寻路看不见的地面（电梯轿厢、移动装置、船的甲板）上
  * 走进走出用它：路很短、一眼看得到，像玩家那样直着走过去，不经过寻路。走不到（被挡住、半天没挪近）就停住如实报告。
  */
 public final class StraightWalk implements Action {
@@ -85,9 +85,17 @@ public final class StraightWalk implements Action {
             stalled++;
         }
         input.lookAt(player, new Vec3(target.x, player.getEyeY(), target.z));
+        double dx = target.x - player.getX();
+        double dz = target.z - player.getZ();
+        // 前面那一步是岩浆、火：停下不迈，挪不近按被挡住报告。
+        if (GroundSteering.hazardAhead(player.level(), player.position(), dx, dz, state -> false)) {
+            input.halt(player);
+            return ActionStatus.running();
+        }
         boolean jump = climb && target.y - player.getY() > 0.55 && distance < 1.6 && player.onGround();
+        // 朝着目标按键，不管镜头转没转过去：原先镜头朝哪就往前走，走过了目标点、镜头转身那几秒会一直走远。
         // 按键用本刻的客户端刻号，不用世界时间（两者不同，传错了输入层判过期抛错）。
-        input.applyMovement(new PlayerInput.Movement(1.0f, 0.0f, jump, false, false), current.clientTick());
+        input.applySteering(yaw -> GroundSteering.keys(dx, dz, yaw, jump), player.getYRot(), current.clientTick());
         return gained ? ActionStatus.progressed() : ActionStatus.running();
     }
 
