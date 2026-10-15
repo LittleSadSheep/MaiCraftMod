@@ -53,7 +53,7 @@ class InteractionConfirmationChannelTest {
         var received = new ReceivedConfirmations();
         for (int i = 0; i < ReceivedConfirmations.MAX_CONFIRMATIONS + 10; i++) {
             JsonObject envelope = ServerConfirmations.confirmationEnvelope(
-                    "interact", "minecraft:overworld", new BlockPos(i, 0, 0), "minecraft:stone", i);
+                    "place", "minecraft:overworld", new BlockPos(i, 0, 0), "minecraft:stone", i);
             received.receive(envelope);
         }
         assertEquals(ReceivedConfirmations.MAX_CONFIRMATIONS, received.recent().size());

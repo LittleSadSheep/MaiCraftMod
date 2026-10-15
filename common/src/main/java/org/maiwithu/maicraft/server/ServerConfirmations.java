@@ -9,8 +9,9 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.state.BlockState;
 
 /**
- * 交互确认通道：服务端把"这个玩家刚才破坏 / 放置 / 交互了哪一格"主动推给客户端，
- * 作为客户端"提交 → 逐刻确认"之外的权威确认。只发给有活跃 MaiCraft 会话的玩家，
+ * 交互确认通道：服务端把"这个玩家刚才破坏 / 放置了哪一格"主动推给客户端，
+ * 作为客户端"提交 → 逐刻确认"之外的权威确认。右键使用方块没有服务端确认，只靠客户端逐刻确认：
+ * 加载器没有统一的"右键用完了"钩子，客户端也没有地方要它，不留一个没人调的入口让后人以为接上了。只发给有活跃 MaiCraft 会话的玩家，
  * 普通玩家一个包都不会多收；服务端只报告事实，不替角色动手，也不提供透视。
  */
 public final class ServerConfirmations {
@@ -41,11 +42,6 @@ public final class ServerConfirmations {
     /** 玩家破坏了方块。 */
     public void broke(ServerPlayer player, BlockPos position, BlockState state) {
         send(player, "break", position, state);
-    }
-
-    /** 玩家对一格方块完成了使用（右键）交互。 */
-    public void used(ServerPlayer player, BlockPos position, BlockState state) {
-        send(player, "interact", position, state);
     }
 
     private void send(ServerPlayer player, String action, BlockPos position, BlockState state) {
