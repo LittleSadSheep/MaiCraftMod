@@ -139,6 +139,49 @@ class ParamSpecsTest {
     }
 
     @Test
+    void arraysWrappedUnderASingleItemKeyAreReadAsArrays() {
+        // 直播里 MiniMax 把 find 的 blocks、build 的 cells 连每格的 offset 都包成 {"item": [...]}，连拒六次：
+        // 期望数组的地方收到这种包装就取出数组照收，正文里面嵌套的也拆，notes 里说一次拆了几处。
+        ParamSpecs spec = ParamSpecs.of(
+                ParamSpec.of("blocks", ParamType.BLOCK_LIST).doc("要找的方块").build(),
+                ParamSpec.of("cells", ParamType.JSON_ARRAY).doc("逐格清单").build(),
+                ParamSpec.of("drawing", ParamType.JSON_OBJECT).doc("图纸正文").build());
+        ParseResult result = spec.parse(JsonParser.parseString("{"
+                + "\"blocks\":{\"item\":[\"minecraft:coal_ore\",\"minecraft:iron_ore\"]},"
+                + "\"cells\":{\"item\":[{\"block\":\"minecraft:air\",\"offset\":{\"item\":[0,1,0]}},"
+                + "{\"block\":\"minecraft:air\",\"offset\":{\"item\":[0,1,1]}}]},"
+                + "\"drawing\":{\"objects\":{\"item\":[{\"location\":{\"item\":[2.5,1.5,2.5]}}]}}}").getAsJsonObject());
+
+        assertTrue(result.ok(), () -> result.errors().toString());
+        assertEquals(List.of("minecraft:coal_ore", "minecraft:iron_ore"), result.params().list("blocks"));
+        assertEquals(JsonParser.parseString("[{\"block\":\"minecraft:air\",\"offset\":[0,1,0]},"
+                + "{\"block\":\"minecraft:air\",\"offset\":[0,1,1]}]"), result.params().json("cells"));
+        assertEquals(JsonParser.parseString("{\"objects\":[{\"location\":[2.5,1.5,2.5]}]}"), result.params().json("drawing"));
+        assertEquals(List.of("blocks：{\"item\": […]} 按数组处理",
+                "cells：{\"item\": […]} 按数组处理（共 3 处，含里面嵌套的）",
+                "drawing：{\"item\": […]} 按数组处理（共 2 处，含里面嵌套的）"), result.notes());
+
+        // 只认"只有 item 一个键、值是数组"：多一个键、值不是数组的都是真对象，照旧按形状报错或原样收。
+        assertFalse(spec.parse(JsonParser.parseString("{\"blocks\":{\"item\":[\"minecraft:stone\"],\"count\":1}}")
+                .getAsJsonObject()).ok(), "多一个键不是包装");
+        assertFalse(spec.parse(JsonParser.parseString("{\"cells\":{\"item\":{\"block\":\"minecraft:air\"}}}")
+                .getAsJsonObject()).ok(), "item 的值不是数组不是包装");
+        ParseResult kept = spec.parse(JsonParser.parseString("{\"drawing\":{\"item\":[1]}}").getAsJsonObject());
+        assertTrue(kept.ok(), () -> kept.errors().toString());
+        assertEquals(JsonParser.parseString("{\"item\":[1]}"), kept.params().json("drawing"), "期望对象的参数本身不拆");
+        assertTrue(kept.notes().isEmpty(), kept.notes()::toString);
+
+        // 整段写成字符串的正文里也有包装时一样拆开。
+        JsonObject text = new JsonObject();
+        text.addProperty("cells", "[{\"block\":\"minecraft:stone\",\"offset\":{\"item\":[0,0,0]}}]");
+        ParseResult fromText = spec.parse(text);
+        assertTrue(fromText.ok(), () -> fromText.errors().toString());
+        assertEquals(3, fromText.params().json("cells").getAsJsonArray().get(0).getAsJsonObject()
+                .getAsJsonArray("offset").size());
+        assertEquals(List.of("cells：字符串里的 JSON 按数组处理", "cells：{\"item\": […]} 按数组处理"), fromText.notes());
+    }
+
+    @Test
     void describesFieldsFromTheSameDefinition() {
         var fields = OBTAIN.describe();
 

@@ -28,7 +28,8 @@ import java.util.regex.Pattern;
  * <ul>
  *   <li>显式的 null 与省略同义；</li>
  *   <li>未声明的参数直接报错，并列出可用的参数名；</li>
- *   <li>少数宽松写法（整数字符串、布尔字符串、选项大小写、单个字符串当作一项列表、整段写成字符串的 JSON 对象或数组）统一接受，
+ *   <li>少数宽松写法（整数字符串、布尔字符串、选项大小写、单个字符串当作一项列表、整段写成字符串的 JSON 对象或数组、
+ *       被包成 {@code {"item": [...]}} 的数组）统一接受，
  *       并在 notes 里说明做过什么；其余一律严格校验；</li>
  *   <li>同一请求的所有错误一次报全。</li>
  * </ul>
@@ -136,17 +137,27 @@ public final class ParamSpecs {
     // 整段 JSON 写成字符串传来的，内容正好是要的形状就照收，并在 notes 里说明：有的模型调工具时会把参数里
     // 没写结构的嵌套数组弄坏（数组被包成 {"item": …}、数字变成字符串），把整张图纸、整份逐格清单写成字符串
     // 是调用方唯一能原样传到的办法。字符串读不成 JSON 时把读到哪坏了一起报回去，调用方照着改那一处。
+    // 被包成 {"item": [...]} 的数组先拆开再核形状：数组参数本身被包的先取出里面的数组，正文里面每一层被包的
+    // （逐格清单每格的 offset、图纸的 objects）也取出来，拆过几处在 notes 里说一次。
     private static JsonElement structured(String name, JsonElement element, boolean object,
                                           List<ParamError> errors, List<String> notes) {
         String shape = object ? "JSON 对象" : "JSON 数组";
-        if (object ? element.isJsonObject() : element.isJsonArray()) return element.deepCopy();
+        WrappedArrays wrapped = new WrappedArrays();
+        JsonElement given = object ? element : wrapped.outer(element);
+        if (object ? given.isJsonObject() : given.isJsonArray()) {
+            JsonElement value = wrapped.inside(given);
+            wrapped.note(name, notes);
+            return value;
+        }
         String unreadable = null;
         if (isString(element)) {
             try {
                 JsonElement parsed = JsonParser.parseString(element.getAsString());
                 if (object ? parsed.isJsonObject() : parsed.isJsonArray()) {
                     notes.add(name + "：字符串里的 JSON 按" + (object ? "对象" : "数组") + "处理");
-                    return parsed;
+                    JsonElement value = wrapped.inside(parsed);
+                    wrapped.note(name, notes);
+                    return value;
                 }
             } catch (JsonParseException broken) {
                 unreadable = firstLine(broken.getMessage());
@@ -252,8 +263,12 @@ public final class ParamSpecs {
 
     private static List<String> list(ParamSpec param, JsonElement element, List<ParamError> errors, List<String> notes) {
         List<JsonElement> items = new ArrayList<>();
-        if (element.isJsonArray()) {
-            element.getAsJsonArray().forEach(items::add);
+        // find 的 blocks 这类列表被包成 {"item": [...]} 时，取出里面的数组按列表收，不当成一个写错的值。
+        WrappedArrays wrapped = new WrappedArrays();
+        JsonElement given = wrapped.outer(element);
+        wrapped.note(param.name(), notes);
+        if (given.isJsonArray()) {
+            given.getAsJsonArray().forEach(items::add);
         } else {
             items.add(element);
             notes.add(param.name() + "：单个值按只有一项的列表处理");
@@ -325,5 +340,51 @@ public final class ParamSpecs {
             case JsonElement element -> element.deepCopy();
             default -> new JsonPrimitive(String.valueOf(value));
         };
+    }
+
+    /**
+     * 拆开被模型包成 {@code {"item": [...]}} 的数组，并数一共拆了几处。
+     *
+     * <p>有的模型（MiniMax）调工具时会把参数里没写结构的数组改写成只有一个 item 键、值是那个数组的对象，
+     * 嵌套在里面的数组也一样被包。只认"只有 item 一个键、值是数组"这一种形状：多一个键、值不是数组的都是真对象，原样留着。
+     * 期望对象的参数本身不拆，只有一个 item 键的对象在那里也是合法的对象。一次读一个参数，用完就丢。
+     */
+    private static final class WrappedArrays {
+        private int count;
+
+        /** 期望数组的值本身被包了：取出里面的数组，不是包装就原样返回。 */
+        JsonElement outer(JsonElement element) {
+            if (!isWrapped(element)) return element;
+            count++;
+            return element.getAsJsonObject().get("item");
+        }
+
+        /** 结构化正文里面每一层被包的数组都取出来，返回拆好的副本；最外层自己不拆。 */
+        JsonElement inside(JsonElement element) {
+            if (element.isJsonArray()) {
+                JsonArray copy = new JsonArray();
+                for (JsonElement child : element.getAsJsonArray()) copy.add(inside(outer(child)));
+                return copy;
+            }
+            if (element.isJsonObject()) {
+                JsonObject copy = new JsonObject();
+                JsonObject source = element.getAsJsonObject();
+                for (String key : source.keySet()) copy.add(key, inside(outer(source.get(key))));
+                return copy;
+            }
+            return element.deepCopy();
+        }
+
+        /** 拆过才说一句，像整数字符串按整数处理那样告诉调用方收到的写法被改写过、按什么收的。 */
+        void note(String name, List<String> notes) {
+            if (count == 0) return;
+            notes.add(name + "：{\"item\": […]} 按数组处理" + (count > 1 ? "（共 " + count + " 处，含里面嵌套的）" : ""));
+        }
+
+        private static boolean isWrapped(JsonElement element) {
+            if (!element.isJsonObject()) return false;
+            JsonObject object = element.getAsJsonObject();
+            return object.size() == 1 && object.has("item") && object.get("item").isJsonArray();
+        }
     }
 }
