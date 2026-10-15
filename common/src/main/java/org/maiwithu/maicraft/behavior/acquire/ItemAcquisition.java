@@ -13,6 +13,7 @@ import java.util.Set;
 import java.util.function.Consumer;
 
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
+import org.maiwithu.maicraft.behavior.acquire.spi.FailedOnlyAtSpots;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
@@ -52,6 +53,11 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
     public static final int DEFAULT_MAX_DEPTH = 12;
     /** 来源还在看现场时最多等几刻再问：方块索引分刻建，几秒内扫得完附近；等太久按给不了收场。 */
     static final int MAX_CONSULT_WAIT_TICKS = 100;
+    /**
+     * 一个来源连着几次只坏在现场几处（这棵树够不着、那块矿挖不下来）、一件没拿到，就当它这次走不通。
+     * 玩家常识：连换三处都够不着，这一带先不在这条路上耗了。
+     */
+    static final int MAX_SPOT_FAILURES = 3;
 
     private final List<ItemSource> sources;
     private final BackpackView backpack;
@@ -223,6 +229,8 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         private boolean started;
         /** 这次办砸过或白跑过、不再回头的来源；报价再好也不选，免得在同一个地方撞两次。 */
         private final Set<String> excluded = new HashSet<>();
+        /** 来源连着几次只坏在现场几处、一件没拿到；拿到过东西就清零。 */
+        private final Map<String, Integer> spotFailures = new HashMap<>();
         private final List<String> deadEnds = new ArrayList<>();
         /** 备料时里层没拿到的经过：里层只给一句结论，经过收在这里，到这一场讲给人听时摊平讲一次。 */
         private final List<Shortage> causes = new ArrayList<>();
@@ -433,7 +441,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             return mergeable >= stillNeeded;
         }
 
-        // 推进当前来源一步；做完就回到清点，做砸了把这个来源划掉、换计划里的下一个。
+        // 推进当前来源一步；做完就回到清点，做砸了把这个来源划掉、重新问价换下一个；只坏在现场几处的不划，换别处接着拿。
         private ActionStatus runStep(TickContext tick) {
             return switch (step.tick(tick)) {
                 case ActionStatus.Running running -> running;
@@ -445,16 +453,22 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                     if (carried <= carriedAtStepStart) {
                         excluded.add(stepSource);
                         deadEnds.add(stepSource + "（做完了，但一件都没拿到）");
-                    } else if (onDelivered != null) {
+                    } else {
+                        spotFailures.remove(stepSource);
                         // 真有东西进了背包：这条途径记进 obtained_via。
-                        onDelivered.accept(stepSourceVia);
+                        if (onDelivered != null) onDelivered.accept(stepSourceVia);
                     }
                     stage = Stage.CONSULT;
                     yield ActionStatus.progressed();
                 }
                 case ActionStatus.Failed failed -> {
                     forwardUnconfirmed();
-                    excluded.add(stepSource);
+                    // 只坏在现场几处（坡上那棵树顶的原木够不着、那块煤挖不下来）：来源已经把那几处记下，
+                    // 换别的格、别的树、别的矿还能接着拿，不把整个来源划掉；连着几次都这样才当它这次走不通。
+                    boolean onlySpots = step instanceof FailedOnlyAtSpots spots && spots.onlyThoseSpotsFailed();
+                    if (!onlySpots || spotFailures.merge(stepSource, 1, Integer::sum) >= MAX_SPOT_FAILURES) {
+                        excluded.add(stepSource);
+                    }
                     deadEnds.add(stepSource + "（" + failed.problem().message() + "）");
                     // 收尾时出了岔子，但这一步里东西确实进了背包：途径照记，不说成"身上已有的"。
                     if (onDelivered != null

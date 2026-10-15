@@ -12,10 +12,13 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
+import java.util.function.Consumer;
+import java.util.function.LongSupplier;
 
 import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquisitionCost;
+import org.maiwithu.maicraft.behavior.acquire.spi.FailedOnlyAtSpots;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
@@ -39,6 +42,8 @@ import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
  * 做出来的加工品（铁锭、木板这类）没有方块直接掉它，明确回答"这里给不了"，
  * 不装作能挖；挖矿要的工具（合用的镐）缺了就先按同一套需求去弄，用途标签写清是采掘要用的。
  * 挖哪几格由许可说了算：别人搭的、玩家放的，一格都不动。
+ * 走不到跟前、挖不下来的格记一阵（见 FailedSpots），这一阵里先挑别的格、别的树、别的矿；
+ * 一次动手只坏在这几格时告诉引擎换别处还能接着拿，不把整个采掘划掉。
  */
 public final class MiningSource implements ItemSource {
 
@@ -65,10 +70,20 @@ public final class MiningSource implements ItemSource {
     private ReadsWorkTools workTools = ReadsWorkTools.NONE;
     /** 拿东西的引擎此刻在推进的那一串请求：正在为做这把工具挖料时，不再要求先有这把工具。 */
     private Supplier<List<ItemRequest>> chain = List::of;
+    /** 刚试过做不成的格：记一阵，先挑别处。 */
+    private final FailedSpots failedSpots;
 
     public MiningSource(ScansMinables minables, CollectsBlocks collects, DigsStairsDown stairs,
             ReadsToolRequirements tools, PermissionCheck permission, BackpackView backpack, OffhandContents offhand,
             ItemNeeds needs) {
+        this(minables, collects, stairs, tools, permission, backpack, offhand, needs, System::currentTimeMillis);
+    }
+
+    /** @param clock 记"刚试过做不成"用的时刻（毫秒）；测试给可拨的钟 */
+    MiningSource(ScansMinables minables, CollectsBlocks collects, DigsStairsDown stairs,
+            ReadsToolRequirements tools, PermissionCheck permission, BackpackView backpack, OffhandContents offhand,
+            ItemNeeds needs, LongSupplier clock) {
+        this.failedSpots = new FailedSpots(clock);
         this.minables = minables;
         this.collects = collects;
         this.stairs = stairs;
@@ -99,7 +114,8 @@ public final class MiningSource implements ItemSource {
                     "没有方块直接掉出" + request.wanted().describe()
                             + "——它是做出来的，去合成或烧炼");
         }
-        List<MinableSpot> spots = minables.minable(request.wanted(), context.characterAt(), searchRadius(context));
+        List<MinableSpot> seen = minables.minable(request.wanted(), context.characterAt(), searchRadius(context));
+        List<MinableSpot> spots = withoutFailed(seen, context.characterAt().dimension());
         if (spots.isEmpty() && !minables.scanComplete()) {
             // 附近的方块还没扫完：说不准有没有，让引擎等一会儿再问，不把没扫完当成没有。
             return new SourceQuote.NotYet(describe(), "附近的方块还没扫完，这一刻说不准有没有会掉出"
@@ -110,6 +126,13 @@ public final class MiningSource implements ItemSource {
         }
         Optional<Deposit> deposit = spots.isEmpty() ? deposit(request, context) : Optional.empty();
         if (deposit.isPresent()) return prospectQuote(request, context, deposit.get());
+        if (spots.isEmpty() && !seen.isEmpty()) {
+            // 看得见的都是刚试过做不成的：如实说是这几处够不着、挖不下来，这一阵先不挑它们。
+            return new SourceQuote.Unavailable(describe(),
+                    "半径 " + searchRadius(context) + " 格内看得见的 " + seen.size() + " 格会掉出" + request.wanted().describe()
+                            + "的方块刚试过都走不到跟前或挖不下来，" + FailedSpots.REMEMBER_MILLIS / 60_000
+                            + " 分钟内先不挑它们；换个站位、垫脚或挖开路再试");
+        }
         if (spots.isEmpty()) {
             return new SourceQuote.Unavailable(describe(),
                     "半径 " + searchRadius(context) + " 格内看得见的地方没有会掉出" + request.wanted().describe()
@@ -127,8 +150,10 @@ public final class MiningSource implements ItemSource {
     }
 
     @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
-        // 动手前重新扫一遍：问价到动手之间矿可能被挖走了，以现场为准。
-        List<MinableSpot> spots = minables.minable(request.wanted(), context.characterAt(), searchRadius(context));
+        // 动手前重新扫一遍：问价到动手之间矿可能被挖走了，以现场为准；刚试过做不成的格这一阵不挑。
+        String dimension = context.characterAt().dimension();
+        List<MinableSpot> spots = withoutFailed(
+                minables.minable(request.wanted(), context.characterAt(), searchRadius(context)), dimension);
         if (spots.isEmpty() && !minables.scanComplete()) {
             // 还没扫完就不动手：交回空，引擎重新问价时会等它扫完。
             return Optional.empty();
@@ -169,14 +194,66 @@ public final class MiningSource implements ItemSource {
         }
         // 走过去、挖掉、整批挖完捡起掉出来的东西：不隔空挖，也不把矿丢在地上。装了连锁挖时整条矿脉、
         // 整根树干一下挖掉（可能比要的多，像玩家用连锁那样），掉落物集中在挖的那一格，挖完一起捡。
+        // 走不到跟前、挖不下来的那一格记一阵，并记在这一串动作上：整串只坏在这几格时，引擎换别处接着拿。
+        SpotWork[] work = new SpotWork[1];
         Optional<Action> collect = collects.collectBatch(batch.stream().map(MinableSpot::pos).toList(), permissions,
-                chainable(request, context.characterAt(), searchRadius(context), permissions));
+                chainable(request, context.characterAt(), searchRadius(context), permissions),
+                cell -> work[0].note(dimension, cell));
         if (collect.isEmpty()) {
             // 收的入口接不上，一步都还没动：整串放弃，由引擎换别的路。
             return Optional.empty();
         }
         steps.add(collect.get());
-        return Optional.of(new StepwiseActions("挖出" + request.wanted().describe(), steps.toArray(Action[]::new)));
+        work[0] = new SpotWork(new StepwiseActions("挖出" + request.wanted().describe(), steps.toArray(Action[]::new)));
+        return Optional.of(work[0]);
+    }
+
+    // 看得见的候选里去掉刚试过做不成的那几格：这一阵先挑别的格、别的树、别的矿。
+    private List<MinableSpot> withoutFailed(List<MinableSpot> spots, String dimension) {
+        return spots.stream().filter(spot -> !failedSpots.recent(dimension, spot.pos())).toList();
+    }
+
+    /**
+     * 采掘的一串动作：挖的那一步里跳过的格记一阵；整串失败时只坏在这几格（一格都没挖下来、都记下了），
+     * 就告诉引擎换别处还能接着拿。备工具、往下挖楼梯这些失败不是哪一格的事，照旧按整个来源走不通算。
+     */
+    private final class SpotWork implements Action, FailedOnlyAtSpots {
+        private final Action inner;
+        private int noted;
+
+        SpotWork(Action inner) {
+            this.inner = inner;
+        }
+
+        // 一格做不成：记进这一阵不挑的格里，也记在这一串上。
+        void note(String dimension, BlockPos cell) {
+            failedSpots.note(dimension, cell);
+            noted++;
+        }
+
+        @Override public boolean onlyThoseSpotsFailed() {
+            return noted > 0;
+        }
+
+        @Override public ActionStatus tick(TickContext context) {
+            return inner.tick(context);
+        }
+
+        @Override public void pause() {
+            inner.pause();
+        }
+
+        @Override public void close() {
+            inner.close();
+        }
+
+        @Override public Interruptibility interruptibility() {
+            return inner.interruptibility();
+        }
+
+        @Override public String describe() {
+            return inner.describe();
+        }
     }
 
     // 附近看不见石头：从脚下往下挖楼梯去找。要挖天然方块，change_blocks 不到 natural 就说清要开哪一档；
@@ -233,34 +310,40 @@ public final class MiningSource implements ItemSource {
                 : "附近看不见；" + where + "，就在这一层（Y=" + deposit.workingY() + "）横着挖两格高的通道找";
     }
 
-    // 长程挖矿：先备好挖这种矿的镐，往下挖台阶、横着挖通道，看见了就把看见的那一片挖了捡起来。
+    // 长程挖矿：先备好挖这种矿的镐，往下挖台阶、横着挖通道，看见了就把看见的那一片挖了捡起来；
+    // 看见的那片够不着、挖不下来的格记一阵，整串只坏在那几格时引擎换别处接着拿。
     private Optional<Action> prospect(ItemRequest request, SourceContext context, Deposit deposit) {
         Permissions permissions = context.permissions();
         String dimension = context.characterAt().dimension();
+        SpotWork[] work = new SpotWork[1];
         DigsStairsDown.Tunnel tunnel = new DigsStairsDown.Tunnel(deposit.workingY(), deposit.band().minY(),
                 blockType -> minables.dropsWanted(request.wanted(), blockType), request.count(),
                 feet -> !inSight(request, at(feet, dimension), permissions).isEmpty(),
-                feet -> mineInSight(request, at(feet, dimension), permissions));
+                feet -> mineInSight(request, at(feet, dimension), permissions, cell -> work[0].note(dimension, cell)));
         Optional<Action> digging = stairs.tunnelToward(tunnel, permissions);
         if (digging.isEmpty()) return Optional.empty();
         List<Action> steps = new ArrayList<>();
         toolStep(deposit.ore(), request, permissions).ifPresent(steps::add);
         steps.add(digging.get());
-        return Optional.of(new StepwiseActions("长程挖矿找" + request.wanted().describe(), steps.toArray(Action[]::new)));
+        work[0] = new SpotWork(new StepwiseActions("长程挖矿找" + request.wanted().describe(), steps.toArray(Action[]::new)));
+        return Optional.of(work[0]);
     }
 
-    // 站在通道里看得见的、许可准挖的那几格要的矿。
+    // 站在通道里看得见的、许可准挖的那几格要的矿；刚试过做不成的这一阵不算看见。
     private List<MinableSpot> inSight(ItemRequest request, WorldPosition here, Permissions permissions) {
-        List<MinableSpot> spots = minables.minable(request.wanted(), here, SIGHT_RADIUS_BLOCKS);
+        List<MinableSpot> spots = withoutFailed(minables.minable(request.wanted(), here, SIGHT_RADIUS_BLOCKS),
+                here.dimension());
         return PermittedSpots.screen(spots, MinableSpot::pos, MinableSpot::blockType, permissions, permission).allowed();
     }
 
-    // 看见了：从最近那格起连一批，整脉连锁挖了、挖完一起捡；看见的都不许挖为空。
-    private Optional<Action> mineInSight(ItemRequest request, WorldPosition here, Permissions permissions) {
+    // 看见了：从最近那格起连一批，整脉连锁挖了、挖完一起捡；看见的都不许挖为空。跳过的格交给 givenUp 记下。
+    private Optional<Action> mineInSight(ItemRequest request, WorldPosition here, Permissions permissions,
+            Consumer<BlockPos> givenUp) {
         List<MinableSpot> seen = inSight(request, here, permissions);
         if (seen.isEmpty()) return Optional.empty();
         List<BlockPos> batch = batchOf(seen, request.count()).stream().map(MinableSpot::pos).toList();
-        return collects.collectBatch(batch, permissions, chainable(request, here, SEARCH_RADIUS_BLOCKS, permissions));
+        return collects.collectBatch(batch, permissions, chainable(request, here, SEARCH_RADIUS_BLOCKS, permissions),
+                givenUp);
     }
 
     private static WorldPosition at(BlockPos feet, String dimension) {

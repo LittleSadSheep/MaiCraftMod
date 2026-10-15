@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.acquire;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 
 import net.minecraft.core.BlockPos;
@@ -16,7 +17,8 @@ import org.maiwithu.maicraft.kernel.task.Action;
  * 像真人挖矿一样一步步来，不隔空挖，也不把掉在地上的东西丢着不管。
  *
  * <p>收没收到、收了几件以背包的重新清点为准；这个动作只保证每一步都如实做了：
- * 走不到、挖不动以问题失败，掉落物捡不到如实失败。实现接在启动时创建并登记上，测试用替身。
+ * 一批里有一格走不到、挖不动就跳过它接着收别的，挖下来的照样去捡；一格都没收下来才以问题失败，
+ * 掉落物捡不到如实失败。实现接在启动时创建并登记上，测试用替身。
  */
 public interface CollectsBlocks {
 
@@ -53,5 +55,16 @@ public interface CollectsBlocks {
      */
     default Optional<Action> collectBatch(List<BlockPos> cells, Permissions permissions, Predicate<BlockPos> chainable) {
         return collectBatch(cells, permissions);
+    }
+
+    /**
+     * 同上，并把跳过的格告诉调用方：走不到跟前、挖了半天挖不下来的那一格交给 givenUp，
+     * 采掘据此记一阵、先挑别处。没有跳过实现的接缝不报。
+     *
+     * @param givenUp 一格做不成、跳过它时收到那一格
+     */
+    default Optional<Action> collectBatch(List<BlockPos> cells, Permissions permissions, Predicate<BlockPos> chainable,
+            Consumer<BlockPos> givenUp) {
+        return collectBatch(cells, permissions, chainable);
     }
 }

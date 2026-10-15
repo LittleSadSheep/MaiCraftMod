@@ -128,6 +128,50 @@ class ClientCollectsBlocksTest {
     }
 
     @Test
+    void 一格走不到就跳过它_挖下来的照样去捡_跳过的格报给来源() {
+        // 坡上砍一棵树：下面两根挖下来了，树顶那根够不着就跳过它，已经挖下来的照样走过去捡，不丢在坡下。
+        BlockPos high = ORE.above(2);
+        BringsPlayerClose close = (target, permissions) -> high.equals(target.block())
+                ? new Step("走不到", ActionStatus.failed(Problem.of(Problem.Kind.STUCK, "没有能靠近目标的站位", null)))
+                : new Step("走", ActionStatus.done());
+        DigsBlocks digs = target -> Optional.of(new Step("挖", ActionStatus.done()));
+        PicksUpDrops drops = new PicksUpDrops() {
+            @Override public Set<Integer> nearby() { return Set.of(); }
+            @Override public Action pickUpNewSince(Set<Integer> before) { return new Step("捡", ActionStatus.done()); }
+        };
+        List<BlockPos> givenUp = new ArrayList<>();
+        Action collect = new ClientCollectsBlocks(close, digs, drops)
+                .collectBatch(List.of(ORE, ORE.above(), high), Permissions.DEFAULT, null, givenUp::add).orElseThrow();
+        ActionStatus status = ActionStatus.running();
+        for (int i = 0; i < 50 && !(status instanceof ActionStatus.Done); i++) status = collect.tick(null);
+        assertTrue(status instanceof ActionStatus.Done, status.toString());
+        assertEquals(List.of("走", "挖", "走", "挖", "走不到", "捡"), log);
+        assertEquals(List.of(high), givenUp);
+    }
+
+    @Test
+    void 一格都没收下来才失败_不去捡() {
+        BringsPlayerClose close = (target, permissions) ->
+                new Step("走不到", ActionStatus.failed(Problem.of(Problem.Kind.STUCK, "没有能靠近目标的站位", null)));
+        DigsBlocks digs = target -> Optional.of(new Step("挖", ActionStatus.done()));
+        PicksUpDrops drops = new PicksUpDrops() {
+            @Override public Set<Integer> nearby() { return Set.of(); }
+            @Override public Action pickUpNewSince(Set<Integer> before) { return new Step("捡", ActionStatus.done()); }
+        };
+        List<BlockPos> givenUp = new ArrayList<>();
+        Action collect = new ClientCollectsBlocks(close, digs, drops)
+                .collectBatch(List.of(ORE, ORE.above()), Permissions.DEFAULT, null, givenUp::add).orElseThrow();
+        ActionStatus status = ActionStatus.running();
+        for (int i = 0; i < 50 && status instanceof ActionStatus.Running; i++) status = collect.tick(null);
+        assertTrue(status instanceof ActionStatus.Failed failed
+                && failed.problem().kind() == Problem.Kind.UNREACHABLE
+                && failed.problem().message().startsWith("这 2 格一格都没挖下来，第一格：走不到"), status.toString());
+        assertEquals(List.of(ORE, ORE.above()), givenUp);
+        assertTrue(!log.contains("挖") && !log.contains("捡"), log.toString());
+        assertTrue(collect.tick(null) instanceof ActionStatus.Failed, "收场后再问照样是失败");
+    }
+
+    @Test
     void 连锁挖一下挖掉整根树干_其余几格不再走过去_挖完捡一次() {
         // 装了连锁挖：第一根原木连锁时整根树干一起没了，后两格已经空了，不再走过去挖；掉落物挖完一起捡。
         Set<BlockPos> gone = new HashSet<>();
