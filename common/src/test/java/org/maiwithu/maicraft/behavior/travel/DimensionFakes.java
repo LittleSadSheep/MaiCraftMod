@@ -32,6 +32,7 @@ import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
+import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -51,6 +52,8 @@ final class DimensionFakes {
         String dimension = DimensionRoute.OVERWORLD;
         BlockPos feet = new BlockPos(0, 64, 0);
         String carried;
+        /** 身上的物品栈：数黑曜石、挑石料用；carries 也认这里面的。 */
+        final List<BackpackStack> stacks = new ArrayList<>();
         boolean touching;
         /** stepAsideCell 的答案；没给就给门口旁一格。 */
         BlockPos aside = new BlockPos(3, 64, 0);
@@ -124,7 +127,11 @@ final class DimensionFakes {
         }
 
         @Override public boolean carries(String itemId) {
-            return itemId.equals(carried);
+            return itemId.equals(carried) || stacks.stream().anyMatch(stack -> itemId.equals(stack.itemId()));
+        }
+
+        @Override public List<BackpackStack> carriedStacks() {
+            return List.copyOf(stacks);
         }
 
         @Override public Scan scanBlocks(Block target, int searchDistance, int want) {

@@ -46,10 +46,13 @@ public record NetherPortalFrame(BlockPos origin, Direction.Axis axis, int width,
         return origin.relative(across(), across).above(up);
     }
 
-    /** 整圈门框的黑曜石格：底一行、顶一行、左右两列（四角若有也在其中）。 */
+    /**
+     * 门框必须有黑曜石的格：底一行、顶一行、左右两列，不含四角——原版点火不看四角，
+     * 玩家摆框省四块、浇筑也只浇十格，验框与补框都不把四角算成缺的。
+     */
     public List<BlockPos> frame() {
         List<BlockPos> cells = new ArrayList<>();
-        for (int x = -1; x <= width; x++) {
+        for (int x = 0; x < width; x++) {
             cells.add(cell(x, -1));
             cells.add(cell(x, height));
         }

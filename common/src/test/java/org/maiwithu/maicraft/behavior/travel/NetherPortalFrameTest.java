@@ -99,7 +99,7 @@ class NetherPortalFrameTest {
         BlockPos seed = frame.cell(0, 0);
         assertTrue(NetherPortalFrame.observe(readOf(world), seed, Direction.Axis.X).isPresent(),
                 "齐框认得出");
-        world.remove(frame.cell(2, -1).asLong());
+        world.remove(frame.cell(1, -1).asLong());
         assertFalse(NetherPortalFrame.observe(readOf(world), seed, Direction.Axis.X).isPresent(),
                 "缺格的框从 observe 认不出（那是补框勘察的事）");
     }

@@ -34,6 +34,7 @@ import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
+import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
@@ -265,6 +266,108 @@ class PortalBuilderTest {
         assertEquals(FRAME.frame().size(), whole.cells().size(), "框齐整时蓝图是整圈");
     }
 
+    private static final PortalCastingLayout SHORE = new PortalCastingLayout(new BlockPos(10, 64, 10), Direction.NORTH);
+
+    /** 一片平地：脚边石头地面，上面几层是加载着的空气。 */
+    private static Map<BlockPos, BlockState> flatGround() {
+        Map<BlockPos, BlockState> world = new HashMap<>();
+        for (int x = -10; x <= 10; x++) {
+            for (int z = -10; z <= 10; z++) {
+                world.put(new BlockPos(x, 63, z), Blocks.STONE.defaultBlockState());
+                for (int y = 64; y <= 70; y++) {
+                    world.put(new BlockPos(x, y, z), Blocks.AIR.defaultBlockState());
+                }
+            }
+        }
+        return world;
+    }
+
+    private static BackpackStack stack(String itemId, int count) {
+        return new BackpackStack(itemId, count, 64, false, false, false, true);
+    }
+
+    private static DimensionFakes.FakeUses lights(DimensionFakes.FakeWorld view, NetherPortalFrame frame) {
+        DimensionFakes.FakeUses uses = new DimensionFakes.FakeUses();
+        uses.effects.add(() -> {
+            for (BlockPos cell : frame.interior()) {
+                view.blocks.put(cell, Blocks.NETHER_PORTAL.defaultBlockState());
+            }
+        });
+        return uses;
+    }
+
+    @Test
+    void castsAtTheLavaPoolWhenCarryingNoObsidian() {
+        DimensionFakes.FakeWorld view = new DimensionFakes.FakeWorld();
+        view.blocks.putAll(CastingFakes.straightShore(SHORE, 2));
+        view.feet = SHORE.cell(0, 1, 2);
+        view.carried = PortalBuilder.FLINT_AND_STEEL;
+        CastingFakes site = new CastingFakes(view.blocks);
+        site.allowFlowAround(SHORE);
+        site.feet = view.feet;
+        site.give(CastingFakes.BUCKET, 1);
+        site.give(CastingFakes.COBBLESTONE, 16);
+        view.stacks.addAll(site.stacks());
+        // 先扫黑曜石：附近没有框；再扫岩浆：池面几格源。
+        view.enqueueScan(new DimensionWorldView.Scan(List.of(), true));
+        view.enqueueScan(new DimensionWorldView.Scan(SHORE.startRow(), true));
+        TaskResult result = run(new PortalBuilder(Permissions.DEFAULT, 128, new DimensionTravelServices(
+                view, () -> new DimensionFakes.FakeContext(), new DimensionFakes.FakeWalks(), site,
+                new DimensionFakes.FakeToMainhand(), lights(view, SHORE.frame()),
+                permissions -> site.services(), null, () -> List.of(), progress -> {})));
+
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary() + " / " + result.problem());
+        assertTrue(result.details() instanceof PortalBuildDetails built
+                && PortalBuildDetails.LAVA_CASTING.equals(built.portalBuiltHow()), "门是浇的：" + result.details());
+        // 身上没黑曜石：没去弄黑曜石，门框是一桶一格浇出来的。
+        assertTrue(site.asked.stream().noneMatch(r -> PortalBuilder.OBSIDIAN.equals(r.wanted().itemId())));
+        assertTrue(site.poured.size() >= 6, "浇了几桶：" + site.poured.size());
+        assertTrue(SHORE.frame().active(readOf(view.blocks)), "门点着了");
+    }
+
+    @Test
+    void laysObsidianWhenCarryingEnoughEvenNextToLava() {
+        DimensionFakes.FakeWorld view = new DimensionFakes.FakeWorld();
+        view.blocks.putAll(flatGround());
+        view.carried = PortalBuilder.FLINT_AND_STEEL;
+        view.stacks.add(stack(PortalBuilder.OBSIDIAN, 10));
+        view.enqueueScan(new DimensionWorldView.Scan(List.of(), true));
+        NetherPortalFrame expected = PortalBuilder.chooseSite(readOf(view.blocks), view.feet, 8).orElseThrow();
+        ConstructionFakes site = new ConstructionFakes(view.blocks);
+        TaskResult result = run(new PortalBuilder(Permissions.DEFAULT, 128, services(view,
+                new DimensionFakes.FakeObtain(), site, lights(view, expected))));
+
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary() + " / " + result.problem());
+        assertTrue(result.details() instanceof PortalBuildDetails built
+                && PortalBuildDetails.OBSIDIAN.equals(built.portalBuiltHow()), "门是摆的：" + result.details());
+        // 十格框摆齐、四角不碰；顶行没有可点的面时垫的那块收走了。
+        assertTrue(expected.frame().stream().allMatch(cell -> view.blocks.get(cell).is(Blocks.OBSIDIAN)), "十格都是黑曜石");
+        assertTrue(site.temporaries.isEmpty(), "垫脚的临时方块收回了");
+        assertEquals(PortalCastingLayout.FRAME_CELLS,
+                site.placed.stream().filter(cell -> view.blocks.get(cell).is(Blocks.OBSIDIAN)).count(), "摆了十块黑曜石");
+    }
+
+    @Test
+    void withoutPoolOrObsidianFallsBackToLayingAndReportsTheSurvey() {
+        DimensionFakes.FakeWorld view = new DimensionFakes.FakeWorld();
+        view.blocks.putAll(flatGround());
+        view.carried = PortalBuilder.FLINT_AND_STEEL;
+        // 黑曜石与岩浆都扫完没有。
+        view.enqueueScan(new DimensionWorldView.Scan(List.of(), true));
+        view.enqueueScan(new DimensionWorldView.Scan(List.of(), true));
+        NetherPortalFrame expected = PortalBuilder.chooseSite(readOf(view.blocks), view.feet, 8).orElseThrow();
+        ConstructionFakes site = new ConstructionFakes(view.blocks);
+        TaskResult result = run(new PortalBuilder(Permissions.DEFAULT, 128, services(view,
+                new DimensionFakes.FakeObtain(), site, lights(view, expected))));
+
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary() + " / " + result.problem());
+        assertTrue(result.details() instanceof PortalBuildDetails built
+                && PortalBuildDetails.OBSIDIAN.equals(built.portalBuiltHow()));
+        // 勘察事实进试过的办法：LLM 知道附近为什么浇不了。
+        assertTrue(result.attempts().stream().anyMatch(a -> a.tried().contains("岩浆池") && a.result().contains("岩浆源")),
+                "勘察事实：" + result.attempts());
+    }
+
     private static Function<BlockPos, Optional<BlockState>> readOf(
             Map<BlockPos, BlockState> world) {
         return cell -> Optional.ofNullable(world.get(cell));
@@ -277,6 +380,7 @@ class PortalBuilderTest {
             BringsPlayerClose {
         final Map<BlockPos, BlockState> world;
         final List<BlockPos> placed = new ArrayList<>();
+        final List<BlockPos> temporaries = new ArrayList<>();
         boolean failPlacing;
         /** 每次放置后的现场改动：模拟施工期间掉进门里的东西。 */
         Runnable afterPlace;
@@ -347,9 +451,10 @@ class PortalBuilderTest {
         }
 
         @Override public void siteStarted(Blueprint blueprint) { }
-        @Override public void temporaryPlaced(BlockPos pos, String blockType, String purpose) { }
-        @Override public void temporaryRemoved(BlockPos pos) { }
-        @Override public List<BlockPos> temporaries() { return List.of(); }
+        // 垫脚的临时方块记在账上：施工收尾才知道收哪几块（顶行没有可点的面时引擎会先垫一块）。
+        @Override public void temporaryPlaced(BlockPos pos, String blockType, String purpose) { temporaries.add(pos); }
+        @Override public void temporaryRemoved(BlockPos pos) { temporaries.remove(pos); }
+        @Override public List<BlockPos> temporaries() { return List.copyOf(temporaries); }
         @Override public Action toward(ApproachTarget target, Permissions permissions) {
             return immediate(() -> { });
         }

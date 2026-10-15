@@ -15,7 +15,8 @@ import org.maiwithu.maicraft.kernel.result.ResultDetails;
  * @param expectedLanding   按维度坐标换算的预期落点（主世界与下界水平 1:8）；这对维度没有换算关系为 null
  * @param landingOffset     实测落点与预期的水平偏差（格）；没有预期为 -1
  * @param oneWay            进的是单程门（末地门）：回程不归出行
+ * @param portalBuiltHow    这趟自己建了门时门是怎么建的：{@code obsidian} 摆黑曜石 / {@code lava_casting} 在岩浆池岸浇筑；没建为 null
  */
 public record DimensionTravelDetails(String arrivedDimension, WorldPosition portalAt,
-        WorldPosition expectedLanding, int landingOffset, boolean oneWay) implements ResultDetails {
+        WorldPosition expectedLanding, int landingOffset, boolean oneWay, String portalBuiltHow) implements ResultDetails {
 }

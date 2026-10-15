@@ -9,9 +9,11 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 
+import org.maiwithu.maicraft.game.player.BackpackStack;
+
 /**
  * 跨维度行程的现场只读视图：现在的维度、找活门、门还活着没有、身体沾没沾门格、
- * 离门落脚格、读一格方块、扫黑曜石与末地门框架。跨维度任务、建门与末地门房间
+ * 离门落脚格、读一格方块、身上有什么、扫黑曜石、岩浆与末地门框架。跨维度任务、建门与末地门房间
  * 只从这里读现场，不碰角色对象；生产实现读当刻的客户端世界，测试用替身摆场景。
  */
 public interface DimensionWorldView {
@@ -39,6 +41,9 @@ public interface DimensionWorldView {
 
     /** 身上带着这件物品吗（主背包与快捷栏）；读不到背包给假。 */
     boolean carries(String itemId);
+
+    /** 身上每一格的物品（主背包与快捷栏）：数黑曜石够不够、挑浇筑用的石料；读不到背包给空表。 */
+    List<BackpackStack> carriedStacks();
 
     /** 扫一轮指定的方块（建门勘察黑曜石、末地门房间扫框架）：这一刻的命中与扫完没有。 */
     Scan scanBlocks(Block target, int searchDistance, int want);

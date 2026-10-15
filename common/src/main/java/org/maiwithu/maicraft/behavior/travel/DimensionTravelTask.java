@@ -67,6 +67,8 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
     private int entryTicks;
     /** 这趟已经建过一扇门：建好后只回去找它走，不再建第二扇。 */
     private boolean portalBuilt;
+    /** 这趟建的门是怎么建的（摆黑曜石、浇筑）；没建为 null，结果细节里原样给出。 */
+    private String portalBuiltHow;
     private String startDimension;
     private BlockPos startFeet;
     private DimensionTravelDetails settlement;
@@ -151,7 +153,7 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
 
     private Next<Phase> sameDimension(String why) {
         if (journey.destination() == null) {
-            settlement = new DimensionTravelDetails(journey.targetDimension(), null, null, -1, false);
+            settlement = new DimensionTravelDetails(journey.targetDimension(), null, null, -1, false, null);
             return Next.done(TaskResult.done("跨维度出行：" + why));
         }
         return Next.go(Phase.WALK_ON, why + "，接着走到坐标");
@@ -278,7 +280,7 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
         settlement = new DimensionTravelDetails(now,
                 entrance == null ? null
                         : new WorldPosition(entrance.getX(), entrance.getY(), entrance.getZ(), startDimension),
-                expected, offset, route != null && route.way() == DimensionRoute.Way.END_PORTAL);
+                expected, offset, route != null && route.way() == DimensionRoute.Way.END_PORTAL, portalBuiltHow);
         if (!journey.targetDimension().equals(now)) {
             return Next.fail(Problem.of(Problem.Kind.UNREACHABLE,
                     "跨维度没成：还在 " + shortDimension(now == null ? "未知" : now)
@@ -334,6 +336,12 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
                 return Next.fail(result.problem());
             }
             if (phase() == Phase.BUILD_PORTAL) {
+                // 建门怎么建的（摆黑曜石、浇筑）随结果带回来，写进这趟的结果细节。
+                if (result.details() instanceof PortalBuildDetails built) {
+                    portalBuiltHow = built.portalBuiltHow();
+                    settlement = new DimensionTravelDetails(services.world().currentDimension(), null, null, -1,
+                            false, portalBuiltHow);
+                }
                 if (result.status() == TaskResult.Status.DONE) {
                     // 门点着了、门面验出来了：回去找这扇门走进去；只建这一次，再找不到入口就如实结束。
                     portalBuilt = true;

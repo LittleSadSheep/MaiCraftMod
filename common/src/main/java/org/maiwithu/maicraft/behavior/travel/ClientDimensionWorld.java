@@ -11,6 +11,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 
+import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.BlockScanService;
 
@@ -98,6 +99,15 @@ public final class ClientDimensionWorld implements DimensionWorldView {
             return false;
         }
         return current.backpack().stacks().stream().anyMatch(stack -> itemId.equals(stack.itemId()));
+    }
+
+    @Override
+    public List<BackpackStack> carriedStacks() {
+        PlayerContext current = context.get();
+        if (current == null || current.backpack() == null) {
+            return List.of();
+        }
+        return List.copyOf(current.backpack().stacks());
     }
 
     @Override

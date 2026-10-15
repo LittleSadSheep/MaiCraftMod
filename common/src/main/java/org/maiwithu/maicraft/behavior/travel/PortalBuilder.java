@@ -7,20 +7,19 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.block.Block;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.material.FluidState;
 
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.WantedItem;
 import org.maiwithu.maicraft.behavior.construction.Blueprint;
 import org.maiwithu.maicraft.behavior.construction.ConstructionInput;
+import org.maiwithu.maicraft.behavior.construction.ConstructionServices;
 import org.maiwithu.maicraft.behavior.construction.ConstructionTask;
 import org.maiwithu.maicraft.behavior.construction.PlannedCell;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
@@ -28,7 +27,9 @@ import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
+import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
+import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.child.ChildTaskRunner;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -44,19 +45,21 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
 /**
- * 建门：附近没有活门且许可允许时，勘察场址、备点火用品、把门框交施工引擎、点火、验活。
+ * 建门：附近没有活门且许可允许时，勘察场址、备点火用品、把门框建起来、点火、验活。
  *
- * <p>像正常玩家：先看附近有没有可用的黑曜石框（残缺的补齐再点），没有才在脚边挑块平整空地
- * 摆十个黑曜石的框。门框的清障、备黑曜石、站位、放置与核对全交给施工引擎，建门自己只做
- * 勘察选点、点火与验活。点火是点火用品换到主手、对门框底部内侧下一格的顶面使用；
- * 门框内侧出现下界门方块才算建好。施工做完门框没成型就结束，保留施工事实、写明差在哪，
- * 不循环浇筑。
+ * <p>像正常玩家：先看附近有没有可用的黑曜石框（残缺的补齐再点）。没有就看身上的黑曜石：
+ * 够摆一圈就在脚边挑块平整空地摆十个黑曜石的框；不够就看附近有没有能浇筑的岩浆池岸，
+ * 有就带一只桶、一桶水和十来块石头去岸边把框浇出来；池也没有才按备料去弄黑曜石。
+ * 摆框的清障、备黑曜石、站位、放置与核对全交给施工引擎，浇筑由浇筑建门做，建门自己只做
+ * 勘察选点、建法选择、点火与验活。点火是点火用品换到主手、对门框底部内侧下一格的顶面使用；
+ * 门框内侧出现下界门方块才算建好。施工或浇筑做完门框没成型就结束，保留事实、写明差在哪，不循环。
  */
 final class PortalBuilder extends PhasedTask<PortalBuilder.Phase> {
 
     /** 建门的阶段。 */
     enum Phase {
-        SURVEY, PICK_SITE, SUPPLY_IGNITION, CONSTRUCT, VERIFY_FRAME, WALK_TO_IGNITE, SWAP_IGNITION, IGNITE, CHECK_LIT
+        SURVEY, SURVEY_POOL, PICK_SITE, SUPPLY_IGNITION, CONSTRUCT, CAST, VERIFY_FRAME, WALK_TO_IGNITE,
+        SWAP_IGNITION, IGNITE, CHECK_LIT
     }
 
     /** 打火石与火弹：点火用品按这个先后备。 */
@@ -69,12 +72,24 @@ final class PortalBuilder extends PhasedTask<PortalBuilder.Phase> {
     private static final long MAX_TICKS = 20L * 60 * 10;
     /** 扫黑曜石一轮要的候选数：够认出附近几扇框，又不让扫描跑太远。 */
     private static final int WANT_OBSIDIAN = 16;
+    /** 扫岩浆一轮要的候选数：一个池子池面就有几十格源，要收得够多才挑得到合规的岸。 */
+    private static final int WANT_LAVA = 256;
+    /** 扫描没完时每多收到这么多格岩浆源才重判一遍池岸。 */
+    private static final int SEEDS_PER_JUDGEMENT = 16;
+    static final String OBSIDIAN = "minecraft:obsidian";
 
     private final Permissions permissions;
     private final int searchDistance;
     private final DimensionTravelServices services;
 
     private NetherPortalFrame frame;
+    /** 勘察挑出的池岸：有它就浇，没有就摆黑曜石。 */
+    private LavaPoolSurvey.Candidate castingSite;
+    /** 这扇门最后是怎么建的；没建到为 null。 */
+    private String builtHow;
+    private ConstructionServices construction;
+    /** 上次判过池岸时已收到的岩浆源数；-1 表示还没判过。 */
+    private int judgedSeeds = -1;
     private WalkRun walk;
     private ChildTaskRunner runner;
     private String ignitionItem;
@@ -102,9 +117,11 @@ final class PortalBuilder extends PhasedTask<PortalBuilder.Phase> {
     protected Next<Phase> tick(Phase phase, TickContext context) {
         return switch (phase) {
             case SURVEY -> survey();
+            case SURVEY_POOL -> surveyPool();
             case PICK_SITE -> pickSite();
             case SUPPLY_IGNITION -> supplyTick(context);
             case CONSTRUCT -> construct(context);
+            case CAST -> cast(context);
             case VERIFY_FRAME -> verifyFrame();
             case WALK_TO_IGNITE -> walkedToIgnite(context);
             case SWAP_IGNITION -> runActionThen(context, () -> Next.go(Phase.IGNITE, "点火用品上了手"));
@@ -130,12 +147,78 @@ final class PortalBuilder extends PhasedTask<PortalBuilder.Phase> {
             frame = sketched.get();
             int missing = frame.missing(read).size();
             recordProgress("找到现成的黑曜石框" + (missing > 0 ? "，缺 " + missing + " 格" : ""));
+            if (missing > obsidianCarried()) {
+                // 补框的黑曜石不够：框要是正好在一段合规池岸上，接着浇完；不在就按备料去弄黑曜石。
+                castingSite = LavaPoolSurvey.fitting(frame, read, mayChange(), services.world().feet()).orElse(null);
+                if (castingSite != null) {
+                    recordProgress("残缺框在池岸上，接着浇");
+                    return Next.go(Phase.SUPPLY_IGNITION, "残缺框在池岸上，先备点火用品再浇");
+                }
+            }
             return Next.go(Phase.SUPPLY_IGNITION, "找到现成的黑曜石框，先备点火用品");
         }
         if (!found.complete()) {
             return Next.stay();
         }
-        return Next.go(Phase.PICK_SITE, "附近没有可用的框，挑块平整空地新建");
+        if (obsidianCarried() >= PortalCastingLayout.FRAME_CELLS) {
+            return Next.go(Phase.PICK_SITE, "附近没有可用的框，身上黑曜石够一圈，挑块平整空地摆");
+        }
+        return Next.go(Phase.SURVEY_POOL, "附近没有框、身上黑曜石也不够，看看有没有能浇的岩浆池");
+    }
+
+    /**
+     * 勘察岩浆池：已加载区里扫岩浆源，按浇筑模板找合规的池岸；找到就去浇，扫完没有就回到摆黑曜石
+     * （备料去弄），勘察事实记进试过的办法，LLM 知道附近为什么浇不了。
+     */
+    private Next<Phase> surveyPool() {
+        DimensionWorldView.Scan found = services.world().scanBlocks(Blocks.LAVA, searchDistance, WANT_LAVA);
+        // 扫描分几刻推进：没扫完时只在又收到一批新种子后才重判一遍，不每刻把几百个候选全算一次。
+        if (!found.complete() && judgedSeeds >= 0 && found.hits().size() - judgedSeeds < SEEDS_PER_JUDGEMENT) {
+            return Next.stay();
+        }
+        judgedSeeds = found.hits().size();
+        Function<BlockPos, Optional<BlockState>> read = services.world()::stateAt;
+        LavaPoolSurvey.Report report = LavaPoolSurvey.survey(found.hits(), read, mayChange(), services.world().feet());
+        Optional<LavaPoolSurvey.Candidate> best = report.best();
+        if (best.isPresent()) {
+            castingSite = best.get();
+            frame = castingSite.layout().frame();
+            recordProgress("挑到能浇筑的池岸" + (castingSite.bankFill().isEmpty() ? "" : "，要填 "
+                    + castingSite.bankFill().size() + " 格站台"));
+            return Next.go(Phase.SUPPLY_IGNITION, "挑到能浇筑的池岸，先备点火用品");
+        }
+        if (!found.complete()) {
+            return Next.stay();
+        }
+        recordAttempt("勘察 " + searchDistance + " 格内的岩浆池", report.describe() + "；改为摆黑曜石");
+        return Next.go(Phase.PICK_SITE, "附近没有能浇的池岸，挑块平整空地摆黑曜石");
+    }
+
+    /** 身上有几块黑曜石。 */
+    private int obsidianCarried() {
+        int count = 0;
+        for (BackpackStack stack : services.world().carriedStacks()) {
+            if (OBSIDIAN.equals(stack.itemId())) count += stack.count();
+        }
+        return count;
+    }
+
+    /** 一格允许角色拆改吗：按这次的许可问许可检查点，受保护的格不选进池岸。 */
+    private Predicate<BlockPos> mayChange() {
+        ConstructionServices built = construction();
+        return pos -> {
+            Optional<BlockState> state = services.world().stateAt(pos);
+            String type = state.map(s -> BuiltInRegistries.BLOCK.getKey(s.getBlock()).toString()).orElse("minecraft:air");
+            return built.guards().allows(PermissionCheck.WorldAction.DIG_BLOCK, pos, type).isEmpty();
+        };
+    }
+
+    /** 按这次的许可拼一份施工服务：摆框、浇筑、勘察的保护判断都用同一份。 */
+    private ConstructionServices construction() {
+        if (construction == null) {
+            construction = services.construction().apply(permissions);
+        }
+        return construction;
     }
 
     /** 挑新址：脚边螺旋找一块门框立得下的平整空地；挑不到如实结束，不乱放。 */
@@ -178,12 +261,37 @@ final class PortalBuilder extends PhasedTask<PortalBuilder.Phase> {
         };
     }
 
-    /** 点火用品齐了：框缺格就先补框，框齐整的直接去验框点火。 */
+    /** 点火用品齐了：框缺格就先补框（挑了池岸的去浇，否则摆黑曜石），框齐整的直接去验框点火。 */
     private Next<Phase> afterSupplies() {
         if (frame.missing(services.world()::stateAt).isEmpty()) {
             return Next.go(Phase.VERIFY_FRAME, "框是齐的，验过就直接点火");
         }
+        if (castingSite != null) {
+            return Next.go(Phase.CAST, "点火用品有了，去池岸浇门框");
+        }
         return Next.go(Phase.CONSTRUCT, "点火用品有了，门框交给施工引擎");
+    }
+
+    /** 浇筑：交给浇筑建门做完整套；缺桶缺水按它的问题失败，浇完（哪怕没浇全）都去验框。 */
+    private Next<Phase> cast(TickContext context) {
+        if (runner == null) {
+            runner = new ChildTaskRunner(ChildTaskRunner.NO_LIMIT);
+            runner.begin(new PortalLavaCasting(castingSite, permissions, services, construction()), context);
+            return Next.stay();
+        }
+        if (runner.tick(context) instanceof TickResult.Finished finished) {
+            copyFacts(finished.result());
+            TaskResult result = finished.result();
+            runner = null;
+            if (result.status() == TaskResult.Status.FAILED) {
+                return Next.fail(result.problem());
+            }
+            builtHow = PortalBuildDetails.LAVA_CASTING;
+            return Next.go(Phase.VERIFY_FRAME, "浇筑做完，看看门框成型没有");
+        }
+        // 浇出一格、放下一块都是真实进展，外层不按"没进展"掐掉。
+        runner.progressedNow().ifPresent(this::recordProgress);
+        return Next.stay();
     }
 
     /** 打火石没弄到换火弹；两种都备不齐如实 NEED_ITEM 结束。 */
@@ -205,7 +313,7 @@ final class PortalBuilder extends PhasedTask<PortalBuilder.Phase> {
             runner = new ChildTaskRunner(ChildTaskRunner.NO_LIMIT);
             runner.begin(new ConstructionTask(
                     new ConstructionInput(frameBlueprint(), permissions, "建下界门"),
-                    services.construction().apply(permissions)), context);
+                    construction()), context);
             return Next.stay();
         }
         if (runner.tick(context) instanceof TickResult.Finished finished) {
@@ -215,6 +323,7 @@ final class PortalBuilder extends PhasedTask<PortalBuilder.Phase> {
             if (result.status() == TaskResult.Status.FAILED) {
                 return Next.fail(result.problem());
             }
+            builtHow = PortalBuildDetails.OBSIDIAN;
             return Next.go(Phase.VERIFY_FRAME, "施工做完，看看门框成型没有");
         }
         // 砌门框的施工引擎有真实进展就算建门有进展，外层不按"没进展"掐掉。
@@ -232,7 +341,7 @@ final class PortalBuilder extends PhasedTask<PortalBuilder.Phase> {
         if (!frame.ready(read)) {
             List<BlockPos> missing = frame.missing(read);
             String why = missing.isEmpty()
-                    ? "门框没成型：内侧被占着，门方块长不出来"
+                    ? "门框没成型：内侧被占着，门方块长不出来（" + occupiedText(read) + "）"
                     : "门框没成型，还缺 " + missing.size() + " 格黑曜石：" + cellsText(missing);
             recordAttempt("建门框", "施工做完" + why);
             return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL,
@@ -331,6 +440,20 @@ final class PortalBuilder extends PhasedTask<PortalBuilder.Phase> {
         return services.world().currentDimension();
     }
 
+    /** 门内哪几格被什么占着：LLM 据此决定清什么，不用再去看。 */
+    private String occupiedText(Function<BlockPos, Optional<BlockState>> read) {
+        List<String> texts = new ArrayList<>();
+        for (BlockPos cell : frame.interior()) {
+            Optional<BlockState> state = read.apply(cell);
+            if (state.isEmpty()) {
+                texts.add(cell.toShortString() + " 没加载");
+            } else if (!state.get().isAir() && !state.get().is(Blocks.FIRE) && !state.get().is(Blocks.NETHER_PORTAL)) {
+                texts.add(cell.toShortString() + " 是 " + state.get().getBlock().getName().getString());
+            }
+        }
+        return String.join("、", texts);
+    }
+
     private static String cellsText(List<BlockPos> cells) {
         List<String> texts = new ArrayList<>();
         for (BlockPos cell : cells) {
@@ -418,47 +541,20 @@ final class PortalBuilder extends PhasedTask<PortalBuilder.Phase> {
         return Optional.empty();
     }
 
-    /** 把"按格读方块"包成通行判断要的 BlockGetter：选址只在已加载区里挑，读不到当空气。 */
-    private record SiteView(Function<BlockPos, Optional<BlockState>> read) implements BlockGetter {
-
-        @Override
-        public BlockState getBlockState(BlockPos pos) {
-            return read.apply(pos).orElse(Blocks.AIR.defaultBlockState());
-        }
-
-        @Override
-        public FluidState getFluidState(BlockPos pos) {
-            return getBlockState(pos).getFluidState();
-        }
-
-        @Override
-        public BlockEntity getBlockEntity(BlockPos pos) {
-            return null;
-        }
-
-        @Override
-        public int getHeight() {
-            return 384;
-        }
-
-        @Override
-        public int getMinBuildHeight() {
-            return -64;
-        }
-    }
-
     @Override
     protected ResultDetails details() {
-        return ResultDetails.NONE;
+        return builtHow == null ? ResultDetails.NONE : new PortalBuildDetails(builtHow);
     }
 
     @Override
     protected String describePhase(Phase value) {
         return switch (value) {
             case SURVEY -> "勘察：找可用的黑曜石框";
+            case SURVEY_POOL -> "勘察：找能浇筑的岩浆池岸";
             case PICK_SITE -> "挑平整空地新建门框";
             case SUPPLY_IGNITION -> "备点火用品";
             case CONSTRUCT -> "门框交给施工引擎";
+            case CAST -> "去池岸浇门框";
             case VERIFY_FRAME -> "验门框成型没有";
             case WALK_TO_IGNITE -> "走向点火位";
             case SWAP_IGNITION -> "点火用品换到主手";
