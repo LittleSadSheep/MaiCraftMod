@@ -45,6 +45,11 @@ public record AcquireVia(String name, String description) {
         return TRADE.name().equals(name);
     }
 
+    /** 这条途径是不是要现做的（合成、烧炼）：挑可以互换的原料时，现成的来路与现做分开比。 */
+    public static boolean makes(String name) {
+        return CRAFT.name().equals(name) || SMELT.name().equals(name);
+    }
+
     public AcquireVia {
         Objects.requireNonNull(name, "name");
         Objects.requireNonNull(description, "description");

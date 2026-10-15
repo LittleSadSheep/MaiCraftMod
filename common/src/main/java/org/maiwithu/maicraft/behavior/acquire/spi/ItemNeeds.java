@@ -51,6 +51,16 @@ public interface ItemNeeds {
     }
 
     /**
+     * 问价不拿：各来源里把这点东西弄进背包最省的一条路，总代价折成格（距离加动作，和挑来源用同一把尺子）；
+     * 说不准有没有的报价按多走一段算。includeMaking 为假时不算合成、烧炼这类要现做的，只看现成的来路
+     * （记得的箱子里有的、自己放下能收回的、挖得到的）。挑可以互换的原料（任一张别的颜色的床）时用。
+     * 各来源都给不了、或实现不问时为空。
+     */
+    default Optional<Double> cheapestCost(ItemRequest request, Permissions permissions, boolean includeMaking) {
+        return Optional.empty();
+    }
+
+    /**
      * 先看一眼：问各来源有没有"打开看一眼才知道"的（身上的 AE 终端这五分钟没开过），给第一个看一眼的动作；
      * 都不用看给空。几种做法分不出先后时，看完再挑。
      */

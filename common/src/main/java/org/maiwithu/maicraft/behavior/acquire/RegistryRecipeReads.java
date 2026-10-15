@@ -90,22 +90,42 @@ public final class RegistryRecipeReads implements ReadsRecipes, ReadsFuels {
         }
     }
 
-    // 一条配方的原料清单：每格一份，同一种写法合并计数。
+    // 一条配方的原料清单：每格一份，同一种写法合并计数。一格收好几样又对不上标签时（给床换颜色要的
+    // "别的颜色的任一张床"），连同收的全部物品一起记下，备料时身上有哪样用哪样、缺了挑最省的那样，不只认第一样。
     private List<WorkstationRecipe.IngredientStack> ingredients(List<Ingredient> ingredients) {
         Map<String, Integer> merged = new LinkedHashMap<>();
+        Map<String, List<String>> choices = new LinkedHashMap<>();
         for (Ingredient ingredient : ingredients) {
-            specifierOf(ingredient).ifPresent(specifier -> merged.merge(specifier, 1, Integer::sum));
+            specifierOf(ingredient).ifPresent(specifier -> {
+                List<String> accepted = specifier.startsWith("#") ? List.of() : itemIds(ingredient.getItems());
+                // 同一种写法、收的东西也一样才算同一样原料，合并计数。
+                String key = accepted.size() > 1 ? String.join("|", accepted) : specifier;
+                merged.merge(key, 1, Integer::sum);
+                choices.putIfAbsent(key, accepted.size() > 1 ? accepted : List.of());
+            });
         }
         List<WorkstationRecipe.IngredientStack> stacks = new ArrayList<>();
         for (var entry : merged.entrySet()) {
-            String specifier = entry.getKey();
+            String key = entry.getKey();
+            List<String> accepted = choices.get(key);
+            String specifier = accepted.isEmpty() ? key : accepted.getFirst();
             stacks.add(new WorkstationRecipe.IngredientStack(
                     specifier.startsWith("#")
                             ? WantedItem.ofTag(specifier.substring(1))
                             : WantedItem.ofItem(specifier),
-                    entry.getValue()));
+                    entry.getValue(), accepted));
         }
         return List.copyOf(stacks);
+    }
+
+    // 一格收的全部物品 ID，按配方给的先后，去重。
+    private static List<String> itemIds(ItemStack[] items) {
+        List<String> ids = new ArrayList<>();
+        for (ItemStack stack : items) {
+            String id = itemId(stack);
+            if (!ids.contains(id)) ids.add(id);
+        }
+        return List.copyOf(ids);
     }
 
     // 一格原料想要什么：配方的原料多半是"这一类都行"。能对上一张装的物品与这一格完全相同的物品标签

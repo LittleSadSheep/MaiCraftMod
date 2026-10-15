@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.acquire;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * 一条工作站配方：角色能自己在合成台、熔炉、石切台上动手做的，从游戏真实配方管理器里读出来的只读快照。含模组配方；
@@ -105,11 +106,37 @@ public record WorkstationRecipe(String id, Kind kind, WantedItem result, int res
         }
     }
 
-    /** 做一次要的一种原料：要什么、要几件。 */
-    public record IngredientStack(WantedItem item, int count) {
+    /**
+     * 做一次要的一种原料：要什么、要几件。这一格收好几样又没有一个正好对上的标签时（给床换颜色要"别的颜色的任一张床"），
+     * choices 列出收的全部物品，item 是其中第一样；身上有哪样就用哪样，缺了由来源挑最省的那样去弄，不只认第一样。
+     *
+     * @param choices 这一格收的全部物品 ID；只收一样或写成标签时为空
+     */
+    public record IngredientStack(WantedItem item, int count, List<String> choices) {
         public IngredientStack {
             if (item == null) throw new IllegalArgumentException("原料必须写要什么");
             if (count < 1) throw new IllegalArgumentException("原料数量至少为 1：" + count);
+            choices = choices == null ? List.of() : List.copyOf(choices);
+        }
+
+        /** 只收一样东西（或一个标签）的原料。 */
+        public IngredientStack(WantedItem item, int count) {
+            this(item, count, List.of());
+        }
+
+        /** 这一格收哪几样：可以互换的列全部，否则就是 item 一样。 */
+        public List<WantedItem> options() {
+            return choices.size() > 1 ? choices.stream().map(WantedItem::ofItem).toList() : List.of(item);
+        }
+
+        /** 一件物品放不放得进这一格。 */
+        public boolean accepts(String itemId, Set<String> itemTags) {
+            return item.matches(itemId, itemTags) || choices.contains(itemId);
+        }
+
+        /** 给结果看的写法：可以互换的写成"某某等几种里的任一样"。 */
+        public String describe() {
+            return choices.size() > 1 ? item.describe() + " 等 " + choices.size() + " 种里的任一样" : item.describe();
         }
     }
 }

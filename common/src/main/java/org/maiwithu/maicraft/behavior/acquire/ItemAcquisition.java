@@ -212,6 +212,21 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         return nearest;
     }
 
+    // 问价不拿：最省的一条路的总代价；不算现做时跳过合成、烧炼。只有点名才做的途径（交易）照旧不参与。
+    @Override public Optional<Double> cheapestCost(ItemRequest request, Permissions permissions, boolean includeMaking) {
+        SourceContext context = new SourceContext(position.currentPosition(), permissions);
+        Optional<Double> cheapest = Optional.empty();
+        for (ItemSource source : sources) {
+            String via = source.via().name();
+            if (!Scope.ALL.allows(via) || (!includeMaking && AcquireVia.makes(via))) continue;
+            if (source.quote(request, context) instanceof SourceQuote.Offer offer) {
+                double cost = offer.cost().total() + (offer.countUnknown() ? UNKNOWN_STOCK_BLOCKS : 0);
+                if (cheapest.isEmpty() || cost < cheapest.get()) cheapest = Optional.of(cost);
+            }
+        }
+        return cheapest;
+    }
+
     /** 一场获取的执行：清点 → 问价挑路 → 腾格子 → 用一个来源 → 再清点，直到够数或路都走完。 */
     private final class Run implements Action {
 

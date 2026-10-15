@@ -769,6 +769,12 @@ public final class AbilityCatalog {
         @Override public boolean knownUnobtainable(WantedItem wanted) {
             return engine != null && engine.knownUnobtainable(wanted);
         }
+
+        // 挑可以互换的原料时问最省的一条路；引擎还没建好时问不出，按配方里的先后。
+        @Override public Optional<Double> cheapestCost(ItemRequest request, Permissions permissions,
+                boolean includeMaking) {
+            return engine == null ? Optional.empty() : engine.cheapestCost(request, permissions, includeMaking);
+        }
     }
 
     /** 采集的靠近：目标落实成一格方块后交给靠近模型，走过去能动多少地形按这次任务的许可来。 */

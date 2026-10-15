@@ -20,10 +20,12 @@ public final class MaterialPreference {
     /** 这种做法的原料里有没有一样是倾向的材料（点名的物品，或挂着点名标签的物品，或原料标签就是点名的那个）。 */
     public static boolean uses(WorkstationRecipe recipe, Set<String> prefer, ReadsItemTags tags) {
         if (prefer.isEmpty()) return false;
+        // 可以互换的原料（任一张别的颜色的床）收的每一样都算：点名白床时，"别的颜色的任一张床"用得上它。
         for (WorkstationRecipe.IngredientStack ingredient : recipe.ingredients()) {
-            WantedItem item = ingredient.item();
-            for (String wanted : prefer) {
-                if (matches(item, new WantedItem(wanted), tags)) return true;
+            for (WantedItem item : ingredient.options()) {
+                for (String wanted : prefer) {
+                    if (matches(item, new WantedItem(wanted), tags)) return true;
+                }
             }
         }
         return false;

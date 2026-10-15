@@ -40,6 +40,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
  * <p>备料弄不全不白跑：某样原料弄不来，先把身上的料够做的件数做掉（要 16 根火把、木炭只够 8 根，就先做 8 根），
  * 引擎按拿到几件、还差几件报部分完成，弄不来的原因一并交代；身上的料连一份都不够才以备料的原因失败。
  * 某样原料弄不来、身上连一份的量都没有时当场放弃这个做法，不再去弄其余原料（没有羊毛就不去砍做床板的木头）。
+ * 一格收好几样的原料（给床换颜色要"别的颜色的任一张床"）身上有哪样用哪样，缺了挑最省的那样去弄。
  */
 public final class RecipeSource implements ItemSource {
 
@@ -78,6 +79,8 @@ public final class RecipeSource implements ItemSource {
     /** 就地摆工作站的接缝；没接上时附近没有设施就如实说没有，不放。 */
     private final SetsUpWorkstation placer;
     private final PermissionCheck permission;
+    /** 可以互换的原料怎么数、缺了去弄哪一样。 */
+    private final IngredientChoice choice;
     /** 拿东西的引擎此刻在推进的那一串请求（外层在前）；没接上为空串。 */
     private Supplier<List<ItemRequest>> chain = List::of;
 
@@ -95,6 +98,7 @@ public final class RecipeSource implements ItemSource {
         this.offhand = offhand;
         this.tags = tags;
         this.needs = needs;
+        this.choice = new IngredientChoice(backpack, offhand, tags, needs);
         this.placer = placer;
         this.permission = permission;
     }
@@ -159,7 +163,7 @@ public final class RecipeSource implements ItemSource {
         // 不按配方表的顺序先试橡木、去砍附近的橡树。原先 AE 里堆着云杉原木，照样跑去砍橡树。
         if (variants.size() > 1 && missingIngredientDistance(variants.get(0), request, context)
                 == missingIngredientDistance(variants.get(1), request, context)) {
-            Optional<Action> look = firstMissing(variants.get(0), request)
+            Optional<Action> look = firstMissing(variants.get(0), request, context)
                     .flatMap(ingredient -> needs.lookAround(ingredient, context.permissions()));
             if (look.isPresent()) {
                 return Optional.of(new LooksBeforeChoosing(look.get(),
@@ -175,15 +179,22 @@ public final class RecipeSource implements ItemSource {
     }
 
     // 这种做法缺的第一样原料，按还缺几件发请求；什么都不缺给空。
-    private Optional<ItemRequest> firstMissing(WorkstationRecipe variant, ItemRequest request) {
+    private Optional<ItemRequest> firstMissing(WorkstationRecipe variant, ItemRequest request, SourceContext context) {
         for (WorkstationRecipe.IngredientStack ingredient : variant.ingredients()) {
             int needed = ingredient.count() * timesNeeded(variant, request.count());
-            int carried = CarriedItems.matching(backpack, offhand, ingredient.item(), tags);
+            int carried = choice.carried(ingredient);
             if (carried < needed) {
-                return Optional.of(new ItemRequest(ingredient.item(), needed - carried, "补" + variant.result().describe() + "的原料"));
+                return Optional.of(new ItemRequest(pick(ingredient, needed - carried, context), needed - carried,
+                        "补" + variant.result().describe() + "的原料"));
             }
         }
         return Optional.empty();
+    }
+
+    // 这一格缺了去弄哪一样：可以互换的原料身上有的先用，没有挑最省的；现做缺几件按这个来源最省的做法算。
+    private WantedItem pick(WorkstationRecipe.IngredientStack ingredient, int needed, SourceContext context) {
+        return choice.pick(ingredient, needed, context, (asked, at) -> ranked(asked, at).stream()
+                .mapToInt(recipe -> missingFor(recipe, asked.count())).min().orElse(Integer.MAX_VALUE));
     }
 
     // 缺得一样多的几种做法排在后面备着：要"任意木板"、身上一根原木都没有时，十来种木板缺的都是一根原木，
@@ -214,10 +225,11 @@ public final class RecipeSource implements ItemSource {
         double farthest = 0;
         for (WorkstationRecipe.IngredientStack ingredient : variant.ingredients()) {
             int needed = ingredient.count() * timesNeeded(variant, request.count());
-            int carried = CarriedItems.matching(backpack, offhand, ingredient.item(), tags);
+            int carried = choice.carried(ingredient);
             if (carried >= needed) continue;
             Optional<Double> distance = needs.nearestDistanceBlocks(
-                    new ItemRequest(ingredient.item(), needed - carried, "补" + variant.result().describe() + "的原料"),
+                    new ItemRequest(pick(ingredient, needed - carried, context), needed - carried,
+                            "补" + variant.result().describe() + "的原料"),
                     context.permissions());
             if (distance.isEmpty()) return Double.MAX_VALUE;
             farthest = Math.max(farthest, distance.get());
@@ -323,7 +335,7 @@ public final class RecipeSource implements ItemSource {
 
     // 这件东西是不是这条配方要的原料：烧炼时不把要烧的东西当燃料。
     private boolean isIngredientOf(WorkstationRecipe recipe, String itemId) {
-        return recipe.ingredients().stream().anyMatch(ingredient -> ingredient.item().matches(itemId, tags.tagsOf(itemId)));
+        return recipe.ingredients().stream().anyMatch(ingredient -> ingredient.accepts(itemId, tags.tagsOf(itemId)));
     }
 
     // 这条配方的原料里有没有一样本身就满足这次要的东西：有的话做它不会让要的东西变多。
@@ -337,16 +349,7 @@ public final class RecipeSource implements ItemSource {
     }
 
     private boolean consumesWhatIsWanted(WorkstationRecipe recipe, WantedItem wanted) {
-        for (WorkstationRecipe.IngredientStack ingredient : recipe.ingredients()) {
-            WantedItem item = ingredient.item();
-            if (!item.isTag()) {
-                if (wanted.matches(item.itemId(), tags.tagsOf(item.itemId()))) return true;
-            } else if (wanted.isTag() ? wanted.tagId().equals(item.tagId())
-                    : tags.tagsOf(wanted.itemId()).contains(item.tagId())) {
-                return true;
-            }
-        }
-        return false;
+        return recipe.ingredients().stream().anyMatch(ingredient -> choice.satisfies(ingredient, wanted));
     }
 
     // 照这条配方做够要的件数，身上还缺几件原料（各种原料缺的加起来）。
@@ -354,8 +357,7 @@ public final class RecipeSource implements ItemSource {
         int times = timesNeeded(recipe, count);
         int missing = 0;
         for (WorkstationRecipe.IngredientStack ingredient : recipe.ingredients()) {
-            int carried = CarriedItems.matching(backpack, offhand, ingredient.item(), tags);
-            missing += Math.max(0, ingredient.count() * times - carried);
+            missing += Math.max(0, ingredient.count() * times - choice.carried(ingredient));
         }
         return missing;
     }
@@ -367,7 +369,7 @@ public final class RecipeSource implements ItemSource {
 
     // 背包合成的一整串：缺的原料逐项去弄，然后打开背包在合成格里做，不走工作台。
     private Action assembleInInventory(WorkstationRecipe recipe, int times, SourceContext context) {
-        Shortfall shortfall = new Shortfall(recipe);
+        Shortfall shortfall = new Shortfall(recipe, context);
         List<Action> steps = shortfall.ingredients(times, context.permissions());
         Optional<Action> run = runs.runInInventory(recipe, times, context.records());
         if (run.isEmpty()) {
@@ -383,10 +385,10 @@ public final class RecipeSource implements ItemSource {
     // 备齐后差一点就在关口再补一轮（见 topUp），不带着缺口去动手。
     private Action assemble(WorkstationRecipe recipe, WorldPosition station, int times, SourceContext context) {
         Permissions permissions = context.permissions();
-        Shortfall shortfall = new Shortfall(recipe);
+        Shortfall shortfall = new Shortfall(recipe, context);
         List<Action> steps = shortfall.ingredients(times, permissions);
         if (recipe.kind().cooks()) {
-            fuelNeed(recipe, times).ifPresent(fuel -> steps.add(shortfall.tolerant(fuel, 0, permissions)));
+            fuelNeed(recipe, times).ifPresent(fuel -> steps.add(shortfall.tolerant(fuel, null, 0, permissions)));
         }
         // 备完料先看够不够做一份：一份都不够就不去摆设施、不走过去，以备料的原因收场。
         steps.add(topUp(recipe, shortfall, times, permissions));
@@ -520,36 +522,42 @@ public final class RecipeSource implements ItemSource {
      */
     private final class Shortfall {
         private final WorkstationRecipe recipe;
+        /** 这次动手时的现场：可以互换的原料挑哪一样时按它问代价。 */
+        private final SourceContext context;
         /** 弄不来的原料：东西×件数。 */
         private final List<String> missing = new ArrayList<>();
         /** 里层没弄来的结论句。 */
         private final List<String> reasons = new ArrayList<>();
 
-        private Shortfall(WorkstationRecipe recipe) {
+        private Shortfall(WorkstationRecipe recipe, SourceContext context) {
             this.recipe = recipe;
+            this.context = context;
         }
 
         // 缺的原料逐项回引擎去弄，身上已有的不再要，用途写清是为谁备的。这一次里已经知道拿不到的那样排最前：
         // 身上一份的量都没有，碰一下就放弃这个做法，不先去弄排在它前面的原料（没有白色羊毛，就不先去采染红色要的花）。
         List<Action> ingredients(int times, Permissions permissions) {
             List<WorkstationRecipe.IngredientStack> ordered = new ArrayList<>(recipe.ingredients());
-            ordered.sort(Comparator.comparingInt(
-                    (WorkstationRecipe.IngredientStack ingredient) -> needs.knownUnobtainable(ingredient.item()) ? 0 : 1));
+            ordered.sort(Comparator.comparingInt((WorkstationRecipe.IngredientStack ingredient) ->
+                    ingredient.options().stream().allMatch(needs::knownUnobtainable) ? 0 : 1));
             List<Action> steps = new ArrayList<>();
             for (WorkstationRecipe.IngredientStack ingredient : ordered) {
                 int needed = ingredient.count() * times;
-                int carried = CarriedItems.matching(backpack, offhand, ingredient.item(), tags);
+                int carried = choice.carried(ingredient);
                 if (carried < needed) {
-                    steps.add(tolerant(new ItemRequest(ingredient.item(), needed - carried,
-                            "为「做" + recipe.result().describe() + "」备原料"), ingredient.count(), permissions));
+                    // 可以互换的原料身上没有就挑最省的那样去弄，不只认配方里排第一的。
+                    steps.add(tolerant(new ItemRequest(pick(ingredient, needed - carried, context), needed - carried,
+                            "为「做" + recipe.result().describe() + "」备原料"), ingredient, ingredient.count(), permissions));
                 }
             }
             return steps;
         }
 
-        // 备料的一步：回引擎去弄。perCraft 是做一份要几件，为 0 表示不按份数止损（燃料不够还能烧一部分）。
-        Action tolerant(ItemRequest request, int perCraft, Permissions permissions) {
-            return new Tolerant(needs.actionFor(request, permissions), request, perCraft);
+        // 备料的一步：回引擎去弄。perCraft 是做一份要几件，为 0 表示不按份数止损（燃料不够还能烧一部分）；
+        // ingredient 是这一步备的哪一格原料（燃料没有为空），身上够不够一份按这一格收的几样一起数。
+        Action tolerant(ItemRequest request, WorkstationRecipe.IngredientStack ingredient, int perCraft,
+                Permissions permissions) {
+            return new Tolerant(needs.actionFor(request, permissions), request, ingredient, perCraft);
         }
 
         // 原料没备齐、一份都做不了：结论句点名缺哪几样，展开写里层没弄来的结论。
@@ -594,11 +602,14 @@ public final class RecipeSource implements ItemSource {
         private final class Tolerant implements Action {
             private final Action step;
             private final ItemRequest request;
+            private final WorkstationRecipe.IngredientStack ingredient;
             private final int perCraft;
 
-            private Tolerant(Action step, ItemRequest request, int perCraft) {
+            private Tolerant(Action step, ItemRequest request, WorkstationRecipe.IngredientStack ingredient,
+                    int perCraft) {
                 this.step = step;
                 this.request = request;
+                this.ingredient = ingredient;
                 this.perCraft = perCraft;
             }
 
@@ -609,7 +620,9 @@ public final class RecipeSource implements ItemSource {
                 if (!(status instanceof ActionStatus.Failed failed)) return status;
                 missing.add(request.wanted().describe() + "×" + request.count());
                 reasons.add(failed.problem().headline());
-                if (perCraft > 0 && CarriedItems.matching(backpack, offhand, request.wanted(), tags) < perCraft) {
+                int onHand = ingredient == null ? CarriedItems.matching(backpack, offhand, request.wanted(), tags)
+                        : choice.carried(ingredient);
+                if (perCraft > 0 && onHand < perCraft) {
                     return ActionStatus.failed(problem());
                 }
                 return ActionStatus.done();
@@ -754,7 +767,7 @@ public final class RecipeSource implements ItemSource {
     private String riskNote(WorkstationRecipe recipe, int times, SourceContext context) {
         StringBuilder note = new StringBuilder("还要备齐原料：");
         for (WorkstationRecipe.IngredientStack ingredient : recipe.ingredients()) {
-            note.append(ingredient.item().describe()).append("×").append(ingredient.count() * times).append(" ");
+            note.append(ingredient.describe()).append("×").append(ingredient.count() * times).append(" ");
         }
         if (recipe.kind().cooks()) {
             note.append("；").append(workstationName(recipe.kind())).append("烧").append(times).append("次还要燃料");
