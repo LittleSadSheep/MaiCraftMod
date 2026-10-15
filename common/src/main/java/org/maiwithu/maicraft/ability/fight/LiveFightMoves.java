@@ -11,6 +11,7 @@ import net.minecraft.world.entity.Entity;
 
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
 import org.maiwithu.maicraft.behavior.inventory.PicksUpDrops;
+import org.maiwithu.maicraft.behavior.combat.DragonGeometry;
 import org.maiwithu.maicraft.behavior.combat.Footwork;
 import org.maiwithu.maicraft.behavior.combat.LiveBattleMoves;
 import org.maiwithu.maicraft.behavior.combat.ModRangedWeapons;
@@ -83,6 +84,35 @@ public final class LiveFightMoves implements FightMoves {
     @Override public boolean night(TickContext context) { return battle.night(context); }
     @Override public Action returnProjectile(int projectileId) { return battle.returnProjectile(projectileId); }
     @Override public Action pillarUp(TickContext context) { return battle.pillarUp(context); }
+
+    // 打龙要的本事：砍龙头、远射水晶、算弹道、迈步不对视末影人、地表与区块、副手的盾。
+    @Override public Action strikeHead(TickContext context, int dragonId) { return battle.strikeHead(context, dragonId); }
+
+    @Override
+    public Action shoot(TickContext context, int entityId, double maxRange) {
+        return battle.shoot(context, entityId, maxRange);
+    }
+
+    @Override
+    public boolean arcTo(TickContext context, int entityId, double maxRange) {
+        return battle.arcTo(context, entityId, maxRange);
+    }
+
+    @Override
+    public void stepAvertingGaze(TickContext context, int faceEntityId, Footwork.Step step) {
+        battle.stepAvertingGaze(context, faceEntityId, step);
+    }
+
+    @Override public DragonGeometry.Surface surface(TickContext context) { return battle.surface(context); }
+    @Override public boolean loaded(TickContext context, double x, double z) { return battle.loaded(context, x, z); }
+    @Override public boolean hasShield(TickContext context) { return battle.hasShield(context); }
+
+    // 经验：客户端收到的等级与总点数（服务器同步过来的）。
+    @Override
+    public Experience experience(TickContext context) {
+        var self = context.player() == null ? null : context.player().localPlayer();
+        return self == null ? null : new Experience(self.experienceLevel, self.totalExperience);
+    }
 
     @Override public double[] selfPosition(TickContext context) { return battle.selfPosition(context); }
 

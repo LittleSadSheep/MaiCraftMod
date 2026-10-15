@@ -19,6 +19,8 @@ import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.behavior.combat.Battle;
 import org.maiwithu.maicraft.behavior.combat.Battlefield;
 import org.maiwithu.maicraft.behavior.combat.CombatSenses;
+import org.maiwithu.maicraft.behavior.combat.DragonArena;
+import org.maiwithu.maicraft.behavior.combat.DragonCombat;
 import org.maiwithu.maicraft.behavior.combat.ThreatAssessment;
 import org.maiwithu.maicraft.behavior.combat.WeaponChoice;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
@@ -44,6 +46,11 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  *
  * <p>先评估再动手：打不过不开打，说清差在血、武器还是数量；打着打着血线破了引擎会撤，甩开所有追击的才算撤成，
  * 撤离了不冒充打赢。击败确认后就地捡一下掉落物，捡不到写进结果，不影响击败判定。
+ *
+ * <p>打末影龙（点名龙，或不点名、身边加载着活龙、没限定别的种类）：开打前不按普通怪评估，改查装备——
+ * 近战与能射的都没有、或还有水晶却没有能射的，如实说缺什么；怎么打交给引擎里龙的那一套。看到龙的死亡动画就算击败，
+ * 再等它消失、出口门亮起（最多二十秒）收经验；只看到龙不见了不算。回血一分钟不涨、打到一半箭用完而水晶还在、
+ * 连着五分钟龙都没趴下也没打到什么，都如实收场。
  */
 final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatResponder {
 
@@ -52,6 +59,10 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
 
     /** 连续半分钟没打中也没走成才算卡住。 */
     private static final long STUCK_AFTER_TICKS = 20L * 30;
+    /** 看到龙的死亡动画后最多再等这么久（刻）：等它消失、出口门亮起，经验球飞过来。 */
+    static final long DRAGON_SETTLE_TICKS = 20L * 20;
+    /** 打龙时连着这么久（刻）龙一次都没趴下、也没真打到什么，算卡住。 */
+    static final long DRAGON_IDLE_TICKS = 20L * 60 * 5;
 
     private final FightInput input;
     private final CombatSenses senses;
@@ -85,6 +96,17 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     private double[] lastKillSpot;
     private boolean fled;
     private TickContext currentContext;
+
+    /** 打龙：这一仗打的那条龙（实体编号）；不打龙为 -1。 */
+    private int dragonEntity = -1;
+    /** 这条龙在结果里的叫法与类型。 */
+    private String dragonName;
+    private String dragonType;
+    /** 看到了龙的死亡动画（击败）；没看到死亡动画龙就不见了（跟丢）。 */
+    private boolean dragonDefeated;
+    private boolean dragonLost;
+    /** 开打前的经验：结果写这一仗得了多少。 */
+    private FightMoves.Experience experienceBefore;
 
     /** 拾荒正在做的那一步（走向某件掉落物）。 */
     private Action current;
@@ -140,11 +162,35 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
             }
             named.add(locked);
         }
+        noticeDragon();
+        if (dragonEntity >= 0) return Next.go(Phase.ASSESS, "打末影龙");
         return Next.go(Phase.ASSESS, named.isEmpty()
                 ? "清扫 " + input.radius() + " 格内的敌对生物" : "核实了 " + named.size() + " 个点名目标");
     }
 
+    // 打龙模式：点名的里有一条龙；或者不点名、身边加载着活龙、没限定别的种类（限定了 ender_dragon 也算）。
+    private void noticeDragon() {
+        for (SeenTargets.Locked locked : named) {
+            Optional<DragonArena> arena = senses.dragonArena(currentContext, locked.entityId());
+            if (arena.isPresent() && arena.get().dragon().id() == locked.entityId()) {
+                dragonEntity = locked.entityId();
+                dragonName = describeOf(locked);
+                dragonType = locked.type();
+                return;
+            }
+        }
+        if (!named.isEmpty()) return;
+        Optional<DragonArena> nearby = senses.dragonArena(currentContext, -1);
+        if (nearby.isEmpty()) return;
+        DragonArena.Dragon dragon = nearby.get().dragon();
+        if (input.entityType() != null && !input.entityType().equals(dragon.type())) return;
+        dragonEntity = dragon.id();
+        dragonType = dragon.type();
+        dragonName = dragon.type() + "（实体 " + dragon.id() + "）";
+    }
+
     private Next<Phase> assess(TickContext context) {
+        if (dragonEntity >= 0) return assessDragon(context);
         if (named.isEmpty()) {
             // 区域清扫先认下这一批：此刻半径内看得见的；墙后、地下看不见的不算，之后新刷的也不算。
             for (CombatSenses.Threat threat : senses.threats(context, input.radius())) {
@@ -179,13 +225,133 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
                 ? "有风险，打的时候盯着血线" : "评估能赢，开打");
     }
 
+    // 打龙开打前：龙不按普通怪评估（打不过不开打那套按怪的种类和数量算，套不到龙身上），改查装备，
+    // 缺什么如实说；血低不拒战，引擎会先退开回血。这一批别的敌对生物照常认下、照常评估写进结果。
+    private Next<Phase> assessDragon(TickContext context) {
+        Optional<DragonArena> arena = senses.dragonArena(context, dragonEntity);
+        if (arena.isEmpty()) {
+            return Next.fail(Problem.of(Problem.Kind.TARGET_GONE, dragonName + " 开打前就不见了（走远或卸载了）",
+                    "回到主岛出口门附近，看得到龙再打"));
+        }
+        boolean melee = moves.hasMeleeWeapon(context);
+        boolean shoot = moves.canShoot(context);
+        if (!melee && !shoot) {
+            return Next.fail(Problem.of(Problem.Kind.NEED_ITEM,
+                    "打末影龙手上什么都没有：要一把剑或斧（龙趴下时砍龙头），以及弓和箭（射末影水晶、射飞着的龙）",
+                    "备好剑或斧、弓和箭再来"));
+        }
+        List<DragonArena.Crystal> crystals = arena.get().crystals();
+        if (!crystals.isEmpty() && !shoot) return Next.fail(needArrows(crystals.size(), positions(crystals)));
+        if (!melee) {
+            recordAttempt("龙趴着时砍龙头", "身上没有近战武器：趴着的龙箭射不动，只能等它飞起来再射");
+        }
+        if (named.isEmpty()) {
+            for (CombatSenses.Threat threat : senses.threats(context, input.radius())) {
+                if (threat.visible() && threat.kind() != ThreatAssessment.Kind.PLAYER
+                        && (input.entityType() == null || threat.type().equals(input.entityType()))) {
+                    batch.add(threat.entityId());
+                    engaged.put(threat.entityId(), threat.type());
+                }
+            }
+        }
+        verdict = ThreatAssessment.assess(mySide(context), foesOf(context)).verdict();
+        experienceBefore = moves.experience(context);
+        battle = new Battle(senses, moves, new Roster(),
+                named.isEmpty() ? input.radius() : ThreatAssessment.VIGILANCE_RADIUS);
+        battle.offerShelter();
+        fightCursor = moves.dropCursor(context);
+        return Next.go(Phase.FIGHT, crystals.isEmpty() ? "开打末影龙" : "开打末影龙：先射 " + crystals.size() + " 颗末影水晶");
+    }
+
+    // 还有水晶却没有能射的：说清还剩几颗、在哪。
+    private static Problem needArrows(int count, List<String> where) {
+        return Problem.of(Problem.Kind.NEED_ITEM,
+                "还有 " + count + " 颗末影水晶没打掉（" + String.join("；", where) + "），身上没有弓和箭（或弩）射它们",
+                "带上弓和箭再来；铁栏笼里的要先搭上去拆开一根铁栏");
+    }
+
+    private static List<String> positions(List<DragonArena.Crystal> crystals) {
+        List<String> where = new ArrayList<>();
+        for (DragonArena.Crystal crystal : crystals) {
+            where.add(Math.round(Math.floor(crystal.x())) + ", " + Math.round(Math.floor(crystal.y())) + ", "
+                    + Math.round(Math.floor(crystal.z())) + (crystal.caged() ? "（铁栏笼里）" : ""));
+        }
+        return where;
+    }
+
+    // 打龙途中要收场的几种：回血一分钟不涨；箭用完了水晶还立着；连着五分钟龙没趴下、也没打到什么；
+    // 看到死亡动画后等够了（龙消失、门亮，或二十秒到了）。都不是返回 null，接着打。
+    private Next<Phase> dragonEnding(TickContext context) {
+        DragonCombat.Report report = battle == null ? null : battle.dragonReport().orElse(null);
+        if (report == null) return null;
+        if (dragonDefeated) {
+            boolean settled = report.goneAfterDying() || report.portal() != null && report.portal().lit()
+                    || context.gameTick() - report.dyingAt() >= DRAGON_SETTLE_TICKS;
+            if (!settled) return null;
+            // 龙收场了：点名的就收工；清扫的这一批还有别的，交回引擎接着打，龙场没了它会按普通打法来。
+            if (!named.isEmpty() && remainingNamed().isEmpty()) {
+                return lastKillSpot == null ? Next.done(settled()) : Next.go(Phase.LOOT, "龙打完了，就地捡一下");
+            }
+            return null;
+        }
+        if (dragonLost) return null;
+        if (report.restStalled()) {
+            CombatSenses.CombatProfile profile = senses.profile(context);
+            if (profile.foodCount() == 0) {
+                return Next.fail(Problem.of(Problem.Kind.NEED_ITEM,
+                        "退开回血一分钟血一点没涨（" + Math.round(profile.health()) + " 点血），身上没有能吃的",
+                        "带上吃的再来"));
+            }
+            return Next.fail(Problem.of(Problem.Kind.DANGER,
+                    "退开回血一分钟血一点没涨（" + Math.round(profile.health()) + " 点血，身上 " + profile.foodCount()
+                            + " 份口粮）", "看看饱食度与身上的吃的，回满血再来"));
+        }
+        if (report.standingCrystals() > 0 && !moves.canShoot(context)) {
+            List<String> standing = new ArrayList<>();
+            for (String left : report.crystalsLeft()) {
+                if (left.endsWith(DragonCombat.NOT_YET)) standing.add(left);
+            }
+            return Next.fail(Problem.of(Problem.Kind.NEED_ITEM,
+                    "箭用完了，还有 " + report.standingCrystals() + " 颗末影水晶没打掉（" + String.join("；", standing) + "）",
+                    "补些箭再来"));
+        }
+        if (context.gameTick() - report.lastEngagement() > DRAGON_IDLE_TICKS) {
+            String doing = report.dragon() == null ? "看不到龙" : "最后看到龙在" + activityName(report.dragon().activity());
+            return Next.fail(Problem.of(Problem.Kind.STUCK,
+                    "打末影龙连着五分钟，龙一次都没趴下，也没射中什么：" + doing + "，还剩 " + report.standingCrystals()
+                            + " 颗没打掉的水晶（水晶多时龙很少落地）",
+                    "先把能射的水晶射掉，或带上弓箭趁它飞近时射"));
+        }
+        return null;
+    }
+
+    private static String activityName(DragonArena.Activity activity) {
+        return switch (activity) {
+            case CIRCLING -> "盘旋";
+            case STRAFING -> "扫射";
+            case CHARGING -> "冲撞";
+            case LANDING -> "降落";
+            case WATCHING -> "趴着扫视";
+            case ROARING -> "趴着吼";
+            case BREATHING -> "趴着喷龙息";
+            case TAKING_OFF -> "起飞";
+            case DYING -> "死亡动画里";
+        };
+    }
+
     private Next<Phase> fight(TickContext context) {
         noteDefeats(context);
-        if (!named.isEmpty() && remainingNamed().isEmpty()) {
+        if (dragonEntity >= 0) {
+            Next<Phase> ending = dragonEnding(context);
+            if (ending != null) return ending;
+        }
+        if (!named.isEmpty() && remainingNamed().isEmpty() && !dragonSettling(context)) {
             // 点名目标都有了着落（打倒或跟丢）：就地捡一下掉落物再收场。
             return lastKillSpot == null ? Next.done(settled()) : Next.go(Phase.LOOT, "点名的都打倒了，就地捡一下");
         }
         Battle.Moment moment = battle.tick(context);
+        // 打龙：这一刻引擎刚看到龙倒下或不见了，收场前先记上，免得把跟丢的龙当成够不着。
+        noteDragon();
         if (moment.struck() || moment.fired()) weaponUsed = moves.mainHand(context);
         if (moment.struck()) hits++;
         // 射出去的箭另记：箭中没中服务器不单独回话，不混进"确认打中"的下数里（实机 10-14 拿弓清掉三只尸壳，hits 写 0 看着像没打）。
@@ -211,10 +377,30 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         };
     }
 
+    // 看到死亡动画后还在等龙消失、门亮：点名的龙已算击败，但先别收工，站在门边收经验。
+    private boolean dragonSettling(TickContext context) {
+        if (!dragonDefeated || battle == null) return false;
+        DragonCombat.Report report = battle.dragonReport().orElse(null);
+        return report != null && !report.goneAfterDying() && (report.portal() == null || !report.portal().lit())
+                && context.gameTick() - report.dyingAt() < DRAGON_SETTLE_TICKS;
+    }
+
     // 名单：点名的（还没倒下、没跟丢）或清扫的这一批，外加途中真打了角色的；给了 count 打够了就只还手。
+    // 打龙时龙不在名单里，由引擎里龙的那一套打。
     private final class Roster implements Battlefield.Roster {
         @Override
+        public boolean fightsDragon() {
+            return dragonEntity >= 0;
+        }
+
+        @Override
+        public int dragonId() {
+            return dragonEntity;
+        }
+
+        @Override
         public boolean wanted(CombatSenses.Threat threat, boolean attacker, boolean chasing) {
+            if (threat.entityId() == dragonEntity) return false;
             // 途中真打了角色的怪一并处理；没点名的玩家不自动还手，打不打他由 LLM 定。
             if (attacker && threat.kind() != ThreatAssessment.Kind.PLAYER) return true;
             if (countReached()) return false;
@@ -224,12 +410,16 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
 
         @Override
         public boolean primary(CombatSenses.Threat threat) {
+            if (threat.entityId() == dragonEntity) return false;
             return named.isEmpty() ? batch.contains(threat.entityId()) : remainingNamed().contains(threat.entityId());
         }
 
         @Override
         public List<Integer> namedIds() {
-            return countReached() ? List.of() : remainingNamed();
+            if (countReached()) return List.of();
+            List<Integer> ids = new ArrayList<>(remainingNamed());
+            ids.remove(Integer.valueOf(dragonEntity));
+            return ids;
         }
     }
 
@@ -248,7 +438,9 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
 
     // 谁倒下了：点名的逐个核对（不见了记跟丢），打过的逐个看有没有倒下；倒下的地方留给拾荒。
     private void noteDefeats(TickContext context) {
+        noteDragon();
         for (SeenTargets.Locked locked : named) {
+            if (locked.entityId() == dragonEntity) continue;
             String name = describeOf(locked);
             if (defeated.contains(name) || lostTrack.contains(name)) continue;
             SeenTargets.Observed observed = seenTargets.observe(context, locked.entityId());
@@ -267,6 +459,22 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
                 engaged.remove(entry.getKey());
                 markDefeated(entry.getValue() + "（实体 " + entry.getKey() + "）", entry.getValue(), observed);
             }
+        }
+    }
+
+    // 龙：看到死亡动画算击败（原版不会回头）；没看到死亡动画龙就不见了，算跟丢，不冒充打死。龙不掉东西，不拾荒。
+    private void noteDragon() {
+        if (dragonEntity < 0 || battle == null || dragonDefeated || dragonLost) return;
+        DragonCombat.Report report = battle.dragonReport().orElse(null);
+        if (report == null) return;
+        if (report.dyingSeen()) {
+            dragonDefeated = true;
+            defeated.add(dragonName);
+            recordChange(Change.of(Change.Kind.ENTITY_AFFECTED, dragonType, 1));
+            recordProgress("末影龙倒下了");
+        } else if (report.goneWithoutDying()) {
+            dragonLost = true;
+            lostTrack.add(dragonName);
         }
     }
 
@@ -359,6 +567,11 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     private TaskResult settled() {
         String summary = defeated.isEmpty() ? "打完了，没有确认击败的目标"
                 : "击败了 " + defeated.size() + " 个目标" + (lootGained.isEmpty() ? "，没捡到掉落物" : "，捡到 " + lootGained.size() + " 组掉落物");
+        // 打龙：龙不掉东西，不说"没捡到掉落物"；另外顺手打倒的照数。
+        if (dragonDefeated) {
+            summary = "打败了末影龙" + (defeated.size() > 1 ? "，另外击败了 " + (defeated.size() - 1) + " 个目标" : "")
+                    + (lootGained.isEmpty() ? "" : "，捡到 " + lootGained.size() + " 组掉落物");
+        }
         List<String> unreached = new ArrayList<>();
         for (SeenTargets.Locked locked : named) {
             if (remainingNamed().contains(locked.entityId())) unreached.add(describeOf(locked));
@@ -432,7 +645,29 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
             if (battle != null && battle.unreachable().contains(locked.entityId())) unreached.add(describeOf(locked));
         }
         return new FightDetails(List.copyOf(defeated), lostTrack, fled, verdictName(), weaponUsed, hits, shots, unreached,
-                retreatWhy, lootGained);
+                retreatWhy, lootGained, dragonDetails());
+    }
+
+    // 打龙这一节：射掉几颗、没打掉的在哪为什么、龙的血、死的证据、出口门、经验、回血与躲闪次数。不打龙为 null。
+    private DragonDetails dragonDetails() {
+        if (dragonEntity < 0 || battle == null) return null;
+        DragonCombat.Report report = battle.dragonReport().orElse(null);
+        if (report == null) return null;
+        List<String> defeat = new ArrayList<>();
+        if (report.dyingSeen()) defeat.add("看到了死亡动画");
+        if (report.goneAfterDying()) defeat.add("死亡动画后龙消失了");
+        if (report.portal() != null && report.portal().lit()) defeat.add("出口门亮了");
+        String health = report.dragon() == null ? null
+                : Math.round(report.dragon().health()) + " / " + Math.round(report.dragon().maxHealth());
+        String portal = report.portal() == null ? null
+                : Math.round(Math.floor(report.portal().x())) + ", " + Math.round(report.portal().y()) + ", "
+                        + Math.round(Math.floor(report.portal().z())) + (report.portal().lit() ? "（亮了）" : "（还没亮）");
+        FightMoves.Experience now = currentContext == null ? null : moves.experience(currentContext);
+        String experience = experienceBefore == null || now == null ? null
+                : "+" + (now.level() - experienceBefore.level()) + " 级（+" + (now.points() - experienceBefore.points()) + " 点）";
+        return new DragonDetails(report.crystalsDestroyed(), report.crystalsLeft(), report.crystalsGoneOtherwise(),
+                health, defeat, portal, experience, report.rests(),
+                new Dodges(report.breathDodges(), report.sweepDodges(), report.fireballDodges()));
     }
 
     /** 正在打的仗自己接得住吗：评估不是"打不过"、没在撤离，被攻击的生存需求就让位。 */
@@ -491,7 +726,7 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
      */
     record FightDetails(List<String> defeated, List<String> lostTrack, boolean fled, String threatVerdict,
                         String weapon, int hits, int shots, List<String> reachIssue, String retreat,
-                        List<String> lootGained) implements ResultDetails {
+                        List<String> lootGained, DragonDetails dragon) implements ResultDetails {
         FightDetails {
             defeated = List.copyOf(defeated);
             lostTrack = List.copyOf(lostTrack);
@@ -499,4 +734,28 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
             lootGained = List.copyOf(lootGained);
         }
     }
+
+    /**
+     * 打龙这一节。
+     *
+     * @param crystalsDestroyed     确认是我射掉的水晶数
+     * @param crystalsLeft          没打掉的水晶：在哪、为什么
+     * @param crystalsGoneOtherwise 不是我射掉却没了的水晶数
+     * @param health                最后看到的龙血量与上限
+     * @param defeat                龙死的证据（有几样写几样）
+     * @param exitPortal            出口门的坐标与亮没亮
+     * @param experience            这一仗得到的经验
+     * @param rests                 退开回血了几次
+     * @param dodges                躲开龙息、冲撞、火球各几次
+     */
+    record DragonDetails(int crystalsDestroyed, List<String> crystalsLeft, int crystalsGoneOtherwise, String health,
+                         List<String> defeat, String exitPortal, String experience, int rests, Dodges dodges) {
+        DragonDetails {
+            crystalsLeft = List.copyOf(crystalsLeft);
+            defeat = List.copyOf(defeat);
+        }
+    }
+
+    /** 躲开龙息、冲撞、火球各几次。 */
+    record Dodges(int breath, int charge, int fireball) {}
 }

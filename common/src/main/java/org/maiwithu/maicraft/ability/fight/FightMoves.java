@@ -30,4 +30,12 @@ interface FightMoves extends BattleMoves {
 
     /** 收进包的一样东西：物品 ID 与件数。 */
     record Gained(String item, int count) {}
+
+    /** 此刻的经验：打龙前后各读一次，结果写这一仗得了多少。没接上为 null。 */
+    default Experience experience(TickContext context) {
+        return null;
+    }
+
+    /** 经验：等级与总点数。 */
+    record Experience(int level, int points) {}
 }
