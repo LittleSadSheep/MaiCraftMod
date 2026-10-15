@@ -35,8 +35,8 @@ final class EnchantTask extends PhasedTask<EnchantTask.Phase> {
 
     /** 不给 target 时找台子的默认范围（格）。 */
     static final int DEFAULT_RADIUS = 32;
-    /** 找台子的分刻扫描：区块半径与每次查询的预算档（与找床同级）。 */
-    private static final int SCAN_CHUNK_RADIUS = 3;
+    /** 找台子的分刻扫描一次最多扫几个区块半径（与寻找同级，约 128 格）；radius 再大也只扫这么远。 */
+    private static final int MAX_SCAN_CHUNK_RADIUS = 8;
     private static final int QUERY_BUDGET = 200;
     /** 连续多少刻没有真实进展算卡住：装料与报价每步都有界，宽限给到几分钟。 */
     private static final long STUCK_AFTER_TICKS = 20L * 150;
@@ -138,15 +138,18 @@ final class EnchantTask extends PhasedTask<EnchantTask.Phase> {
     private Next<Phase> resolveTarget(TickContext context) {
         var target = input.target();
         if (target == null) {
-            // 不给 target：radius 内已加载区找最近的；没扫完下一刻再问，扫完没有写明找过的范围。
+            // 不给 target：按 radius 换算成区块半径扫已加载的地方，找最近的；没扫完下一刻再问。
+            // 扫完没有时写实际扫过的范围：radius 超过一次能扫的就照实说只扫了多远，不把没扫过的说成扫过了。
+            int chunks = Math.max(1, Math.min(MAX_SCAN_CHUNK_RADIUS, input.radius() / 16 + 1));
             var found = services.scans().query(context.player().level(),
                     context.player().localPlayer().blockPosition(), Set.of(Blocks.ENCHANTING_TABLE),
-                    1, SCAN_CHUNK_RADIUS, QUERY_BUDGET);
+                    1, chunks, QUERY_BUDGET);
             if (!found.complete()) return Next.stay();
             if (found.hits().isEmpty()) {
+                String range = input.radius() <= chunks * 16 ? "半径 " + input.radius() + " 格内"
+                        : "只扫了约 " + chunks * 16 + " 格内（一次最多扫这么远，要的是 " + input.radius() + " 格）";
                 return Next.fail(Problem.of(Problem.Kind.NOT_FOUND,
-                        "半径 " + input.radius() + " 格内已加载的地方没找到附魔台；不会就地造一个，"
-                                + "先 travel 或自己去建"));
+                        range + "已加载的地方没找到附魔台；不会就地造一个，先 travel 或自己去建"));
             }
             prepare.table = found.hits().get(0);
             return null;
@@ -167,8 +170,13 @@ final class EnchantTask extends PhasedTask<EnchantTask.Phase> {
             return fromPosition(at.get(), context);
         }
         if (target instanceof Target.Position position) {
-            return fromPosition(new WorldPosition(position.x(), position.y() == null ? 0 : position.y(),
-                    position.z(), position.dimension()), context);
+            // 坐标没给 y 是参数缺了，不当成 y=0 去看那格是什么，免得报"台子没了"让 LLM 以为台子被拆。
+            if (position.y() == null) {
+                return Next.fail(Problem.of(Problem.Kind.INVALID_PARAMETER,
+                        "附魔台的坐标没写 y", "补上附魔台那一格的 y，或用观察编号指它"));
+            }
+            return fromPosition(new WorldPosition(position.x(), position.y(), position.z(), position.dimension()),
+                    context);
         }
         return Next.fail(Problem.of(Problem.Kind.INVALID_PARAMETER,
                 "附魔台的目标对象只认观察编号（b#）、坐标或记过的地点"));

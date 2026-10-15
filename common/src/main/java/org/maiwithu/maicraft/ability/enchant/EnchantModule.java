@@ -100,7 +100,7 @@ public final class EnchantModule implements AbilityModule {
         long radius = step.goal().params().has("radius")
                 ? step.goal().params().integer("radius") : EnchantTask.DEFAULT_RADIUS;
         return new StepDecision.Run(new EnchantInput(step.goal().params().text("item"), tier,
-                (int) Math.min(radius, Integer.MAX_VALUE), step.goal().target()));
+                (int) Math.min(radius, Integer.MAX_VALUE), step.goal().target(), step.goal().permissions()));
     }
 
     /** 物品 ID 注册过、或标签下挂着注册物品；都没有给一句说得清的原因，通过返回 null。 */
@@ -112,11 +112,8 @@ public final class EnchantModule implements AbilityModule {
     }
 
     @Override public void registerTasks(TaskFactories factories) {
-        factories.register(EnchantInput.class, input -> new EnchantTask(input, services, currentPermissions()));
-    }
-
-    // 附魔不改世界（消耗的是自己的等级与青金石），不需要额外许可；台子按「无主的东西照常用」。
-    private Permissions currentPermissions() {
-        return Permissions.DEFAULT;
+        // 附魔本身只耗自己的等级与青金石，但走去台子、腾背包、拿附魔料都要看这次目标的许可：
+        // LLM 下 change_blocks=none 或允许动贵重品，都得原样传下去，不悄悄换成默认许可。
+        factories.register(EnchantInput.class, input -> new EnchantTask(input, services, input.permissions()));
     }
 }
