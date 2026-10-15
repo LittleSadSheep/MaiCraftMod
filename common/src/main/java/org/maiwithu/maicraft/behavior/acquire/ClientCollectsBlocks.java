@@ -76,6 +76,8 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
         /** 这一格已经挖了几刻；跳过了几格。 */
         private int digTicks;
         private int skipped;
+        /** 被生存需求打断过，回来还没推进：挖到一半被叫走的，回来先重新走到跟前。 */
+        private boolean interrupted;
 
         Collect(List<BlockPos> cells, Permissions permissions, Predicate<BlockPos> chainable) {
             this.cells = cells;
@@ -89,6 +91,17 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
 
         @Override public ActionStatus tick(TickContext context) {
             if (stage == Stage.DONE) return ActionStatus.done();
+            // 挖到一半被打断（自卫撤离几十格、去找吃的）：回来时人多半已经不在跟前，挖的那一下也早松手了。
+            // 先重新走到这一格跟前再挖，挖的限时从头算：被打断和走回来的时间不算进"挖了十五秒没下来"。
+            // 实机 10-15 收床被饥饿打断，回来隔着老远接着"挖"，十五秒一到就说挖不下来，床丢在了野外。
+            if (interrupted) {
+                interrupted = false;
+                if (stage == Stage.DIG) {
+                    closeStep();
+                    digTicks = 0;
+                    stage = Stage.APPROACH;
+                }
+            }
             // 这一格已经没了（上一格连锁时一起挖掉了）：不走过去，接着下一格。
             if (step == null && stage == Stage.APPROACH && digs.gone(context, cell())) return skipGone();
             if (step == null) {
@@ -167,8 +180,10 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
             }
         }
 
+        // 被打断：手上那一步先停住；记下来，回来时挖到一半的那一格要重新走到跟前。
         @Override public void pause() {
             if (step != null) step.pause();
+            interrupted = true;
         }
 
         @Override public void close() {

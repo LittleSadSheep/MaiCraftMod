@@ -180,4 +180,22 @@ class ClientCollectsBlocksTest {
         collect.close();
         assertTrue(dig.closed);
     }
+
+    @Test
+    void 挖到一半被打断_回来先重新走到跟前_挖的限时从头算() {
+        // 实机 10-15：收床挖到一半被饥饿叫走，回来隔着老远接着挖，挖的时间连着打断前的一起算，
+        // 十五秒一到就说挖不下来。回来要先走回跟前，挖的限时从头算。
+        Step digging = new Step("挖", ActionStatus.running());
+        Action collect = collects(new Step("走", ActionStatus.done()), digging, new Step("捡", ActionStatus.done()))
+                .collect(ORE, Permissions.DEFAULT).orElseThrow();
+        for (int i = 0; i < 200; i++) collect.tick(null);
+        collect.pause();
+        assertTrue(digging.paused, "被打断时先停住挖");
+        ActionStatus status = ActionStatus.running();
+        // 打断前已挖了快两百刻；回来再挖两百五十刻也不该按"十五秒挖不下来"收场。
+        for (int i = 0; i < 250 && status instanceof ActionStatus.Running; i++) status = collect.tick(null);
+        assertTrue(status instanceof ActionStatus.Running, status.toString());
+        assertEquals(2, log.stream().filter("走"::equals).count(), "回来先重新走到跟前");
+        assertTrue(digging.closed, "打断前那一下挖掘先收尾，重新走过去再挖");
+    }
 }
