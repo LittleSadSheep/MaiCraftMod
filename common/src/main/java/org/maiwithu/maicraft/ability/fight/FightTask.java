@@ -107,18 +107,22 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     }
 
     private final Driver driver = new Driver();
+    /** 这一刻决定换去的阶段：基类紧接着收尾外壳，靠它分清是换阶段还是任务真结束。 */
+    private Phase goingTo;
 
     @Override protected Action enter(Phase phase) { return driver; }
 
     @Override
     protected Next<Phase> tick(Phase phase, TickContext context) {
         currentContext = context;
-        return switch (phase) {
+        Next<Phase> next = switch (phase) {
             case CHECK -> check();
             case ASSESS -> assess(context);
             case FIGHT -> fight(context);
             case LOOT -> loot(context);
         };
+        goingTo = next instanceof Next.Go<Phase> go ? go.phase() : null;
+        return next;
     }
 
     private Next<Phase> check() {
@@ -460,10 +464,13 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         @Override
         public void close() {
             // 换阶段或任务结束时基类收尾外壳：拾荒的走到、引擎的出手与寻路、拉了一半的弓都收尾。
+            // 评估完换去开打时，引擎是刚为这一仗建好的，不关它，开打第一刻就能出手、走位。
+            boolean battleGoesOn = goingTo == Phase.FIGHT;
+            goingTo = null;
             dropCurrent();
             if (pickup != null) pickup.close();
             pickup = null;
-            if (battle != null) battle.close();
+            if (battle != null && !battleGoesOn) battle.close();
         }
 
         @Override
