@@ -100,6 +100,10 @@ public final class FindModule implements AbilityModule {
     @Override
     public StepDecision decide(StepContext step) {
         Goal goal = step.goal();
+        // block 与 blocks 是同一种找法的两种写法：两个都给时说不清要找哪份，按参数错误报，不悄悄只用一份。
+        if (goal.params().has("block") && goal.params().has("blocks")) {
+            return new StepDecision.Finish(failInvalid("block 和 blocks 只给一个：一种用 block，几种用 blocks"));
+        }
         List<String> blocks = goal.params().has("block") ? List.of(goal.params().text("block"))
                 : goal.params().has("blocks") ? goal.params().list("blocks") : null;
         List<String> entities = goal.params().has("entity") ? goal.params().list("entity") : null;

@@ -119,6 +119,9 @@ class FindModuleTest {
         assertEquals(Problem.Kind.INVALID_PARAMETER,
                 problemOf(goal("{\"block\": \"minecraft:chest\", \"entity\": [\"minecraft:sheep\"]}")).kind(),
                 "两种一起给说不清找什么");
+        assertEquals(Problem.Kind.INVALID_PARAMETER,
+                problemOf(goal("{\"block\": \"minecraft:chest\", \"blocks\": [\"minecraft:barrel\"]}")).kind(),
+                "block 和 blocks 一起给，不悄悄只找 block");
     }
 
     @Test
