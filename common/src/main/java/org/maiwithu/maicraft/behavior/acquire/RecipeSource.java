@@ -58,8 +58,6 @@ public final class RecipeSource implements ItemSource {
     /** 排远近前最多看几种做法：装了加木头的模组时木板有几十种，先全拿来按远近排，再取最近的几种试。 */
     private static final int VARIANT_POOL = 64;
 
-    /** 烧炼一件东西要烧多少刻：原版熔炉的固定速度。 */
-    private static final int SMELT_TICKS_PER_ITEM = 200;
     /** 备燃料时的规划数字：一块煤烧 1600 刻，按它算要带几块，实际烧多久以燃料表为准。 */
     private static final int PLANNED_COAL_BURN_TICKS = 1600;
     private static final String COAL = "minecraft:coal";
@@ -104,7 +102,8 @@ public final class RecipeSource implements ItemSource {
     /** 认所有种类配方、不就地摆设施的来源：就地摆放与种类分路接入前的老写法。 */
     public RecipeSource(ReadsRecipes recipes, WorldMemory memory, ReadsFuels fuels, RecipeRuns runs,
             BackpackView backpack, OffhandContents offhand, ReadsItemTags tags, ItemNeeds needs) {
-        this(Set.of(WorkstationRecipe.Kind.CRAFTING, WorkstationRecipe.Kind.SMELTING, WorkstationRecipe.Kind.STONECUTTING),
+        this(Set.of(WorkstationRecipe.Kind.CRAFTING, WorkstationRecipe.Kind.SMELTING, WorkstationRecipe.Kind.BLASTING,
+                        WorkstationRecipe.Kind.SMOKING, WorkstationRecipe.Kind.STONECUTTING),
                 recipes, memory, fuels, runs, backpack, offhand, tags, needs, null, null);
     }
 
@@ -123,10 +122,10 @@ public final class RecipeSource implements ItemSource {
     }
 
     @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
-        List<WorkstationRecipe> candidates = ranked(request);
+        List<WorkstationRecipe> candidates = ranked(request, context);
         if (candidates.isEmpty()) {
             return new SourceQuote.Unavailable(describe(),
-                    "游戏里没有做出" + request.wanted().describe() + "的配方");
+                    StationFallbacks.noRecipeReason(request.wanted(), recipes.recipesProducing(request.wanted()), kinds));
         }
         WorkstationRecipe recipe = candidates.getFirst();
         // 摆得进 2×2 的合成在背包合成格里做：不用找工作台，也不用先摆一个，新世界开局做木板、工作台就靠它。
@@ -146,7 +145,7 @@ public final class RecipeSource implements ItemSource {
     }
 
     @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
-        List<WorkstationRecipe> candidates = ranked(request);
+        List<WorkstationRecipe> candidates = ranked(request, context);
         WorkstationRecipe recipe = candidates.stream()
                 .filter(candidate -> candidate.id().equals(offer.hint()))
                 .findFirst()
@@ -164,7 +163,7 @@ public final class RecipeSource implements ItemSource {
                     .flatMap(ingredient -> needs.lookAround(ingredient, context.permissions()));
             if (look.isPresent()) {
                 return Optional.of(new LooksBeforeChoosing(look.get(),
-                        () -> run(variantsFor(recipe, ranked(request), request, context), recipe, request, context)));
+                        () -> run(variantsFor(recipe, ranked(request, context), request, context), recipe, request, context)));
             }
         }
         return Optional.of(run(variants, recipe, request, context));
@@ -229,15 +228,19 @@ public final class RecipeSource implements ItemSource {
     // 用拿得到的配方排个先后，像玩家一样先看手头：原料身上缺得最少的那种优先（要"任意木板"、背包里有云杉原木，
     // 就做云杉木板，不去找竹子）；缺得一样多时，摆得进背包合成格的优先，再挑原料种类最少的。
     // 拿要的东西本身当原料的配方不算做法：给床换个颜色、给羊毛染色，做完身上的床、羊毛一件没多。
-    private List<WorkstationRecipe> ranked(ItemRequest request) {
+    // 能用的做法按先后排：高炉、烟熏炉这类只用现成的，附近没记得一台就不算做法（不会为了快一倍去凑一台）；
+    // 缺料一样、原料一样时烧得快的在前——记得高炉就把矿石拿去高炉烧，没有照旧用熔炉。
+    private List<WorkstationRecipe> ranked(ItemRequest request, SourceContext context) {
         return recipes.recipesProducing(request.wanted()).stream()
                 .filter(recipe -> kinds.contains(recipe.kind()))
+                .filter(recipe -> recipe.kind().placeable() || findStation(recipe.kind(), context).isPresent())
                 .filter(recipe -> !consumesWhatIsWanted(recipe, request.wanted()))
                 .filter(recipe -> !consumesOuterWanted(recipe))
                 .sorted(MaterialPreference.first(preferred(request), tags)
                         .thenComparingInt((WorkstationRecipe candidate) -> missingFor(candidate, request.count()))
                         .thenComparingInt(candidate -> inInventory(candidate) ? 0 : 1)
-                        .thenComparingInt(candidate -> candidate.ingredients().size()))
+                        .thenComparingInt(candidate -> candidate.ingredients().size())
+                        .thenComparingInt(candidate -> candidate.kind().plannedCookTicks()))
                 .toList();
     }
 
@@ -382,11 +385,17 @@ public final class RecipeSource implements ItemSource {
         Permissions permissions = context.permissions();
         Shortfall shortfall = new Shortfall(recipe);
         List<Action> steps = shortfall.ingredients(times, permissions);
-        if (recipe.kind() == WorkstationRecipe.Kind.SMELTING) {
+        if (recipe.kind().cooks()) {
             fuelNeed(recipe, times).ifPresent(fuel -> steps.add(shortfall.tolerant(fuel, 0, permissions)));
         }
         // 备完料先看够不够做一份：一份都不够就不去摆设施、不走过去，以备料的原因收场。
         steps.add(topUp(recipe, shortfall, times, permissions));
+        if (station == null && !recipe.kind().placeable()) {
+            // 报价时记得的高炉、烟熏炉动手时不见了：不会为它去摆一台，整串以问题收场，由引擎换别的路（熔炉照旧能用）。
+            steps.add(StationFallbacks.stationGone(recipe.kind()));
+            return new StepwiseActions("记得的" + workstationName(recipe.kind()) + "不见了",
+                    steps.toArray(Action[]::new));
+        }
         if (station == null) {
             // 附近没有记住的设施：先去弄一个设施方块、在身边放下，再到新设施上做。
             // 动手那一步等摆完才认新设施的位置（它的记录是摆台这一步才写下的），少这一步就只剩摆台、不做东西。
@@ -632,25 +641,11 @@ public final class RecipeSource implements ItemSource {
         // 接缝没接上、或现场放不下时，这一步以问题收场，整串停在摆台之前，不冒充做成了。
         Optional<Action> placing = placer == null ? Optional.empty() : placer.placeNearby(blockType);
         if (placing.isEmpty()) {
-            steps.add(cannotPlace(recipe));
+            steps.add(StationFallbacks.cannotPlace(recipe.kind()));
         } else {
             placing.ifPresent(steps::add);
         }
         return steps;
-    }
-
-    // 摆不了设施的动作：一推进一步就带着问题失败，免得"备料成功"冒充摆好了台子。
-    private Action cannotPlace(WorkstationRecipe recipe) {
-        String name = workstationName(recipe.kind());
-        return new Action() {
-            @Override public ActionStatus tick(TickContext context) {
-                return ActionStatus.failed(Problem.of(Problem.Kind.UNSUPPORTED,
-                        "在身边放下" + name + "的现场动作还没接上，做不了"));
-            }
-            @Override public String describe() {
-                return "放" + name + "的现场动作还没接上";
-            }
-        };
     }
 
     // 报价时没找到记住的设施：能就地摆就报"摆一个再做"，摆不了就如实说没有设施。
@@ -673,7 +668,7 @@ public final class RecipeSource implements ItemSource {
 
     // 烧炼要的燃料：身上有烧得着的就用身上的（挑烧得最久的），一件都没有才去弄煤。
     private Optional<ItemRequest> fuelNeed(WorkstationRecipe recipe, int times) {
-        int smeltTicks = times * SMELT_TICKS_PER_ITEM;
+        int smeltTicks = times * recipe.kind().plannedCookTicks();
         // 身上能烧的加起来够不够：十块木板能烤好几块肉，不能只看最耐烧的一件就说要去弄煤。
         // 工具、武器这类一格一件的不算燃料，这次要烧的原料也不算。
         long burnable = 0;
@@ -760,27 +755,19 @@ public final class RecipeSource implements ItemSource {
         for (WorkstationRecipe.IngredientStack ingredient : recipe.ingredients()) {
             note.append(ingredient.item().describe()).append("×").append(ingredient.count() * times).append(" ");
         }
-        if (recipe.kind() == WorkstationRecipe.Kind.SMELTING) {
-            note.append("；烧").append(times).append("次还要燃料");
+        if (recipe.kind().cooks()) {
+            note.append("；").append(workstationName(recipe.kind())).append("烧").append(times).append("次还要燃料");
         }
         return note.toString().trim();
     }
 
-    /** 设施的方块类型：配方在哪种设施上做，就在记忆里找哪种。 */
+    /** 设施的方块类型：配方在哪种设施上做，就在记忆里找哪种；只在设施种类那一处记。 */
     private static String workstationBlockType(WorkstationRecipe.Kind kind) {
-        return switch (kind) {
-            case CRAFTING -> "minecraft:crafting_table";
-            case SMELTING -> "minecraft:furnace";
-            case STONECUTTING -> "minecraft:stonecutter";
-        };
+        return kind.blockType();
     }
 
     private static String workstationName(WorkstationRecipe.Kind kind) {
-        return switch (kind) {
-            case CRAFTING -> "工作台";
-            case SMELTING -> "熔炉";
-            case STONECUTTING -> "石切台";
-        };
+        return kind.displayName();
     }
 
     private static double distance(MemoryRecord record, SourceContext context) {

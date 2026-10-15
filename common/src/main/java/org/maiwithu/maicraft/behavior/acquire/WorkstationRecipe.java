@@ -35,14 +35,61 @@ public record WorkstationRecipe(String id, Kind kind, WantedItem result, int res
         }
     }
 
-    /** 做这条配方的设施。 */
+    /**
+     * 做这条配方的设施。设施在哪种方块上、叫什么、要不要燃料、角色会不会为了做东西就地摆一个、
+     * 规划时按多少刻烧一件，都只在这里记一份：报价、备料、走到设施跟前、认界面都按它答。
+     */
     public enum Kind {
         /** 合成：摆得进 2×2 的在背包合成格里做，摆不进的上工作台（见 fitsInInventory）。 */
-        CRAFTING,
-        /** 熔炉烧炼；除了原料还要燃料。 */
-        SMELTING,
+        CRAFTING("minecraft:crafting_table", "工作台", 0, true),
+        /** 熔炉烧炼；除了原料还要燃料。附近没有会就地摆一个。 */
+        SMELTING("minecraft:furnace", "熔炉", 200, true),
+        /**
+         * 高炉烧炼：矿石、金属装备在高炉里烧快一倍。只用记得的现成高炉（真人不会为了快一倍先凑五块铁做一台），
+         * 没有就照旧用熔炉。
+         */
+        BLASTING("minecraft:blast_furnace", "高炉", 100, false),
+        /** 烟熏炉烤食物，快一倍；同样只用记得的现成烟熏炉。 */
+        SMOKING("minecraft:smoker", "烟熏炉", 100, false),
         /** 石切台切割，机制与合成同途径：读配方、放原料、取成品。 */
-        STONECUTTING
+        STONECUTTING("minecraft:stonecutter", "石切台", 0, true);
+
+        private final String blockType;
+        private final String displayName;
+        private final int plannedCookTicks;
+        private final boolean placeable;
+
+        Kind(String blockType, String displayName, int plannedCookTicks, boolean placeable) {
+            this.blockType = blockType;
+            this.displayName = displayName;
+            this.plannedCookTicks = plannedCookTicks;
+            this.placeable = placeable;
+        }
+
+        /** 这种设施的方块类型：记忆里按它找设施，就地摆也摆它。 */
+        public String blockType() {
+            return blockType;
+        }
+
+        /** 给人看的名字：工作台、熔炉、高炉、烟熏炉、石切台。 */
+        public String displayName() {
+            return displayName;
+        }
+
+        /** 要烧：除了原料还要燃料，做法是装炉子、关着界面等、回来取。 */
+        public boolean cooks() {
+            return plannedCookTicks > 0;
+        }
+
+        /** 规划备燃料时按多少刻烧一件（熔炉 200、高炉烟熏炉 100）；不烧的为 0。实际烧多久以配方为准。 */
+        public int plannedCookTicks() {
+            return plannedCookTicks;
+        }
+
+        /** 附近没有时角色会不会就地摆一个：工作台、熔炉、石切台会；高炉、烟熏炉只用现成的。 */
+        public boolean placeable() {
+            return placeable;
+        }
     }
 
     /** 做一次要的一种原料：要什么、要几件。 */

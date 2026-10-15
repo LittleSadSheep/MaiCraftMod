@@ -413,6 +413,51 @@ class RecipeSourceTest {
         assertEquals(1, fuelNeed.count());
     }
 
+    private static WorkstationRecipe ironSmelting() {
+        return new WorkstationRecipe("minecraft:iron_ingot", WorkstationRecipe.Kind.SMELTING,
+                WantedItem.ofItem("minecraft:iron_ingot"), 1,
+                List.of(new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:raw_iron"), 1)));
+    }
+
+    private static WorkstationRecipe ironBlasting() {
+        return new WorkstationRecipe("minecraft:iron_ingot_from_blasting_raw_iron", WorkstationRecipe.Kind.BLASTING,
+                WantedItem.ofItem("minecraft:iron_ingot"), 1,
+                List.of(new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:raw_iron"), 1)));
+    }
+
+    @Test
+    void 记得高炉_矿石拿去高炉烧而不是熔炉() {
+        // 有高炉时铁在高炉里烧快一倍；熔炉和高炉都记得时挑高炉，不再去熔炉慢慢烧。
+        WorldMemory memory = memory();
+        memory.rememberWorkstationUsed(TABLE_AT, "minecraft:furnace", NOW);
+        memory.rememberWorkstationUsed(new WorldPosition(3, 64, 1, null), "minecraft:blast_furnace", NOW);
+        CapturingNeeds needs = new CapturingNeeds();
+        RecipeSource recipeSource = source(memory, wanted -> List.of(ironSmelting(), ironBlasting()), needs);
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class,
+                recipeSource.quote(new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), 1, "工具准备"), CONTEXT));
+        assertEquals("minecraft:iron_ingot_from_blasting_raw_iron", offer.hint(), "记得高炉就在高炉烧");
+        assertTrue(offer.risk().contains("高炉"), offer.risk());
+    }
+
+    @Test
+    void 没记得高炉_照旧用熔炉_不为了高炉摆一台() {
+        WorldMemory memory = memory();
+        memory.rememberWorkstationUsed(TABLE_AT, "minecraft:furnace", NOW);
+        RecipeSource recipeSource = source(memory, wanted -> List.of(ironBlasting(), ironSmelting()), new CapturingNeeds());
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class,
+                recipeSource.quote(new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), 1, "工具准备"), CONTEXT));
+        assertEquals("minecraft:iron_ingot", offer.hint(), "没有高炉就用熔炉，不把高炉配方当做法");
+    }
+
+    @Test
+    void 只有高炉配方又没记得高炉_说清是没记得炉子不是没配方() {
+        RecipeSource recipeSource = source(memory(), wanted -> List.of(ironBlasting()), new CapturingNeeds());
+        SourceQuote.Unavailable unavailable = assertInstanceOf(SourceQuote.Unavailable.class,
+                recipeSource.quote(new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), 1, "工具准备"), CONTEXT));
+        assertTrue(unavailable.reason().contains("高炉"), unavailable.reason());
+        assertTrue(unavailable.reason().contains("没记得"), unavailable.reason());
+    }
+
     @Test
     void 烧木炭没燃料_揣着原木就拿原木做木板烧() {
         // 实机（全量测试 10-12）：做火把缺木炭，身上 16 根原木，烧木炭时"身上没有能烧的燃料"，再去弄煤又转回木炭。

@@ -63,8 +63,10 @@ public final class MenuRecipeRuns implements RecipeRuns {
 
     /** 合成台界面的类型注册 ID。 */
     private static final String CRAFTING_MENU = "minecraft:crafting";
-    /** 熔炉界面的类型注册 ID：烧炼配方只认普通熔炉，高炉、烟熏炉各有自己的配方。 */
+    /** 熔炉界面的类型注册 ID。高炉、烟熏炉的界面布局和熔炉一样（投入口、燃料槽、产出格），只是类型不同。 */
     private static final String FURNACE_MENU = "minecraft:furnace";
+    private static final String BLAST_FURNACE_MENU = "minecraft:blast_furnace";
+    private static final String SMOKER_MENU = "minecraft:smoker";
     /** 石切台界面的类型注册 ID。 */
     private static final String STONECUTTER_MENU = "minecraft:stonecutter";
 
@@ -100,7 +102,7 @@ public final class MenuRecipeRuns implements RecipeRuns {
             return Optional.empty();
         }
         // 烧炼要关着界面等炉子、烧好再回来取，单独一个动作；合成与石切台站在跟前一口气做完。
-        return level.getRecipeManager().byKey(id).map(holder -> recipe.kind() == WorkstationRecipe.Kind.SMELTING
+        return level.getRecipeManager().byKey(id).map(holder -> recipe.kind().cooks()
                 ? new FurnaceRun(holder, recipe, station, times, () -> visit(recipe, station, permissions), fuels,
                         memory, records)
                 : new WorkAction(holder, recipe, station, times, permissions, records));
@@ -108,10 +110,12 @@ public final class MenuRecipeRuns implements RecipeRuns {
 
     // 到设施跟前点开界面的一趟：站位、点开、等同步、认界面类型，做配方和烧炉子共用。
     private StationVisit visit(WorkstationRecipe recipe, WorldPosition station, Permissions permissions) {
-        String doing = (recipe.kind() == WorkstationRecipe.Kind.SMELTING ? "烧" : "做") + recipe.result().describe();
+        String doing = (recipe.kind().cooks() ? "烧" : "做") + recipe.result().describe();
         String menuType = switch (recipe.kind()) {
             case CRAFTING -> CRAFTING_MENU;
             case SMELTING -> FURNACE_MENU;
+            case BLASTING -> BLAST_FURNACE_MENU;
+            case SMOKING -> SMOKER_MENU;
             case STONECUTTING -> STONECUTTER_MENU;
         };
         return new StationVisit(close, interactions, context, station, permissions,
@@ -579,19 +583,11 @@ public final class MenuRecipeRuns implements RecipeRuns {
     }
 
     static String workstationName(WorkstationRecipe.Kind kind) {
-        return switch (kind) {
-            case CRAFTING -> "工作台";
-            case SMELTING -> "熔炉";
-            case STONECUTTING -> "石切台";
-        };
+        return kind.displayName();
     }
 
-    /** 配方的设施种类对应的方块类型；摆台与记设施都用它。 */
+    /** 配方的设施种类对应的方块类型；摆台与记设施都用它，只在设施种类那一处记。 */
     static String workstationBlockType(WorkstationRecipe.Kind kind) {
-        return switch (kind) {
-            case CRAFTING -> "minecraft:crafting_table";
-            case SMELTING -> "minecraft:furnace";
-            case STONECUTTING -> "minecraft:stonecutter";
-        };
+        return kind.blockType();
     }
 }

@@ -649,8 +649,9 @@ public final class AbilityCatalog {
                 Set.of(WorkstationRecipe.Kind.CRAFTING, WorkstationRecipe.Kind.STONECUTTING),
                 recipeReads, deps.memory(), recipeReads, recipeRuns,
                 deps.backpack(), deps.offhand(), deps.itemTags(), innerNeeds, placer, permission);
+        // 烧炼来源认熔炉、高炉、烟熏炉三种：高炉、烟熏炉只用记得的现成的，没有照旧用熔炉。
         RecipeSource smeltSource = new RecipeSource(
-                Set.of(WorkstationRecipe.Kind.SMELTING),
+                Set.of(WorkstationRecipe.Kind.SMELTING, WorkstationRecipe.Kind.BLASTING, WorkstationRecipe.Kind.SMOKING),
                 recipeReads, deps.memory(), recipeReads, recipeRuns,
                 deps.backpack(), deps.offhand(), deps.itemTags(), innerNeeds, placer, permission);
         MiningSource miningSource = new MiningSource(yieldScans, collects, stairs, deps.toolRequirements(),

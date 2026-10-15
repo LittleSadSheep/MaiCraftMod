@@ -23,8 +23,8 @@ public record AcquireVia(String name, String description) {
     public static final AcquireVia CONTAINER = new AcquireVia("container", "记得的箱子、现场看到的容器");
     /** 工作台上做出来（含石切台）。 */
     public static final AcquireVia CRAFT = new AcquireVia("craft", "工作台上做出来（含石切台）");
-    /** 熔炉里烧出来。 */
-    public static final AcquireVia SMELT = new AcquireVia("smelt", "熔炉里烧出来");
+    /** 熔炉里烧出来；记得附近有高炉、烟熏炉时，矿石与食物在那里烧（快一倍）。 */
+    public static final AcquireVia SMELT = new AcquireVia("smelt", "熔炉里烧出来（记得附近有高炉、烟熏炉时在那里烧，快一倍）");
     /** 挖掉会掉出它的方块。 */
     public static final AcquireVia MINE = new AcquireVia("mine", "挖掉会掉出它的方块");
     /** 收成熟的作物。 */

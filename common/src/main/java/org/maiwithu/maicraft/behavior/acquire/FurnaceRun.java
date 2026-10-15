@@ -154,14 +154,19 @@ final class FurnaceRun implements Action {
         this.giveUpTicks = (long) times * cookTicks + HANDLING_TICKS;
     }
 
+    /** 这次用的炉子叫什么：熔炉、高炉或烟熏炉，按配方的设施种类说。 */
+    private String stove() {
+        return recipe.kind().displayName();
+    }
+
     @Override
     public ActionStatus tick(TickContext tick) {
         if (failure != null) {
             return ActionStatus.failed(failure);
         }
         if (++waited > giveUpTicks) {
-            return fail(Problem.Kind.STUCK, "用熔炉烧" + recipe.result().describe() + "超时，先收手"
-                    + (inputLoaded ? "；熔炉里可能还有这次放进去的原料或烧好的成品" : ""));
+            return fail(Problem.Kind.STUCK, "用" + stove() + "烧" + recipe.result().describe() + "超时，先收手"
+                    + (inputLoaded ? "；" + stove() + "里可能还有这次放进去的原料或烧好的成品" : ""));
         }
         if (pending != null) {
             return awaitClick(tick);
@@ -184,7 +189,7 @@ final class FurnaceRun implements Action {
         if (status instanceof ActionStatus.Failed failed) {
             Problem why = failed.problem();
             return fail(why.kind(), why.message()
-                    + (inputLoaded ? "；熔炉里可能还有这次放进去的原料或烧好的成品" : ""));
+                    + (inputLoaded ? "；" + stove() + "里可能还有这次放进去的原料或烧好的成品" : ""));
         }
         if (status instanceof ActionStatus.Done) {
             menus = visit.menus();

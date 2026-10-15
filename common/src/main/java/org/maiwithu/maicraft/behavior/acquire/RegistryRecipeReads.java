@@ -29,7 +29,7 @@ import org.maiwithu.maicraft.game.world.FurnaceFuels;
  * 配方与燃料读端的注册表实现：能做出一种东西的有哪些做法、一件东西能烧多久，
  * 都从角色所在世界真实的配方管理器与燃料表读（服务端同步给客户端的数据，含模组配方）。
  *
- * <p>配方按设施种类分开问：合成一条（含石切台）、烧炼一条，via 参数认的就是这个分法。
+ * <p>配方按设施种类分开问：合成一条（含石切台）、烧炼一条（熔炉、高炉、烟熏炉），via 参数认的就是这个分法。
  * 产出写具体物品；原料优先写成标签（配方的原料本来就是"这一类都行"），
  * 对不上任何标签才落成具体物品；注册表里查不到的物品如实说没有做法，不猜。
  */
@@ -55,6 +55,9 @@ public final class RegistryRecipeReads implements ReadsRecipes, ReadsFuels {
         List<WorkstationRecipe> views = new ArrayList<>();
         collect(current, RecipeType.CRAFTING, WorkstationRecipe.Kind.CRAFTING, wanted, views);
         collect(current, RecipeType.SMELTING, WorkstationRecipe.Kind.SMELTING, wanted, views);
+        // 高炉、烟熏炉各有自己的配方表（矿石、金属装备进高炉，食物进烟熏炉），同一件东西可能两种炉子都能烧。
+        collect(current, RecipeType.BLASTING, WorkstationRecipe.Kind.BLASTING, wanted, views);
+        collect(current, RecipeType.SMOKING, WorkstationRecipe.Kind.SMOKING, wanted, views);
         collect(current, RecipeType.STONECUTTING, WorkstationRecipe.Kind.STONECUTTING, wanted, views);
         return List.copyOf(views);
     }
