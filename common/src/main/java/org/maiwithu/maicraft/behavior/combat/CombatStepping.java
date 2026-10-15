@@ -1,10 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.combat;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.monster.EnderMan;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BaseFireBlock;
 import net.minecraft.world.level.block.Blocks;
@@ -13,6 +19,7 @@ import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
+import org.maiwithu.maicraft.game.world.EndermanGaze;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -58,6 +65,18 @@ public final class CombatStepping {
      * @param faceEntityId 要面朝的那只；-1 时朝走的方向
      */
     public static void move(TickContext tick, int faceEntityId, Footwork.Step step) {
+        move(tick, faceEntityId, step, false);
+    }
+
+    /**
+     * 同 {@link #move}，但这一眼会对上没惹毛的末影人的眼睛时把镜头往下压看脚前（走的方向不变）；
+     * 站着不动、没有要看的也查一眼此刻的镜头。打龙时末地到处是末影人，平视、看天上的龙都可能正好对上一只。
+     */
+    public static void moveAvertingGaze(TickContext tick, int faceEntityId, Footwork.Step step) {
+        move(tick, faceEntityId, step, true);
+    }
+
+    private static void move(TickContext tick, int faceEntityId, Footwork.Step step, boolean avertGaze) {
         PlayerContext player = tick.player();
         LocalPlayer self = player == null ? null : player.localPlayer();
         if (self == null) return;
@@ -76,6 +95,11 @@ public final class CombatStepping {
         if (step.sprint() && !step.standing() || target == null) {
             if (step.standing()) {
                 player.input().applyMovement(new PlayerInput.Movement(0f, 0f, false, false, false), player.clientTick());
+                // 站着不动、没有要看的：此刻的镜头对上末影人就往下压。
+                if (avertGaze) {
+                    float averted = avertedPitch(self, self.getYRot(), self.getXRot());
+                    if (averted != self.getXRot()) player.input().requestLook(self.getYRot(), averted, player.clientTick());
+                }
                 return;
             }
             yaw = (float) Math.toDegrees(Math.atan2(step.dz(), step.dx())) - 90;
@@ -87,6 +111,7 @@ public final class CombatStepping {
             Vec3 aim = target.getBoundingBox().getCenter();
             pitch = (float) -Math.toDegrees(Math.atan2(aim.y - eye.y, Math.hypot(aim.x - eye.x, aim.z - eye.z)));
         }
+        if (avertGaze) pitch = avertedPitch(self, yaw, pitch);
         player.input().requestLook(yaw, pitch, player.clientTick());
         // 朝向 yaw 时，前方是 (-sin, cos)，左方是 (cos, sin)：世界方向投影到这两条上就是前后与左右的按键量。
         double radians = Math.toRadians(yaw);
@@ -98,6 +123,22 @@ public final class CombatStepping {
 
     /** 迈步时不动镜头（手上正瞄着出手）。 */
     public static final int KEEP_AIM = -2;
+
+    /** 看末影人眼睛的范围（格）：原版 64 格内的末影人会因为对视发怒。 */
+    private static final double GAZE_RANGE = EndermanGaze.RANGE;
+
+    // 不惹毛附近没惹毛的末影人的俯仰角：看得见它的眼睛的才算；戴着雕刻南瓜不会对视。
+    private static float avertedPitch(LocalPlayer self, float yaw, float pitch) {
+        List<EndermanGaze.Eyes> eyes = new ArrayList<>();
+        for (EnderMan enderman : self.level().getEntitiesOfClass(EnderMan.class,
+                self.getBoundingBox().inflate(GAZE_RANGE), candidate -> candidate.isAlive() && !candidate.isCreepy())) {
+            eyes.add(new EndermanGaze.Eyes(enderman.getX(), enderman.getEyeY(), enderman.getZ(),
+                    self.hasLineOfSight(enderman)));
+        }
+        if (eyes.isEmpty()) return pitch;
+        return EndermanGaze.avertedPitch(self.getEyePosition(), yaw, pitch, eyes,
+                self.getItemBySlot(EquipmentSlot.HEAD).is(Items.CARVED_PUMPKIN));
+    }
 
     // 身子过得去：脚和头那两格都没有碰撞。
     private static boolean passable(Level level, BlockPos feet) {

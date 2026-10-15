@@ -45,6 +45,11 @@ public final class LiveCombatHands {
         return new RangedShot(entityId, projection, weapons);
     }
 
+    /** 同上，射程放到 maxRange 格（仰射柱顶的末影水晶）。 */
+    public Action shoot(int entityId, double maxRange) {
+        return new RangedShot(entityId, projection, weapons, maxRange);
+    }
+
     public boolean canShoot(TickContext context) {
         LocalPlayer self = self(context);
         return self != null && RangedShot.canShoot(self, weapons);

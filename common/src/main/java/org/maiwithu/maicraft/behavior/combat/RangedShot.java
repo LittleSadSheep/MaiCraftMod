@@ -31,7 +31,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 取消用切换快捷栏（原版切槽停止使用、不放箭），不能用松手——松开弓就是放箭。
  * 射没射出去按游戏确认认（弓确认停止使用、弩确认手里的弩不再上弦），中没中不在这里认。
  */
-public final class RangedShot implements Action {
+public final class RangedShot implements Action, RangedCombat.Fires {
 
     /** 弓拉满的刻数：拉满才有满速和暴击。 */
     static final int FULL_DRAW_TICKS = 20;
@@ -45,8 +45,8 @@ public final class RangedShot implements Action {
     private static final int MAX_AIM_TICKS = 60;
     /** 视线和弹道差不到这么多度才放。 */
     static final double AIM_TOLERANCE_DEGREES = 1.5;
-    /** 比这远不算弹道。 */
-    private static final double MAX_RANGE = 32.0;
+    /** 平常比这远不算弹道。 */
+    public static final double MAX_RANGE = 32.0;
     private static final int CONFIRM_TICKS = 20;
 
     private enum Stage { ARM, START, DRAW, LOAD, LOADING_RELEASE, AIM, FIRING, DONE }
@@ -54,6 +54,8 @@ public final class RangedShot implements Action {
     private final int targetId;
     private final UseKeyProjection projection;
     private final ModRangedWeapons weapons;
+    /** 这一箭比这远不算弹道：平常 32 格，仰射柱顶的末影水晶放到 48 格。 */
+    private final double maxRange;
     /** 挑中联动的远程武器时，这一发整个交给它。 */
     private ModShot modShot;
     private PlayerContext current;
@@ -73,12 +75,19 @@ public final class RangedShot implements Action {
     }
 
     public RangedShot(int targetId, UseKeyProjection projection, ModRangedWeapons weapons) {
+        this(targetId, projection, weapons, MAX_RANGE);
+    }
+
+    /** @param maxRange 比这远不算弹道（站在爆炸范围外仰射柱顶的末影水晶要比平常远） */
+    public RangedShot(int targetId, UseKeyProjection projection, ModRangedWeapons weapons, double maxRange) {
         this.targetId = targetId;
         this.projection = projection;
         this.weapons = weapons;
+        this.maxRange = maxRange;
     }
 
     /** 这一箭射出去了（游戏确认了放箭或弩发射）。 */
+    @Override
     public boolean fired() {
         return modShot != null ? modShot.fired() : fired;
     }
@@ -199,7 +208,7 @@ public final class RangedShot implements Action {
         held = self.getTicksUsingItem();
         if (held < FULL_DRAW_TICKS - AIM_LEAD_TICKS) return ActionStatus.progressed();
         Optional<ArrowAim.Aim> aim = ArrowAim.find(player.level(), self, target,
-                ArrowAim.bowSpeed(Math.max(held, FULL_DRAW_TICKS)), true, MAX_RANGE);
+                ArrowAim.bowSpeed(Math.max(held, FULL_DRAW_TICKS)), true, maxRange);
         if (aim.isEmpty()) {
             if (held >= MAX_DRAW_TICKS) {
                 cancelDraw(player);
@@ -253,7 +262,7 @@ public final class RangedShot implements Action {
         LocalPlayer self = player.localPlayer();
         ItemStack hand = self.getMainHandItem();
         if (!CrossbowItem.isCharged(hand)) return fail("弩没有上弦");
-        Optional<ArrowAim.Aim> aim = ArrowAim.find(player.level(), self, target, ArrowAim.CROSSBOW_SPEED, false, MAX_RANGE);
+        Optional<ArrowAim.Aim> aim = ArrowAim.find(player.level(), self, target, ArrowAim.CROSSBOW_SPEED, false, maxRange);
         if (aim.isEmpty()) {
             if (++aimWaited >= MAX_AIM_TICKS) stage = Stage.DONE;
             return ActionStatus.running();

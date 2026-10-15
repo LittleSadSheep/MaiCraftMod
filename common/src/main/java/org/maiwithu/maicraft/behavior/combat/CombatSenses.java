@@ -40,6 +40,15 @@ public interface CombatSenses {
         return Optional.empty();
     }
 
+    /**
+     * 打龙的龙场：龙、龙头、水晶、龙息、龙火球、末影人、出口门。没有加载着的活龙（或在死亡动画里的龙）为空。
+     *
+     * @param dragonId 打哪一条（实体编号）；-1 为离出口门最近的那条
+     */
+    default Optional<DragonArena> dragonArena(TickContext context, int dragonId) {
+        return Optional.empty();
+    }
+
     /** 正冲着角色飞来、能打回去的火球（恶魂火球这类）里最近的那个的实体编号；没有为空。 */
     default OptionalInt returnableIncoming(TickContext context) {
         return OptionalInt.empty();
@@ -69,11 +78,21 @@ public interface CombatSenses {
      * @param canHitMe     它此刻打不打得到我：原版攻击框与我的碰撞箱相交（只算近战）
      * @param dangerRadius 它从任何方位都够不着我的水平中心距（格）
      * @param powered      闪电劈过的苦力怕：爆炸范围翻倍
+     * @param dodgesArrows 箭打不中它（末影人会瞬移躲开）：只近战，不白费箭
      */
     record Threat(int entityId, UUID uuid, String type, double x, double y, double z,
                   double distance, ThreatAssessment.Kind kind, boolean armed, boolean visible,
                   boolean aggressive, double halfWidth, double reachGap, boolean canHitMe,
-                  double dangerRadius, boolean powered) {
+                  double dangerRadius, boolean powered, boolean dodgesArrows) {
+
+        /** 箭打得中的一只。 */
+        public Threat(int entityId, UUID uuid, String type, double x, double y, double z,
+                      double distance, ThreatAssessment.Kind kind, boolean armed, boolean visible,
+                      boolean aggressive, double halfWidth, double reachGap, boolean canHitMe,
+                      double dangerRadius, boolean powered) {
+            this(entityId, uuid, type, x, y, z, distance, kind, armed, visible, aggressive, halfWidth, reachGap,
+                    canHitMe, dangerRadius, powered, false);
+        }
 
         /** 身板按僵尸估的一只（离线替身用；生产实现按真实碰撞箱算）。 */
         public Threat(int entityId, UUID uuid, String type, double x, double y, double z,

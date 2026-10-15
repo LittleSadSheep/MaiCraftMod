@@ -20,6 +20,9 @@ import java.util.Set;
  *   <li>挑不出能打的，但还有压着我的追兵（点着引信的、刚打过我的、贴到快够得着我的）：只走位，离开所有危险半径；</li>
  *   <li>都没有：打完了。隔着坑、隔着栅栏走不到又不打我的不算，不为它们站着干耗。</li>
  * </ol>
+ *
+ * <p>打龙时（战场里有龙场）躲完爆炸先问龙的打法（{@link DragonTactic}）：躲龙息、躲冲撞、射水晶、砍龙头都在那边；
+ * 它说先对付贴上来的别的怪，才往下走普通的先后。
  */
 public final class Tactic {
 
@@ -29,7 +32,10 @@ public final class Tactic {
     private Tactic() {}
 
     /** 这一刻的打法。 */
-    public sealed interface Plan permits EvadeBlast, Withdraw, PillarUp, DigIn, Melee, Shoot, KeepClear, Finished {}
+    public sealed interface Plan permits EvadeBlast, Withdraw, PillarUp, DigIn, Melee, Shoot, KeepClear, Finished, Dragon {}
+
+    /** 打龙：这一刻按龙的打法来。 */
+    public record Dragon(DragonTactic.Move move) implements Plan {}
 
     /** 躲开这只点着引信的。 */
     public record EvadeBlast(Battlefield.Foe bomb) implements Plan {}
@@ -67,12 +73,18 @@ public final class Tactic {
      * @param mayPillar   能就地垫高（白天、有料、头顶空、这一仗还没垫过）
      * @param perched     已经站在垫起来的柱顶上
      * @param mayDigIn    天黑了、能挖坑自保（调用方接得住、这一仗还没挖过）
+     * @param dragon      打龙时这一仗记着的事；不打龙为 null
      */
     public record Memory(int locked, boolean retreating, boolean cornered, Set<Integer> unreachable,
                          boolean bowGivenUp, boolean shooting, boolean mayPillar, boolean perched,
-                         boolean mayDigIn) {
+                         boolean mayDigIn, DragonTactic.Memory dragon) {
         public Memory {
             unreachable = Set.copyOf(unreachable);
+        }
+
+        public Memory(int locked, boolean retreating, boolean cornered, Set<Integer> unreachable,
+                      boolean bowGivenUp, boolean shooting, boolean mayPillar, boolean perched, boolean mayDigIn) {
+            this(locked, retreating, cornered, unreachable, bowGivenUp, shooting, mayPillar, perched, mayDigIn, null);
         }
 
         public Memory(int locked, boolean retreating, boolean cornered, Set<Integer> unreachable,
@@ -99,6 +111,12 @@ public final class Tactic {
             }
         }
         if (bomb != null) return new EvadeBlast(bomb);
+        // 打龙：龙的打法说了算；它说先对付贴上来的别的怪（null）才往下走普通的先后。
+        if (field.arena() != null) {
+            DragonTactic.Move move = DragonTactic.decide(field,
+                    memory.dragon() == null ? DragonTactic.Memory.FRESH : memory.dragon());
+            if (move != null) return new Dragon(move);
+        }
         boolean chased = !field.chasers().isEmpty();
         boolean outmatched = me.belowRetreatLine() || !me.hasMelee() && !me.canShoot() && me.weaponScore() <= 0;
         // 天黑了打不过：先拉开距离，追兵离得够远（挖三格来得及）就地挖坑封起来熬到天亮，
@@ -175,11 +193,11 @@ public final class Tactic {
                 || kind == ThreatAssessment.Kind.PLAYER;
     }
 
-    // 能打的：名单上要打的；点着引信的只能射；走不到的只能射。
+    // 能打的：名单上要打的；点着引信的只能射；走不到的只能射。会躲箭的（末影人）不算射得了。
     private static boolean eligible(Battlefield.Foe foe, Battlefield.Me me, Memory memory) {
         if (!foe.wanted()) return false;
         boolean canShoot = me.canShoot() && !memory.bowGivenUp() && foe.threat().visible()
-                && foe.distance() <= RangedCombat.ENGAGE_RANGE;
+                && !foe.threat().dodgesArrows() && foe.distance() <= RangedCombat.ENGAGE_RANGE;
         if (foe.fusing() && !canShoot) return false;
         // 血不到一半又射不了：不凑上去砍苦力怕（凑到三格它就点着，残血挨一下就没了），离它远点、让它过去。
         // 实机 10-14 箭打光了，残血还凑近砍苦力怕，三格点着引信再躲，爆炸就在身边。
@@ -220,8 +238,9 @@ public final class Tactic {
     }
 
     // 用不用弓：看得见、射程内，目标点着引信、走不到、手上没近战、是会炸的，或离得远（七格外换弓、贴近到四格半才换回）。
+    // 末影人会瞬移躲开箭，射它白费箭，只近战。
     private static boolean shoots(Battlefield.Me me, Memory memory, Battlefield.Foe target) {
-        if (!me.canShoot() || memory.bowGivenUp() || !target.threat().visible()
+        if (!me.canShoot() || memory.bowGivenUp() || !target.threat().visible() || target.threat().dodgesArrows()
                 || target.distance() > RangedCombat.ENGAGE_RANGE) {
             return false;
         }

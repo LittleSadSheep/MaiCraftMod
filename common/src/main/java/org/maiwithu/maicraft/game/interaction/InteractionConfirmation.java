@@ -10,6 +10,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.boss.EnderDragonPart;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.BaseFireBlock;
 import net.minecraft.world.level.block.NetherPortalBlock;
@@ -160,10 +161,12 @@ public interface InteractionConfirmation {
      * 打中了和目标最终被打死分开判断：确认这一刀后目标还活着，由上层任务接着决定要不要再打。
      */
     public static InteractionConfirmation entityStruck(LocalPlayer attacker, Entity target) {
-        int id = target.getId();
-        float health = target instanceof LivingEntity living ? living.getHealth() : Float.NaN;
+        // 打的是末影龙的碰撞部件（龙头、翅膀）：部件不是活物、按编号也找不到，伤害记在龙本体上，按本体的掉血、红闪确认。
+        Entity body = target instanceof EnderDragonPart part ? part.parentMob : target;
+        int id = body.getId();
+        float health = body instanceof LivingEntity living ? living.getHealth() : Float.NaN;
         // 出手前目标已经在红闪（刚被别人或上一刀打过）：那段红闪不是这一刀的证据，只认之后重新闪起来的。
-        int hurtBefore = target instanceof LivingEntity living ? living.hurtTime : 0;
+        int hurtBefore = body instanceof LivingEntity living ? living.hurtTime : 0;
         return context -> {
             // 目标实体不在了分不清是这次打死的还是别的原因，维持等待由超期如实收场。
             if (!(context.level().getEntity(id) instanceof LivingEntity living)) return Verdict.PENDING;

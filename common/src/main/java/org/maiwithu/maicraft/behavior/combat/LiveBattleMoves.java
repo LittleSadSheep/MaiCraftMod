@@ -3,10 +3,14 @@ package org.maiwithu.maicraft.behavior.combat;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.OptionalInt;
 
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.boss.enderdragon.EnderDragon;
+import net.minecraft.world.item.ShieldItem;
 
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
 import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
@@ -15,6 +19,7 @@ import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
+import org.maiwithu.maicraft.behavior.navigation.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -49,6 +54,61 @@ public final class LiveBattleMoves implements BattleMoves {
     @Override
     public Action shoot(TickContext context, int entityId) {
         return hands.shoot(entityId);
+    }
+
+    // 龙头是龙的一个碰撞部件，客户端按实体编号找不到：每刻从这条龙身上取；龙不在了就收场，不打空拳。
+    @Override
+    public Action strikeHead(TickContext context, int dragonId) {
+        var player = context.player();
+        if (player == null || player.level() == null || player.interactionSender() == null) return Gone.INSTANCE;
+        return new MeleeStrike(level -> level.getEntity(dragonId) instanceof EnderDragon dragon && !dragon.isRemoved()
+                ? dragon.head : null);
+    }
+
+    @Override
+    public Action shoot(TickContext context, int entityId, double maxRange) {
+        return hands.shoot(entityId, maxRange);
+    }
+
+    // 此刻站在这里有没有一条射得中它的弹道：按弓拉满的初速算（弩更快，弓射得到弩也射得到）。
+    @Override
+    public boolean arcTo(TickContext context, int entityId, double maxRange) {
+        var player = context.player();
+        var self = player == null ? null : player.localPlayer();
+        Entity target = self == null || player.level() == null ? null : player.level().getEntity(entityId);
+        return target != null
+                && ArrowAim.find(player.level(), self, target, ArrowAim.BOW_FULL_SPEED, true, maxRange).isPresent();
+    }
+
+    @Override
+    public void stepAvertingGaze(TickContext context, int faceEntityId, Footwork.Step step) {
+        CombatStepping.moveAvertingGaze(context, faceEntityId, step);
+    }
+
+    // 地表：这一列最高的实心面上站得住（已加载、干的、身子两格空、脚下踩得住且不伤人）；虚空那一列为空。
+    @Override
+    public DragonGeometry.Surface surface(TickContext context) {
+        ClientLevel level = context.player() == null ? null : context.player().level();
+        return (x, z) -> {
+            if (level == null || !level.isLoaded(new BlockPos(x, level.getMinBuildHeight(), z))) return OptionalInt.empty();
+            int y = ClientSurfaceHeight.motionBlockingNoLeaves(level, x, z);
+            if (y <= level.getMinBuildHeight()) return OptionalInt.empty();
+            BlockPos feet = new BlockPos(x, y, z);
+            return BlockPassability.isDryStandable(level, feet) && CombatStepping.safeFooting(level, feet)
+                    ? OptionalInt.of(y) : OptionalInt.empty();
+        };
+    }
+
+    @Override
+    public boolean loaded(TickContext context, double x, double z) {
+        ClientLevel level = context.player() == null ? null : context.player().level();
+        return level != null && level.isLoaded(BlockPos.containing(x, level.getMinBuildHeight(), z));
+    }
+
+    @Override
+    public boolean hasShield(TickContext context) {
+        var self = context.player() == null ? null : context.player().localPlayer();
+        return self != null && self.getOffhandItem().getItem() instanceof ShieldItem;
     }
 
     @Override

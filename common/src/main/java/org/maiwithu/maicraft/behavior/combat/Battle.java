@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Map;
 import java.util.Set;
@@ -32,6 +33,9 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  *
  * <p>躲爆炸先跑后算：当刻按背离苦力怕的方向疾跑，八个方向都迈不出去才交给寻路。撤离往没怪的方向跑、甩开才停，
  * 被追上就面朝它退着还手；连着三次走不通就背水一战。
+ *
+ * <p>打龙（名单说这一仗打末影龙）时每刻另读一份龙场，打法说按龙的来就交给打龙的脚和手（{@link DragonCombat}）；
+ * 它说先对付贴上来的别的怪，就照普通打法打，打完接着打龙。
  */
 public final class Battle {
 
@@ -140,6 +144,10 @@ public final class Battle {
     private int noLeapTicks;
     /** 上一段寻路走不通：逼近的那只记成走不到。 */
     private boolean lastWalkFailed;
+    /** 打龙的脚和手；这一仗不打龙为 null。 */
+    private final DragonCombat dragon;
+    /** 上一刻是按龙的打法做的：能不能被打断问打龙那边。 */
+    private boolean dragonActive;
 
     /** @param radius 看多远的战场：自卫用警戒半径，区域清扫用清扫半径；撤离时自动看四十格 */
     public Battle(CombatSenses senses, BattleMoves moves, Battlefield.Roster roster, double radius) {
@@ -147,6 +155,7 @@ public final class Battle {
         this.moves = moves;
         this.roster = roster;
         this.radius = radius;
+        this.dragon = roster.fightsDragon() ? new DragonCombat(moves) : null;
     }
 
     public Moment tick(TickContext context) {
@@ -155,6 +164,8 @@ public final class Battle {
                 retreating ? ThreatAssessment.FLEE_CLEAR_DISTANCE : radius, roster,
                 retreating ? retreat.pursuers() : Set.of());
         if (retreating) retreat.noteChasers(field);
+        // 打龙：先记战况（水晶少了哪颗、龙倒没倒下、回血回到哪儿），再定打法。
+        if (dragon != null) dragon.observe(context, field);
         // 走不到而记下的那只自己贴上来了（看得见、够得着）：不再当走不到，照常近身打，不对着贴脸的怪拉弓。
         // 实机 10-14 一只尸壳被记成走不到，贴到 0.6 格时还在拉弓射它。
         for (Battlefield.Foe foe : field.foes()) {
@@ -172,7 +183,11 @@ public final class Battle {
         // 天黑才挖坑；拉开距离后就挖，不必等到退无可退（何时挖由打法按追兵远近定）。
         boolean mayDigIn = offersShelter && !shelterAsked && moves.night(context);
         Tactic.Plan plan = Tactic.decide(field, new Tactic.Memory(locked, retreating, cornered, unreachable,
-                bow.givenUp(), bow.shooting(), mayPillar || pillar != null, perched, mayDigIn));
+                bow.givenUp(), bow.shooting(), mayPillar || pillar != null, perched, mayDigIn,
+                dragon == null ? null : dragon.memory(context)));
+        // 普通打法接手（先对付贴上来的别的怪）：打龙那边的出手、寻路、拉了一半的弓收尾。
+        if (dragon != null && dragonActive && !(plan instanceof Tactic.Dragon)) dragon.stand();
+        dragonActive = plan instanceof Tactic.Dragon;
         if (pillar != null && !(plan instanceof Tactic.PillarUp)) {
             // 垫到一半处境变了（回了血、来了射手）：垫高收尾，按新打法来。
             pillar.close();
@@ -192,6 +207,13 @@ public final class Battle {
             case Tactic.Shoot shoot -> shoot(context, field, shoot.target());
             case Tactic.KeepClear keep -> keepClear(context, field, keep.why());
             case Tactic.Finished finished -> finish();
+            case Tactic.Dragon dragonPlan -> {
+                // 按龙的打法：普通打法这边的出手、寻路、弓先收尾，脚和手交给打龙那边。
+                dropStrike();
+                dropWalk();
+                bow.close();
+                yield dragon.tick(context, field, dragonPlan.move());
+            }
         };
         for (Battlefield.Foe foe : field.foes()) lastDistance.put(foe.id(), foe.distance());
         // 打法、对手换了记一行（对着谁、多远、点没点引信、我在哪），实机出事后对得上当时在做什么。
@@ -677,6 +699,7 @@ public final class Battle {
         if (pillar != null) pillar.close();
         pillar = null;
         bow.close();
+        if (dragon != null) dragon.close();
         moves.lowerGuard();
     }
 
@@ -685,6 +708,12 @@ public final class Battle {
         if (strike != null) strike.pause();
         if (walk != null) walk.pause();
         bow.close();
+        if (dragon != null) dragon.pause();
+    }
+
+    /** 打龙这一仗到此刻的战况；不打龙为空。 */
+    public Optional<DragonCombat.Report> dragonReport() {
+        return dragon == null ? Optional.empty() : Optional.of(dragon.report());
     }
 
     /** 调用方接得住挖坑自保：夜里退无可退、打不过时引擎报 {@link State#NEEDS_SHELTER} 交给它。 */
@@ -708,6 +737,7 @@ public final class Battle {
     }
 
     public Interruptibility interruptibility() {
+        if (dragon != null && dragonActive) return dragon.interruptibility();
         if (walk != null) return walk.interruptibility();
         if (strike != null) return strike.interruptibility();
         return Interruptibility.WORKING;

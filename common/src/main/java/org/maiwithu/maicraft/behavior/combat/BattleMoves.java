@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.combat;
 
+import java.util.OptionalInt;
+
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -93,6 +95,47 @@ public interface BattleMoves {
     /** 就地往上垫三格，站到柱顶（只垫不挖，垫的是废料）。没接上时如实失败。 */
     default Action pillarUp(TickContext context) {
         return null;
+    }
+
+    /**
+     * 砍这条龙的龙头：龙头是龙的一个碰撞部件，只有打这里是全额伤害；命中按龙本体的掉血、红闪确认。
+     * 没接上时按打龙本体。
+     */
+    default Action strikeHead(TickContext context, int dragonId) {
+        return strike(context, dragonId);
+    }
+
+    /** 冲这只射一箭，射程放到 maxRange 格（站在爆炸范围外仰射柱顶的末影水晶）。没接上时同普通射箭。 */
+    default Action shoot(TickContext context, int entityId, double maxRange) {
+        return shoot(context, entityId);
+    }
+
+    /** 此刻站在这里，有没有一条射得中它的弹道（maxRange 格内、不被方块挡住）。没接上时按有。 */
+    default boolean arcTo(TickContext context, int entityId, double maxRange) {
+        return true;
+    }
+
+    /**
+     * 迈一步、镜头看着这只（-1 时朝走的方向）；这一眼会对上没惹毛的末影人的眼睛，就把镜头往下压看脚前，
+     * 走的方向不变。没接上时同普通迈步。
+     */
+    default void stepAvertingGaze(TickContext context, int faceEntityId, Footwork.Step step) {
+        step(context, faceEntityId, step);
+    }
+
+    /** 地表：一列站得住的脚的高度（已加载、踩得住、不伤人、不是虚空），挑打龙的落点用。没接上时哪儿都站不住。 */
+    default DragonGeometry.Surface surface(TickContext context) {
+        return (x, z) -> OptionalInt.empty();
+    }
+
+    /** 这一点所在的区块加载着没有：看不见的水晶是被打掉了还是没加载，靠它分。没接上时按加载着。 */
+    default boolean loaded(TickContext context, double x, double z) {
+        return true;
+    }
+
+    /** 副手拿着盾：躲不开龙的冲撞时举盾。没接上时按没有。 */
+    default boolean hasShield(TickContext context) {
+        return false;
     }
 
     /**

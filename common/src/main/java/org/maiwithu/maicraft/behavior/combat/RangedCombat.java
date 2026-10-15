@@ -24,6 +24,11 @@ public final class RangedCombat {
     /** 连着这么多箭没射出去就交回近战。 */
     private static final int MAX_MISFIRES = 2;
 
+    /** 射一箭的动作报得出这一箭射没射出去（游戏确认了放箭）；报不出的按没射出去算。 */
+    public interface Fires {
+        boolean fired();
+    }
+
     private Action shot;
     private int shotTarget = -1;
     private int misfires;
@@ -59,15 +64,22 @@ public final class RangedCombat {
 
     /** 用弓打这一刻：推进手上这一箭。返回这一刻有没有真射出去一箭。 */
     public boolean tick(TickContext context, BattleMoves moves, int targetId) {
+        return tick(context, moves, targetId, 0);
+    }
+
+    /**
+     * 同上，射程放到 maxRange 格（站在爆炸范围外仰射柱顶的末影水晶）；0 为普通射程。
+     */
+    public boolean tick(TickContext context, BattleMoves moves, int targetId, double maxRange) {
         if (shot != null && shotTarget != targetId) close();
         if (shot == null) {
-            shot = moves.shoot(context, targetId);
+            shot = maxRange > 0 ? moves.shoot(context, targetId, maxRange) : moves.shoot(context, targetId);
             shotTarget = targetId;
         }
         ActionStatus status = shot.tick(context);
         boolean fired = false;
         if (status instanceof ActionStatus.Done || status instanceof ActionStatus.Failed) {
-            fired = shot instanceof RangedShot ranged && ranged.fired();
+            fired = shot instanceof Fires ranged && ranged.fired();
             misfires = status instanceof ActionStatus.Failed ? misfires + 1 : 0;
             close();
         }

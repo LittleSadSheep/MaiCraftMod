@@ -16,11 +16,20 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  *
  * <p>对手只收两种：正在追我的（十秒内真打过我的、引信点着的、看得见我又亮着攻击标记的、看得见的近处苦力怕），
  * 和名单上要打的。只在附近游荡、隔着墙的不收——不躲它，也不打它。
+ *
+ * <p>打龙时另带一份龙场（{@link DragonArena}）：龙不在对手里，龙和水晶、龙息、火球、末影人由龙的打法看龙场决定。
+ *
+ * @param arena 打龙时的龙场；不打龙、或龙不在了为 null
  */
-public record Battlefield(Me me, List<Foe> foes) {
+public record Battlefield(Me me, List<Foe> foes, DragonArena arena) {
 
     public Battlefield {
         foes = List.copyOf(foes);
+    }
+
+    /** 不打龙的战场。 */
+    public Battlefield(Me me, List<Foe> foes) {
+        this(me, foes, null);
     }
 
     /**
@@ -114,6 +123,16 @@ public record Battlefield(Me me, List<Foe> foes) {
         default List<Integer> namedIds() {
             return List.of();
         }
+
+        /** 这一仗打末影龙：每刻另读一份龙场，交龙的打法。 */
+        default boolean fightsDragon() {
+            return false;
+        }
+
+        /** 打的是哪一条龙（实体编号）；-1 为离出口门最近的那条。 */
+        default int dragonId() {
+            return -1;
+        }
     }
 
     /** 读一份战场：给定半径内的追兵与名单上的，按威胁先后排好。 */
@@ -157,7 +176,9 @@ public record Battlefield(Me me, List<Foe> foes) {
             });
         }
         foes.sort(Comparator.comparing(Foe::assessed, ThreatAssessment.BY_THREAT));
-        return new Battlefield(me, foes);
+        // 打龙：龙不在对手里（战斗感观不把龙当普通威胁），龙场另读；龙不在了（死了、走远了）就没有龙场。
+        DragonArena arena = roster.fightsDragon() ? senses.dragonArena(context, roster.dragonId()).orElse(null) : null;
+        return new Battlefield(me, foes, arena);
     }
 
     /** 玩家半个身宽（站着、潜行都是 0.6 宽）。 */

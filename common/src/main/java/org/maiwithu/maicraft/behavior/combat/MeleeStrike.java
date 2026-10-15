@@ -4,7 +4,9 @@ package org.maiwithu.maicraft.behavior.combat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Function;
 
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
@@ -32,7 +34,8 @@ public final class MeleeStrike implements Action {
     /** 对手离这么远以上，才为换武器打开背包。 */
     private static final double INVENTORY_SWAP_DISTANCE = 4.0;
 
-    private final int targetId;
+    /** 每刻从世界里找回要打的那个：平常按实体编号；龙头这类碰撞部件按编号找不到，由调用方给找法。 */
+    private final Function<ClientLevel, Entity> target;
     private PlayerContext current;
     private final ClientMovesToMainhand hands = new ClientMovesToMainhand(() -> this.current);
     private Action arming;
@@ -40,14 +43,19 @@ public final class MeleeStrike implements Action {
     private Action attack;
 
     public MeleeStrike(int targetId) {
-        this.targetId = targetId;
+        this(level -> level.getEntity(targetId));
+    }
+
+    /** 打一个按实体编号找不到的目标（末影龙的龙头这类碰撞部件）：找法由调用方给，找不到就收场不打空拳。 */
+    public MeleeStrike(Function<ClientLevel, Entity> target) {
+        this.target = target;
     }
 
     @Override
     public ActionStatus tick(TickContext context) {
         PlayerContext player = context.player();
         current = player;
-        Entity target = player == null || player.level() == null ? null : player.level().getEntity(targetId);
+        Entity target = player == null || player.level() == null ? null : this.target.apply(player.level());
         if (target == null || player.localPlayer() == null || player.interactionSender() == null) {
             return ActionStatus.done();
         }

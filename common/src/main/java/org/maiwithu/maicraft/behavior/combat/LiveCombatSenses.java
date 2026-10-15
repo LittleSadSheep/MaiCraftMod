@@ -21,6 +21,8 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.monster.Blaze;
 import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.boss.enderdragon.EnderDragon;
+import net.minecraft.world.entity.monster.EnderMan;
 import net.minecraft.world.entity.monster.Evoker;
 import net.minecraft.world.entity.monster.Guardian;
 import net.minecraft.world.entity.monster.RangedAttackMob;
@@ -43,12 +45,17 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * <p>"正在追我"在客户端拿不到怪物的心里想法（AI 目标不同步），按游戏事实的替代征兆判断：
  * 十秒内真打过她、或正在朝她射投射物的，都按正在追处理；只看见但没动手的按没追处理。
  * 引信判定只认客户端看得到的：苦力怕已经膨胀或开始闪白才算点了引信。
+ *
+ * <p>末影龙不算普通威胁：拿剑追一条飞着的龙、按普通怪撤离都没用，打龙另读一份龙场（{@link #dragonArena}），
+ * 由龙的打法管；自卫也就不会为撞过角色的龙插进来。
  */
 public final class LiveCombatSenses implements CombatSenses {
 
     private final CombatMemory memory;
     private final ReadsFoodValues foods;
     private final ModRangedWeapons weapons;
+    /** 龙场的读数：记着龙与火球上一刻的位置估速度、龙的这件事干了几刻。 */
+    private final LiveDragonSight dragonSight = new LiveDragonSight();
 
     /** @param foods 食物数值：数"带了几份口粮"时按游戏的食物组件认，不按物品名猜。 */
     public LiveCombatSenses(CombatMemory memory, ReadsFoodValues foods) {
@@ -79,7 +86,7 @@ public final class LiveCombatSenses implements CombatSenses {
         }
         List<Threat> threats = new ArrayList<>();
         for (Mob hostile : level.getEntitiesOfClass(Mob.class, box,
-                mob -> Hostility.hostileNow(mob) || attackers.contains(mob.getUUID()))) {
+                mob -> !(mob instanceof EnderDragon) && (Hostility.hostileNow(mob) || attackers.contains(mob.getUUID())))) {
             if (self.distanceTo(hostile) > radius) {
                 continue;
             }
@@ -110,6 +117,11 @@ public final class LiveCombatSenses implements CombatSenses {
             if (nearest == null || projectile.distanceToSqr(self) < nearest.distanceToSqr(self)) nearest = projectile;
         }
         return nearest == null ? OptionalInt.empty() : OptionalInt.of(nearest.getId());
+    }
+
+    @Override
+    public Optional<DragonArena> dragonArena(TickContext context, int dragonId) {
+        return dragonSight.read(context, dragonId);
     }
 
     @Override
@@ -144,12 +156,14 @@ public final class LiveCombatSenses implements CombatSenses {
             canHitMe = CombatGeometry.mobReaches(other.getBoundingBox(), self.getBoundingBox());
             dangerRadius = CombatGeometry.mobDangerRadius(halfWidth, myHalf);
         }
+        // 末影人挨箭前会瞬移躲开：标出来，打它只近战，不白费箭。
         return new Threat(other.getId(), other.getUUID(), typeId(other),
                 other.getX(), other.getY(), other.getZ(), self.distanceTo(other),
                 kindOf(other), armed(other), ObservationVisibility.entity(self, other),
                 aggressive, halfWidth,
                 CombatGeometry.distanceToBox(self.getEyePosition(), other.getBoundingBox()),
-                canHitMe, dangerRadius, other instanceof Creeper creeper && creeper.isPowered());
+                canHitMe, dangerRadius, other instanceof Creeper creeper && creeper.isPowered(),
+                other instanceof EnderMan);
     }
 
     @Override
