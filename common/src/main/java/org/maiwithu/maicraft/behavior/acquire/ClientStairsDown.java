@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.acquire;
 
+import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -29,7 +31,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 再走下去，把这一级挖出来的东西捡起来；挖够了就停在楼梯底，回地面顺着楼梯走上去，不用垫方块。
  *
  * <p>挖之前先看清这一级：要挖的三格不能是液体、挖不动的、不许动的；三格四周、头顶和下一级脚下
- * 不能挨着水或岩浆（挖开就灌进来）。挖完再看下一级脚下踩不踩得住：下面是空洞就不走下去，
+ * 不能挨着水或岩浆（挖开就灌进来）。这一级朝原方向挖不了、或挖到一半挖不动，就往左、往右拐着挖
+ * （第一级四面都试），不往回挖；这一级几个方向都不行才如实停下。挖完再看下一级脚下踩不踩得住：下面是空洞就不走下去，
  * 洞壁上露出来的石头已经看得见了，下回按采掘直接挖。这些都是现场是什么样，不是猜结果。
  *
  * <p>停下时挖到过想要的方块就算做完，由拿东西的引擎重新清点，不够再来（楼梯壁上的石头这时看得见了）；
@@ -201,6 +204,12 @@ public final class ClientStairsDown implements DigsStairsDown {
         private ActionStatus ended;
         /** 被打断过（夜里去睡觉、躲怪）：回来时人可能已经不在原来那一级上。 */
         private boolean paused;
+        /** 来时的方向（上一级在这一边）：拐弯不往回挖，免得挖掉来时踩的那一级；第一级为空。 */
+        private Direction back;
+        /** 这一级已经挖不了、挖砸了的方向：换方向时不再试。走下一级就清空。 */
+        private final Set<Direction> refusedHere = EnumSet.noneOf(Direction.class);
+        /** 这一级第一个挖不了的原因：几个方向都不行时照它说。 */
+        private Problem firstRefusal;
 
         Digging(Predicate<String> yields, int wantedCells, Permissions permissions, Tunnel tunnel) {
             this.yields = yields;
@@ -276,27 +285,50 @@ public final class ClientStairsDown implements DigsStairsDown {
                 levelStarted = true;
                 if (heading != null) turnAside(context);
             }
-            if (heading == null) {
-                Direction facing = site.facing(context);
-                Problem first = null;
-                for (int turn = 0; turn < 4 && heading == null; turn++) {
-                    Direction tried = facing;
-                    for (int i = 0; i < turn; i++) tried = tried.getClockWise();
-                    Optional<Problem> why = refusal(context, tried);
-                    if (why.isEmpty()) {
-                        heading = tried;
-                    } else if (first == null) {
-                        first = why.get();
-                    }
-                }
-                if (heading == null) return finish(first);
-            } else {
-                Optional<Problem> why = refusal(context, heading);
-                if (why.isPresent() && !turned(context)) return finish(why.get());
-            }
+            Optional<Problem> stop = chooseHeading(context);
+            if (stop.isPresent()) return finish(stop.get());
             dropsBefore = drops.nearby();
             digsThisStep = 0;
             stage = Stage.DIG;
+            return ActionStatus.progressed();
+        }
+
+        // 这一级朝哪边挖：原方向挖得了就照原方向；挖不了就换——第一级四面都试（先朝脸对着的，再顺时针），
+        // 之后往左、往右拐，不往回挖（回头会挖掉来时踩的那一级）；这一级挖砸过的方向不再试。
+        // 几个方向都不行才停，原因用这一级第一个挖不了的。
+        private Optional<Problem> chooseHeading(TickContext context) {
+            List<Direction> order = new ArrayList<>();
+            if (heading == null) {
+                Direction facing = site.facing(context);
+                for (int turn = 0; turn < 4; turn++) {
+                    order.add(facing);
+                    facing = facing.getClockWise();
+                }
+            } else {
+                order.add(heading);
+                order.add(heading.getCounterClockWise());
+                order.add(heading.getClockWise());
+                order.add(heading.getOpposite());
+            }
+            for (Direction tried : order) {
+                if (tried == back || refusedHere.contains(tried)) continue;
+                Optional<Problem> why = refusal(context, tried);
+                if (why.isEmpty()) {
+                    heading = tried;
+                    return Optional.empty();
+                }
+                refusedHere.add(tried);
+                if (firstRefusal == null) firstRefusal = why.get();
+            }
+            return Optional.of(firstRefusal);
+        }
+
+        // 挖这一级挖到一半挖不了（上面掉下沙砾一直挖不通、挖不动、不许动）：这个方向记作挖不了，
+        // 回去重新挑方向，左右都不行才停。
+        private ActionStatus turnOrFinish(Problem why) {
+            refusedHere.add(heading);
+            if (firstRefusal == null) firstRefusal = why;
+            stage = Stage.LOOK;
             return ActionStatus.progressed();
         }
 
@@ -308,18 +340,6 @@ public final class ClientStairsDown implements DigsStairsDown {
                     return;
                 }
             }
-        }
-
-        // 长程挖矿半路前面挖不了（设施、搭出来的、挨着水）：往左或往右拐，两边都不行才停；不往回挖。
-        private boolean turned(TickContext context) {
-            if (tunnel == null) return false;
-            for (Direction side : List.of(heading.getCounterClockWise(), heading.getClockWise())) {
-                if (refusal(context, side).isEmpty()) {
-                    heading = side;
-                    return true;
-                }
-            }
-            return false;
         }
 
         // 这一级为什么不能挖；能挖为空。要挖的格看能不能挖、许不许动，四周看有没有水或岩浆。
@@ -352,15 +372,15 @@ public final class ClientStairsDown implements DigsStairsDown {
                 BlockPos cell = cells.get(row);
                 Ground ground = site.ground(context, cell);
                 if (ground == Ground.OPEN) continue;
-                if (ground != Ground.DIGGABLE) return finish(blocked(context, cell, ground));
+                if (ground != Ground.DIGGABLE) return turnOrFinish(blocked(context, cell, ground));
                 if (digsThisStep >= MAX_DIGS_PER_STEP) {
-                    return finish(Problem.of(Problem.Kind.STUCK, "往下挖楼梯：" + at(cell) + " 挖了 "
+                    return turnOrFinish(Problem.of(Problem.Kind.STUCK, "往下挖楼梯：" + at(cell) + " 挖了 "
                             + digsThisStep + " 下还没挖通，上面可能一直在往下掉沙砾"));
                 }
                 String blockType = site.blockType(context, cell);
                 Optional<Problem> refused = permission.blockAllowed(permissions, PermissionCheck.WorldAction.DIG_BLOCK,
                         position(context, cell), blockType);
-                if (refused.isPresent()) return finish(refused.get());
+                if (refused.isPresent()) return turnOrFinish(refused.get());
                 Optional<Action> dig = tunnel == null ? digs.dig(cell) : chainDig(context, cell, row, way);
                 if (dig.isEmpty()) {
                     return finish(Problem.of(Problem.Kind.UNSUPPORTED, "挖方块的现场动作没接上"));
@@ -433,7 +453,8 @@ public final class ClientStairsDown implements DigsStairsDown {
             BlockPos trigger = chainTrigger;
             chainedRow = Map.of();
             chainTrigger = null;
-            if (status instanceof ActionStatus.Failed failed) return finish(failed.problem());
+            // 这一格挖不下来（够不着、被拒）：这个方向记作挖不了，换个方向再挖。
+            if (status instanceof ActionStatus.Failed failed) return turnOrFinish(failed.problem());
             if (diggingYields) yielded++;
             for (Map.Entry<BlockPos, String> cell : row.entrySet()) {
                 if (cell.getKey().equals(trigger) || !yields.test(cell.getValue())) continue;
@@ -450,6 +471,10 @@ public final class ClientStairsDown implements DigsStairsDown {
             }
             steps++;
             if (steppingLevel) levelSteps++;
+            // 下到新的一级：上一级在来时方向的反面，这一级挖不了的方向从头算。
+            back = heading.getOpposite();
+            refusedHere.clear();
+            firstRefusal = null;
             stage = Stage.PICK_UP;
             step = drops.pickUpNewSince(dropsBefore);
             return ActionStatus.progressed();

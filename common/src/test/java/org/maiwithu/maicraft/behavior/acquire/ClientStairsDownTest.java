@@ -203,23 +203,81 @@ class ClientStairsDownTest {
     }
 
     @Test
-    void 前面挨着岩浆_一格石头都没挖到就以危险失败() {
-        // 第二级齐脚那格的左边是岩浆：挖开就流进来。
+    void 前面挨着岩浆_拐个弯接着挖_挨岩浆的那一级不挖() {
+        // 第二级齐脚那格的左边是岩浆：挖开就流进来。往北挖不了，左拐也挨着它，右拐往东接着挖。
         world.placed.put(new BlockPos(-1, 63, -2), "minecraft:lava");
+
+        assertInstanceOf(ActionStatus.Done.class, run(3));
+        assertTrue(digs.dug.stream().noneMatch(cell -> cell.getZ() == -2), "挨着岩浆的那一级一格都不挖：" + digs.dug);
+        assertTrue(digs.dug.contains(new BlockPos(1, 62, -1)), "第二级拐到东边挖：" + digs.dug);
+    }
+
+    @Test
+    void 这一级前左右都挨着岩浆_一格石头都没挖到就以危险失败() {
+        // 往前、往左、往右都挨着岩浆；往回挖会挖掉来时那一级，也不挖。
+        world.placed.put(new BlockPos(-1, 63, -2), "minecraft:lava");
+        world.placed.put(new BlockPos(2, 63, -1), "minecraft:lava");
 
         ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, run(3));
         assertEquals(Problem.Kind.DANGER, failed.problem().kind());
         assertTrue(failed.problem().message().contains("minecraft:lava"), failed.problem().message());
-        assertTrue(digs.dug.stream().noneMatch(cell -> cell.getZ() == -2), "挨着岩浆的那一级一格都不挖：" + digs.dug);
+        assertTrue(digs.dug.stream().allMatch(cell -> cell.getZ() == -1 && cell.getX() == 0),
+                "第二级哪个方向都没挖：" + digs.dug);
     }
 
     @Test
-    void 挖到过石头后撞上水_算做完交给引擎重新清点() {
-        world.placed.put(new BlockPos(1, 59, -5), "minecraft:water");
+    void 半路前面是别人放的方块_拐个弯接着往下挖() {
+        // 挖到一半前面是不许拆的方块：往左、往右拐着接着挖，不为这一格停下整条采掘。
+        protectedCells.add(new BlockPos(0, 62, -2));
+
+        assertInstanceOf(ActionStatus.Done.class, run(3));
+        assertTrue(digs.dug.stream().noneMatch(new BlockPos(0, 62, -2)::equals), "不许拆的不挖：" + digs.dug);
+        assertEquals(3, digs.types.stream().filter("minecraft:stone"::equals).count());
+    }
+
+    @Test
+    void 半路一格挖不下来_换个方向再挖() {
+        // 第二级齐脚那格挖不下来（够不着、被拒）：这个方向记作挖不了，拐弯接着挖。
+        DigsBlocks failing = new DigsBlocks() {
+            @Override public Optional<Action> dig(BlockPos target) {
+                if (target.equals(new BlockPos(0, 63, -2))) {
+                    return Optional.of(new Action() {
+                        @Override public ActionStatus tick(TickContext context) {
+                            return ActionStatus.failed(Problem.of(Problem.Kind.REFUSED_BY_GAME, "被拒了"));
+                        }
+                        @Override public String describe() {
+                            return "挖不下来";
+                        }
+                    });
+                }
+                return digs.dig(target);
+            }
+        };
+        PermissionCheck check = new PermissionCheck(
+                new Protection((dimension, x, y, z) -> Optional.empty(), () -> List.of(), name -> Optional.empty(),
+                        GuessesPlayerMade.NOTHING, "self"),
+                new ReadsCreatureSituation() {
+                    @Override public Optional<CreatureSituation> situationOf(UUID entityId) {
+                        return Optional.empty();
+                    }
+                });
+        Action action = new ClientStairsDown(world, failing, new Drops(), check)
+                .digDown(type -> type.equals("minecraft:stone"), 2, Permissions.DEFAULT);
+        ActionStatus status = ActionStatus.running();
+        for (long t = 0; t < 5000 && status instanceof ActionStatus.Running; t++) status = action.tick(new Tick(t));
+        assertInstanceOf(ActionStatus.Done.class, status);
+        assertTrue(digs.dug.stream().anyMatch(cell -> cell.getX() != 0), "拐了弯：" + digs.dug);
+    }
+
+    @Test
+    void 挖到一半前面挨着水_拐开接着挖够() {
+        // 第五级旁边是水：这一级往北挖开就灌进来，拐个弯接着往下挖，挖够九格石头。
+        BlockPos water = new BlockPos(1, 59, -5);
+        world.placed.put(water, "minecraft:water");
 
         assertInstanceOf(ActionStatus.Done.class, run(9));
-        assertTrue(digs.types.contains("minecraft:stone"));
-        assertEquals(new BlockPos(0, 60, -4), world.feet, "停在挨着水的那一级前面");
+        assertEquals(9, digs.types.stream().filter("minecraft:stone"::equals).count());
+        assertTrue(digs.dug.stream().noneMatch(cell -> cell.distManhattan(water) == 1), "挨着水的格不挖：" + digs.dug);
     }
 
     @Test
