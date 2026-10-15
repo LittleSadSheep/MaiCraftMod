@@ -103,7 +103,8 @@ public final class PlayerReminders implements DamageObserver {
         observeRest(tick);
         drowning.observe(new DrowningReminder.Observation(tick, player.isUnderWater(),
                 player.getAirSupply(), player.getMaxAirSupply()));
-        burning.observe(new BurningReminder.Observation(tick, player.isOnFire(), player.isInLava()));
+        burning.observe(new BurningReminder.Observation(tick, player.isOnFire(), player.isInLava(),
+                level.dimensionType().ultraWarm()));
         if (lastSlowTick < 0 || tick < lastSlowTick || tick - lastSlowTick >= SLOW_INTERVAL) {
             observeFood(context, tick);
             observeGear(tick);

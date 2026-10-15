@@ -12,8 +12,13 @@ final class BurningReminder {
     private static final long EXPOSURE_TICKS = 20;
     private static final long MAX_OBSERVATION_GAP = 5 * 20;
 
-    /** 一刻的观察：身上着没着火、是不是泡在岩浆里。 */
-    record Observation(long tick, boolean onFire, boolean inLava) {}
+    /** 一刻的观察：身上着没着火、是不是泡在岩浆里、这个维度放不放得了水（下界放水会蒸发）。 */
+    record Observation(long tick, boolean onFire, boolean inLava, boolean waterEvaporates) {
+
+        Observation(long tick, boolean onFire, boolean inLava) {
+            this(tick, onFire, inLava, false);
+        }
+    }
 
     private final ReminderBoard board;
     private long previousTick = -1;
@@ -43,7 +48,11 @@ final class BurningReminder {
         evidence.put("exposure_observed_ticks", now.tick() - exposureSince);
         // 火可能是自己点的、地上的火或岩浆；防火效果下实际伤害也不一样，这里只说身体此刻的状态。
         evidence.put("fire_source_known", false);
-        board.update(ID, "正在着火或泡在岩浆里，可能一直在掉血。建议马上离开火源，或跳进水里灭火。",
+        // 下界没有水、也放不出水：只建议离开火源等火自己灭，不叫它去找水。
+        String advice = now.waterEvaporates()
+                ? "建议马上离开火源；这里放不出水，离开后身上的火要烧几秒才灭。"
+                : "建议马上离开火源，或跳进水里灭火。";
+        board.update(ID, "正在着火或泡在岩浆里，可能一直在掉血。" + advice,
                 evidence, List.of(
                         "提醒不会自己灭火或移动角色；离开火源后再看身体状态，决定还要不要继续手上的事。",
                         "去下界作业前可以准备防火药水。"), now.tick());

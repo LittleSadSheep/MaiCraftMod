@@ -73,6 +73,12 @@ public final class FallGuardTask extends PhasedTask<FallGuardTask.Phase> {
         }
         rescue = rescues.apply(player);
         if (rescue == null) {
+            // 下界放水会蒸发，水桶接不住自己：别让 LLM 照着建议去备水。实机 10-14 下界落地防护叫它带水桶。
+            if (player.level() != null && player.level().dimensionType().ultraWarm()) {
+                return Next.fail(Problem.of(Problem.Kind.DANGER,
+                        "这一掉会掉血，可身上没有能接住自己的东西（干草、黏液块、蛛网……；这里放水会蒸发，水桶接不住）；落地伤害由游戏结算",
+                        "在下界高处走动时带干草块或黏液块，掉下去时就能接住自己"));
+            }
             return Next.fail(Problem.of(Problem.Kind.DANGER,
                     "这一掉会掉血，可身上没有能接住自己的东西（水桶、干草、黏液块、蛛网……），落点附近也没有现成的水；落地伤害由游戏结算",
                     "高处干活时身上带一桶水（或干草、黏液块），掉下去时就能接住自己"));

@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import org.maiwithu.maicraft.game.player.DamageObserver;
+import org.maiwithu.maicraft.game.world.Hostility;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.client.player.LocalPlayer;
 import java.util.Optional;
@@ -88,11 +89,11 @@ public final class CombatMemory implements DamageObserver {
         lastHealth = health;
         // 这一刻服务器已经说了是谁打的：不再按血掉落猜最近的怪，免得记到旁边无辜的那只头上。
         if (hurtThisTick && authoritativeTick != now) {
-            // 找最近的敌对生物记一笔；伤害类型按血掉落当刻说不清来源，统一记"被攻击"。
+            // 找最近的敌对生物记一笔；伤害类型按血掉落当刻说不清来源，统一记"被攻击"。没惹毛的中立生物不背这个锅。
             Mob nearest = null;
             for (Mob mob : level.getEntitiesOfClass(Mob.class,
                     self.getBoundingBox().inflate(ThreatAssessment.VIGILANCE_RADIUS),
-                    mob -> mob instanceof Enemy)) {
+                    mob -> Hostility.hostileNow(mob))) {
                 if (nearest == null || self.distanceToSqr(mob) < self.distanceToSqr(nearest)) {
                     nearest = mob;
                 }

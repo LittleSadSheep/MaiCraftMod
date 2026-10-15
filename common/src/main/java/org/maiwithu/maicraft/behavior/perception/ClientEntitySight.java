@@ -16,9 +16,9 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.animal.Sheep;
 import net.minecraft.world.entity.item.ItemEntity;
-import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.item.ItemStack;
 
+import org.maiwithu.maicraft.game.world.Hostility;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.ObservationVisibility;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -65,7 +65,7 @@ public final class ClientEntitySight implements EntitySight {
                     WorldPosition.here((int) Math.floor(entity.getX()),
                             (int) Math.floor(entity.getY()), (int) Math.floor(entity.getZ())),
                     ObservationVisibility.entity(player, entity),
-                    entity instanceof Enemy,
+                    Hostility.hostileNow(entity),
                     targetsPlayer(entity, player),
                     health,
                     traits(entity)));
@@ -83,6 +83,10 @@ public final class ClientEntitySight implements EntitySight {
         Map<String, String> traits = new LinkedHashMap<>();
         if (entity.isOnFire()) {
             traits.put("着火", "是");
+        }
+        // 中立生物：没惹它不打人，惹毛了才算敌对（僵尸猪灵打一只整群上）。
+        if (Hostility.neutral(entity) && entity instanceof Mob mob) {
+            traits.put("中立", mob.isAggressive() ? "已惹毛，正在进攻" : "没惹它不会打人");
         }
         if (entity instanceof AgeableMob ageable && ageable.isBaby()) {
             traits.put("幼年", "是");
