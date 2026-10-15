@@ -80,6 +80,22 @@ public final class ClientGearChanges implements GearChanges {
     }
 
     @Override
+    public Optional<Action> wearFrom(int inventorySlot, GearSlotName slot) {
+        PlayerContext context = contexts.get();
+        if (context == null || context.localPlayer() == null || inventorySlot < 0 || inventorySlot > 35) {
+            return Optional.empty();
+        }
+        var stack = context.localPlayer().getInventory().getItem(inventorySlot);
+        if (stack.isEmpty()) return Optional.empty();
+        // 穿的是这一格上的那一件：同种的有好几件（附魔、耐久不同）时不按种类随手拿。
+        String itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+        if (slot == GearSlotName.MAINHAND || slot == GearSlotName.OFFHAND || armorInventorySlot(slot) > 0) {
+            return Optional.of(new WearAction(itemId, slot, inventorySlot));
+        }
+        return Optional.empty();
+    }
+
+    @Override
     public Optional<Action> takeOff(GearSlotName slot) {
         PlayerContext context = contexts.get();
         if (context == null) return Optional.empty();
@@ -95,13 +111,20 @@ public final class ClientGearChanges implements GearChanges {
     private final class WearAction implements Action {
         private final String itemId;
         private final GearSlotName slot;
+        /** 指定从背包哪一格拿那一件；不指定（按种类找第一件）为 -1。 */
+        private final int sourceSlot;
         private Action stage;
         private PendingInteraction usePending;
         private Problem failure;
 
         WearAction(String itemId, GearSlotName slot) {
+            this(itemId, slot, -1);
+        }
+
+        WearAction(String itemId, GearSlotName slot, int sourceSlot) {
             this.itemId = itemId;
             this.slot = slot;
+            this.sourceSlot = sourceSlot;
             // 主手与护甲都从"换到主手"起手；副手一步交换就到，直接进副手阶段。
             this.stage = slot == GearSlotName.OFFHAND ? null : handStage();
         }
@@ -111,6 +134,10 @@ public final class ClientGearChanges implements GearChanges {
             if (!movesToMainhand.carried(itemId)) {
                 failure = Problem.of(Problem.Kind.NEED_ITEM, "身上没有 " + itemId + "，穿不上", null);
                 return null;
+            }
+            // 指定了哪一格：把那一格的那件换到主手；那一格已经选中时给空，直接穿。
+            if (sourceSlot >= 0) {
+                return movesToMainhand.actionToMainhandFrom(sourceSlot, "把 " + itemId + " 换到主手").orElse(null);
             }
             return movesToMainhand.actionToMainhand(itemId).orElse(null);
         }
@@ -141,7 +168,8 @@ public final class ClientGearChanges implements GearChanges {
         // 副手交换：只认主背包与快捷栏里的东西；交换要求世界画面空闲，占着就下一刻再试。
         private ActionStatus offhandSwap(PlayerContext player) {
             LocalPlayer body = player.localPlayer();
-            int source = findFirstInventorySlot(body, itemId);
+            // 指定了哪一格就换那一格的那件；没指定按种类找第一件。
+            int source = sourceSlot >= 0 ? sourceSlot : findFirstInventorySlot(body, itemId);
             if (source < 0) {
                 failure = Problem.of(Problem.Kind.NEED_ITEM, "身上没有 " + itemId + "，穿不上副手", null);
                 return ActionStatus.failed(failure);

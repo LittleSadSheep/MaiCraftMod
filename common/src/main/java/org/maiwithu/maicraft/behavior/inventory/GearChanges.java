@@ -20,4 +20,12 @@ public interface GearChanges {
 
     /** 从指定栏位取下放背包的动作；接缝没接上或现场做不了时为 empty。 */
     Optional<Action> takeOff(GearSlotName slot);
+
+    /**
+     * 把背包第几格（主背包与快捷栏，0~35）上的那一件穿上指定栏位：同种的东西有好几件（附魔、耐久不一样）时，
+     * 穿的就是这一格的那件，不按物品种类随手拿一件。接缝没接上、那一格空着或现场做不了时为 empty。
+     */
+    default Optional<Action> wearFrom(int inventorySlot, GearSlotName slot) {
+        return Optional.empty();
+    }
 }

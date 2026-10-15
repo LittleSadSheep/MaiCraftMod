@@ -24,12 +24,12 @@ public final class ClientEquipmentView implements ReadsEquipment {
 
     @Override
     public Optional<BackpackStack> slot(GearSlotName name) {
-        ItemStack stack = player.getItemBySlot(mapped(name));
+        ItemStack stack = player.getItemBySlot(vanillaSlot(name));
         return stack.isEmpty() ? Optional.empty() : Optional.of(ClientBackpackView.snapshot(stack));
     }
 
-    // 本项目的栏位名与原版 EquipmentSlot 一一对应，只做一次映射。
-    private static EquipmentSlot mapped(GearSlotName name) {
+    /** 本项目的栏位名对应的原版栏位：一一对应，全仓只在这里映射一次（寻死按原件收护甲也用它）。 */
+    public static EquipmentSlot vanillaSlot(GearSlotName name) {
         return switch (name) {
             case MAINHAND -> EquipmentSlot.MAINHAND;
             case OFFHAND -> EquipmentSlot.OFFHAND;

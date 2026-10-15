@@ -66,6 +66,20 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
     }
 
     /**
+     * 把背包指定那一格（0~35）上的东西弄到主手：同种的东西有好几件时拿的就是这一格的那件。
+     * 那一格已经是选中的快捷栏格时给空（不用换）；格号不在主背包与快捷栏范围、或那一格空着时也给空。
+     */
+    public Optional<Action> actionToMainhandFrom(int sourceSlot, String what) {
+        PlayerContext context = contexts.get();
+        if (context == null || context.localPlayer() == null || sourceSlot < 0 || sourceSlot > LAST_MAIN_SLOT) {
+            return Optional.empty();
+        }
+        var inventory = context.localPlayer().getInventory();
+        if (sourceSlot == inventory.selected || inventory.getItem(sourceSlot).isEmpty()) return Optional.empty();
+        return Optional.of(new MoveAction(what, sourceSlot));
+    }
+
+    /**
      * 腾出空手：主手已空就给一个立刻做完的选中（选中的还是这一格）；不然像真人滚一下滚轮切到空着的快捷栏格，
      * 经原生选中、等服务端确认；快捷栏没有空格就把主手的东西收进背包；背包也满了给空。
      */
