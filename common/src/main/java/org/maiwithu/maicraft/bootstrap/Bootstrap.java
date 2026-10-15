@@ -387,7 +387,7 @@ public final class Bootstrap {
             instanceConfig = InstanceConfig.read(loader.configDirectory());
             furnaceFuels = loader.furnaceFuels();
             if (instanceConfig.allowGameCommands()) {
-                LOG.info("{} 本实例允许角色执行游戏命令（配置文件放开）", ModIdentity.NAME);
+                LOG.info("{} 本实例连管理员命令也允许角色执行（配置文件放开）", ModIdentity.NAME);
             }
             // 交互提交与容器界面操作共用角色上下文里同一份每刻一次的交互机会；两边建好后互相接上，再挂进角色上下文。
             // 行为层的生存需求要靠这条轨道挖掘与放水，所以在这里创建并互相接好。

@@ -15,9 +15,7 @@ import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 import org.maiwithu.maicraft.kernel.task.TickContext;
-import org.maiwithu.maicraft.kernel.task.TickResult;
 
-import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -25,9 +23,8 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** 说话能力：普通聊天照常发；游戏命令默认不执行、实例配置放开后放行；完成以本地回显为准。 */
+/** 说话能力：普通聊天与普通玩家命令照常发；管理员命令默认不执行、实例配置放开后放行；完成以本地回显为准。 */
 class ChatAbilityTest {
-
     /** 不发话、读不到任何回显的替身：能力测试只看决定与说明，不碰发送。 */
     private static final ReadsChatEcho SILENT_ECHO = new ReadsChatEcho() {
         @Override public boolean appearsInChat(String message) { return false; }
@@ -87,20 +84,49 @@ class ChatAbilityTest {
     }
 
     @Test
-    void slashCommandIsRefusedWithoutRunningAnything() {
+    void adminCommandIsRefusedWithoutRunningAnything() {
         StepDecision.Finish finish = assertInstanceOf(StepDecision.Finish.class,
                 new ChatAbility(message -> true, SILENT_ECHO, NO_BOX, false).decide(step(goal("/give @s diamond"))));
-
         assertEquals(TaskResult.Status.FAILED, finish.result().status());
         Problem problem = finish.result().problem();
         assertEquals(Problem.Kind.REFUSED_BY_GAME, problem.kind());
-        // 禁令要说清是角色不执行游戏命令，不是游戏拦的。
-        assertTrue(problem.message().contains("角色不执行游戏命令"), problem.message());
+        // 禁令要说清是管理员命令角色不执行、不是游戏拦的，并告诉它普通命令照常能发。
+        assertTrue(problem.message().contains("管理员命令角色不执行"), problem.message());
+        assertTrue(problem.suggestion().contains("普通玩家命令"), problem.suggestion());
     }
 
     @Test
-    void slashCommandRunsWhenInstanceAllowsIt() {
-        // 实例配置放开后，以 / 开头的消息不再拒绝，照常开出发话任务；命令能不能成由服务器裁决。
+    void ordinaryPlayerCommandRunsByDefault() {
+        // 像生存玩家一样：/msg、/home 这类普通玩家命令默认就发，不用实例配置放开。
+        StepDecision.Run run = assertInstanceOf(StepDecision.Run.class,
+                new ChatAbility(message -> true, SILENT_ECHO, NO_BOX, false).decide(step(goal("/msg Steve 你好"))));
+        assertEquals("/msg Steve 你好", assertInstanceOf(ChatInput.class, run.input()).message());
+    }
+
+    @Test
+    void serverCommandTreeDecidesModAdminCommands() {
+        // 名单里没有的模组命令，单人时问内置服务器的命令树：它说普通玩家用不了，就当管理员命令拒绝。
+        KnowsAdminCommands tree = name -> name.equals("ftbteams");
+        StepDecision.Finish finish = assertInstanceOf(StepDecision.Finish.class,
+                new ChatAbility(message -> true, SILENT_ECHO, NO_BOX, false, tree)
+                        .decide(step(goal("/ftbteams create 队"))));
+        assertEquals(Problem.Kind.REFUSED_BY_GAME, finish.result().problem().kind());
+        assertInstanceOf(StepDecision.Run.class,
+                new ChatAbility(message -> true, SILENT_ECHO, NO_BOX, false, tree).decide(step(goal("/home"))));
+    }
+
+    @Test
+    void maicraftCommandStaysWithTheHumanEvenWhenOpened() {
+        // /maicraft 是人的客户端命令：实例放开管理员命令也不发，角色不能改自己的权限。
+        StepDecision.Finish finish = assertInstanceOf(StepDecision.Finish.class,
+                new ChatAbility(message -> true, SILENT_ECHO, NO_BOX, true).decide(step(goal("/maicraft port 1"))));
+        assertEquals(Problem.Kind.REFUSED_BY_GAME, finish.result().problem().kind());
+        assertTrue(finish.result().problem().message().contains("/maicraft"), finish.result().problem().message());
+    }
+
+    @Test
+    void adminCommandRunsWhenInstanceAllowsIt() {
+        // 实例配置放开后，管理员命令也不再拒绝，照常开出发话任务；命令能不能成由服务器裁决。
         StepDecision.Run run = assertInstanceOf(StepDecision.Run.class,
                 new ChatAbility(message -> true, SILENT_ECHO, NO_BOX, true).decide(step(goal("/give @s diamond"))));
         assertEquals("/give @s diamond", assertInstanceOf(ChatInput.class, run.input()).message());
@@ -108,17 +134,17 @@ class ChatAbilityTest {
 
     @Test
     void docTellsCommandPolicyAccordingToInstance() {
-        // 默认：说明写明角色不执行游戏命令；放开：说明与参数说明都如实写本实例允许执行游戏命令。
+        // 默认：说明写明普通命令照发、管理员命令角色不执行；放开：说明与参数说明都如实写本实例连管理员命令也允许。
         ChatAbility closed = new ChatAbility(message -> true, SILENT_ECHO, NO_BOX, false);
-        assertTrue(closed.spec().doc().load().contains("角色不执行游戏命令"));
-        assertFalse(closed.spec().doc().load().contains("本实例允许执行游戏命令"));
-
+        assertTrue(closed.spec().doc().load().contains("管理员命令角色不执行"));
+        assertTrue(closed.spec().doc().load().contains("普通玩家命令照发"));
+        assertFalse(closed.spec().doc().load().contains("连管理员命令也允许"));
         ChatAbility open = new ChatAbility(message -> true, SILENT_ECHO, NO_BOX, true);
-        assertTrue(open.spec().doc().load().contains("本实例允许执行游戏命令"),
+        assertTrue(open.spec().doc().load().contains("连管理员命令也允许"),
                 open.spec().doc().load());
         // 放开说明要进全量列表：一句话用途里也带这一句，不能只藏在 lookup 详情里。
-        assertTrue(open.spec().summary().contains("本实例允许执行游戏命令"), open.spec().summary());
-        assertFalse(closed.spec().summary().contains("游戏命令"), closed.spec().summary());
+        assertTrue(open.spec().summary().contains("连管理员命令也允许"), open.spec().summary());
+        assertFalse(closed.spec().summary().contains("管理员"), closed.spec().summary());
     }
 
     @Test

@@ -26,8 +26,8 @@ import org.slf4j.LoggerFactory;
  *
  * <p>现在有三项：
  * <ul>
- * <li>「允许执行游戏命令」（allowGameCommands，默认 false）：开着时 chat 能力放行以 / 开头的消息，
- *     作为游戏命令以角色自己的权限交给服务器执行。</li>
+ * <li>「放开管理员命令」（allowGameCommands，默认 false）：关着时 chat 能力只发普通玩家命令（/msg、/home 这类），
+ *     /tp、/give 这类管理员命令拒绝；开着时管理员命令也作为游戏命令以角色自己的权限交给服务器执行。</li>
  * <li>「自家人」（trustedPlayers，默认空）：所有者信任的玩家，写玩家名或 UUID。他们放的箱子、AE 网络这类存储，
  *     角色可以取用、存放；拆、改照旧当别人的。</li>
  * <li>「每台机器的方块上限」（machineBlockLimits，默认链条输送机 create:chain_conveyor 最多 1 个）：方块 ID 到个数，

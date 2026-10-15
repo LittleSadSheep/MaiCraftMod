@@ -78,6 +78,7 @@ import org.maiwithu.maicraft.behavior.acquire.LiveHunts;
 import org.maiwithu.maicraft.behavior.acquire.ItemAcquisition;
 import org.maiwithu.maicraft.behavior.acquire.ItemsInUse;
 import org.maiwithu.maicraft.behavior.acquire.MerchantTradeTakes;
+import org.maiwithu.maicraft.game.world.ClientCommandTree;
 import org.maiwithu.maicraft.game.world.DropConfirmations;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
@@ -616,7 +617,10 @@ public final class AbilityCatalog {
             @Override public List<String> shownSince(long mark) { return chat.shownSince(mark); }
         };
         // 逐字打字开的是真实聊天框，框里放的是草稿；提交仍走聊天通道。
-        return new ChatAbility(chat::send, echo, new ClientChatDraftScreen(), deps.allowGameCommands());
+        // 管理员命令认不认得出，单人时问内置服务器的命令树；连远程服务器时只按名单认。
+        ClientCommandTree commandTree = new ClientCommandTree();
+        return new ChatAbility(chat::send, echo, new ClientChatDraftScreen(), deps.allowGameCommands(),
+                commandTree::adminOnly);
     }
 
     /** 用东西能力的一份：游戏拒绝读端看动作栏与服务端确认流，与睡觉能力共用一份。 */
