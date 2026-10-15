@@ -590,6 +590,34 @@ class GoalRunnerTest {
     }
 
     @Test
+    void parkedMainPausesAtOnceWithoutWaitingToLand() {
+        // 主任务被临时任务带离原地、停在半路：没人推进它，收尾走不完，挂暂停不等落地。
+        GoalTestAbility ability = new GoalTestAbility("maicraft:test");
+        InMemoryGoalRunStore store = new InMemoryGoalRunStore();
+        GoalRunner runner = flyingGoal(ability, store);
+
+        runner.pauseParked();
+
+        assertEquals(GoalRunState.PAUSED, runner.run().state());
+        assertFalse(runner.windingDown());
+        assertEquals(GoalRunState.PAUSED, store.unfinished().get(0).state(), "暂停后存盘");
+    }
+
+    @Test
+    void parkedMainStopsWindingDownToPause() {
+        // 已经在先落地再暂停的路上又被带离原地：就此停下，不再等。
+        GoalTestAbility ability = new GoalTestAbility("maicraft:test");
+        GoalRunner runner = flyingGoal(ability, new InMemoryGoalRunStore());
+        runner.pauseGoal();
+        assertTrue(runner.windingDown());
+
+        runner.pauseParked();
+
+        assertEquals(GoalRunState.PAUSED, runner.run().state());
+        assertFalse(runner.windingDown());
+    }
+
+    @Test
     void pauseLetsAFlyingTaskLandFirst() {
         // 飞着时被叫暂停：先就近落地，照常推进到落稳再暂停；恢复后接着原来的任务。
         GoalTestAbility ability = new GoalTestAbility("maicraft:test");

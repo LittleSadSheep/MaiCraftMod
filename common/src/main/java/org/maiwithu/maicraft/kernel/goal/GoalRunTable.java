@@ -105,7 +105,15 @@ public final class GoalRunTable {
     public void mainParked() {
         if (mainRunId == -1) return;
         GoalRunner runner = runners.get(mainRunId);
-        if (runner != null && runner.run().state() == GoalRunState.RUNNING) runner.pauseGoal();
+        if (runner == null || runner.run().state() != GoalRunState.RUNNING) return;
+        // 停在半路的主任务没人推进，"先到安全处再停"的收尾走不完：已经叫过取消的当场按取消收掉，
+        // 其余直接挂暂停，不等收尾（原先走先收尾再暂停，目标一直显示在跑、暂停事件发不出来）。
+        if (runner.cancelPending()) {
+            loop.endMainTask(CloseReason.CANCELLED);
+            mainRunId = -1;
+            return;
+        }
+        runner.pauseParked();
     }
 
     /** 死亡过程结束（重生或以别的方式回到活体）：本轮死亡决策了结，下次死亡再挂新的。 */

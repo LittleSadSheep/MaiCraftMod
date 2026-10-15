@@ -214,6 +214,20 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, KeepsTempTaskFa
         LOG.info("目标 {} 暂停", run.id());
     }
 
+    /**
+     * 主任务被临时任务带离原地、停在了半路：控制循环不再推进它，"先到安全处再停"的收尾走不完，
+     * 直接挂成暂停、存盘并发暂停事件，不等收尾；之前已经在收尾等暂停的也就此停下。
+     */
+    public void pauseParked() {
+        if (result != null || run.state() == GoalRunState.PAUSED) return;
+        pauseNow();
+    }
+
+    /** 已经叫过取消、正在先收尾再取消。 */
+    public boolean cancelPending() {
+        return ending == Ending.CANCEL;
+    }
+
     // 手上的任务说它要先收尾才记下这件事；没有任务、任务说现在就能停都是现在就停。
     private boolean beginEnding(Ending kind) {
         if (child == null || child.finished() || !child.stopSafely()) {
