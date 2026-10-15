@@ -25,6 +25,7 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.Next;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
@@ -105,6 +106,19 @@ final class NightRestTask extends SleepTask implements AnnouncesFinish {
             homeSpot = WorldPosition.here(at.getX(), at.getY(), at.getZ());
         }
         return super.tick(phase, context);
+    }
+
+    /**
+     * 躺在床上睡着时手上没有动作，按两个动作之间算，饿了这类找空当的事就能插进来把人叫起来，
+     * 一下床这一夜就没睡成（实机 10-15 野外躺下 4 秒被饥饿叫醒）。睡着时报"正在干活"：只有挨打、着火这类
+     * 要尽快处理的事和要命的事能叫醒，饿了等醒来再吃。醒了以后（起身、收床、回站位）照常按动作报。
+     */
+    @Override
+    public Interruptibility interruptibility(TickContext context) {
+        if (phase() == Phase.WAIT_WAKE && sleepState.asleep(context)) {
+            return Interruptibility.WORKING;
+        }
+        return super.interruptibility(context);
     }
 
     // 可睡窗口关了：多半是别人先睡过了这一夜，视为已经度过，直接结清回去干活。

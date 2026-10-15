@@ -32,11 +32,14 @@ import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
+import org.maiwithu.maicraft.kernel.interrupt.InterruptRule;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TickResult;
+import org.maiwithu.maicraft.kernel.task.Urgency;
 
 /**
  * 睡觉任务的离线场景：选中的床走近躺下即完成；床被占用换下一张；
@@ -507,5 +510,25 @@ class SleepTaskTest {
         assertTrue(result.problem().message().contains("32 格内没有能睡的床"));
         assertNull(obtain.last, "夜里不去弄床");
         assertTrue(approaches.targets.isEmpty(), "远处的床不去");
+    }
+
+    @Test
+    void whileAsleepOnlyUrgentNeedsCanWakeTheCharacter() {
+        // 实机 10-15：野外躺下 4 秒被"饿了，找空当吃一口"叫醒，没睡过夜。睡着时只让挨打、着火这类急事叫醒。
+        FakeScanner scanner = new FakeScanner();
+        scanner.offer(new BedScanner.BedScan(
+                List.of(new BedCandidate(BED_A, false, false, false, 4)), true));
+        boolean[] asleep = {true};
+        NightRestTask rest = nightRest(scanner, new StubPlacer(), new StubObtain(), new StubApproaches(),
+                new StubUsesBeds(), Optional::empty, moment -> asleep[0]);
+        assertNull(runTicks(rest, 10), "睡着了就在床上等天亮");
+        TickContext context = tick();
+        assertEquals(Interruptibility.WORKING, rest.interruptibility(context));
+        assertFalse(InterruptRule.canInterrupt(Urgency.LATER, rest.interruptibility(context)), "饿了等醒来再吃");
+        assertTrue(InterruptRule.canInterrupt(Urgency.SOON, rest.interruptibility(context)), "挨打、着火照样叫醒");
+        // 醒了在床边等对齐的那两秒没有动作：找空当的事这时候插进来正好。
+        asleep[0] = false;
+        rest.tick(context);
+        assertEquals(Interruptibility.BETWEEN_ACTIONS, rest.interruptibility(context));
     }
 }
