@@ -6,7 +6,7 @@
 
 - `item` 必填：附魔哪件，物品 ID 或 # 标签。已附魔的（含附魔书本身）台子不收第二次。
 - `tier`：1..3，默认 1。
-- `radius`：不给 target 时找台子的范围，格。
+- `radius`：不给 target 时找台子的范围，格；只找已加载的地方，一次最多扫约 128 格，再远先 travel 过去。
 - target：`seen`（b#）/ `position` / `landmark` 点名用哪张台子。
 
 ## 结果怎么读
