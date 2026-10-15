@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.OptionalInt;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -128,6 +129,9 @@ public final class Battle {
     private boolean perched;
     private double perchY;
     private Action pillar;
+    /** 正在打回去的那个火球的动作与编号；没在接为 null / -1。 */
+    private Action returning;
+    private int returningId = -1;
     /** 补站位：在给哪只补、够不着几刻了。 */
     private int trimTarget = -1;
     private int trimTicks;
@@ -161,6 +165,9 @@ public final class Battle {
         }
         // 被打下柱顶（击退、柱子被炸）：不再算站在高处。
         if (perched && field.me().y() < perchY - 0.5) perched = false;
+        // 有能打回去的火球冲我飞来：先把它打回去，别的打法这几刻让开（恶魂隔着十几格放火球，凑近战够不着它）。
+        Moment back = returnFire(context, senses.returnableIncoming(context));
+        if (back != null) return back;
         boolean mayPillar = !pillarTried && cornered && moves.canPillar(context);
         // 天黑才挖坑；拉开距离后就挖，不必等到退无可退（何时挖由打法按追兵远近定）。
         boolean mayDigIn = offersShelter && !shelterAsked && moves.night(context);
@@ -198,6 +205,33 @@ public final class Battle {
         }
         doing = moment.doing();
         return moment;
+    }
+
+    // 接火球：换了一个更近的就改接它；站定盯着、够得着就挥（动作里），火球掉头、没了、不再冲我就收手回到原打法。
+    private Moment returnFire(TickContext context, OptionalInt incoming) {
+        if (incoming.isPresent() && incoming.getAsInt() != returningId) {
+            dropReturn();
+            returning = moves.returnProjectile(incoming.getAsInt());
+            returningId = returning == null ? -1 : incoming.getAsInt();
+            if (returning != null) LOG.info("[战斗] 接火球：冲我飞来的 #{}，站定盯着打回去", returningId);
+        }
+        if (returning == null) return null;
+        ActionStatus status = returning.tick(context);
+        if (!(status instanceof ActionStatus.Running running)) {
+            dropReturn();
+            return null;
+        }
+        dropStrike();
+        bow.close();
+        moves.lowerGuard();
+        moves.stepKeepingAim(context, Footwork.Step.STAND);
+        return new Moment(State.FIGHTING, "把飞来的火球打回去", running.progressed(), false, false, -1, null, false);
+    }
+
+    private void dropReturn() {
+        if (returning != null) returning.close();
+        returning = null;
+        returningId = -1;
     }
 
     // 躲爆炸：当刻疾跑背离它，出了熄火距离与爆炸波及再停；八个方向都迈不出去才交给寻路找别的路。
@@ -637,6 +671,7 @@ public final class Battle {
 
     /** 不打了：出手、寻路、垫高、拉了一半的弓都收尾，盾放下。 */
     public void close() {
+        dropReturn();
         dropStrike();
         dropWalk();
         if (pillar != null) pillar.close();

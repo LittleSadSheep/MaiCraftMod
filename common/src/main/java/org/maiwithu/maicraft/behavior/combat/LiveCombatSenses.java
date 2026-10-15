@@ -8,6 +8,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.Set;
 import java.util.UUID;
 
@@ -26,7 +27,9 @@ import net.minecraft.world.entity.monster.RangedAttackMob;
 import net.minecraft.world.entity.monster.Shulker;
 import net.minecraft.world.entity.monster.breeze.Breeze;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.game.player.ReadsFoodValues;
 import org.maiwithu.maicraft.game.world.Hostility;
@@ -90,6 +93,23 @@ public final class LiveCombatSenses implements CombatSenses {
             }
         }
         return threats;
+    }
+
+    // 二十四格内冲着角色飞来、能打回去的火球，挑最近的；自己打回去的（主人是自己）不算。
+    @Override
+    public OptionalInt returnableIncoming(TickContext context) {
+        ClientLevel level = level(context);
+        if (level == null) return OptionalInt.empty();
+        var self = context.player().localPlayer();
+        Vec3 body = self.getBoundingBox().getCenter();
+        Projectile nearest = null;
+        for (Projectile projectile : level.getEntitiesOfClass(Projectile.class,
+                self.getBoundingBox().inflate(ProjectileReturn.WATCH_RADIUS),
+                candidate -> ProjectileReturn.returnable(candidate) && candidate.isAlive() && candidate.getOwner() != self)) {
+            if (!ProjectileReturn.headingAt(projectile.position(), projectile.getDeltaMovement(), body)) continue;
+            if (nearest == null || projectile.distanceToSqr(self) < nearest.distanceToSqr(self)) nearest = projectile;
+        }
+        return nearest == null ? OptionalInt.empty() : OptionalInt.of(nearest.getId());
     }
 
     @Override

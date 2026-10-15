@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.combat;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.UUID;
 
 import net.minecraft.world.entity.Entity;
@@ -37,6 +38,11 @@ public interface CombatSenses {
      */
     default Optional<Threat> living(TickContext context, int entityId) {
         return Optional.empty();
+    }
+
+    /** 正冲着角色飞来、能打回去的火球（恶魂火球这类）里最近的那个的实体编号；没有为空。 */
+    default OptionalInt returnableIncoming(TickContext context) {
+        return OptionalInt.empty();
     }
 
     /**

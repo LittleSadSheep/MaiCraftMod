@@ -96,10 +96,17 @@ public final class LiveBattleMoves implements BattleMoves {
         CombatStepping.move(context, CombatStepping.KEEP_AIM, step);
     }
 
+    // 没有昼夜的维度（下界、末地）不算天黑：那里挖坑等不到天亮。实机 10-15 下界被恶魂打，
+    // 自卫要"挖坑熬到天亮"，挖坑时走进火球点的火里烧死。
     @Override
     public boolean night(TickContext context) {
         var self = context.player() == null ? null : context.player().localPlayer();
-        return self != null && !self.level().isDay();
+        return self != null && !self.level().dimensionType().hasFixedTime() && !self.level().isDay();
+    }
+
+    @Override
+    public Action returnProjectile(int projectileId) {
+        return new ProjectileReturn(projectileId);
     }
 
     @Override

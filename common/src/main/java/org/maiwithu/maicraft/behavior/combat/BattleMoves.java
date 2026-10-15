@@ -85,6 +85,11 @@ public interface BattleMoves {
         return false;
     }
 
+    /** 把这个飞来的火球打回去的动作；没接上时为 null（照常打）。 */
+    default Action returnProjectile(int projectileId) {
+        return null;
+    }
+
     /** 就地往上垫三格，站到柱顶（只垫不挖，垫的是废料）。没接上时如实失败。 */
     default Action pillarUp(TickContext context) {
         return null;
