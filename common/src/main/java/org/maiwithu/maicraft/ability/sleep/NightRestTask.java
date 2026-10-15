@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.game.interaction.OverlayMessages;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.interrupt.AnnouncesFinish;
+import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -36,7 +37,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  *
  * <p>醒来的实体包和时间包不在同一刻到达，醒来后先等它们对齐再动；去床途中夜晚被别人先睡过
  * （多人生存里常见），视为已经度过这一夜，直接结清回去干活。放在记住的"家"区域里的床不收：
- * 收床会让重生点失效，家里的床留着当重生点。
+ * 收床会让重生点失效，家里的床留着当重生点。收床被打断（自卫撤离、去吃东西）不算收不了：处理完回来，
+ * 先重新走到床边再挖。实在收不了时如实结束，并交代床留在哪、重生点是不是改到了那里。
  */
 final class NightRestTask extends SleepTask implements AnnouncesFinish {
 
@@ -68,6 +70,8 @@ final class NightRestTask extends SleepTask implements AnnouncesFinish {
     private int wakeCountdown = -1;
     /** 睡不成时先记下的失败：回到站位后再如实交代。 */
     private Problem deferredFailure;
+    /** 自己放下的床已经收回来了。 */
+    private boolean bedCollected;
     /** 本刻的上下文：收尾钩子要用它读现场，只在同一次推进里有效。 */
     private TickContext now;
 
@@ -148,8 +152,12 @@ final class NightRestTask extends SleepTask implements AnnouncesFinish {
     }
 
     // 睡不成收场时（没床、床全睡不上、维度不对）：先回站位再交代失败，不把角色留在半路或别人屋里。
+    // 自己放下的床没睡上、也没收：失败原因后面补一句床留在哪、重生点改没改。
     @Override
-    protected Next<Phase> onFail(Problem problem) {
+    protected Next<Phase> onFail(Problem failure) {
+        String left = bedLeftBehind();
+        Problem problem = left == null || failure.message().contains(left) ? failure
+                : new Problem(failure.kind(), failure.message() + "；" + left, failure.suggestion());
         if (homeSpot == null || backAtHomeSpot()) {
             return Next.fail(problem);
         }
@@ -185,19 +193,34 @@ final class NightRestTask extends SleepTask implements AnnouncesFinish {
         return Next.stay();
     }
 
-    // 收回自己放下的床：床头与床尾各收一格；收完回站位。
+    // 收回自己放下的床：床头与床尾各收一格；收完回站位。收的中途被打断，回来由收方块的动作自己先走回床边再挖。
     @Override
     protected Next<Phase> tickCollectBed(TickContext context) {
-        Next<Phase> next = runActionThen(context, () -> {
-            List<BlockPos> rest = new ArrayList<>(cellsToCollect.subList(1, cellsToCollect.size()));
-            if (rest.isEmpty()) {
-                return Next.go(Phase.WALK_BACK, "床收好了，回到原来的站位");
+        ActionStatus status = runAction(context);
+        if (status instanceof ActionStatus.Running) {
+            return Next.stay();
+        }
+        if (status instanceof ActionStatus.Failed failed) {
+            // 实在收不了（走不到跟前、挖不下来）：如实结束，说清床留在哪、重生点改没改，
+            // 不然 LLM 会以为床还在身上或放在了家里（实机 10-15 回家找了两次）。
+            Problem why = failed.problem();
+            String left = bedLeftBehind();
+            return Next.fail(new Problem(why.kind(), "床没收回来：" + why.message()
+                    + (left == null ? "" : "；" + left), why.suggestion()));
+        }
+        List<BlockPos> rest = new ArrayList<>(cellsToCollect.subList(1, cellsToCollect.size()));
+        if (rest.isEmpty()) {
+            // 床收回来了：记一条收回的变化，和放床那条对上，LLM 不会照着放床那条去原地找床。
+            bedCollected = true;
+            if (placedBed() != null) {
+                recordChange(new Change(Change.Kind.BLOCK_BROKEN, placedBedId(), 1,
+                        "收回了放在 " + placedBed().toShortString() + " 的床"));
             }
-            cellsToCollect = rest;
-            // 还有半张没收：重进本阶段，收下一格。
-            return Next.go(Phase.COLLECT_BED, "继续收床的另一半");
-        });
-        return next;
+            return Next.go(Phase.WALK_BACK, "床收好了，回到原来的站位");
+        }
+        cellsToCollect = rest;
+        // 还有半张没收：重进本阶段，收下一格。
+        return Next.go(Phase.COLLECT_BED, "继续收床的另一半");
     }
 
     // 回到睡前的站位：走回去了这一夜才算结束；回不去如实说，别让主任务在新地点悄悄续上。
@@ -255,14 +278,32 @@ final class NightRestTask extends SleepTask implements AnnouncesFinish {
         return at.distSqr(new BlockPos(homeSpot.x(), homeSpot.y(), homeSpot.z())) <= 4;
     }
 
+    // 自己放的床还留在世界里时的一句交代：床在哪、重生点是不是也改到了那里；没放过床或已经收回来时为 null。
+    private String bedLeftBehind() {
+        BlockPos bed = placedBed();
+        if (bed == null || bedCollected) {
+            return null;
+        }
+        String where = "自己放的床留在 " + bed.toShortString();
+        return bed.equals(spawnSetAt()) ? where + "，重生点也改到了这张床" : where;
+    }
+
     // 夜里自己去睡了一觉要告诉 LLM：时间一下跳到天亮、人挪过地方，不说它就不知道。实机 10-14 角色夜里自己睡了两回，
     // 事件流里一条都没有，测试员下 sleep 只看到"现在睡不了"，前后对不上。没睡成也说一声为什么。
+    // 自己放的床没收回来（收不了、放在家里、没睡上就天亮了）也在这里说清床在哪、重生点改没改。
     @Override
     public String finishedNote(TaskResult result) {
+        String note;
         if (result.details() instanceof SleepDetails details && details.enteredSleep()) {
-            return "天黑了，自己去床上睡了一觉" + (details.nightSkippedBySleep() ? "，一觉睡到了天亮" : "")
+            note = "天黑了，自己去床上睡了一觉" + (details.nightSkippedBySleep() ? "，一觉睡到了天亮" : "")
                     + "；" + result.summary();
+        } else {
+            note = result.status() == TaskResult.Status.DONE ? null : "天黑了想去睡，没睡成：" + result.summary();
         }
-        return result.status() == TaskResult.Status.DONE ? null : "天黑了想去睡，没睡成：" + result.summary();
+        String left = bedLeftBehind();
+        if (left == null || note != null && note.contains(left)) {
+            return note;
+        }
+        return note == null ? "天黑了放下过一张床：" + left : note + "；" + left;
     }
 }

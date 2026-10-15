@@ -30,6 +30,7 @@ import org.maiwithu.maicraft.game.interaction.OverlayMessages;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.interrupt.InterruptRule;
@@ -530,5 +531,48 @@ class SleepTaskTest {
         asleep[0] = false;
         rest.tick(context);
         assertEquals(Interruptibility.BETWEEN_ACTIONS, rest.interruptibility(context));
+    }
+
+    @Test
+    void thePlacedBedChangeSaysWhereTheBedIs() {
+        // 实机 10-15：LLM 只收到一条没位置的"放了床"，以为床放在家里，回家找了两次。放床那条变化带上坐标。
+        FakeScanner scanner = new FakeScanner();
+        scanner.offer(new BedScanner.BedScan(List.of(), true));
+        StubPlacer placer = new StubPlacer();
+        placer.offer(new BlockPos(-86, 66, 50));
+        StubUsesBeds usesBeds = new StubUsesBeds();
+        TaskResult result = runToCompletion(task(scanner, placer, new StubObtain(), new StubApproaches(), usesBeds,
+                () -> null, () -> usesBeds.clicked.isEmpty() ? Optional.of("minecraft:white_bed") : Optional.empty()));
+        Change placed = result.changes().stream()
+                .filter(change -> change.kind() == Change.Kind.BLOCK_PLACED).findFirst().orElseThrow();
+        assertEquals("minecraft:white_bed", placed.what());
+        assertEquals("放在 -86, 66, 50", placed.note());
+    }
+
+    @Test
+    void aPlacedBedThatIsLeftBehindIsReportedWithTheRespawnPoint() {
+        // 野外放下的床被"周围有怪物"拒绝：原版拒绝之前已经把重生点改到这张床。睡不成时结果与事件都要说清
+        // 床留在哪、重生点改到了哪，不能让 LLM 以为床还在身上。
+        FakeScanner scanner = new FakeScanner();
+        scanner.offer(new BedScanner.BedScan(List.of(), true));
+        StubPlacer placer = new StubPlacer();
+        BlockPos placedHead = new BlockPos(-86, 66, 50);
+        placer.offer(placedHead);
+        StubUsesBeds usesBeds = new StubUsesBeds();
+        usesBeds.offer(new Scripted(ActionStatus.failed(
+                Problem.of(Problem.Kind.REFUSED_BY_GAME, "对床头的交互没有生效", null))));
+        NightRestTask rest = new NightRestTask(new SleepInput(null), Permissions.DEFAULT, scanner, placer,
+                new StubObtain(), new StubApproaches(), usesBeds,
+                () -> new OverlayMessages.Shown("你现在不能休息，周围有怪物在游荡", 60),
+                () -> usesBeds.clicked.isEmpty() ? Optional.of("minecraft:white_bed") : Optional.empty(),
+                (cell, permissions) -> Optional.empty(), place -> Optional.empty(), moment -> false,
+                moment -> true, new HashSet<>());
+        TaskResult result = runToCompletion(rest);
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        String left = "自己放的床留在 -86, 66, 50，重生点也改到了这张床";
+        assertTrue(result.problem().message().contains(left), result.problem().message());
+        String note = rest.finishedNote(result);
+        assertTrue(note.contains(left), note);
+        assertEquals(1, note.split("自己放的床留在", -1).length - 1, "同一句不说两遍：" + note);
     }
 }

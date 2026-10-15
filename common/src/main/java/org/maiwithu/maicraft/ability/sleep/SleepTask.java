@@ -89,6 +89,13 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
     private boolean repositionedForBed;
     /** 点床之后动作栏新冒出来的拒绝原话：按它分流，比事后再读动作栏准（那时可能已经换成别的话）。 */
     private String refusalAfterClick;
+    /** 要放下的那张床是什么床：放之前从身上读，放下后身上可能就没有了。 */
+    private String bedToPlace;
+    /** 自己放下的床（床头那一格）与它是什么床；没放过为 null。夜休据此交代床留在哪、收回了没有。 */
+    private BlockPos placedBed;
+    private String placedBedId;
+    /** 重生点改到了哪张床：原版躺下时会改，被以"不是晚上""有怪"拒绝时也已经改了。没改过为 null。 */
+    private BlockPos spawnSetAt;
     /** 选床时等方块扫描扫完已经等了几刻。 */
     private int scanWaitTicks;
     private boolean enteredSleep;
@@ -122,10 +129,13 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
             // 拿一张床回来：合成（3 块同色羊毛加 3 块木板）也在拿到物品引擎的途径里；弄不到如实失败。
             case GET_BED -> obtain.actionFor(
                     new ItemRequest(WantedItem.ofTag("minecraft:beds"), 1, "睡觉"), permissions, records());
-            // 身上放好床了再放：放床动作自己挑格、换手、点支撑面。
-            case PLACE_BED -> placer.placeCarriedBed()
-                    .map(placement -> (Action) placement)
-                    .orElse(null);
+            // 身上放好床了再放：放床动作自己挑格、换手、点支撑面。先记下放的是什么床，放下后身上就没有了。
+            case PLACE_BED -> {
+                bedToPlace = carriedBed.get().orElse(null);
+                yield placer.placeCarriedBed()
+                        .map(placement -> (Action) placement)
+                        .orElse(null);
+            }
             default -> null;
         };
     }
@@ -219,7 +229,11 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
         }
         chosenBed = head;
         repositionedForBed = false;
-        recordChange(Change.of(Change.Kind.BLOCK_PLACED, carriedBed.get().orElse("床"), 1));
+        // 放床这条变化带上坐标：夜休结束后这条会交给主任务，LLM 照着它才知道床放在哪（实机 10-15 只记了一条
+        // 没位置的"放了床"，LLM 以为床放在家里，回家找了两次）。
+        placedBed = head.immutable();
+        placedBedId = bedToPlace != null ? bedToPlace : carriedBed.get().orElse("床");
+        recordChange(new Change(Change.Kind.BLOCK_PLACED, placedBedId, 1, "放在 " + head.toShortString()));
         return Next.go(Phase.APPROACH, "床放好了，走过去睡");
     }
 
@@ -231,6 +245,8 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
         }
         if (status instanceof ActionStatus.Done) {
             enteredSleep = true;
+            // 原版躺下时把重生点设到这张床。
+            spawnSetAt = chosenBed;
             // 躺下了：记住这张床，下次夜里离家不远就回这张床睡。
             if (scanner != null && chosenBed != null) scanner.sleptIn(chosenBed);
             return afterFellAsleep(context);
@@ -259,7 +275,13 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
         if (refusalAfterClick != null) {
             recordAttempt("点床 " + chosenBed.toShortString(), "游戏不让睡：" + refusalAfterClick);
         }
-        return switch (SleepRefusal.of(text)) {
+        SleepRefusal kind = SleepRefusal.of(text);
+        // 原版先查够不够得着、床头有没有被挡，过了就先改重生点，再查是不是晚上、周围有没有怪：
+        // 被这两样拒绝时重生点已经改到这张床了。
+        if (kind == SleepRefusal.NOT_SLEEP_TIME || kind == SleepRefusal.MONSTERS_NEARBY) {
+            spawnSetAt = chosenBed;
+        }
+        return switch (kind) {
             case OCCUPIED, MONSTERS_NEARBY -> {
                 // 床被占用、床边有怪：这张床排除掉，换下一张；接连不行到上限就如实结束。
                 excluded.add(chosenBed);
@@ -383,6 +405,21 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
     /** 给子类读的床的来源：夜休判断醒后要不要收床。 */
     protected final SleepDetails.BedSource bedSource() {
         return bedSource;
+    }
+
+    /** 给子类读的自己放下的床（床头那一格）；没放过为 null。 */
+    protected final BlockPos placedBed() {
+        return placedBed;
+    }
+
+    /** 给子类读的自己放下的是什么床；没放过为 null。 */
+    protected final String placedBedId() {
+        return placedBedId;
+    }
+
+    /** 给子类读的重生点改到了哪张床；没改过为 null。 */
+    protected final BlockPos spawnSetAt() {
+        return spawnSetAt;
     }
 
     /** 给子类读的"一觉睡到了天亮"：确认期间日期前进时为真。 */
