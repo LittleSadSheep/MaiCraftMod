@@ -324,7 +324,11 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
                 carriedProblem = carriedProblem != null ? carriedProblem : finished.result().problem();
             }
             copyFacts(finished.result());
+            return Next.stay();
         }
+        // 改设置的子任务在走过去、开界面、循环切换：它有真实进展就算整台机器有进展，
+        // 不然远处那台机器走一分钟就被父任务判"没进展"，已建好的格、装好的段跟着失败收场。
+        runner.progressedNow().ifPresent(this::recordProgress);
         return Next.stay();
     }
 
