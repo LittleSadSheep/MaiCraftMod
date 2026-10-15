@@ -17,7 +17,6 @@ import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
-import org.maiwithu.maicraft.behavior.navigation.baritone.ScaffoldStaging.Holding;
 
 /**
  * 垫料只在主背包时挪到快捷栏的打算：快捷栏已有能垫的就不挪；挪到空格先于零碎东西，
@@ -41,21 +40,6 @@ class ScaffoldStagingTest {
         Map<String, Integer> spare = new LinkedHashMap<>();
         for (String id : ids) spare.put(id, 16);
         return spare;
-    }
-
-    @Test
-    void emptySlotsComeBeforeOddsAndEndsAndTheHeldSlotComesLastWithinEach() {
-        List<Holding> hotbar = new ArrayList<>(List.of(Holding.KEEP, Holding.MOVABLE, Holding.EMPTY, Holding.KEEP,
-                Holding.KEEP, Holding.KEEP, Holding.MOVABLE, Holding.KEEP, Holding.KEEP));
-        assertEquals(2, ScaffoldStaging.hotbarTarget(hotbar, 0));
-        // 唯一的空格正拿在手上（空手）：照样用它，空格换进来什么都不挤走。
-        assertEquals(2, ScaffoldStaging.hotbarTarget(hotbar, 2));
-        hotbar.set(2, Holding.KEEP);
-        hotbar.set(1, Holding.KEEP);
-        // 只剩手上那一格能腾：退而用它。
-        assertEquals(6, ScaffoldStaging.hotbarTarget(hotbar, 6));
-        hotbar.set(6, Holding.KEEP);
-        assertEquals(-1, ScaffoldStaging.hotbarTarget(hotbar, 0));
     }
 
     @Test

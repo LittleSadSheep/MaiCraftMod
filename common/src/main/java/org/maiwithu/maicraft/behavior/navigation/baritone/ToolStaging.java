@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.navigation.baritone;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -9,6 +8,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 
+import org.maiwithu.maicraft.behavior.inventory.HotbarSwapTarget;
 import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 
 /**
@@ -16,7 +16,7 @@ import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
  * 就拿手边的扳手、火把硬挖。像玩家一样先打开背包把最顺手的那把换到快捷栏，再接着走。
  *
  * <p>只在主背包里那把比快捷栏里最好的挖得更快（或快捷栏里没有能挖下来的、它能）时才挪；
- * 换到快捷栏哪一格和垫料一样：空格先于零碎东西，工具、武器、吃的、桶、火把、正要用的不挪走。
+ * 换到快捷栏哪一格按 {@link HotbarSwapTarget}：空格先于零碎东西，工具、武器、吃的、桶、火把、正要用的不挪走。
  */
 final class ToolStaging {
 
@@ -34,11 +34,8 @@ final class ToolStaging {
      */
     static Optional<ScaffoldStaging.Swap> plan(List<ItemStack> items, int selected, BlockState state, ItemsToKeep keeps) {
         Score hotbarBest = Score.NONE;
-        List<ScaffoldStaging.Holding> hotbar = new ArrayList<>();
         for (int slot = 0; slot < HOTBAR_SIZE; slot++) {
-            ItemStack stack = items.get(slot);
-            hotbarBest = hotbarBest.max(Score.of(stack, state));
-            hotbar.add(ScaffoldStaging.holding(stack, keeps));
+            hotbarBest = hotbarBest.max(Score.of(items.get(slot), state));
         }
         int source = -1;
         Score best = hotbarBest;
@@ -50,7 +47,7 @@ final class ToolStaging {
             }
         }
         if (source < 0) return Optional.empty();
-        int target = ScaffoldStaging.hotbarTarget(hotbar, selected);
+        int target = HotbarSwapTarget.pick(HotbarSwapTarget.hotbar(items, keeps), selected);
         if (target < 0) return Optional.empty();
         String itemId = BuiltInRegistries.ITEM.getKey(items.get(source).getItem()).toString();
         return Optional.of(new ScaffoldStaging.Swap(source, target, itemId));
