@@ -69,7 +69,8 @@ public final class ToolCatalog {
                         field("plan_id", "string", "执行一次 dry_run 通过的计划；与 goal 二选一", null),
                         field("request_key", "string", "网络重试用的幂等键；不给时由入口自动生成", null)),
                 new String[]{"goal"}));
-        tools.add(tool(GOAL, "查看、暂停、恢复、取消下达过的目标，回答目标提出的问题，分页读证据。",
+        tools.add(tool(GOAL, "查看、暂停、恢复、取消下达过的目标，回答目标提出的问题，分页读证据。"
+                        + "暂停的若是当前目标，再用 execute 下达新目标会把它按\"被新任务替换\"结束、不能再恢复；想回头接着做就先 resume 它，别另下新目标。",
                 properties(
                         field("operation", "string", "操作：get、list、pause、resume、cancel、answer", null),
                         field("goal_id", "integer", "除 list 外都要给：execute 返回的目标编号", null),
