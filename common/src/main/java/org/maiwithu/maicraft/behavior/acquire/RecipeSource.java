@@ -668,7 +668,8 @@ public final class RecipeSource implements ItemSource {
 
     // 烧炼要的燃料：身上有烧得着的就用身上的（挑烧得最久的），一件都没有才去弄煤。
     private Optional<ItemRequest> fuelNeed(WorkstationRecipe recipe, int times) {
-        int smeltTicks = times * recipe.kind().plannedCookTicks();
+        // 燃料表是熔炉口径；高炉、烟熏炉烧得快、燃料也耗得快，按熔炉口径一件仍是 200 刻。
+        int smeltTicks = times * recipe.kind().fuelTicksPerItem();
         // 身上能烧的加起来够不够：十块木板能烤好几块肉，不能只看最耐烧的一件就说要去弄煤。
         // 工具、武器这类一格一件的不算燃料，这次要烧的原料也不算。
         long burnable = 0;

@@ -440,6 +440,23 @@ class RecipeSourceTest {
     }
 
     @Test
+    void 高炉烧得快燃料也耗得快_备煤按熔炉口径一件二百刻() {
+        // 原版高炉、烟熏炉一件烧 100 刻，但燃料时长减半：一块煤在哪种炉子里都只烧 8 件，烧 16 件照样备 2 块煤。
+        WorldMemory memory = memory();
+        memory.rememberWorkstationUsed(TABLE_AT, "minecraft:blast_furnace", NOW);
+        CapturingNeeds needs = new CapturingNeeds();
+        RecipeSource recipeSource = source(memory, wanted -> List.of(ironBlasting()), needs);
+        ItemRequest request = new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), 16, "工具准备");
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, recipeSource.quote(request, CONTEXT));
+        recipeSource.begin(request, offer, CONTEXT).orElseThrow();
+        ItemRequest fuelNeed = needs.asked.stream()
+                .filter(asked -> asked.purpose().contains("燃料"))
+                .findFirst().orElseThrow();
+        assertEquals("minecraft:coal", fuelNeed.wanted().specifier());
+        assertEquals(2, fuelNeed.count(), "16 件要 3200 刻熔炉口径的燃料，两块煤");
+    }
+
+    @Test
     void 没记得高炉_照旧用熔炉_不为了高炉摆一台() {
         WorldMemory memory = memory();
         memory.rememberWorkstationUsed(TABLE_AT, "minecraft:furnace", NOW);

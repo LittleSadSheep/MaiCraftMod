@@ -81,9 +81,22 @@ public record WorkstationRecipe(String id, Kind kind, WantedItem result, int res
             return plannedCookTicks > 0;
         }
 
-        /** 规划备燃料时按多少刻烧一件（熔炉 200、高炉烟熏炉 100）；不烧的为 0。实际烧多久以配方为准。 */
+        /** 规划时按多少刻烧一件（熔炉 200、高炉烟熏炉 100），只用来比快慢；不烧的为 0。实际烧多久以配方为准。 */
         public int plannedCookTicks() {
             return plannedCookTicks;
+        }
+
+        /**
+         * 燃料烧得比熔炉快几倍：原版高炉、烟熏炉的燃料时长减半（烧一件 100 刻、燃料也只顶熔炉的一半），
+         * 所以一块煤在哪种炉子里都烧 8 件。燃料表给的是熔炉的时长，用在高炉、烟熏炉上要除以它。
+         */
+        public int fuelBurnDivisor() {
+            return this == BLASTING || this == SMOKING ? 2 : 1;
+        }
+
+        /** 备燃料时按熔炉口径算一件要多少刻燃料：三种炉子都是 200（高炉烧得快，燃料也耗得快，正好抵消）。 */
+        public int fuelTicksPerItem() {
+            return cooks() ? 200 : 0;
         }
 
         /** 附近没有时角色会不会就地摆一个：工作台、熔炉、石切台会；高炉、烟熏炉只用现成的。 */

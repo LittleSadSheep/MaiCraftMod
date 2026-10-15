@@ -256,7 +256,8 @@ final class FurnaceRun implements Action {
             // 工具、武器这类一格一件的不烧，这次要烧的原料和烧出来的成品也不烧。
             if (stack.isEmpty() || stack.stack().getMaxStackSize() <= 1
                     || isIngredient(stack.stack()) || isResult(stack.stack())) continue;
-            int burn = fuels.burnTicks(itemId(stack.stack()));
+            // 燃料表给的是熔炉里烧多久；高炉、烟熏炉里同一件燃料只顶一半。
+            int burn = fuels.burnTicks(itemId(stack.stack())) / recipe.kind().fuelBurnDivisor();
             if (burn > 0) stacks.add(new FuelStack(i, stack.count(), burn));
         }
         FuelPick pick = pickFuel(stacks, (long) stillToSmelt() * cookTicks);
