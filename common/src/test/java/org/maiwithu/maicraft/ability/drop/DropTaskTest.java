@@ -42,6 +42,7 @@ import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
+import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
@@ -213,7 +214,7 @@ class DropTaskTest {
         }
 
         DropTask task(int count) {
-            return new DropTask(new DropInput(COBBLE, count), backpack, emptyOffhand(),
+            return new DropTask(new DropInput(COBBLE, count, null, Permissions.DEFAULT), backpack, emptyOffhand(),
                     new DropsItems.Parts(ignored -> scene, atOrigin(), Optional.empty(), Optional.empty(), avoidance));
         }
 
@@ -306,7 +307,7 @@ class DropTaskTest {
 
             @Override public String describe() { return "换下一堆到主手"; }
         });
-        DropTask task = new DropTask(new DropInput(COBBLE, 40), rig.backpack, emptyOffhand(),
+        DropTask task = new DropTask(new DropInput(COBBLE, 40, null, Permissions.DEFAULT), rig.backpack, emptyOffhand(),
                 new DropsItems.Parts(ignored -> rig.scene, atOrigin(), Optional.of(moves), Optional.empty(), rig.avoidance));
         TickResult result = rig.run(task, 80);
         TaskResult done = result instanceof TickResult.Finished finished ? finished.result() : null;

@@ -8,7 +8,6 @@ import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
 import org.maiwithu.maicraft.behavior.inventory.DropsItems;
 import org.maiwithu.maicraft.behavior.inventory.TossesOnto;
 import org.maiwithu.maicraft.game.player.BackpackView;
-import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
@@ -57,7 +56,8 @@ final class DropTask extends PhasedTask<DropTask.Phase> {
     protected Action enter(Phase phase) {
         // 指定了往哪一格扔（传送带、工作盆上）：走到旁边、换到主手、按抛物线扔过去，看着它落下。
         if (input.onto() != null && tossOnto != null) {
-            tossing = tossOnto.toss(input.itemId(), Math.min(input.count(), carried()), input.onto(), Permissions.DEFAULT);
+            // 走到那一格旁边按这次目标的许可走：change_blocks=none 时不为扔一下去挖路。
+            tossing = tossOnto.toss(input.itemId(), Math.min(input.count(), carried()), input.onto(), input.permissions());
             return tossing;
         }
         // 丢出的每一堆、没等到确认的那一下，都由丢东西动作直接记进本任务的结果。
@@ -99,8 +99,11 @@ final class DropTask extends PhasedTask<DropTask.Phase> {
         return Next.done(TaskResult.builder(all ? TaskResult.Status.DONE : TaskResult.Status.PARTIAL, summary).build());
     }
 
+    // 还差几件：朝一格扔的按落上去的（被收走的加停在上面的）扣，随手丢的按丢出的扣。
     @Override protected List<String> remaining() {
-        int left = input.count() - (dropping == null ? 0 : dropping.dropped());
+        int done = tossing != null ? tossing.delivered() + tossing.waiting()
+                : dropping == null ? 0 : dropping.dropped();
+        int left = input.count() - done;
         return left <= 0 ? List.of()
                 : List.of("还差 " + left + " 件" + input.itemId() + "没丢（身上只有这些，或丢的时候出了岔子）");
     }

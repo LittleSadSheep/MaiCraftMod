@@ -101,7 +101,7 @@ public final class DropModule implements AbilityModule {
             onto = new BlockPos(position.x(), position.y(), position.z());
         }
         return new StepDecision.Run(new DropInput(item.startsWith("#") ? mostCarriedIn(item.substring(1)) : item,
-                count, onto));
+                count, onto, step.goal().permissions()));
     }
 
     private String mostCarriedIn(String tagId) {
