@@ -149,19 +149,19 @@ public final class Ae2Compat extends CompatModule {
         return call("认合成数量界面", () -> menus.craftAmountMenu(menu));
     }
 
-    /** 是不是合成确认界面；见 {@link Ae2TerminalMenu#craftConfirmMenu}。 */
-    public boolean craftConfirmMenu(AbstractContainerMenu menu) {
-        return call("认合成确认界面", () -> menus.craftConfirmMenu(menu));
-    }
-
     /** 定下合成数量并请网络开工；见 {@link Ae2TerminalMenu#confirmCraft}。 */
     public void confirmCraft(AbstractContainerMenu menu, int amount) {
         run("定下合成数量", () -> menus.confirmCraft(menu, amount));
     }
 
-    /** 合成确认页算出来缺的料；见 {@link Ae2TerminalMenu#craftShortages}。 */
-    public List<String> craftShortages(AbstractContainerMenu menu) {
-        return call("读合成缺料", () -> menus.craftShortages(menu));
+    /** 合成确认页此刻的样子；见 {@link Ae2TerminalMenu#craftPlanPage}。 */
+    public Optional<Ae2TerminalMenu.CraftPlanPage> craftPlanPage(AbstractContainerMenu menu) {
+        return call("读合成确认页", () -> menus.craftPlanPage(menu));
+    }
+
+    /** 角色自己下的这种东西的合成作业还没结束；见 {@link Ae2TerminalMenu#craftPending}。 */
+    public boolean craftPending(ItemStack sample) {
+        return call("读自己下的合成作业", () -> menus.craftPending(sample));
     }
 
     /** 发一次整组取货；见 {@link Ae2TerminalMenu#takeStack}。 */

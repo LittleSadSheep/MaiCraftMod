@@ -26,6 +26,7 @@ import org.maiwithu.maicraft.behavior.menu.MoveConfirmation;
 import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
 import org.maiwithu.maicraft.behavior.menu.TransferSettlement;
+import org.maiwithu.maicraft.game.menu.MenuActions;
 import org.maiwithu.maicraft.game.menu.MenuConfirmation;
 import org.maiwithu.maicraft.game.menu.PendingMenuAction;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -33,6 +34,7 @@ import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -43,6 +45,9 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 只记确认过的量（搬运结算），没动静就不再硬点，对不上的如实记下不凑数。
  * 拿走多少最终以引擎在动作结束后按身上的重新清点为准。关之前把这次看到的网络存货记下，下次报价用。
  * 收场时光标上还有东西，先放回背包（背包放不下就放回网络）再关界面，不留给关界面的流程去还——背包满了它会把东西丢在地上。
+ *
+ * <p>现货取完还缺、网络里那一条有样板时，交给 {@link NetworkCraft} 决定下不下单、下几件，走完下单那几页；
+ * 开工后关掉 AE2 退回来的终端重新打开，站在跟前等成品进网络，进来一批取一批。
  */
 public final class MenuTerminalTakes implements TerminalTakes {
 
@@ -63,10 +68,8 @@ public final class MenuTerminalTakes implements TerminalTakes {
     private static final int TAKE_TIMEOUT_TICKS = 40;
     /** 放下光标那一下点完后，等两侧内容同步过来的宽限（刻）。 */
     private static final int PUT_DOWN_SETTLE_TICKS = 5;
-    /** 下单后等界面换页（填数量、算料）的期限（刻）。 */
-    private static final int CRAFT_MENU_TICKS = 60;
-    /** 网络开工后等成品进网络的期限（刻）：两分钟没出来就如实说作业还在跑，不在终端前耗死。 */
-    private static final int CRAFT_WAIT_TICKS = 20 * 120;
+    /** 在下单那几页上点一下等换页的期限（刻）；换页由下单那边自己看，这里只让这一下的确认按时结清。 */
+    private static final int PAGE_CONFIRM_TICKS = 60;
     /** 收场前放好光标的期限（刻）：到点还没放好就照常关界面，光标上的东西交给游戏的关闭流程。 */
     private static final int CURSOR_TICKS = 40;
 
@@ -84,16 +87,32 @@ public final class MenuTerminalTakes implements TerminalTakes {
     }
 
     @Override public Optional<Action> take(Ae2Terminals.Terminal terminal, String dimension, ItemRequest request,
-            Permissions permissions) {
-        return Optional.of(new TakeAction(new Placed(terminal, dimension, permissions), request));
+            Permissions permissions, TaskRecords records) {
+        return Optional.of(new TakeAction(new Placed(terminal, dimension, permissions), request, false, records));
     }
 
-    @Override public Optional<Action> takeWireless(String terminalItemId, ItemRequest request) {
-        return Optional.of(new TakeAction(new Wireless(terminalItemId), request));
+    @Override public Optional<Action> takeWireless(String terminalItemId, ItemRequest request, TaskRecords records) {
+        return Optional.of(new TakeAction(new Wireless(terminalItemId), request, false, records));
     }
 
     @Override public Optional<Action> lookWireless(String terminalItemId, ItemRequest request) {
-        return Optional.of(new TakeAction(new Wireless(terminalItemId), request, true));
+        return Optional.of(new TakeAction(new Wireless(terminalItemId), request, true, null));
+    }
+
+    // 在此刻那一页上发模组的包。AE2 的填数量页、确认页是服务端换上来的，不是角色点开的那一份界面，
+    // 用不了已打开界面的发包入口，这里照同一条规矩判断：本刻有交互机会、上一下结清、界面画过一帧才发，
+    // 这一下按"换页了"确认；发不了返回 false，下一刻再试。
+    private boolean sendOnCurrentPage(String what, Runnable send) {
+        PlayerContext context = services.context().get();
+        if (context == null || !context.canInteractThisTick()) return false;
+        MenuActions actions = context.menuActions();
+        if (actions.hasPendingTransaction() || !actions.ensureVisible(context)) return false;
+        AbstractContainerMenu page = context.localPlayer().containerMenu;
+        actions.submitModAction(context, what, send,
+                (now, ignored) -> now.localPlayer().containerMenu != page
+                        ? MenuConfirmation.Verdict.APPLIED : MenuConfirmation.Verdict.PENDING,
+                PAGE_CONFIRM_TICKS);
+        return true;
     }
 
     /** 到网络跟前的办法：走到一台装着的终端点开，或拿出身上的无线终端打开。取货的其余步骤两者一样。 */
@@ -168,7 +187,7 @@ public final class MenuTerminalTakes implements TerminalTakes {
         }
     }
 
-    /** 从终端取货的先后顺序；网络里没有现货但有样板时，在取之前插一步下单合成。 */
+    /** 从终端取货的先后顺序；现货取完还缺、网络里有样板时，插一步下单合成，开工后重新打开终端等成品。 */
     private enum Stage { OPEN, SYNC, TAKE, CRAFT, CURSOR, CLOSE, DONE }
 
     /** 正在等确认的那一下是哪种取法。 */
@@ -198,14 +217,12 @@ public final class MenuTerminalTakes implements TerminalTakes {
         private int stockFullWaited;
         /** 收场的原因：一件都没取到时按它失败；取到了就算做完。null 是正常收场（拿够了）。 */
         private Problem stopReason;
-        // 下单合成：下过单没有、走到哪一步、这一步等了几刻、下了几件；网络开工后等成品又等了几刻。
-        private boolean craftOrdered;
-        private boolean craftSubmitted;
-        private int craftStep;
-        private int craftTicks;
-        private int craftAmount;
-        private String craftWhat;
-        private int craftWaited;
+        /** 现货不够时在网络里下单补缺口：下不下单、下单那几页、等成品的期限都在它那里。 */
+        private final NetworkCraft craft;
+        /** 下单没成或等不到成品：就算已经取到一些也按失败交回，让引擎划掉这条路，不再回来白跑。 */
+        private boolean failEvenIfTaken;
+        /** 等成品时数刻，每秒报一次进展用。 */
+        private int craftBeat;
 
         // 正在等确认的一下：取法、取的那种东西、点之前角色那一侧与光标的样子。
         private PendingMenuAction pending;
@@ -224,20 +241,22 @@ public final class MenuTerminalTakes implements TerminalTakes {
         private int cursorWaited;
         private PendingMenuAction putBackPending;
 
-        TakeAction(Access access, ItemRequest request) {
-            this(access, request, false);
-        }
-
-        TakeAction(Access access, ItemRequest request, boolean lookOnly) {
+        /**
+         * @param lookOnly 只看一眼，什么都不拿
+         * @param records  发起任务的记账口，下单的结论记成 attempts；没有为 null
+         */
+        TakeAction(Access access, ItemRequest request, boolean lookOnly, TaskRecords records) {
             this.access = access;
             this.request = request;
             this.lookOnly = lookOnly;
             this.opening = access.opening();
+            this.craft = new NetworkCraft(compat, MenuTerminalTakes.this::sendOnCurrentPage, access.describe(), records);
         }
 
         @Override public ActionStatus tick(TickContext tick) {
-            // 下了单在等成品时另有期限（两分钟），总期限跟着放宽。
-            long limit = craftSubmitted ? GIVE_UP_TICKS + CRAFT_WAIT_TICKS : GIVE_UP_TICKS;
+            // 下了单（或在等之前下的单）时，下单那几页与等成品另有期限，总期限跟着放宽。
+            long limit = craft.involved()
+                    ? GIVE_UP_TICKS + CraftOrdering.MOST_TICKS + CraftWait.TOTAL_TICKS : GIVE_UP_TICKS;
             if (++waited > limit && stage.ordinal() < Stage.CURSOR.ordinal()) {
                 stop(Problem.of(Problem.Kind.STUCK, "从 " + access.describe() + " 取货超时", null));
             }
@@ -324,21 +343,28 @@ public final class MenuTerminalTakes implements TerminalTakes {
             }
             Ae2TerminalMenu.StockEntry entry = cursor.isEmpty() ? firstWanted(stock) : entryFor(cursor, stock);
             if (entry == null) {
+                // 成品刚好取够、网络里也没了：拿够就收场，不再等下单的那一单。
+                if (request.count() - confirmedTotal() <= 0) return stopNow(null);
                 // 一件还没取到就没看见：可能是存货还没同步齐，等表连着几刻不再变多再说没有。
                 if (confirmedTotal() == 0 && stockStillArriving(stock.size())) return ActionStatus.running();
                 // 等到存货表不再变了：这时记下的才算看全了，下次报价可以照它说"没有"。
                 if (confirmedTotal() == 0) compat.networkLinked(raw).ifPresent(linked -> access.remember(linked, stock, true));
-                // 网络里没有现货但有样板能做：像玩家一样在终端里下单，等成品进网络再取（不补缺料、不加样板）。
-                Ae2TerminalMenu.StockEntry craftable = craftOrdered || confirmedTotal() > 0 ? null : craftableWanted(stock);
-                if (craftable != null) return orderCraft(raw, craftable);
-                // 下过单、网络在做：成品还没进网络就接着等，到期限如实说作业还在跑。
-                if (craftSubmitted) {
-                    if (++craftWaited < CRAFT_WAIT_TICKS) return ActionStatus.running();
-                    return stopNow(Problem.of(Problem.Kind.STUCK, "已在 " + access.describe() + " 的网络下单合成 "
-                            + craftAmount + " 个" + craftWhat + "，两分钟没做出来，作业还在网络里跑",
-                            "过一会儿再来取，或用 machine_inspect 看网络的合成 CPU"));
-                }
-                return stopNow(nothingLeft());
+                // 现货取完了还缺（或一开始就没有）：网络里那一条有样板就像玩家一样下单补缺口，件数封顶在背包装得下的；
+                // 自己之前下的这样东西还在做就不再下单、接着等；下过单就在跟前等成品进网络，进来一批取一批。
+                List<SlotSnapshot> playerSide = reading.get().playerSnapshots();
+                return switch (craft.noStock(raw, stock, this::wanted, confirmedTotal(),
+                        request.count() - confirmedTotal(), sample -> NetworkTakePlan.room(sample, playerSide))) {
+                    case NetworkCraft.Ordering ordering -> {
+                        stage = Stage.CRAFT;
+                        yield ActionStatus.progressed();
+                    }
+                    // AE2 还记着这一单在做：网络在干活，每秒报一次进展，这段等待的上限由下单那边的期限管。
+                    case NetworkCraft.Waiting waiting -> waiting.jobRunning() && ++craftBeat % 20 == 0
+                            ? ActionStatus.progressed() : ActionStatus.running();
+                    case NetworkCraft.Reopen reopen -> reopen();
+                    case NetworkCraft.Stop stop -> stopCraft(stop);
+                    case NetworkCraft.Nothing nothing -> stopNow(nothingLeft());
+                };
             }
             int remaining = request.count() - confirmedTotal();
             if (entry.fillsBucket() && cursor.isEmpty()) return fillBucket(entry, stock, reading.get(), raw, remaining);
@@ -387,55 +413,17 @@ public final class MenuTerminalTakes implements TerminalTakes {
                     + itemId(entry.sample()) + "要装的流体，可网络里和背包里都没有空桶", "先备一只空桶（三块铁锭）再来装"));
         }
 
-        // 网络里有样板、能做出想要的东西的那一条（现货是零）。
-        private Ae2TerminalMenu.StockEntry craftableWanted(List<Ae2TerminalMenu.StockEntry> stock) {
-            for (Ae2TerminalMenu.StockEntry entry : stock) {
-                if (entry.craftable() && wanted(entry.sample())) return entry;
-            }
-            return null;
-        }
-
-        // 下单：发"合成这一条"，服务端打开填数量的界面，下一步在那页定数量。
-        private ActionStatus orderCraft(AbstractContainerMenu raw, Ae2TerminalMenu.StockEntry craftable) {
-            craftOrdered = true;
-            craftAmount = Math.max(1, request.count() - confirmedTotal());
-            craftWhat = itemId(craftable.sample());
-            craftStep = 0;
-            craftTicks = 0;
-            compat.requestCraft(raw, craftable.serial());
-            stage = Stage.CRAFT;
-            return ActionStatus.progressed();
-        }
-
-        // 下单的几页：填数量 → 定下并请网络算料、能做就开工。缺料停在确认页就照抄缺什么收场；
-        // 开工后服务端退回终端，关掉它重新打开，等成品进网络再取。
+        // 下单的几页：点合成 → 填数量、算完能做就开工 → 确认页看结论，每一刻看此刻的界面是哪一页。
         private ActionStatus craft(TickContext tick) {
-            AbstractContainerMenu raw = tick.player().localPlayer().containerMenu;
-            craftTicks++;
-            if (craftStep == 0) {
-                if (compat.craftAmountMenu(raw)) {
-                    compat.confirmCraft(raw, craftAmount);
-                    craftStep = 1;
-                    craftTicks = 0;
-                    return ActionStatus.progressed();
-                }
-                if (craftTicks > CRAFT_MENU_TICKS) return craftStopped("下单合成" + craftWhat + "没打开填数量的界面");
-                return ActionStatus.running();
-            }
-            if (compat.craftConfirmMenu(raw)) {
-                List<String> shortages = compat.craftShortages(raw);
-                if (!shortages.isEmpty()) {
-                    return craftStopped("网络有样板能合成" + craftWhat + "，但这次做不了：" + String.join("、", shortages));
-                }
-                if (craftTicks > CRAFT_MENU_TICKS) return craftStopped("网络算了料一直没开工（可能合成 CPU 都在忙）");
-                return ActionStatus.running();
-            }
-            if (compat.craftAmountMenu(raw)) {
-                if (craftTicks > CRAFT_MENU_TICKS) return craftStopped("定了合成数量网络一直没反应");
-                return ActionStatus.running();
-            }
-            // 退回了终端：网络开工了。关掉退回来的这页，重新打开看存货，等成品进网络。
-            craftSubmitted = true;
+            return switch (craft.ordering(tick.player().localPlayer().containerMenu)) {
+                case NetworkCraft.Reopen reopen -> reopen();
+                case NetworkCraft.Stop stop -> stopCraft(stop);
+                default -> ActionStatus.running();
+            };
+        }
+
+        // 开工了：AE2 退回来的终端不是角色点开的那一份，关掉它重新打开看存货，等成品进网络。
+        private ActionStatus reopen() {
             closeCurrent();
             opening = access.opening();
             menu = null;
@@ -448,10 +436,13 @@ public final class MenuTerminalTakes implements TerminalTakes {
             return ActionStatus.progressed();
         }
 
-        // 下单没成：关掉停着的那页，照抄原因收场（一件没取到就按它失败，引擎换路）。
-        private ActionStatus craftStopped(String why) {
+        // 下单没成或等不到成品：还停在下单那几页上就关掉那一页收场；在终端前等的照常放好光标、关界面收场。
+        // 下单这条路走不通时就算已经取到一些也按失败交回，引擎划掉它换别的路。
+        private ActionStatus stopCraft(NetworkCraft.Stop stop) {
+            failEvenIfTaken = stop.evenIfTaken();
+            if (stage != Stage.CRAFT) return stopNow(stop.problem());
             closeCurrent();
-            if (stopReason == null) stopReason = Problem.of(Problem.Kind.NEED_ITEM, why, "缺的料补进网络，或换别的途径");
+            if (stopReason == null) stopReason = stop.problem();
             stage = Stage.DONE;
             return result();
         }
@@ -628,8 +619,9 @@ public final class MenuTerminalTakes implements TerminalTakes {
         }
 
         // 收场：取到了就算做完（数量由引擎清点）；一件都没取到就按收场原因失败，让引擎换别的路。
+        // 下单没成、等不到成品的，取到了也按失败交回（引擎照样按身上清点记下取到的）。
         private ActionStatus result() {
-            if (confirmedTotal() > 0 || stopReason == null) return ActionStatus.done();
+            if (stopReason == null || (confirmedTotal() > 0 && !failEvenIfTaken)) return ActionStatus.done();
             String unconfirmed = settlement.unconfirmedFacts().isEmpty() ? ""
                     : "；没能确认的：" + String.join("；", settlement.unconfirmedFacts());
             return ActionStatus.failed(Problem.of(stopReason.kind(), stopReason.message() + unconfirmed,
@@ -722,7 +714,8 @@ public final class MenuTerminalTakes implements TerminalTakes {
         }
 
         @Override public String describe() {
-            return "从 " + access.describe() + " 取" + request.wanted().describe();
+            String doing = "从 " + access.describe() + " 取" + request.wanted().describe();
+            return craft.waiting() ? doing + "，" + craft.waitingText() : doing;
         }
     }
 

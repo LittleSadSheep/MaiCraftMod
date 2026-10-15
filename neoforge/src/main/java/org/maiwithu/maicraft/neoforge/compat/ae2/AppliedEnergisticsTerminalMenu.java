@@ -5,9 +5,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+import appeng.api.networking.crafting.ICraftingSubmitResult;
+import appeng.api.networking.crafting.UnsuitableCpus;
 import appeng.api.parts.IPartHost;
 import appeng.api.stacks.AEItemKey;
 import appeng.api.stacks.AEFluidKey;
+import appeng.api.stacks.GenericStack;
+import appeng.client.gui.me.common.PendingCraftingJobs;
 import appeng.helpers.InventoryAction;
 import appeng.helpers.WirelessTerminalMenuHost;
 import appeng.menu.me.common.GridInventoryEntry;
@@ -97,27 +101,45 @@ public final class AppliedEnergisticsTerminalMenu implements Ae2TerminalMenu {
         return menu instanceof CraftAmountMenu;
     }
 
-    @Override public boolean craftConfirmMenu(AbstractContainerMenu menu) {
-        return menu instanceof CraftConfirmMenu;
-    }
-
     // 定数量、不只补差额、算完就开工：料齐时服务端直接开工并回到终端，缺料时停在确认页把缺的列出来。
     @Override public void confirmCraft(AbstractContainerMenu menu, int amount) {
         if (menu instanceof CraftAmountMenu craftAmount) craftAmount.confirm(amount, false, true);
     }
 
-    // 确认页算出来的缺料（模拟结果里缺的每一样），没有空闲合成 CPU 也算一条。
-    @Override public List<String> craftShortages(AbstractContainerMenu menu) {
-        if (!(menu instanceof CraftConfirmMenu confirm)) return List.of();
-        List<String> shortages = new ArrayList<>();
+    // 确认页：计划同步过来才算算完；计划是模拟的就是缺料，列出每样缺多少；开工被拒时服务端把错误码与详情
+    // 同步到 submitError（几台在忙、太小、断电，或开工时缺的那一样），照原样交出去，说法在联动入口那边写。
+    @Override public Optional<CraftPlanPage> craftPlanPage(AbstractContainerMenu menu) {
+        if (!(menu instanceof CraftConfirmMenu confirm)) return Optional.empty();
         var plan = confirm.getPlan();
+        List<String> missing = new ArrayList<>();
         if (plan != null && plan.isSimulation()) {
             for (var entry : plan.getEntries()) {
-                if (entry.getMissingAmount() > 0) shortages.add(entry.getWhat().getId() + " ×" + entry.getMissingAmount());
+                if (entry.getMissingAmount() > 0) missing.add(entry.getWhat().getId() + " ×" + entry.getMissingAmount());
             }
         }
-        if (plan != null && !plan.isSimulation() && confirm.hasNoCPU()) shortages.add("没有空闲的合成 CPU");
-        return List.copyOf(shortages);
+        Optional<CraftRefusal> refusal = Optional.empty();
+        ICraftingSubmitResult submitted = confirm.submitError == null ? null : confirm.submitError.result();
+        if (submitted != null && submitted.errorCode() != null) {
+            int busy = 0;
+            int tooSmall = 0;
+            int offline = 0;
+            String missingOne = "";
+            if (submitted.errorDetail() instanceof UnsuitableCpus cpus) {
+                busy = cpus.busy();
+                tooSmall = cpus.tooSmall();
+                offline = cpus.offline();
+            } else if (submitted.errorDetail() instanceof GenericStack stack) {
+                missingOne = stack.what().getId() + " ×" + stack.amount();
+            }
+            refusal = Optional.of(new CraftRefusal(submitted.errorCode().name(), busy, tooSmall, offline, missingOne));
+        }
+        return Optional.of(new CraftPlanPage(plan != null, missing, refusal));
+    }
+
+    // 角色自己下的作业：AE2 客户端按服务端发来的开工、结束记着，按物品键问。
+    @Override public boolean craftPending(ItemStack sample) {
+        AEItemKey key = AEItemKey.of(sample);
+        return key != null && PendingCraftingJobs.hasPendingJob(key);
     }
 
     // 编号 -1 指网络格子的空白处：光标上拿着东西时，左键这一下把它放回网络。

@@ -35,7 +35,8 @@ import org.maiwithu.maicraft.kernel.task.Action;
  * 按上次在终端里看到的网络存货挑一台：记得有货报明确数量；没有记得有货的就去看一眼，报不知道有多少，
  * 上次看不行（没连上网络、没有这样东西）的排在最后，旧记录只拿来排先后、不拿来拒绝。
  * 网络里的东西一直在变，记下的数只当线索，到了终端跟前以现场为准。
- * 动手前再核对终端还在、还能取用，然后交给从终端取货的动作。网络能合成但现货不够时不下单。
+ * 动手前再核对终端还在、还能取用，然后交给从终端取货的动作。现货不够、网络里有样板时，取货动作在终端里下单补缺口，
+ * 等成品进网络再取；所以记得有样板的终端按够数报价，不把缺口拆给手搓。
  *
  * <p>身上带着绑过访问点的无线终端时先用它：不用走路，拿到主手右键打开就是同一张网；
  * 超出访问点范围、没电时界面上写着原因，如实收场，引擎再去找附近装着的终端。
@@ -44,7 +45,7 @@ public final class Ae2TerminalSource implements ItemSource {
 
     /** 这条途径：via 取 ae2 就只从 ME 终端取。 */
     public static final AcquireVia VIA = new AcquireVia("ae2",
-            "从 ME 网络取：身上带着绑过的无线终端就直接拿出来开，不然去附近的 ME 终端；没现货但有样板就在网络里下单合成，等做好再取（装了 AE2 才有）");
+            "从 ME 网络取：身上带着绑过的无线终端就直接拿出来开，不然去附近的 ME 终端；现货不够、有样板就在网络里下单合成补上，等做好再取（装了 AE2 才有）");
 
     /** 找终端的半径：与找箱子的一样，再远就不算顺手能拿。 */
     public static final int SEARCH_RADIUS_BLOCKS = 64;
@@ -103,16 +104,17 @@ public final class Ae2TerminalSource implements ItemSource {
     }
 
     /**
-     * 把挑终端的结论写成报价：记得有货报明确数量（不超过这次要的），没看过报不知道有多少，都用不上报给不了。
-     * 报价线索记着是哪一格哪一面的终端，动手时原样带回来。
+     * 把挑终端的结论写成报价：记得有货报明确数量（不超过这次要的），记得网络里有样板按够数报（现货不够在终端里下单补上），
+     * 没看过报不知道有多少，都用不上报给不了。报价线索记着是哪一格哪一面的终端，动手时原样带回来。
      */
     static SourceQuote quoteFrom(TerminalChooser.Choice choice, ItemRequest request, String source, Instant now) {
         return switch (choice) {
             case TerminalChooser.Known known -> new SourceQuote.Offer(source,
-                    (int) Math.min(known.count(), request.count()),
+                    known.craftable() ? request.count() : (int) Math.min(known.count(), request.count()),
                     new AcquisitionCost(known.candidate().distance(), ACTIONS_PER_VISIT),
-                    "记的是" + ago(known.candidate().seen().orElseThrow().seenAt(), now)
-                            + "在终端里看到的数，到了以终端里为准",
+                    "记的是" + ago(known.candidate().seen().orElseThrow().seenAt(), now) + "在终端里看到的"
+                            + (known.craftable() ? "：现货 " + known.count() + " 件，不够的在网络里下单合成" : "数")
+                            + "，到了以终端里为准",
                     hint(known.candidate().terminal()));
             case TerminalChooser.Unknown unknown -> new SourceQuote.Offer(source, SourceQuote.Offer.UNKNOWN_COUNT,
                     new AcquisitionCost(unknown.candidate().distance(), ACTIONS_PER_VISIT),
@@ -140,7 +142,8 @@ public final class Ae2TerminalSource implements ItemSource {
         // 报的是身上的无线终端：动手前再看一眼它还在身上，就拿出来打开。
         if (offer.hint().startsWith(WIRELESS_HINT)) {
             String itemId = offer.hint().substring(WIRELESS_HINT.length());
-            return carriedWirelessTerminal(player).filter(itemId::equals).flatMap(id -> takes.takeWireless(id, request));
+            return carriedWirelessTerminal(player).filter(itemId::equals)
+                    .flatMap(id -> takes.takeWireless(id, request, context.records()));
         }
         ClientLevel level = player.level();
         String dimension = level.dimension().location().toString();
@@ -157,7 +160,7 @@ public final class Ae2TerminalSource implements ItemSource {
         if (!usable(level, dimension, terminal.get(), context.permissions())) {
             return Optional.empty();
         }
-        return takes.take(terminal.get(), dimension, request, context.permissions());
+        return takes.take(terminal.get(), dimension, request, context.permissions(), context.records());
     }
 
     /** 报价线索里标明"用身上的无线终端"的前缀，后面跟物品 ID。 */
@@ -179,8 +182,8 @@ public final class Ae2TerminalSource implements ItemSource {
 
     /**
      * 身上无线终端的报价。像玩家一样先看一眼 AE：这次还没打开过就按够数报（打开看一眼只要一两秒，
-     * 没有的话引擎划掉它再换路，比先去手搓一整条链省事）；记得有现货报现货的数；记得没现货但有样板，
-     * 按够数报、到了在网络里下单；上次没连上（超出范围、没电）照样报，写明上次的情况；
+     * 没有的话引擎划掉它再换路，比先去手搓一整条链省事）；记得有现货报现货的数；记得有样板（不管现货够不够），
+     * 按够数报、到了取完现货在网络里下单补上；上次没连上（超出范围、没电）照样报，写明上次的情况；
      * 五分钟内看过、网络里既没有也没样板，就不再去开。
      */
     static SourceQuote wirelessQuote(String itemId, ItemRequest request, Optional<SeenNetworkStock.Sighting> lastTime,
@@ -198,6 +201,10 @@ public final class Ae2TerminalSource implements ItemSource {
         if (!seen.linked()) {
             return new SourceQuote.Offer(source, SourceQuote.Offer.UNKNOWN_COUNT, cost,
                     "上次打开时没连上网络（超出范围或没电），不知道现在好了没有，打开看一眼", hint);
+        }
+        if (seen.count(wanted) > 0 && seen.craftable(wanted)) {
+            return new SourceQuote.Offer(source, request.count(), cost,
+                    "用身上的无线终端取，上次打开时现货 " + seen.count(wanted) + " 件，不够的在网络里下单合成", hint);
         }
         if (seen.count(wanted) > 0) {
             return new SourceQuote.Offer(source, (int) Math.min(seen.count(wanted), request.count()), cost,

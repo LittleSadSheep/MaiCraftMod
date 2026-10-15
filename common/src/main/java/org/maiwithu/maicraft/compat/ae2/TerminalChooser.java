@@ -11,7 +11,7 @@ import java.util.function.Predicate;
 /**
  * 挑终端：附近有好几台 ME 终端时去哪一台。纯函数，不读世界也不动手。
  *
- * <p>记得哪台终端的网络里有想要的东西，就去最近的那台，报明确的数；有确定的货就不赌运气。
+ * <p>记得哪台终端的网络里有想要的东西（有现货，或有样板能下单合成），就去最近的那台，报明确的数；有确定的货就不赌运气。
  * 没有记得有货的，就去看一眼：先去没看过的（或看过已经过时的）里最近的一台，
  * 再是上次看不行的——没连上网络、网络里没有这样东西——里最近的一台，报"不知道有多少"并写明上次看到的情况。
  * 上次不行不代表现在还不行（电可能接上了、东西可能有人放进去了），旧记录只拿来排先后，不拿来拒绝；
@@ -42,8 +42,17 @@ public final class TerminalChooser {
     public sealed interface Choice {
     }
 
-    /** 记得这台终端的网络里有 count 件想要的东西。 */
-    public record Known(Candidate candidate, long count) implements Choice {
+    /**
+     * 记得这台终端的网络里有 count 件想要的东西。
+     *
+     * @param craftable 网络里还有样板能做它：现货不够时在终端里下单补上
+     */
+    public record Known(Candidate candidate, long count, boolean craftable) implements Choice {
+
+        /** 只记得现货、没记着样板。 */
+        public Known(Candidate candidate, long count) {
+            this(candidate, count, false);
+        }
     }
 
     /**
@@ -95,8 +104,10 @@ public final class TerminalChooser {
                 continue;
             }
             long count = sighting.count(wanted);
-            if (count > 0) {
-                known.add(new Known(candidate, count));
+            boolean craftable = sighting.craftable(wanted);
+            // 有现货，或网络里有样板（现货不够在终端里下单补上），都算记得这台有。
+            if (count > 0 || craftable) {
+                known.add(new Known(candidate, count, craftable));
             } else {
                 lastTimeNot.add(new Unknown(candidate, Optional.of("上次看网络里没有" + wantedText)));
             }

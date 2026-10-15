@@ -118,6 +118,24 @@ public final class NetworkTakePlan {
         return Optional.ofNullable(empty);
     }
 
+    /**
+     * 角色背包那一侧这次还能装下几件这种东西：空格按一组算，放着同一种、没满的格子补到满。
+     * 在网络里下单合成前用它定件数，做出来拿得走多少就下多少。
+     */
+    static int room(ItemStack sample, List<SlotSnapshot> playerSnapshots) {
+        SlotSnapshot kind = SlotSnapshot.of(sample.copyWithCount(1));
+        int stackSize = sample.getMaxStackSize();
+        int room = 0;
+        for (SlotSnapshot slot : playerSnapshots) {
+            if (slot.isEmpty()) {
+                room += stackSize;
+            } else if (slot.sameIdentity(kind)) {
+                room += Math.max(0, slot.stack().getMaxStackSize() - slot.count());
+            }
+        }
+        return room;
+    }
+
     // 和这种物品刚做出来时一个样：组件与默认的一致。
     private static boolean plain(ItemStack sample) {
         return ItemStack.isSameItemSameComponents(sample, new ItemStack(sample.getItem()));

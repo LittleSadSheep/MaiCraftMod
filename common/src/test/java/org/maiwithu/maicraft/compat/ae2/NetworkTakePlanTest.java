@@ -125,4 +125,12 @@ class NetworkTakePlanTest {
                 sample -> sample.is(Items.IRON_PICKAXE));
         assertEquals(List.of(2L, 1L), picks.stream().map(Ae2TerminalMenu.StockEntry::serial).toList());
     }
+
+    @Test
+    void 背包还能装下几件_空格按一组_同种半堆补满_别的东西不算() {
+        ItemStack cobble = new ItemStack(Items.COBBLESTONE);
+        assertEquals(34 * 64 + 4, NetworkTakePlan.room(cobble,
+                playerSide(new ItemStack(Items.COBBLESTONE, 60), new ItemStack(Items.DIRT, 64))));
+        assertEquals(0, NetworkTakePlan.room(cobble, fullOf(new ItemStack(Items.DIRT, 64))));
+    }
 }

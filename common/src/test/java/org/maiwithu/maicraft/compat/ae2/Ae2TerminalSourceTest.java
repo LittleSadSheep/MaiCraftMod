@@ -142,7 +142,7 @@ class Ae2TerminalSourceTest {
     @Test
     void 角色不在世界里就给不了() {
         Ae2TerminalSource source = new Ae2TerminalSource(compat(), offlineServices(),
-                (terminal, dimension, request, permissions) -> Optional.empty(), new SeenNetworkStock(), () -> NOW);
+                (terminal, dimension, request, permissions, records) -> Optional.empty(), new SeenNetworkStock(), () -> NOW);
         SourceQuote quote = source.quote(torches(8),
                 new SourceContext(WorldPosition.here(0, 64, 0), Permissions.DEFAULT));
         assertInstanceOf(SourceQuote.Unavailable.class, quote);
@@ -158,6 +158,22 @@ class Ae2TerminalSourceTest {
         assertEquals(12, offer.cost().distanceBlocks());
         assertTrue(offer.risk().contains("1 分钟前"), offer.risk());
         assertEquals("3,64,0,north", offer.hint());
+    }
+
+    @Test
+    void 记得网络有样板_现货不够也按够数报_说明写现货几件() {
+        TerminalChooser.Candidate candidate = new TerminalChooser.Candidate(TERMINAL, 12, true,
+                Optional.of(new SeenNetworkStock.Sighting(true, Map.of("minecraft:torch", 3L), NOW,
+                        Set.of("minecraft:torch"))));
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class,
+                Ae2TerminalSource.quoteFrom(new TerminalChooser.Known(candidate, 3, true), torches(8), "ME 终端", NOW));
+        assertEquals(8, offer.obtainableCount(), "不够的在终端里下单补上，不把缺口拆给手搓");
+        assertTrue(offer.risk().contains("现货 3 件，不够的在网络里下单合成"), offer.risk());
+
+        SourceQuote.Offer wireless = assertInstanceOf(SourceQuote.Offer.class, Ae2TerminalSource.wirelessQuote(
+                "ae2:wireless_terminal", torches(8), Optional.of(new SeenNetworkStock.Sighting(true,
+                        Map.of("minecraft:torch", 3L), NOW, Set.of("minecraft:torch"))), "minecraft:torch"::equals));
+        assertEquals(8, wireless.obtainableCount(), "身上的无线终端也一样：有样板就按够数报");
     }
 
     @Test

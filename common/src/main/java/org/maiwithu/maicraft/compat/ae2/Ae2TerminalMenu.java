@@ -68,21 +68,55 @@ public interface Ae2TerminalMenu {
         return false;
     }
 
-    /** 这份界面是不是合成确认界面（算料、选合成 CPU 的那一页）。 */
-    default boolean craftConfirmMenu(AbstractContainerMenu menu) {
-        return false;
-    }
-
     /** 在填数量的界面里定下数量，请网络算料、算完能做就直接开工；缺料时停在确认界面列出缺什么。 */
     default void confirmCraft(AbstractContainerMenu menu, int amount) {
     }
 
     /**
-     * 合成确认界面里算出来缺的料（物品 ID 与件数，一条一句）；还在算、或不缺（网络已经开工就不会停在这页）为空。
-     * 没有空闲的合成 CPU 时也写一句。
+     * 合成确认界面（算料、选合成 CPU 的那一页）此刻能看到的：计划算完没有、缺哪些料、开工被拒的原因。
+     * 不是确认界面时给空。网络算完、料齐又选了"算完就开工"时服务端当场开工并退回终端，不会停在这页。
      */
-    default List<String> craftShortages(AbstractContainerMenu menu) {
-        return List.of();
+    default Optional<CraftPlanPage> craftPlanPage(AbstractContainerMenu menu) {
+        return Optional.empty();
+    }
+
+    /**
+     * AE2 记着角色自己下的、这种东西的合成作业还没结束：开工时服务端发来"开工"，做完、取消时发来"结束"，
+     * 终端里正在合成的那一行带的标记就是按它画的。只记角色自己下的；重新登录后从空的记起。
+     */
+    default boolean craftPending(ItemStack sample) {
+        return false;
+    }
+
+    /**
+     * 合成确认界面的样子。
+     *
+     * @param calculated 计划已经算完同步过来；为假是网络还在算
+     * @param missing    计划缺的料，一样一句（物品 ID 与件数）；不缺为空
+     * @param refusal    开工被 AE2 拒了的原因；没被拒为空
+     */
+    record CraftPlanPage(boolean calculated, List<String> missing, Optional<CraftRefusal> refusal) {
+        public CraftPlanPage {
+            missing = List.copyOf(missing);
+            Objects.requireNonNull(refusal, "refusal");
+        }
+    }
+
+    /**
+     * AE2 拒绝开工时给的原因，照它自己的错误码与详情。
+     *
+     * @param code     AE2 的错误码：NO_CPU_FOUND 没有合成 CPU、NO_SUITABLE_CPU_FOUND 合成 CPU 都用不上、
+     *                 CPU_BUSY、CPU_OFFLINE、CPU_TOO_SMALL、MISSING_INGREDIENT 开工时缺料、INCOMPLETE_PLAN 计划缺料
+     * @param busy     都用不上时，几台在忙
+     * @param tooSmall 几台存储太小
+     * @param offline  几台断电或缺频道
+     * @param missing  开工时缺的那一样（物品 ID 与件数）；不是缺料为空字符串
+     */
+    record CraftRefusal(String code, int busy, int tooSmall, int offline, String missing) {
+        public CraftRefusal {
+            Objects.requireNonNull(code, "code");
+            missing = missing == null ? "" : missing;
+        }
     }
 
     /**

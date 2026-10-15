@@ -10,6 +10,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Predicate;
 
 import net.minecraft.SharedConstants;
@@ -58,6 +59,18 @@ class TerminalChooserTest {
         TerminalChooser.Known known = assertInstanceOf(TerminalChooser.Known.class, choice);
         assertEquals(terminalAt(3), known.candidate().terminal());
         assertEquals(8, known.count());
+    }
+
+    @Test
+    void 记得网络里没现货但有样板_也算记得有_比没看过的先去() {
+        TerminalChooser.Choice choice = TerminalChooser.choose(List.of(
+                candidate(1, 3, true, null),
+                candidate(2, 9, true, new SeenNetworkStock.Sighting(true, Map.of(), NOW, Set.of("minecraft:torch")))),
+                TORCH, "minecraft:torch", 64);
+        TerminalChooser.Known known = assertInstanceOf(TerminalChooser.Known.class, choice);
+        assertEquals(terminalAt(2), known.candidate().terminal());
+        assertEquals(0, known.count());
+        assertTrue(known.craftable(), "到了在终端里下单补上");
     }
 
     @Test
