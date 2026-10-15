@@ -17,6 +17,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
+import org.maiwithu.maicraft.game.interaction.OverlayMessages;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.interrupt.AnnouncesFinish;
@@ -70,10 +71,10 @@ final class NightRestTask extends SleepTask implements AnnouncesFinish {
 
     NightRestTask(SleepInput input, Permissions permissions, BedScanner scanner, PlacesBed placer,
             ItemNeeds obtain, BringsPlayerClose approaches, UsesBeds usesBeds,
-            Supplier<Optional<String>> refusalTexts, Supplier<Optional<String>> carriedBed,
+            Supplier<OverlayMessages.Shown> actionBar, Supplier<Optional<String>> carriedBed,
             CollectsBlocks collects, ReadsRememberedPlaces rememberedPlaces, ReadsSleepState sleepState,
             SleepTask.ReadsSleepWindow sleepWindow, Set<BlockPos> sharedExclusions) {
-        super(input, permissions, scanner, placer, obtain, approaches, usesBeds, refusalTexts, carriedBed,
+        super(input, permissions, scanner, placer, obtain, approaches, usesBeds, actionBar, carriedBed,
                 sleepWindow, sharedExclusions);
         this.collects = Objects.requireNonNull(collects, "collects");
         this.rememberedPlaces = Objects.requireNonNull(rememberedPlaces, "rememberedPlaces");

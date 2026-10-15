@@ -14,6 +14,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
+import org.maiwithu.maicraft.game.interaction.OverlayMessages;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.WorldTime;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -69,8 +70,11 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
     private final ItemNeeds obtain;
     protected final BringsPlayerClose approaches;
     private final UsesBeds usesBed;
-    /** 最近一条动作栏提示语的读端：游戏拒绝入睡时按它分流。 */
-    private final Supplier<Optional<String>> refusalTexts;
+    /**
+     * 动作栏的读端：原版拒绝入睡时把为什么写在这里。读到的带着还要显示几刻，
+     * 认得出是不是点床之后新冒出来的；没在显示时给 null。
+     */
+    private final Supplier<OverlayMessages.Shown> actionBar;
     /** 身上带着的床：决定"没床"时走放床还是先弄一张。 */
     private final Supplier<Optional<String>> carriedBed;
     /** 可睡窗口的读缝：去床途中每刻都要再看一眼，天亮了就不往床走了。 */
@@ -81,6 +85,10 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
     private SleepDetails.BedSource bedSource = SleepDetails.BedSource.WORLD;
     private final Set<BlockPos> excluded;
     private int bedTries;
+    /** 这张床已经为"太远或被挡"换过一次站位：再被拒就换床。选中或放下新床时清掉。 */
+    private boolean repositionedForBed;
+    /** 点床之后动作栏新冒出来的拒绝原话：按它分流，比事后再读动作栏准（那时可能已经换成别的话）。 */
+    private String refusalAfterClick;
     /** 选床时等方块扫描扫完已经等了几刻。 */
     private int scanWaitTicks;
     private boolean enteredSleep;
@@ -88,7 +96,7 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
 
     SleepTask(SleepInput input, Permissions permissions, BedScanner scanner, PlacesBed placer,
             ItemNeeds obtain, BringsPlayerClose approaches, UsesBeds usesBed,
-            Supplier<Optional<String>> refusalTexts, Supplier<Optional<String>> carriedBed,
+            Supplier<OverlayMessages.Shown> actionBar, Supplier<Optional<String>> carriedBed,
             ReadsSleepWindow sleepWindow, Set<BlockPos> sharedExclusions) {
         super("睡觉", Phase.CHOOSE_BED, new ProgressTracker(STUCK_AFTER_TICKS, MAX_TICKS));
         this.input = input;
@@ -98,7 +106,7 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
         this.obtain = obtain;
         this.approaches = approaches;
         this.usesBed = usesBed;
-        this.refusalTexts = refusalTexts;
+        this.actionBar = Objects.requireNonNull(actionBar, "actionBar");
         this.carriedBed = carriedBed;
         this.sleepWindow = Objects.requireNonNull(sleepWindow, "sleepWindow");
         // 排除名单由调用方持有：夜休的需求会重插任务，"试过的床"要跨任务活着；公开能力给一份自己的。
@@ -167,6 +175,7 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
         if (chosen.isPresent()) {
             chosenBed = chosen.get().cell();
             bedTries++;
+            repositionedForBed = false;
             bedSource = SleepDetails.BedSource.WORLD;
             recordProgress("选中了一张床");
             return Next.go(Phase.APPROACH, "选中了一张床，走过去");
@@ -198,6 +207,7 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
             bedSource = SleepDetails.BedSource.CARRIED;
         }
         chosenBed = head;
+        repositionedForBed = false;
         recordChange(Change.of(Change.Kind.BLOCK_PLACED, carriedBed.get().orElse("床"), 1));
         return Next.go(Phase.APPROACH, "床放好了，走过去睡");
     }
@@ -230,8 +240,14 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
     }
 
     // 游戏明确拒绝了这次入睡：按提示语分流，认不出的如实带原文上报。
+    // 提示语先用点床后确认时认出的那句；没认出时读动作栏此刻的话，都没有就用拒绝原文。
     private Next<Phase> onGameRefusal(Problem refusal) {
-        String text = refusalTexts.get().orElse(refusal.message());
+        OverlayMessages.Shown shown = actionBar.get();
+        String text = refusalAfterClick != null ? refusalAfterClick
+                : shown != null ? shown.text() : refusal.message();
+        if (refusalAfterClick != null) {
+            recordAttempt("点床 " + chosenBed.toShortString(), "游戏不让睡：" + refusalAfterClick);
+        }
         return switch (SleepRefusal.of(text)) {
             case OCCUPIED, MONSTERS_NEARBY -> {
                 // 床被占用、床边有怪：这张床排除掉，换下一张；接连不行到上限就如实结束。
@@ -244,9 +260,11 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
         };
     }
 
-    // 太远或被挡：先退回靠近换站位；换过了还不行就换床，次数到顶如实结束。
+    // 太远或被挡：先退回靠近换一次站位；这张床换过站位还不行就换床，换床次数到顶如实结束。
+    // 每张床只换一次站位：靠近从原地核对，站位没问题时换了也还在原地，再点一样被拒，不在同一张床上来回点。
     private Next<Phase> repositionOrGiveUp(Problem refusal, String why) {
-        if (bedTries < MAX_BED_TRIES) {
+        if (!repositionedForBed) {
+            repositionedForBed = true;
             return Next.go(Phase.APPROACH, why + "，换一次站位再点");
         }
         excluded.add(chosenBed);
@@ -263,17 +281,33 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
         return otherwise;
     }
 
-    /** 确认条件：角色正在睡就是躺下了；确认期间日期前进说明一觉睡到了天亮，同样算成功。 */
+    /**
+     * 确认条件：角色正在睡就是躺下了；确认期间日期前进说明一觉睡到了天亮，同样算成功；
+     * 点床之后动作栏新冒出一句认得出的拒绝（太远、有怪、被占、不是晚上、被挡），就是这一下没生效。
+     */
     private InteractionConfirmation lyingDownConfirmation() {
+        // 进躺下这一段时（瞄准、点床之前）先读一眼动作栏当基准：点之前就挂着的旧话不算这一下的回应。
+        OverlayMessages.Shown beforeClick = actionBar.get();
+        refusalAfterClick = null;
         // 点床那一刻还没睡：把那天的日期记下来，之后哪一刻日期变了，就是睡过了一夜。
         return new InteractionConfirmation() {
             private Long dayAtClick;
+            private OverlayMessages.Shown lastSeen = beforeClick;
 
             @Override
             public Verdict observe(PlayerContext context) {
                 if (context.localPlayer().isSleeping()) {
                     return Verdict.APPLIED;
                 }
+                // 原版不让睡时人不会躺下，只在动作栏说一句为什么：认出这句就判没生效，走换站位、换床的分流，
+                // 不干等到超时变成"没能确认结果"。
+                OverlayMessages.Shown now = actionBar.get();
+                Optional<String> refused = SleepRefusal.newRefusal(lastSeen, now);
+                if (refused.isPresent()) {
+                    refusalAfterClick = refused.get();
+                    return Verdict.NOT_APPLIED;
+                }
+                lastSeen = now;
                 long day = WorldTime.dayIndexOf(context.level().getDayTime());
                 if (dayAtClick == null) {
                     dayAtClick = day;

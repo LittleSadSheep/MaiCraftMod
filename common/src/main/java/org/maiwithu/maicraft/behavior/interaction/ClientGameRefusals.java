@@ -45,6 +45,14 @@ public final class ClientGameRefusals {
         return text == null ? Optional.empty() : Optional.of(text);
     }
 
+    /**
+     * 动作栏此刻正显示着的提示，连同还要显示几刻；没有在显示时为 null。点下去之后要认"这一下新冒出来的话"
+     * 用它：同一句拒绝连说两遍文字一样，只有剩余显示刻数会跳回满格。
+     */
+    public OverlayMessages.Shown shownMessage() {
+        return overlayMessages.shown();
+    }
+
     /** 最近一段时间服务端没有推送过任何交互成果，最近的交互多半没被处理。 */
     public boolean interactionWasUnhandled() {
         List<ReceivedConfirmations.ServerConfirmation> recent = confirmations.get();

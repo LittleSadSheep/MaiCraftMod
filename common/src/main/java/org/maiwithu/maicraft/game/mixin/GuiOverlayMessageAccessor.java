@@ -13,4 +13,11 @@ public interface GuiOverlayMessageAccessor {
     /** 动作栏此刻的提示语；没有在显示时为 null。 */
     @Accessor("overlayMessageString")
     Component maicraft$overlayMessage();
+
+    /**
+     * 动作栏提示还要显示几刻：每冒出一条新提示原版就把它重置成满格（60 刻），之后每刻减一，减到 0 就不显示了。
+     * 同一句话又冒出来一次时文字不变，只有它会跳回满格，靠它认得出"又说了一遍"。
+     */
+    @Accessor("overlayMessageTime")
+    int maicraft$overlayMessageTime();
 }

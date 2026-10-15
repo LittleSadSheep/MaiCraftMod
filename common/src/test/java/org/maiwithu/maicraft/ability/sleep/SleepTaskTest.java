@@ -26,6 +26,7 @@ import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
+import org.maiwithu.maicraft.game.interaction.OverlayMessages;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -196,26 +197,26 @@ class SleepTaskTest {
 
     private static SleepTask task(FakeScanner scanner, StubPlacer placer, StubObtain obtain,
             StubApproaches approaches, StubUsesBeds usesBeds,
-            Supplier<Optional<String>> refusals,
+            Supplier<OverlayMessages.Shown> actionBar,
             Supplier<Optional<String>> carried) {
         // 缺省可睡窗口全开、排除名单任务自持：多数场景不关心这两样。
-        return task(scanner, placer, obtain, approaches, usesBeds, refusals, carried,
+        return task(scanner, placer, obtain, approaches, usesBeds, actionBar, carried,
                 moment -> true, new HashSet<>());
     }
 
     private static SleepTask task(FakeScanner scanner, StubPlacer placer, StubObtain obtain,
             StubApproaches approaches, StubUsesBeds usesBeds,
-            Supplier<Optional<String>> refusals,
+            Supplier<OverlayMessages.Shown> actionBar,
             Supplier<Optional<String>> carried, SleepTask.ReadsSleepWindow sleepWindow,
             Set<BlockPos> sharedExclusions) {
         return new SleepTask(new SleepInput(null), Permissions.DEFAULT, scanner, placer, obtain,
-                approaches, usesBeds, refusals::get, carried::get, sleepWindow, sharedExclusions);
+                approaches, usesBeds, actionBar, carried::get, sleepWindow, sharedExclusions);
     }
 
     private static NightRestTask nightRest(FakeScanner scanner, StubApproaches approaches,
             StubUsesBeds usesBeds, SleepTask.ReadsSleepWindow sleepWindow, Set<BlockPos> sharedExclusions) {
         return new NightRestTask(new SleepInput(null), Permissions.DEFAULT, scanner, new StubPlacer(),
-                new StubObtain(), approaches, usesBeds, Optional::empty, Optional::empty,
+                new StubObtain(), approaches, usesBeds, () -> null, Optional::empty,
                 (cell, permissions) -> Optional.empty(), place -> Optional.empty(), moment -> false,
                 sleepWindow, sharedExclusions);
     }
@@ -240,7 +241,7 @@ class SleepTaskTest {
         StubApproaches approaches = new StubApproaches();
         StubUsesBeds usesBeds = new StubUsesBeds();
         TaskResult result = runToCompletion(task(scanner, new StubPlacer(), new StubObtain(),
-                approaches, usesBeds, Optional::empty, Optional::empty));
+                approaches, usesBeds, () -> null, Optional::empty));
         // 躺下即完成，床是世界里原有的。
         assertEquals(TaskResult.Status.DONE, result.status());
         SleepDetails details = assertInstanceOf(SleepDetails.class, result.details());
@@ -262,7 +263,7 @@ class SleepTaskTest {
         StubObtain obtain = new StubObtain();
         StubPlacer placer = new StubPlacer();
         TaskResult result = runToCompletion(task(scanner, placer, obtain,
-                new StubApproaches(), new StubUsesBeds(), Optional::empty, Optional::empty));
+                new StubApproaches(), new StubUsesBeds(), () -> null, Optional::empty));
         assertEquals(TaskResult.Status.DONE, result.status());
         SleepDetails details = assertInstanceOf(SleepDetails.class, result.details());
         assertTrue(details.enteredSleep(), "世界有床时应该走到床边躺下");
@@ -281,7 +282,7 @@ class SleepTaskTest {
         StubUsesBeds usesBeds = new StubUsesBeds();
         usesBeds.offer(new Scripted(ActionStatus.failed(
                 Problem.of(Problem.Kind.REFUSED_BY_GAME, "对床头的交互没有生效", null))));
-        Supplier<Optional<String>> refusals = () -> Optional.of("这张床被占用");
+        Supplier<OverlayMessages.Shown> refusals = () -> new OverlayMessages.Shown("这张床已被占用", 60);
         TaskResult result = runToCompletion(task(scanner, new StubPlacer(), new StubObtain(),
                 new StubApproaches(), usesBeds, refusals, Optional::empty));
         // 被占用的床被排除，第二张床睡上了。
@@ -300,7 +301,7 @@ class SleepTaskTest {
         placer.offer(placedHead);
         StubUsesBeds usesBeds = new StubUsesBeds();
         TaskResult result = runToCompletion(task(scanner, placer, new StubObtain(),
-                new StubApproaches(), usesBeds, Optional::empty, () -> Optional.of("minecraft:red_bed")));
+                new StubApproaches(), usesBeds, () -> null, () -> Optional.of("minecraft:red_bed")));
         // 附近没床时放下自带的床，对着放好的床头睡。
         assertEquals(TaskResult.Status.DONE, result.status());
         SleepDetails details = assertInstanceOf(SleepDetails.class, result.details());
@@ -317,7 +318,7 @@ class SleepTaskTest {
         placer.offer(placedHead);
         StubObtain obtain = new StubObtain();
         TaskResult result = runToCompletion(task(scanner, placer, obtain,
-                new StubApproaches(), new StubUsesBeds(), Optional::empty, Optional::empty));
+                new StubApproaches(), new StubUsesBeds(), () -> null, Optional::empty));
         // 先去弄一张床（合成也在途径里），弄到后放下再睡；床的来源记成现做。
         assertEquals(TaskResult.Status.DONE, result.status());
         assertEquals("#minecraft:beds", obtain.last.wanted().specifier());
@@ -391,7 +392,7 @@ class SleepTaskTest {
                 Problem.of(Problem.Kind.UNREACHABLE, "去床的路上走不通", null))));
         StubUsesBeds usesBeds = new StubUsesBeds();
         TaskResult result = runToCompletion(task(scanner, new StubPlacer(), new StubObtain(),
-                approaches, usesBeds, Optional::empty, Optional::empty));
+                approaches, usesBeds, () -> null, Optional::empty));
         // 靠近失败先换一次站位再点，第二次走近成功躺下；不把这张床一棍子排除。
         assertEquals(TaskResult.Status.DONE, result.status());
         assertEquals(List.of(BED_A, BED_A), approaches.targets);
@@ -410,7 +411,7 @@ class SleepTaskTest {
         StubUsesBeds usesBeds = new StubUsesBeds();
         usesBeds.offer(new Scripted(ActionStatus.failed(
                 Problem.of(Problem.Kind.REFUSED_BY_GAME, "对床头的交互没有生效", null))));
-        Supplier<Optional<String>> refusals = () -> Optional.of("这张床被占用");
+        Supplier<OverlayMessages.Shown> refusals = () -> new OverlayMessages.Shown("这张床已被占用", 60);
         TaskResult first = runToCompletion(task(scanner, new StubPlacer(), new StubObtain(),
                 new StubApproaches(), usesBeds, refusals, Optional::empty, moment -> true, shared));
         assertEquals(TaskResult.Status.DONE, first.status());
@@ -427,5 +428,29 @@ class SleepTaskTest {
         second.start(context);
         second.tick(context);
         assertTrue(secondScanner.askedExclusions.getFirst().contains(BED_A), "重插的任务继承试过的床");
+    }
+
+    @Test
+    void tooFarIsRepositionedOnceThenTheNextBedIsTried() {
+        // 实机 10-15：点床被"床太远了"拒绝。换一次站位再点；同一张床还是被拒就换床，
+        // 不在同一张床上来回换站位、来回点（原先前两张床每次都回去换站位，永远换不到下一张）。
+        FakeScanner scanner = new FakeScanner();
+        scanner.offer(new BedScanner.BedScan(
+                List.of(new BedCandidate(BED_A, false, false, false, 4)), true));
+        scanner.offer(new BedScanner.BedScan(
+                List.of(new BedCandidate(BED_B, false, false, false, 9)), true));
+        StubUsesBeds usesBeds = new StubUsesBeds();
+        for (int i = 0; i < 2; i++) {
+            usesBeds.offer(new Scripted(ActionStatus.failed(
+                    Problem.of(Problem.Kind.REFUSED_BY_GAME, "对床头的交互没有生效", null))));
+        }
+        StubApproaches approaches = new StubApproaches();
+        Supplier<OverlayMessages.Shown> tooFar = () -> new OverlayMessages.Shown("你现在不能休息，床太远了", 60);
+        TaskResult result = runToCompletion(task(scanner, new StubPlacer(), new StubObtain(),
+                approaches, usesBeds, tooFar, Optional::empty));
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertEquals(List.of(BED_A, BED_A, BED_B), approaches.targets);
+        assertEquals(List.of(BED_A, BED_A, BED_B), usesBeds.clicked);
+        assertTrue(scanner.askedExclusions.getLast().contains(BED_A), "换过站位还被拒的床排除掉");
     }
 }

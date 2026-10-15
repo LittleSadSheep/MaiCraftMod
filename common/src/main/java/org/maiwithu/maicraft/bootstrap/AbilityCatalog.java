@@ -477,7 +477,7 @@ public final class AbilityCatalog {
                 deps.backpack(), deps.offhand(), deps.interactions(), shared.bringClose(), shared.collects(),
                 deps.memory(), new DestinationResolver(deps.travelWorld(), deps.memory(),
                         new SceneSeenTargets(deps::scene)),
-                shared.innerNeeds(), shared.refusals()::latestMessage, deps.survivalWiring().autoSleep());
+                shared.innerNeeds(), shared.refusals()::shownMessage, deps.survivalWiring().autoSleep());
         registry.register(sleepModule);
         deps.survivalWiring().attach(sleepModule.bedAvailability(), sleepModule);
     }

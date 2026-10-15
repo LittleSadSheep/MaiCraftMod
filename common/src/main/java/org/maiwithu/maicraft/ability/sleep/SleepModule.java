@@ -23,6 +23,7 @@ import org.maiwithu.maicraft.behavior.survival.NightfallNeed;
 import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
 import org.maiwithu.maicraft.behavior.travel.DestinationResolver;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
+import org.maiwithu.maicraft.game.interaction.OverlayMessages;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.BlockScanService;
@@ -66,7 +67,8 @@ public final class SleepModule implements AbilityModule, NightfallNeed.NightRest
     private final CollectsBlocks collects;
     private final ReadsRememberedPlaces rememberedPlaces;
     private final DestinationResolver destinations;
-    private final Supplier<Optional<String>> refusalTexts;
+    /** 动作栏的读端：原版拒绝入睡时把为什么写在这里，躺下的确认靠它认出这一下没生效。 */
+    private final Supplier<OverlayMessages.Shown> actionBar;
     private final Interactions interactions;
     /** 夜里自动去睡的开关：operation=auto_off / auto_on 改它，夜晚生存需求读它。 */
     private final AutoSleep autoSleep;
@@ -81,9 +83,9 @@ public final class SleepModule implements AbilityModule, NightfallNeed.NightRest
             BackpackView backpack, OffhandContents offhand,
             Interactions interactions, BringsPlayerClose approaches, CollectsBlocks collects,
             WorldMemory rememberedPlaces, DestinationResolver destinations,
-            ItemNeeds obtain, Supplier<Optional<String>> refusalTexts) {
+            ItemNeeds obtain, Supplier<OverlayMessages.Shown> actionBar) {
         this(context, scans, protection, backpack, offhand, interactions, approaches, collects, rememberedPlaces,
-                destinations, obtain, refusalTexts, new AutoSleep());
+                destinations, obtain, actionBar, new AutoSleep());
     }
 
     /** @param autoSleep 夜里自动去睡的开关，与夜晚生存需求共用一份 */
@@ -91,7 +93,7 @@ public final class SleepModule implements AbilityModule, NightfallNeed.NightRest
             BackpackView backpack, OffhandContents offhand,
             Interactions interactions, BringsPlayerClose approaches, CollectsBlocks collects,
             WorldMemory rememberedPlaces, DestinationResolver destinations,
-            ItemNeeds obtain, Supplier<Optional<String>> refusalTexts, AutoSleep autoSleep) {
+            ItemNeeds obtain, Supplier<OverlayMessages.Shown> actionBar, AutoSleep autoSleep) {
         this.autoSleep = Objects.requireNonNull(autoSleep, "autoSleep");
         this.context = Objects.requireNonNull(context, "context");
         // 找床也看世界记忆里自己睡过的床，躺下后记住这一张。
@@ -104,7 +106,7 @@ public final class SleepModule implements AbilityModule, NightfallNeed.NightRest
         this.collects = Objects.requireNonNull(collects, "collects");
         this.rememberedPlaces = Objects.requireNonNull(rememberedPlaces, "rememberedPlaces");
         this.destinations = Objects.requireNonNull(destinations, "destinations");
-        this.refusalTexts = Objects.requireNonNull(refusalTexts, "refusalTexts");
+        this.actionBar = Objects.requireNonNull(actionBar, "actionBar");
     }
 
     @Override
@@ -228,7 +230,7 @@ public final class SleepModule implements AbilityModule, NightfallNeed.NightRest
     public void registerTasks(TaskFactories factories) {
         factories.register(SleepInput.class, input ->
                 new SleepTask(input, currentPermissions(), beds, placer, obtain, approaches,
-                        interactions::useBlock, refusalTexts, beds::carriedBed, sleepWindow,
+                        interactions::useBlock, actionBar, beds::carriedBed, sleepWindow,
                         new HashSet<>()));
         factories.register(PrepareBedInput.class, input ->
                 new PrepareBedTask(obtain, currentPermissions(), beds::carriedBed));
@@ -251,7 +253,7 @@ public final class SleepModule implements AbilityModule, NightfallNeed.NightRest
             }
         }
         return new NightRestTask(new SleepInput(null), currentPermissions(), beds, placer, obtain, approaches,
-                interactions::useBlock, refusalTexts, beds::carriedBed, collects, rememberedPlaces,
+                interactions::useBlock, actionBar, beds::carriedBed, collects, rememberedPlaces,
                 moment -> moment.player() != null && moment.player().localPlayer() != null
                         && moment.player().localPlayer().isSleeping(),
                 sleepWindow, nightTriedBeds);
