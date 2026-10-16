@@ -17,6 +17,7 @@ import org.maiwithu.maicraft.kernel.goal.Question;
 import org.maiwithu.maicraft.kernel.result.Attempt;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
+import org.maiwithu.maicraft.mcp.view.ProblemAdvice;
 import org.maiwithu.maicraft.kernel.result.ResultDetails;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 
@@ -133,9 +134,8 @@ public final class ResultJson {
         JsonObject json = new JsonObject();
         json.addProperty("kind", problem.kind().name());
         json.addProperty("message", problem.message());
-        if (problem.suggestion() != null) {
-            json.addProperty("suggestion", problem.suggestion());
-        }
+        // 任务层没写建议时按种类给一句通用的下一步：小模型看到"卡住了"后面没有话，会原样重发或当 MCP 坏了。
+        json.addProperty("suggestion", ProblemAdvice.suggestionFor(problem));
         return json;
     }
 
