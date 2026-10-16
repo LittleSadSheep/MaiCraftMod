@@ -90,13 +90,18 @@ class ItemUseAimTest {
     }
 
     @Test
-    void pouringOnOwnFeetIsRefused() {
-        // 目标在脚下：朝上的面外一格正是自己站的格子，不点，交给靠近换站位。
+    void pouringOnOwnFeetStillAimsAndSaysSo() {
+        // 目标在脚下：朝上的面外一格正是自己站的格子。照样给瞄准（往脚下倒水、倒岩浆都是玩家会做的事），说明里写清。
         BlockPos below = feet.below();
         Optional<ItemUseAim.Aim> aim = ItemUseAim.aim(ItemUseAim.Gesture.POUR, below,
                 ItemUseAim.CellNature.SOLID,
                 new ItemUseAim.Around(feet, Set.of(), Set.of(), false, false));
-        assertTrue(aim.isEmpty());
+        assertTrue(aim.isPresent());
+        assertEquals(below, aim.get().clickCell());
+        assertEquals(feet, aim.get().effectCell());
+        assertTrue(aim.get().describe().contains("自己站的地方"));
+        assertTrue(ItemUseAim.overlapsPlayer(feet.above(), feet));
+        assertFalse(ItemUseAim.overlapsPlayer(feet.east(), feet));
     }
 
     @Test

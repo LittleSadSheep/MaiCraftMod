@@ -140,15 +140,16 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
         return new UseSeams.Built.Ready(use, use::result, gesture, held, menuBefore, aim.effectCell());
     }
 
-    // 瞄不出来的原因按手势说：工具与空桶是这一格用不了；倒和点火是站位问题，换个站位还有机会。
+    // 瞄不出来的原因按手势说：工具与空桶是这一格用不了；倒和点火是旁边没有能点的面（落到自己身上不算瞄不出，照做）。
     private static Problem whyNoAim(ItemUseAim.Gesture gesture, ResolvedTarget target) {
         return switch (gesture) {
             case SCOOP -> Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
                     target.describe() + " 不是流体源格，空桶舀不起来", null);
             case TRANSFORM_TOOL -> Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
                     target.describe() + " 不是实心方块或上面压着东西，锄、锹、斧用不上", null);
-            case POUR, IGNITE -> Problem.of(Problem.Kind.UNREACHABLE,
-                    "从这里对 " + target.describe() + " 下手，效果会落到自己身上或旁边没有能点的面", null);
+            case POUR, IGNITE -> Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+                    target.describe() + " 是空气或流体，旁边又没有实心方块当支撑面，倒、点火落不到那一格",
+                    "点名它旁边的实心方块，或先在旁边放一块方块再对着那一面倒、点");
             default -> Problem.of(Problem.Kind.UNSUPPORTED, "手上的东西 use 不接", null);
         };
     }

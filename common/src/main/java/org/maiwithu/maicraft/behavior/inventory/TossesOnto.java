@@ -34,8 +34,9 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 把身上的一样东西扔进一格里：料扔进工作盆、扔到石磨或朝上的锯顶上、扔进粉碎轮中间。
- * 换到主手 → 走到那一格正旁边 → 还扔不准就潜行着往前贴 → 按抛物线转好镜头、用真朝向再核一遍 → 原生 Q 丢出 → 看着它落下。
- * 主手这一堆不够时丢完再换下一堆，从换手那一步重来。
+ * 换到主手 → 走到那一格正旁边 → 还扔不准就潜行着往前贴 → 按抛物线转好镜头、等真朝向转到 → 原生 Q 丢出 → 看着它落下。
+ * 贴到头还扔不准（随机偏差落不全在那一格里）就挑落进去最多的角度照扔，说明里写清是碰运气扔的；
+ * 一种偏差都落不进去（够不着、半路全挡住）才不扔。主手这一堆不够时丢完再换下一堆，从换手那一步重来。
  *
  * <p>丢出去以后不替机器下结论，只说看见了什么：落进去后不见了的算进去了；落在那一格上没被收走的照实说
  * "在上面等着"（锯没转、盆满了；原版在它下一次落下时再收）；落到别处、并进地上原有那一堆的写清在哪。
@@ -182,12 +183,13 @@ public final class TossesOnto implements Action {
         };
     }
 
-    // 站在格子中间就扔得准时不动；不然潜行着朝那一格走，贴上它或被边缘停住为止，潜行不会从边上掉下去。
+    // 站在格子中间每种偏差都落得进去时不动；不然潜行着朝那一格走，贴上它或被边缘停住为止，潜行不会从边上掉下去。
     private ActionStatus lean(PlayerContext player) {
         LocalPlayer body = player.localPlayer();
         FirstPersonScene scene = scenes.apply(player);
-        boolean reachable = TossArc.choose(scene.eyePosition(), target, obstacles(player.level())).isPresent();
-        if ((leanTicks == 0 && reachable)
+        boolean sure = TossArc.choose(scene.eyePosition(), target, obstacles(player.level()))
+                .map(TossArc.Aim::sure).orElse(false);
+        if ((leanTicks == 0 && sure)
                 || leanTicks >= LEAN_TICKS || (leanTicks > 0 && body.horizontalCollision)) {
             player.input().halt(body);
             return enter(Stage.AIM);
@@ -199,7 +201,7 @@ public final class TossesOnto implements Action {
         return ActionStatus.running();
     }
 
-    // 停稳后按此刻的眼睛挑俯仰角，转过去；实际视线连续两刻都扔得准才出手，一个角度都不行就是这里扔不进去。
+    // 停稳后按此刻的眼睛挑俯仰角，转过去；实际视线连续两刻都转到了才出手。落不全也照扔，只有一种偏差都落不进去才不扔。
     private ActionStatus aim(PlayerContext player) {
         LocalPlayer body = player.localPlayer();
         player.input().halt(body);
@@ -213,13 +215,19 @@ public final class TossesOnto implements Action {
         Optional<TossArc.Aim> chosen = TossArc.choose(eye, target, obstacles);
         if (chosen.isEmpty()) {
             return stop(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "站在 " + body.blockPosition().toShortString()
-                    + " 往 " + target.cell().toShortString() + " 扔，丢出物的随机偏差落不全在那一格里，或半路会撞上东西",
+                    + " 往 " + target.cell().toShortString() + " 扔，" + TossArc.SAMPLES
+                    + " 种随机偏差没有一种能落进那一格：够不着，或半路都被挡住",
                     "那一格旁边站高一点、或把挡在半路的方块挪开"));
         }
         aim = chosen.get();
         player.input().lookAt(body, aim.lookPoint(eye));
-        steadyTicks = TossArc.lands(eye, scene.viewVector(), target, obstacles) ? steadyTicks + 1 : 0;
+        steadyTicks = aim.turnedTo(scene.viewVector()) ? steadyTicks + 1 : 0;
         if (steadyTicks < STEADY_TICKS) return ActionStatus.running();
+        // 落不全也扔：说清是碰运气扔的、几成把握，落在哪由看着它落下那一步如实报；不因为算出来会偏就不扔。
+        if (!aim.sure()) {
+            notes.add("站在 " + body.blockPosition().toShortString() + " 往 " + target.cell().toShortString()
+                    + " 扔，" + TossArc.SAMPLES + " 种随机偏差里只有 " + aim.landed() + " 种落得进那一格，照扔了");
+        }
         int held = heldCount(player);
         if (held == 0) {
             return stop(Problem.of(Problem.Kind.NEED_ITEM, "换过手之后主手上还是没有 " + itemId));

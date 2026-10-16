@@ -16,9 +16,10 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
  * 原版丢东西的抛物线，纯计算：Q 丢出的东西从眼睛下方 0.3 格出手，沿视线以 0.3 的速度飞出、再往上加 0.1；
  * 竖直方向随机多出 ±0.1，水平方向随机偏 0.02 以内；之后每刻先受重力 0.04、再移动、再乘 0.98 的阻力。
  *
- * <p>往机器顶上扔料前用它挑俯仰角：随机偏差的极端组合都要落进那一格、半路不撞别的方块才算扔得准，
- * 不靠"多半落得进去"碰运气。随机偏差不删、不缩来迁就场地：落不全就是站得不对，换站位或贴近再算。
- * 世界里的碰撞外形从调用方给的读法问；那一格自己不算障碍，东西本来就要落进它的外形里。
+ * <p>往机器顶上扔料前用它挑俯仰角：随机偏差的极端组合都落进那一格、半路不撞别的方块的角度最好；
+ * 没有这样的角度时挑落进去最多的那个照扔，落在哪由看着它落下那一步如实报，不因为"算出来会偏"就不扔
+ * （所有者 10-16：预测会失败不是拒绝原生操作的理由）。只有一种偏差都落不进去（够不着、半路全挡住）才给不出。
+ * 随机偏差不删、不缩来迁就场地。世界里的碰撞外形从调用方给的读法问；那一格自己不算障碍，东西本来就要落进它的外形里。
  */
 public final class TossArc {
 
@@ -44,6 +45,10 @@ public final class TossArc {
     /** 俯仰角从抬头 45° 扫到几乎垂直往下，每度试一次。 */
     private static final int HIGHEST_PITCH = -45;
     private static final int LOWEST_PITCH = 89;
+    /** 每个角度试的随机偏差组合数：九个水平偏差乘三个竖直偏差。 */
+    public static final int SAMPLES = 27;
+    /** 实际视线与挑好的方向夹角在半度以内就算转到了。 */
+    private static final double TURNED_COS = Math.cos(Math.toRadians(0.5));
 
     private TossArc() {
     }
@@ -90,55 +95,75 @@ public final class TossArc {
     }
 
     /**
-     * 挑好的出手方向（原版的偏航、俯仰角，单位度）与最坏情况下落点离那一格中心多远。
+     * 挑好的出手方向（原版的偏航、俯仰角，单位度）、{@link #SAMPLES} 种随机偏差里落进那一格的有几种，
+     * 以及落进去的那些离格子中心最远多少。
      */
-    public record Aim(float yaw, float pitch, double worstMiss) {
+    public record Aim(float yaw, float pitch, int landed, double spread) {
+
+        /** 每种随机偏差都落进那一格：扔得准，不用提醒。 */
+        public boolean sure() {
+            return landed >= SAMPLES;
+        }
 
         /** 镜头要看向的那一点：从眼睛沿出手方向往前四格。 */
         public Vec3 lookPoint(Vec3 eye) {
             return eye.add(direction(yaw, pitch).scale(4.0));
         }
+
+        /** 此刻实际的视线转到了挑好的方向上没有：服务端按上一刻发过去的朝向算抛物线，转到了再出手。 */
+        public boolean turnedTo(Vec3 view) {
+            return view.normalize().dot(direction(yaw, pitch)) >= TURNED_COS;
+        }
     }
 
     /**
-     * 从这只眼睛往目标那一格扔：朝格子中心转过去，逐度试俯仰角，挑随机偏差的极端组合都落进那一格、
-     * 且落点散得最小的那个角度；一个都不行时为 empty，站位不对。
+     * 从这只眼睛往目标那一格扔：朝格子中心转过去，逐度试俯仰角，挑落进那一格的随机偏差组合最多、
+     * 同样多时落点散得最小的那个角度；每种偏差都落进去的就是扔得准。一种偏差都落不进去时为 empty：
+     * 够不着，或半路全被挡住。
      */
     public static Optional<Aim> choose(Vec3 eye, Target target, Obstacles obstacles) {
         Vec3 toward = target.center().subtract(eye);
         float yaw = (float) (Mth.atan2(-toward.x, toward.z) * Mth.RAD_TO_DEG);
         Aim best = null;
         for (int pitch = HIGHEST_PITCH; pitch <= LOWEST_PITCH; pitch++) {
-            double worst = worstMiss(eye, direction(yaw, pitch), target, obstacles);
-            if (worst >= 0 && (best == null || worst < best.worstMiss())) {
-                best = new Aim(yaw, pitch, worst);
+            Aim trial = trial(yaw, pitch, eye, target, obstacles);
+            if (trial.landed() == 0) continue;
+            if (best == null || trial.landed() > best.landed()
+                    || (trial.landed() == best.landed() && trial.spread() < best.spread())) {
+                best = trial;
             }
         }
         return Optional.ofNullable(best);
     }
 
-    /** 按此刻实际的视线丢出去，随机偏差的极端组合是不是都落进那一格：转头有容差，出手前用真朝向再核一遍。 */
-    public static boolean lands(Vec3 eye, Vec3 view, Target target, Obstacles obstacles) {
-        return worstMiss(eye, view, target, obstacles) >= 0;
+    /** 按这个视线丢出去，{@link #SAMPLES} 种随机偏差里有几种落进那一格。 */
+    public static int landed(Vec3 eye, Vec3 view, Target target, Obstacles obstacles) {
+        return trial(0, 0, eye, view, target, obstacles).landed();
     }
 
-    // 九个水平偏差（不偏与圆周上八个方向）乘三个竖直偏差，逐个算落点：有一个落不进那一格就是 -1，
-    // 都落进去时返回离格子中心最远的那个距离。
-    private static double worstMiss(Vec3 eye, Vec3 view, Target target, Obstacles obstacles) {
+    private static Aim trial(float yaw, int pitch, Vec3 eye, Target target, Obstacles obstacles) {
+        return trial(yaw, pitch, eye, direction(yaw, pitch), target, obstacles);
+    }
+
+    // 九个水平偏差（不偏与圆周上八个方向）乘三个竖直偏差，逐个算落点：数落进那一格的有几种，
+    // 并记落进去的里面离格子中心最远的那个距离。
+    private static Aim trial(float yaw, float pitch, Vec3 eye, Vec3 view, Target target, Obstacles obstacles) {
         Vec3 release = eye.subtract(0, RELEASE_DROP, 0);
         Vec3 nominal = view.normalize().scale(THROW_SPEED).add(0, LIFT, 0);
-        double worst = 0;
+        int landed = 0;
+        double spread = 0;
         for (int side = -1; side < 8; side++) {
             double angle = side * Math.PI / 4;
             double sideX = side < 0 ? 0 : Math.cos(angle) * SIDE_JITTER;
             double sideZ = side < 0 ? 0 : Math.sin(angle) * SIDE_JITTER;
             for (double vertical : new double[] {-VERTICAL_JITTER, 0, VERTICAL_JITTER}) {
                 Vec3 landing = landing(release, nominal.add(sideX, vertical, sideZ), target, obstacles);
-                if (landing == null) return -1;
-                worst = Math.max(worst, Math.hypot(landing.x - target.center().x, landing.z - target.center().z));
+                if (landing == null) continue;
+                landed++;
+                spread = Math.max(spread, Math.hypot(landing.x - target.center().x, landing.z - target.center().z));
             }
         }
-        return worst;
+        return new Aim(yaw, pitch, landed, spread);
     }
 
     // 一刻一刻往前推：先加重力、再走一步、再乘阻力；落到接住的高度时看落点在不在那一格里，

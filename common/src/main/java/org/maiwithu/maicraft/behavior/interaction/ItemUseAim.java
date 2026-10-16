@@ -89,7 +89,7 @@ public final class ItemUseAim {
     /**
      * 瞄准时要问的周围事实，调用方在动手前读好。
      *
-     * @param feet                     角色脚下的格子；效果格不能和身体重叠，免得点着自己
+     * @param feet                     角色脚下的格子；用来猜目标朝向角色的面，效果格正是自己站的地方时写进说明
      * @param solidNeighbors           目标的六个邻居里哪些是实心方块（可当支撑面）
      * @param rightClickableNeighbors  邻居里哪些自己有右键行为（箱子、门、工作台），点它会先触发方块的行为
      * @param aboveOpen                目标正上方是不是空气；锄和锹要求上方敞开
@@ -140,7 +140,9 @@ public final class ItemUseAim {
     /** 按手势和目标格的样子给出瞄准决定；给不出时为空，调用方换站位或换目标。
      *
      * <p>给不出有了几类原因：空桶对着的既不是源格也不需要找源格；锄和锹要的上方敞开不满足；
-     * 倒流体、点火的每个可能落格都会落到自己身上——这最后一种由靠近换站位解决，不在这里硬点。
+     * 倒流体、点火对着空气或流体、旁边又没有实心方块当支撑面。效果格正是自己站的地方不算给不出：
+     * 往脚下倒水、往脚下倒岩浆都是玩家本来就会做的事，照给瞄准、说明里写清，由 LLM 自己担后果
+     * （所有者 10-16："岩浆会流到脚下就不能放"这类预测门不能有，只会多绕一轮、让小模型以为 MCP 坏了）。
      */
     public static Optional<Aim> aim(Gesture gesture, BlockPos target, CellNature nature, Around around) {
         return aim(gesture, target, nature, around, null);
@@ -183,7 +185,7 @@ public final class ItemUseAim {
     /**
      * 倒流体与点火：效果落在被点面外面那一格。
      * 目标是空气或可替换的格子时，点它旁边方块的支撑面；目标是实心方块时，
-     * 点它朝向角色的面，效果落在那个面外面的格子。效果格不能和身体重叠。
+     * 点它朝向角色的面，效果落在那个面外面的格子。效果格正是自己站的地方时照样给，说明里写清。
      */
     private static Optional<Aim> aimEffect(Gesture gesture, BlockPos target, CellNature nature,
             Around around, Confirmation confirmation, Direction face) {
@@ -198,9 +200,11 @@ public final class ItemUseAim {
         // 侧面外面是脚下那块地、看不见，回回"看不到任何一面"。
         Direction towardPlayer = face != null ? face : faceToward(around.feet(), target);
         BlockPos effect = target.relative(towardPlayer);
-        if (overlapsPlayer(effect, around.feet())) return Optional.empty();
+        // 目标在脚下、点它的顶面，效果就落在自己站的格子里：不拒绝也不替 LLM 挪站位，照倒、照点，说明里写清落在自己身上。
+        // 往脚下倒水救火、寻死往脚下倒岩浆都是这条路；真不想淋到自己，LLM 点名别的面或先 travel 一步就行。
+        String onSelf = overlapsPlayer(effect, around.feet()) ? "，那一格正是自己站的地方" : "";
         return Optional.of(new Aim(target, effect, confirmation,
-                "点目标朝向角色的面，" + doing + "在面外的 " + effect.toShortString()));
+                "点目标朝向角色的面，" + doing + "在面外的 " + effect.toShortString() + onSelf));
     }
 
     /**
@@ -241,8 +245,8 @@ public final class ItemUseAim {
         return dy > 0 ? Direction.UP : Direction.DOWN;
     }
 
-    // 效果格压着身体（脚下或头顶）就不点：换站位解决，不把火烧到自己身上。
-    private static boolean overlapsPlayer(BlockPos cell, BlockPos feet) {
+    /** 这一格压着身体（脚下或头顶）：倒流体、点火落在这里会淋到、烧到自己，结果里要写明。 */
+    public static boolean overlapsPlayer(BlockPos cell, BlockPos feet) {
         return cell.equals(feet) || cell.equals(feet.above());
     }
 

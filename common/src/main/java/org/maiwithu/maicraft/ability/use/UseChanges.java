@@ -7,6 +7,7 @@ import java.util.function.Consumer;
 import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
+import org.maiwithu.maicraft.behavior.interaction.ItemUseAim;
 import org.maiwithu.maicraft.kernel.result.Change;
 
 /**
@@ -46,9 +47,11 @@ final class UseChanges {
         }
         BlockPos effect = interaction.effectCell();
         if (effect != null && !effect.equals(target.cell())) {
-            // 倒流体、点火：东西落在被点面外面那一格，记那一格此刻实际出现的方块。
+            // 倒流体、点火：东西落在被点面外面那一格，记那一格此刻实际出现的方块；落在自己站的格子里时写明，
+            // LLM 看到"岩浆落在自己脚下"就知道接下来的掉血、着火是自己点的，不是别的危险。
             String placed = world.blockId(effect).orElse("未加载");
-            record.accept(new Change(Change.Kind.BLOCK_PLACED, placed, 1, "落在 " + effect.toShortString()));
+            String onSelf = ItemUseAim.overlapsPlayer(effect, world.feet()) ? "，正是自己站的地方" : "";
+            record.accept(new Change(Change.Kind.BLOCK_PLACED, placed, 1, "落在 " + effect.toShortString() + onSelf));
             return;
         }
         // 效果就在目标本身：门开了、锄成了耕地、点着了营火，记它出手前后的样子。
