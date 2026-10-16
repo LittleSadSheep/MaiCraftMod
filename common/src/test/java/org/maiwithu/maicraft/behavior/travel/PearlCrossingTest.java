@@ -118,11 +118,10 @@ class PearlCrossingTest {
     }
 
     @Test
-    void 不许用稀有品_说清要开_use_rare_items() {
+    void use_rare_items关着也照样出报价_珍珠就是过门用的() {
         Answers answers = ask(request(new BlockPos(1100, 64, 0), Permissions.DEFAULT, null));
-        assertEquals(Problem.Kind.NEED_APPROVAL, answers.declinedKind);
-        assertTrue(answers.reason.contains("use_rare_items"), answers.reason);
-        assertTrue(answers.offers.isEmpty());
+        assertEquals(null, answers.declinedKind, answers.reason);
+        assertFalse(answers.offers.isEmpty(), "跨虚空时照样给过门的报价");
     }
 
     @Test

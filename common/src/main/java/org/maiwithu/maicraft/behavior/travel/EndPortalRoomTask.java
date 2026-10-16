@@ -164,7 +164,7 @@ final class EndPortalRoomTask extends PhasedTask<EndPortalRoomTask.Phase> {
             break;
         }
         if (ring != null) {
-            // 认出一圈框架：去末地就是这次的目标，眼是为这个带的，不再问 use_rare_items。
+            // 认出一圈框架：去末地就是这次的目标，眼是为这个带的，不看 use_rare_items。
             // 身上的眼够插满就直接去插；不够才先按缺口备眼。
             recordProgress("认出末地门框架，还缺 " + toInsert.size() + " 只眼");
             return eyesCarried() >= toInsert.size()

@@ -24,7 +24,7 @@ import org.maiwithu.maicraft.kernel.result.Problem;
  * 主岛与外岛之间隔着近千格虚空，走路过不去，真人是对着折跃门扔一颗末影珍珠，人就被送到另一头。
  *
  * <p>出发与目的地分在虚空两边时这一段非它不可；只给 via、不给 target 时过最近的一扇门，到了对面就算到；
- * 两头在同一片就不出报价，让行程照常走路。要扔掉一颗珍珠，所以受 use_rare_items 许可管，没开就说清要开。
+ * 两头在同一片就不出报价，让行程照常走路。珍珠就是过门的手段，扔掉一颗不看 use_rare_items；身上没有先去弄。
  * 找门先看主岛那一圈原版开门的 20 个位置，再扫已加载区（外岛的门、改过地形的末地）。按"走到门边加上过完门再走到目的地"
  * 挑最省的三扇，每扇一份报价：一扇门扔两颗都没过去行程才换下一扇，三扇封住了最多扔掉几颗珍珠。报价的起点写门的位置：
  * 同一扇门这一趟没过成，行程不会因为人挪了地方又挑它；送到哪按原版的方向估。
@@ -33,7 +33,7 @@ public final class PearlCrossing implements TravelMode {
 
     /** 取值与一句说明，自报进 travel 的 via 参数表。 */
     public static final TravelVia VIA = new TravelVia("end_gateway",
-            "过末地折跃门：对着门扔一颗末影珍珠，传到主岛与外岛的另一头（只在末地；要 use_rare_items）");
+            "过末地折跃门：对着门扔一颗末影珍珠，传到主岛与外岛的另一头（只在末地；身上没有珍珠先去弄）");
 
     /** 扫已加载区找门的范围（格）：外岛的门悬在当初落地处头顶十来格，主岛那一圈另按固定位置看。 */
     static final int SEARCH_DISTANCE = 128;
@@ -72,7 +72,7 @@ public final class PearlCrossing implements TravelMode {
     }
 
     /**
-     * 只读：不在末地、两头在同一片、不许用稀有品各自说清；找得到活门就每扇一份报价，
+     * 只读：不在末地、两头在同一片各自说清；找得到活门就每扇一份报价，
      * 一扇都没有、已加载区又扫完了才说没有，没扫完这一刻不答。
      */
     @Override public void offer(TravelRequest request, OfferSink sink) {
@@ -86,11 +86,7 @@ public final class PearlCrossing implements TravelMode {
             sink.decline(Problem.Kind.UNSUPPORTED, "两头都在" + EndIslands.describe(here) + "，折跃门只通虚空另一边");
             return;
         }
-        if (!request.permissions().useRareItems()) {
-            sink.decline(Problem.Kind.NEED_APPROVAL, "过折跃门要对着门扔一颗末影珍珠，这次不许用稀有消耗品"
-                    + "（use_rare_items=false）；要过门把 use_rare_items 设为 true");
-            return;
-        }
+        // 过门就是这一段的目的，珍珠是为这个扔的：不看 use_rare_items，直接出报价；身上没珍珠由这一段先去弄。
         DimensionWorldView.Scan scan = services.world().scanBlocks(Blocks.END_GATEWAY, SEARCH_DISTANCE, MAX_SCANNED);
         List<BlockPos> gates = cheapestGates(scan, request.from(), request.to());
         if (gates.isEmpty()) {
