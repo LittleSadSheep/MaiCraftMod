@@ -186,7 +186,7 @@
                   },
                   "use_rare_items": {
                     "type": "boolean",
-                    "description": "能不能动用稀有物品"
+                    "description": "能不能动用稀有物品；目标本身就要用的不受它管（去末地插的末影之眼照插）"
                   },
                   "protected_landmarks": {
                     "type": "array",

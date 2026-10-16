@@ -88,7 +88,7 @@ final class GoalSchema {
                 names(Permissions.SurvivalNeeds.values())));
         JsonObject rare = new JsonObject();
         rare.addProperty("type", "boolean");
-        rare.addProperty("description", "能不能动用稀有物品");
+        rare.addProperty("description", "能不能动用稀有物品；目标本身就要用的不受它管（去末地插的末影之眼照插）");
         properties.add("use_rare_items", rare);
         JsonObject landmarks = new JsonObject();
         landmarks.addProperty("type", "array");

@@ -23,6 +23,7 @@ import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
+import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -41,8 +42,9 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 末地门房间：去要塞找到末地门的十二块框架，把空着的眼逐格插上末影之眼，插满门面出现。
  *
  * <p>找要塞靠世界记忆里记过的产地线索（亲眼看过的才算数），到了线索附近再扫框架方块；
- * 框架方块只在要塞里生成，认不出完整一圈就如实说。插眼受 use_rare_items 许可：
- * 没开就停下要许可，不悄悄消耗；末影之眼按缺几只备几只，备不齐 NEED_ITEM。
+ * 框架方块只在要塞里生成，认不出完整一圈就如实说。目标就是去末地，眼就是为这个带的，
+ * 所以插眼不看 use_rare_items，直接插，结果里写用了几只、身上还剩几只；
+ * 身上的眼不够插满时先按缺口备，备不齐 NEED_ITEM。
  * 激活以门面出现为准；末地门进去是单程，这一事实由跨维度行程写进结果。
  */
 final class EndPortalRoomTask extends PhasedTask<EndPortalRoomTask.Phase> {
@@ -70,6 +72,8 @@ final class EndPortalRoomTask extends PhasedTask<EndPortalRoomTask.Phase> {
     private EndPortalFrame ring;
     private final Deque<BlockPos> toInsert = new ArrayDeque<>();
     private WalkRun walk;
+    /** 这一趟真插进框架的眼数：收场时连同身上还剩几只一起报。 */
+    private int inserted;
 
     EndPortalRoomTask(Permissions permissions, int searchDistance, DimensionTravelServices services) {
         super("末地门房间", Phase.FIND_LEAD, new ProgressTracker(STUCK_AFTER_TICKS, MAX_TICKS));
@@ -160,15 +164,12 @@ final class EndPortalRoomTask extends PhasedTask<EndPortalRoomTask.Phase> {
             break;
         }
         if (ring != null) {
-            if (!permissions.useRareItems()) {
-                // 插眼要消耗末影之眼：没开这个许可就停下要许可，不悄悄消耗稀有品。
-                return Next.fail(Problem.of(Problem.Kind.NEED_APPROVAL,
-                        "找到末地门框架了，还缺 " + toInsert.size() + " 只末影之眼；这次任务不许用稀有消耗品"
-                                + "（use_rare_items=false）",
-                        "把这次任务的 use_rare_items 设为 true 再来插眼"));
-            }
+            // 认出一圈框架：去末地就是这次的目标，眼是为这个带的，不再问 use_rare_items。
+            // 身上的眼够插满就直接去插；不够才先按缺口备眼。
             recordProgress("认出末地门框架，还缺 " + toInsert.size() + " 只眼");
-            return Next.go(Phase.EYES_SUPPLY, "认出末地门框架，先备末影之眼");
+            return eyesCarried() >= toInsert.size()
+                    ? Next.go(Phase.WALK_TO_EYE, "认出末地门框架，身上的眼够插满，逐格插眼")
+                    : Next.go(Phase.EYES_SUPPLY, "认出末地门框架，身上的眼不够，先备末影之眼");
         }
         if (!found.complete()) {
             return Next.stay();
@@ -178,20 +179,44 @@ final class EndPortalRoomTask extends PhasedTask<EndPortalRoomTask.Phase> {
                 "再走近一点，或换一条要塞线索"));
     }
 
-    /** 按缺几只备几只；备不齐如实 NEED_ITEM，不插半圈就点火。 */
+    /** 身上的眼不够插满：只备差的那几只（请求的数量是"再多拿几件"），不插半圈就点火。 */
     private Action eyesRequest() {
+        int shortfall = Math.max(1, toInsert.size() - eyesCarried());
         return services.obtain().actionFor(
-                new ItemRequest(WantedItem.ofItem(ENDER_EYE), Math.max(1, toInsert.size()), "插末地门的眼"),
+                new ItemRequest(WantedItem.ofItem(ENDER_EYE), shortfall, "插末地门的眼"),
                 permissions, records());
     }
 
+    /** 备眼收场后再数一次身上的眼：够插满才去插，不够就按缺料如实结束。 */
     private Next<Phase> eyesSupplied(TickContext context) {
         ActionStatus status = runAction(context);
         return switch (status) {
             case ActionStatus.Running running -> Next.stay();
-            case ActionStatus.Done done -> Next.go(Phase.WALK_TO_EYE, "末影之眼备齐，逐格插眼");
-            case ActionStatus.Failed failed -> Next.fail(failed.problem());
+            case ActionStatus.Done done -> eyesCarried() >= toInsert.size()
+                    ? Next.go(Phase.WALK_TO_EYE, "末影之眼备齐，逐格插眼")
+                    : Next.fail(eyesShort("备眼做完了"));
+            case ActionStatus.Failed failed -> Next.fail(eyesShort("备眼没成：" + failed.problem().message()));
         };
+    }
+
+    /** 眼不够插满：写明缺几只、身上有几只、备眼为什么没成，建议先 obtain 末影之眼再来。 */
+    private Problem eyesShort(String why) {
+        int carried = eyesCarried();
+        int shortfall = Math.max(1, toInsert.size() - carried);
+        return Problem.of(Problem.Kind.NEED_ITEM,
+                "末影之眼不够插满末地门：还缺 " + toInsert.size() + " 只，身上只有 " + carried + " 只（" + why + "）",
+                "先 obtain 末影之眼（" + ENDER_EYE + "）至少 " + shortfall + " 只，再来去末地");
+    }
+
+    /** 身上一共带着几只末影之眼。 */
+    private int eyesCarried() {
+        int count = 0;
+        for (BackpackStack stack : services.world().carriedStacks()) {
+            if (ENDER_EYE.equals(stack.itemId())) {
+                count += stack.count();
+            }
+        }
+        return count;
     }
 
     /** 走到下一只空眼旁；那一格已经插上了就跳过，队列空了直接验门面。 */
@@ -219,6 +244,7 @@ final class EndPortalRoomTask extends PhasedTask<EndPortalRoomTask.Phase> {
             case ActionStatus.Running running -> Next.stay();
             case ActionStatus.Done done -> {
                 BlockPos cell = toInsert.poll();
+                inserted++;
                 recordChange(new Change(Change.Kind.BLOCK_CHANGED,
                         ENDER_EYE + " 插进 " + cell.toShortString(), 1, null));
                 recordProgress("插上一只眼，还缺 " + toInsert.size() + " 只");
@@ -233,13 +259,26 @@ final class EndPortalRoomTask extends PhasedTask<EndPortalRoomTask.Phase> {
 
     /** 插满后的验活：插满会自动激活，门面出现就算数；没出现如实说。 */
     private Next<Phase> checkActive() {
+        // 插眼收场先把用掉的眼记成一条消耗：跨维度那一趟只带回变化，用了几只、还剩几只靠这一条传上去。
+        String eyesUsed = eyesUsed();
+        if (inserted > 0) {
+            recordChange(new Change(Change.Kind.ITEM_CONSUMED, ENDER_EYE, inserted,
+                    "插进末地门框架，身上还剩 " + eyesCarried() + " 只"));
+        }
         if (ring.active(services.world()::stateAt)) {
-            return Next.done(TaskResult.done("末地门开了，门面已出现（进去是单程，回程要打败末影龙）"));
+            return Next.done(TaskResult.done("末地门开了，门面已出现，" + eyesUsed
+                    + "（进去是单程，回程要打败末影龙）"));
         }
         recordAttempt("插满末影之眼", "都插上了，门面还没有出现");
-        return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL, "眼都插上了但门没开，这次不再重来")
+        return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL,
+                        "眼都插上了但门没开，" + eyesUsed + "，这次不再重来")
                 .problem(Problem.of(Problem.Kind.NOT_FOUND, "插满了眼门面没有出现（框架朝向或完整性有问题）",
                         "换一扇框架再试，或核对框架的完整性")).build());
+    }
+
+    /** 用了几只眼、身上还剩几只的一句话。 */
+    private String eyesUsed() {
+        return "插了 " + inserted + " 只末影之眼，身上还剩 " + eyesCarried() + " 只";
     }
 
     /** 队列里下一只已经插上了就跳过（激活可能顺手补了相邻格）；队列空了也是跳过。 */

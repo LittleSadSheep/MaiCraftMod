@@ -22,8 +22,10 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
+import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
@@ -34,12 +36,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 末地门房间：没有要塞线索如实说、插眼受 use_rare_items 许可（没开就停下要许可）、
- * 逐格插眼、插满门面出现才算开。
+ * 末地门房间：没有要塞线索如实说、插眼不看 use_rare_items（目标就是去末地）、眼不够按缺料结束、
+ * 逐格插眼、插满门面出现才算开，结果写用了几只眼、还剩几只。
  */
 class EndPortalRoomTaskTest {
 
     private static final BlockPos RING_CENTER = new BlockPos(40, 30, -20);
+    private static final String EYE = "minecraft:ender_eye";
 
     @BeforeAll
     static void bootMinecraft() {
@@ -70,6 +73,16 @@ class EndPortalRoomTaskTest {
         for (BlockPos cell : ring.interior()) {
             world.put(cell, Blocks.AIR.defaultBlockState());
         }
+    }
+
+    /** 身上带几只末影之眼。 */
+    private static void carryEyes(DimensionFakes.FakeWorld world, int count) {
+        world.stacks.removeIf(stack -> EYE.equals(stack.itemId()));
+        if (count > 0) world.stacks.add(new BackpackStack(EYE, count, 16, false, false, true, false));
+    }
+
+    private static int eyesOn(DimensionFakes.FakeWorld world) {
+        return world.stacks.stream().filter(stack -> EYE.equals(stack.itemId())).mapToInt(BackpackStack::count).sum();
     }
 
     private EndPortalRoomTask task(DimensionFakes.FakeWorld world, WorldMemory memory,
@@ -103,21 +116,61 @@ class EndPortalRoomTaskTest {
     }
 
     @Test
-    void insertingEyesNeedsRareItemPermission(@TempDir Path dir) {
+    void eyesGoInWithoutAskingForRareItems(@TempDir Path dir) {
         WorldMemory memory = new WorldMemory(new DocumentStore(dir.resolve("m.sqlite")), "w1");
         memory.rememberSite(new WorldPosition(50, 30, -20, "minecraft:overworld"),
                 List.of("这一片见过要塞"), Instant.now());
         DimensionFakes.FakeWorld world = new DimensionFakes.FakeWorld();
         layRing(world.blocks, Set.of());
+        carryEyes(world, 14);
         world.enqueueScan(new DimensionWorldView.Scan(List.of(
                 RING_CENTER.relative(Direction.NORTH, 2).relative(Direction.EAST)), true));
+        // 每点一格插上那一格的眼、身上少一只；十二格插满原版把内侧换成门面。
+        DimensionFakes.FakeUses uses = new DimensionFakes.FakeUses();
+        EndPortalFrame ring = new EndPortalFrame(RING_CENTER);
+        for (int i = 0; i < 12; i++) {
+            uses.effects.add(() -> {
+                BlockPos clicked = uses.clicked.get(uses.clicked.size() - 1);
+                world.blocks.put(clicked, world.blocks.get(clicked).setValue(EndPortalFrameBlock.HAS_EYE, true));
+                carryEyes(world, eyesOn(world) - 1);
+                if (ring.frames().keySet().stream().allMatch(cell ->
+                        world.blocks.get(cell).getValue(EndPortalFrameBlock.HAS_EYE))) {
+                    ring.interior().forEach(cell -> world.blocks.put(cell, Blocks.END_PORTAL.defaultBlockState()));
+                }
+            });
+        }
+        DimensionFakes.FakeObtain obtain = new DimensionFakes.FakeObtain();
+        // use_rare_items 关着：去末地本身就是目标，照样插。
         Permissions noRare = Permissions.DEFAULT.mergedWith(null, null, false, null, null, null);
-        TaskResult result = run(task(world, memory, new DimensionFakes.FakeObtain(),
-                new DimensionFakes.FakeUses(), noRare));
+        TaskResult result = run(task(world, memory, obtain, uses, noRare));
+
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary() + " / " + result.problem());
+        assertTrue(result.summary().contains("插了 12 只末影之眼，身上还剩 2 只"), result.summary());
+        assertTrue(obtain.asked.isEmpty(), "身上的眼够插满，不该再去备：" + obtain.asked);
+        assertTrue(result.changes().stream().anyMatch(change -> change.kind() == Change.Kind.ITEM_CONSUMED
+                && EYE.equals(change.what()) && change.count() == 12), "用掉的眼记成一条消耗：" + result.changes());
+    }
+
+    @Test
+    void tooFewEyesEndsAsMissingItem(@TempDir Path dir) {
+        WorldMemory memory = new WorldMemory(new DocumentStore(dir.resolve("m.sqlite")), "w1");
+        memory.rememberSite(new WorldPosition(50, 30, -20, "minecraft:overworld"),
+                List.of("这一片见过要塞"), Instant.now());
+        DimensionFakes.FakeWorld world = new DimensionFakes.FakeWorld();
+        layRing(world.blocks, Set.of());
+        carryEyes(world, 3);
+        world.enqueueScan(new DimensionWorldView.Scan(List.of(
+                RING_CENTER.relative(Direction.NORTH, 2).relative(Direction.EAST)), true));
+        DimensionFakes.FakeObtain obtain = new DimensionFakes.FakeObtain();
+        obtain.answers.add(Problem.of(Problem.Kind.NOT_FOUND, "附近找不到末影之眼，也合不出来"));
+        TaskResult result = run(task(world, memory, obtain, new DimensionFakes.FakeUses(), Permissions.DEFAULT));
 
         assertEquals(TaskResult.Status.FAILED, result.status());
-        assertEquals(Problem.Kind.NEED_APPROVAL, result.problem().kind());
-        assertTrue(result.problem().message().contains("use_rare_items"), result.problem().message());
+        assertEquals(Problem.Kind.NEED_ITEM, result.problem().kind());
+        assertTrue(result.problem().message().contains("还缺 12 只，身上只有 3 只"), result.problem().message());
+        assertTrue(result.problem().suggestion().contains("obtain"), result.problem().suggestion());
+        // 只备差的那九只：请求的数量是"再多拿几件"。
+        assertEquals(9, obtain.asked.get(0).count());
     }
 
     @Test
@@ -143,9 +196,9 @@ class EndPortalRoomTaskTest {
                 world.blocks.put(cell, Blocks.END_PORTAL.defaultBlockState());
             }
         });
-        Permissions rareOk = Permissions.DEFAULT.mergedWith(null, null, true, null, null, null);
+        carryEyes(world, 12);
         TaskResult result = run(task(world, memory, new DimensionFakes.FakeObtain(),
-                uses, rareOk));
+                uses, Permissions.DEFAULT));
 
         assertEquals(TaskResult.Status.DONE, result.status(), result.summary() + " / " + result.problem());
         assertTrue(result.summary().contains("门面已出现"), result.summary());
@@ -164,9 +217,8 @@ class EndPortalRoomTaskTest {
         }
         world.enqueueScan(new DimensionWorldView.Scan(List.of(
                 RING_CENTER.relative(Direction.NORTH, 2).relative(Direction.EAST)), true));
-        Permissions rareOk = Permissions.DEFAULT.mergedWith(null, null, true, null, null, null);
         TaskResult result = run(task(world, memory, new DimensionFakes.FakeObtain(),
-                new DimensionFakes.FakeUses(), rareOk));
+                new DimensionFakes.FakeUses(), Permissions.DEFAULT));
 
         assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
         assertTrue(result.summary().contains("不用插眼"), result.summary());
@@ -192,14 +244,15 @@ class EndPortalRoomTaskTest {
                 world.blocks.put(justClicked, state.setValue(EndPortalFrameBlock.HAS_EYE, true));
             }
         });
-        Permissions rareOk = Permissions.DEFAULT.mergedWith(null, null, true, null, null, null);
+        carryEyes(world, 10);
         TaskResult result = run(task(world, memory, new DimensionFakes.FakeObtain(),
-                uses, rareOk));
+                uses, Permissions.DEFAULT));
 
         assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
         assertTrue(result.problem().message().contains("门面没有出现"), result.problem().message());
-        // 十只空眼逐格插过，变化一条不少。
-        assertEquals(10, result.changes().stream()
+        // 十只空眼逐格插过，变化一条不少；用掉的十只另记一条消耗。
+        assertEquals(10, result.changes().stream().filter(change -> change.kind() == Change.Kind.BLOCK_CHANGED)
                 .filter(change -> change.what().contains("ender_eye")).count(), "插了十格眼：" + result.changes());
+        assertTrue(result.summary().contains("插了 10 只末影之眼"), result.summary());
     }
 }

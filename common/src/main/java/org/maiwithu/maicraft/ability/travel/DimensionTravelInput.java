@@ -13,7 +13,7 @@ import org.maiwithu.maicraft.kernel.task.TaskInput;
  * @param destination     到了目标维度接着走的目的地；"就是去那个维度"时为 null
  * @param searchDistance  找活门的范围（格）：查了这么远的已加载区没有门才轮到建门
  * @param maxSeconds      最多走多久（秒）；不超过 0 表示不设时限
- * @param permissions     这次任务的许可：动地形管建门，use_rare_items 管插末影之眼
+ * @param permissions     这次任务的许可：动地形管建门；插末影之眼是去末地本身要用的，不看 use_rare_items
  */
 record DimensionTravelInput(String targetDimension, TravelDestination destination, int searchDistance,
         int maxSeconds, Permissions permissions) implements TaskInput {
