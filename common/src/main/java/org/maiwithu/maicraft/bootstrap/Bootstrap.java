@@ -8,7 +8,6 @@ import java.util.function.Predicate;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -122,14 +121,6 @@ import org.maiwithu.maicraft.kernel.goal.InMemoryGoalRunStore;
 import org.maiwithu.maicraft.kernel.goal.PlayerControlHandover;
 import org.maiwithu.maicraft.kernel.goal.RemembersPlaces;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
-import org.maiwithu.maicraft.behavior.recipe.GameRecipeTable;
-import org.maiwithu.maicraft.behavior.recipe.GameRecipes;
-import org.maiwithu.maicraft.behavior.recipe.RecipeLookup;
-import org.maiwithu.maicraft.game.world.ClientItemDescriptions;
-import org.maiwithu.maicraft.game.world.ReadsItemDescriptions;
-import org.maiwithu.maicraft.kernel.knowledge.KnowledgeSource;
-import org.maiwithu.maicraft.mcp.knowledge.ItemPages;
-import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
 import org.maiwithu.maicraft.mcp.tool.EventsTool;
 import org.maiwithu.maicraft.mcp.tool.ExecuteTool;
 import org.maiwithu.maicraft.mcp.tool.LookupTool;
@@ -564,17 +555,9 @@ public final class Bootstrap {
             }).orElse(false);
         }
 
-        // 查资料与查配方：配方先问联动登记的配方查看器，都答不了退到游戏配方表；
-        // 知识库 = 物品资料页（总入口）+ 联动模组登记的资料来源，物品资料页列各来源跟这件物品有关的条目。
+        // 查资料与查配方：来源与配方查看器按联动登记表拼，读游戏现场都按当刻的角色。
         private LookupTool lookupTool() {
-            Supplier<PlayerContext> now = () -> playerControl.activeContext().orElse(null);
-            RecipeLookup recipes = new RecipeLookup(compat.recipeViewers(), new GameRecipeTable(GameRecipes.fromPlayer(now)));
-            ReadsItemDescriptions items = new ClientItemDescriptions(now);
-            List<KnowledgeSource> modSources = compat.knowledgeSources();
-            List<KnowledgeSource> sources = new ArrayList<>();
-            sources.add(new ItemPages(items, recipes, modSources));
-            sources.addAll(modSources);
-            return new LookupTool(abilities, new KnowledgeLibrary(sources), recipes, items, clientWork);
+            return LookupSources.lookupTool(abilities, compat, () -> playerControl.activeContext().orElse(null), clientWork);
         }
 
         /** 建与服务端的会话，并在入服前登记客户端知道的操作清单。 */
