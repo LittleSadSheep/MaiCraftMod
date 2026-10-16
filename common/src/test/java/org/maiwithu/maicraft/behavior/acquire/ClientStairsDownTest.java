@@ -84,7 +84,7 @@ class ClientStairsDownTest {
         @Override public String dimension(TickContext context) {
             return "minecraft:overworld";
         }
-        @Override public Action stepDownTo(BlockPos target) {
+        @Override public Action stepTo(BlockPos target) {
             return done("走下一级", () -> {
                 walkedTo.add(target);
                 feet = target;

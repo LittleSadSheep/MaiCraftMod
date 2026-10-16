@@ -21,7 +21,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 挖楼梯读的现场：角色站在哪、脸朝哪、一格是什么样，都读当刻的客户端世界；
- * 走下一级交给走到，只走不改地形（这一级已经挖通了，不该再挖别的、垫别的）。
+ * 走到下一级（往下、往上都一样）交给走到，只走不改地形（这一级已经挖通了，不该再挖别的、垫别的）。
  */
 public final class LiveStairsSite implements ClientStairsDown.Site {
 
@@ -85,7 +85,7 @@ public final class LiveStairsSite implements ClientStairsDown.Site {
     }
 
     @Override
-    public Action stepDownTo(BlockPos feet) {
+    public Action stepTo(BlockPos feet) {
         return walks.start(GoalCompiler.standOn(feet), TerrainPermit.WALK_ONLY);
     }
 

@@ -61,7 +61,7 @@ public final class ClientStairsDown implements DigsStairsDown {
         BUILT
     }
 
-    /** 挖楼梯要读的现场与走下一级的动作；生产实现读当刻的世界，测试用替身。 */
+    /** 挖楼梯要读的现场与走到下一级的动作（往下、往上挖楼梯共用）；生产实现读当刻的世界，测试用替身。 */
     public interface Site {
 
         /** 角色站着的那一格；不在世界里为空。 */
@@ -82,8 +82,8 @@ public final class ClientStairsDown implements DigsStairsDown {
         /** 当前维度：许可检查按它找保护记录。 */
         String dimension(TickContext context);
 
-        /** 走下一级：这一级已经挖通，只走不改地形。 */
-        Action stepDownTo(BlockPos feet);
+        /** 走到下一级（往下挖是下一级台阶，往上挖是上一级）：这一级已经挖通，只走不改地形。 */
+        Action stepTo(BlockPos feet);
     }
 
     /** 一直没挖到想要的方块时最多往下挖几级：沙漠、恶地底下的沙子和陶瓦可能很厚，不一直挖下去。 */
@@ -406,7 +406,7 @@ public final class ClientStairsDown implements DigsStairsDown {
             stage = Stage.STEP_DOWN;
             stepTarget = landing;
             steppingLevel = !way.down();
-            step = site.stepDownTo(landing);
+            step = site.stepTo(landing);
             return ActionStatus.progressed();
         }
 
