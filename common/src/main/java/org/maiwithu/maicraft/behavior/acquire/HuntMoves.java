@@ -27,6 +27,15 @@ public interface HuntMoves {
     /** 这只生物此刻在哪；不在了为空。走近时朝它现在的位置走，不朝扫描时记下的旧位置走。 */
     Optional<double[]> positionOf(TickContext context, int entityId);
 
+    /**
+     * 角色和这只猎物是不是泡在同一片水里：两个都在水里，眼睛到它身体中心那条直线一路是水，没有方块挡着。
+     * 是的话不交给寻路：寻路在水里只在水面那一层找路，到不了水下它跟前，只会停在它头顶上够不着。
+     */
+    boolean sameWater(TickContext context, int entityId);
+
+    /** 在水里朝这只猎物游过去：镜头一直跟着它，要下潜就下潜、要上浮就上浮；氧气不够先浮上去换满再回来接着追。 */
+    Action swimTo(int entityId);
+
     /** 朝一个位置走过去（只走不改）。 */
     Action walkTo(double x, double y, double z);
 

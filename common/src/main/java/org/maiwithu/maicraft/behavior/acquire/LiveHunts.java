@@ -25,7 +25,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 狩猎的生产实现：逐只走近、看准、交给战斗域的攻击动作出手，打倒了就地收掉落。
  *
  * <p>出手前必须看得见、够得着（射线核对把关）：被墙挡住或离得远就朝它现在的位置走，看见又够得着才出手；
- * 出手用和自卫同一个近战出手，先把最好的剑斧换到主手。出手后盯住这只，
+ * 人和它泡在同一片水里时不走寻路，直接游过去追（寻路在水里到不了水下它跟前）。
+ * 出手用和自卫同一个近战出手；最好的剑斧在锁定一只、追它之前就换到主手。出手后盯住这只，
  * 不因更近的同类反复改道。打斗中每刻核对目标：被拴绳、被命名、被驯服、圈起来了——变成别人的了
  * 就停手，记下原因换下一只（事实核对，不是拦截）。打倒了（它不在了）先回到它倒下的地方，
  * 把这次新掉出来的目标物品与副产物都捡起来；够不着的如实记下、不冒充收干净——
@@ -224,6 +225,13 @@ public final class LiveHunts implements Hunts {
                 return ActionStatus.running();
             }
             if (!seen.get() || !moves.inReach(tick, target.entityId())) {
+                if (moves.sameWater(tick, target.entityId())) {
+                    // 人和它泡在同一片水里、中间一路是水：寻路在水里只在水面那一层找路，到不了水下它跟前，只会停在它头顶上
+                    // 够不着。直接游过去追，镜头跟着它往下扎或往上浮；氧气不够先上去换满再回来，进了出手距离就砍。
+                    keep("游过去追 " + target.entityId(), () -> moves.swimTo(target.entityId()));
+                    stepCurrent(tick, "游过去追 " + target.describe());
+                    return ActionStatus.running();
+                }
                 // 被墙挡住或还够不着：朝它现在的位置走过去，看得见又够得着再出手；一直走不到就超时换下一只。
                 // 它挪出原来那片（四格见方）就按新位置重新走，不追着扫描时的旧位置跑。
                 double[] at = where.orElse(new double[] {

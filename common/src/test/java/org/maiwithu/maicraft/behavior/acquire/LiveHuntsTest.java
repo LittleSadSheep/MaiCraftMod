@@ -84,6 +84,18 @@ class LiveHuntsTest {
             return instant();
         }
 
+        /** 人和它是不是泡在同一片水里，由测试摆。 */
+        boolean sameWater;
+
+        @Override public boolean sameWater(TickContext context, int entityId) {
+            return sameWater;
+        }
+
+        @Override public Action swimTo(int entityId) {
+            done.add("游过去追");
+            return instant();
+        }
+
         @Override public double[] selfPosition(TickContext context) {
             return new double[] {0, 64, 0};
         }
@@ -170,6 +182,20 @@ class LiveHuntsTest {
         // 它已经走到 12 格外：朝它现在的位置走，不站在原地对着空气挥。
         assertTrue(moves.done.contains("走到 12"), moves.done.toString());
         assertTrue(!moves.done.contains("打"), "够不着不出手：" + moves.done);
+        moves.inReach = true;
+        hunting.tick(TICK);
+        assertEquals("打", moves.done.get(moves.done.size() - 1), moves.done.toString());
+    }
+
+    @Test
+    void 同一片水里够不着_直接游过去追_不交给寻路_够得着就砍() {
+        FakeMoves moves = new FakeMoves();
+        moves.sameWater = true;
+        Action hunting = hunts(moves).hunt(List.of(sheep()), wool(), Permissions.DEFAULT).orElseThrow();
+        for (int i = 0; i < 3; i++) hunting.tick(TICK);
+        // 寻路在水里到不了水下它跟前：直接游，不再一遍遍算路停在它头顶上。
+        assertTrue(moves.done.contains("游过去追"), moves.done.toString());
+        assertFalse(moves.done.stream().anyMatch(done -> done.startsWith("走到")), moves.done.toString());
         moves.inReach = true;
         hunting.tick(TICK);
         assertEquals("打", moves.done.get(moves.done.size() - 1), moves.done.toString());
