@@ -19,7 +19,7 @@ public final class LiveHungerView implements HungerNeed.ReadsFacts {
 
     private final ReadsFoodValues foods;
 
-    /** 正要用的东西：趁空当吃看的口粮不算它们。 */
+    /** 正要用的东西：趁空当吃看的口粮不算它们；伤得重、饿到不能疾跑时照算。 */
     private ItemsToKeep keeps = ItemsToKeep.NOTHING;
 
     public LiveHungerView(ReadsFoodValues foods, ItemsToKeep keeps) {
@@ -38,18 +38,20 @@ public final class LiveHungerView implements HungerNeed.ReadsFacts {
             return null;
         }
         int food = self.getFoodData().getFoodLevel();
-        // 身上补得最少的一件普通食物：按游戏的食物组件认，和吃饭任务挑吃的用同一条规则；
-        // 趁空当吃要看它能不能整份补进去。
-        BackpackView backpack = context.player().backpack();
-        int smallest = backpack == null ? 0 : FoodPicker.carried(backpack.stacks(), foods, keeps).stream()
-                .filter(candidate -> FoodPicker.plain(candidate.value()))
-                .mapToInt(candidate -> candidate.value().nutrition())
-                .min().orElse(0);
         // 掉了一颗心以上算受了伤：饱食度不到回血线时宁可溢出一点也吃，血才回得来。
         boolean injured = self.getHealth() <= self.getMaxHealth() - 2;
         // 血不到一半算伤得重：没有普通食物时，腐肉这类垃圾食物吃一口能过回血线也吃。
         boolean badlyHurt = self.getHealth() <= self.getMaxHealth() / 2;
-        int bestJunk = backpack == null ? 0 : FoodPicker.carried(backpack.stacks(), foods, keeps).stream()
+        // 伤得重或饿到不能疾跑时先顾身体，正要用的吃的也算口粮；只是趁空当垫一口时才绕开它们。
+        ItemsToKeep counted = HungerNeed.eatsKeptFood(food, badlyHurt) ? ItemsToKeep.NOTHING : keeps;
+        // 身上补得最少的一件普通食物：按游戏的食物组件认，和吃饭任务挑吃的用同一条规则；
+        // 趁空当吃要看它能不能整份补进去。
+        BackpackView backpack = context.player().backpack();
+        int smallest = backpack == null ? 0 : FoodPicker.carried(backpack.stacks(), foods, counted).stream()
+                .filter(candidate -> FoodPicker.plain(candidate.value()))
+                .mapToInt(candidate -> candidate.value().nutrition())
+                .min().orElse(0);
+        int bestJunk = backpack == null ? 0 : FoodPicker.carried(backpack.stacks(), foods, counted).stream()
                 .filter(candidate -> FoodPicker.junk(candidate.value()))
                 .mapToInt(candidate -> candidate.value().nutrition())
                 .max().orElse(0);

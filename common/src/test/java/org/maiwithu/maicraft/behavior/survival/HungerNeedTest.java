@@ -2,7 +2,9 @@
 package org.maiwithu.maicraft.behavior.survival;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -89,6 +91,16 @@ class HungerNeedTest {
         assertEquals(Urgency.SOON, need.urgency(tick), "新的一回饿不再歇着");
         runToEnd(need.createTask(tick));
         assertEquals(2, events.size(), "新的一回饿没吃上，再说一次");
+    }
+
+    @Test
+    void 伤得重或饿到不能疾跑时_正要用的吃的也照吃() {
+        // 只有趁空当垫一口（LATER）时才绕开目标要交、要做菜的那几件；血不到一半、饿到 SOON / NOW 先顾身体。
+        assertFalse(HungerNeed.eatsKeptFood(14, false), "趁空当垫一口：绕开正要用的");
+        assertTrue(HungerNeed.eatsKeptFood(14, true), "血不到一半");
+        assertTrue(HungerNeed.eatsKeptFood(HungerNeed.SPRINT_FLOOR, false), "饿到不能疾跑");
+        assertTrue(HungerNeed.eatsKeptFood(0, false), "饿到掉血");
+        assertTrue(new HungerNeed.Facts(11, false, 0, true, true, 0).eatsKeptFood());
     }
 
     // 把吃饭任务推进到结束，最多一百刻。

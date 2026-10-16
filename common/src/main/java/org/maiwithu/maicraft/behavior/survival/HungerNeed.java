@@ -57,6 +57,20 @@ public final class HungerNeed implements SurvivalNeed {
         public boolean carryingEdible() {
             return smallestPlainNutrition > 0;
         }
+
+        /** 这会儿吃饭顾不上正要用的东西了：见 {@link HungerNeed#eatsKeptFood}。 */
+        public boolean eatsKeptFood() {
+            return HungerNeed.eatsKeptFood(food, badlyHurt);
+        }
+    }
+
+    /**
+     * 吃饭还绕不绕开正要用的东西（目标要交的熟海带、要做菜的土豆）：血不到一半，或饿到不能疾跑（SOON、NOW）时
+     * 先顾身体，正要用的也吃；只有趁空当垫一口（LATER）时才绕开它们。读处境和挑吃的都按这一条，免得一边说
+     * "身上有吃的"、一边又挑不出来。
+     */
+    public static boolean eatsKeptFood(int food, boolean badlyHurt) {
+        return badlyHurt || food <= SPRINT_FLOOR;
     }
 
     /** 饥饿的三档判断，纯函数；不到档位返回 null。 */
