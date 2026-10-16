@@ -3,11 +3,14 @@ package org.maiwithu.maicraft.ability.light;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 
+import org.maiwithu.maicraft.game.world.IdKind;
+import org.maiwithu.maicraft.game.world.ClientRegisteredIds;
 import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
 import org.maiwithu.maicraft.behavior.acquire.ReadsCharacterPosition;
 import org.maiwithu.maicraft.behavior.construction.AnchorResolver;
@@ -167,7 +170,11 @@ public final class LightModule implements AbilityModule {
         }
         String item = params.has("item") ? params.text("item") : null;
         if (item != null && LampItem.resolve(item, 0).isEmpty()) {
-            errors.add("item 没有叫 " + item + " 的可放置光源");
+            // 写岔的物品 ID 带上本实例里相近的名字；注册过、只是放不出光的照实说不是光源。
+            ClientRegisteredIds registered = ClientRegisteredIds.builtIn();
+            errors.add(registered.ids(IdKind.ITEM).contains(item.trim().toLowerCase(Locale.ROOT))
+                    ? "item " + item + " 不是能放下的光源"
+                    : registered.missing(IdKind.ITEM, item));
         }
         String coverageText = params.has("coverage") ? params.text("coverage") : "all";
         LightInput.Coverage coverage = coverageOf(coverageText);
