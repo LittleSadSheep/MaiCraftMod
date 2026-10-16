@@ -18,6 +18,8 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
 
+import org.maiwithu.maicraft.game.world.IdKind;
+import org.maiwithu.maicraft.game.world.ClientRegisteredIds;
 import org.maiwithu.maicraft.behavior.construction.PlannedCell;
 
 /**
@@ -158,7 +160,8 @@ final class MachineBlueprints {
                 }
                 String itemId = spec.get("item").getAsString();
                 if (BuiltInRegistries.ITEM.getOptional(key(itemId)).isEmpty()) {
-                    throw new IllegalArgumentException("没有这个物品：" + itemId);
+                    // 写岔的物品 ID 带上本实例里相近的名字。
+                    throw new IllegalArgumentException(ClientRegisteredIds.builtIn().missing(IdKind.ITEM, itemId));
                 }
                 out.add(new MachineBlueprint.Part(host, side, itemId));
             } catch (IllegalArgumentException invalid) {
@@ -271,7 +274,8 @@ final class MachineBlueprints {
                 }
                 String itemId = spec.get("item").getAsString();
                 if (BuiltInRegistries.ITEM.getOptional(key(itemId)).isEmpty()) {
-                    throw new IllegalArgumentException("没有这个物品：" + itemId);
+                    // 写岔的物品 ID 带上本实例里相近的名字。
+                    throw new IllegalArgumentException(ClientRegisteredIds.builtIn().missing(IdKind.ITEM, itemId));
                 }
                 out.add(new MachineBlueprint.Process(at, itemId));
             } catch (IllegalArgumentException invalid) {
@@ -311,7 +315,7 @@ final class MachineBlueprints {
             throw new IllegalArgumentException("方块 ID 写法不对：" + blockId);
         }
         return BuiltInRegistries.BLOCK.getOptional(key)
-                .orElseThrow(() -> new IllegalArgumentException("没有这个方块：" + blockId));
+                .orElseThrow(() -> new IllegalArgumentException(ClientRegisteredIds.builtIn().missing(IdKind.BLOCK, blockId)));
     }
 
     private static ResourceLocation key(String id) {

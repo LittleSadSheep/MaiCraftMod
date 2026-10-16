@@ -116,7 +116,7 @@ class MachineReviewTest {
                 () -> MachineBlueprints.parse(json(bad)));
         assertTrue(error.getMessage().contains("unknown_field"), error.getMessage());
         assertTrue(error.getMessage().contains("offset 要是 [x, y, z]"), error.getMessage());
-        assertTrue(error.getMessage().contains("没有这个方块"), error.getMessage());
+        assertTrue(error.getMessage().contains("方块 test:none 不存在"), error.getMessage());
         assertTrue(error.getMessage().contains("side"), error.getMessage());
     }
 
