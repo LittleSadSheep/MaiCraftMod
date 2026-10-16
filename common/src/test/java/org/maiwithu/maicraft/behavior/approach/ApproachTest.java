@@ -5,14 +5,20 @@ import net.minecraft.core.BlockPos;
 
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -30,8 +36,13 @@ class ApproachTest {
     private final StubGuarded guarded = new StubGuarded();
 
     private Approach approach(StubMoves moves, StandOpener opener, Permissions permissions) {
-        return new Approach(ApproachTarget.ofBlock(目标), REACH, world, walking, guarded,
-                moves, opener, permissions);
+        return approach(ApproachTarget.ofBlock(目标), moves, opener, permissions, null);
+    }
+
+    private Approach approach(ApproachTarget target, StubMoves moves, StandOpener opener,
+            Permissions permissions, TaskRecords records) {
+        return new Approach(target, REACH, world, walking, guarded,
+                moves, opener, permissions, records);
     }
 
     @Test
@@ -196,5 +207,66 @@ class ApproachTest {
         assertEquals(0, moves.stops, "被打断不该把这一趟丢掉");
         approach.tick(new StubTick(3));
         assertEquals(1, moves.begun.size(), "回来接着走，不重新挑站位");
+    }
+
+    @Test
+    void 要挖的方块在脚下下面是岩浆就换旁边一格() {
+        BlockPos 目标格 = new BlockPos(3, 64, 0);
+        world.feet = 目标格.above();
+        world.lavaUnderneath.add(目标格.below());
+        StubMoves moves = new StubMoves(world, ActionStatus.done());
+        Approach approach = approach(ApproachTarget.ofBlockToDig(目标格), moves, null, Permissions.DEFAULT, null);
+        ActionStatus status = ActionStatus.running();
+        for (int tick = 1; tick <= 10 && !(status instanceof ActionStatus.Done); tick++) {
+            status = approach.tick(new StubTick(tick));
+        }
+        assertEquals(ActionStatus.done(), status);
+        // 挪去了旁边一格，没有留在要挖的那格正上方。
+        assertEquals(1, moves.begun.size());
+        assertNotEquals(目标格.above(), moves.begun.get(0));
+    }
+
+    @Test
+    void 要挖的方块在脚下下面是实地就原地挖() {
+        BlockPos 目标格 = new BlockPos(3, 64, 0);
+        world.feet = 目标格.above();
+        StubMoves moves = new StubMoves(world);
+        Approach approach = approach(ApproachTarget.ofBlockToDig(目标格), moves, null, Permissions.DEFAULT, null);
+        assertEquals(ActionStatus.done(), approach.tick(new StubTick(1)));
+        assertEquals(0, moves.begun.size());
+    }
+
+    @Test
+    void 要挖的方块在脚下旁边站不了就就地挖并交代下面是什么() {
+        BlockPos 目标格 = new BlockPos(3, 64, 0);
+        world.feet = 目标格.above();
+        world.lavaUnderneath.add(目标格.below());
+        // 附近所有格子的地面都抽掉（候选脚位最低到 59，它的地面在 58）：旁边一格都站不了。
+        for (int x = -2; x <= 8; x++) {
+            for (int z = -5; z <= 5; z++) {
+                for (int y = 58; y <= 67; y++) {
+                    world.noFloor.add(new BlockPos(x, y, z));
+                }
+            }
+        }
+        List<String> 记录 = new ArrayList<>();
+        TaskRecords 记账 = new TaskRecords() {
+            @Override public void change(Change change) { }
+            @Override public void unconfirmed(Change change) { }
+            @Override public void attempt(String tried, String whatHappened) {
+                记录.add(tried + "：" + whatHappened);
+            }
+        };
+        StubMoves moves = new StubMoves(world);
+        Approach approach = approach(ApproachTarget.ofBlockToDig(目标格), moves, null, Permissions.DEFAULT, 记账);
+        ActionStatus status = ActionStatus.running();
+        for (int tick = 1; tick <= 10 && !(status instanceof ActionStatus.Done); tick++) {
+            status = approach.tick(new StubTick(tick));
+        }
+        // 不算到不了：留在原地动手，下面是什么跟着任务结果走。
+        assertEquals(ActionStatus.done(), status);
+        assertEquals(0, moves.begun.size());
+        assertEquals(1, 记录.size());
+        assertTrue(记录.get(0).contains("岩浆"));
     }
 }

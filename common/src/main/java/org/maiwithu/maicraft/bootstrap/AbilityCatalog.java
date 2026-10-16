@@ -662,7 +662,6 @@ public final class AbilityCatalog {
                 deps.facilities(), () -> networks.stream().findFirst());
     }
 
-    /** 采集的靠近：目标落实成一格方块后交给靠近模型，走过去能动多少地形按这次任务的许可来。 */
     /**
      * 采集：观察编号从场景查，现场从世界读，靠近用站位与走到，挖用原生挖掘；收完把身上的种子补种回原格，
      * 没有种子就不补，不额外去找。点名展示框时走近按实体的够得着规则，左键打一下再捡弹出来的东西。
@@ -674,8 +673,9 @@ public final class AbilityCatalog {
                 new ClientCropReplanting(shared.toMainhand(), deps.interactions(), deps.context()),
                 shared.drops(), shared.permission(), deps.backpack(), deps.offhand(), frames);
     }
-
+    /** 采集的靠近：目标落实成一格要挖掉的方块后交给靠近模型，走过去能动多少地形按这次任务的许可来。 */
     private static ApproachesTargets approaches(LiveApproaches bringsClose) {
-        return (target, permissions) -> bringsClose.toward(ApproachTarget.ofBlock(target), permissions);
+        return (target, permissions, records) ->
+                bringsClose.toward(ApproachTarget.ofBlockToDig(target), permissions, records);
     }
 }

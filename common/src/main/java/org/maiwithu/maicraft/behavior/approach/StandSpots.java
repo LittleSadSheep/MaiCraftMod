@@ -98,6 +98,16 @@ public final class StandSpots {
      */
     public static Optional<String> checkArrival(ApproachTarget target, ReachRules reach,
                                                 ApproachWorldView world, ProtectedCells guarded) {
+        return checkArrival(target, reach, world, guarded, false);
+    }
+
+    /**
+     * 到了之后的核对；{@code mayStandOnTarget} 为真时允许站在要挖的那格上（就地挖的兜底用，
+     * 那时下面是实地或摔不坏才放行）。其余判定与公开重载一致。
+     */
+    static Optional<String> checkArrival(ApproachTarget target, ReachRules reach,
+                                                 ApproachWorldView world, ProtectedCells guarded,
+                                                 boolean mayStandOnTarget) {
         BlockPos feet = world.currentFeet();
         if (!world.onGround()) return Optional.of("还没落地");
         // 站的这格不能站（要往这里放东西、或受保护）：先挪开。实机让它就地放工作台，人站在要放的那格里，
@@ -110,7 +120,31 @@ public final class StandSpots {
         String reachFailure = reachFailure(target, reach, world.currentPosition(), 0.0, world.currentEye());
         if (reachFailure != null) return Optional.of(reachFailure);
         if (!world.visibleFrom(world.currentEye(), target)) return Optional.of("看不见");
+        // 要挖的那格正好踩在脚下：先看一眼下面，岩浆或看不见底的洞不在这里动手，换旁边一格。
+        if (target.removesBlock() && !mayStandOnTarget) {
+            String under = standingOnTargetFailure(feet, target, world);
+            if (under != null) return Optional.of(under);
+        }
         return Optional.empty();
+    }
+
+    /**
+     * 人正好踩在要挖的那格上时的下看判断：下面是岩浆或看不见底的洞，就不站在这里挖（返回败项）；
+     * 下面是实地、或掉下去摔不坏，原地挖。非站在目标上时返回 null。
+     */
+    static String standingOnTargetFailure(BlockPos feet, ApproachTarget target, ApproachWorldView world) {
+        if (!target.removesBlock() || !feet.below().equals(target.block())) return null;
+        return underfootFailure(target.block(), world);
+    }
+
+    /**
+     * 要挖的那格下面是什么的结论：岩浆掉进去就是死，看不见底的洞摔不死也爬不上来，
+     * 这两种都不在它上面挖；实地或落差不超过 {@link #MAX_DROP} 的坑摔不坏，原地挖。
+     */
+    static String underfootFailure(BlockPos targetCell, ApproachWorldView world) {
+        if (world.lavaUnder(targetCell)) return "要挖的那格下面是岩浆";
+        if (world.dropBelow(targetCell) > MAX_DROP) return "要挖的那格下面看不见底";
+        return null;
     }
 
     /** 一个候选位置过一遍四项检查；过得去就带着代价进候选表，过不去就带着失败项进被拒表。 */
@@ -121,6 +155,12 @@ public final class StandSpots {
         String steady = steadyFailure(feet, world, guarded);
         if (steady != null) {
             rejected.add(new RejectedSpot(feet, steady));
+            return;
+        }
+        // 候选正好踩在要挖的那格上：先看一眼下面，岩浆或看不见底的洞不当站位，免得挖穿脚下掉进去。
+        String underfoot = standingOnTargetFailure(feet, target, world);
+        if (underfoot != null) {
+            rejected.add(new RejectedSpot(feet, underfoot));
             return;
         }
         // 只站正面的目标（写告示牌）先按正背筛：背面那一侧的位置连距离与视线都不用看。

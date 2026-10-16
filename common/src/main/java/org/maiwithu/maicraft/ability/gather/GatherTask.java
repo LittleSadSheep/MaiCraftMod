@@ -95,9 +95,10 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
         if (phase == Phase.WALK) {
             // 出发前记下背包里每样东西有几件：走过去时顺路吸进包的掉落物也算这次捡到的。
             snapshotBaseline();
-            // 走近交给站位与靠近的模型；展示框按它挂着的包围盒找够得着的站位。
+            // 走近交给站位与靠近的模型；展示框按它挂着的包围盒找够得着的站位；
+            // 要挖的方块在脚下、旁边站不了就地挖时，说明经记账口进结果。
             return spot.frame() ? frames.approach(spot.itemFrame(), spot.permissions())
-                    : approaches.toward(asBlock(spot.at()), spot.permissions());
+                    : approaches.toward(asBlock(spot.at()), spot.permissions(), records());
         }
         Action next = prepared;
         prepared = null;

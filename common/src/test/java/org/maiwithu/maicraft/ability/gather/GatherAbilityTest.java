@@ -80,7 +80,7 @@ class GatherAbilityTest {
             }
         };
         return new GatherAbility(seen, new FakeWorld(),
-                (target, permissions) -> {
+                (target, permissions, records) -> {
                     throw new IllegalStateException("决定阶段不该靠近");
                 },
                 unusableDigs(), noTools, null, null, permission(), emptyBackpack(), null, null);

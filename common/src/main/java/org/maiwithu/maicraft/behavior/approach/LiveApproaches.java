@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /**
@@ -45,6 +46,16 @@ public final class LiveApproaches implements BringsPlayerClose {
 
     @Override
     public Action toward(ApproachTarget target, Permissions permissions, ProtectedCells avoid) {
+        return toward(target, permissions, avoid, null);
+    }
+
+    @Override
+    public Action toward(ApproachTarget target, Permissions permissions, TaskRecords records) {
+        return toward(target, permissions, at -> false, records);
+    }
+
+    private Action toward(ApproachTarget target, Permissions permissions, ProtectedCells avoid,
+            TaskRecords records) {
         // 每个靠近动作各走各的一份：路上能动多少地形按这次任务的许可来，暂停与收尾互不牵连。
         // 调用方不许踩的格（放方块时的目标格）并进受保护格判断，能不能挖某一格由走到实现方把关；
         // 站位补救另走一份，挖开遮挡前过许可检查点。
@@ -53,7 +64,7 @@ public final class LiveApproaches implements BringsPlayerClose {
         StandOpener opener = new LiveStandOpener(context, permission, permissions, reach,
                 new LiveSpotWalks(walks, permit), avoid);
         return new Approach(target, reach, world, LiveApproaches::straightCost,
-                avoid, new LiveSpotWalks(walks, permit), opener, permissions);
+                avoid, new LiveSpotWalks(walks, permit), opener, permissions, records);
     }
 
     /** 当刻的距离数值：交互距离读角色属性，眼高按当时姿态取。 */

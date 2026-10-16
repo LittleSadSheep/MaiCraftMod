@@ -110,6 +110,13 @@ public final class LiveApproachWorld implements ApproachWorldView {
         return level != null && !level.getFluidState(feet).isEmpty();
     }
 
+    // 要挖的那格正下方那格是岩浆：挖穿脚就踩空掉进去，站位判断要提前知道。
+    @Override
+    public boolean lavaUnder(BlockPos cell) {
+        Level level = level();
+        return level != null && level.getFluidState(cell.below()).is(FluidTags.LAVA);
+    }
+
     @Override
     public boolean lavaBeside(BlockPos feet) {
         Level level = level();

@@ -23,6 +23,8 @@ final class StubWorld implements ApproachWorldView {
     final Set<BlockPos> deepDrops = new HashSet<>();
     final Set<BlockPos> fluids = new HashSet<>();
     final Set<BlockPos> lavas = new HashSet<>();
+    /** 正下方那格是岩浆的格子：要挖的方块在脚下时看下面用什么。 */
+    final Set<BlockPos> lavaUnderneath = new HashSet<>();
     final Set<BlockPos> unloaded = new HashSet<>();
     /** 看不见的默认反面：只对声明为挡住的眼睛位置回答看不见。 */
     BiPredicate<Vec3, ApproachTarget> hidden = (eye, target) -> false;
@@ -67,6 +69,11 @@ final class StubWorld implements ApproachWorldView {
 
     @Override public boolean lavaBeside(BlockPos at) {
         return lavas.contains(at);
+    }
+
+    @Override public boolean lavaUnder(BlockPos at) {
+        // 与生产实现同一语义：问的是这一格的正下方那格。
+        return lavaUnderneath.contains(at.below());
     }
 
     @Override public boolean visibleFrom(Vec3 eye, ApproachTarget target) {

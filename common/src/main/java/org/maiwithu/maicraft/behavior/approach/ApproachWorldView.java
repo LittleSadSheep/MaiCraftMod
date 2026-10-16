@@ -47,6 +47,14 @@ public interface ApproachWorldView {
     boolean lavaBeside(BlockPos feet);
 
     /**
+     * 这一格的正下方那格是不是岩浆。要挖的方块正好踩在脚下时先看它下面：
+     * 是岩浆就换到旁边一格站着挖，不挖穿脚下让自己掉进去。测试替身默认回答否。
+     */
+    default boolean lavaUnder(BlockPos cell) {
+        return false;
+    }
+
+    /**
      * 从给定眼睛位置看向目标，射线是否先命中目标本身；中途撞到别的方块就是看不见。
      * 透光方块（玻璃、树叶）不挡视线，与角色平时的观察一致。
      */

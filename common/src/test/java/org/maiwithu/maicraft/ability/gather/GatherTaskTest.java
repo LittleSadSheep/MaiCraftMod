@@ -32,6 +32,7 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -100,7 +101,7 @@ class GatherTaskTest {
             this.dropCount = dropCount;
         }
 
-        @Override public Action toward(BlockPos target, Permissions permissions) {
+        @Override public Action toward(BlockPos target, Permissions permissions, TaskRecords records) {
             return simple("走近 " + target, "走近");
         }
 
@@ -335,11 +336,38 @@ class GatherTaskTest {
     }
 
     @Test
+    void 就地挖脚下那格的说明跟着结果走() {
+        FakeBackpack backpack = new FakeBackpack();
+        // 靠近替身模拟站位模型的兜底：要挖的方块在脚下、旁边一格都站不了，就地挖并交代下面是什么。
+        FakeActions actions = new FakeActions(backpack, "minecraft:cobblestone", 1) {
+            @Override public Action toward(BlockPos target, Permissions permissions, TaskRecords records) {
+                records.attempt("就站在要挖的那格上", "旁边一格都站不了，就地挖：要挖的那格下面是岩浆");
+                return new Action() {
+                    @Override public ActionStatus tick(TickContext context) {
+                        return ActionStatus.done();
+                    }
+
+                    @Override public String describe() {
+                        return "走近捡起";
+                    }
+                };
+            }
+        };
+        GatherSpot spot = new GatherSpot(AT, false, "minecraft:stone", null, PERMS, false, "采集脚下石头");
+        GatherTask task = new GatherTask(spot, actions, actions, new NoToolsNeeded(),
+                new FakeWorld("minecraft:stone", false), null, actions, permission(), backpack, null, PERMS);
+        TaskResult result = run(task);
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertEquals(1, result.attempts().size());
+        assertTrue(result.attempts().get(0).result().contains("岩浆"));
+    }
+
+    @Test
     void 掉落物走近靠背包数量变化确认() {
         FakeBackpack backpack = new FakeBackpack();
         // 掉落物在走近时由原版收进包：替身按同样的时机把东西放进背包。
         FakeActions actions = new FakeActions(backpack, "minecraft:rotten_flesh", 2) {
-            @Override public Action toward(BlockPos target, Permissions permissions) {
+            @Override public Action toward(BlockPos target, Permissions permissions, TaskRecords records) {
                 return new Action() {
                     @Override public ActionStatus tick(TickContext context) {
                         backpack.add("minecraft:rotten_flesh", 2);

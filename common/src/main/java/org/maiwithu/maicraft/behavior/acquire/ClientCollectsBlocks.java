@@ -176,7 +176,7 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
         // 这一步要做的动作：靠近按任务许可；第一下挖之前记下脚边原有的掉落物；捡只捡这之后新冒出来的。
         private Optional<Action> begin() {
             return switch (stage) {
-                case APPROACH -> Optional.of(close.toward(ApproachTarget.ofBlock(cell()), permissions));
+                case APPROACH -> Optional.of(close.toward(ApproachTarget.ofBlockToDig(cell()), permissions));
                 case DIG -> {
                     if (dropsBefore == null) dropsBefore = drops.nearby();
                     // 连锁时整条矿脉、整根树干一起挖掉，掉落物集中在这一格，整批挖完一起捡。

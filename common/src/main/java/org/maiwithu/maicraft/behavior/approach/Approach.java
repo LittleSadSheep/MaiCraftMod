@@ -9,6 +9,7 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 import java.util.ArrayDeque;
@@ -24,6 +25,7 @@ import java.util.Set;
  *
  * <p>走到第一个候选站位，到了再核对；核对不过就换下一个候选。
  * 候选用尽而许可允许改方块时，请站位补救挖开遮挡或垫一块，作最后一次尝试。
+ * 要挖的方块就在脚下、旁边一格都站不了时，就地挖不算到不了，下面是什么随任务结果交代。
  * 仍不成功按"到不了"结束，问题里带着试过几个站位、各自败在哪一项；
  * 换站位的过程是本动作的内部事务，不作为独立失败上报。
  *
@@ -42,6 +44,8 @@ public final class Approach implements Action {
     private final WalksToSpot moves;
     private final StandOpener opener;
     private final Permissions permissions;
+    /** 发起方的记账口：就地挖这类要跟着任务结果走的事实记在这里；null 表示不需要记。 */
+    private final TaskRecords records;
 
     private Stage stage = Stage.CHECK_HERE;
     private final Deque<StandSpot> pending = new ArrayDeque<>();
@@ -60,10 +64,11 @@ public final class Approach implements Action {
      * @param moves       移动执行，由出行轨提供
      * @param opener      站位补救；交互轨没接上之前传 null，等于不挖不垫
      * @param permissions 这次的许可，决定最后手段能不能用
+     * @param records     发起任务的记账口，就地挖的说明记进任务结果；不需要时传 null
      */
     public Approach(ApproachTarget target, ReachRules reach, ApproachWorldView world,
                     WalkCost walking, ProtectedCells guarded, WalksToSpot moves,
-                    StandOpener opener, Permissions permissions) {
+                    StandOpener opener, Permissions permissions, TaskRecords records) {
         this.target = target;
         this.reach = reach;
         this.world = world;
@@ -72,6 +77,7 @@ public final class Approach implements Action {
         this.moves = moves;
         this.opener = opener;
         this.permissions = permissions;
+        this.records = records;
     }
 
     @Override public ActionStatus tick(TickContext context) {
@@ -178,8 +184,10 @@ public final class Approach implements Action {
         return ActionStatus.progressed();
     }
 
-    /** 候选用尽后的最后手段：许可允许改方块时，为只差一点的位置挖开遮挡或垫一块。 */
+    /** 候选用尽后的最后手段：先看能不能就地挖，再按许可决定挖开遮挡或垫一块。 */
     private ActionStatus lastResort() {
+        ActionStatus underfoot = digUnderfootAnyway();
+        if (underfoot != null) return underfoot;
         RejectedSpot blocked = pickBlocked();
         boolean mayChangeBlocks = permissions.changeBlocks() != Permissions.BlockChanges.NONE;
         if (blocked == null || !mayChangeBlocks || opener == null) {
@@ -236,6 +244,26 @@ public final class Approach implements Action {
                 .filter(spot -> RESCUABLE.contains(spot.failedItem()))
                 .findFirst()
                 .orElse(null);
+    }
+
+    /**
+     * 要挖的那格就在脚下、旁边一格都站不了：不把这次靠近判成到不了，就站在原地动手。
+     * 真人也是这么干的：旁边实在没处站，就地挖并在心里记一句下面是什么——
+     * 岩浆、深坑这样的话跟着任务结果走，指挥的 LLM 知道挖穿之后人会掉到哪里。
+     * 没踩在目标上、或连就地挖的检查都不过（没落地、看不见），不归这里管，照常以失败收场。
+     */
+    private ActionStatus digUnderfootAnyway() {
+        if (!target.removesBlock()) return null;
+        BlockPos feet = world.currentFeet();
+        if (feet == null || !feet.below().equals(target.block())) return null;
+        // 允许站在目标上再核对一遍：没落地、够不着、看不见照样不行，能过说明只是旁边没有落脚的格子。
+        Optional<String> failure = StandSpots.checkArrival(target, reach, world, guarded, true);
+        if (failure.isPresent()) return null;
+        if (records != null) {
+            String under = StandSpots.underfootFailure(target.block(), world);
+            records.attempt("就站在要挖的那格上", under == null ? "旁边一格都站不了，就地挖" : "旁边一格都站不了，就地挖：" + under);
+        }
+        return ActionStatus.done();
     }
 
     private ActionStatus giveUp(RejectedSpot blocked, boolean mayChangeBlocks) {

@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.ability.gather;
 import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 
 /**
@@ -13,6 +14,9 @@ import org.maiwithu.maicraft.kernel.goal.Permissions;
  */
 public interface ApproachesTargets {
 
-    /** 为靠近一格生成动作：做完时角色已在够得着、看得见的站位上；到不了时以问题失败。 */
-    Action toward(BlockPos target, Permissions permissions);
+    /**
+     * 为靠近一格生成动作：做完时角色已在够得着、看得见的站位上；到不了时以问题失败。
+     * 要挖的方块正好在脚下、旁边一格都站不了时照样完成，就地挖的说明经 records 记进这次的结果。
+     */
+    Action toward(BlockPos target, Permissions permissions, TaskRecords records);
 }

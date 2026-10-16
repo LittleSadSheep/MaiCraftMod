@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.approach;
 
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 
 /**
  * 靠近的接缝：给一个交互目标，返回把角色带到能动手位置的靠近动作。
@@ -20,6 +21,14 @@ public interface BringsPlayerClose {
      * 默认实现不理会这些格；生产实现把它们并进受保护格判断。
      */
     default Action toward(ApproachTarget target, Permissions permissions, ProtectedCells avoid) {
+        return toward(target, permissions);
+    }
+
+    /**
+     * 同上，靠近过程里要跟着任务结果走的事实（要挖的方块在脚下、旁边站不了就地挖，下面是什么）
+     * 记进这份任务记账口。默认实现收不到这些事实，只有生产实现记。
+     */
+    default Action toward(ApproachTarget target, Permissions permissions, TaskRecords records) {
         return toward(target, permissions);
     }
 }

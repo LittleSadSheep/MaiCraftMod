@@ -16,14 +16,25 @@ import net.minecraft.world.phys.Vec3;
  * @param frontYaw 正面的水平朝向角（原版的旋转角，南为 0、往西转）：只站正面那一侧的目标才带，
  *                 其余为 null。告示牌从哪一面点就编辑哪一面，写告示牌只挑正面那一侧的站位，
  *                 站到背面会把字写到背面去。
- * @param face     放方块时要点的那一面朝哪边：看不看得见按方块外形上朝这边的任一处表面判，
- *                 够不够得着仍按 bounds（格子边界上那一面的薄框）估；其余为 null
+ * @param face         放方块时要点的那一面朝哪边：看不看得见按方块外形上朝这边的任一处表面判，
+ *                     够不够得着仍按 bounds（格子边界上那一面的薄框）估；其余为 null
+ * @param removesBlock 这次动手会把这一格拆掉（采集与挖掘）：要挖的正好是脚下那格时，
+ *                     先看它下面是什么，岩浆或看不见底的洞不站在它上面，换旁边一格站着挖
  */
-public record ApproachTarget(InteractionKind kind, BlockPos block, AABB bounds, Double frontYaw, Direction face) {
+public record ApproachTarget(InteractionKind kind, BlockPos block, AABB bounds, Double frontYaw, Direction face,
+        boolean removesBlock) {
 
     /** 对一个方块做事，例如箱子、工作台；床不用这个，见 {@link #ofBed}。 */
     public static ApproachTarget ofBlock(BlockPos at) {
-        return new ApproachTarget(InteractionKind.BLOCK, at, new AABB(at), null, null);
+        return new ApproachTarget(InteractionKind.BLOCK, at, new AABB(at), null, null, false);
+    }
+
+    /**
+     * 对一格要挖掉的方块做事（采集、挖掘）：站位不挑它正上方那一格——挖穿了人就掉下去；
+     * 下面是实地或摔不坏时原地挖不算错，下面是岩浆或看不见底的洞就换旁边一格。
+     */
+    public static ApproachTarget ofBlockToDig(BlockPos at) {
+        return new ApproachTarget(InteractionKind.BLOCK, at, new AABB(at), null, null, true);
     }
 
     /**
@@ -36,7 +47,7 @@ public record ApproachTarget(InteractionKind kind, BlockPos block, AABB bounds, 
         if (!new AABB(at).intersects(part)) {
             throw new IllegalArgumentException("部件框不在 " + at.toShortString() + " 这一格里");
         }
-        return new ApproachTarget(InteractionKind.BLOCK, at, part, null, null);
+        return new ApproachTarget(InteractionKind.BLOCK, at, part, null, null, false);
     }
 
     /**
@@ -45,7 +56,7 @@ public record ApproachTarget(InteractionKind kind, BlockPos block, AABB bounds, 
      * 够不够得着按格子边界上那一面的薄框估。
      */
     public static ApproachTarget ofBlockFace(BlockPos at, Direction face) {
-        return new ApproachTarget(InteractionKind.BLOCK, at, PlacementSpots.faceBox(at, face), null, face);
+        return new ApproachTarget(InteractionKind.BLOCK, at, PlacementSpots.faceBox(at, face), null, face, false);
     }
 
     /**
@@ -53,12 +64,12 @@ public record ApproachTarget(InteractionKind kind, BlockPos block, AABB bounds, 
      * 背面那一侧的按"背面"拒掉。正面的水平朝向角按原版告示牌自己的旋转角给出。
      */
     public static ApproachTarget onFrontSideOf(BlockPos at, double frontYaw) {
-        return new ApproachTarget(InteractionKind.BLOCK, at, new AABB(at), frontYaw, null);
+        return new ApproachTarget(InteractionKind.BLOCK, at, new AABB(at), frontYaw, null, false);
     }
 
     /** 对一张床做事：给床头或床尾任意一半的格子，距离与视线都按床底面判。 */
     public static ApproachTarget ofBed(BlockPos half) {
-        return new ApproachTarget(InteractionKind.BED, half, new AABB(half), null, null);
+        return new ApproachTarget(InteractionKind.BED, half, new AABB(half), null, null, false);
     }
 
     /**
@@ -73,13 +84,13 @@ public record ApproachTarget(InteractionKind kind, BlockPos block, AABB bounds, 
         }
         AABB landing = new AABB(cell.getX(), cell.getY() + catchHeight, cell.getZ(),
                 cell.getX() + 1, cell.getY() + Math.max(1.0, catchHeight + 0.05), cell.getZ() + 1);
-        return new ApproachTarget(InteractionKind.TOSS, cell, landing, null, null);
+        return new ApproachTarget(InteractionKind.TOSS, cell, landing, null, null, false);
     }
 
     /** 对一个实体做事；包围盒由调用方在取目标的同一刻读出来。 */
     public static ApproachTarget ofEntity(AABB box) {
         BlockPos center = BlockPos.containing(box.getCenter());
-        return new ApproachTarget(InteractionKind.ENTITY, center, box, null, null);
+        return new ApproachTarget(InteractionKind.ENTITY, center, box, null, null, false);
     }
 
     public ApproachTarget {
@@ -95,6 +106,9 @@ public record ApproachTarget(InteractionKind kind, BlockPos block, AABB bounds, 
         }
         if (face != null && kind != InteractionKind.BLOCK) {
             throw new IllegalArgumentException("只有方块目标能指定点哪一面");
+        }
+        if (removesBlock && kind != InteractionKind.BLOCK) {
+            throw new IllegalArgumentException("只有方块目标能带会被拆掉的约束");
         }
     }
 
