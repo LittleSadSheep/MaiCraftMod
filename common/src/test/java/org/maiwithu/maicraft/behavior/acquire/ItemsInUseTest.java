@@ -42,4 +42,19 @@ class ItemsInUseTest {
 
         assertEquals(3, inUse.keep("minecraft:cobblestone"));
     }
+
+    @Test
+    void 要的本来就是吃的_拿到的不算正要用的() {
+        // 10-15 直播：obtain #maicraft:foods/edible 拿到 1 块生羊肉，三颗心饿着却因为"上一个目标刚拿到"不吃。
+        tags.put("minecraft:mutton", "maicraft:foods/edible");
+        tags.put("minecraft:bread", "c:foods/bread", "maicraft:foods/edible");
+        tags.put("minecraft:dried_kelp", "c:foods", "maicraft:foods/edible");
+        inUse.goalFinished(List.of(Change.of(Change.Kind.ITEM_GAINED, "#maicraft:foods/edible", 1),
+                Change.of(Change.Kind.ITEM_GAINED, "#c:foods/bread", 3),
+                Change.of(Change.Kind.ITEM_GAINED, "minecraft:dried_kelp", 8)));
+
+        assertEquals(0, inUse.keep("minecraft:mutton"));
+        assertEquals(0, inUse.keep("minecraft:bread"));
+        assertEquals(8, inUse.keep("minecraft:dried_kelp"), "点名要的具体食物（要交任务的熟海带）照旧留着");
+    }
 }
