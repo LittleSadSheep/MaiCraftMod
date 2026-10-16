@@ -461,10 +461,17 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
         if (current != null) current.dropRoute();
         PathingBehavior pathing = pathing();
         if (pathing != null) pathing.forceCancel();
-        if (engine != null) {
-            engine.getInputOverrideHandler().clearAllKeys();
-            if (engine.getLookBehavior() instanceof LookBehavior look) look.clearTarget();
-        }
+        if (engine != null) engine.getInputOverrideHandler().clearAllKeys();
+        dropLookTarget();
+    }
+
+    /**
+     * 丢掉引擎这一刻留着的朝向：它在物理里替换走路方向，路走完、被收掉后还留着，别的动作按自己的朝向按前进键
+     * （游过去追鱼、打架挪步、直着走几步）也会被它拧回旧路线的方向——镜头对着鱼，人却朝来时的路走、顶在墙上。
+     * 人收回角色、一趟路结束都调它。
+     */
+    public void dropLookTarget() {
+        if (engine != null && engine.getLookBehavior() instanceof LookBehavior look) look.clearTarget();
     }
 
     /** 自动化拿到了角色：引擎定的朝向重新管走路方向。 */

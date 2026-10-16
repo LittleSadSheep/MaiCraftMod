@@ -714,6 +714,8 @@ final class BaritoneWalkRun implements WalkRun {
         landing.stop(lastContext, "这一趟走路结束了");
         pathing.forceCancel();
         engine.getInputOverrideHandler().clearAllKeys();
+        // 路走完了，引擎留着的朝向也收掉：不收的话下一个动作按前进键会被拧回这趟路的方向。
+        owner.dropLookTarget();
         NavigationProtection.clear();
     }
 
@@ -727,6 +729,8 @@ final class BaritoneWalkRun implements WalkRun {
         if (activated && pathing != null && pathing.isSafeToCancel()) {
             pathing.forceCancel();
             owner.engine().getInputOverrideHandler().clearAllKeys();
+            // 插进来的事（自卫挪步、换气上浮）按自己的朝向走：引擎留着的路线朝向一并收掉。
+            owner.dropLookTarget();
         }
     }
 
@@ -752,6 +756,8 @@ final class BaritoneWalkRun implements WalkRun {
         if (pathing == null) return;
         pathing.forceCancel();
         owner.engine().getInputOverrideHandler().clearAllKeys();
+        // 被收掉的这一趟同样收掉引擎留着的朝向，别让它拧着下一个动作走路的方向。
+        owner.dropLookTarget();
         NavigationProtection.clear();
     }
 
