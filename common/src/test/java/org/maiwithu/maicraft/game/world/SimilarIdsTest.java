@@ -54,4 +54,35 @@ class SimilarIdsTest {
                 SimilarIds.missing("物品", "minecraft:diamon", Optional.of("minecraft:diamond")));
         assertEquals("群系 minecraft:qqqq 不存在", SimilarIds.missing("群系", "minecraft:qqqq", Optional.empty()));
     }
+
+    @Test
+    void 注册ID读端按种类挑候选_标签说成某某标签() {
+        ReadsRegisteredIds registered = new ReadsRegisteredIds() {
+            @Override public List<String> ids(IdKind kind) {
+                return switch (kind) {
+                    case ITEM -> List.of("minecraft:oak_log", "minecraft:torch");
+                    case BLOCK -> List.of("minecraft:coal_ore");
+                    case ENTITY_TYPE -> List.of("minecraft:zombie");
+                    case BIOME -> List.of("minecraft:beach", "minecraft:plains");
+                    case STRUCTURE -> List.of("minecraft:village_plains");
+                };
+            }
+
+            @Override public List<String> tags(IdKind kind) {
+                return kind == IdKind.ITEM ? List.of("minecraft:logs") : List.of();
+            }
+        };
+        assertEquals("物品 minecraft:oak_lg 不存在；你是不是要 minecraft:oak_log",
+                registered.missing(IdKind.ITEM, "minecraft:oak_lg"));
+        assertEquals("物品标签 #minecraft:log 不存在；你是不是要 #minecraft:logs",
+                registered.missing(IdKind.ITEM, "#minecraft:log"));
+        assertEquals("方块 minecraft:coal_oer 不存在；你是不是要 minecraft:coal_ore",
+                registered.missing(IdKind.BLOCK, "minecraft:coal_oer"));
+        assertEquals("实体 minecraft:zombi 不存在；你是不是要 minecraft:zombie",
+                registered.missing(IdKind.ENTITY_TYPE, "minecraft:zombi"));
+        assertEquals("群系 minecraft:beachh 不存在；你是不是要 minecraft:beach",
+                registered.missing(IdKind.BIOME, "minecraft:beachh"));
+        assertEquals("结构 minecraft:village 不存在；你是不是要 minecraft:village_plains",
+                registered.missing(IdKind.STRUCTURE, "minecraft:village"));
+    }
 }
