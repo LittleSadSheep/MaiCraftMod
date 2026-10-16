@@ -24,6 +24,8 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.shapes.BooleanOp;
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
+import org.maiwithu.maicraft.game.world.IdKind;
+import org.maiwithu.maicraft.game.world.ClientRegisteredIds;
 
 /**
  * 材料的方块状态跟着对象一起转向：水平的旋转与镜像走原版自己的 rotate/mirror；竖直的翻转与倾斜原版没有通用接口，
@@ -200,7 +202,9 @@ public final class StateTransforms {
         String id = DesignFormat.string(material.get("block_id"), 256, "block_id");
         if (!id.matches("[a-z0-9_.-]+:[a-z0-9/._-]+")) throw new IllegalArgumentException("block_id 要写带命名空间的方块 ID：" + id);
         BlockState state = BuiltInRegistries.BLOCK.getOptional(ResourceLocation.parse(id))
-                .orElseThrow(() -> new IllegalArgumentException("没有这个方块：" + id)).defaultBlockState();
+                // 材料写岔的方块 ID 带上本实例里相近的名字，LLM 改图纸时照着换。
+                .orElseThrow(() -> new IllegalArgumentException(ClientRegisteredIds.builtIn().missing(IdKind.BLOCK, id)))
+                .defaultBlockState();
         if (material.has("properties")) {
             JsonObject properties = DesignFormat.object(material.get("properties"), "properties");
             if (properties.size() > 32) throw unsupported(state, "属性太多");

@@ -15,6 +15,8 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
+import org.maiwithu.maicraft.game.world.IdKind;
+import org.maiwithu.maicraft.game.world.ClientRegisteredIds;
 import org.maiwithu.maicraft.behavior.construction.PlannedCell;
 
 /**
@@ -75,7 +77,9 @@ final class BuildCells {
         if (blockId.startsWith("#")) throw new IllegalArgumentException("block 要写具体的方块，不能写标签：" + blockId);
         ResourceLocation key = ResourceLocation.tryParse(blockId);
         if (key == null) throw new IllegalArgumentException("方块 ID 写法不对：" + blockId);
-        Block block = BuiltInRegistries.BLOCK.getOptional(key).orElseThrow(() -> new IllegalArgumentException("没有这个方块：" + blockId));
+        // 写岔的方块 ID 带上本实例里相近的名字：逐格清单动辄几百格，报错得让 LLM 一眼看出该改成什么。
+        Block block = BuiltInRegistries.BLOCK.getOptional(key).orElseThrow(
+                () -> new IllegalArgumentException(ClientRegisteredIds.builtIn().missing(IdKind.BLOCK, blockId)));
         BlockState state = block.defaultBlockState();
         Set<String> required = new LinkedHashSet<>();
         if (spec.has("properties")) {
