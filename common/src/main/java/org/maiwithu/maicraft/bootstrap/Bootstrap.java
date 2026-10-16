@@ -35,7 +35,6 @@ import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
 import org.maiwithu.maicraft.behavior.acquire.ItemsInUse;
 import org.maiwithu.maicraft.game.player.RestStatistics;
 import org.maiwithu.maicraft.behavior.reminder.PlayerReminders;
-import org.maiwithu.maicraft.behavior.reminder.Reminder;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.game.player.EquipmentConfirmations;
 import org.maiwithu.maicraft.game.world.DropConfirmations;
@@ -121,11 +120,7 @@ import org.maiwithu.maicraft.kernel.goal.InMemoryGoalRunStore;
 import org.maiwithu.maicraft.kernel.goal.PlayerControlHandover;
 import org.maiwithu.maicraft.kernel.goal.RemembersPlaces;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
-import org.maiwithu.maicraft.mcp.tool.EventsTool;
-import org.maiwithu.maicraft.mcp.tool.ExecuteTool;
 import org.maiwithu.maicraft.mcp.tool.LookupTool;
-import org.maiwithu.maicraft.mcp.tool.ObserveTool;
-import org.maiwithu.maicraft.mcp.tool.GoalTool;
 import org.maiwithu.maicraft.mcp.tool.ToolDispatcher;
 import org.maiwithu.maicraft.mcp.transport.EmbeddedMcpService;
 import org.maiwithu.maicraft.mcp.transport.McpConfig;
@@ -579,7 +574,7 @@ public final class Bootstrap {
             walks.flyUpGear(() -> compat.flyUpGears());
             // 能刹住往下跳的装备（穿着有气的喷气背包）也交给寻路：计划内的往下跳用它刹住，不翻背包找水桶。
             walks.fallBrakes(() -> compat.fallBrakes());
-            tools = goalTools(abilities, goals, clientWork, taskEvents, chatEvents, () -> worldScope[0], recentCalls,
+            tools = McpTools.dispatcher(abilities, goals, clientWork, taskEvents, chatEvents, () -> worldScope[0], recentCalls,
                     lookupTool(), () -> reminders == null ? List.of() : reminders.snapshot());
             try {
                 mcp = EmbeddedMcpService.startWithFallback(mcpConfig, 2, tools);
@@ -757,27 +752,5 @@ public final class Bootstrap {
             if (minecraft.player == null) return;
             ClientReceivedChat.system(message, actionBar).ifPresent(chatEvents::append);
         }
-    }
-
-
-    /**
-     * 目标执行与 MCP 工具：能力注册表、目标运行表与任务事件流。LLM 用 execute 下达的目标经目标运行表
-     * 成为控制循环的主任务；目标处境每次变化都发成任务事件，宿主用 events 等。
-     * 能力按清单在进世界时登记进这份注册表。事件流用 ClientEntry 的那一份：目标处境与生存需求共一条流。
-     */
-    private static ToolDispatcher goalTools(AbilityRegistry abilities, GoalRunTable goals,
-                                            ClientTickWork clientWork, TaskEventLog taskEvents,
-                                            ChatEventLog chatEvents, Supplier<WorldScope> worldScope,
-                                            RecentToolCalls recentCalls, LookupTool lookup,
-                                            Supplier<List<Reminder>> reminders) {
-        return new ToolDispatcher(List.of(
-                new ObserveTool(() -> worldScope.get() == null ? null : worldScope.get().scene(),
-                        () -> worldScope.get() == null ? null : worldScope.get().memory(), goals, clientWork,
-                        reminders, () -> worldScope.get() == null ? null : worldScope.get().menus()),
-                // 查资料接随包的机制常识、物品资料页、联动模组登记的资料来源与配方；联网的资料来源还没登记。
-                lookup,
-                new ExecuteTool(abilities, goals, clientWork),
-                new GoalTool(goals, clientWork),
-                new EventsTool(taskEvents, chatEvents, goals, clientWork)), recentCalls);
     }
 }
