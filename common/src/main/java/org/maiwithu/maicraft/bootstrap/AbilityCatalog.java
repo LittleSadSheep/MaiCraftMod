@@ -334,9 +334,9 @@ public final class AbilityCatalog {
         // 寻死：脱甲收图腾、挑死法走过去、重生后按原件穿回，见 registerSuicide。
         registerSuicide(registry, deps, shared);
         // 拿到物品：身上的不算来源（引擎开场就清点），已实现的途径都登记，见 obtainModule。
-        // 看不见石头时往下挖楼梯：挖一格、捡这一级掉的东西与采掘共用一套，走下一级只走不改地形。
-        ClientStairsDown stairs = new ClientStairsDown(new LiveStairsSite(deps.walks()), shared.digging(),
-                shared.drops(), shared.permission());
+        // 看不见石头时往下挖楼梯：挖一格、捡这一级掉的东西与采掘共用一套，走下一级只走不改地形，脚下空着垫一块。
+        ClientStairsDown stairs = new ClientStairsDown(new LiveStairsSite(deps.walks(), deps.interactions(),
+                shared.toMainhand()), shared.digging(), shared.drops(), shared.permission());
         // 从记得的箱子与现场容器拿东西的来源：拿到物品的引擎与附魔的受限补齐共用同一份。
         ContainerSource containerSource = new ContainerSource(deps.memory(), deps.itemTags(), deps.protection(),
                 new MenuContainerTakes(shared.bringClose(), deps.interactions(), deps.itemTags(),

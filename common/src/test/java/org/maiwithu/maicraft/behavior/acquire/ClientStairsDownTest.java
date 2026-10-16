@@ -52,6 +52,12 @@ class ClientStairsDownTest {
         BlockPos feet = new BlockPos(0, 64, 0);
         Direction facing = Direction.NORTH;
         final List<BlockPos> walkedTo = new ArrayList<>();
+        /** 身上能垫的废料；默认没有。 */
+        List<String> fillers = List.of();
+        /** 旁边有没有能对着垫的实地；没有时垫不了。 */
+        boolean placeable = true;
+        /** 垫过哪几格。 */
+        final List<BlockPos> filledAt = new ArrayList<>();
 
         String type(BlockPos cell) {
             String set = placed.get(cell);
@@ -83,6 +89,16 @@ class ClientStairsDownTest {
         }
         @Override public String dimension(TickContext context) {
             return "minecraft:overworld";
+        }
+        @Override public List<String> fillers(TickContext context) {
+            return fillers;
+        }
+        @Override public Optional<Action> placeFiller(TickContext context, BlockPos cell, String filler) {
+            if (!placeable) return Optional.empty();
+            return Optional.of(done("垫一块", () -> {
+                filledAt.add(cell);
+                placed.put(cell, filler);
+            }));
         }
         @Override public Action stepTo(BlockPos target) {
             return done("走下一级", () -> {
@@ -318,17 +334,58 @@ class ClientStairsDownTest {
         assertTrue(world.walkedTo.contains(new BlockPos(0, 62, -1)), "落到实地上面那一格：" + world.walkedTo);
     }
 
-    @Test
-    void 下一级脚下是空洞_挖开就停_不走下去() {
-        // 第一级脚下那格挖开后，下面三格都是洞穴的空气。
+    // 第一级脚下那格挖开后，下面三格都是洞穴的空气。
+    private void holeUnderFirstStep() {
         world.placed.put(new BlockPos(0, 62, -1), "minecraft:air");
         world.placed.put(new BlockPos(0, 61, -1), "minecraft:air");
         world.placed.put(new BlockPos(0, 60, -1), "minecraft:air");
+    }
+
+    @Test
+    void 下一级脚下是空洞_身上没垫料_停下写清没法垫() {
+        holeUnderFirstStep();
 
         ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, run(1));
         assertEquals(Problem.Kind.NOT_FOUND, failed.problem().kind());
-        assertTrue(failed.problem().message().contains("空的"), failed.problem().message());
+        assertTrue(failed.problem().message().contains("空的") && failed.problem().message().contains("没法垫"),
+                failed.problem().message());
         assertTrue(world.walkedTo.isEmpty(), "脚下是空的不走下去");
+    }
+
+    @Test
+    void 下一级脚下是空洞_有垫料_垫一块接着往下挖() {
+        // 许可默认准放方块、身上有泥土：在下一级脚下垫一块，走下去接着挖到石头。
+        holeUnderFirstStep();
+        world.fillers = List.of("minecraft:dirt");
+
+        assertInstanceOf(ActionStatus.Done.class, run(1));
+        assertEquals(List.of(new BlockPos(0, 62, -1)), world.filledAt, "垫在下一级正下方");
+        assertTrue(world.walkedTo.contains(new BlockPos(0, 63, -1)), "垫好走下去：" + world.walkedTo);
+        assertTrue(digs.types.contains("minecraft:stone"), "接着挖到了石头：" + digs.types);
+    }
+
+    @Test
+    void 下一级脚下是空洞_那一格不许放_不垫() {
+        // 空洞那一格是别人的（受保护）：不往里垫，停下说清不许垫。
+        holeUnderFirstStep();
+        world.fillers = List.of("minecraft:dirt");
+        protectedCells.add(new BlockPos(0, 62, -1));
+
+        ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, run(1));
+        assertEquals(Problem.Kind.NEED_APPROVAL, failed.problem().kind());
+        assertTrue(failed.problem().message().contains("不许垫方块"), failed.problem().message());
+        assertTrue(world.filledAt.isEmpty() && world.walkedTo.isEmpty());
+    }
+
+    @Test
+    void 下一级脚下是空洞_旁边没有能对着垫的实地_停下() {
+        holeUnderFirstStep();
+        world.fillers = List.of("minecraft:dirt");
+        world.placeable = false;
+
+        ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, run(1));
+        assertTrue(failed.problem().message().contains("没有能对着垫的实地"), failed.problem().message());
+        assertTrue(world.walkedTo.isEmpty());
     }
 
     @Test

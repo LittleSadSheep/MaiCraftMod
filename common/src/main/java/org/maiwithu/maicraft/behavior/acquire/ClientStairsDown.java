@@ -32,8 +32,9 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  *
  * <p>挖之前先看清这一级：要挖的三格不能是液体、挖不动的、不许动的；三格四周、头顶和下一级脚下
  * 不能挨着水或岩浆（挖开就灌进来）。这一级朝原方向挖不了、或挖到一半挖不动，就往左、往右拐着挖
- * （第一级四面都试），不往回挖；这一级几个方向都不行才如实停下。挖完再看下一级脚下踩不踩得住：下面是空洞就不走下去，
- * 洞壁上露出来的石头已经看得见了，下回按采掘直接挖。这些都是现场是什么样，不是猜结果。
+ * （第一级四面都试），不往回挖；这一级几个方向都不行才如实停下。挖完再看下一级脚下踩不踩得住：下面是空洞时，
+ * 许可准放方块、身上有不会往下掉的废料（泥土、圆石这类），就在下一级脚下垫一块接着往下挖；不许放、没垫料、
+ * 旁边没有能对着垫的实地才不走下去，洞壁上露出来的石头已经看得见了，下回按采掘直接挖。这些都是现场是什么样，不是猜结果。
  *
  * <p>停下时挖到过想要的方块就算做完，由拿东西的引擎重新清点，不够再来（楼梯壁上的石头这时看得见了）；
  * 一格都没挖到就以原因失败，引擎把原因写进结果。
@@ -86,6 +87,16 @@ public final class ClientStairsDown implements DigsStairsDown {
 
         /** 当前维度：许可检查按它找保护记录。 */
         String dimension(TickContext context);
+
+        /** 身上能拿去垫脚的废料（泥土、废石、圆石这类，不会往下掉的），按先垫后垫排；没有为空。 */
+        default List<String> fillers(TickContext context) {
+            return List.of();
+        }
+
+        /** 在 cell 垫一块 filler：换到主手，对着旁边的实地点一下放进去，那一格有了实心方块才算；旁边没有能对着放的为空。 */
+        default Optional<Action> placeFiller(TickContext context, BlockPos cell, String filler) {
+            return Optional.empty();
+        }
 
         /** 走到下一级（往下挖是下一级台阶，往上挖是上一级）：这一级已经挖通，只走不改地形。 */
         Action stepTo(BlockPos feet);
@@ -178,7 +189,7 @@ public final class ClientStairsDown implements DigsStairsDown {
     /** 一次往下挖楼梯（或长程挖矿）：看清下一级 → 从上往下挖开 → 走下去 → 捡起这一级掉的东西，循环到挖够或该停。 */
     private final class Digging implements Action {
 
-        private enum Stage { LOOK, DIG, STEP_DOWN, PICK_UP, MINE }
+        private enum Stage { LOOK, DIG, FILL, STEP_DOWN, PICK_UP, MINE }
 
         private final Predicate<String> yields;
         private final int wantedCells;
@@ -211,6 +222,8 @@ public final class ClientStairsDown implements DigsStairsDown {
         private boolean paused;
         /** 来时的方向（上一级在这一边）：拐弯不往回挖，免得挖掉来时踩的那一级；第一级为空。 */
         private Direction back;
+        /** 这一级已经在下一级脚下垫过一块：垫完还是空的就不再垫。走下一级、被打断回来就清掉。 */
+        private boolean filledThisStep;
         /** 这一级已经挖不了、挖砸了的方向：换方向时不再试。走下一级就清空。 */
         private final Set<Direction> refusedHere = EnumSet.noneOf(Direction.class);
         /** 这一级第一个挖不了的原因：几个方向都不行时照它说。 */
@@ -231,6 +244,7 @@ public final class ClientStairsDown implements DigsStairsDown {
                 paused = false;
                 closeStep();
                 stage = Stage.LOOK;
+                filledThisStep = false;
             }
             if (step != null) {
                 ActionStatus status = step.tick(context);
@@ -238,6 +252,7 @@ public final class ClientStairsDown implements DigsStairsDown {
                 closeStep();
                 return switch (stage) {
                     case DIG -> dug(context, status);
+                    case FILL -> filled(status);
                     case STEP_DOWN -> steppedDown(status);
                     // 捡没捡全不停楼梯：掉进缝里的一两件不值得为它停手，够不够由引擎重新清点。
                     case PICK_UP -> nextStep();
@@ -369,7 +384,7 @@ public final class ClientStairsDown implements DigsStairsDown {
 
         // 从上往下挖这一级还没通的格子：上面掉下沙砾、流进液体都照现场重新判断。都通了，
         // 下一级脚下踩得住就走下去；脚下空着、再往下一两格有实地（站在比地面高一格的地方开挖就是这样）就落到那上面；
-        // 往下三格都空（洞）、是液体就停在这里。
+        // 往下三格都空（洞）就在下一级脚下垫一块再走下去，垫不了才停；是液体就停在这里。
         private ActionStatus digNext(TickContext context) {
             Heading way = new Heading(heading, down());
             List<BlockPos> cells = stepCells(feet, heading, way.down());
@@ -402,16 +417,53 @@ public final class ClientStairsDown implements DigsStairsDown {
                 floor = site.ground(context, landing.below());
             }
             if (floor == Ground.OPEN || floor == Ground.FLUID) {
-                // 长程挖矿挖穿进了洞：洞壁上露出要的矿就去挖，没有再停。
+                // 长程挖矿挖穿进了洞：洞壁上露出要的矿就去挖，没有再垫一块或停。
                 if (tunnel != null && tunnel.inSight().test(feet)) return mineInSight();
-                return finish(Problem.of(floor == Ground.FLUID ? Problem.Kind.DANGER : Problem.Kind.NOT_FOUND,
-                        "往下挖楼梯：下一级 " + at(nextFeet(feet, way)) + " 脚下是"
-                                + (floor == Ground.FLUID ? "液体" : "空的（往下三格都没有实地）") + "，不往下走了"));
+                if (floor == Ground.OPEN) return fillUnder(context, nextFeet(feet, way).below());
+                return finish(Problem.of(Problem.Kind.DANGER,
+                        "往下挖楼梯：下一级 " + at(nextFeet(feet, way)) + " 脚下是液体，不往下走了"));
             }
             stage = Stage.STEP_DOWN;
             stepTarget = landing;
             steppingLevel = !way.down();
             step = site.stepTo(landing);
+            return ActionStatus.progressed();
+        }
+
+        // 下一级脚下往下三格都空：许可准放、身上有垫料，就在下一级脚下垫一块，垫好回去重新看这一级再走下去；
+        // 这一级垫过一次还是空的、身上没有能垫的、这一格不许放、旁边没有能对着垫的实地，才停在这里并写清为什么没法垫。
+        private ActionStatus fillUnder(TickContext context, BlockPos support) {
+            String hole = "往下挖楼梯：下一级 " + at(support.above()) + " 脚下是空的（往下三格都没有实地）";
+            if (filledThisStep) return finish(Problem.of(Problem.Kind.NOT_FOUND, hole + "，垫过一块还是空的，不往下走了"));
+            List<String> fillers = site.fillers(context);
+            if (fillers.isEmpty()) {
+                return finish(Problem.of(Problem.Kind.NOT_FOUND, hole + "，身上没有能垫的废料（泥土、圆石这类），没法垫，不往下走了",
+                        "带些泥土、圆石再来，或换个地方挖"));
+            }
+            String filler = fillers.getFirst();
+            Optional<Problem> refused = permission.blockAllowed(permissions, PermissionCheck.WorldAction.PLACE_BLOCK,
+                    position(context, support), filler);
+            if (refused.isPresent()) {
+                return finish(Problem.of(refused.get().kind(), hole + "，这一格不许垫方块，没法垫：" + refused.get().message(),
+                        refused.get().suggestion()));
+            }
+            Optional<Action> place = site.placeFiller(context, support, filler);
+            if (place.isEmpty()) {
+                return finish(Problem.of(Problem.Kind.NOT_FOUND, hole + "，旁边也没有能对着垫的实地，没法垫，不往下走了"));
+            }
+            filledThisStep = true;
+            stage = Stage.FILL;
+            step = place.get();
+            return ActionStatus.progressed();
+        }
+
+        // 垫完：回去重新看这一级（脚下有了实地就走下去）；没垫成如实停下。
+        private ActionStatus filled(ActionStatus status) {
+            if (status instanceof ActionStatus.Failed failed) {
+                return finish(Problem.of(failed.problem().kind(), "往下挖楼梯：下一级脚下是空的，垫一块没垫成："
+                        + failed.problem().message(), failed.problem().suggestion()));
+            }
+            stage = Stage.DIG;
             return ActionStatus.progressed();
         }
 
@@ -476,8 +528,9 @@ public final class ClientStairsDown implements DigsStairsDown {
             }
             steps++;
             if (steppingLevel) levelSteps++;
-            // 下到新的一级：上一级在来时方向的反面，这一级挖不了的方向从头算。
+            // 下到新的一级：上一级在来时方向的反面，这一级挖不了的方向从头算，垫没垫过也从头算。
             back = heading.getOpposite();
+            filledThisStep = false;
             refusedHere.clear();
             firstRefusal = null;
             stage = Stage.PICK_UP;
