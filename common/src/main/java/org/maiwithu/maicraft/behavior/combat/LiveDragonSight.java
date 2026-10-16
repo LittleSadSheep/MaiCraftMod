@@ -26,10 +26,10 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.DragonFireball;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
+import org.maiwithu.maicraft.game.world.EndExitPortal;
 import org.maiwithu.maicraft.game.world.ObservationVisibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
@@ -37,8 +37,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 龙场的生产读数：从客户端世界逐刻读龙、龙头、水晶、龙息、龙火球、末影人与出口门。
  *
  * <p>龙在干什么读原版同步给客户端的阶段；速度客户端读不准（龙按插值挪），按最近两刻的位置估。
- * 龙息云的主人客户端不知道，按龙息粒子认。出口门按原版主岛中心（龙的战斗原点，原版是 0,0）那一圈认：
- * 门洞那一层的门方块在，就是龙死后门亮了。
+ * 龙息云的主人客户端不知道，按龙息粒子认。出口门在龙的战斗原点上，亮没亮按出口门那一份游戏事实认，
+ * 和出行走出口门回主世界用的是同一个认法。
  */
 final class LiveDragonSight {
 
@@ -48,8 +48,6 @@ final class LiveDragonSight {
     private static final double NEAR_RANGE = 64.0;
     /** 铁栏笼至少这么多根铁栏才算（原版笼子一圈加顶几十根，零散装饰的栏杆不算）。 */
     private static final int CAGE_BARS = 8;
-    /** 门洞那一层上离门心这么远的格子查门方块。 */
-    private static final int PORTAL_RING = 2;
 
     private int dragonId = -1;
     private Vec3 lastDragon;
@@ -226,14 +224,9 @@ final class LiveDragonSight {
         return watchers;
     }
 
-    // 出口门：战斗原点那一列旁边门洞那一层的高度；那一层上有门方块就是亮了。
+    // 出口门：门心在战斗原点那一柱上，门洞那一层的高度与亮没亮都交给出口门那一份游戏事实读。
     private static DragonArena.Portal portal(ClientLevel level, int x, int z) {
-        int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING, x + PORTAL_RING, z);
-        boolean lit = false;
-        for (int[] offset : new int[][] {{PORTAL_RING, 0}, {-PORTAL_RING, 0}, {0, PORTAL_RING}, {0, -PORTAL_RING}}) {
-            BlockPos cell = new BlockPos(x + offset[0], y, z + offset[1]);
-            if (level.isLoaded(cell) && level.getBlockState(cell).is(Blocks.END_PORTAL)) lit = true;
-        }
-        return new DragonArena.Portal(x + 0.5, y, z + 0.5, lit);
+        EndExitPortal.Sighting exit = EndExitPortal.look(level, x, z);
+        return new DragonArena.Portal(x + 0.5, exit.center().getY(), z + 0.5, exit.lit());
     }
 }
