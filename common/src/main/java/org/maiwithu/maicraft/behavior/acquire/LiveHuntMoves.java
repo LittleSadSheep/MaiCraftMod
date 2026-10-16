@@ -24,6 +24,7 @@ import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
 import it.unimi.dsi.fastutil.longs.LongSets;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
+import org.maiwithu.maicraft.game.menu.MenuActions;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
 import org.maiwithu.maicraft.game.world.InteractionRange;
@@ -223,6 +224,10 @@ public final class LiveHuntMoves implements HuntMoves {
                 release();
                 return ActionStatus.done();
             }
+            if (screenInTheWay(player)) {
+                // 背包、容器、模组界面开着时原版不让人挪（镜头照转）：和走路一样先把它关上，关好了再游。
+                return ActionStatus.running();
+            }
             Vec3 eye = self.getEyePosition();
             Vec3 body = target.getBoundingBox().getCenter();
             long tick = player.clientTick();
@@ -244,6 +249,19 @@ public final class LiveHuntMoves implements HuntMoves {
             return ActionStatus.running();
         }
 
+        // 有界面挡着就请它关上，关好前算挡着；关不掉照常游，挪不动由狩猎每只猎物的期限收场。
+        private static boolean screenInTheWay(PlayerContext player) {
+            MenuActions menus = player.menuActions();
+            if (menus == null || !menus.blocksWorld(player)) return false;
+            try {
+                LOG.info("[狩猎] 游之前先关上挡着的界面");
+                return !menus.ensureWorldVisible(player);
+            } catch (RuntimeException stuck) {
+                LOG.info("[狩猎] 开着的界面关不掉，照常游：{}", stuck.getMessage());
+                return false;
+            }
+        }
+
         // 按的键变了、或者隔了两秒，记一行：前进、横移、跳、潜行、疾跑，人在哪、眼睛进没进水、离它多远。
         private void logKeys(LocalPlayer self, PlayerInput.Movement keys, SwimChase.Stroke stroke, double distance,
                 long tick) {
@@ -252,10 +270,12 @@ public final class LiveHuntMoves implements HuntMoves {
             if (now.equals(lastKeys) && tick - lastKeysTick < LOG_EVERY_TICKS) return;
             lastKeys = now;
             lastKeysTick = tick;
-            LOG.info("[狩猎] 游：{}；人在 {}, {}, {}，眼睛在水里 {}，踩着地 {}，离它 {} 格", now,
-                    String.format("%.2f", self.getX()), String.format("%.2f", self.getY()),
+            // 上一刻写进原版输入的前进量也记上：按了前进人却不挪时，分得清是键没送到还是被挡住。
+            LOG.info("[狩猎] 游：{}；人在 {}, {}, {}，眼睛在水里 {}，踩着地 {}，离它 {} 格，上一刻送到的前进 {}，横移 {}，"
+                    + "撞墙 {}", now, String.format("%.2f", self.getX()), String.format("%.2f", self.getY()),
                     String.format("%.2f", self.getZ()), self.isEyeInFluid(FluidTags.WATER), self.onGround(),
-                    String.format("%.1f", distance));
+                    String.format("%.1f", distance), String.format("%.2f", self.input.forwardImpulse),
+                    String.format("%.2f", self.input.leftImpulse), self.horizontalCollision);
         }
 
         /** 按键没变时多久再记一行（刻）。 */
