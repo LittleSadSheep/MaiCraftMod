@@ -166,6 +166,7 @@ import org.maiwithu.maicraft.behavior.travel.DestinationResolver;
 import org.maiwithu.maicraft.behavior.travel.ClientDimensionWorld;
 import org.maiwithu.maicraft.behavior.travel.DimensionTravelServices;
 import org.maiwithu.maicraft.behavior.travel.LiveBlockUses;
+import org.maiwithu.maicraft.behavior.travel.BoatCrossing;
 import org.maiwithu.maicraft.behavior.travel.PearlCrossing;
 import org.maiwithu.maicraft.behavior.travel.PortalFinder;
 import org.maiwithu.maicraft.behavior.travel.SceneSeenTargets;
@@ -636,7 +637,8 @@ public final class AbilityCatalog {
 
     /**
      * 出行的方式：联动登记的（电梯、喷气背包、火车、上下船），装了能开载具的联动时再加开自己的载具（via=vehicle）；
-     * 原版自带的末地折跃门（via=end_gateway）总在，只在末地用得上，用跨维度那一份现场部件读格、走到、扔珍珠。
+     * 原版自带的末地折跃门（via=end_gateway）总在，只在末地用得上，原版船（via=boat）只在主世界用得上，
+     * 两个都用跨维度那一份现场部件读格、走到、换主手。
      */
     private static List<TravelMode> travelModes(Deps deps, PlayerServices services, DimensionTravelServices portals) {
         List<TravelMode> modes = new ArrayList<>(deps.compat().travelModes(services));
@@ -646,6 +648,8 @@ public final class AbilityCatalog {
                     id -> deps.scene().seen().structureOf(id)));
         }
         modes.add(new PearlCrossing(portals));
+        // 原版船（via=boat）也是原版自带：隔水时放船划过去，用跨维度那一份现场部件读格、走到、换主手。
+        modes.add(new BoatCrossing(portals));
         return modes;
     }
 
