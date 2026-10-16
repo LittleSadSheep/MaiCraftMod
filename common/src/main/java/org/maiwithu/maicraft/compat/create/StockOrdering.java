@@ -42,9 +42,6 @@ final class StockOrdering implements Action {
     private enum Stage { APPROACH, OPEN, STOCK, ORDER, CLOSE, TO_PICKUP, WAIT, TAKE, UNPACK, FINISHED }
 
     private static final int SYNC_TICKS = 40;
-    private static final int POLL_TICKS = 20;
-    private static final int NO_NEW_PARCEL_TICKS = 20 * 60;
-    private static final int MAX_WAIT_TICKS = 20 * 60 * 5;
     private static final int UNPACK_HOLD_TICKS = 10;
 
     private final CreateCompat compat;
@@ -62,9 +59,10 @@ final class StockOrdering implements Action {
     private List<ItemStack> baseline = List.of();
     private String orderedItem;
     private int ordered;
+    /** 开了请求界面后等现货同步过来已经等了几刻；等包裹另有自己的计时。 */
     private int waited;
-    private long lastGrowth;
-    private int arrived;
+    /** 走到取货口才开始等包裹：从那一刻起算一分钟、五分钟，不和等现货同步的刻数混在一起。 */
+    private ParcelWait parcelWait;
     private Problem problem;
 
     StockOrdering(CreateCompat compat, PlayerServices services, CreateLogistics.Ticker ticker, CreateLogistics.Pickup pickup,
@@ -91,7 +89,7 @@ final class StockOrdering implements Action {
             case CLOSE -> closeRequest();
             case TO_PICKUP -> step(context, () -> services.approach().toward(ApproachTarget.ofBlock(pickup.pos()), permissions),
                     Stage.WAIT, "走不到取货口跟前");
-            case WAIT -> await(context, player);
+            case WAIT -> await(context);
             case TAKE -> take(context, player);
             case UNPACK -> unpack(context, player);
             case FINISHED -> problem == null ? ActionStatus.done() : ActionStatus.failed(problem);
@@ -173,24 +171,27 @@ final class StockOrdering implements Action {
         return ActionStatus.progressed();
     }
 
-    // 等包裹：数下单后新到、装着要的东西的件数；够了去取；一分钟没新的或满五分钟收场，取已经到的。
-    private ActionStatus await(TickContext context, PlayerContext player) {
-        long tick = context.gameTick();
-        if (waited == 0) lastGrowth = tick;
-        waited++;
-        if (waited % POLL_TICKS != 0) return ActionStatus.running();
-        int now = newParcels(player).stream().mapToInt(slot -> contentsOf(pickupNow(player).orElseThrow().packages().get(slot))).sum();
-        if (now > arrived) {
-            arrived = now;
-            lastGrowth = tick;
-        }
-        if (arrived >= ordered || tick - lastGrowth >= NO_NEW_PARCEL_TICKS || waited >= MAX_WAIT_TICKS) {
-            if (arrived == 0) return finish(Problem.of(Problem.Kind.STUCK, "下了 " + ordered + " 件 " + orderedItem
-                    + "，等到收场一件都没送到 " + pickup.address() + "（链条断了、地址没人收都会这样），没有重下单"));
-            stage = Stage.TAKE;
-            return ActionStatus.progressed();
-        }
-        return ActionStatus.running();
+    // 走到取货口后站着等包裹：够了去取；一分钟没新包裹或满五分钟收场，取已经到的；一件都没到如实交回，不重下单。
+    // 新包裹算进展、期限以内每秒报一次，拿东西任务的一分钟判卡住不抢在这段期限前面（见 ParcelWait）。
+    private ActionStatus await(TickContext context) {
+        if (parcelWait == null) parcelWait = new ParcelWait(ordered, tick -> arrivedNow(tick.player()));
+        ActionStatus status = parcelWait.tick(context);
+        if (status instanceof ActionStatus.Running) return status;
+        if (arrived() == 0) return finish(Problem.of(Problem.Kind.STUCK, "下了 " + ordered + " 件 " + orderedItem
+                + "，等到收场一件都没送到 " + pickup.address() + "（链条断了、地址没人收都会这样），没有重下单"));
+        stage = Stage.TAKE;
+        return ActionStatus.progressed();
+    }
+
+    // 取货口里下单后新到、装着要的东西的包裹，合计装着几件要的东西。
+    private int arrivedNow(PlayerContext player) {
+        List<ItemStack> packages = pickupNow(player).map(CreateLogistics.Pickup::packages).orElse(List.of());
+        return newParcels(player).stream().mapToInt(slot -> contentsOf(packages.get(slot))).sum();
+    }
+
+    // 等包裹时到了几件要的东西；还没开始等是 0。
+    private int arrived() {
+        return parcelWait == null ? 0 : parcelWait.arrived();
     }
 
     // 点开取货口，把新到的包裹一件件快速移动进背包。
@@ -237,8 +238,8 @@ final class StockOrdering implements Action {
         }
         LocalPlayer self = player.localPlayer();
         int slot = parcelSlot(self);
-        if (slot < 0) return finish(arrived >= ordered ? null : Problem.of(Problem.Kind.STUCK, "下了 " + ordered + " 件 "
-                + orderedItem + "，到了 " + arrived + " 件，其余还在路上，没有重下单"));
+        if (slot < 0) return finish(arrived() >= ordered ? null : Problem.of(Problem.Kind.STUCK, "下了 " + ordered + " 件 "
+                + orderedItem + "，到了 " + arrived() + " 件，其余还在路上，没有重下单"));
         int free = (int) self.getInventory().items.stream().filter(ItemStack::isEmpty).count();
         int stacks = compat.parcel(self.getInventory().items.get(slot)).map(parcel -> parcel.contents().size()).orElse(1);
         if (free < stacks) return finish(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "背包放不下包裹里的东西，没再拆"));
@@ -338,7 +339,7 @@ final class StockOrdering implements Action {
             case STOCK -> "看请求器的现货";
             case ORDER, CLOSE -> "下单寄到 " + pickup.address();
             case TO_PICKUP -> "走到取货口";
-            case WAIT -> "等包裹（到了 " + arrived + " / " + ordered + " 件）";
+            case WAIT -> parcelWait == null ? "等包裹（到了 0 / " + ordered + " 件）" : parcelWait.describe();
             case TAKE -> "从取货口拿包裹";
             case UNPACK -> "拆包裹";
             case FINISHED -> "库存请求器这一趟做完了";
