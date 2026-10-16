@@ -110,8 +110,11 @@ processResources {
 }
 
 // 测试统一走 JUnit 平台；架构护栏和决策类测试都是普通单元测试，build 与 check 会自动运行。
+// 测试进程堆放到 1 GB：架构检查用 ArchUnit 导入全部类，Gradle 默认的 512 MB 在全量单测跑到 LayerRulesTest 时堆溢出（本机与 CI 都出现过）。
+// 2026-10-16 在 2443 个用例上实测：ArchUnit 导入缓存被挤掉、要重新导入的最坏情况下，回收后存活最高约 560 MB，1 GB 留四成余量。
 tasks.withType(Test).configureEach {
     useJUnitPlatform()
+    maxHeapSize = '1g'
     testLogging {
         events 'failed'
         exceptionFormat 'full'
