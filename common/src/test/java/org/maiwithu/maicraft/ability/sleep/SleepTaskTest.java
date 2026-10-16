@@ -575,4 +575,15 @@ class SleepTaskTest {
         assertTrue(note.contains(left), note);
         assertEquals(1, note.split("自己放的床留在", -1).length - 1, "同一句不说两遍：" + note);
     }
+
+    @Test
+    void sleepingForMinutesIsNotTakenAsBeingStuck() {
+        // 多人服务器上要等别人都躺下才跳夜：睡着就是在做这件事，睡了三十秒也不能按"没进展"判卡住收场。
+        FakeScanner scanner = new FakeScanner();
+        scanner.offer(new BedScanner.BedScan(
+                List.of(new BedCandidate(BED_A, false, false, false, 4)), true));
+        NightRestTask rest = nightRest(scanner, new StubPlacer(), new StubObtain(), new StubApproaches(),
+                new StubUsesBeds(), Optional::empty, moment -> true);
+        assertNull(runTicks(rest, 20 * 60 * 3), "睡三分钟还在床上等天亮");
+    }
 }

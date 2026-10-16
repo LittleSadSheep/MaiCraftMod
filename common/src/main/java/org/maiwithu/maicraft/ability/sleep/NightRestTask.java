@@ -169,6 +169,8 @@ final class NightRestTask extends SleepTask implements AnnouncesFinish {
     @Override
     protected Next<Phase> tickWaitWake(TickContext context) {
         if (sleepState.asleep(context)) {
+            // 睡着就是在做这件事：多人服务器上要等别人都躺下才跳夜，一等就是好几分钟，不能睡了三十秒就按"没进展"判卡住。
+            recordProgress("睡着了，等天亮");
             return Next.stay();
         }
         // 日期变了说明一觉睡到了天亮，记下这个事实。
