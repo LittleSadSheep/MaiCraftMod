@@ -6,6 +6,7 @@ import java.util.HashSet;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
@@ -22,6 +23,7 @@ import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -37,6 +39,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 一格放不下（游戏拒绝）就换下一格，最多试三格；一格都找不到或都不行时动作如实失败，
  * 来源换别的路，不挪用别人的方块也不隔空放。对着支撑方块点一下，方块落在哪一格由点到的面决定，
  * 所以按实际落下的那一格记成"亲眼看到的工作站"，后面到那里动手、下次找设施都用这条记忆。
+ *
+ * <p>收回用的是把一格方块收进包的那套动作：走到跟前、挖下来、捡起这一下掉出来的，和收回野外自己那张床一样。
  */
 public final class ClientWorkstationPlacer implements SetsUpWorkstation, ReadsBlockTypes {
 
@@ -49,13 +53,16 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation, ReadsBl
     private final ClientMovesToMainhand toMainhand;
     private final WorldMemory memory;
     private final Supplier<PlayerContext> context;
+    /** 收回台子：走到跟前、挖下来、捡起掉落物。 */
+    private final CollectsBlocks collects;
 
     public ClientWorkstationPlacer(Interactions interactions, ClientMovesToMainhand toMainhand,
-            WorldMemory memory, Supplier<PlayerContext> context) {
+            WorldMemory memory, Supplier<PlayerContext> context, CollectsBlocks collects) {
         this.interactions = Objects.requireNonNull(interactions, "interactions");
         this.toMainhand = Objects.requireNonNull(toMainhand, "toMainhand");
         this.memory = Objects.requireNonNull(memory, "memory");
         this.context = Objects.requireNonNull(context, "context");
+        this.collects = Objects.requireNonNull(collects, "collects");
     }
 
     @Override
@@ -86,17 +93,25 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation, ReadsBl
     }
 
     @Override
-    public Optional<Action> placeNearby(String blockType) {
+    public Optional<Action> placeNearby(String blockType, Consumer<WorldPosition> placedAt) {
         // 方块类型在注册表里查不到：这个设施放不了，让来源如实换路。
         return blockOf(blockType).isEmpty()
                 ? Optional.empty()
-                : Optional.of(new PlaceAction(blockType));
+                : Optional.of(new PlaceAction(blockType, Objects.requireNonNull(placedAt, "placedAt")));
+    }
+
+    // 做完合成收回刚摆的台子：走到跟前挖下来、捡起这一下掉出来的；挖不下来、捡不到由收进包的动作如实失败。
+    @Override
+    public Optional<Action> takeBack(WorldPosition at, Permissions permissions) {
+        return collects.collect(new BlockPos(at.x(), at.y(), at.z()), permissions);
     }
 
     // 放置的动作：找格 → 换到主手 → 对着支撑面点一下 → 确认后记进世界记忆，跨刻推进。
     private final class PlaceAction implements Action {
 
         private final String blockType;
+        /** 真放下了才告诉来源落在哪一格：做完合成按这一格收回。 */
+        private final Consumer<WorldPosition> placedAt;
         private Action moving;
         private AimAndInteract placing;
         private Problem failure;
@@ -107,8 +122,9 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation, ReadsBl
         /** 试过、放不下的格子：换格时跳过。 */
         private final Set<BlockPos> tried = new HashSet<>();
 
-        PlaceAction(String blockType) {
+        PlaceAction(String blockType, Consumer<WorldPosition> placedAt) {
             this.blockType = blockType;
+            this.placedAt = placedAt;
         }
 
         @Override
@@ -188,8 +204,10 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation, ReadsBl
             Set<BlockPos> now = holding(current, spot.below(), block);
             now.removeAll(alreadyThere);
             BlockPos landed = now.stream().findFirst().orElse(spot);
-            memory.workstationSeen(new WorldPosition(landed.getX(), landed.getY(), landed.getZ(), null),
-                    blockType, Instant.now());
+            // 记进世界记忆的那一格同时告诉来源：做完合成按同一格收回，不靠回头去记忆里猜哪台是自己刚摆的。
+            WorldPosition at = new WorldPosition(landed.getX(), landed.getY(), landed.getZ(), null);
+            memory.workstationSeen(at, blockType, Instant.now());
+            placedAt.accept(at);
             return ActionStatus.done();
         }
 

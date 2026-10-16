@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.ArrayList;
+import java.util.function.Consumer;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -24,6 +25,7 @@ import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -235,7 +237,7 @@ class RecipeSourceTest {
                         new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:stick"), 2)));
         RecipeSource recipeSource = new RecipeSource(Set.of(WorkstationRecipe.Kind.CRAFTING), wanted -> List.of(pickaxe),
                 memory, itemId -> 0, FakeRuns.READY, backpack, offhand, tags, new CapturingNeeds(),
-                blockType -> Optional.empty(), null);
+                (blockType, placedAt) -> Optional.empty(), null);
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, recipeSource.quote(
                 new ItemRequest(WantedItem.ofItem("minecraft:stone_pickaxe"), 1, "开局"), CONTEXT));
         assertTrue(offer.risk().contains("放一个"), offer.risk());
@@ -577,13 +579,25 @@ class RecipeSourceTest {
                         stale, CONTEXT).isEmpty());
     }
 
-    /** 替身：摆工作台就是往世界记忆里记下它的位置（生产实现摆好并记，摆没记下等于白摆）。 */
-    private static final class PlacesWorkstation implements SetsUpWorkstation {
+    /** 收回台子时现场的三种结局：挖下来捡回包里、挖下来了掉的没捡到、挖不下来。 */
+    private enum TakeBackEnding { POCKETED, DROP_LEFT, STUCK }
+
+    /**
+     * 替身：摆工作台就是从背包扣一台、往世界记忆里记下它的位置（生产实现摆好并记，摆没记下等于白摆），
+     * 落点照实告诉来源；收回按给定的结局改背包与"世界"。
+     */
+    private final class PlacesWorkstation implements SetsUpWorkstation {
         private final WorldMemory memory;
         private final boolean remember;
         int placed;
         /** 这一格记着的台子在世界里已经没了。 */
         WorldPosition goneAt;
+        /** 收回时的结局；收过哪几格。 */
+        TakeBackEnding ending = TakeBackEnding.POCKETED;
+        final List<WorldPosition> takenBack = new ArrayList<>();
+        /** 收回那一步被打断过几次、打断后又推进了几刻。 */
+        int pauses;
+        int ticksAfterPause;
 
         @Override public boolean gone(WorldPosition at, String blockType) {
             return at.equals(goneAt);
@@ -594,18 +608,56 @@ class RecipeSourceTest {
             this.remember = remember;
         }
 
-        @Override public Optional<Action> placeNearby(String blockType) {
+        @Override public Optional<Action> placeNearby(String blockType, Consumer<WorldPosition> placedAt) {
             return Optional.of(new Action() {
                 @Override public ActionStatus tick(TickContext context) {
                     placed++;
+                    backpack.take(blockType, 1);
+                    WorldPosition at = new WorldPosition(3, 64, 3, null);
                     if (remember) {
-                        memory.workstationSeen(new WorldPosition(3, 64, 3, null), blockType, NOW);
+                        memory.workstationSeen(at, blockType, NOW);
                     }
+                    placedAt.accept(at);
                     return ActionStatus.done();
                 }
 
                 @Override public String describe() {
                     return "在身边放下工作台";
+                }
+            });
+        }
+
+        // 收回要走两刻：第一刻走到跟前，第二刻挖下来、捡起掉落物（或按给定结局失败）。
+        @Override public Optional<Action> takeBack(WorldPosition at, Permissions permissions) {
+            return Optional.of(new Action() {
+                private int ticks;
+
+                @Override public ActionStatus tick(TickContext context) {
+                    if (pauses > 0) ticksAfterPause++;
+                    if (++ticks < 2) return ActionStatus.progressed();
+                    takenBack.add(at);
+                    switch (ending) {
+                        case POCKETED -> {
+                            goneAt = at;
+                            backpack.add("minecraft:crafting_table", 1);
+                            return ActionStatus.done();
+                        }
+                        case DROP_LEFT -> {
+                            goneAt = at;
+                            return ActionStatus.failed(Problem.of(Problem.Kind.STUCK, "掉落物没捡到"));
+                        }
+                        default -> {
+                            return ActionStatus.failed(Problem.of(Problem.Kind.STUCK, "挖了十五秒都没挖下来"));
+                        }
+                    }
+                }
+
+                @Override public void pause() {
+                    pauses++;
+                }
+
+                @Override public String describe() {
+                    return "收回工作台";
                 }
             });
         }
@@ -629,8 +681,7 @@ class RecipeSourceTest {
                 Permissions permissions, TaskRecords records) {
             boolean remembered = memory.allRecords().stream()
                     .anyMatch(record -> record.kind() == MemoryKind.WORKSTATION
-                            && MenuRecipeRuns.workstationBlockType(WorkstationRecipe.Kind.CRAFTING)
-                                    .equals(record.blockType()));
+                            && MenuRecipeRuns.workstationBlockType(recipe.kind()).equals(record.blockType()));
             return remembered ? Optional.of(craftAction()) : Optional.empty();
         }
 
@@ -719,6 +770,138 @@ class RecipeSourceTest {
                 runToEnd(recipeSource.begin(request, offer, CONTEXT).orElseThrow()));
         assertTrue(failed.problem().message().contains("位置"), failed.problem().message());
         assertEquals(0, runs.crafted, "没认出位置就不动手");
+    }
+
+    /** 刚摆下的台子落在这一格（替身摆台的落点）。 */
+    private static final WorldPosition PLACED_AT = new WorldPosition(3, 64, 3, null);
+
+    // 做木镐的来源：只认合成，就地摆台用给定的替身；身上备好三块木板、两根木棍、一张工作台。
+    private RecipeSource pickaxeSource(WorldMemory memory, RecipeRuns runs, SetsUpWorkstation placer) {
+        backpack.add("minecraft:oak_planks", 3);
+        backpack.add("minecraft:stick", 2);
+        backpack.add("minecraft:crafting_table", 1);
+        return new RecipeSource(Set.of(WorkstationRecipe.Kind.CRAFTING), wanted -> List.of(pickaxeRecipe()), memory,
+                itemId -> 0, runs, backpack, offhand, tags, new CapturingNeeds(), placer, null);
+    }
+
+    private int carriedTables() {
+        return CarriedItems.matching(backpack, offhand, WantedItem.ofItem("minecraft:crafting_table"), tags);
+    }
+
+    // 报价、动手做一把木镐到收场；动手时接上给定的记账口。
+    private ActionStatus makePickaxe(RecipeSource recipeSource, CollectedRecords records) {
+        ItemRequest request = new ItemRequest(WantedItem.ofItem("minecraft:wooden_pickaxe"), 1, "开局");
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, recipeSource.quote(request, CONTEXT));
+        SourceContext booked = new SourceContext(WorldPosition.here(0, 64, 0), Permissions.DEFAULT, null, null, records);
+        return runToEnd(recipeSource.begin(request, offer, booked).orElseThrow());
+    }
+
+    @Test
+    void 就地摆下的台子_做完挖回背包_记忆里划掉() {
+        // 做完木镐就走、台子留在野外，世界记忆里多一台：真人做完会顺手挖起来揣回包里。
+        WorldMemory memory = memory();
+        MemoryBackedRuns runs = new MemoryBackedRuns(memory);
+        PlacesWorkstation placer = new PlacesWorkstation(memory, true);
+        RecipeSource recipeSource = pickaxeSource(memory, runs, placer);
+        SourceQuote quote = recipeSource.quote(
+                new ItemRequest(WantedItem.ofItem("minecraft:wooden_pickaxe"), 1, "开局"), CONTEXT);
+        assertTrue(assertInstanceOf(SourceQuote.Offer.class, quote).risk().contains("做完挖下来收回背包"),
+                "报价说清做完会收回");
+        CollectedRecords records = new CollectedRecords();
+
+        assertInstanceOf(ActionStatus.Done.class, makePickaxe(recipeSource, records));
+        assertEquals(1, runs.crafted, "先在台上做成");
+        assertEquals(List.of(PLACED_AT), placer.takenBack, "做完挖的就是刚摆的那一格");
+        assertEquals(1, carriedTables(), "台子回到背包");
+        assertTrue(memory.recordAt(MemoryKind.WORKSTATION, PLACED_AT).isEmpty(), "记忆里不再记着这台");
+        assertTrue(records.changes.stream().anyMatch(change -> change.kind() == Change.Kind.BLOCK_BROKEN
+                && change.note().startsWith("收回了临时摆的工作台")), records.changes.toString());
+        assertTrue(records.attempts.isEmpty(), records.attempts.toString());
+    }
+
+    @Test
+    void 挖不下来_台子留着_如实记进试过的办法_合成照样算做成() {
+        WorldMemory memory = memory();
+        MemoryBackedRuns runs = new MemoryBackedRuns(memory);
+        PlacesWorkstation placer = new PlacesWorkstation(memory, true);
+        placer.ending = TakeBackEnding.STUCK;
+        CollectedRecords records = new CollectedRecords();
+
+        assertInstanceOf(ActionStatus.Done.class, makePickaxe(pickaxeSource(memory, runs, placer), records));
+        assertEquals(1, runs.crafted);
+        assertTrue(memory.recordAt(MemoryKind.WORKSTATION, PLACED_AT).isPresent(), "台子还在原地，记忆照旧");
+        assertEquals(List.of("收回临时摆的工作台：没收回，台子留在 3, 64, 3：挖了十五秒都没挖下来"), records.attempts);
+        assertTrue(records.changes.stream().noneMatch(change -> change.kind() == Change.Kind.BLOCK_BROKEN));
+    }
+
+    @Test
+    void 挖下来了掉的没捡到_记忆照样划掉_如实说没捡回() {
+        WorldMemory memory = memory();
+        PlacesWorkstation placer = new PlacesWorkstation(memory, true);
+        placer.ending = TakeBackEnding.DROP_LEFT;
+        CollectedRecords records = new CollectedRecords();
+
+        assertInstanceOf(ActionStatus.Done.class,
+                makePickaxe(pickaxeSource(memory, new MemoryBackedRuns(memory), placer), records));
+        assertEquals(0, carriedTables());
+        assertTrue(memory.recordAt(MemoryKind.WORKSTATION, PLACED_AT).isEmpty(), "那一格已经没有台子了");
+        assertEquals(List.of("收回临时摆的工作台：挖下来了，掉出来的工作台没捡回背包：掉落物没捡到"), records.attempts);
+    }
+
+    @Test
+    void 收回时被打断_回来接着收() {
+        // 挖台子挖到一半肚子饿了：先去吃一口，回来接着挖，不把台子丢在原地。
+        WorldMemory memory = memory();
+        PlacesWorkstation placer = new PlacesWorkstation(memory, true);
+        RecipeSource recipeSource = pickaxeSource(memory, new MemoryBackedRuns(memory), placer);
+        ItemRequest request = new ItemRequest(WantedItem.ofItem("minecraft:wooden_pickaxe"), 1, "开局");
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, recipeSource.quote(request, CONTEXT));
+        Action action = recipeSource.begin(request, offer, CONTEXT).orElseThrow();
+        ActionStatus status = ActionStatus.running();
+        for (long t = 0; t < 100 && status instanceof ActionStatus.Running; t++) {
+            status = action.tick(new StubTick(t));
+            if (placer.pauses == 0 && action.describe().contains("收回临时摆的工作台")) action.pause();
+        }
+
+        assertInstanceOf(ActionStatus.Done.class, status);
+        assertEquals(1, placer.pauses, "收回那一步被打断过");
+        assertTrue(placer.ticksAfterPause > 0, "回来接着推进收回");
+        assertEquals(List.of(PLACED_AT), placer.takenBack);
+        assertEquals(1, carriedTables());
+    }
+
+    @Test
+    void 本来就记得的台子_做完不收() {
+        WorldMemory memory = memory();
+        memory.rememberWorkstationUsed(TABLE_AT, "minecraft:crafting_table", NOW);
+        PlacesWorkstation placer = new PlacesWorkstation(memory, true);
+        CollectedRecords records = new CollectedRecords();
+
+        assertInstanceOf(ActionStatus.Done.class,
+                makePickaxe(pickaxeSource(memory, new MemoryBackedRuns(memory), placer), records));
+        assertEquals(0, placer.placed, "用附近那台，不另摆");
+        assertTrue(placer.takenBack.isEmpty(), "别人的、原来就在的台子不动");
+        assertTrue(memory.recordAt(MemoryKind.WORKSTATION, TABLE_AT).isPresent());
+    }
+
+    @Test
+    void 就地摆下的熔炉_烧完留着不收() {
+        WorldMemory memory = memory();
+        MemoryBackedRuns runs = new MemoryBackedRuns(memory);
+        PlacesWorkstation placer = new PlacesWorkstation(memory, true);
+        backpack.add("minecraft:raw_iron", 1);
+        backpack.add("minecraft:coal", 1);
+        backpack.add("minecraft:furnace", 1);
+        RecipeSource recipeSource = new RecipeSource(Set.of(WorkstationRecipe.Kind.SMELTING),
+                wanted -> List.of(ironSmelting()), memory, itemId -> itemId.equals("minecraft:coal") ? 1600 : 0,
+                runs, backpack, offhand, tags, new CapturingNeeds(), placer, null);
+        ItemRequest request = new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), 1, "工具准备");
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, recipeSource.quote(request, CONTEXT));
+
+        assertInstanceOf(ActionStatus.Done.class, runToEnd(recipeSource.begin(request, offer, CONTEXT).orElseThrow()));
+        assertEquals(1, runs.crafted, "在刚放下的熔炉里烧");
+        assertTrue(placer.takenBack.isEmpty(), "熔炉要关着界面等它烧，放下就留着");
+        assertTrue(memory.recordAt(MemoryKind.WORKSTATION, PLACED_AT).isPresent());
     }
 
     /** 替身：备原料的动作照实改背包——做木板扣一根原木加四块板，做木棍扣两块板加四根棍；记下每回要了什么。 */

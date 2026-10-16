@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquisitionCost;
@@ -40,6 +41,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
  * 引擎按拿到几件、还差几件报部分完成，弄不来的原因一并交代；身上的料连一份都不够才以备料的原因失败。
  * 某样原料弄不来、身上连一份的量都没有时当场放弃这个做法，不再去弄其余原料（没有羊毛就不去砍做床板的木头）。
  * 一格收好几样的原料（给床换颜色要"别的颜色的任一张床"）身上有哪样用哪样，缺了挑最省的那样去弄。
+ * 附近没有工作台、石切台时就地摆一台，做完就挖回背包；熔炉要关着界面等它烧，放下就留着。
  */
 public final class RecipeSource implements ItemSource {
 
@@ -414,8 +416,13 @@ public final class RecipeSource implements ItemSource {
         if (station == null) {
             // 附近没有记住的设施：先去弄一个设施方块、在身边放下，再到新设施上做。
             // 动手那一步等摆完才认新设施的位置（它的记录是摆台这一步才写下的），少这一步就只剩摆台、不做东西。
-            steps.addAll(placeSteps(recipe, permissions));
-            steps.add(shortfall.explaining(runAtPlacedStation(recipe, times, permissions, context.records())));
+            // 工作台、石切台站在跟前一口气做完：做完就把这台收回背包；熔炉要关着界面等它烧，放下就留着。
+            AtomicReference<WorldPosition> placedAt = new AtomicReference<>();
+            steps.addAll(placeSteps(recipe, permissions, placedAt));
+            Action run = shortfall.explaining(runAtPlacedStation(recipe, times, permissions, context.records()));
+            steps.add(recipe.kind().cooks() ? run : new TakesBackPlacedStation(run, recipe.kind(), placedAt,
+                    permissions, context.records(), placer, memory, () -> CarriedItems.matching(backpack, offhand,
+                            WantedItem.ofItem(recipe.kind().blockType()), tags)));
             return new StepwiseActions("就地摆下" + recipe.kind().displayName() + "再做"
                     + recipe.result().describe(), steps.toArray(Action[]::new));
         }
@@ -660,7 +667,9 @@ public final class RecipeSource implements ItemSource {
     }
 
     // 摆一个设施要的几步：身上没有设施方块就先去弄一个，然后在身边放下。摆不了（没接上）时给一个当场说明问题的动作。
-    private List<Action> placeSteps(WorkstationRecipe recipe, Permissions permissions) {
+    // 真放下了，落在哪一格写进 placedAt：做完合成按这一格收回。
+    private List<Action> placeSteps(WorkstationRecipe recipe, Permissions permissions,
+            AtomicReference<WorldPosition> placedAt) {
         String blockType = recipe.kind().blockType();
         List<Action> steps = new ArrayList<>();
         int carried = CarriedItems.matching(backpack, offhand, WantedItem.ofItem(blockType), tags);
@@ -669,7 +678,7 @@ public final class RecipeSource implements ItemSource {
                     "就地摆放的工作站"), permissions));
         }
         // 接缝没接上、或现场放不下时，这一步以问题收场，整串停在摆台之前，不冒充做成了。
-        Optional<Action> placing = placer == null ? Optional.empty() : placer.placeNearby(blockType);
+        Optional<Action> placing = placer == null ? Optional.empty() : placer.placeNearby(blockType, placedAt::set);
         if (placing.isEmpty()) {
             steps.add(StationFallbacks.cannotPlace(recipe.kind()));
         } else {
@@ -690,10 +699,14 @@ public final class RecipeSource implements ItemSource {
                     "有配方（" + recipe.id() + "），附近没有" + recipe.kind().displayName()
                             + "，就地放一个需要改方块的许可，这次的许可不给");
         }
+        // 工作台、石切台做完挖回背包，熔炉放下就留着：报价把这一点说清，LLM 不用猜野外会不会多出一台。
+        String placing = recipe.kind().cooks()
+                ? "，会在身边放一个（消耗一个）并记下位置"
+                : "，会在身边放一个，做完挖下来收回背包";
         return new SourceQuote.Offer(describe(), count,
                 new AcquisitionCost(0, 8 + recipe.ingredients().size(), shortfall)
                         .withWait(cookWait(recipe, timesNeeded(recipe, count))),
-                "附近没有" + recipe.kind().displayName() + "，会在身边放一个（消耗一个）并记下位置",
+                "附近没有" + recipe.kind().displayName() + placing,
                 recipe.id());
     }
 

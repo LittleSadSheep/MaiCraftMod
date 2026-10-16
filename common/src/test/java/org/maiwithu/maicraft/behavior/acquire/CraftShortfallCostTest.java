@@ -61,7 +61,7 @@ class CraftShortfallCostTest {
             };
         };
         RecipeRuns runs = (recipe, station, times, permissions, records) -> Optional.empty();
-        SetsUpWorkstation placer = blockType -> Optional.empty();
+        SetsUpWorkstation placer = (blockType, placedAt) -> Optional.empty();
         return new RecipeSource(Set.of(WorkstationRecipe.Kind.CRAFTING),
                 wanted -> wanted.matches(WHITE_BED.itemId(), Set.of()) ? List.of(bed) : List.of(),
                 new WorldMemory(new DocumentStore(temp.resolve("state.sqlite")), "world-1"), itemId -> 0, runs,

@@ -691,8 +691,9 @@ public final class AbilityCatalog {
         RecipeRuns recipeRuns = new MenuRecipeRuns(bringsClose, deps.interactions(),
                 recipeReads, deps.memory(), deps.context());
         ClientYieldScans yieldScans = new ClientYieldScans(deps.blockScans(), deps.context());
+        // 就地摆台与做完收回同一个接缝：收回走和收回野外那张床同一套"走过去、挖下来、捡起来"。
         ClientWorkstationPlacer placer = new ClientWorkstationPlacer(
-                deps.interactions(), toMainhand, deps.memory(), deps.context());
+                deps.interactions(), toMainhand, deps.memory(), deps.context(), collects);
         RecipeSource craftSource = new RecipeSource(
                 Set.of(WorkstationRecipe.Kind.CRAFTING, WorkstationRecipe.Kind.STONECUTTING),
                 recipeReads, deps.memory(), recipeReads, recipeRuns,
