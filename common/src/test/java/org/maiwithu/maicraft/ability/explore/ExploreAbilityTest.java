@@ -9,8 +9,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.google.gson.JsonParser;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -19,6 +21,8 @@ import org.maiwithu.maicraft.behavior.explore.ExploreTask;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.world.BlockScanService;
+import org.maiwithu.maicraft.game.world.IdKind;
+import org.maiwithu.maicraft.game.world.SimilarIds;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
@@ -154,6 +158,24 @@ class ExploreAbilityTest {
     }
 
     @Test
+    void 群系写错时带上相近的群系并指到群系目录页() {
+        TaskResult result = assertInstanceOf(StepDecision.Finish.class,
+                ability().decide(step(goal("{\"target\":\"minecraft:beachh\"}")))).result();
+        assertEquals("群系 minecraft:beachh 不存在；你是不是要 minecraft:beach", result.problem().message());
+        assertEquals("探索：群系 minecraft:beachh 不存在", result.summary(), "一句话结论只带结论句");
+        assertTrue(result.problem().suggestion().contains("lookup(topic=knowledge, id=biomes)"),
+                result.problem().suggestion());
+    }
+
+    @Test
+    void 留意清单写错时带上相近的名字() {
+        TaskResult result = assertInstanceOf(StepDecision.Finish.class, ability().decide(step(goal(
+                "{\"target\":\"survey\",\"interests\":[\"minecraft:zombi\",\"minecraft:qqq\"]}")))).result();
+        assertTrue(result.problem().message().startsWith("留意清单里的 minecraft:zombi 不存在；你是不是要 minecraft:zombie；"
+                + "留意清单里的 minecraft:qqq 不存在（"), result.problem().message());
+    }
+
+    @Test
     void 给了目标对象就如实拒绝() {
         // 探索没有预设终点：坐标这类已定位终点是出行的事。
         Goal request = new Goal("maicraft:explore", null, new Target.Position(12, null, -2, null),
@@ -216,13 +238,13 @@ class ExploreAbilityTest {
         assertEquals(Set.of(), ability().spec().targets(), "探索不接受目标对象");
     }
 
-    /** 类型目录替身：常见的认得出，其余一律没有。 */
+    /** 类型目录替身：常见的认得出，其余一律没有；写岔时从同一份名单里挑相近的。 */
     private static final class StubTypes implements ReadsExploreTypes {
-        private static final Set<String> BIOMES = Set.of("minecraft:jungle", "minecraft:beach",
+        private static final List<String> BIOMES = List.of("minecraft:jungle", "minecraft:beach",
                 "minecraft:plains", "#minecraft:is_forest");
-        private static final Set<String> BLOCKS = Set.of("minecraft:chest", "#minecraft:logs");
-        private static final Set<String> ENTITIES = Set.of("minecraft:zombie");
-        private static final Set<String> STRUCTURES = Set.of("minecraft:village_plains");
+        private static final List<String> BLOCKS = List.of("minecraft:chest", "#minecraft:logs");
+        private static final List<String> ENTITIES = List.of("minecraft:zombie");
+        private static final List<String> STRUCTURES = List.of("minecraft:village_plains");
 
         @Override public boolean biomeExists(String selector) {
             return BIOMES.contains(selector.toLowerCase(Locale.ROOT));
@@ -242,6 +264,17 @@ class ExploreAbilityTest {
 
         @Override public boolean structureExists(String selector) {
             return STRUCTURES.contains(selector.toLowerCase(Locale.ROOT));
+        }
+
+        @Override public String missing(IdKind kind, String selector) {
+            return SimilarIds.missing(kind.label(), selector, SimilarIds.closest(BIOMES, selector));
+        }
+
+        @Override public Optional<String> similarInterest(String selector) {
+            List<String> candidates = new ArrayList<>(BLOCKS);
+            candidates.addAll(ENTITIES);
+            candidates.addAll(STRUCTURES);
+            return SimilarIds.closest(candidates, selector);
         }
     }
 }

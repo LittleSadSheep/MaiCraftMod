@@ -8,13 +8,13 @@
 
 | 名字 | 必填 | 说明 |
 | --- | :---: | --- |
-| `target` | ✅ | 探索目标：`survey` / 群系 ID 或 `#` 标签 / `platform` / `surface`。找海岸给 `minecraft:beach` |
+| `target` | ✅ | 探索目标：`survey` / 群系 ID 或 `#` 标签 / `platform` / `surface`。找海岸给 `minecraft:beach`；拿不准群系 ID 时 `lookup(topic=knowledge, id=biomes)` 看本实例的群系目录 |
 | `direction` | platform 必配 | 扇形朝向：`forward` / `backward` / `left` / `right` / `north` / `south` / `east` / `west`；出发时按当时朝向固定，之后转头不改搜索方向 |
 | `angle_degrees` | | 扇形开口角（度）1..360；有方向默认 90，无方向必须省略或 360。要斜向就给相邻方位加大开口角 |
 | `min_distance` | | 忽略更近的目标匹配（格）；有方向默认 16，无方向默认 0 |
 | `max_distance` | | 探索半径（格）64..2048，默认 768 |
 | `max_seconds` | | 最多做多久（秒）；观察与走行有真实进展就续期 |
-| `interests` | | 途中留意清单：地形要素（`lava_pool`）、结构 ID、方块 ID 或 `#` 标签、实体类型 ID，可给几样；看见了记入世界记忆与结果并发一条发现事件，不改路线、不算抵达 |
+| `interests` | | 途中留意清单：地形要素（`lava_pool`）、结构 ID、方块 ID 或 `#` 标签、实体类型 ID，可给几样；看见了记入世界记忆与结果并发一条发现事件，不改路线、不算抵达；认得出哪些结构看 `lookup(topic=knowledge, id=structures)` |
 
 可给 `permissions`：`change_blocks` 决定走行能不能挖开挡路的方块、垫方块，以及回露天被埋时能不能上掘（默认 `natural`）；目标探测本身永不改方块。
 

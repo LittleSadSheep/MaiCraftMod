@@ -15,6 +15,8 @@ import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.BlockScanService;
+import org.maiwithu.maicraft.game.world.IdKind;
+import org.maiwithu.maicraft.game.world.SimilarIds;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilitySpec;
@@ -112,13 +114,14 @@ public final class ExploreAbility implements AbilityModule {
             problems.add("起找距离（min_distance " + goal.params().integer("min_distance")
                     + "）不能超过探索半径（max_distance " + goal.params().integer("max_distance") + "）");
         }
-        // 注册表里没有的群系不跑图：以不支持结束，提示先查可用 ID，不混进参数错误里。
+        // 注册表里没有的群系不跑图：以不支持结束，说出本实例里相近的群系，并指到群系目录页，不混进参数错误里。
         String targetSpec = goal.params().text("target").trim().toLowerCase(Locale.ROOT);
         if (!targetSpec.isEmpty() && !List.of("survey", "platform", "surface").contains(targetSpec)
                 && !worldTypes.biomeExists(targetSpec)) {
-            return new StepDecision.Finish(TaskResult.failed("探索：没有叫 " + targetSpec + " 的群系",
-                    Problem.of(Problem.Kind.UNSUPPORTED, "注册表里没有这个群系 ID 或标签：" + targetSpec,
-                            "先 lookup 查可用的群系 ID（例如找海岸给 minecraft:beach）")));
+            // 一句话结论只带"不存在"那半句，相近的名字与去处只在问题里说一次。
+            Problem unknown = Problem.of(Problem.Kind.UNSUPPORTED, worldTypes.missing(IdKind.BIOME, targetSpec),
+                    BIOME_CATALOG_HINT);
+            return new StepDecision.Finish(TaskResult.failed("探索：" + unknown.headline(), unknown));
         }
         ExploreObjective objective = objectiveOf(goal.params(), direction, problems);
         if (objective == null) {
@@ -182,7 +185,7 @@ public final class ExploreAbility implements AbilityModule {
         return direction != null ? 90 : 360;
     }
 
-    /** 途中留意清单：按注册表分类（地形要素、方块、实体、结构），认不出的记下来一次报全。 */
+    /** 途中留意清单：按注册表分类（地形要素、方块、实体、结构），认不出的记下来一次报全，各带一个相近的名字。 */
     private ExploreObjective.Interests interestsOf(ParamValues params, List<String> problems) {
         List<String> raw = params.has("interests") ? params.list("interests") : List.of();
         // 空数组当没给。
@@ -212,7 +215,9 @@ public final class ExploreAbility implements AbilityModule {
             }
         }
         if (!unknown.isEmpty()) {
-            problems.add("留意清单里有认不出的：" + String.join("、", unknown)
+            List<String> sentences = unknown.stream()
+                    .map(spec -> SimilarIds.missing("留意清单里的", spec, worldTypes.similarInterest(spec))).toList();
+            problems.add(String.join("；", sentences)
                     + "（地形要素只有 lava_pool，其余要写方块、实体或结构的注册 ID）");
         }
         return new ExploreObjective.Interests(blocks, entities, structures, terrain);
@@ -230,10 +235,15 @@ public final class ExploreAbility implements AbilityModule {
         return (int) seconds;
     }
 
+    /** 认不出群系时的去处：本实例的群系目录页列着全部群系 ID 与标签。 */
+    static final String BIOME_CATALOG_HINT =
+            "lookup(topic=knowledge, id=biomes) 看本实例的群系目录（例如找海岸给 minecraft:beach）";
+
     private TaskResult failInvalid(String message) {
         return TaskResult.failed("探索：参数说得不对",
                 Problem.of(Problem.Kind.INVALID_PARAMETER, message,
-                        "target 写 survey、群系 ID 或 # 标签、platform 或 surface；拿不准的 ID 先 lookup 查"));
+                        "target 写 survey、群系 ID 或 # 标签、platform 或 surface；拿不准的群系 ID 先 "
+                                + BIOME_CATALOG_HINT));
     }
 
     @Override

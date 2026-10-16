@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.explore;
 
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
@@ -16,6 +18,9 @@ import net.minecraft.tags.TagKey;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.levelgen.structure.Structure;
 import org.maiwithu.maicraft.behavior.explore.StructureClues;
+import org.maiwithu.maicraft.game.world.ClientRegisteredIds;
+import org.maiwithu.maicraft.game.world.IdKind;
+import org.maiwithu.maicraft.game.world.SimilarIds;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /**
@@ -25,9 +30,12 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
 final class LiveExploreTypes implements ReadsExploreTypes {
 
     private final Supplier<PlayerContext> context;
+    // 写岔时挑相近名字用的注册 ID 名单：群系从当刻世界的数据包注册表读。
+    private final ClientRegisteredIds registered;
 
     LiveExploreTypes(Supplier<PlayerContext> context) {
         this.context = Objects.requireNonNull(context, "context");
+        this.registered = new ClientRegisteredIds(context);
     }
 
     @Override
@@ -85,6 +93,28 @@ final class LiveExploreTypes implements ReadsExploreTypes {
         // 原先硬取注册表抛"Missing registry"，实机 10-14 在下界带着要塞留意清单跑图，一开就程序出错。
         return worldRegistry(Registries.STRUCTURE).map(registry -> registry.containsKey(id))
                 .orElseGet(() -> StructureClues.known(id.toString()));
+    }
+
+    @Override
+    public String missing(IdKind kind, String selector) {
+        return registered.missing(kind, selector);
+    }
+
+    @Override
+    public Optional<String> similarInterest(String selector) {
+        String spec = selector.trim();
+        if (spec.startsWith("#")) {
+            // 留意清单里的标签只认方块标签。
+            return SimilarIds.closest(registered.tags(IdKind.BLOCK), spec);
+        }
+        // 留意清单一项可能是四类里的任何一种：按地形要素、方块、实体、结构的顺序排候选，同样像时先给排前面的。
+        List<String> candidates = new ArrayList<>(List.of("lava_pool"));
+        candidates.addAll(registered.ids(IdKind.BLOCK));
+        candidates.addAll(registered.ids(IdKind.ENTITY_TYPE));
+        List<String> structures = registered.ids(IdKind.STRUCTURE);
+        // 结构注册表客户端多半读不到，和认不认得出一样退到有线索档案的那些结构。
+        candidates.addAll(structures.isEmpty() ? StructureClues.knownIds().stream().sorted().toList() : structures);
+        return SimilarIds.closest(candidates, spec);
     }
 
     private <T> boolean tagHasEntries(Registry<T> registry, TagKey<T> tag) {
