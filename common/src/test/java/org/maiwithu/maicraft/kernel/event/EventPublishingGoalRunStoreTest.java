@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.OptionalLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -108,5 +109,31 @@ class EventPublishingGoalRunStoreTest {
                 .filter(event -> event.kind() == TaskEvent.Kind.STEP_FINISHED).map(TaskEvent::message).toList();
         assertEquals(List.of("第 1 步（maicraft:build，砌东墙）：按图建好了", "第 2 步（maicraft:build，砌东墙）：按图建好了"),
                 finished);
+    }
+
+    @Test
+    void finishingAttachesOneLineAboutTheCharacterAndNothingElseDoes() throws InterruptedException {
+        // 目标与 sequence 的一步结束时附上结束那一刻的一行自身摘要；开始、提问这些不附，读不到时照样发事件。
+        TaskEventLog log = new TaskEventLog();
+        String[] brief = {"在 minecraft:overworld 12, 64, -8；血 18，饱食 15；两手空着"};
+        EventPublishingGoalRunStore store = new EventPublishingGoalRunStore(new InMemoryGoalRunStore(), log,
+                () -> Optional.ofNullable(brief[0]));
+        GoalRun sequence = new GoalRun(store.nextId(), GOAL);
+        store.save(sequence);
+        GoalRun step = new GoalRun(store.nextId(), GOAL, sequence.id(), 0);
+        store.save(step);
+        step.finish(TaskResult.done("拆完了"), 300);
+        store.save(step);
+        brief[0] = null;
+        sequence.finish(TaskResult.done("都做完了"), 301);
+        store.save(sequence);
+
+        List<TaskEvent> events = events(log);
+        assertEquals(List.of(TaskEvent.Kind.STARTED, TaskEvent.Kind.STEP_FINISHED, TaskEvent.Kind.FINISHED),
+                events.stream().map(TaskEvent::kind).toList());
+        assertNull(events.get(0).selfBrief());
+        assertEquals("在 minecraft:overworld 12, 64, -8；血 18，饱食 15；两手空着", events.get(1).selfBrief());
+        assertNull(events.get(2).selfBrief(), "读不到角色时不附，事件照发");
+        assertEquals("都做完了", events.get(2).message(), "结论句不变，摘要另放一处");
     }
 }

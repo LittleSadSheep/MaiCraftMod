@@ -114,7 +114,7 @@ public final class ResultJson {
         return json;
     }
 
-    /** 任务事件：序号、发生了什么、哪个目标、一句话，结束时附结果状态。 */
+    /** 任务事件：序号、发生了什么、哪个目标、一句话，结束时附结果状态与角色的一行自身摘要。 */
     public static JsonObject event(TaskEvent event) {
         JsonObject json = new JsonObject();
         json.addProperty("cursor", event.cursor());
@@ -126,6 +126,10 @@ public final class ResultJson {
         json.addProperty("message", event.message());
         if (event.status() != null) {
             json.addProperty("status", lower(event.status()));
+        }
+        // 目标或某一步结束时附的一行自身摘要：在哪、血、饱食、氧气、主手、开着的界面；背包看 observe(self)。
+        if (event.selfBrief() != null) {
+            json.addProperty("self_brief", event.selfBrief());
         }
         return json;
     }

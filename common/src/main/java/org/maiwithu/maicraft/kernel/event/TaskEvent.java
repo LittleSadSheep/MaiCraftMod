@@ -18,8 +18,11 @@ import java.util.Objects;
  *                  LLM 只认识自己下达的那个编号
  * @param message   一句话，例如问题的原文、结果的一句话结论
  * @param status    目标或某一步结束时的结果状态；其余事件为 null
+ * @param selfBrief 目标或某一步结束那一刻角色的一行自身摘要（在哪、血、饱食、氧气、主手、开着的界面）；
+ *                  其余事件、或结束时读不到角色时为 null
  */
-public record TaskEvent(long cursor, Kind kind, long goalRunId, String message, TaskResult.Status status) {
+public record TaskEvent(long cursor, Kind kind, long goalRunId, String message, TaskResult.Status status,
+                        String selfBrief) {
 
     /** 发生了什么。 */
     public enum Kind {
@@ -68,6 +71,11 @@ public record TaskEvent(long cursor, Kind kind, long goalRunId, String message, 
          * 此刻的时间与天气在消息里。没有昼夜的维度不发。
          */
         SKY_CHANGED
+    }
+
+    /** 不附自身摘要的事件：开始、提问、暂停、生存需求这些都是这一种。 */
+    public TaskEvent(long cursor, Kind kind, long goalRunId, String message, TaskResult.Status status) {
+        this(cursor, kind, goalRunId, message, status, null);
     }
 
     public TaskEvent {

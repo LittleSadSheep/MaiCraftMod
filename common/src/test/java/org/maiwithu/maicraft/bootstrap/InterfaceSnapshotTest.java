@@ -166,6 +166,10 @@ class InterfaceSnapshotTest {
         shapes.add("result", ResultJson.result(partial));
         shapes.add("goal_run", ResultJson.goalRun(asking, question, "在等回答"));
         shapes.add("event", ResultJson.event(new TaskEvent(7, TaskEvent.Kind.ASKED, 12, "动哪个箱子？", null)));
+        // 目标结束的事件附结束那一刻角色的一行自身摘要。
+        shapes.add("finished_event", ResultJson.event(new TaskEvent(9, TaskEvent.Kind.FINISHED, 12,
+                "拿到 3 块原木，还差 5 块", TaskResult.Status.PARTIAL,
+                "在 minecraft:overworld 12, 64, -8；血 18，饱食 15；手上 minecraft:stone_axe")));
         return shapes;
     }
 

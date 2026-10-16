@@ -17,17 +17,28 @@ import java.util.Objects;
  * <p>sequence 的每一步都有自己的目标运行记录，但 LLM 只认识自己下达的那个编号：
  * 步骤的提问、暂停、结束都记在整个 sequence 的编号上，步骤开始不单独发事件；步骤结束的消息带上第几步与能力。
  *
+ * <p>目标或某一步结束时，事件上附结束那一刻角色的一行自身摘要：LLM 读到结束接着决定下一步，
+ * 不用先再看一次自己在哪、血够不够、手上拿着什么、界面关没关。
+ *
  * <p>只在客户端线程使用。
  */
 public final class EventPublishingGoalRunStore implements GoalRunStore {
     private final GoalRunStore delegate;
     private final TaskEventLog log;
+    /** 结束那一刻角色的一行自身摘要。 */
+    private final ReadsSelfBrief selfBrief;
     /** 各条还没结束的记录上次存盘时的处境；结束后移除，不会越积越多。 */
     private final Map<Long, GoalRunState> lastStates = new HashMap<>();
 
+    /** 不附自身摘要的一份：离线测试与还没接上现场时用。 */
     public EventPublishingGoalRunStore(GoalRunStore delegate, TaskEventLog log) {
+        this(delegate, log, ReadsSelfBrief.NONE);
+    }
+
+    public EventPublishingGoalRunStore(GoalRunStore delegate, TaskEventLog log, ReadsSelfBrief selfBrief) {
         this.delegate = Objects.requireNonNull(delegate, "delegate");
         this.log = Objects.requireNonNull(log, "log");
+        this.selfBrief = Objects.requireNonNull(selfBrief, "selfBrief");
     }
 
     @Override public long nextId() {
@@ -72,9 +83,10 @@ public final class EventPublishingGoalRunStore implements GoalRunStore {
             case PAUSED -> log.append(TaskEvent.Kind.PAUSED, id, "暂停：" + describe(run) + run.pauseNote("；"), null);
             // sequence 的一步做完记在整件 sequence 的编号上，结论句前带上第几步、哪个能力：连着几步结论一样
             // （一格一格施工每步都是"按图建好了"）时，读事件的人也分得清做完的是哪一步。
+            // 结束这一刻顺手附上角色的一行自身摘要（在哪、血、饱食、主手、开着的界面），读不到就不附。
             case FINISHED -> log.append(step ? TaskEvent.Kind.STEP_FINISHED : TaskEvent.Kind.FINISHED, id,
                     step ? run.goal().stepLabel(run.stepOfParent()) + "：" + run.result().summary() : run.result().summary(),
-                    run.result().status());
+                    run.result().status(), selfBrief.current().orElse(null));
         }
     }
 

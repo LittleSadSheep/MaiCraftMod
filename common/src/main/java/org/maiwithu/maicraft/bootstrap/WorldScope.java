@@ -7,6 +7,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.nio.file.Path;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
 
@@ -33,6 +34,7 @@ import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.TrustedPlayers;
 import org.maiwithu.maicraft.behavior.permission.RegionsSnapshot;
 import org.maiwithu.maicraft.behavior.perception.ClientEntitySight;
+import org.maiwithu.maicraft.behavior.perception.SceneSelf;
 import org.maiwithu.maicraft.behavior.perception.ClientEnvironmentSight;
 import org.maiwithu.maicraft.behavior.perception.ClientNearbyBlocksSight;
 import org.maiwithu.maicraft.behavior.perception.ClientSelfSight;
@@ -75,6 +77,7 @@ import org.maiwithu.maicraft.game.world.FurnaceFuels;
 import org.maiwithu.maicraft.compat.CompatRegistry;
 import org.maiwithu.maicraft.game.world.RegistryBlockTags;
 import org.maiwithu.maicraft.mcp.view.MenuView;
+import org.maiwithu.maicraft.mcp.view.SelfBrief;
 
 /**
  * 进世界时创建、退世界时丢弃的这一份现场：世界记忆、感知场景，并把能力按清单登记进客户端共用的注册表。
@@ -289,6 +292,15 @@ public final class WorldScope {
     }
 
     /** 感知场景：观察视图与速写都从这里整理。 */
+    /**
+     * 结束事件附的一行自身摘要：这个世界场景里的自身观察（每刻刷新）、所在维度与开着的界面；
+     * 刚进世界还没看清自己时为空，事件照发不附。
+     */
+    public Optional<String> selfBrief() {
+        SceneSelf self = scene.self();
+        return self == null ? Optional.empty() : Optional.of(SelfBrief.line(self, dimension, menus.screens().current()));
+    }
+
     /** observe(menu) 读的界面：开着的界面与交易报价。 */
     public MenuView.Reads menus() {
         return menus;

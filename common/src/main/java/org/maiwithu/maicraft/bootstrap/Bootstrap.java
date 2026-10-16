@@ -112,6 +112,7 @@ import org.maiwithu.maicraft.kernel.goal.DeathRecoveryActions;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.event.EventPublishingGoalRunStore;
+import org.maiwithu.maicraft.kernel.event.ReadsSelfBrief;
 import org.maiwithu.maicraft.kernel.event.TaskEventLog;
 import org.maiwithu.maicraft.kernel.event.ChatEventLog;
 import org.maiwithu.maicraft.kernel.goal.GoalRunStore;
@@ -323,6 +324,8 @@ public final class Bootstrap {
         // 聊天事件流一份：聊天栏收到的消息进它，events(topic=chat) 从这里读；和任务事件分开，刷屏挤不掉目标的事件。
         private final ChatEventLog chatEvents = new ChatEventLog();
         private final WorldScope[] worldScope = new WorldScope[1];
+        // 目标结束时附的一行自身摘要读当前世界的现场；不在世界里时不附，事件照发。
+        private final ReadsSelfBrief selfBriefs = () -> worldScope[0] == null ? Optional.empty() : worldScope[0].selfBrief();
         private EmbeddedMcpService mcp;
         /** MCP 入口启动失败的原因；启动成功时为 null。调试面板照实显示。 */
         private String mcpStartFailure;
@@ -422,7 +425,7 @@ public final class Bootstrap {
             // 目标处境与生存需求的事件都进同一条任务事件流，宿主用 events 读。
             // 没进世界时的占位存储：进世界时换成那个世界的存盘（见 enterWorld），不在世界里也下达不了目标。
             GoalRunStore goalRuns = new EventPublishingGoalRunStore(
-                    new NotesGoalGains(new InMemoryGoalRunStore(), itemsInUse), taskEvents);
+                    new NotesGoalGains(new InMemoryGoalRunStore(), itemsInUse), taskEvents, selfBriefs);
             // 记地点交给当前世界的世界记忆；不在世界里时如实以程序错误收场，不悄悄丢掉。
             RemembersPlaces places = (name, position) -> {
                 WorldScope scope = worldScope[0];
@@ -638,7 +641,7 @@ public final class Bootstrap {
                 // 全部恢复为暂停，等 LLM 决定接不接着做。读回时的暂停事件进的是新的这条流。
                 taskEvents.restart();
                 goals.enterWorld(scope.memory(), new EventPublishingGoalRunStore(
-                        new NotesGoalGains(scope.goalRuns(), itemsInUse), taskEvents));
+                        new NotesGoalGains(scope.goalRuns(), itemsInUse), taskEvents, selfBriefs));
                 // 开关开启时，这次进世界要逐刻请求控制权直到拿到；还没有目标时也守得住角色。
                 startupAutomationPending = automationOnJoin;
             } else if (minecraft.level == null) {
