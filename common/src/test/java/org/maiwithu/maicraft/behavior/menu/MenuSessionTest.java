@@ -123,4 +123,17 @@ class MenuSessionTest {
         channel.open = false;
         assertFalse(session.readyForNextClick(channel), "界面不在了不再点击");
     }
+
+    @Test
+    void 服务端换了页_旧页上拿起的那一格不再按格号放回_交给关界面放进背包() {
+        // AE2 下单时终端换成填数量页：旧页第 17 格在新页上是另一格，收尾不能照旧点它。
+        FakeChannel channel = new FakeChannel();
+        MenuSession session = ((Claim.Owned) MenuSession.claim(channel)).session();
+        session.noteCursorTakenFrom(17);
+        session.pageSwapped();
+        channel.cursorCarrying = true;
+        assertInstanceOf(Closing.InProgress.class, session.closeNow(channel, 0));
+        assertEquals(0, channel.clicks.size(), "不点旧页的格号");
+        assertEquals(1, channel.closeRequests, "照样由打开者请游戏关上");
+    }
 }

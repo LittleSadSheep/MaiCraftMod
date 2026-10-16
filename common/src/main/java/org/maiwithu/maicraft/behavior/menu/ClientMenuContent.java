@@ -47,6 +47,14 @@ public final class ClientMenuContent implements MenuContent {
         this.layouts = Objects.requireNonNull(layouts, "layouts");
     }
 
+    /**
+     * 服务端换上来下一页时用的读端：认得出的界面照旧，第一次读时绑上那一刻开着的新一页，
+     * 和刚点开时一样等它的内容同步过来才给读数。
+     */
+    ClientMenuContent forNextPage() {
+        return new ClientMenuContent(contexts, layouts);
+    }
+
     // 绑定推迟到第一次读：动手动作可以先建读端再点开界面，绑上的就是点开的那份。
     private void bindOnce() {
         if (bound) {

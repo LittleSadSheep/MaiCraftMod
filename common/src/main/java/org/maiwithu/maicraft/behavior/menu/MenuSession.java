@@ -84,6 +84,15 @@ public final class MenuSession {
         cursorSourceSlot = slot;
     }
 
+    /**
+     * 服务端在这次交互里换了页，会话跟着接管新的一页（打开者声明过这种换法算接着用）：
+     * 拿起东西的那一格是旧页上的格号，新页上对不上，收尾不再按它放回；光标上还有东西就交给关界面那一步放进背包。
+     * 关闭的纪律照旧：还是打开者负责关上。
+     */
+    public void pageSwapped() {
+        cursorSourceSlot = -1;
+    }
+
     /** 明确移交：界面留给接手的任务继续用，本会话不再负责关闭。 */
     public void handOver() {
         handedOver = true;

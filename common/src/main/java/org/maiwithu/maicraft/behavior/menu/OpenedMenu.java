@@ -57,6 +57,14 @@ public interface OpenedMenu {
         throw new UnsupportedOperationException("这份界面不支持点按钮");
     }
 
+    /**
+     * 声明接下来服务端会在这次交互里换页、哪些换法算接着用（见 {@link PageSwaps}）：之后服务端换上来的、
+     * 声明认的那一页，读数、点击、模组协议的操作、关闭都换绑到它上面，不再当成界面被关掉。
+     * 换上来的新页同步完之前读不到内容，调用方照常等。默认什么都不认，替身不用实现。
+     */
+    default void followPageSwaps(PageSwaps swaps) {
+    }
+
     /** 光标上的东西是从这一格拿起的：关界面前先放回这里。 */
     void noteCursorTakenFrom(int slotId);
 

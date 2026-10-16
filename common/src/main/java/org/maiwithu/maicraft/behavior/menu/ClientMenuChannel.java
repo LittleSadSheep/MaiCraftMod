@@ -139,6 +139,11 @@ public final class ClientMenuChannel implements MenuChannel {
         closing = context.menuActions().close(context, CLOSE_TIMEOUT_TICKS);
     }
 
+    /** 认领时绑定的那一份界面；服务端换页后拿它问调用方声明的换法认不认。 */
+    AbstractContainerMenu claimedMenu() {
+        return claimedMenu;
+    }
+
     // 界面还是认领的那一份时给出当前菜单，否则给 null；后续读数按"界面不在"处理。
     private AbstractContainerMenu currentIfStillClaimed() {
         PlayerContext context = contexts.get();

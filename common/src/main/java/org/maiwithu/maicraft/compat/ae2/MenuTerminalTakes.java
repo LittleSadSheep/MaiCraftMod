@@ -17,7 +17,6 @@ import net.minecraft.world.item.ItemStack;
 
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
-import org.maiwithu.maicraft.behavior.menu.ClientMenuChannel;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuOpening;
 import org.maiwithu.maicraft.behavior.menu.HeldItemMenuOpening;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
@@ -26,7 +25,6 @@ import org.maiwithu.maicraft.behavior.menu.MoveConfirmation;
 import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
 import org.maiwithu.maicraft.behavior.menu.TransferSettlement;
-import org.maiwithu.maicraft.game.menu.MenuActions;
 import org.maiwithu.maicraft.game.menu.MenuConfirmation;
 import org.maiwithu.maicraft.game.menu.PendingMenuAction;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -97,22 +95,6 @@ public final class MenuTerminalTakes implements TerminalTakes {
 
     @Override public Optional<Action> lookWireless(String terminalItemId, ItemRequest request) {
         return Optional.of(new TakeAction(new Wireless(terminalItemId), request, true, null));
-    }
-
-    // 在此刻那一页上发模组的包。AE2 的填数量页、确认页是服务端换上来的，不是角色点开的那一份界面，
-    // 用不了已打开界面的发包入口，这里照同一条规矩判断：本刻有交互机会、上一下结清、界面画过一帧才发，
-    // 这一下按"换页了"确认；发不了返回 false，下一刻再试。
-    private boolean sendOnCurrentPage(String what, Runnable send) {
-        PlayerContext context = services.context().get();
-        if (context == null || !context.canInteractThisTick()) return false;
-        MenuActions actions = context.menuActions();
-        if (actions.hasPendingTransaction() || !actions.ensureVisible(context)) return false;
-        AbstractContainerMenu page = context.localPlayer().containerMenu;
-        actions.submitModAction(context, what, send,
-                (now, ignored) -> now.localPlayer().containerMenu != page
-                        ? MenuConfirmation.Verdict.APPLIED : MenuConfirmation.Verdict.PENDING,
-                PAGE_CONFIRM_TICKS);
-        return true;
     }
 
     /** 到网络跟前的办法：走到一台装着的终端点开，或拿出身上的无线终端打开。取货的其余步骤两者一样。 */
@@ -250,7 +232,7 @@ public final class MenuTerminalTakes implements TerminalTakes {
             this.request = request;
             this.lookOnly = lookOnly;
             this.opening = access.opening();
-            this.craft = new NetworkCraft(compat, MenuTerminalTakes.this::sendOnCurrentPage, access.describe(), records);
+            this.craft = new NetworkCraft(compat, this::sendOnPage, access.describe(), records);
         }
 
         @Override public ActionStatus tick(TickContext tick) {
@@ -276,8 +258,31 @@ public final class MenuTerminalTakes implements TerminalTakes {
             ActionStatus status = opening.tick(tick);
             if (!(status instanceof ActionStatus.Done)) return status;
             menu = opening.opened().orElseThrow();
+            // 下单时服务端会把终端换成填数量页、确认页，开工后再退回终端：这些都是这次取货接着用的页，
+            // 界面跟着换绑，下单那几页上的操作、关界面都对着此刻那一页。
+            menu.followPageSwaps(this::craftPage);
             stage = Stage.SYNC;
             return ActionStatus.progressed();
+        }
+
+        // 服务端换上来的哪些页算这次取货接着用：填合成数量页、合成确认页、退回来的还是这台终端（或这件无线终端）。
+        // 别的界面顶上来不跟，照旧当成终端被关掉。
+        private boolean craftPage(AbstractContainerMenu from, AbstractContainerMenu to) {
+            PlayerContext player = services.context().get();
+            return compat.craftAmountMenu(to) || compat.craftPlanPage(to).isPresent()
+                    || (player != null && access.belongs(to, player.level()));
+        }
+
+        // 在此刻那一页上发模组的包：经已打开的界面发（它跟着下单那几页换绑），和取货同一条就绪规矩——
+        // 本刻有交互机会、上一下结清、界面画过一帧才发；这一下按"换页了"确认。发不了返回 false，下一刻再试。
+        private boolean sendOnPage(String what, Runnable send) {
+            PlayerContext player = services.context().get();
+            if (menu == null || player == null) return false;
+            AbstractContainerMenu page = player.localPlayer().containerMenu;
+            return menu.submitModAction(what, send,
+                    (now, ignored) -> now.localPlayer().containerMenu != page
+                            ? MenuConfirmation.Verdict.APPLIED : MenuConfirmation.Verdict.PENDING,
+                    PAGE_CONFIRM_TICKS).isPresent();
         }
 
         // 核对是这台终端的界面，再等连接状态与网络存货同步过来；没连上网络就如实收场。
@@ -422,7 +427,7 @@ public final class MenuTerminalTakes implements TerminalTakes {
             };
         }
 
-        // 开工了：AE2 退回来的终端不是角色点开的那一份，关掉它重新打开看存货，等成品进网络。
+        // 开工了：关掉 AE2 退回来的终端重新打开看存货，等成品进网络。
         private ActionStatus reopen() {
             closeCurrent();
             opening = access.opening();
@@ -447,10 +452,9 @@ public final class MenuTerminalTakes implements TerminalTakes {
             return result();
         }
 
-        // 关掉此刻开着的界面（下单的几页、退回来的终端）：认领当前那一页请游戏关上。
+        // 关掉此刻开着的界面（下单的几页、退回来的终端）：已打开的界面跟着这几页换绑过，请游戏关的就是此刻那一页。
         private void closeCurrent() {
-            ClientMenuChannel current = ClientMenuChannel.claimCurrent(services.context());
-            if (current != null && current.stillOpen()) current.requestClose();
+            if (menu != null) menu.abandon();
         }
 
         // 存货表还在变（还有包没到）就接着等；连着几刻没变或等到期限就算齐了。
