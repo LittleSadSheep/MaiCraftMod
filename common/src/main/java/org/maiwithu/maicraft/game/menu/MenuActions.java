@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.game.menu;
 
+import java.util.Optional;
+
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.crafting.RecipeHolder;
@@ -89,6 +91,14 @@ public interface MenuActions {
      * 原任务对象已经没了，关闭要靠这里一刻一刻推进到界面真的关上；新任务开始之前先结清。
      */
     default void advance(PlayerContext context) {}
+
+    /**
+     * 角色眼前开着的界面是哪一刻出现的、谁开的；什么都没开时为空。只读，不点、不关。
+     * 看界面的视图用它说"任务点开的还是人开的"、判断里面的东西同步过来没有。替身默认不记。
+     */
+    default Optional<ScreenOpening> screenOpening(PlayerContext context) {
+        return Optional.empty();
+    }
 
     /** 换了身体或客户端停机时由控制权边界调：旧的菜单等待按效果不确定结清，界面状态记录清掉。 */
     default void revokeForBoundary(String reason) {}

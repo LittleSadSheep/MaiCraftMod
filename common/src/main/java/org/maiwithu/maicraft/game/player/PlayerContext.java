@@ -64,6 +64,14 @@ public interface PlayerContext {
     boolean tryClaimInteraction();
 
     /**
+     * 自动化最近一次真的向游戏出手（占用了交互机会）是哪一刻，与 {@link #clientTick} 同一个钟；还没出过手为 Long.MIN_VALUE。
+     * 界面打开记录用它分辨一份界面是任务右键、点开出来的，还是人按键开的。测试替身不接时当作没出过手。
+     */
+    default long lastInteractionTick() {
+        return Long.MIN_VALUE;
+    }
+
+    /**
      * 角色此刻是否正处于"按住使用"中（吃东西、拉弓、刷子刷可疑方块这类持续使用）。
      * 持续使用动作靠它认出按住被原版松开了：视线离开方块、使用到期或按住投影断掉时原版自己松手。
      */

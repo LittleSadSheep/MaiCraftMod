@@ -37,6 +37,8 @@ public final class PlayerControlBoundary {
     private long controlRevision;
     private long tickRevision;
     private long mutationClaimedTick = Long.MIN_VALUE;
+    /** 自动化最近一次真的向游戏出手（占用交互机会）是哪一刻；界面打开记录靠它分辨界面是不是任务点开的。 */
+    private long lastClaimedTick = Long.MIN_VALUE;
     private DefaultPlayerContext activeContext;
     private boolean windowControlActive;
     private boolean restoreMouseOnRelease;
@@ -275,6 +277,13 @@ public final class PlayerControlBoundary {
             throw new IllegalStateException("this client tick already submitted a native mutation");
         }
         mutationClaimedTick = tickRevision;
+        // 记下这一刻出过手：右键方块、点开背包之后出现的界面，是这一下开出来的。
+        lastClaimedTick = tickRevision;
+    }
+
+    /** 自动化最近一次真的向游戏出手是哪一刻（与上下文的刻号同一个钟）；还没出过手为 Long.MIN_VALUE。 */
+    long lastClaimedTick() {
+        return lastClaimedTick;
     }
 
     /** 客户端停止时归还输入，并让以前发出的所有上下文失效。 */

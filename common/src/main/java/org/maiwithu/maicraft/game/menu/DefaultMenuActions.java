@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.game.menu;
 
 import java.util.Objects;
+import java.util.Optional;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientPacketListener;
@@ -31,6 +32,8 @@ public final class DefaultMenuActions implements MenuActions {
     private InteractionSender sender;
     private PendingMenuAction active;
     private final MenuVisibility visibility;
+    /** 界面打开记录：每刻推进时看一眼界面变没变，记下哪一刻出现、谁开的。 */
+    private final ScreenOpenings openings = new ScreenOpenings();
     private AbstractContainerMenu closingMenu;
     /** 关界面前已经把光标上的东西点进背包的哪一格；没点过为 -1。每次关界面只放一次，放不下就照常关。 */
     private int stowedSlot = -1;
@@ -528,6 +531,8 @@ public final class DefaultMenuActions implements MenuActions {
     /** 每刻推进一次：即使原任务对象已经结束，动作入口仍继续完成挂着的关闭。 */
     @Override
     public void advance(PlayerContext context) {
+        // 先看一眼界面变没变：本刻还没有谁出手，新出现的界面按之前几刻有没有出过手判谁开的。
+        openings.observe(context);
         PendingMenuAction pending = active;
         if (pending != null && !pending.terminal()) {
             poll(context, pending);
@@ -536,6 +541,10 @@ public final class DefaultMenuActions implements MenuActions {
                 context.tryClaimInteraction();
             }
         }
+    }
+
+    @Override public Optional<ScreenOpening> screenOpening(PlayerContext context) {
+        return openings.current(context);
     }
 
     private static MultiPlayerGameMode gameMode(PlayerContext context) {

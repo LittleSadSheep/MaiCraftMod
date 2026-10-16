@@ -11,6 +11,7 @@ import java.util.function.Supplier;
 import net.minecraft.world.item.ItemStack;
 
 import org.maiwithu.maicraft.game.menu.MenuSynchronization;
+import org.maiwithu.maicraft.game.menu.ScreenOpening;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /**
@@ -35,6 +36,11 @@ public final class ClientMenuContent implements MenuContent {
 
     /** 认得出哪些界面：原版加上联动模组证明过的。 */
     private final MenuLayouts layouts;
+    /**
+     * 按界面出现那一刻起算同步：只看一眼的读法（observe 看界面）不在点开时建读端，
+     * 用界面打开记录里的版本号与刻号代替绑定时的那一份；为 null 时按第一次读的时候起算。
+     */
+    private final ScreenOpening openedAt;
 
     /** 只认原版界面的读端：合成、烧炼这类只会开原版工作站的地方用。 */
     public ClientMenuContent(Supplier<PlayerContext> contexts) {
@@ -43,8 +49,22 @@ public final class ClientMenuContent implements MenuContent {
 
     /** 按给定的一份布局判定读两侧：要开模组界面的地方带上联动模组的证明。 */
     public ClientMenuContent(Supplier<PlayerContext> contexts, MenuLayouts layouts) {
+        this(contexts, layouts, null);
+    }
+
+    private ClientMenuContent(Supplier<PlayerContext> contexts, MenuLayouts layouts, ScreenOpening openedAt) {
         this.contexts = Objects.requireNonNull(contexts);
         this.layouts = Objects.requireNonNull(layouts, "layouts");
+        this.openedAt = openedAt;
+    }
+
+    /**
+     * 看一眼眼前这份界面的读端：同步按界面出现那一刻起算，界面开了一会儿就直接给读数；
+     * 刚出现、服务端的格子还没到时照样给空。说不清是哪一刻开的（版本号记成 -1）按早就同步完了算。
+     */
+    public static ClientMenuContent openedAt(Supplier<PlayerContext> contexts, MenuLayouts layouts,
+                                             ScreenOpening opening) {
+        return new ClientMenuContent(contexts, layouts, Objects.requireNonNull(opening, "opening"));
     }
 
     /**
@@ -73,6 +93,11 @@ public final class ClientMenuContent implements MenuContent {
         };
         this.boundStateId = context == null ? -1 : context.localPlayer().containerMenu.getStateId();
         this.boundTick = context == null ? Long.MIN_VALUE : context.clientTick();
+        // 只看一眼时从界面出现那一刻起算：开了好一阵的界面不必再等一次往返才给读数。
+        if (openedAt != null) {
+            this.boundStateId = openedAt.stateIdAtOpen();
+            this.boundTick = openedAt.openedTick();
+        }
     }
 
     @Override

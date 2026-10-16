@@ -15,6 +15,7 @@ import org.maiwithu.maicraft.kernel.goal.GoalRun;
 import org.maiwithu.maicraft.kernel.goal.GoalRunTable;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.mcp.view.DetailView;
+import org.maiwithu.maicraft.mcp.view.MenuView;
 import org.maiwithu.maicraft.mcp.view.SceneView;
 import org.maiwithu.maicraft.mcp.view.SelfView;
 import org.maiwithu.maicraft.mcp.view.WorldMemoryView;
@@ -25,13 +26,14 @@ import java.util.function.Supplier;
 
 /**
  * observe：看世界和自己，只看不做。what 选看什么：self（自己）、scene（周围，默认）、
- * detail（一个看到的东西或记住的地点的细节）、world_memory（角色记得的地点与容器）。
+ * detail（一个看到的东西或记住的地点的细节）、world_memory（角色记得的地点与容器）、
+ * menu（此刻开着的界面）。
  *
  * <p>只给"玩家此刻能看见、记得的"；需要分析、计算的（例如施工场地勘测）是能力，用 execute。
  * 场景与记忆按世界创建，角色不在世界里时回答不在世界里。
  */
 public final class ObserveTool implements McpTool {
-    private static final List<String> VIEWS = List.of("self", "scene", "detail", "world_memory");
+    private static final List<String> VIEWS = List.of("self", "scene", "detail", "world_memory", "menu");
 
     /** 提醒转成 JSON：字段名照记录的写法换成下划线小写。 */
     private static final Gson REMINDER_JSON = new GsonBuilder()
@@ -43,6 +45,8 @@ public final class ObserveTool implements McpTool {
     private final ClientThread clientThread;
     /** 角色身上还成立的提醒：observe(self) 每次都完整交出去，事件只负责叫醒。 */
     private final Supplier<List<Reminder>> reminders;
+    /** 看界面要读的东西：开着的界面与交易报价；不在世界里时给 null。 */
+    private final Supplier<MenuView.Reads> menus;
 
     /**
      * @param scene  当前世界的感知场景；不在世界里时给 null
@@ -50,11 +54,19 @@ public final class ObserveTool implements McpTool {
      */
     public ObserveTool(Supplier<Scene> scene, Supplier<WorldMemory> memory, GoalRunTable table,
                        ClientThread clientThread, Supplier<List<Reminder>> reminders) {
+        this(scene, memory, table, clientThread, reminders, () -> null);
+    }
+
+    /** @param menus 看界面要读的东西；不在世界里时给 null */
+    public ObserveTool(Supplier<Scene> scene, Supplier<WorldMemory> memory, GoalRunTable table,
+                       ClientThread clientThread, Supplier<List<Reminder>> reminders,
+                       Supplier<MenuView.Reads> menus) {
         this.scene = Objects.requireNonNull(scene, "scene");
         this.memory = Objects.requireNonNull(memory, "memory");
         this.table = Objects.requireNonNull(table, "table");
         this.clientThread = Objects.requireNonNull(clientThread, "clientThread");
         this.reminders = Objects.requireNonNull(reminders, "reminders");
+        this.menus = Objects.requireNonNull(menus, "menus");
     }
 
     @Override public String name() {
@@ -96,8 +108,16 @@ public final class ObserveTool implements McpTool {
             case "self" -> self(currentScene, context);
             case "detail" -> DetailView.of(currentScene, currentMemory, id).orElse(null);
             case "world_memory" -> WorldMemoryView.of(currentMemory, currentScene.self());
+            case "menu" -> menu();
             default -> SceneView.scene(currentScene, grid);
         };
+    }
+
+    // 此刻开着的界面：在客户端线程上当场读，读不到界面读端说明不在世界里。
+    private JsonObject menu() {
+        MenuView.Reads reads = menus.get();
+        if (reads == null) throw new ClientThread.NotInWorld();
+        return MenuView.read(reads);
     }
 
     private JsonObject self(Scene currentScene, TickContext context) {

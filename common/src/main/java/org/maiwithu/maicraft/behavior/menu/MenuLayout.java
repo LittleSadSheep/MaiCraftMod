@@ -44,10 +44,28 @@ public final class MenuLayout {
     /** 附魔台：容器侧只有第 0、1 两格工作槽（第 0 格放待附魔物品、第 1 格放青金石），三个按钮不在槽位里。 */
     private static final Set<String> ENCHANTING = Set.of("minecraft:enchantment");
 
+    /** 和村民、流浪商人交易的界面。类别：游戏事实（原版菜单类型注册表）；两侧不按格子分，报价另读。 */
+    private static final String MERCHANT = "minecraft:merchant";
+
     /** 角色侧固定 36 格：27 格主背包 + 9 格快捷栏。 */
     private static final int PLAYER_SLOTS = 36;
 
     private MenuLayout() {}
+
+    /**
+     * 按菜单类型认是哪一种界面，和分侧判定用的是同一份原版菜单类型清单：
+     * 原版里不在清单上的（铁砧、酿造台……）算别的原版界面，命名空间不是 minecraft 的算模组界面。
+     */
+    public static OpenScreen.Kind kindOf(String menuTypeId) {
+        String typeId = menuTypeId == null ? "" : menuTypeId.toLowerCase(Locale.ROOT);
+        if (PLAIN_STORAGE.contains(typeId)) return OpenScreen.Kind.STORAGE;
+        if (CRAFTING.contains(typeId)) return OpenScreen.Kind.CRAFTING_TABLE;
+        if (FURNACE_LIKE.contains(typeId)) return OpenScreen.Kind.FURNACE;
+        if (STONECUTTER.contains(typeId)) return OpenScreen.Kind.STONECUTTER;
+        if (ENCHANTING.contains(typeId)) return OpenScreen.Kind.ENCHANTING_TABLE;
+        if (MERCHANT.equals(typeId)) return OpenScreen.Kind.TRADE;
+        return typeId.startsWith("minecraft:") ? OpenScreen.Kind.OTHER_VANILLA : OpenScreen.Kind.MOD;
+    }
 
     /** 判定结论：证明了两侧怎么分，或者承认证明不了。 */
     public sealed interface Layout {

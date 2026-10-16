@@ -45,10 +45,12 @@ import org.maiwithu.maicraft.behavior.survival.NativeBlockBreaking;
 import org.maiwithu.maicraft.behavior.travel.ClientTravelWorldView;
 import org.maiwithu.maicraft.behavior.travel.TravelProgress;
 import org.maiwithu.maicraft.behavior.travel.TravelProgressListener;
+import org.maiwithu.maicraft.behavior.acquire.ClientTradeMenuReads;
 import org.maiwithu.maicraft.behavior.acquire.ItemsInUse;
 import org.maiwithu.maicraft.game.world.DropConfirmations;
 import org.maiwithu.maicraft.behavior.acquire.LiveCarryReads;
 import org.maiwithu.maicraft.behavior.acquire.RegistryToolRequirements;
+import org.maiwithu.maicraft.behavior.menu.ClientOpenScreenReads;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.ChatChannel;
 import org.maiwithu.maicraft.game.SubtitleFeed;
@@ -72,6 +74,7 @@ import org.maiwithu.maicraft.kernel.storage.StateIdentity;
 import org.maiwithu.maicraft.game.world.FurnaceFuels;
 import org.maiwithu.maicraft.compat.CompatRegistry;
 import org.maiwithu.maicraft.game.world.RegistryBlockTags;
+import org.maiwithu.maicraft.mcp.view.MenuView;
 
 /**
  * 进世界时创建、退世界时丢弃的这一份现场：世界记忆、感知场景，并把能力按清单登记进客户端共用的注册表。
@@ -113,6 +116,8 @@ public final class WorldScope {
     /** 模组的东西在角色周围多大范围里看（格）。 */
     private static final int THINGS_RADIUS = 64;
     private final TravelProgressListener travelProgress = new LatestTravelProgress();
+    /** 看界面要读的东西：开着的界面按这个世界认得出的界面（原版加联动模组的证明）读，交易界面再读报价。 */
+    private final MenuView.Reads menus;
 
     /** 保留最近一刻出行进展的收件口：宿主查任务面板时读它，不攒历史。 */
     private static final class LatestTravelProgress implements TravelProgressListener {
@@ -173,9 +178,9 @@ public final class WorldScope {
         // 会动的结构（联动登记的障碍来源）交给寻路：转着的风车、开着的列车、电梯井绕开走，挡路时先等它过去。
         NavigationObstacles.install(compat.obstacleSources());
         this.modSights = compat.modSights();
-
-        // 当刻角色的供给者：感知、背包、聊天都从它拿这一刻的角色，不留到下一刻。
+        // 当刻角色的供给者：感知、背包、聊天、看界面都从它拿这一刻的角色，不留到下一刻。
         Supplier<PlayerContext> now = () -> playerControl.activeContext().orElse(null);
+        this.menus = new MenuView.Reads(new ClientOpenScreenReads(now, compat.menuLayouts()), new ClientTradeMenuReads(now));
         // 原生挖掘走生存需求共用的那套挖掘基础代码，每次要挖一格开一份。
         Supplier<NativeBlockBreaking> diggings = () -> new NativeBlockBreaking(interactionSender, menuActions);
         // 能力按清单登记进客户端全程共用的那一份注册表：MCP 的 lookup 与 execute 读的就是它。
@@ -284,6 +289,11 @@ public final class WorldScope {
     }
 
     /** 感知场景：观察视图与速写都从这里整理。 */
+    /** observe(menu) 读的界面：开着的界面与交易报价。 */
+    public MenuView.Reads menus() {
+        return menus;
+    }
+
     public Scene scene() {
         return scene;
     }

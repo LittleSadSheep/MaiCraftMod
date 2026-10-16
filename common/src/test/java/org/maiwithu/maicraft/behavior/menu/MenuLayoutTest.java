@@ -94,4 +94,18 @@ class MenuLayoutTest {
         assertEquals(List.of(0, 1), stoneSupported.containerSlots());
         assertTrue(stoneSupported.machineSlots().isEmpty());
     }
+
+    @Test
+    void 按菜单类型认得出是哪一种界面() {
+        // 看界面时说的种类和分侧用同一份原版清单：箱子木桶都是储物，交易另算，清单外的原版界面与模组界面分开。
+        assertEquals(OpenScreen.Kind.STORAGE, MenuLayout.kindOf("minecraft:generic_9x3"));
+        assertEquals(OpenScreen.Kind.STORAGE, MenuLayout.kindOf("minecraft:shulker_box"));
+        assertEquals(OpenScreen.Kind.CRAFTING_TABLE, MenuLayout.kindOf("minecraft:crafting"));
+        assertEquals(OpenScreen.Kind.FURNACE, MenuLayout.kindOf("minecraft:blast_furnace"));
+        assertEquals(OpenScreen.Kind.STONECUTTER, MenuLayout.kindOf("minecraft:stonecutter"));
+        assertEquals(OpenScreen.Kind.ENCHANTING_TABLE, MenuLayout.kindOf("minecraft:enchantment"));
+        assertEquals(OpenScreen.Kind.TRADE, MenuLayout.kindOf("minecraft:merchant"));
+        assertEquals(OpenScreen.Kind.OTHER_VANILLA, MenuLayout.kindOf("minecraft:anvil"));
+        assertEquals(OpenScreen.Kind.MOD, MenuLayout.kindOf("create:filter"));
+    }
 }

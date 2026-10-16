@@ -7,6 +7,9 @@ import com.google.gson.JsonParser;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.maiwithu.maicraft.behavior.acquire.ReadsTradeMenu;
+import org.maiwithu.maicraft.behavior.acquire.TradeOffers;
+import org.maiwithu.maicraft.behavior.menu.OpenScreen;
 import org.maiwithu.maicraft.behavior.reminder.Reminder;
 import org.maiwithu.maicraft.ability.remember.RememberAbility;
 import org.maiwithu.maicraft.behavior.perception.EntitySight;
@@ -19,6 +22,7 @@ import org.maiwithu.maicraft.behavior.travel.SceneSeenTargets;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.interaction.InteractionSender;
 import org.maiwithu.maicraft.game.menu.MenuActions;
+import org.maiwithu.maicraft.game.menu.ScreenOpening;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -34,6 +38,7 @@ import org.maiwithu.maicraft.kernel.task.TaskFactories;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 import org.maiwithu.maicraft.behavior.perception.FakeBlockTags;
+import org.maiwithu.maicraft.mcp.view.MenuView;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ClientPacketListener;
@@ -44,13 +49,15 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** observe 的四种视图：场景、自己、细节（观察编号或地标名）、世界记忆；不在世界里时如实回答。 */
+/** observe 的五种视图：场景、自己、细节（观察编号或地标名）、世界记忆、开着的界面；不在世界里时如实回答。 */
 class ObserveToolTest {
 
     /** 本刻上下文替身：刻号由测试推进；角色上下文替身只在看背包的用例里给。 */
@@ -88,6 +95,14 @@ class ObserveToolTest {
     private ToolDispatcher tools;
     /** 板上还成立的提醒：测试摆。 */
     private List<Reminder> reminders = List.of();
+    /** 角色此刻开着的界面：测试摆，默认什么都没开。 */
+    private Optional<OpenScreen> openScreen = Optional.empty();
+    /** 交易界面没读到报价的替身：observe(menu) 只在交易界面时才问它。 */
+    private final ReadsTradeMenu noTrades = new ReadsTradeMenu() {
+        @Override public Optional<List<TradeOffers.View>> offers() { return Optional.empty(); }
+        @Override public Optional<TradeOffers.SlotContent> slot(int index) { return Optional.empty(); }
+        @Override public OptionalInt stashSlot() { return OptionalInt.empty(); }
+    };
 
     @BeforeEach
     void world() {
@@ -121,7 +136,8 @@ class ObserveToolTest {
             }
         };
         tools = new ToolDispatcher(List.of(new ObserveTool(() -> inWorld ? scene : null,
-                () -> inWorld ? memory : null, table, direct, () -> reminders),
+                () -> inWorld ? memory : null, table, direct, () -> reminders,
+                () -> inWorld ? new MenuView.Reads(() -> openScreen, noTrades) : null),
                 new ExecuteTool(registry, table, direct)));
     }
 
@@ -306,6 +322,23 @@ class ObserveToolTest {
         // 不点 grid 就不带网格：地形特征照常给。
         assertFalse(data(observe("{}")).has("grid"));
         assertTrue(data(observe("{}")).getAsJsonArray("features").size() >= 2);
+    }
+
+    @Test
+    void menuSaysWhatIsOpenOrThatNothingIs() {
+        assertFalse(data(observe("{\"what\": \"menu\"}")).get("open").getAsBoolean());
+        // 任务点开的工作台：种类、容器那一侧、谁开的都在；格子号不出现。
+        openScreen = Optional.of(new OpenScreen(OpenScreen.Kind.CRAFTING_TABLE, "minecraft:crafting", "工作台", null,
+                new OpenScreen.Contents(List.of(new OpenScreen.ItemCount("minecraft:oak_planks", 4)), 10, 9), null, null,
+                ScreenOpening.OpenedBy.TASK));
+        JsonObject view = data(observe("{\"what\": \"menu\"}"));
+        assertEquals("crafting_table", view.get("kind").getAsString());
+        assertEquals("minecraft:oak_planks", view.getAsJsonArray("contents").get(0).getAsJsonObject()
+                .get("item").getAsString());
+        assertEquals("task", view.get("opened_by").getAsString());
+        assertEquals("invalid_parameter", errorCode(observe("{\"what\": \"menu\", \"id\": \"b5\"}")));
+        inWorld = false;
+        assertEquals("not_in_world", errorCode(observe("{\"what\": \"menu\"}")));
     }
 
     @Test

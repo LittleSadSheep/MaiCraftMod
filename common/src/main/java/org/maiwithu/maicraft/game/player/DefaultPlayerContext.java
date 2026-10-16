@@ -72,6 +72,9 @@ final class DefaultPlayerContext implements PlayerContext {
         return permitsNativeActions() && owner.input().automationOwnsControls() && owner.mutationAvailable(this);
     }
 
+    // 最近一次真的出手的刻号由控制边界记账：每刻新建的上下文只是转问它。
+    @Override public long lastInteractionTick() { return owner.lastClaimedTick(); }
+
     @Override public boolean tryClaimInteraction() {
         if (!canInteractThisTick()) return false;
         owner.claimMutation(this);
