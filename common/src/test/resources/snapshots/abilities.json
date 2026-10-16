@@ -268,8 +268,8 @@
       },
       {
         "ability": "maicraft:remember",
-        "summary": "记住或忘掉一个按名字叫的地点",
-        "parameters": "name: string, operation: string = remember",
+        "summary": "记住或忘掉一个按名字叫的地点，或把一片地方圈成玩家地盘",
+        "parameters": "name: string, operation: string = remember, radius?: integer",
         "targets": [
           "here",
           "landmark",
@@ -1513,24 +1513,33 @@
     },
     {
       "ability": "maicraft:remember",
-      "summary": "记住或忘掉一个按名字叫的地点",
+      "summary": "记住或忘掉一个按名字叫的地点，或把一片地方圈成玩家地盘",
       "parameters": [
         {
           "name": "name",
           "type": "string",
           "required": true,
-          "doc": "地点名；首尾空白去掉后原样比较，不改大小写"
+          "doc": "地点或地盘的名字；首尾空白去掉后原样比较，不改大小写"
         },
         {
           "name": "operation",
           "type": "string",
           "required": false,
-          "doc": "remember 记住（默认，同名覆盖），forget 忘掉",
+          "doc": "remember 记住地点（默认，同名覆盖），forget 忘掉同名的地点与地盘，region 以目标为中心圈一块玩家地盘（里面的方块不拆、箱子不取用）",
           "default": "remember",
           "choices": [
             "remember",
-            "forget"
+            "forget",
+            "region"
           ]
+        },
+        {
+          "name": "radius",
+          "type": "integer",
+          "required": false,
+          "doc": "只用于 region：地盘半径，单位格，默认 8",
+          "min": 1,
+          "max": 64
         }
       ],
       "targets": [

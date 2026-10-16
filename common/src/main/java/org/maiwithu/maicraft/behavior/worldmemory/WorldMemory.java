@@ -190,6 +190,11 @@ public final class WorldMemory implements RemembersPlaces, RemembersRegions, Rem
                 .toList();
     }
 
+    /** 按名字查记住的区域：圈地盘时说清原来圈的是哪儿、忘掉时知道有没有这一块；没圈过就给空。 */
+    public Optional<RememberedRegion> region(String name) {
+        return Optional.ofNullable(readBook().regions().get(name));
+    }
+
     /** 查某个位置某类东西的记忆；没有就给空。 */
     public Optional<MemoryRecord> recordAt(MemoryKind kind, WorldPosition position) {
         return readBook().records().stream()

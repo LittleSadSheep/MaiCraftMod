@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.maiwithu.maicraft.behavior.acquire.ReadsCharacterPosition;
 import org.maiwithu.maicraft.behavior.travel.ReadsSeenTargets;
+import org.maiwithu.maicraft.behavior.worldmemory.RememberedRegion;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
@@ -223,5 +224,113 @@ class RememberAbilityTest {
         assertEquals(Problem.Kind.NOT_FOUND, finish.result().problem().kind());
         assertTrue(finish.result().problem().message().contains("矿洞"),
                 "失败要说清记得的地点都有什么：" + finish.result().problem().message());
+    }
+
+    @Test
+    void regionAroundHereUsesTheDefaultRadius() {
+        // 站在基地门口说"这一片是我的"：以脚下为中心圈 8 格，圈下立刻能查到，片里的格子算在地盘里。
+        StepDecision.Run run = assertInstanceOf(StepDecision.Run.class,
+                ability.decide(step(goal(null, "{\"name\":\"基地\",\"operation\":\"region\"}"))));
+        TaskResult result = runToFinish(run);
+        assertEquals(TaskResult.Status.DONE, result.status());
+        RememberedRegion region = memory.region("基地").orElseThrow();
+        assertEquals(new WorldPosition(12, 64, -8, "minecraft:overworld"), region.center());
+        assertEquals(RememberAbility.DEFAULT_REGION_RADIUS, region.radiusBlocks());
+        assertTrue(region.contains(new WorldPosition(15, 64, -5, "minecraft:overworld")));
+        assertTrue(memory.place("基地").isEmpty(), "圈地盘不顺手记成地点：两本账");
+    }
+
+    @Test
+    void regionCanBeCenteredOnACoordinateWithAGivenRadius() {
+        StepDecision.Run run = assertInstanceOf(StepDecision.Run.class,
+                ability.decide(step(goal(new Target.Position(100, 70, 100, null),
+                        "{\"name\":\"农场\",\"operation\":\"region\",\"radius\":20}"))));
+        runToFinish(run);
+        RememberedRegion region = memory.region("农场").orElseThrow();
+        assertEquals(new WorldPosition(100, 70, 100, "minecraft:overworld"), region.center(), "没写维度按此刻所在维度");
+        assertEquals(20, region.radiusBlocks());
+    }
+
+    @Test
+    void radiusOutOfRangeIsRejectedByTheParameterCheck() {
+        assertFalse(ability.spec().paramSpecs().parse(JsonParser.parseString(
+                "{\"name\":\"大地盘\",\"operation\":\"region\",\"radius\":65}").getAsJsonObject()).ok());
+        assertFalse(ability.spec().paramSpecs().parse(JsonParser.parseString(
+                "{\"name\":\"小地盘\",\"operation\":\"region\",\"radius\":0}").getAsJsonObject()).ok());
+    }
+
+    @Test
+    void radiusWithoutRegionIsAParameterError() {
+        // 给了半径却没写 region：只记一个点会让 LLM 以为那片受保护了，如实报参数错，什么也不记。
+        StepDecision.Finish finish = assertInstanceOf(StepDecision.Finish.class,
+                ability.decide(step(goal(null, "{\"name\":\"基地\",\"radius\":12}"))));
+        assertEquals(Problem.Kind.INVALID_PARAMETER, finish.result().problem().kind());
+        assertTrue(memory.place("基地").isEmpty());
+        assertTrue(memory.region("基地").isEmpty());
+    }
+
+    @Test
+    void regionOverwriteReportsTheOldShape() {
+        memory.rememberRegion("基地", new WorldPosition(0, 64, 0, "minecraft:overworld"), 8);
+
+        StepDecision.Run run = assertInstanceOf(StepDecision.Run.class,
+                ability.decide(step(goal(null, "{\"name\":\"基地\",\"operation\":\"region\",\"radius\":16}"))));
+        TaskResult result = runToFinish(run);
+        RememberPlaceTask.RememberDetails details =
+                assertInstanceOf(RememberPlaceTask.RememberDetails.class, result.details());
+        assertEquals(new WorldPosition(0, 64, 0, "minecraft:overworld"), details.previousPosition());
+        assertEquals(8, details.previousRadius());
+        assertEquals(16, details.radius());
+        assertEquals(16, memory.region("基地").orElseThrow().radiusBlocks());
+    }
+
+    @Test
+    void theSameRegionAgainFinishesWithoutWriting() {
+        memory.rememberRegion("基地", new WorldPosition(12, 64, -8, "minecraft:overworld"), 8);
+
+        StepDecision.Finish finish = assertInstanceOf(StepDecision.Finish.class,
+                ability.decide(step(goal(null, "{\"name\":\"基地\",\"operation\":\"region\"}"))));
+        assertEquals(TaskResult.Status.DONE, finish.result().status());
+        assertTrue(finish.result().summary().contains("本来就这样记着"));
+    }
+
+    @Test
+    void forgettingRemovesThePlaceAndTheRegionOfTheSameName() {
+        memory.remember("基地", new WorldPosition(12, 64, -8, "minecraft:overworld"));
+        memory.rememberRegion("基地", new WorldPosition(12, 64, -8, "minecraft:overworld"), 8);
+        memory.rememberRegion("农场", new WorldPosition(100, 70, 100, "minecraft:overworld"), 20);
+
+        StepDecision.Run run = assertInstanceOf(StepDecision.Run.class,
+                ability.decide(step(goal(null, "{\"name\":\"基地\",\"operation\":\"forget\"}"))));
+        TaskResult result = runToFinish(run);
+        assertTrue(result.summary().contains("地点和地盘"), result.summary());
+        assertTrue(memory.place("基地").isEmpty());
+        assertTrue(memory.region("基地").isEmpty());
+        assertTrue(memory.region("农场").isPresent(), "只忘名字对得上的那一块");
+        RememberPlaceTask.RememberDetails details =
+                assertInstanceOf(RememberPlaceTask.RememberDetails.class, result.details());
+        assertEquals(8, details.forgottenRegion().radius());
+    }
+
+    @Test
+    void forgettingOnlyARegionWorksWithoutAPlace() {
+        memory.rememberRegion("农场", new WorldPosition(100, 70, 100, "minecraft:overworld"), 20);
+
+        StepDecision.Run run = assertInstanceOf(StepDecision.Run.class,
+                ability.decide(step(goal(null, "{\"name\":\"农场\",\"operation\":\"forget\"}"))));
+        TaskResult result = runToFinish(run);
+        assertTrue(result.summary().contains("地盘「农场」"), result.summary());
+        assertTrue(memory.regions().isEmpty());
+    }
+
+    @Test
+    void forgettingAnUnknownNameAlsoListsRegions() {
+        memory.rememberRegion("农场", new WorldPosition(100, 70, 100, "minecraft:overworld"), 20);
+
+        StepDecision.Finish finish = assertInstanceOf(StepDecision.Finish.class,
+                ability.decide(step(goal(null, "{\"name\":\"基地\",\"operation\":\"forget\"}"))));
+        assertEquals(Problem.Kind.NOT_FOUND, finish.result().problem().kind());
+        assertTrue(finish.result().problem().message().contains("农场"),
+                "失败要说清圈过哪些地盘：" + finish.result().problem().message());
     }
 }
