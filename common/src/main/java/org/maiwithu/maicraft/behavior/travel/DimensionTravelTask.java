@@ -205,26 +205,11 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
                 if (DimensionRoute.END.equals(startDimension)) {
                     yield exitPortalRoute();
                 }
-                // 去末地外岛的坐标：主岛与外岛隔着虚空，到了只能对着折跃门扔珍珠过去；末地门又是单程，
-                // 不许用稀有品就在出发前说清，免得进了末地才发现过不去、困在那里。
-                if (outerIslandsWithoutPearls()) {
-                    yield Next.fail(Problem.of(Problem.Kind.NEED_APPROVAL,
-                            "去末地外岛要对着折跃门扔一颗末影珍珠，这次不许用稀有消耗品（use_rare_items=false）；"
-                                    + "末地门是单程，进去了才发现过不去就困在末地",
-                            "先把 use_rare_items 设为 true 再去"));
-                }
+                // 去末地外岛的坐标也直接走末地门：到了对着折跃门扔珍珠过去，珍珠是过门用的，不看 use_rare_items。
                 yield Next.go(Phase.FIND_PORTAL, "走末地传送门");
             }
             case NO_DIRECT_PORTAL, UNKNOWN_DIMENSION -> Next.fail(route.problem());
         };
-    }
-
-    /** 坐标在末地外岛（离 0,0 水平 512 格外）而这次不许用稀有品：到了末地也过不去虚空。 */
-    private boolean outerIslandsWithoutPearls() {
-        TravelDestination destination = journey.destination();
-        return destination != null && DimensionRoute.END.equals(journey.targetDimension())
-                && EndIslands.sideOf(destination.center()) == EndIslands.Side.OUTER_ISLANDS
-                && !journey.permissions().useRareItems();
     }
 
     /**

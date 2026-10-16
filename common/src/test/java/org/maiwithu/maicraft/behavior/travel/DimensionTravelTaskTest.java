@@ -544,17 +544,18 @@ class DimensionTravelTaskTest {
     }
 
     @Test
-    void outerIslandSpotWithoutRareItemsStopsBeforeTheOneWayPortal() {
-        // 去外岛要扔珍珠、末地门又是单程：不许用稀有品就在主世界说清，不找门、不走一步。
+    void outerIslandSpotWithoutRareItemsStillGoesInOneTrip() {
+        // use_rare_items 关着也照走：珍珠是过门用的，进末地门、对着门扔一颗过去、走完剩下的路。
+        DimensionTravelServices with = pearlServices();
         endPortalToPlatform();
-        TaskResult result = run(taskToOuterIslands(Permissions.DEFAULT, pearlServices()));
+        DimensionFakes.gateAt(world, EAST_GATE);
+        world.blocks.put(EAST_GATE.offset(3, -2, 0), Blocks.END_STONE.defaultBlockState());
+        carryOnePearl();
+        throwLandsAt(OUTER_FEET, null);
+        TaskResult result = run(taskToOuterIslands(Permissions.DEFAULT, with));
 
-        assertEquals(TaskResult.Status.FAILED, result.status());
-        assertEquals(Problem.Kind.NEED_APPROVAL, result.problem().kind());
-        assertTrue(result.problem().message().contains("单程"), result.problem().message());
-        assertTrue(result.problem().suggestion().contains("use_rare_items"), result.problem().suggestion());
-        assertTrue(walks.started.isEmpty(), "一步不走");
-        assertEquals(DimensionRoute.OVERWORLD, world.dimension);
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary() + " / " + result.problem());
+        assertEquals(List.of(EAST_GATE), throwing.aimedAt);
     }
 
     @Test
@@ -617,14 +618,20 @@ class DimensionTravelTaskTest {
     }
 
     @Test
-    void outerIslandsGatewayRefusedEndsSayingStillOnTheOuterIslands() {
-        // 不许用稀有品：回主岛的折跃门过不了，照它的原因结束，说清人还在外岛，一步不往别处走。
-        TaskResult result = run(taskHomeFromTheOuterIslands(Permissions.DEFAULT));
+    void outerIslandsGatewayMissingEndsSayingStillOnTheOuterIslands() {
+        // 外岛附近一扇折跃门都没有：回主岛的那一段过不了，照它的原因结束，说清人还在外岛，一步不往别处走。
+        world.dimension = DimensionRoute.END;
+        world.feet = OUTER_FEET;
+        world.exitLoaded = false;
+        world.enqueueScan(new DimensionWorldView.Scan(List.of(), true));
+        carryOnePearl();
+        DimensionTravelServices with = pearlServices();
+        TaskResult result = run(new DimensionTravelTask(new DimensionTravelTask.Journey(DimensionRoute.OVERWORLD, null,
+                128, 0, Permissions.DEFAULT), with, journeysIn(with)));
 
         assertEquals(TaskResult.Status.FAILED, result.status());
-        assertEquals(Problem.Kind.NEED_APPROVAL, result.problem().kind());
+        assertEquals(Problem.Kind.NOT_FOUND, result.problem().kind());
         assertTrue(result.problem().message().startsWith("人在外岛，回主岛的折跃门没过成："), result.problem().message());
-        assertTrue(result.problem().message().contains("use_rare_items"), result.problem().message());
         assertTrue(walks.started.isEmpty());
         assertTrue(throwing.aimedAt.isEmpty());
     }
