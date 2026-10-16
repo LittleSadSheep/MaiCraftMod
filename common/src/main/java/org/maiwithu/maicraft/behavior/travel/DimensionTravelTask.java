@@ -171,16 +171,20 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
     }
 
     /**
-     * 末地回程：先看主岛中心的出口门。看不见门（那一片没加载）就说先回主岛；门没亮是龙还活着，
+     * 末地回程：先看主岛中心的出口门。看不见门（那一片没加载）就说先回主岛：人在外岛时指明过折跃门回去；门没亮是龙还活着，
      * 要先打龙，不去找别的门也不代打；门亮了就把门洞那一层连成一片的门格当这扇门，走过去跳进去。
      */
     private Next<Phase> exitPortalRoute() {
         EndExitPortal.Sighting exit = services.world().exitPortal();
         if (exit == null || !exit.loaded()) {
+            // 人在外岛：中间隔着虚空走不回去，回主岛要对着折跃门扔珍珠，建议里直接说怎么下这一步。
+            boolean outer = startFeet != null && EndIslands.sideOf(startFeet) == EndIslands.Side.OUTER_ISLANDS;
             return Next.fail(Problem.of(Problem.Kind.NOT_FOUND,
                     "主岛中心 (" + EndExitPortal.CENTER_X + ", " + EndExitPortal.CENTER_Z
                             + ") 那一片没加载，看不见出口门亮没亮",
-                    "先回主岛（离 0, 0 一百多格内）再出行回主世界"));
+                    outer ? "人在外岛：先用 travel 给 via=" + PearlCrossing.VIA.name()
+                            + "（不给 target）过折跃门回主岛，再出行回主世界"
+                            : "先回主岛（离 0, 0 一百多格内）再出行回主世界"));
         }
         Set<Long> cells = exit.lit() ? exitPortalCells(exit.center()) : Set.of();
         if (cells.isEmpty()) {

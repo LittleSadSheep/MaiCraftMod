@@ -325,6 +325,18 @@ class DimensionTravelTaskTest {
     }
 
     @Test
+    void onTheOuterIslandsTheSuggestionPointsAtTheEndGateway() {
+        // 人在外岛：回主岛走不过去，建议里直接说用 via=end_gateway 过折跃门回去。
+        world.exitLoaded = false;
+        world.dimension = DimensionRoute.END;
+        world.feet = new BlockPos(1100, 60, 0);
+        TaskResult result = run(taskHomeFromTheEnd());
+
+        assertEquals(Problem.Kind.NOT_FOUND, result.problem().kind());
+        assertTrue(result.problem().suggestion().contains("via=end_gateway"), result.problem().suggestion());
+    }
+
+    @Test
     void respawnAnchorInTheNetherKeepsGoingThroughANetherPortal() {
         // 重生锚设在下界：出口门先送到下界，从那里接着走下界门回主世界，结果里先交代这一段。
         world.lightExitPortal();
