@@ -51,6 +51,20 @@ class AcquisitionSelectorTest {
     }
 
     @Test
+    void 要等的按等多久折算_等得久的排在走几步就拿得到的后面() {
+        // 网络下单要等半分钟（600 刻折 129 格），比走 60 格去箱子里拿还慢；只等五秒（100 刻折 21.5 格）就比它快。
+        SourceQuote.Offer slowOrder = new SourceQuote.Offer("网络下单", 8, new AcquisitionCost(0, 3).withWait(600), null);
+        SourceQuote.Offer quickOrder = new SourceQuote.Offer("网络下单", 8, new AcquisitionCost(0, 3).withWait(100), null);
+        SourceQuote.Offer chest = offer("箱子", 8, 60, 4);
+        assertEquals(List.of("箱子"), AcquisitionSelector.choose(List.of(slowOrder, chest), 8).stream()
+                .map(SourceQuote.Offer::source).toList());
+        assertEquals(List.of("网络下单"), AcquisitionSelector.choose(List.of(chest, quickOrder), 8).stream()
+                .map(SourceQuote.Offer::source).toList());
+        assertEquals(new AcquisitionCost(0, 3).total() + 600 * 4.3 / 20, slowOrder.cost().total(), 1e-9,
+                "站着等一秒按走路一秒折算");
+    }
+
+    @Test
     void 一条报价都没有_计划为空() {
         assertTrue(AcquisitionSelector.choose(List.of(), 3).isEmpty());
     }

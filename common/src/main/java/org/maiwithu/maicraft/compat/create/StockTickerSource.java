@@ -72,8 +72,7 @@ final class StockTickerSource implements ItemSource {
             case Choice.None none -> new SourceQuote.Unavailable(describe(), none.reason());
             case Choice.Found found -> found.ticker().ticksSinceUpdate() <= FRESH_TICKS
                     ? stockedOffer(found, wanted, request.count(), at)
-                    : new SourceQuote.Offer(describe(), SourceQuote.Offer.UNKNOWN_COUNT,
-                            new AcquisitionCost(Math.sqrt(found.ticker().pos().distSqr(at)), ACTIONS),
+                    : new SourceQuote.Offer(describe(), SourceQuote.Offer.UNKNOWN_COUNT, cost(found, at),
                             "这台请求器的现货很久没看过，到了再看；包裹寄到 " + found.pickup().address(), found.hint());
         };
     }
@@ -82,9 +81,15 @@ final class StockTickerSource implements ItemSource {
         int stock = found.ticker().stock().entrySet().stream().filter(entry -> wanted.test(entry.getKey()))
                 .mapToInt(Map.Entry::getValue).sum();
         if (stock <= 0) return new SourceQuote.Unavailable(describe(), "库存请求器同步来的现货里没有");
-        return new SourceQuote.Offer(describe(), Math.min(stock, count),
-                new AcquisitionCost(Math.sqrt(found.ticker().pos().distSqr(at)), ACTIONS),
+        return new SourceQuote.Offer(describe(), Math.min(stock, count), cost(found, at),
                 "下单后包裹顺着物流网络送到 " + found.pickup().address() + "，要等它到", found.hint());
+    }
+
+    // 走到请求器、下单、到取货口取的代价，再加上站在取货口等包裹的时间：包裹不是立等可取，
+    // 箱子里、身上现成的排在前面。
+    private static AcquisitionCost cost(Choice.Found found, BlockPos at) {
+        return new AcquisitionCost(Math.sqrt(found.ticker().pos().distSqr(at)), ACTIONS)
+                .withWait(ParcelWait.EXPECTED_TICKS);
     }
 
     @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {

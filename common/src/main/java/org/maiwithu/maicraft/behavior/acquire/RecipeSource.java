@@ -150,8 +150,15 @@ public final class RecipeSource implements ItemSource {
         }
         int times = timesNeeded(recipe, request.count());
         return new SourceQuote.Offer(describe(), request.count(),
-                new AcquisitionCost(distance(station.get(), context), 6 + recipe.ingredients().size(), shortfall),
+                new AcquisitionCost(distance(station.get(), context), 6 + recipe.ingredients().size(), shortfall)
+                        .withWait(cookWait(recipe, times)),
                 riskNote(recipe, times, context), recipe.id());
+    }
+
+    // 烧炼要站着等炉子烧完：每件按这种炉子的规划时长算（熔炉 200 刻、高炉烟熏炉 100 刻），合成、切石不用等。
+    // 报价算上它，烧一炉铁要好几分钟时，箱子里、网络里现成的排在前面。
+    private static long cookWait(WorkstationRecipe recipe, int times) {
+        return (long) recipe.kind().plannedCookTicks() * times;
     }
 
     @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
@@ -684,7 +691,8 @@ public final class RecipeSource implements ItemSource {
                             + "，就地放一个需要改方块的许可，这次的许可不给");
         }
         return new SourceQuote.Offer(describe(), count,
-                new AcquisitionCost(0, 8 + recipe.ingredients().size(), shortfall),
+                new AcquisitionCost(0, 8 + recipe.ingredients().size(), shortfall)
+                        .withWait(cookWait(recipe, timesNeeded(recipe, count))),
                 "附近没有" + recipe.kind().displayName() + "，会在身边放一个（消耗一个）并记下位置",
                 recipe.id());
     }

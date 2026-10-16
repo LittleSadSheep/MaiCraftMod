@@ -437,6 +437,7 @@ class RecipeSourceTest {
                 recipeSource.quote(new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), 1, "工具准备"), CONTEXT));
         assertEquals("minecraft:iron_ingot_from_blasting_raw_iron", offer.hint(), "记得高炉就在高炉烧");
         assertTrue(offer.risk().contains("高炉"), offer.risk());
+        assertEquals(100, offer.cost().waitTicks(), "高炉烧一件 100 刻，报价算上站着等炉子的时间");
     }
 
     @Test

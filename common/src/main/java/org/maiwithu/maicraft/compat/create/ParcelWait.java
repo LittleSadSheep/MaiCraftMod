@@ -31,6 +31,11 @@ final class ParcelWait implements Action {
     static final int IDLE_TICKS = 20 * 60;
     /** 最多等多久（刻）：五分钟；类别：玩家常识。 */
     static final int TOTAL_TICKS = 20 * 60 * 5;
+    /**
+     * 报价时估包裹多久到（刻），只拿来和别的途径比快慢：打包、顺着链条输送机或青蛙港送到取货口，
+     * 近的十几秒；包裹在路上走到哪看不见，一律按二十秒算。实际等多久以取货口为准。
+     */
+    static final int EXPECTED_TICKS = 20 * 20;
 
     private final int ordered;
     private final ToIntFunction<TickContext> arrivals;

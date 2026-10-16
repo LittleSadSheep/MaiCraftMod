@@ -66,4 +66,11 @@ class CraftWaitTest {
                 "服务端的开工还没到，不能当成这单已经结束");
         assertEquals(CraftWait.Verdict.IDLE, idle(wait, CraftWait.IDLE_TICKS, 0, false), "只按两分钟没新的收场");
     }
+
+    @Test
+    void 报价估等多久_起步一秒每件十刻_最多按五分钟算() {
+        assertEquals(0, CraftWait.expectedTicks(0), "现货够、不用下单就不用等");
+        assertEquals(CraftWait.ORDER_TICKS + 44L * CraftWait.TICKS_PER_ITEM, CraftWait.expectedTicks(44));
+        assertEquals(CraftWait.TOTAL_TICKS, CraftWait.expectedTicks(36 * 64), "再多也不会站着等过五分钟");
+    }
 }

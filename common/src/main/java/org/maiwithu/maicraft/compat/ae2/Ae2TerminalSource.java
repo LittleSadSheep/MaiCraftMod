@@ -106,12 +106,14 @@ public final class Ae2TerminalSource implements ItemSource {
     /**
      * 把挑终端的结论写成报价：记得有货报明确数量（不超过这次要的），记得网络里有样板按够数报（现货不够在终端里下单补上），
      * 没看过报不知道有多少，都用不上报给不了。报价线索记着是哪一格哪一面的终端，动手时原样带回来。
+     * 现货不够要下单的，代价里算上站在终端前等网络做好缺口的时间：慢慢等 AE2 做几十件，未必比身上有料手搓快。
      */
     static SourceQuote quoteFrom(TerminalChooser.Choice choice, ItemRequest request, String source, Instant now) {
         return switch (choice) {
             case TerminalChooser.Known known -> new SourceQuote.Offer(source,
                     known.craftable() ? request.count() : (int) Math.min(known.count(), request.count()),
-                    new AcquisitionCost(known.candidate().distance(), ACTIONS_PER_VISIT),
+                    new AcquisitionCost(known.candidate().distance(), ACTIONS_PER_VISIT)
+                            .withWait(orderWait(known.craftable(), known.count(), request)),
                     "记的是" + ago(known.candidate().seen().orElseThrow().seenAt(), now) + "在终端里看到的"
                             + (known.craftable() ? "：现货 " + known.count() + " 件，不够的在网络里下单合成" : "数")
                             + "，到了以终端里为准",
@@ -202,8 +204,10 @@ public final class Ae2TerminalSource implements ItemSource {
             return new SourceQuote.Offer(source, SourceQuote.Offer.UNKNOWN_COUNT, cost,
                     "上次打开时没连上网络（超出范围或没电），不知道现在好了没有，打开看一眼", hint);
         }
+        // 记得有样板、现货不够：缺口要在网络里下单等它做好，代价算上等的时间。
+        AcquisitionCost ordering = cost.withWait(orderWait(seen.craftable(wanted), seen.count(wanted), request));
         if (seen.count(wanted) > 0 && seen.craftable(wanted)) {
-            return new SourceQuote.Offer(source, request.count(), cost,
+            return new SourceQuote.Offer(source, request.count(), ordering,
                     "用身上的无线终端取，上次打开时现货 " + seen.count(wanted) + " 件，不够的在网络里下单合成", hint);
         }
         if (seen.count(wanted) > 0) {
@@ -211,7 +215,7 @@ public final class Ae2TerminalSource implements ItemSource {
                     "用身上的无线终端取，记的是上次打开时看到的数，打开后以界面里为准", hint);
         }
         if (seen.craftable(wanted)) {
-            return new SourceQuote.Offer(source, request.count(), cost,
+            return new SourceQuote.Offer(source, request.count(), ordering,
                     "网络里没现货但有样板，用身上的无线终端下单合成，等做好再取", hint);
         }
         // 上次只看到了第一包存货（取到想要的就关了，后面的包还没到）：没看见不等于没有，打开再看一眼。
@@ -221,6 +225,11 @@ public final class Ae2TerminalSource implements ItemSource {
                     "上次打开时存货还没同步齐，没看到这样东西，打开再看一眼", hint);
         }
         return new SourceQuote.Unavailable(source, "身上的无线终端连着的网络里，上次打开时既没有这样东西也没有样板");
+    }
+
+    // 现货不够、记得有样板时，要站在终端前等网络做好缺口的时长（刻）；现货够或没样板为 0。
+    private static long orderWait(boolean craftable, long stock, ItemRequest request) {
+        return craftable ? CraftWait.expectedTicks(request.count() - stock) : 0;
     }
 
     private SourceQuote wirelessQuote(String itemId, ItemRequest request, Instant now) {

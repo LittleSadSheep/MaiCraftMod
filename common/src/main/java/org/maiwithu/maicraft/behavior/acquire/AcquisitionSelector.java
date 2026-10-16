@@ -8,6 +8,8 @@ import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 
 /**
  * 挑来源：把各来源的报价按总代价从低到高排，凑够要的数量为止。
+ * 总代价连同动手以后要站着等的时长一起比：AE2 下单、熔炉烧、库存请求器寄包裹都不是立等可取，
+ * 等得久的排在走几步就拿得到的后面，身上有料、手搓更快时不去干等网络慢慢做。
  * 数量明确的报价按代价直接排；只记得有箱子、不知道里面有什么的报价排在明确够数的后面——
  * 有确定的货就不赌运气。这是纯计算，不读世界也不动手。
  */
@@ -25,6 +27,7 @@ public final class AcquisitionSelector {
         for (SourceQuote.Offer offer : offers) {
             (offer.countUnknown() ? unknown : known).add(offer);
         }
+        // 按总代价排：走多远、做几下、缺料、要等多久折到同一把尺子上。
         known.sort(Comparator.comparing(offer -> offer.cost()));
         unknown.sort(Comparator.comparing(offer -> offer.cost()));
 

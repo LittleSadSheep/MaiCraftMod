@@ -16,6 +16,10 @@ final class CraftWait {
     static final int TOTAL_TICKS = 20 * 300;
     /** AE2 报这单结束后，等终端里的存货同步过来再下结论的宽限（刻）。 */
     static final int ENDED_SETTLE_TICKS = 40;
+    /** 报价时估下单的起步时间（刻）：点合成、填数量、网络算料、第一批成品进网络，大约一秒。 */
+    static final int ORDER_TICKS = 20;
+    /** 报价时估每做一件要多久（刻）：没装加速卡的 ae2:molecular_assembler 做一次 10 刻；一次出几件、过机器的加工样板快慢不一，不细分。 */
+    static final int TICKS_PER_ITEM = 10;
 
     /** 这一刻的结论。 */
     enum Verdict {
@@ -76,5 +80,14 @@ final class CraftWait {
     /** 开始等以后到了几件。 */
     int arrived() {
         return lastTaken - takenAtStart;
+    }
+
+    /**
+     * 报价时估下单补 toCraft 件要站在终端前等多久（刻），只拿来和手搓、去箱子里拿比快慢：
+     * 起步一秒，之后每件 10 刻，最多按等待上限五分钟算——再久也不会站着等下去。现货够、不用下单为 0。
+     */
+    static long expectedTicks(long toCraft) {
+        if (toCraft <= 0) return 0;
+        return Math.min(TOTAL_TICKS, ORDER_TICKS + toCraft * TICKS_PER_ITEM);
     }
 }

@@ -156,6 +156,7 @@ class Ae2TerminalSourceTest {
                 Ae2TerminalSource.quoteFrom(new TerminalChooser.Known(candidate, 200), torches(8), "ME 终端", NOW));
         assertEquals(8, offer.obtainableCount());
         assertEquals(12, offer.cost().distanceBlocks());
+        assertEquals(0, offer.cost().waitTicks(), "现货够，取了就走，不用等");
         assertTrue(offer.risk().contains("1 分钟前"), offer.risk());
         assertEquals("3,64,0,north", offer.hint());
     }
@@ -169,11 +170,13 @@ class Ae2TerminalSourceTest {
                 Ae2TerminalSource.quoteFrom(new TerminalChooser.Known(candidate, 3, true), torches(8), "ME 终端", NOW));
         assertEquals(8, offer.obtainableCount(), "不够的在终端里下单补上，不把缺口拆给手搓");
         assertTrue(offer.risk().contains("现货 3 件，不够的在网络里下单合成"), offer.risk());
+        assertEquals(CraftWait.expectedTicks(5), offer.cost().waitTicks(), "缺的 5 件要站在终端前等网络做好");
 
         SourceQuote.Offer wireless = assertInstanceOf(SourceQuote.Offer.class, Ae2TerminalSource.wirelessQuote(
                 "ae2:wireless_terminal", torches(8), Optional.of(new SeenNetworkStock.Sighting(true,
                         Map.of("minecraft:torch", 3L), NOW, Set.of("minecraft:torch"))), "minecraft:torch"::equals));
         assertEquals(8, wireless.obtainableCount(), "身上的无线终端也一样：有样板就按够数报");
+        assertEquals(CraftWait.expectedTicks(5), wireless.cost().waitTicks(), "无线终端下单也一样要等");
     }
 
     @Test
@@ -218,6 +221,8 @@ class Ae2TerminalSourceTest {
                 "ae2:wireless_crafting_terminal", torches(8),
                 Optional.of(new SeenNetworkStock.Sighting(true, Map.of(), NOW, Set.of("minecraft:torch"))), torch));
         assertEquals(8, byPattern.obtainableCount(), "没现货但有样板：到了在网络里下单");
+        assertEquals(CraftWait.expectedTicks(8), byPattern.cost().waitTicks(), "一件现货都没有，八件都要等网络做");
+        assertEquals(0, fresh.cost().waitTicks(), "还没打开过：不知道要不要下单，不按等待算");
 
         assertInstanceOf(SourceQuote.Unavailable.class, Ae2TerminalSource.wirelessQuote(
                 "ae2:wireless_crafting_terminal", torches(8),
