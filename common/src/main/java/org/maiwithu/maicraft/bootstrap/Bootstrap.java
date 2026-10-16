@@ -51,6 +51,7 @@ import org.maiwithu.maicraft.behavior.lighting.LiveLightingWorld;
 import org.maiwithu.maicraft.behavior.lighting.LightingWorld;
 import org.maiwithu.maicraft.behavior.perception.DimensionChanges;
 import org.maiwithu.maicraft.behavior.perception.HurtEpisodes;
+import org.maiwithu.maicraft.behavior.perception.SkyChanges;
 import org.maiwithu.maicraft.behavior.survival.BreathNeed;
 import org.maiwithu.maicraft.behavior.combat.ModRangedWeapons;
 import org.maiwithu.maicraft.behavior.survival.DarknessNeed;
@@ -318,20 +319,21 @@ public final class Bootstrap {
         private final UseKeyHold useKeyHold = new UseKeyHold();
         private final SubtitleFeed subtitles = new SubtitleFeed();
         private final McpConfig mcpConfig = McpConfig.localForProcess(8766);
-        // 能力注册表客户端全程一份：进世界时按清单把各能力登记进来，退世界清掉，不跨世界残留；
-        // 能力需要的模组装没装由加载器回答，没装的能力不登记。
+        // 能力注册表客户端全程一份：进世界时按清单把各能力登记进来，退世界清掉，不跨世界残留；能力需要的模组装没装由加载器回答，没装的能力不登记。
         private final AbilityRegistry abilities;
         /** 这个加载器的联动清单；客户端启动完成时逐行检查成登记表。 */
         private final List<SupportedMod<CompatModule>> compatCatalog;
         /** 联动登记表：启动完成前是空的，之后是按清单检查过的那份；进世界建能力清单时把登记的来源交进去。 */
         private CompatRegistry compat = CompatRegistry.empty();
-        /** 挨打的片段与换维度：每刻看一眼，到点发事件。 */
+        /** 挨打的片段：每刻看一眼，到点发事件。 */
         private HurtEpisodes hurtEpisodes;
-        private DimensionChanges dimensionChanges;
         // MCP 请求线程排工作、客户端刻里做：下达、暂停、回答与控制循环推进在同一个线程上。
         private final ClientTickWork clientWork = new ClientTickWork();
         // 任务事件流一份：目标处境变化与生存需求的事件都进它，events 工具从这里读。
         private final TaskEventLog taskEvents = new TaskEventLog();
+        // 换维度与天色变化（天黑天亮、下雨雨停）：每刻看一眼，变了发事件，LLM 靠后者安排睡觉和户外的活。
+        private final DimensionChanges dimensionChanges = new DimensionChanges(taskEvents);
+        private final SkyChanges skyChanges = new SkyChanges(taskEvents);
         // 聊天事件流一份：聊天栏收到的消息进它，events(topic=chat) 从这里读；和任务事件分开，刷屏挤不掉目标的事件。
         private final ChatEventLog chatEvents = new ChatEventLog();
         private final WorldScope[] worldScope = new WorldScope[1];
@@ -366,8 +368,7 @@ public final class Bootstrap {
         private ToolDispatcher tools;
         private GoalRunTable goals;
         // 启动自动接管开关：maicraft.automation.on_join 开启时，进世界逐刻请求控制权直到拿到（默认关）。
-        // 它只管"进世界就接管"这一段：拿到之后开关就不再管，之后由目标下达的时机决定何时再请求，
-        // 人类按 F8 抢回不会被开关立刻夺回。重新进世界（现场重建）时重新生效。
+        // 它只管"进世界就接管"这一段：拿到之后开关就不再管，之后由目标下达的时机决定何时再请求，人类按 F8 抢回不会被开关立刻夺回；重新进世界（现场重建）时重新生效。
         private final boolean automationOnJoin = Boolean.getBoolean("maicraft.automation.on_join");
         private boolean startupAutomationPending;
         /** 上一刻自动化是否拿着角色；变了就记一行日志，排查"下了目标却不动"时先看这里。 */
@@ -420,11 +421,10 @@ public final class Bootstrap {
             // 一次伤害包两处要：自卫的伤害证据，与提醒（黑暗里挨打、战斗压力）。
             CombatMemory memory = combatMemory;
             PlayerReminders playerReminders = reminders;
-            // 挨打的片段与换维度：攻击者看得见时带观察编号；碰着方块扎的先由吃过亏的方块认出、记下，那一句才说得出是它。
+            // 挨打的片段：攻击者看得见时带观察编号；碰着方块扎的先由吃过亏的方块认出、记下，那一句才说得出是它。
             hurtEpisodes = new HurtEpisodes(taskEvents, entityId -> worldScope[0] == null ? Optional.empty()
                     : worldScope[0].scene().seen().idOfEntity(entityId), type -> worldScope[0] == null
                     ? Optional.empty() : worldScope[0].pains().culpritOf(type));
-            dimensionChanges = new DimensionChanges(taskEvents);
             HurtEpisodes hurts = hurtEpisodes;
             ClientHooks.registerDamageObserver((player, source, tick) -> {
                 memory.hurt(player, source, tick);
@@ -526,8 +526,7 @@ public final class Bootstrap {
             ModRangedWeapons ranged = new ModRangedWeapons(() -> compat.rangedWeapons(), foods);
             combatSenses = new LiveCombatSenses(combatMemory, foods, ranged);
             // 控制循环按急迫程度登记生存需求：必须立刻处理的先登记，同样急时它先插进来；
-            // 生存需求的事件从同一条任务事件流出去。主任务由目标运行表挂上：LLM 用 execute 派了活，
-            // 目标就成为主任务。
+            // 生存需求的事件从同一条任务事件流出去。主任务由目标运行表挂上：LLM 用 execute 派了活，目标就成为主任务。
             // 交互动作入口与按住使用键投影：生存需求的落地放水、能力清单在进世界时都用它们。
             interactions = new Interactions(useKeyProjection);
             // 挖三填一：挖用原生挖掘、封口换方块原生放下、出坑用走到；脚下是不是别人的东西问当前世界的保护判断。
@@ -657,8 +656,8 @@ public final class Bootstrap {
                 followLighting.reset();
                 // 夜里自动去睡回默认（开）：上个世界里有人说"晚上别睡"，不带到这个世界。
                 survivalWiring.autoSleep().reset();
-                // 换了世界，任务事件流换一条新的，宿主手里的旧游标如实作废；再把这个世界上次没做完的目标
-                // 读回来，全部恢复为暂停，等 LLM 决定接不接着做。读回时的暂停事件进的是新的这条流。
+                // 换了世界，任务事件流换一条新的，宿主手里的旧游标如实作废；再把这个世界上次没做完的目标读回来，
+                // 全部恢复为暂停，等 LLM 决定接不接着做。读回时的暂停事件进的是新的这条流。
                 taskEvents.restart();
                 goals.enterWorld(scope.memory(), new EventPublishingGoalRunStore(
                         new NotesGoalGains(scope.goalRuns(), itemsInUse), taskEvents));
@@ -669,13 +668,13 @@ public final class Bootstrap {
             }
         }
 
-        // 离开世界：没做完的目标停手存成暂停（下次进这个世界时恢复），再把世界记忆里还没存盘的改动写下去，
-        // 最后丢掉现场；不让目标跟进下一个世界接着跑。方块扫描索引按维度名分开，不清空的话
-        // 下一个世界的同名维度会读到上一个世界的命中。
+        // 离开世界：没做完的目标停手存成暂停（下次进这个世界时恢复），再把世界记忆里还没存盘的改动写下去，最后丢掉现场；
+        // 不让目标跟进下一个世界接着跑。方块扫描索引按维度名分开，不清空的话下一个世界的同名维度会读到上一个世界的命中。
         private void leaveWorld() {
-            // 换世界、断线：没发出的挨打片段丢掉，维度基准重来。
+            // 换世界、断线：没发出的挨打片段丢掉，维度与天色基准重来。
             if (hurtEpisodes != null) hurtEpisodes.forget();
-            if (dimensionChanges != null) dimensionChanges.forget();
+            dimensionChanges.forget();
+            skyChanges.forget();
             if (worldScope[0] != null) {
                 goals.leaveWorld();
                 worldScope[0].leave();
@@ -719,9 +718,10 @@ public final class Bootstrap {
             }
             // 提醒每刻看一遍角色：人自己玩的时候也照样看，LLM 该知道的事不因控制权换手断掉。
             if (reminders != null) tickGuard.run("提醒", () -> reminders.tick(current));
-            // 挨打的片段到点发、维度变了发：人自己玩的时候也照样发。
+            // 挨打的片段到点发、维度变了发、天黑天亮下雨雨停发：人自己玩的时候也照样发。
             if (hurtEpisodes != null) tickGuard.run("挨打片段", () -> hurtEpisodes.tick(current));
-            if (dimensionChanges != null) tickGuard.run("换维度", () -> dimensionChanges.tick(current));
+            tickGuard.run("换维度", () -> dimensionChanges.tick(current));
+            tickGuard.run("天色变化", () -> skyChanges.tick(current));
             clientWork.drain(new ClientTickContext(gameTick, current));
             boolean owned = playerControl.input().automationOwnsControls();
             if (owned != automationOwned) {

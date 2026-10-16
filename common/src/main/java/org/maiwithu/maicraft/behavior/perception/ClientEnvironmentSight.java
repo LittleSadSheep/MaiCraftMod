@@ -54,15 +54,20 @@ public final class ClientEnvironmentSight implements EnvironmentSight {
         };
     }
 
+    /** 天气词：雷暴、雨、晴。天色变化事件拿同一份词判断开始下雨、雨停。 */
+    static final String THUNDER = "雷暴";
+    static final String RAIN = "雨";
+    static final String CLEAR = "晴";
+
     // 天气词：雷暴比雨大，先判雷暴；阈值取一半，雨量阈值以下的毛毛雨不折腾观察。纯函数。
     static String weatherWord(float rainLevel, float thunderLevel) {
         if (thunderLevel >= 0.5F) {
-            return "雷暴";
+            return THUNDER;
         }
         if (rainLevel >= 0.5F) {
-            return "雨";
+            return RAIN;
         }
-        return "晴";
+        return CLEAR;
     }
 
     private static String biomeId(LocalPlayer player) {

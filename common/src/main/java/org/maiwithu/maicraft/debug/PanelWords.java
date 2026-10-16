@@ -93,6 +93,7 @@ final class PanelWords {
             case HURT -> "挨打";
             case DIMENSION_CHANGED -> "换维度";
             case FOLLOW_STATUS -> "跟随";
+            case SKY_CHANGED -> "天色";
         };
     }
 

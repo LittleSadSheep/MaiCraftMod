@@ -62,7 +62,12 @@ public record TaskEvent(long cursor, Kind kind, long goalRunId, String message, 
          * 跟随的状况变了：跟不过去停下等、跟丢了在找、又跟上了、跟着过门、上下他那辆载具、开始与结束帮他打；
          * 发生了什么、他在哪、我在哪在消息里。角色不因这条停下等回答，照常跟着。
          */
-        FOLLOW_STATUS
+        FOLLOW_STATUS,
+        /**
+         * 天色变了：天黑（到了能睡的时间）、天亮（过了能睡的时间）、开始下雨、雨停，只在变的那一刻发一条；
+         * 此刻的时间与天气在消息里。没有昼夜的维度不发。
+         */
+        SKY_CHANGED
     }
 
     public TaskEvent {

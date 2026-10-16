@@ -167,7 +167,8 @@
     "discovered",
     "hurt",
     "dimension_changed",
-    "follow_status"
+    "follow_status",
+    "sky_changed"
   ],
   "chat_kinds": [
     "player",
