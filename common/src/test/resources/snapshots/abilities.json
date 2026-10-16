@@ -200,7 +200,7 @@
       },
       {
         "ability": "maicraft:fight",
-        "summary": "打指定的目标，或清掉附近一片区域的敌对生物；打得过才打，血见底会先撤",
+        "summary": "打指定的目标，或清掉附近一片区域的敌对生物；看着打不过也照打并写明差在哪，血见底会先撤",
         "parameters": "entity?: string, radius: integer = 32, count?: integer",
         "targets": [
           "seen"
@@ -1229,7 +1229,7 @@
     },
     {
       "ability": "maicraft:fight",
-      "summary": "打指定的目标，或清掉附近一片区域的敌对生物；打得过才打，血见底会先撤",
+      "summary": "打指定的目标，或清掉附近一片区域的敌对生物；看着打不过也照打并写明差在哪，血见底会先撤",
       "parameters": [
         {
           "name": "entity",

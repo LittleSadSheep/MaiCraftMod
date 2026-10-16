@@ -239,6 +239,43 @@ class FightTaskTest {
     }
 
     @Test
+    void namedTargetLookingTooStrongIsStillFoughtWithAReminder() {
+        // 空着手、点名的僵尸会还手：评估打不过也照打（LLM 叫打的），差在哪记一句提醒，不先拒绝。
+        CombatSenses bareHanded = new CombatSenses() {
+            @Override public List<Threat> threats(TickContext context, double radius) {
+                return namedZombie(7).map(List::of).orElse(List.of());
+            }
+            @Override public List<Attacker> recentAttackers(TickContext context) { return List.of(); }
+            @Override public CombatProfile profile(TickContext context) {
+                return new CombatProfile(20, 0, Optional.empty(), 0);
+            }
+            @Override public Entity entityById(TickContext context, int entityId) { return null; }
+            @Override public Optional<Threat> living(TickContext context, int entityId) { return namedZombie(entityId); }
+        };
+        FightTask fight = new FightTask(
+                new FightInput(List.of("e1"), null, FightInput.DEFAULT_RADIUS, null, Permissions.DEFAULT),
+                bareHanded, targets, moves, (target, permissions) -> refusal);
+        targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, false);
+        fight.start(new Tick(0));
+        TaskResult result = null;
+        for (long t = 0; t < 3; t++) {
+            if (fight.tick(new Tick(t)) instanceof TickResult.Finished finished) result = finished.result();
+        }
+        assertTrue(result == null, "打不过也不在开打前收场：" + (result == null ? "" : result.summary()));
+        assertTrue(fight.confidentAgainstCurrentThreats(), "没在撤离就由这一仗自己应对，自卫不插进来");
+        targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, true);
+        for (long t = 3; t < 40 && result == null; t++) {
+            if (fight.tick(new Tick(t)) instanceof TickResult.Finished finished) result = finished.result();
+        }
+
+        assertNotNull(result);
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary() + " / " + result.problem());
+        assertEquals("outmatched", ((FightTask.FightDetails) result.details()).threatVerdict());
+        assertTrue(result.attempts().stream().anyMatch(attempt -> attempt.tried().equals("开打前评估")
+                && attempt.result().contains("照打") && attempt.result().contains("武器")), result.attempts().toString());
+    }
+
+    @Test
     void namedTargetOwnedBySomeoneNeedsAnotherConfirmationBeforeAnyMove() {
         // 点名的是别人的狗：点了名也要再确认一次，许可没开到 any 就不走过去、不出手。
         refusal = Optional.of(Problem.of(Problem.Kind.NEED_APPROVAL, "是有主的", "把 fight 设为 any"));

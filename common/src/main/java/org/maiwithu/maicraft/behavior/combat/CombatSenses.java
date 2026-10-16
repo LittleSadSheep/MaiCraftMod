@@ -30,6 +30,14 @@ public interface CombatSenses {
     /** 角色此刻的战斗资质：血量、护甲点数、随身武器（用于威胁评估与武器挑选）。 */
     CombatProfile profile(TickContext context);
 
+    /**
+     * 角色此刻的饱食度（0～20）；创造模式没有饥饿机制、读不到角色时为空。
+     * 撤离收场时据此看"吃东西回血再来打"这条路还通不通。
+     */
+    default OptionalInt foodLevel(TickContext context) {
+        return OptionalInt.empty();
+    }
+
     /** 按游戏实体编号找回实体；还活着且在附近时才有。自卫出手要的是实体本身。 */
     Entity entityById(TickContext context, int entityId);
 

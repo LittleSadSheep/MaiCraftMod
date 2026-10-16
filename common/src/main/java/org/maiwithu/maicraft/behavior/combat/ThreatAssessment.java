@@ -23,7 +23,7 @@ public final class ThreatAssessment {
         WINNABLE,
         /** 有风险：打，但保持在远程距离带，别硬凑近战。 */
         RISKY,
-        /** 打不过：不开打；撤离也撤不掉时按背水一战处理。 */
+        /** 打不过：自卫与夜里露天按它退开、挖坑自保；LLM 叫打的仗照打，只提醒差在哪；撤离也撤不掉时按背水一战处理。 */
         OUTMATCHED
     }
 

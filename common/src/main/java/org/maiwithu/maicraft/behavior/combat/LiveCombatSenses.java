@@ -35,6 +35,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.behavior.permission.Protection;
+import org.maiwithu.maicraft.game.player.ClientHungerView;
 import org.maiwithu.maicraft.game.player.ReadsFoodValues;
 import org.maiwithu.maicraft.game.world.Hostility;
 import org.maiwithu.maicraft.game.world.InteractionRange;
@@ -187,6 +188,15 @@ public final class LiveCombatSenses implements CombatSenses {
                     evidence.tick(), evidence.damageKind()));
         }
         return attackers;
+    }
+
+    // 饱食度从角色的饥饿数据读；创造模式没有饥饿机制，读作没有，撤离收场就不按"没吃的回不了血"说。
+    @Override
+    public OptionalInt foodLevel(TickContext context) {
+        LocalPlayer self = context.player() == null ? null : context.player().localPlayer();
+        if (self == null) return OptionalInt.empty();
+        ClientHungerView hunger = new ClientHungerView(self);
+        return hunger.hungerMechanicsOn() ? OptionalInt.of(hunger.foodLevel()) : OptionalInt.empty();
     }
 
     @Override

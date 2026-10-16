@@ -204,28 +204,24 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         ThreatAssessment.Assessment assessment = ThreatAssessment.assess(mySide(context), foesOf(context));
         verdict = assessment.verdict();
         if (verdict == ThreatAssessment.Verdict.OUTMATCHED) {
-            // 点名目标开始时已经倒下：不必打，直接收场。
-            noteDefeats(context);
-            if (!named.isEmpty() && remainingNamed().isEmpty() && lostTrack.isEmpty()) {
-                return Next.done(TaskResult.builder(TaskResult.Status.DONE, "开始时点名目标已被击败，不用打")
-                        .details(details()).build());
-            }
+            // LLM 叫打就照打：评估出的差距只记一句提醒，不拒绝；开打后血线破了引擎照旧先撤，
+            // 撤不掉、天黑露天照旧交给自保挖坑。
             String gaps = assessment.gaps().isEmpty() ? "整体劣势" : String.join("、", assessment.gaps());
-            return Next.fail(Problem.of(Problem.Kind.DANGER,
-                    "打不过，先不动手：差在" + gaps
-                            + "；吃点东西回血、换把更好的武器，或减少同时面对的敌人再来",
-                    "先解决血量与武器的问题再开战"));
+            recordAttempt("开打前评估", "看着打不过（差在" + gaps + "），照打；血到拒战线会先撤");
         }
         double radius = named.isEmpty() ? input.radius() : ThreatAssessment.VIGILANCE_RADIUS;
         battle = new Battle(senses, moves, new Roster(), radius);
         // 夜里退无可退、打不过：引擎报要挖坑时这一仗停下，交给自卫接挖三填一。
         battle.offerShelter();
         fightCursor = moves.dropCursor(context);
-        return Next.go(Phase.FIGHT, verdict == ThreatAssessment.Verdict.RISKY
-                ? "有风险，打的时候盯着血线" : "评估能赢，开打");
+        return Next.go(Phase.FIGHT, switch (verdict) {
+            case OUTMATCHED -> "看着打不过，照打，盯着血线";
+            case RISKY -> "有风险，打的时候盯着血线";
+            case WINNABLE -> "评估能赢，开打";
+        });
     }
 
-    // 打龙开打前：龙不按普通怪评估（打不过不开打那套按怪的种类和数量算，套不到龙身上），改查装备，
+    // 打龙开打前：龙不按普通怪评估（那套按怪的种类和数量算，套不到龙身上），改查装备，
     // 缺什么如实说；血低不拒战，引擎会先退开回血。这一批别的敌对生物照常认下、照常评估写进结果。
     private Next<Phase> assessDragon(TickContext context) {
         Optional<DragonArena> arena = senses.dragonArena(context, dragonEntity, landmarks());
@@ -360,16 +356,15 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         if (moment.progressed()) recordProgress(moment.doing());
         return switch (moment.state()) {
             case ESCAPED -> {
-                // 甩开了：撤离成功不等于任务成功，目标没死就以失败收场，写明为什么撤与出路。
+                // 甩开了：撤离成功不等于任务成功，目标没死就以失败收场，写明为什么撤与出路；
+                // 血低、没吃的、饱食度又不够自然回血时点破"吃了回血再打"这条链断了。
                 fled = true;
                 retreatWhy = moment.retreatWhy();
-                yield Next.fail(Problem.of(Problem.Kind.DANGER,
-                        "撤离成功，甩开了追兵（" + moment.retreatWhy() + "），但目标没有击败——这一仗算没打赢",
-                        "吃点东西回血到拒战线以上，或换把武器再来"));
+                yield Next.fail(RetreatEnding.escaped(moment.retreatWhy(), senses.profile(context),
+                        senses.foodLevel(context)));
             }
-            case NEEDS_SHELTER -> Next.fail(Problem.of(Problem.Kind.DANGER,
-                    "撤不掉又打不过，天黑露天：这一仗停下，交给自保挖坑熬到天亮",
-                    "天亮后回血、换把武器再来"));
+            case NEEDS_SHELTER -> Next.fail(RetreatEnding.needsShelter(senses.profile(context),
+                    senses.foodLevel(context)));
             case FINISHED -> named.isEmpty()
                     ? Next.go(Phase.LOOT, lastKillSpot == null ? "附近没有要打的了" : "这一批清完了，就地捡一下")
                     : lastKillSpot == null ? Next.done(settled()) : Next.go(Phase.LOOT, "打完了，就地捡一下");
@@ -681,10 +676,13 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
                 new Dodges(report.breathDodges(), report.sweepDodges(), report.fireballDodges()));
     }
 
-    /** 正在打的仗自己接得住吗：评估不是"打不过"、没在撤离，被攻击的生存需求就让位。 */
+    /**
+     * 正在打的仗自己接得住吗：LLM 叫打的仗看着打不过也照打，引擎没在撤离就由这一仗自己应对，
+     * 被攻击的生存需求让位；血线破了需求那边照旧不让位，本能接管。
+     */
     @Override
     public boolean confidentAgainstCurrentThreats() {
-        return verdict != ThreatAssessment.Verdict.OUTMATCHED && !fled && (battle == null || !battle.retreating());
+        return !fled && (battle == null || !battle.retreating());
     }
 
     @Override

@@ -26,7 +26,7 @@ import org.maiwithu.maicraft.kernel.task.TaskFactories;
 /**
  * 战斗能力：打指定的目标，或清掉附近一片区域的敌对生物。
  *
- * <p>先评估打不打得过：打不过会直接说差什么，不会白白送死。打得过就上，武器自己挑，
+ * <p>叫打就打：开打前评估看着打不过也照打，差在哪写进结果当提醒。武器自己挑，
  * 血见底会先撤离，撤离了不冒充打赢。击败后就地捡一下掉落物，捡不到也会如实说明。
  * 玩家、别人的宠物、有名字的动物不在清扫范围内；要点名打它们需要放开许可。
  * 本包对外的唯一入口：规格、参数与任务都从这里进入内核。
@@ -48,7 +48,7 @@ public final class FightModule implements AbilityModule {
 
     private final AbilitySpec spec = new AbilitySpec(
             "maicraft:fight",
-            "打指定的目标，或清掉附近一片区域的敌对生物；打得过才打，血见底会先撤",
+            "打指定的目标，或清掉附近一片区域的敌对生物；看着打不过也照打并写明差在哪，血见底会先撤",
             AbilityDoc.forAbility("fight"),
             ParamSpecs.of(
                     ParamSpec.of("entity", ParamType.ENTITY_TYPE)
