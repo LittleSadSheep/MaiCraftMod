@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.travel;
 
+import org.maiwithu.maicraft.behavior.acquire.DigsStairsUp;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.travel.DestinationResolver;
 import org.maiwithu.maicraft.behavior.travel.DimensionTravelServices;
 import org.maiwithu.maicraft.behavior.travel.DimensionTravelTask;
 import org.maiwithu.maicraft.behavior.travel.JourneyTask;
+import org.maiwithu.maicraft.behavior.travel.OpenSkySpots;
+import org.maiwithu.maicraft.behavior.travel.ReachOpenSkyTask;
 import org.maiwithu.maicraft.behavior.travel.ReadsPlacedBlocks;
 import org.maiwithu.maicraft.behavior.travel.TravelDestination;
 import org.maiwithu.maicraft.behavior.travel.TravelProgressListener;
@@ -24,6 +27,7 @@ import org.maiwithu.maicraft.kernel.goal.Goal;
 
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
+import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.TargetKind;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.param.ParamSpec;
@@ -49,7 +53,8 @@ import java.util.stream.Collectors;
  * 出行任务步行；落在别的维度或"就是去那个维度"交给跨维度任务（找活门、走进门、没门按许可建门、
  * 末地去要塞激活，到了带坐标的目的地接着步行）。装了联动的出行方式（电梯、喷气背包、火车）时，同维度的
  * 出行交给行程任务：近处走路，远处或走不通比各方式的报价，可用 via 指定方式。末地里还有原版自带的折跃门：
- * 主岛与外岛隔着虚空时只能过门，也交给行程任务；别的维度里没有用得上的方式，照原样直接步行。需要的走到、解析、扫描、交互、
+ * 主岛与外岛隔着虚空时只能过门，也交给行程任务；别的维度里没有用得上的方式，照原样直接步行。目标写 here 而人在
+ * 地下、屋里时交给回露天任务：旁边见天先走出去，许可动土时挖楼梯上去。需要的走到、解析、扫描、交互、
  * 施工这些现场部件都从构造函数传入；本能力不认任何具体的服务实现。
  */
 public final class TravelAbility implements AbilityModule {
@@ -68,6 +73,8 @@ public final class TravelAbility implements AbilityModule {
     /** 目的地附近一格能站的都没有时最多再放宽几格。 */
     private static final int ROOMY_EXTRA = 3;
     private final List<TravelMode> modes;
+    /** 往上挖楼梯回地面；没接上为 null，回露天只走路。 */
+    private final DigsStairsUp stairsUp;
 
     /** 只走路：没有联动的出行方式，参数表里没有 via。 */
     public TravelAbility(WalkTo walks, DestinationResolver resolver,
@@ -83,6 +90,15 @@ public final class TravelAbility implements AbilityModule {
     public TravelAbility(WalkTo walks, DestinationResolver resolver,
             ReadsPlacedBlocks placedBlocks, TravelProgressListener progressListener,
             DimensionTravelServices dimensionServices, TravelWorldView world, List<TravelMode> modes) {
+        this(walks, resolver, placedBlocks, progressListener, dimensionServices, world, modes, null);
+    }
+
+    /** @param stairsUp 往上挖楼梯回地面；为 null 时回露天只走路 */
+    public TravelAbility(WalkTo walks, DestinationResolver resolver,
+            ReadsPlacedBlocks placedBlocks, TravelProgressListener progressListener,
+            DimensionTravelServices dimensionServices, TravelWorldView world, List<TravelMode> modes,
+            DigsStairsUp stairsUp) {
+        this.stairsUp = stairsUp;
         this.walks = walks;
         this.resolver = resolver;
         this.placedBlocks = placedBlocks;
@@ -162,6 +178,8 @@ public final class TravelAbility implements AbilityModule {
                     Problem.of(Problem.Kind.UNSUPPORTED,
                             "出行的目标对象没有给：要用坐标、地点名、观察编号、维度或方向说明去哪")));
         }
+        // 目标写 here：出行里"没给 y 就是地面上"，here 不带高度，就是脚下这一带头顶见天的地面。
+        if (goal.target() instanceof Target.Here && world != null) return backToOpenSky(goal, choice.via());
         // 目的地现在就解析：坐标没给 y 走那一柱列，地标没记过就问，观察编号失效就如实结束；
         // 落在别的维度按维度路由认门，认不出的维度对在这里就以走不了结束。
         var resolution = resolver.resolve(goal.target(), goal.params().number("radius"));
@@ -210,6 +228,18 @@ public final class TravelAbility implements AbilityModule {
     // 只给 via 不给 target 也知道送到哪的方式（过最近的一扇折跃门）。
     private boolean goesAlone(String via) {
         return modes.stream().anyMatch(mode -> mode.via().name().equals(via) && mode.goesWithoutDestination());
+    }
+
+    // 回露天：已经站在露天的地上就是到了；不然交给回露天任务。它只走路和挖楼梯，给了别的方式是参数自相矛盾。
+    private StepDecision backToOpenSky(Goal goal, String via) {
+        if (OpenSkySpots.standingUnderOpenSky(world)) {
+            return new StepDecision.Finish(TaskResult.done("出行：开始时已经站在露天的地上"));
+        }
+        if (via != null && !TravelVia.WALK.name().equals(via)) {
+            return new StepDecision.Finish(TaskResult.failed("出行：参数对不上", Problem.of(Problem.Kind.INVALID_PARAMETER,
+                    "回露天地面（target=here）只走路和挖楼梯，用不上 via=" + via, "去掉 via")));
+        }
+        return new StepDecision.Run(new OpenSkyInput(maxSeconds(goal), goal.permissions()));
     }
 
     /** 用什么方式、给它的话；参数自相矛盾时带问题。 */
@@ -282,6 +312,10 @@ public final class TravelAbility implements AbilityModule {
             JourneyTask.Journey journey = input.journey();
             return new JourneyTask(journey, world, modes, destination -> new TravelTask(destination,
                     journey.maxSeconds(), input.permit(), walks, placedBlocks, progressListener, world));
+        });
+        factories.register(OpenSkyInput.class, input -> {
+            // 回露天：旁边见天先走出去，许可动土时挖楼梯上去，再不行找路走到远处的露天落脚处。
+            return new ReachOpenSkyTask(input.maxSeconds(), input.permissions(), world, walks, stairsUp, placedBlocks);
         });
         factories.register(DimensionTravelInput.class, input -> {
             // 跨维度行程：找门、进门、建门与末地门房间都从这个任务里按阶段走。

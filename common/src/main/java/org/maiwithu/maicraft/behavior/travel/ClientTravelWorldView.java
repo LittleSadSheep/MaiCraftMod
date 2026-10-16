@@ -7,6 +7,8 @@ import java.util.function.Supplier;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 
+import org.maiwithu.maicraft.behavior.explore.ClientExplorationWorld;
+import org.maiwithu.maicraft.behavior.explore.ColumnSample;
 import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.behavior.navigation.util.ClientSurfaceHeight;
@@ -57,6 +59,13 @@ public final class ClientTravelWorldView implements TravelWorldView {
         // 地表最高的实心（不算树叶）方块上面那一格就是站的地方。
         // 客户端只同步了含树叶的高度图，"忽略树叶"那张一直是空的（整列读成世界最底层）；从同步的那张往下补读。
         return OptionalInt.of(ClientSurfaceHeight.motionBlockingNoLeaves(current.level(), x, z));
+    }
+
+    // 顶盖样本和探索逐列抽样读的是同一份：回没回到露天、哪儿是露天落脚处，两边按同一条事实判。
+    @Override
+    public ColumnSample column(int x, int z) {
+        PlayerContext current = context.get();
+        return ClientExplorationWorld.sample(current == null ? null : current.level(), x, z);
     }
 
     @Override

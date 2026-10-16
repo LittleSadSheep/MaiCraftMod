@@ -84,7 +84,14 @@ public final class ClientExplorationWorld implements ExplorationWorld {
 
     @Override
     public ColumnSample sampleColumn(int x, int z) {
-        ClientLevel level = level();
+        return sample(level(), x, z);
+    }
+
+    /**
+     * 读一列的样本：顶盖（忽略树叶的最高实体或液体遮挡物）在哪、是什么、什么群系。探索逐列抽样、
+     * 出行判断回没回到露天都读这一份；世界为空或那一列没加载给未加载样本。
+     */
+    public static ColumnSample sample(ClientLevel level, int x, int z) {
         // 客户端世界的 hasChunkAt 永远答“加载着”，没加载的格读出来是空气、地表落在世界最底层；按区块真加载没加载判。
         if (level == null || !level.isLoaded(new BlockPos(x, 0, z))) {
             return ColumnSample.unloaded();

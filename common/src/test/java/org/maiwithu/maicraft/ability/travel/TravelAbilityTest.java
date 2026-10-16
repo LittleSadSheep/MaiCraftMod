@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.ability.travel;
 
 import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.behavior.explore.ColumnSample;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
@@ -193,6 +194,50 @@ class TravelAbilityTest {
         StepDecision.Finish finish = assertInstanceOf(StepDecision.Finish.class,
                 ability.decide(step(goal(new Target.Here(), "{}"))));
         assertEquals(TaskResult.Status.DONE, finish.result().status());
+    }
+
+    @Test
+    void hereMeansBackToOpenGround() {
+        // 出行里 here 不带高度，就是脚下这一带头顶见天的地面：已在露天直接完成，在地下交给回露天任务。
+        int[] top = {63};
+        StubWorld world = new StubWorld() {
+            @Override public ColumnSample column(int x, int z) {
+                return new ColumnSample(true, "minecraft:plains", top[0], false, true, "minecraft:stone");
+            }
+        };
+        TravelMode elevator = new TravelMode() {
+            @Override public TravelVia via() {
+                return new TravelVia("elevator", "坐 Create 电梯换楼层");
+            }
+
+            @Override public void offer(TravelRequest request, OfferSink sink) {}
+
+            @Override public TravelLeg start(TravelRequest request, TravelOffer offer) {
+                throw new AssertionError("决定阶段不开跑");
+            }
+        };
+        TravelAbility surface = new TravelAbility(walks,
+                new DestinationResolver(world, name -> Optional.empty(), id -> Optional.empty()),
+                List::of, progress -> {}, null, world, List.of(elevator));
+
+        StepDecision.Finish open = assertInstanceOf(StepDecision.Finish.class,
+                surface.decide(step(goal(new Target.Here(), "{}"))));
+        assertEquals(TaskResult.Status.DONE, open.result().status());
+        assertTrue(open.result().summary().contains("露天"), open.result().summary());
+
+        // 头顶还压着十几格石头：交给回露天任务，时限照带。
+        top[0] = 80;
+        StepDecision.Run run = assertInstanceOf(StepDecision.Run.class,
+                surface.decide(step(goal(new Target.Here(), "{\"max_seconds\":60}"))));
+        assertEquals(60, assertInstanceOf(OpenSkyInput.class, run.input()).maxSeconds());
+
+        // 回露天只走路和挖楼梯：指定坐电梯是参数自相矛盾。
+        ParseResult viaElevator = surface.spec().paramSpecs().parse(JsonParser.parseString("{\"via\":\"elevator\"}")
+                .getAsJsonObject());
+        Goal wrong = new Goal("maicraft:travel", null, new Target.Here(), viaElevator.params(),
+                Permissions.DEFAULT, List.of(), null);
+        StepDecision.Finish clash = assertInstanceOf(StepDecision.Finish.class, surface.decide(step(wrong)));
+        assertEquals(Problem.Kind.INVALID_PARAMETER, clash.result().problem().kind());
     }
 
     private static StepContext answered(Goal goal, String answer) {

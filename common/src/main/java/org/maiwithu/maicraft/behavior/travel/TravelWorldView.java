@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.travel;
 
 import java.util.OptionalInt;
 
+import org.maiwithu.maicraft.behavior.explore.ColumnSample;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
@@ -24,6 +25,14 @@ public interface TravelWorldView {
      */
     default OptionalInt surfaceFeet(int x, int z) {
         return OptionalInt.empty();
+    }
+
+    /**
+     * 这一列的顶盖样本（忽略树叶的最高实体或液体遮挡物）：判断脚下露天没有、找露天落脚处用；
+     * 没加载、读不到给未加载样本，既不判露天也不判封闭。
+     */
+    default ColumnSample column(int x, int z) {
+        return ColumnSample.unloaded();
     }
 
     /** 人能不能站在这一格（脚在这格、头在上面一格、脚下踩得住）；没加载、读不到时答能，不凭空放宽目的地。 */
