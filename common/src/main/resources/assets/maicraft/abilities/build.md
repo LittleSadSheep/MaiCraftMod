@@ -7,6 +7,19 @@
 - `target` 必填，是锚点：设计原点或 offset [0,0,0] 落在这里。`here` 是脚下；坐标省略 y 时取那一列的地表；记得的地点按名字；观察编号查它在哪。
 - `rotation` 绕锚点转 0 / 90 / 180 / 270 度，只配 `design_id` 或 `file`。
 - 许可里的 `change_blocks` 决定能拆什么（默认 `natural`）；`none` 时只放不拆，`temporary` 时只能垫临时方块。
+- `name` 是这一栋的档案名（不给就用图纸名，同名的一栋在别处时加上 `@x,y,z`）。
+
+## 建筑档案与改建
+
+用 `design_id`、`cells`、`file` 盖完会记一份建筑档案：名字、照哪一版图纸、锚点、朝向、整栋蓝图，`observe(what="world_memory")` 里看得到，按名字也指得过去。
+
+改一栋已有的房子：`target` 写 `{"kind":"landmark","name":"档案名"}`。
+
+- 锚点和朝向照档案，`rotation` 不用给（给了不一样的会被拒：换朝向就是另盖一栋）。
+- `design_id` 给新一版图纸：整份换掉档案里的蓝图，按图补盖（对上的格跳过，不对的拆换）。
+- `cells` 是补丁：`offset` 相对档案的锚点，按现场的东南西北写；同一格以补丁为准，档案里其余的格留着。
+- `block` 放在某一栋范围里的一格，也算那一栋的补丁。
+- 收场时对整栋比一遍：结果的 `check` 列出没对上的每一格（拆墙时碰掉的火把、流进来的水都在里面），施工本身照施工的结果算；改建还带上这一栋的 `layout`。
 
 ## 做完收拾现场
 
@@ -28,6 +41,9 @@
 | `materials_used` | 用掉的材料（物品 → 件数） |
 | `temporary_blocks_left[]` | 没收回的临时方块，下一次施工接着收 |
 | `fixtures_skipped` | 结构文件里没装的摆设实体数（只有 `file` 施工才有） |
+| `archive` | 这一栋的档案：`name`、`anchor`、`rotation`、`design_id`；存不进去时有 `problem` |
+| `check` | 整栋比对：`complete`（每格都看到了）、`counts`、`differences[]`（每格 `at`、`state`、`wanted`、`found`，不截断）、`extra[]`（范围里没声明却有东西的格，只作信息） |
+| `layout` | 改建时这一栋的布局：`floors`、`doors`、`openings`、`windows`、`beds`、`climbs`、`facilities`、`free_floor` |
 
 `changes` 记放下、挖掉、倒桶与开关门、用掉的材料；`remaining` 写"还有 N 格没砌"；全部对了是完成，否则部分完成带问题。
 
@@ -39,4 +55,5 @@
 - `STUCK`：有临时方块没收回（下面落不稳、走不到）；下一次施工接着收。
 - `UNSUPPORTED`：有格放好了但点名的属性对不上，施工调不了。
 - `NOT_FOUND`：`schematics/` 里没有叫 `file` 的文件。
-- `INVALID_PARAMETER`：四选一没给对、`cells` 写错（带下标）、`file` 读不懂或超过上限、`rotation` 不是四个取值之一、`target` 给不了。
+- `INVALID_PARAMETER`：四选一没给对、`cells` 写错（带下标）、`file` 读不懂或超过上限、`rotation` 不是四个取值之一或和改建的那一栋朝向不同、`target` 给不了。
+- 档案名和一个记过的地点同名、两处不在一起时会先问你指哪个：`building` 改那一栋，`place` 在那个地点另盖，`cancel` 不盖了。

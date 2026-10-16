@@ -138,6 +138,11 @@ public final class WorldMemory implements RemembersPlaces, RemembersRegions, Rem
         upsert(new MemoryRecord(MemoryKind.MACHINE, position, archiveName, null, MemoryOrigin.USED, when));
     }
 
+    /** 记一栋自己盖起的建筑：锚点与档案名，盖完建档或改档时写入，observe 的记忆清单里看得到，按名字也指得过去。 */
+    public void rememberBuilding(WorldPosition position, String archiveName, Instant when) {
+        upsert(new MemoryRecord(MemoryKind.BUILDING, position, archiveName, null, MemoryOrigin.USED, when));
+    }
+
     /** 还没收回的临时方块，记录时刻新的在前。 */
     public List<MemoryRecord> temporaryBlocks() {
         return allRecords().stream().filter(record -> record.kind() == MemoryKind.TEMPORARY_BLOCK).toList();
@@ -223,9 +228,20 @@ public final class WorldMemory implements RemembersPlaces, RemembersRegions, Rem
         return Map.copyOf(readBook().places());
     }
 
-    /** 按名字查记过的地点。 */
+    /**
+     * 按名字查记过的地点；没记过这个地名，再找同名的建筑档案、机器档案（盖完、建完自动记的那一条），
+     * 盖好的房子按名字也指得过去。
+     */
     public Optional<WorldPosition> place(String name) {
-        return Optional.ofNullable(readBook().places().get(name));
+        WorldPosition remembered = readBook().places().get(name);
+        if (remembered != null) return Optional.of(remembered);
+        List<MemoryRecord> records = allRecords();
+        for (MemoryKind kind : List.of(MemoryKind.BUILDING, MemoryKind.MACHINE)) {
+            for (MemoryRecord record : records) {
+                if (record.kind() == kind && name.equals(record.blockType())) return Optional.of(record.position());
+            }
+        }
+        return Optional.empty();
     }
 
     /** 记下或更新一条记忆；同一个东西（产地按片认，其余按格认）只留合并后的一条。 */

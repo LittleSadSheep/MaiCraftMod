@@ -43,6 +43,8 @@ public final class ConstructionTask extends PhasedTask<ConstructionTask.Phase> {
     private List<BlockPos> temporariesLeft = List.of();
     /** 卡住转去善后时记下的卡住原因：善后做完照它收场。 */
     private Problem stuckProblem;
+    /** 交出去的结果细节：收场时让使用方记一次账，之后照它给，不重复记。 */
+    private ResultDetails settledDetails;
 
     public ConstructionTask(ConstructionInput input, ConstructionServices services) {
         super("施工", Phase.CHECK, new ProgressTracker(20L * 60, 20L * 60 * 120));
@@ -231,8 +233,13 @@ public final class ConstructionTask extends PhasedTask<ConstructionTask.Phase> {
         return TaskResult.builder(TaskResult.Status.DONE, summary).details(details()).build();
     }
 
+    // 结果细节只在收场时出一次：先交给使用方记账（盖房子记建筑档案、改建后整栋比对），之后照它给。
     @Override protected ResultDetails details() {
-        return site.details(services.site().dimension(), temporariesLeft, input.fixturesSkipped());
+        if (settledDetails == null) {
+            settledDetails = input.recorder().record(site.details(services.site().dimension(), temporariesLeft, input.fixturesSkipped()),
+                    services.site());
+        }
+        return settledDetails;
     }
 
     @Override protected List<String> remaining() {

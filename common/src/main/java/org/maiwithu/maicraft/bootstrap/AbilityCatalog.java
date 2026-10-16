@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.bootstrap;
 
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -19,6 +20,8 @@ import org.maiwithu.maicraft.ability.machine.MachineAbilities;
 import org.maiwithu.maicraft.ability.machine.MachineVehicles;
 import org.maiwithu.maicraft.ability.chat.ChatAbility;
 import org.maiwithu.maicraft.ability.design.DesignModule;
+import org.maiwithu.maicraft.ability.design.api.BuildingArchives;
+import org.maiwithu.maicraft.ability.design.api.BuildingRecords;
 import org.maiwithu.maicraft.ability.design.api.DesignStore;
 import org.maiwithu.maicraft.ability.chat.ReadsChatEcho;
 import org.maiwithu.maicraft.ability.enchant.EnchantModule;
@@ -174,6 +177,7 @@ import org.maiwithu.maicraft.game.world.BlockScanService;
 import org.maiwithu.maicraft.game.world.ReadsLightLevels;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 import org.maiwithu.maicraft.kernel.task.TaskRecords;
@@ -493,7 +497,18 @@ public final class AbilityCatalog {
         // design 导出与 build 导入用同一个 schematics 目录：导出的文件名直接当 file 参数喂回去。
         Path schematics = deps.configDirectory().resolveSibling("schematics");
         registry.register(new DesignModule(designs, anchors, deps.preview(), schematics));
-        registry.register(new BuildModule(designs, anchors, schematics, construction));
+        registry.register(new BuildModule(designs, anchors, schematics, construction, buildingRecords(deps)));
+    }
+
+    /**
+     * 建筑档案这一摊：档案按世界存在能力自己的文档里，存好就把"这一栋在哪、叫什么"记进世界记忆；
+     * 同名的记过地点问世界记忆；布局里的设施照场景里的认法（容器、工作站）。
+     */
+    private static BuildingRecords buildingRecords(Deps deps) {
+        return new BuildingRecords(new BuildingArchives(deps.worldDocuments(), deps.worldKey()), deps.memory(),
+                archive -> deps.memory().rememberBuilding(new WorldPosition(archive.anchor().getX(), archive.anchor().getY(),
+                        archive.anchor().getZ(), archive.dimension()), archive.name(), Instant.now()),
+                id -> deps.facilities().isContainer(id) || deps.facilities().isWorkstation(id));
     }
 
     /** 锚点解析：观察编号查场景、地标查世界记忆、脚下与坐标直接用，省 y 取地表；建造与机器施工共用。 */

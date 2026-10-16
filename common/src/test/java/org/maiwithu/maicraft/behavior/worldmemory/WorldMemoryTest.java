@@ -158,6 +158,19 @@ class WorldMemoryTest {
     }
 
     @Test
+    void 没记过的地名_找同名的建筑档案_记过的地点优先(@TempDir Path temp) {
+        // 盖完自动记一条"这一栋在哪、叫什么"：按名字指过去不用另外 remember；同名的记过地点在就以地点为准。
+        var memory = memory(temp);
+        WorldPosition anchor = new WorldPosition(10, 64, 10, "minecraft:overworld");
+        memory.rememberBuilding(anchor, "小屋", NOW);
+        assertEquals(Optional.of(anchor), memory.place("小屋"));
+        assertEquals(Optional.empty(), memory.place("大屋"));
+        WorldPosition door = new WorldPosition(12, 64, 9, "minecraft:overworld");
+        memory.remember("小屋", door);
+        assertEquals(Optional.of(door), memory.place("小屋"));
+    }
+
+    @Test
     void 换世界身份_记忆互不串(@TempDir Path temp) {
         DocumentStore store = store(temp);
         var worldA = new WorldMemory(store, "a".repeat(64));

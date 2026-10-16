@@ -109,8 +109,8 @@
       },
       {
         "ability": "maicraft:build",
-        "summary": "按图纸、逐格清单、结构文件或单格在 target 处施工：缺料自己拿、挡着的挖掉、从底往上砌、够不着就垫临时方块再收走",
-        "parameters": "design_id?: string, cells?: array, block?: string, properties?: object, file?: string, rotation: integer = 0",
+        "summary": "按图纸、逐格清单、结构文件或单格在 target 处施工：缺料自己拿、挡着的挖掉、从底往上砌、够不着就垫临时方块再收走；盖完记建筑档案，target 写档案名就是改那一栋",
+        "parameters": "design_id?: string, cells?: array, block?: string, properties?: object, file?: string, rotation: integer = 0, name?: string",
         "targets": [
           "here",
           "landmark",
@@ -835,25 +835,25 @@
     },
     {
       "ability": "maicraft:build",
-      "summary": "按图纸、逐格清单、结构文件或单格在 target 处施工：缺料自己拿、挡着的挖掉、从底往上砌、够不着就垫临时方块再收走",
+      "summary": "按图纸、逐格清单、结构文件或单格在 target 处施工：缺料自己拿、挡着的挖掉、从底往上砌、够不着就垫临时方块再收走；盖完记建筑档案，target 写档案名就是改那一栋",
       "parameters": [
         {
           "name": "design_id",
           "type": "string",
           "required": false,
-          "doc": "按 design 存的图纸施工（四选一）"
+          "doc": "按 design 存的图纸施工（四选一）；target 是档案名时整份换掉那一栋的图"
         },
         {
           "name": "cells",
           "type": "array",
           "required": false,
-          "doc": "逐格蓝图（四选一）：[{\"offset\":[x,y,z],\"block\":\"minecraft:stone\",\"properties\":{...}}]，block 为 minecraft:air 表示清空，水源、岩浆源表示倒桶"
+          "doc": "逐格蓝图（四选一）：[{\"offset\":[x,y,z],\"block\":\"minecraft:stone\",\"properties\":{...}}]，block 为 minecraft:air 表示清空，水源、岩浆源表示倒桶；target 是档案名时 offset 相对档案锚点，是并进那一栋的补丁"
         },
         {
           "name": "block",
           "type": "string",
           "required": false,
-          "doc": "只放一格（四选一）：放在 target 那一格"
+          "doc": "只放一格（四选一）：放在 target 那一格；落在某一栋的范围里就并进那一栋"
         },
         {
           "name": "properties",
@@ -871,10 +871,16 @@
           "name": "rotation",
           "type": "integer",
           "required": false,
-          "doc": "绕锚点转 0 / 90 / 180 / 270 度；只配 design_id 或 file",
+          "doc": "绕锚点转 0 / 90 / 180 / 270 度；只配 design_id 或 file；改建照档案的朝向，不用给",
           "default": 0,
           "min": 0,
           "max": 270
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "doc": "新建筑的档案名；不给就用图纸名，撞名加 @x,y,z；target 已经是档案时不用给"
         }
       ],
       "targets": [
