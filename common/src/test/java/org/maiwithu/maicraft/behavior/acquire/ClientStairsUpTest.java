@@ -34,7 +34,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 往上挖楼梯：石头里一级一级挖上去，每级先头顶、再前上方、再前方齐头，走上去，到露天停；
- * 挨着水换方向；头顶压着沙砾、四面都挖不了就如实停下；不许动的格拐弯绕开；挖掉的方块合并成一条变化。
+ * 挨着水换方向；头顶压着沙砾照挖、掉下来再挖；不许动的格拐弯绕开；挖掉的方块合并成一条变化。
  */
 class ClientStairsUpTest {
 
@@ -81,9 +81,6 @@ class ClientStairsUpTest {
         @Override public String blockType(TickContext context, BlockPos cell) {
             return type(cell);
         }
-        @Override public boolean falls(TickContext context, BlockPos cell) {
-            return type(cell).equals("minecraft:gravel");
-        }
         @Override public String dimension(TickContext context) {
             return "minecraft:overworld";
         }
@@ -92,14 +89,16 @@ class ClientStairsUpTest {
         }
     }
 
-    /** 替身：挖一格当场挖成空气，按先后记下挖了哪些格。 */
+    /** 替身：挖一格当场挖成空气，按先后记下挖了哪些格；上面压着沙砾的，挖空了沙砾掉进这一格。 */
     private final class Digs implements DigsBlocks {
         final List<BlockPos> dug = new ArrayList<>();
 
         @Override public Optional<Action> dig(BlockPos target) {
             return Optional.of(done("挖一格", () -> {
                 dug.add(target);
-                world.placed.put(target, "minecraft:air");
+                boolean gravelAbove = world.type(target.above()).equals("minecraft:gravel");
+                world.placed.put(target, gravelAbove ? "minecraft:gravel" : "minecraft:air");
+                if (gravelAbove) world.placed.put(target.above(), "minecraft:air");
             }));
         }
     }
@@ -180,14 +179,14 @@ class ClientStairsUpTest {
     }
 
     @Test
-    void 头顶上面压着沙砾_四面都不挖_如实停下() {
-        // 头顶那格上面是沙砾：挖开头顶它就砸进人站的格。头顶每个方向都要挖，这一级挖不了。
+    void 头顶上面压着沙砾_照挖_掉下来再挖一下接着往上() {
+        // 头顶那格上面是沙砾：挖开头顶它掉下来，再挖一下就通了，照样挖到地面。
         world.placed.put(new BlockPos(0, 63, 0), "minecraft:gravel");
 
-        ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, climb());
-        assertEquals(Problem.Kind.DANGER, failed.problem().kind());
-        assertTrue(failed.problem().message().contains("砸下来"), failed.problem().message());
-        assertTrue(digs.dug.isEmpty(), "一格都不挖：" + digs.dug);
+        assertInstanceOf(ActionStatus.Done.class, climb());
+        assertEquals(List.of(new BlockPos(0, 62, 0), new BlockPos(0, 62, 0)), digs.dug.subList(0, 2),
+                "头顶挖了两下（第二下挖掉掉下来的沙砾）：" + digs.dug);
+        assertEquals(70, world.feet.getY());
     }
 
     @Test

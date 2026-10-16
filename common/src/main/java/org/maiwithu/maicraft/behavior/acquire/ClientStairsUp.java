@@ -32,8 +32,9 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 挖楼梯现场和往下挖楼梯共用一份。
  *
  * <p>挖之前先看清这一级：要挖的三格不能是液体、挖不动的、设施、搭出来的、不许动的；前方脚下那格要踩得住；
- * 挖开会露出来的格（三格的四邻、头顶与前上方的上面）不能挨着水或岩浆，挖开就灌进楼梯；头顶上面压着沙子、
- * 沙砾这类会往下掉的方块也不挖，挖空了它就砸进人站的那一格。这一级朝原方向挖不了、或挖到一半挖不动，就往左、
+ * 挖开会露出来的格（三格的四邻、头顶与前上方的上面）不能挨着水或岩浆，挖开就灌进楼梯。头顶上面压着沙子、
+ * 沙砾照挖：掉下来就再挖一下，砸到头被埋住由生存需求当刻挖开，同一级挖满十二下还没通才换方向。
+ * 这一级朝原方向挖不了、或挖到一半挖不动，就往左、
  * 往右拐着挖（第一级四面都试），不往回挖；这一级几个方向都不行才如实停下，由调用方换别的办法出去。
  * 这些都是现场是什么样，不是猜结果。挖掉的方块按种类合并计数记进变化，走上去时掉落多半顺路吸进包里。
  */
@@ -201,7 +202,7 @@ public final class ClientStairsUp implements DigsStairsUp {
         }
 
         // 这一级为什么不能挖；能挖为空。要挖的格看能不能挖、许不许动；前方脚下要踩得住；
-        // 四周看有没有水或岩浆；头顶上面看有没有会掉下来砸人的方块。
+        // 四周看有没有水或岩浆。头顶上面的沙砾不看：掉下来再挖，一直掉由每级十二下的上限接住。
         private Optional<Problem> refusal(TickContext context, Direction toward) {
             for (BlockPos cell : stepCells(feet, toward)) {
                 ClientStairsDown.Ground ground = site.ground(context, cell);
@@ -223,11 +224,6 @@ public final class ClientStairsUp implements DigsStairsUp {
                     return Optional.of(Problem.of(Problem.Kind.DANGER, "往上挖楼梯：挨着 " + at(cell) + " 的 "
                             + site.blockType(context, cell) + "，挖开会灌进来"));
                 }
-            }
-            BlockPos aboveHead = feet.above(3);
-            if (site.falls(context, aboveHead)) {
-                return Optional.of(Problem.of(Problem.Kind.DANGER, "往上挖楼梯：头顶上面 " + at(aboveHead) + " 压着 "
-                        + site.blockType(context, aboveHead) + "，挖开会砸下来"));
             }
             return Optional.empty();
         }
