@@ -44,7 +44,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * <p>三种设施的用法不同，都按原版界面真实的规矩来：
  * <ul>
  *   <li>背包合成格：摆得进 2×2 的合成不用工作台，打开背包照工作台的做法做（见 {@link InventoryCrafting}）；</li>
- *   <li>工作台：经配方簿一次摆一份原料，取走产出再摆下一份；</li>
+ *   <li>工作台：经配方簿一次摆一份原料，取走产出再摆下一份；配方簿点不了（还没解锁、原料带附魔或改过名）
+ *       就逐格摆（见 {@link CraftingGridFill}），一次摆几份、一下取走；</li>
  *   <li>熔炉：装好原料和燃料就关上界面在旁边等，烧好了回来取（见 {@link FurnaceRun}）；</li>
  *   <li>石切台：配方簿不管石切台。把原料拿到手上，右键一件一件放进投入口，放够要切的件数，
  *       多的放回原格；再按下这条配方的按钮，取走产出。关界面时原版会把投入口剩下的还回背包。</li>
@@ -58,6 +59,8 @@ public final class MenuRecipeRuns implements RecipeRuns {
     private static final int CLICK_TIMEOUT_TICKS = 100;
     /** 合成、石切一轮的总期限：走过去、点开、摆料收货都算上。 */
     private static final int GIVE_UP_TICKS = 20 * 60;
+    /** 逐格摆料时每一下点击多给的时间（刻）：一下要等游戏确认，一轮几十下。 */
+    static final int TICKS_PER_GRID_CLICK = 5;
     /** 界面不是被打断关上、而是无缘无故没了，最多重开几次。 */
     private static final int MAX_REOPENS = 3;
 
@@ -207,6 +210,12 @@ public final class MenuRecipeRuns implements RecipeRuns {
         /** 石切台喂料：原料拿在手上时从哪一格拿起来的、还要往投入口放几件；没在喂料时为 -1。 */
         private int feedFrom = -1;
         private int feedLeft;
+        /** 配方簿点不了：这条还没解锁，或配方簿摆过一次没摆上；之后这一轮都逐格摆。 */
+        private boolean byHand;
+        /** 正在逐格摆的这一轮；没在摆时为 null。 */
+        private CraftingGridFill filling;
+        /** 总期限：逐格摆料时按点击的下数再多给一些。 */
+        private int giveUpTicks = GIVE_UP_TICKS;
 
         WorkAction(RecipeHolder<?> holder, WorkstationRecipe recipe, WorldPosition station, int batches,
                 Permissions permissions, TaskRecords records) {
@@ -223,7 +232,7 @@ public final class MenuRecipeRuns implements RecipeRuns {
             if (failure != null) {
                 return ActionStatus.failed(failure);
             }
-            if (++waited > GIVE_UP_TICKS) {
+            if (++waited > giveUpTicks) {
                 return fail(Problem.Kind.STUCK, "在" + workstationName() + "上做" + recipe.result().describe() + "超时，先收手");
             }
             if (pending != null) {
@@ -265,6 +274,7 @@ public final class MenuRecipeRuns implements RecipeRuns {
             closedByPause = false;
             feedFrom = -1;
             feedLeft = 0;
+            filling = null;
             dropVisit();
             stage = Stage.VISIT;
             return ActionStatus.progressed();
@@ -289,6 +299,10 @@ public final class MenuRecipeRuns implements RecipeRuns {
                 return reopen();
             }
             MenuContent.Reading open = reading.get();
+            // 逐格摆到一半：先摆完这一轮；摆到一半时产出格可能先出了别的东西（四块木板先凑成工作台），不去收它。
+            if (filling != null) {
+                return continueFilling(tick);
+            }
             if (feedFrom < 0 && produced >= targetItems) {
                 memory.rememberWorkstationUsed(station, workstationBlockType(recipe.kind()), Instant.now());
                 stage = Stage.CLOSE;
@@ -298,8 +312,55 @@ public final class MenuRecipeRuns implements RecipeRuns {
             if (feedFrom < 0 && !open.containerSnapshots().get(output).isEmpty()) {
                 return takeOutput(tick, open, output);
             }
-            return recipe.kind() == WorkstationRecipe.Kind.STONECUTTING ? feedStonecutter(tick, open)
-                    : placeByRecipeBook(tick);
+            if (recipe.kind() == WorkstationRecipe.Kind.STONECUTTING) {
+                return feedStonecutter(tick, open);
+            }
+            // 配方簿里这条还没解锁就直接逐格摆；解锁了先走配方簿。
+            if (!byHand && !tick.player().localPlayer().getRecipeBook().contains(holder)) {
+                byHand = true;
+            }
+            return byHand ? placeByHand(tick, open) : placeByRecipeBook(tick);
+        }
+
+        // 逐格摆一轮：合成格里有上一份留下的东西（返还的空桶、配方簿摆到一半的料）先快速移动回背包，
+        // 格子空了再按身上的料排一轮；身上的料一份都摆不满就如实说缺料。
+        private ActionStatus placeByHand(TickContext tick, MenuContent.Reading open) {
+            List<SlotSnapshot> container = open.containerSnapshots();
+            for (int i = 1; i < container.size(); i++) {
+                if (container.get(i).isEmpty()) continue;
+                int slotId = open.containerSlotIds().get(i);
+                ItemStack shown = container.get(i).stack().copy();
+                return click(tick, slotId, 0, ClickType.QUICK_MOVE, slotChanged(slotId, shown), (status, later) ->
+                        status == PendingMenuAction.Status.CONFIRMED_APPLIED ? ActionStatus.progressed()
+                                : fail(Problem.Kind.INVENTORY_FULL, "合成格里剩下的"
+                                        + shown.getHoverName().getString() + "收不回背包，背包可能满了"));
+            }
+            int stillToMake = Math.max(1, (targetItems - produced + recipe.resultCount() - 1) / recipe.resultCount());
+            Optional<CraftingGridFill> fill = CraftingGridFill.plan(holder, 3,
+                    open.containerSlotIds().subList(1, container.size()), open.containerSlotIds().get(0),
+                    open.playerSlotIds(), open.playerSnapshots().stream().map(SlotSnapshot::stack).toList(),
+                    stillToMake, recipe.result());
+            if (fill.isEmpty()) {
+                return fail(Problem.Kind.NEED_ITEM, "配方簿点不了，逐格摆时身上的料摆不满一份"
+                        + recipe.result().describe());
+            }
+            filling = fill.get();
+            giveUpTicks += filling.clickCount() * TICKS_PER_GRID_CLICK;
+            return continueFilling(tick);
+        }
+
+        // 推进逐格摆的这一轮：摆完、产出格出了成品交回去取货；没得到确认或摆法对不上如实失败。
+        private ActionStatus continueFilling(TickContext tick) {
+            ActionStatus status = filling.tick(tick.player());
+            if (status instanceof ActionStatus.Done) {
+                filling = null;
+                return ActionStatus.progressed();
+            }
+            if (status instanceof ActionStatus.Failed failed) {
+                filling = null;
+                failure = failed.problem();
+            }
+            return status;
         }
 
         // 取货：整堆收进背包；收到几件按取货前后背包里这件东西的数量差记，不按产出格上写的数猜。
@@ -337,10 +398,11 @@ public final class MenuRecipeRuns implements RecipeRuns {
             }
             PendingMenuAction placing = player.menuActions().placeRecipe(player, holder, false,
                     ingredientsPlaced(), CLICK_TIMEOUT_TICKS);
-            return submit(placing, (status, later) -> status == PendingMenuAction.Status.CONFIRMED_APPLIED
-                    ? ActionStatus.progressed()
-                    : fail(Problem.Kind.NEED_ITEM, "配方簿没有把原料摆进去（身上可能缺料），做不了"
-                            + recipe.result().describe()));
+            // 配方簿没摆上（原料带附魔、改过名配方簿不认，或别的原因）：不在这里认输，改逐格摆，缺不缺料由逐格摆说。
+            return submit(placing, (status, later) -> {
+                if (status != PendingMenuAction.Status.CONFIRMED_APPLIED) byHand = true;
+                return ActionStatus.progressed();
+            });
         }
 
         // 石切台：手上拿着原料就接着往投入口放；投入口空着就去拿原料；料够了还没选配方就按配方按钮。
@@ -547,10 +609,10 @@ public final class MenuRecipeRuns implements RecipeRuns {
             }
         }
 
-        // 点到一半时不宜打断：等这一下的结果出来再停。
+        // 点到一半、逐格摆到一半时不宜打断：等这一下的结果出来、这一轮摆完再停，鼠标上可能还拿着料。
         @Override
         public Interruptibility interruptibility() {
-            return pending != null ? Interruptibility.UNSAFE_TO_STOP : Interruptibility.WORKING;
+            return pending != null || filling != null ? Interruptibility.UNSAFE_TO_STOP : Interruptibility.WORKING;
         }
 
         @Override

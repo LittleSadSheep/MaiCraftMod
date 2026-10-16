@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.acquire;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Supplier;
 
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -28,8 +31,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 新世界开局不用先有一张工作台。
  *
  * <p>每一下都等游戏确认再走下一步：配方簿摆完要看到产出格出了东西，取货要看到产出格变了。
- * 配方簿摆不进去（身上缺料、配方还没解锁）如实失败，引擎换别的路。被打断或收尾时请游戏关上背包，
- * 合成格里剩下的原版会还回背包。
+ * 配方簿点不了（配方还没解锁、原料带附魔或改过名配方簿不认）就逐格摆（见 {@link CraftingGridFill}）；
+ * 逐格摆身上的料也摆不满一份才如实失败，引擎换别的路。被打断或收尾时请游戏关上背包，合成格里剩下的原版会还回背包。
  */
 final class InventoryCrafting implements Action {
 
@@ -39,6 +42,10 @@ final class InventoryCrafting implements Action {
     private static final int CLICK_TIMEOUT_TICKS = 100;
     /** 一次背包合成的总期限（刻）：开背包、摆料、取货几下就够，留足余量。 */
     private static final int GIVE_UP_TICKS = 20 * 60;
+    /** 背包界面里 2×2 合成格的槽位号（按行排）与身上能拿料的槽位号（主背包与快捷栏）。 */
+    private static final List<Integer> GRID_SLOTS = List.of(1, 2, 3, 4);
+    private static final int FIRST_CARRIED_SLOT = InventoryMenu.INV_SLOT_START;
+    private static final int END_CARRIED_SLOT = InventoryMenu.USE_ROW_SLOT_END;
 
     /** 打开背包 → 摆料与收货 → 关上 → 结束。 */
     private enum Stage { OPEN, WORK, CLOSE, FINISHED }
@@ -62,6 +69,12 @@ final class InventoryCrafting implements Action {
     private int produced;
     private PendingMenuAction pending;
     private Settlement settlement;
+    /** 配方簿点不了：这条还没解锁，或配方簿摆过一次没摆上；之后都逐格摆。 */
+    private boolean byHand;
+    /** 正在逐格摆的这一轮；没在摆时为 null。 */
+    private CraftingGridFill filling;
+    /** 总期限：逐格摆料时按点击的下数再多给一些。 */
+    private int giveUpTicks = GIVE_UP_TICKS;
 
     /**
      * @param holder 游戏自己的配方对象：配方簿只认它
@@ -88,7 +101,7 @@ final class InventoryCrafting implements Action {
         if (stage == Stage.FINISHED) {
             return ActionStatus.done();
         }
-        if (++waited > GIVE_UP_TICKS) {
+        if (++waited > giveUpTicks) {
             return giveUp(player, Problem.of(Problem.Kind.STUCK, "在背包里做" + recipe.result().describe() + "超时，先收手"));
         }
         if (pending != null) {
@@ -115,8 +128,12 @@ final class InventoryCrafting implements Action {
         return ActionStatus.progressed();
     }
 
-    // 摆料与收货：做够了去关背包；产出格有货先收；否则经配方簿摆下一份。
+    // 摆料与收货：逐格摆到一半先摆完；做够了去关背包；产出格有货先收；否则摆下一份。
+    // 逐格摆到一半时产出格可能先出了别的东西，不去收它。
     private ActionStatus work(PlayerContext player) {
+        if (filling != null) {
+            return continueFilling(player);
+        }
         if (produced >= targetItems) {
             stage = Stage.CLOSE;
             return ActionStatus.progressed();
@@ -144,11 +161,69 @@ final class InventoryCrafting implements Action {
                         return ActionStatus.progressed();
                     });
         }
+        // 配方簿里这条还没解锁就直接逐格摆；解锁了先走配方簿，没摆上（原料带附魔、改过名配方簿不认）也改逐格摆。
+        if (!byHand && !player.localPlayer().getRecipeBook().contains(holder)) {
+            byHand = true;
+        }
+        if (byHand) {
+            return placeByHand(player, menu);
+        }
         return submit(player.menuActions().placeRecipe(player, holder, false, resultShown(), CLICK_TIMEOUT_TICKS),
-                status -> status == PendingMenuAction.Status.CONFIRMED_APPLIED ? ActionStatus.progressed()
-                        : giveUp(player, Problem.of(Problem.Kind.NEED_ITEM,
-                                "配方簿没有把原料摆进背包的合成格（身上可能缺料，或配方还没解锁），做不了"
-                                        + recipe.result().describe())));
+                status -> {
+                    if (status != PendingMenuAction.Status.CONFIRMED_APPLIED) byHand = true;
+                    return ActionStatus.progressed();
+                });
+    }
+
+    // 逐格摆一轮：合成格里有上一份留下的东西先快速移动回背包，格子空了再按身上的料排一轮；
+    // 身上的料一份都摆不满就如实说缺料。
+    private ActionStatus placeByHand(PlayerContext player, InventoryMenu menu) {
+        for (int slot : GRID_SLOTS) {
+            ItemStack left = menu.getSlot(slot).getItem();
+            if (left.isEmpty()) continue;
+            ItemStack shown = left.copy();
+            return submit(player.menuActions().click(player, slot, 0, ClickType.QUICK_MOVE,
+                    slotChanged(slot, shown), CLICK_TIMEOUT_TICKS), status ->
+                    status == PendingMenuAction.Status.CONFIRMED_APPLIED ? ActionStatus.progressed()
+                            : giveUp(player, Problem.of(Problem.Kind.INVENTORY_FULL, "合成格里剩下的"
+                                    + shown.getHoverName().getString() + "收不回背包，背包可能满了")));
+        }
+        List<Integer> carriedSlots = new ArrayList<>();
+        List<ItemStack> carried = new ArrayList<>();
+        for (int slot = FIRST_CARRIED_SLOT; slot < END_CARRIED_SLOT; slot++) {
+            carriedSlots.add(slot);
+            carried.add(menu.getSlot(slot).getItem());
+        }
+        int stillToMake = Math.max(1, (targetItems - produced + recipe.resultCount() - 1) / recipe.resultCount());
+        Optional<CraftingGridFill> fill = CraftingGridFill.plan(holder, 2, GRID_SLOTS, RESULT_SLOT, carriedSlots,
+                carried, stillToMake, recipe.result());
+        if (fill.isEmpty()) {
+            return giveUp(player, Problem.of(Problem.Kind.NEED_ITEM, "配方簿点不了，逐格摆时身上的料摆不满一份"
+                    + recipe.result().describe()));
+        }
+        filling = fill.get();
+        giveUpTicks += filling.clickCount() * MenuRecipeRuns.TICKS_PER_GRID_CLICK;
+        return continueFilling(player);
+    }
+
+    // 推进逐格摆的这一轮：摆完、产出格出了成品交回去取货；没得到确认或摆法对不上如实失败并关上背包。
+    private ActionStatus continueFilling(PlayerContext player) {
+        ActionStatus status = filling.tick(player);
+        if (status instanceof ActionStatus.Done) {
+            filling = null;
+            return ActionStatus.progressed();
+        }
+        if (status instanceof ActionStatus.Failed failed) {
+            filling = null;
+            return giveUp(player, failed.problem());
+        }
+        return status;
+    }
+
+    // 点到的格子变了（变空、变少或换了东西）才算这一下生效。
+    private static MenuConfirmation slotChanged(int slot, ItemStack before) {
+        return (player, click) -> ItemStack.matches(player.localPlayer().containerMenu.getSlot(slot).getItem(), before)
+                ? MenuConfirmation.Verdict.PENDING : MenuConfirmation.Verdict.APPLIED;
     }
 
     // 关上背包：做出来的已经按背包里的数量算过，关得利不利索不改写这件事。
@@ -225,6 +300,8 @@ final class InventoryCrafting implements Action {
         PlayerContext player = currentPlayer();
         pending = null;
         settlement = null;
+        // 逐格摆到一半被打断：关背包时合成格和鼠标上的料原版还回背包，回来按身上的料重新排一轮。
+        filling = null;
         if (player != null) requestClose(player);
         stage = Stage.OPEN;
     }
@@ -246,7 +323,9 @@ final class InventoryCrafting implements Action {
 
     @Override
     public Interruptibility interruptibility() {
-        return pending != null && !pending.terminal() ? Interruptibility.UNSAFE_TO_STOP : Interruptibility.WORKING;
+        // 点到一半、逐格摆到一半时停下不安全：鼠标上可能还拿着料。
+        return pending != null && !pending.terminal() || filling != null
+                ? Interruptibility.UNSAFE_TO_STOP : Interruptibility.WORKING;
     }
 
     @Override
