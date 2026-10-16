@@ -37,7 +37,7 @@ final class LiveSuicideWorld implements SuicideWorld {
     private final PermissionCheck permission;
     private final Permissions permissions;
 
-    /** @param permissions 这次寻死目标的许可：放火、倒岩浆按它过放方块的检查 */
+    /** @param permissions 这次寻死目标的许可：只取额外保护的地标，放火、倒岩浆不看 change_blocks */
     LiveSuicideWorld(Supplier<PlayerContext> context, Protection protection, PermissionCheck permission,
             Permissions permissions) {
         this.context = Objects.requireNonNull(context, "context");
@@ -122,8 +122,13 @@ final class LiveSuicideWorld implements SuicideWorld {
                 permissions.protectedLandmarks());
     }
 
+    // 寻死本身就是目标，放一格火、倒一格岩浆是手段：change_blocks 是 none 也按 temporary 过放方块检查，
+    // 只剩受保护的格（别人的地盘、记住的区域、额外保护的地标）照旧不放。
     @Override public boolean mayPlaceAt(BlockPos cell) {
-        return permission.blockAllowed(permissions, PermissionCheck.WorldAction.PLACE_BLOCK,
+        Permissions placing = permissions.changeBlocks() == Permissions.BlockChanges.NONE
+                ? permissions.mergedWith(Permissions.BlockChanges.TEMPORARY, null, null, null, null, null)
+                : permissions;
+        return permission.blockAllowed(placing, PermissionCheck.WorldAction.PLACE_BLOCK,
                 WorldPosition.here(cell.getX(), cell.getY(), cell.getZ()), "minecraft:fire").isEmpty();
     }
 

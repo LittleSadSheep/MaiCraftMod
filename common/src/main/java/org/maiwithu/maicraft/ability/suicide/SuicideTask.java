@@ -421,18 +421,8 @@ final class SuicideTask extends PhasedTask<SuicideTask.Phase> implements Surviva
             }
         }
         String message = "附近 " + input.radius() + " 格内没有能用的死法";
-        // 身上带着点火物或岩浆桶、只是许可不让放方块：缺的是许可，说清提哪一项就能接着做。
-        if (input.via() == null && !input.placesBlocks() && carriesForCarriedWays()) {
-            parts.add("随身点火、倒岩浆：这次任务不许动方块（change_blocks=none）");
-            return Problem.of(Problem.Kind.NEED_APPROVAL, message + "：" + String.join("；", parts),
-                    "把 change_blocks 提到 temporary 或更高，就能原地点火或倒岩浆");
-        }
         return Problem.of(Problem.Kind.NOT_FOUND, message + (parts.isEmpty() ? "" : "：" + String.join("；", parts)),
                 "换到有岩浆或高崖的地方再试，或带上打火石、岩浆桶");
-    }
-
-    private boolean carriesForCarriedWays() {
-        return itemFor(WayToDie.FIRE) != null || itemFor(WayToDie.LAVA_BUCKET) != null;
     }
 
     // 挑下一件能穿的：原部位被别的占了就不换；原件还没在背包里（重生后背包晚到）先跳过，等一等再来。

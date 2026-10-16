@@ -91,10 +91,11 @@ class SuicideModuleTest {
     }
 
     @Test
-    void 指定倒岩浆却不许动方块_要许可() {
+    void 指定倒岩浆_不许动方块也照做() {
+        // 寻死本身就是目标：倒一格岩浆是手段，change_blocks=none 不拦，只看身上有没有岩浆桶。
         player.carried.add(WayToDie.LAVA_BUCKET_ITEM);
         Permissions none = Permissions.DEFAULT.mergedWith(Permissions.BlockChanges.NONE, null, null, null, null, null);
-        assertProblem(decide("{\"via\": \"lava_bucket\"}", none, List.of()), Problem.Kind.NEED_APPROVAL);
+        assertEquals(WayToDie.LAVA_BUCKET, run(decide("{\"via\": \"lava_bucket\"}", none, List.of())).via());
     }
 
     @Test

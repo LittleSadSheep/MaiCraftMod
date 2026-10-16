@@ -58,7 +58,8 @@ class CarriedHazardsTest {
     }
 
     @Test
-    void 许可不让放方块就一格都不选() {
+    void 放的那一格都受保护就一格都不选() {
+        // 放方块检查只剩保护这一关（change_blocks 不管寻死点火）：每格都过不了就没有能点的格。
         world.mayPlace = cell -> false;
         assertTrue(search(WayToDie.FIRE) instanceof CarriedHazards.Step.Exhausted);
     }

@@ -103,16 +103,13 @@ public final class SuicideModule implements AbilityModule {
         ParamValues params = step.goal().params();
         Permissions permissions = step.goal().permissions();
         WayToDie via = params.has("via") ? WayToDie.fromParam(params.text("via")) : null;
-        // 创造、旁观死不了；极限死了不能重生，寻死回家没有意义。
+        // 创造、旁观死不了；极限死了不能重生，寻死回家没有意义。点火、倒岩浆是寻死的手段，不看 change_blocks，
+        // 只看身上有没有点火物、岩浆桶。
         if (player.creative() || player.spectator()) {
             return fail("创造、旁观模式死不了", Problem.Kind.NOT_POSSIBLE_HERE, null);
         }
         if (player.hardcore()) {
             return fail("极限模式死了不能重生，回不了家", Problem.Kind.NOT_POSSIBLE_HERE, null);
-        }
-        if (via != null && via.carried() && permissions.changeBlocks() == Permissions.BlockChanges.NONE) {
-            return fail(via.label + "要放方块（火、岩浆），这次任务不许动方块（change_blocks=none）",
-                    Problem.Kind.NEED_APPROVAL, "把 change_blocks 提到 temporary 或更高");
         }
         if (via == WayToDie.FIRE && WayToDie.IGNITERS.stream().noneMatch(player::carries)) {
             return fail("身上没有打火石或火焰弹", Problem.Kind.NEED_ITEM, null);

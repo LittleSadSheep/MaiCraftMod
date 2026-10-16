@@ -246,15 +246,19 @@ class SuicideTaskTest {
     }
 
     @Test
-    void 不许动方块时不点火() {
+    void 不许动方块也原地点火_结果写在哪点的() {
+        // change_blocks=none（默认）时照样点火：寻死就是目标，放一格火是手段；在哪放了什么记进变化。
         player.carried.add("minecraft:flint_and_steel");
         SuicideTask task = new SuicideTask(new SuicideInput(null, 8, 120,
                 Permissions.DEFAULT.mergedWith(Permissions.BlockChanges.NONE, null, null, null, null, null), "game_rule"),
                 player, world, moves, gear);
-        TaskResult result = finished(run(task, 300, () -> false));
-        assertFalse(moves.calls.stream().anyMatch(call -> call.startsWith("make:")));
-        assertEquals(Problem.Kind.NEED_APPROVAL, result.problem().kind(), "带着打火石、只差许可");
-        assertTrue(result.problem().message().contains("change_blocks=none"), result.problem().message());
+        run(task, 50, () -> world.fireAt(new BlockPos(0, 64, 0)));
+        assertTrue(moves.calls.contains("make:fire"), moves.calls.toString());
+        player.respawns = 1;
+        TaskResult result = finished(run(task, 50, () -> false));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertTrue(result.changes().stream().anyMatch(change -> change.kind() == Change.Kind.BLOCK_PLACED
+                && "minecraft:fire".equals(change.what()) && change.note().contains("0, 64, 0")), result.changes().toString());
     }
 
     private SuicideTask task(WayToDie via, long seconds) {
