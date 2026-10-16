@@ -586,4 +586,30 @@ class SleepTaskTest {
                 new StubUsesBeds(), Optional::empty, moment -> true);
         assertNull(runTicks(rest, 20 * 60 * 3), "睡三分钟还在床上等天亮");
     }
+
+    @Test
+    void wokenAtNightGoesBackToBedInsteadOfPackingUp() {
+        // 夜里被挨打叫醒，处理完回来还是夜里：回床上接着睡，不收床、不回站位。
+        FakeScanner scanner = new FakeScanner();
+        scanner.offer(new BedScanner.BedScan(
+                List.of(new BedCandidate(BED_A, false, false, false, 4)), true));
+        StubApproaches approaches = new StubApproaches();
+        StubUsesBeds usesBeds = new StubUsesBeds();
+        boolean[] asleep = {true};
+        NightRestTask rest = nightRest(scanner, new StubPlacer(), new StubObtain(), approaches, usesBeds,
+                Optional::empty, moment -> asleep[0]);
+        TickContext context = tick();
+        rest.start(context);
+        for (int i = 0; i < 10; i++) rest.tick(context);
+        assertEquals(List.of(BED_A), usesBeds.clicked);
+        // 被打醒：醒来后先等两秒对齐，再看到还是夜里，就走回床边重新躺下。
+        asleep[0] = false;
+        for (int i = 0; i < 60; i++) {
+            if (usesBeds.clicked.size() == 2) asleep[0] = true;
+            assertFalse(rest.tick(context) instanceof TickResult.Finished, "夜里被叫醒不收工");
+        }
+        assertEquals(List.of(BED_A, BED_A), approaches.targets, "走回同一张床");
+        assertEquals(List.of(BED_A, BED_A), usesBeds.clicked, "重新躺下");
+    }
 }
+

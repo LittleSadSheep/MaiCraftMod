@@ -39,6 +39,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * （多人生存里常见），视为已经度过这一夜，直接结清回去干活。放在记住的"家"区域里的床不收：
  * 收床会让重生点失效，家里的床留着当重生点。收床被打断（自卫撤离、去吃东西）不算收不了：处理完回来，
  * 先重新走到床边再挖。实在收不了时如实结束，并交代床留在哪、重生点是不是改到了那里。
+ * 睡着就是在做这件事，等多久都不算卡住；夜里被挨打、着火叫醒，处理完还是夜里就回床上接着睡，不收床、不回站位。
  */
 final class NightRestTask extends SleepTask implements AnnouncesFinish {
 
@@ -126,8 +127,12 @@ final class NightRestTask extends SleepTask implements AnnouncesFinish {
     }
 
     // 可睡窗口关了：多半是别人先睡过了这一夜，视为已经度过，直接结清回去干活。
+    // 已经睡过一觉、夜里被叫醒后回床的路上天亮了：照睡醒的样子起身，自己放的床照样收回来再回站位。
     @Override
     protected Next<Phase> onNoLongerSleepTime() {
+        if (enteredSleep()) {
+            return getUp(now);
+        }
         return Next.done(TaskResult.builder(TaskResult.Status.DONE, "这一夜已经过去，不用睡了")
                 .details(new SleepDetails(false, SleepDetails.BedSource.WORLD, null, false, true)).build());
     }
@@ -182,17 +187,29 @@ final class NightRestTask extends SleepTask implements AnnouncesFinish {
         }
         wakeCountdown--;
         if (wakeCountdown <= 0) {
-            // 起身这一刻算进展：等对齐是有意的停顿，不能让回站位一出手就按"醒了之后没进展"判卡住
-            // （实机醒来后走回站位第一刻就以卡住收场，人留在三十多格外的床边）。
-            recordProgress("起身");
-            cellsToCollect = collectibleCells(context);
-            if (!cellsToCollect.isEmpty() && collects.collect(cellsToCollect.getFirst(), permissions).isPresent()) {
-                return Next.go(Phase.COLLECT_BED, "睡醒了，收回放下的床");
+            // 醒了还是夜里（被挨打、着火叫醒，处理完回来）：不收床、不回站位，回床上接着睡。
+            // 等对齐之后再看时间：醒来那一刻时间包可能还没到，早上自然醒也会被误当成还在夜里。
+            if (!nightSkippedBySleep() && sleepWindowOpen(context)) {
+                wakeCountdown = -1;
+                recordProgress("夜里被叫醒");
+                return Next.go(Phase.APPROACH, "夜里被叫醒，还没天亮，回床上接着睡");
             }
-            // 不是自己放的床、在"家"里、或床已经不在：没什么可收，直接回站位。
-            return Next.go(Phase.WALK_BACK, "睡醒了，回到原来的站位");
+            return getUp(context);
         }
         return Next.stay();
+    }
+
+    // 起身：自己放的床先收回来，再回睡前的站位；没什么可收就直接回去。
+    // 起身这一刻算进展：等对齐是有意的停顿，不能让回站位一出手就按"醒了之后没进展"判卡住
+    // （实机醒来后走回站位第一刻就以卡住收场，人留在三十多格外的床边）。
+    private Next<Phase> getUp(TickContext context) {
+        recordProgress("起身");
+        cellsToCollect = collectibleCells(context);
+        if (!cellsToCollect.isEmpty() && collects.collect(cellsToCollect.getFirst(), permissions).isPresent()) {
+            return Next.go(Phase.COLLECT_BED, "睡醒了，收回放下的床");
+        }
+        // 不是自己放的床、在"家"里、或床已经不在：没什么可收，直接回站位。
+        return Next.go(Phase.WALK_BACK, "睡醒了，回到原来的站位");
     }
 
     // 收回自己放下的床：床头与床尾各收一格；收完回站位。收的中途被打断，回来由收方块的动作自己先走回床边再挖。

@@ -407,6 +407,16 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
         return bedSource;
     }
 
+    /** 给子类读的"这次躺下过"：确认躺下了就为真，醒了也不变。 */
+    protected final boolean enteredSleep() {
+        return enteredSleep;
+    }
+
+    /** 给子类读的此刻还在不在可睡窗口里（夜里或雷暴）。 */
+    protected final boolean sleepWindowOpen(TickContext context) {
+        return sleepWindow.open(context);
+    }
+
     /** 给子类读的自己放下的床（床头那一格）；没放过为 null。 */
     protected final BlockPos placedBed() {
         return placedBed;
