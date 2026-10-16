@@ -8,6 +8,7 @@ import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.BlockScanService;
+import org.maiwithu.maicraft.game.world.IdKind;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 
@@ -114,11 +115,10 @@ public final class FindModule implements AbilityModule {
             return new StepDecision.Finish(failInvalid("block/blocks、entity、structure 要三选一，"
                     + "这次给了 " + given + " 种"));
         }
-        // 写岔的 ID 一次报全：不是"附近还没扫完"，是这句话本来就找不到东西。
+        // 写岔的 ID 一次报全：不是"附近还没扫完"，是这句话本来就找不到东西；每个都带上本实例里相近的名字。
         List<String> unknown = unknownOf(blocks, entities);
         if (!unknown.isEmpty()) {
-            return new StepDecision.Finish(failInvalid("没有叫 "
-                    + String.join("、", unknown) + " 的方块或实体（或标签下一件注册的都没有）"));
+            return new StepDecision.Finish(failInvalid(String.join("；", unknown)));
         }
         FindInput.FindKind kind = blocks != null ? FindInput.FindKind.BLOCK
                 : entities != null ? FindInput.FindKind.ENTITY : FindInput.FindKind.STRUCTURE;
@@ -129,17 +129,19 @@ public final class FindModule implements AbilityModule {
         return new StepDecision.Run(new FindInput(kind, selectors, count, radius));
     }
 
-    /** 方块与实体 ID 在游戏里查一遍：不存在的逐个记下，一起报。 */
+    /** 方块与实体 ID 在游戏里查一遍：不存在的逐个说成"…不存在；你是不是要 …"，一起报。 */
     private List<String> unknownOf(List<String> blocks, List<String> entities) {
         List<String> unknown = new ArrayList<>();
         if (blocks != null) {
             for (String selector : blocks) {
-                if (!worldTypes.blockTypeExists(selector)) unknown.add(selector);
+                if (!worldTypes.blockTypeExists(selector)) unknown.add(worldTypes.missing(IdKind.BLOCK, selector));
             }
         }
         if (entities != null) {
             for (String selector : entities) {
-                if (!worldTypes.entityTypeExists(selector)) unknown.add(selector);
+                if (!worldTypes.entityTypeExists(selector)) {
+                    unknown.add(worldTypes.missing(IdKind.ENTITY_TYPE, selector));
+                }
             }
         }
         return unknown;

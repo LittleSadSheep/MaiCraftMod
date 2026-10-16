@@ -12,6 +12,8 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.block.Block;
+import org.maiwithu.maicraft.game.world.ClientRegisteredIds;
+import org.maiwithu.maicraft.game.world.IdKind;
 
 /**
  * 游戏类型目录的生产读端：直接问原版注册表（含模组注册）。
@@ -40,6 +42,12 @@ final class LiveWorldTypes implements ReadsWorldTypes {
     @Override
     public boolean entityTypeExists(String entityTypeId) {
         return entityTypeOf(entityTypeId).isPresent();
+    }
+
+    @Override
+    public String missing(IdKind kind, String selector) {
+        // 方块与实体类型都在游戏内置的注册表里，不用进世界就能挑相近的名字。
+        return ClientRegisteredIds.builtIn().missing(kind, selector);
     }
 
     /** 方块 ID 或标签展开成方块集合；写法不合法或都没注册给空集。包内复用，避免两份解析。 */

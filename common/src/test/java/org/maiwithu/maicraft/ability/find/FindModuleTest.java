@@ -9,6 +9,8 @@ import org.maiwithu.maicraft.behavior.perception.FakeBlockTags;
 import org.maiwithu.maicraft.behavior.perception.RemembersSightings;
 import org.maiwithu.maicraft.behavior.perception.Scene;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
+import org.maiwithu.maicraft.game.world.IdKind;
+import org.maiwithu.maicraft.game.world.SimilarIds;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
@@ -24,7 +26,6 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
-import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -33,15 +34,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** 寻找能力：block/blocks、entity、structure 三选一，写岔的 ID 一次报全，再凑成一次寻找任务。 */
 class FindModuleTest {
 
-    /** 游戏类型目录替身：只认这几个 ID 与标签。 */
+    /** 游戏类型目录替身：只认这几个 ID 与标签；写岔时从同一份名单里挑相近的。 */
     private static ReadsWorldTypes types() {
+        List<String> blocks = List.of("minecraft:coal_ore", "minecraft:chest");
+        List<String> entities = List.of("minecraft:zombie", "minecraft:sheep");
         return new ReadsWorldTypes() {
             @Override public boolean blockTypeExists(String blockIdOrTag) {
-                return Set.of("minecraft:coal_ore", "minecraft:chest", "#minecraft:logs").contains(blockIdOrTag);
+                return blocks.contains(blockIdOrTag) || blockIdOrTag.equals("#minecraft:logs");
             }
 
             @Override public boolean entityTypeExists(String entityTypeId) {
-                return Set.of("minecraft:zombie", "minecraft:sheep").contains(entityTypeId);
+                return entities.contains(entityTypeId);
+            }
+
+            @Override public String missing(IdKind kind, String selector) {
+                List<String> known = kind == IdKind.BLOCK ? blocks : entities;
+                return SimilarIds.missing(kind.label(), selector, SimilarIds.closest(known, selector));
             }
         };
     }
@@ -134,6 +142,16 @@ class FindModuleTest {
 
         TaskResult entity = failResult(goal("{\"entity\": [\"minecraft:creeper\"]}"));
         assertEquals(Problem.Kind.INVALID_PARAMETER, entity.problem().kind());
+    }
+
+    @Test
+    void decideNamesTheClosestIdForTypos() {
+        TaskResult block = failResult(goal("{\"block\": \"minecraft:coal_oer\"}"));
+        assertEquals("方块 minecraft:coal_oer 不存在；你是不是要 minecraft:coal_ore", block.problem().message());
+
+        TaskResult entity = failResult(goal("{\"entity\": [\"minecraft:zombi\", \"minecraft:ender_dragon\"]}"));
+        assertEquals("实体 minecraft:zombi 不存在；你是不是要 minecraft:zombie；实体 minecraft:ender_dragon 不存在",
+                entity.problem().message(), "一个都不像的不硬凑建议");
     }
 
     private FindInput runInput(Goal goal) {
