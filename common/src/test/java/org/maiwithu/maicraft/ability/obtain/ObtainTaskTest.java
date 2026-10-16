@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 
@@ -18,15 +19,23 @@ import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
 import org.maiwithu.maicraft.behavior.acquire.ReadsItemTags;
 import org.maiwithu.maicraft.behavior.acquire.StartsAcquisition;
+import org.maiwithu.maicraft.behavior.acquire.StepwiseActions;
 import org.maiwithu.maicraft.behavior.acquire.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
+import org.maiwithu.maicraft.behavior.acquire.spi.AcquisitionCost;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
+import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
+import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
@@ -237,6 +246,84 @@ class ObtainTaskTest {
         assertEquals(Double.valueOf(30), acquisition.lastScope.maxDistanceBlocks());
         assertEquals(Integer.valueOf(12), acquisition.lastScope.radiusBlocks());
         assertEquals(1, acquisition.lastRequest.count());
+    }
+
+    /** 测试用的一条要等的途径：下单后站着等成品。 */
+    private static final AcquireVia WAITING_VIA = new AcquireVia("test_wait", "测试：下单后站着等成品");
+
+    @Test
+    void 来源此刻能不能打断_经取物引擎一路交给拿东西任务() {
+        // 来源的动作是一串：点下单等游戏确认（停不得）→ 站着等成品（两件事之间的空当，饿了能吃一口）→ 成品进背包。
+        // 拿东西任务对内核报的要跟着这一串走，不是一律报正常干活。
+        FakeBackpack backpack = new FakeBackpack();
+        Action clicking = new Action() {
+            private boolean sent;
+
+            @Override public ActionStatus tick(TickContext context) {
+                if (sent) return ActionStatus.done();
+                sent = true;
+                return ActionStatus.running();
+            }
+
+            @Override public Interruptibility interruptibility() {
+                return Interruptibility.UNSAFE_TO_STOP;
+            }
+
+            @Override public String describe() {
+                return "点下单，等游戏确认";
+            }
+        };
+        Action waiting = new Action() {
+            private int waited;
+
+            @Override public ActionStatus tick(TickContext context) {
+                if (++waited < 3) return ActionStatus.running();
+                backpack.add("minecraft:torch", 4);
+                return ActionStatus.done();
+            }
+
+            @Override public Interruptibility interruptibility() {
+                return Interruptibility.BETWEEN_ACTIONS;
+            }
+
+            @Override public String describe() {
+                return "站着等成品";
+            }
+        };
+        ItemSource ordering = new ItemSource() {
+            @Override public String describe() {
+                return "网络下单";
+            }
+
+            @Override public AcquireVia via() {
+                return WAITING_VIA;
+            }
+
+            @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
+                return new SourceQuote.Offer(describe(), request.count(), new AcquisitionCost(0, 3).withWait(60), null);
+            }
+
+            @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
+                return Optional.of(new StepwiseActions("下单后等成品", clicking, waiting));
+            }
+        };
+        ItemAcquisition engine = new ItemAcquisition(List.of(ordering), backpack, null, itemId -> Set.of(),
+                () -> WorldPosition.here(0, 64, 0), Optional.empty(), ItemAcquisition.DEFAULT_MAX_DEPTH);
+        ObtainTask task = new ObtainTask(input(4, ItemAcquisition.Scope.ALL), engine, backpack, null, itemId -> Set.of());
+        task.start(tick(0));
+        List<Interruptibility> reported = new ArrayList<>();
+        TaskResult finished = null;
+        for (int i = 1; i <= 20 && finished == null; i++) {
+            if (task.tick(tick(i)) instanceof TickResult.Finished done) {
+                finished = done.result();
+            } else {
+                Interruptibility now = task.interruptibility(tick(i));
+                if (reported.isEmpty() || reported.getLast() != now) reported.add(now);
+            }
+        }
+        assertEquals(TaskResult.Status.DONE, finished.status());
+        assertEquals(List.of(Interruptibility.BETWEEN_ACTIONS, Interruptibility.UNSAFE_TO_STOP,
+                Interruptibility.BETWEEN_ACTIONS), reported, "问价时是空当，点下单时停不得，站着等成品时又是空当");
     }
 
     private TaskResult runTask(ObtainTask task) {

@@ -32,6 +32,7 @@ import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
@@ -205,6 +206,8 @@ public final class MenuTerminalTakes implements TerminalTakes {
         private boolean failEvenIfTaken;
         /** 等成品时数刻，每秒报一次进展用。 */
         private int craftBeat;
+        /** 站在终端前等成品时被生存需求打断过：回来先重新打开终端接着等，不当成取完了。 */
+        private boolean reopenAfterPause;
 
         // 正在等确认的一下：取法、取的那种东西、点之前角色那一侧与光标的样子。
         private PendingMenuAction pending;
@@ -236,6 +239,7 @@ public final class MenuTerminalTakes implements TerminalTakes {
         }
 
         @Override public ActionStatus tick(TickContext tick) {
+            if (reopenAfterPause) return resumeAfterPause();
             // 下了单（或在等之前下的单）时，下单那几页与等成品另有期限，总期限跟着放宽。
             long limit = craft.involved()
                     ? GIVE_UP_TICKS + CraftOrdering.MOST_TICKS + CraftWait.TOTAL_TICKS : GIVE_UP_TICKS;
@@ -425,6 +429,18 @@ public final class MenuTerminalTakes implements TerminalTakes {
                 case NetworkCraft.Stop stop -> stopCraft(stop);
                 default -> ActionStatus.running();
             };
+        }
+
+        // 等成品时被打断过（饿了去吃、天黑去睡）：界面已经关了，作业留在网络里接着做。回来重新走到终端前打开，
+        // 接着等同一单——等过的时间照算、不重复下单；打断前还没确认的那一下如实记下，不再等它。
+        private ActionStatus resumeAfterPause() {
+            reopenAfterPause = false;
+            if (pending != null) {
+                settlement.unconfirmed("从 " + access.describe() + " 取货的一下没等到确认就被打断了");
+                pending = null;
+            }
+            putDownSlot = -1;
+            return reopen();
         }
 
         // 开工了：关掉 AE2 退回来的终端重新打开看存货，等成品进网络。
@@ -705,9 +721,18 @@ public final class MenuTerminalTakes implements TerminalTakes {
             return request.wanted().matches(itemId, services.itemTags().tagsOf(itemId));
         }
 
+        // 被生存需求打断：界面关上。站在终端前等成品时打断的，回来接着等；取现货时打断的就此收场，取到多少由引擎清点。
         @Override public void pause() {
+            if (menu != null && stage == Stage.TAKE && craft.waiting()) reopenAfterPause = true;
             opening.pause();
             if (menu != null) menu.abandon();
+        }
+
+        // 此刻能不能被生存需求打断：一下取货、放下、放回网络还在等游戏确认时停不得，光标上可能拿着东西；
+        // 站在终端前等网络做成品是两件事之间的空当，饿了吃一口、天黑去睡都能插进来，作业留在网络里接着做；其余是正常干活。
+        @Override public Interruptibility interruptibility() {
+            if (pending != null || putDownSlot >= 0 || putBackPending != null) return Interruptibility.UNSAFE_TO_STOP;
+            return stage == Stage.TAKE && craft.waiting() ? Interruptibility.BETWEEN_ACTIONS : Interruptibility.WORKING;
         }
 
         // 收尾：打开动作一并收尾；界面还开着就请游戏关上，光标上的东西由原版的关闭流程还回背包。

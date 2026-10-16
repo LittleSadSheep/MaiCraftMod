@@ -14,6 +14,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 
@@ -138,6 +139,11 @@ public final class HarvestSource implements ItemSource {
 
         @Override public void close() {
             if (replant != null) replant.close();
+        }
+
+        // 补种这一下能不能被打断，照补种动作自己说（点下去等确认时停不得）；还没开始补种就是正常干活。
+        @Override public Interruptibility interruptibility() {
+            return replant != null ? replant.interruptibility() : Interruptibility.WORKING;
         }
 
         @Override public String describe() {

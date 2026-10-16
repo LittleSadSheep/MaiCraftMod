@@ -26,6 +26,7 @@ import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.ReportsUnconfirmed;
 import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -593,6 +594,16 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         @Override public void pause() {
             if (step != null) step.pause();
             if (room != null) room.pause();
+        }
+
+        // 此刻能不能被生存需求打断，照手上正在做的那一件说，按同一套打断规则交给外面的任务：
+        // 在用来源就转交来源动作自己报的（站在终端前等成品、关着界面等熔炉、在取货口等包裹是空当，
+        // 点到一半、光标上拿着东西停不得）；在腾地方就转交腾地方的动作；在问价、换下一个来源时手上没有
+        // 进行中的动作，是两件事之间的空当，饿了吃一口这类不急的事可以插进来。
+        @Override public Interruptibility interruptibility() {
+            if (stage == Stage.RUN && step != null) return step.interruptibility();
+            if (room != null) return room.interruptibility();
+            return Interruptibility.BETWEEN_ACTIONS;
         }
 
         @Override public void close() {

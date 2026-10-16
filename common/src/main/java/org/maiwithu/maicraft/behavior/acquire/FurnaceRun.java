@@ -693,10 +693,12 @@ final class FurnaceRun implements Action {
         }
     }
 
-    // 点到一半、分堆分到一半时不宜打断：鼠标上可能还拿着东西。
+    // 点到一半、分堆分到一半时不宜打断：鼠标上可能还拿着东西。关着界面在旁边等炉子烧是两件事之间的空当：
+    // 饿了吃一口、天黑去睡这类不急的事也能插进来，炉子照烧，回来走到跟前点开接着收。
     @Override
     public Interruptibility interruptibility() {
-        return pending != null || splitting != null ? Interruptibility.UNSAFE_TO_STOP : Interruptibility.WORKING;
+        if (pending != null || splitting != null) return Interruptibility.UNSAFE_TO_STOP;
+        return stage == Stage.AWAY ? Interruptibility.BETWEEN_ACTIONS : Interruptibility.WORKING;
     }
 
     @Override
