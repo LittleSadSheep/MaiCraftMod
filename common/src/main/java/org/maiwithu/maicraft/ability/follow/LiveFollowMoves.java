@@ -20,6 +20,7 @@ import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.travel.DimensionTravelServices;
 import org.maiwithu.maicraft.behavior.travel.DimensionTravelTask;
+import org.maiwithu.maicraft.behavior.travel.SameDimensionTravel;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -93,13 +94,14 @@ public final class LiveFollowMoves implements FollowMoves {
     }
 
     // 过门只走现成的门：许可里的改地形降到不改，找不到门就如实说没找到，不替他建一扇。
+    // 跟着过门不带坐标、也不从末地出发（出口门不跟），同一个维度里的那段用只走路的那一份。
     @Override
     public Task crossPortal(String targetDimension, Permissions permissions) {
         Permissions walkOnly = new Permissions(Permissions.BlockChanges.NONE, permissions.fight(),
                 permissions.useRareItems(), permissions.killAnimals(), permissions.survivalNeeds(),
                 permissions.protectedLandmarks());
         return new DimensionTravelTask(new DimensionTravelTask.Journey(targetDimension, null, PORTAL_SEARCH,
-                PORTAL_SECONDS, walkOnly), portals);
+                PORTAL_SECONDS, walkOnly), portals, SameDimensionTravel.walkingOnly(portals));
     }
 
     // 帮打的名单：他身边 6 格内的敌对生物，加上正在打我的；玩家不打（打不打人由 LLM 定）。

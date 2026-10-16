@@ -3,10 +3,12 @@ package org.maiwithu.maicraft.behavior.travel;
 
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import java.util.AbstractMap;
+import java.util.ArrayList;
 import java.util.Deque;
 import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import net.minecraft.core.BlockPos;
@@ -21,10 +23,17 @@ import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
+import org.maiwithu.maicraft.behavior.travel.spi.TravelVia;
+import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.kernel.result.Attempt;
+import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
+import org.maiwithu.maicraft.kernel.task.CloseReason;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
+import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
@@ -36,7 +45,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 跨维度段的任务：扫描没完成不收场、门没了换下一候选、20 秒进不去排除、
- * 维度变了才算到、先离门口再结算、没门且不许动地形就按没门结束。
+ * 维度变了才算到、先离门口再结算、没门且不许动地形就按没门结束；
+ * 主世界一趟去外岛的坐标中途过折跃门、外岛一趟回主世界先过门回主岛，各自的失败收场。
  */
 class DimensionTravelTaskTest {
 
@@ -97,7 +107,7 @@ class DimensionTravelTaskTest {
 
     private DimensionTravelTask taskToNether(Permissions permissions) {
         return new DimensionTravelTask(new DimensionTravelTask.Journey(
-                DimensionRoute.NETHER, null, 128, 0, permissions), services);
+                DimensionRoute.NETHER, null, 128, 0, permissions), services, SameDimensionTravel.walkingOnly(services));
     }
 
     @Test
@@ -196,7 +206,7 @@ class DimensionTravelTaskTest {
                 new DimensionFakes.FakeObtain(), new DimensionFakes.FakeToMainhand(), lights,
                 permissions -> null, null, () -> List.of(), progress -> {});
         TaskResult result = run(new DimensionTravelTask(new DimensionTravelTask.Journey(
-                DimensionRoute.NETHER, null, 128, 0, Permissions.DEFAULT), building));
+                DimensionRoute.NETHER, null, 128, 0, Permissions.DEFAULT), building, SameDimensionTravel.walkingOnly(building)));
 
         assertEquals(TaskResult.Status.DONE, result.status(), result.summary() + " / " + result.problem());
         assertEquals(DimensionRoute.NETHER, ((DimensionTravelDetails) result.details()).arrivedDimension());
@@ -236,7 +246,7 @@ class DimensionTravelTaskTest {
     private DimensionTravelTask taskHomeFromTheEnd() {
         world.dimension = DimensionRoute.END;
         return new DimensionTravelTask(new DimensionTravelTask.Journey(
-                DimensionRoute.OVERWORLD, null, 128, 0, Permissions.DEFAULT), services);
+                DimensionRoute.OVERWORLD, null, 128, 0, Permissions.DEFAULT), services, SameDimensionTravel.walkingOnly(services));
     }
 
     private static Map.Entry<Boolean, Runnable> touch(Runnable effect) {
@@ -380,7 +390,7 @@ class DimensionTravelTaskTest {
     @Test
     void dimensionOnlyGoalAlreadyThereFinishesAtOnce() {
         DimensionTravelTask task = new DimensionTravelTask(new DimensionTravelTask.Journey(
-                DimensionRoute.OVERWORLD, null, 128, 0, Permissions.DEFAULT), services);
+                DimensionRoute.OVERWORLD, null, 128, 0, Permissions.DEFAULT), services, SameDimensionTravel.walkingOnly(services));
         TaskResult result = run(task);
         assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
         assertEquals(DimensionRoute.OVERWORLD, ((DimensionTravelDetails) result.details()).arrivedDimension());
@@ -396,7 +406,7 @@ class DimensionTravelTaskTest {
         TravelDestination there = TravelDestination.confirmed(
                 new WorldPosition(80, 40, -20, DimensionRoute.NETHER), 2);
         DimensionTravelTask task = new DimensionTravelTask(new DimensionTravelTask.Journey(
-                DimensionRoute.NETHER, there, 128, 0, Permissions.DEFAULT), services);
+                DimensionRoute.NETHER, there, 128, 0, Permissions.DEFAULT), services, SameDimensionTravel.walkingOnly(services));
         TaskResult result = run(task);
         assertEquals(TaskResult.Status.DONE, result.status(), result.summary() + " / " + result.problem()
 );
@@ -425,5 +435,285 @@ class DimensionTravelTaskTest {
         assertEquals(101, expected.x());
         assertEquals(-31, expected.z());
         assertEquals(0, details.landingOffset());
+    }
+
+    /** 末地黑曜石平台：从主世界进末地门落在这里（主岛上）。 */
+    private static final BlockPos PLATFORM = new BlockPos(100, 49, 0);
+    /** 主岛那一圈正东那扇折跃门，和门东边三格、脚低一格的落脚处。 */
+    private static final BlockPos EAST_GATE = new BlockPos(96, 75, 0);
+    /** 外岛上的落点、它头顶那扇折跃门；过门回主岛落在主岛那一圈旁边。 */
+    private static final BlockPos OUTER_FEET = new BlockPos(1030, 62, 4);
+    private static final BlockPos OUTER_GATE = new BlockPos(1030, 75, 4);
+    private static final BlockPos MAIN_LANDING = new BlockPos(95, 76, 1);
+    /** 外岛上的一个坐标：离 0,0 一千多格。 */
+    private static final BlockPos OUTER_TARGET = new BlockPos(1100, 64, 0);
+    private static final Permissions RARE = Permissions.DEFAULT.mergedWith(null, null, true, null, null, null);
+
+    private final DimensionFakes.Throws throwing = new DimensionFakes.Throws();
+    /** 行程走路那几段要去的地方：一刻就到。 */
+    private final List<TravelDestination> walkedTo = new ArrayList<>();
+
+    /** 能扔珍珠的一份现场部件：用一格方块的接缝换成扔东西的替身。 */
+    private DimensionTravelServices pearlServices() {
+        return new DimensionTravelServices(world, () -> context, walks, new DimensionFakes.FakeObtain(),
+                new DimensionFakes.FakeToMainhand(), throwing, permissions -> null, null, () -> List.of(), progress -> {});
+    }
+
+    /**
+     * 照出行能力那一份的取舍演的同维度出行：此刻在末地就是行程（只登记折跃门），别处只走路；
+     * 走路的几段一刻就到，记下去哪。
+     */
+    private SameDimensionTravel journeysIn(DimensionTravelServices with) {
+        return new SameDimensionTravel() {
+            @Override public Task toward(TravelDestination destination, Permissions permissions, int maxSeconds) {
+                if (!DimensionRoute.END.equals(world.dimension)) {
+                    walkedTo.add(destination);
+                    return new DimensionFakes.ArrivingWalk();
+                }
+                return journey(destination, null, permissions, with);
+            }
+
+            @Override public Optional<Task> only(TravelVia via, Permissions permissions, int maxSeconds) {
+                return Optional.of(journey(null, via.name(), permissions, with));
+            }
+        };
+    }
+
+    private Task journey(TravelDestination destination, String via, Permissions permissions, DimensionTravelServices with) {
+        return new JourneyTask(new JourneyTask.Journey(destination, via, Map.of(), permissions, 0),
+                DimensionFakes.spots(world), List.of(new PearlCrossing(with)), to -> {
+                    walkedTo.add(to);
+                    return new DimensionFakes.ArrivingWalk();
+                });
+    }
+
+    private void carryOnePearl() {
+        world.stacks.add(new BackpackStack(PearlCrossingLeg.PEARL, 1, 16, false, false, true, false));
+    }
+
+    /** 扔一颗就过去：手上的珍珠没了，人落到 landing。 */
+    private void throwLandsAt(BlockPos landing, Runnable alsoThen) {
+        throwing.plan.add(new DimensionFakes.Throw(null, () -> {
+            world.stacks.clear();
+            world.feet = landing;
+            if (alsoThen != null) {
+                alsoThen.run();
+            }
+        }));
+    }
+
+    /** 主世界里摆一扇开着的末地门，走进去第三次读沾门时落在末地平台上。 */
+    private void endPortalToPlatform() {
+        world.putPortal(Blocks.END_PORTAL, ENTRANCE);
+        world.enqueuePortals(new PortalFinder.Round(List.of(
+                new PortalFinder.Entrance(ENTRANCE, Set.of(ENTRANCE.asLong()))), true));
+        world.touchScript.add(touch(null));
+        world.touchScript.add(touch(null));
+        world.touchScript.add(touch(() -> {
+            world.dimension = DimensionRoute.END;
+            world.feet = PLATFORM;
+        }));
+    }
+
+    private DimensionTravelTask taskToOuterIslands(Permissions permissions, DimensionTravelServices with) {
+        TravelDestination there = TravelDestination.confirmed(new WorldPosition(OUTER_TARGET.getX(), OUTER_TARGET.getY(),
+                OUTER_TARGET.getZ(), DimensionRoute.END), 2);
+        return new DimensionTravelTask(new DimensionTravelTask.Journey(DimensionRoute.END, there, 128, 0, permissions),
+                with, journeysIn(with));
+    }
+
+    @Test
+    void overworldToAnOuterIslandSpotCrossesTheGatewayInOneTrip() {
+        // 主世界一趟去外岛的坐标：进末地门落在平台，行程认出隔着虚空只问折跃门，扔一颗过去，落地后走完剩下的路。
+        DimensionTravelServices with = pearlServices();
+        endPortalToPlatform();
+        DimensionFakes.gateAt(world, EAST_GATE);
+        world.blocks.put(EAST_GATE.offset(3, -2, 0), Blocks.END_STONE.defaultBlockState());
+        carryOnePearl();
+        throwLandsAt(OUTER_FEET, null);
+        TaskResult result = run(taskToOuterIslands(RARE, with));
+
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary() + " / " + result.problem());
+        assertEquals(List.of(EAST_GATE), throwing.aimedAt, "对着主岛那一圈正东那扇门扔");
+        assertEquals(1, walkedTo.size(), "过门后走完剩下的路");
+        assertTrue(result.summary().contains("the_end") && result.summary().contains("落在外岛"),
+                "总结写到了末地、过的哪扇门、落在哪：" + result.summary());
+        assertTrue(result.changes().stream().anyMatch(change -> change.kind() == Change.Kind.ITEM_CONSUMED),
+                "扔掉的珍珠并进结果：" + result.changes());
+        assertEquals(DimensionRoute.END, ((DimensionTravelDetails) result.details()).arrivedDimension());
+    }
+
+    @Test
+    void outerIslandSpotWithoutRareItemsStopsBeforeTheOneWayPortal() {
+        // 去外岛要扔珍珠、末地门又是单程：不许用稀有品就在主世界说清，不找门、不走一步。
+        endPortalToPlatform();
+        TaskResult result = run(taskToOuterIslands(Permissions.DEFAULT, pearlServices()));
+
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertEquals(Problem.Kind.NEED_APPROVAL, result.problem().kind());
+        assertTrue(result.problem().message().contains("单程"), result.problem().message());
+        assertTrue(result.problem().suggestion().contains("use_rare_items"), result.problem().suggestion());
+        assertTrue(walks.started.isEmpty(), "一步不走");
+        assertEquals(DimensionRoute.OVERWORLD, world.dimension);
+    }
+
+    @Test
+    void noGatewayOnTheMainIslandEndsSayingWeAreAlreadyInTheEnd() {
+        // 进了末地，主岛那一圈看得见、一扇折跃门都没有：照折跃门的原因结束，原因前面说清已经到了末地（单程）。
+        endPortalToPlatform();
+        for (BlockPos slot : EndIslands.ringSlots()) {
+            world.blocks.put(slot, Blocks.AIR.defaultBlockState());
+        }
+        TaskResult result = run(taskToOuterIslands(RARE, pearlServices()));
+
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertEquals(Problem.Kind.NOT_FOUND, result.problem().kind());
+        String message = result.problem().message();
+        assertTrue(message.startsWith("已经到了 the_end（末地门是单程），剩下那段没走成："), message);
+        assertTrue(message.contains("一扇折跃门都没有"), message);
+        assertTrue(throwing.aimedAt.isEmpty());
+        DimensionTravelDetails details = (DimensionTravelDetails) result.details();
+        assertEquals(DimensionRoute.END, details.arrivedDimension());
+        assertTrue(details.oneWay(), "结果写明末地门是单程");
+    }
+
+    /** 站在外岛、头顶有一扇折跃门、主岛中心那一片没加载：要回主世界。 */
+    private DimensionTravelTask taskHomeFromTheOuterIslands(Permissions permissions) {
+        world.dimension = DimensionRoute.END;
+        world.feet = OUTER_FEET;
+        world.exitLoaded = false;
+        DimensionFakes.gateAt(world, OUTER_GATE);
+        world.enqueueScan(new DimensionWorldView.Scan(List.of(OUTER_GATE), true));
+        carryOnePearl();
+        DimensionTravelServices with = pearlServices();
+        return new DimensionTravelTask(new DimensionTravelTask.Journey(DimensionRoute.OVERWORLD, null, 128, 0,
+                permissions), with, journeysIn(with));
+    }
+
+    @Test
+    void outerIslandsHomeCrossesBackToTheMainIslandThenTakesTheExitPortal() {
+        // 外岛一趟回主世界：先对着头顶那扇门扔珍珠回主岛，那一片加载出来看到出口门亮着，走过去跳进去落在重生点。
+        DimensionTravelTask task = taskHomeFromTheOuterIslands(RARE);
+        throwLandsAt(MAIN_LANDING, () -> {
+            world.exitLoaded = true;
+            world.lightExitPortal();
+        });
+        world.touchScript.add(touch(null));
+        world.touchScript.add(touch(() -> {
+            world.dimension = DimensionRoute.OVERWORLD;
+            world.feet = new BlockPos(120, 70, -35);
+        }));
+        TaskResult result = run(task);
+
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary() + " / " + result.problem());
+        assertEquals(List.of(OUTER_GATE), throwing.aimedAt, "只过一次门");
+        assertTrue(result.summary().contains("人在外岛，先回主岛") && result.summary().contains("落在主岛"),
+                result.summary());
+        assertTrue(result.summary().contains("重生点"), result.summary());
+        DimensionTravelDetails details = (DimensionTravelDetails) result.details();
+        assertEquals(DimensionRoute.OVERWORLD, details.arrivedDimension());
+        assertEquals(DimensionRoute.END, details.portalAt().dimension(), "用的门是出口门，按末地坐标写");
+        assertTrue(result.changes().stream().anyMatch(change -> change.kind() == Change.Kind.ITEM_CONSUMED));
+    }
+
+    @Test
+    void outerIslandsGatewayRefusedEndsSayingStillOnTheOuterIslands() {
+        // 不许用稀有品：回主岛的折跃门过不了，照它的原因结束，说清人还在外岛，一步不往别处走。
+        TaskResult result = run(taskHomeFromTheOuterIslands(Permissions.DEFAULT));
+
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertEquals(Problem.Kind.NEED_APPROVAL, result.problem().kind());
+        assertTrue(result.problem().message().startsWith("人在外岛，回主岛的折跃门没过成："), result.problem().message());
+        assertTrue(result.problem().message().contains("use_rare_items"), result.problem().message());
+        assertTrue(walks.started.isEmpty());
+        assertTrue(throwing.aimedAt.isEmpty());
+    }
+
+    @Test
+    void backOnTheMainIslandWithTheCenterStillUnloadedSaysSoAfterWaiting() {
+        // 回到主岛后主岛中心一直没加载（视距太小）：等满 10 秒如实说看不见，写明已经在主岛，不再过门。
+        DimensionTravelTask task = taskHomeFromTheOuterIslands(RARE);
+        throwLandsAt(MAIN_LANDING, null);
+        TaskResult result = run(task);
+
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertEquals(Problem.Kind.NOT_FOUND, result.problem().kind());
+        assertTrue(result.problem().message().startsWith("已经过折跃门回到主岛 (95, 1)"), result.problem().message());
+        assertTrue(result.problem().suggestion().contains("0, 0"), result.problem().suggestion());
+        assertEquals(1, throwing.aimedAt.size(), "只过一次门");
+    }
+
+    @Test
+    void backOnTheMainIslandWithAnUnlitExitSaysBeatTheDragon() {
+        // 回到主岛看见出口门没亮（龙又被复活了）：说要先打败末影龙，交代已经回到主岛。
+        DimensionTravelTask task = taskHomeFromTheOuterIslands(RARE);
+        throwLandsAt(MAIN_LANDING, () -> world.exitLoaded = true);
+        TaskResult result = run(task);
+
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, result.problem().kind());
+        assertTrue(result.problem().message().startsWith("已经过折跃门回到主岛"), result.problem().message());
+        assertTrue(result.problem().suggestion().contains("fight"), result.problem().suggestion());
+    }
+
+    @Test
+    void theOnwardLegIsPausedStoppedAndClosedWithTheTrip() {
+        // 接着去坐标的那段按动作推进：整趟暂停、能不能停、收尾都转给它。
+        world.dimension = DimensionRoute.NETHER;
+        HeldLeg held = new HeldLeg();
+        SameDimensionTravel holding = new SameDimensionTravel() {
+            @Override public Task toward(TravelDestination destination, Permissions permissions, int maxSeconds) {
+                return held;
+            }
+
+            @Override public Optional<Task> only(TravelVia via, Permissions permissions, int maxSeconds) {
+                return Optional.empty();
+            }
+        };
+        TravelDestination there = TravelDestination.confirmed(new WorldPosition(80, 40, -20, DimensionRoute.NETHER), 2);
+        DimensionTravelTask task = new DimensionTravelTask(new DimensionTravelTask.Journey(DimensionRoute.NETHER, there,
+                128, 0, Permissions.DEFAULT), services, holding);
+        task.start(tick());
+        for (int i = 0; i < 5; i++) {
+            task.tick(tick());
+        }
+        assertTrue(held.ticks > 0, "那段在走");
+        assertEquals(Interruptibility.UNSAFE_TO_STOP, task.interruptibility(tick()), "那段说停不得，整趟就停不得");
+        task.pause();
+        assertEquals(1, held.pauses, "整趟暂停，那段跟着暂停");
+        TaskResult closed = task.close(CloseReason.CANCELLED);
+        assertEquals(1, held.closes, "整趟收尾，那段按取消收尾");
+        assertTrue(closed.attempts().stream().anyMatch(attempt -> attempt.tried().equals("悬空搭桥")),
+                "那段收尾交代的事实并进整趟：" + closed.attempts());
+    }
+
+    /** 一直在走、停不得的那段：记下被推进、暂停、收尾了几次，收尾时交代一条试过的办法。 */
+    private static final class HeldLeg implements Task {
+        int ticks;
+        int pauses;
+        int closes;
+
+        @Override public TickResult tick(TickContext context) {
+            ticks++;
+            return TickResult.RUNNING;
+        }
+
+        @Override public void pause() {
+            pauses++;
+        }
+
+        @Override public Interruptibility interruptibility(TickContext context) {
+            return Interruptibility.UNSAFE_TO_STOP;
+        }
+
+        @Override public TaskResult close(CloseReason reason) {
+            closes++;
+            return TaskResult.builder(TaskResult.Status.CANCELLED, "出行：被取消")
+                    .attempts(List.of(new Attempt("悬空搭桥", "搭到一半被叫停"))).build();
+        }
+
+        @Override public String describe() {
+            return "停不得的那段";
+        }
     }
 }

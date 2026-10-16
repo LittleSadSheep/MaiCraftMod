@@ -13,6 +13,7 @@ import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
 import org.maiwithu.maicraft.behavior.travel.DestinationResolver;
 import org.maiwithu.maicraft.behavior.travel.DimensionRoute;
 import org.maiwithu.maicraft.behavior.travel.DimensionTravelServices;
+import org.maiwithu.maicraft.behavior.travel.JourneyTask;
 import org.maiwithu.maicraft.behavior.travel.PearlCrossing;
 import org.maiwithu.maicraft.behavior.travel.ReadsPlacedBlocks;
 import org.maiwithu.maicraft.behavior.travel.TravelProgressListener;
@@ -359,6 +360,23 @@ class TravelAbilityTest {
                 assertInstanceOf(StepDecision.Run.class, end.decide(step(hop))).input());
         assertEquals("end_gateway", input.journey().via());
         assertEquals(null, input.journey().destination(), "不给 target 就是过最近的门，到了对面就算到");
+    }
+
+    @Test
+    void legsAroundACrossingUseTheSameChoiceAsSameDimensionTrips() {
+        // 跨维度那一程前后在同一个维度里的那段：到了末地交给行程（隔着虚空先过折跃门），在主世界只走路；
+        // 外岛回主岛只用折跃门送一段，没登记折跃门就建不出来。
+        PearlCrossing gateway = new PearlCrossing(new DimensionTravelServices(null, null, null, null, null, null,
+                null, null, null, null));
+        TravelDestination outer = TravelDestination.confirmed(new WorldPosition(1100, 64, 0, DimensionRoute.END), 2);
+        assertInstanceOf(JourneyTask.class, standingIn(DimensionRoute.END, gateway).sameDimensionTravel()
+                .toward(outer, Permissions.DEFAULT, 0));
+        assertInstanceOf(TravelTask.class, standingIn(DimensionRoute.OVERWORLD, gateway).sameDimensionTravel()
+                .toward(outer, Permissions.DEFAULT, 0));
+        assertInstanceOf(JourneyTask.class, standingIn(DimensionRoute.END, gateway).sameDimensionTravel()
+                .only(PearlCrossing.VIA, Permissions.DEFAULT, 0).orElseThrow());
+        assertTrue(standingIn(DimensionRoute.END).sameDimensionTravel()
+                .only(PearlCrossing.VIA, Permissions.DEFAULT, 0).isEmpty(), "没登记折跃门就建不出过门那一段");
     }
 
     /** 站在某个维度原点、只登记了这几种出行方式的出行能力。 */

@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.behavior.travel.JourneyTask;
 import org.maiwithu.maicraft.behavior.travel.OpenSkySpots;
 import org.maiwithu.maicraft.behavior.travel.ReachOpenSkyTask;
 import org.maiwithu.maicraft.behavior.travel.ReadsPlacedBlocks;
+import org.maiwithu.maicraft.behavior.travel.SameDimensionTravel;
 import org.maiwithu.maicraft.behavior.travel.TravelDestination;
 import org.maiwithu.maicraft.behavior.travel.TravelProgressListener;
 import org.maiwithu.maicraft.behavior.travel.TravelTask;
@@ -24,6 +25,7 @@ import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
 import org.maiwithu.maicraft.kernel.ability.Listing;
 
 import org.maiwithu.maicraft.kernel.goal.Goal;
+import org.maiwithu.maicraft.kernel.goal.Permissions;
 
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
@@ -36,6 +38,7 @@ import org.maiwithu.maicraft.kernel.param.ParamType;
 import org.maiwithu.maicraft.kernel.param.ParamValues;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
+import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 
 import com.google.gson.JsonElement;
@@ -44,6 +47,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -53,7 +57,8 @@ import java.util.stream.Collectors;
  * 出行任务步行；落在别的维度或"就是去那个维度"交给跨维度任务（找活门、走进门、没门按许可建门、
  * 末地去要塞激活，到了带坐标的目的地接着步行）。装了联动的出行方式（电梯、喷气背包、火车）时，同维度的
  * 出行交给行程任务：近处走路，远处或走不通比各方式的报价，可用 via 指定方式。末地里还有原版自带的折跃门：
- * 主岛与外岛隔着虚空时只能过门，也交给行程任务；别的维度里没有用得上的方式，照原样直接步行。目标写 here 而人在
+ * 主岛与外岛隔着虚空时只能过门，也交给行程任务；别的维度里没有用得上的方式，照原样直接步行。跨维度那一程前后在同一个
+ * 维度里的那段（到了接着去坐标、外岛先过折跃门回主岛）也按这个取舍建，主世界一趟去外岛的坐标中途自己过门。目标写 here 而人在
  * 地下、屋里时交给回露天任务：旁边见天先走出去，许可动土时挖楼梯上去。需要的走到、解析、扫描、交互、
  * 施工这些现场部件都从构造函数传入；本能力不认任何具体的服务实现。
  */
@@ -75,6 +80,8 @@ public final class TravelAbility implements AbilityModule {
     private final List<TravelMode> modes;
     /** 往上挖楼梯回地面；没接上为 null，回露天只走路。 */
     private final DigsStairsUp stairsUp;
+    /** 跨维度那一程前后在同一个维度里的那段怎么建：和下达同维度出行同一个取舍。 */
+    private final SameDimensionTravel sameDimension = new SameDimensionTrips();
 
     /** 只走路：没有联动的出行方式，参数表里没有 via。 */
     public TravelAbility(WalkTo walks, DestinationResolver resolver,
@@ -189,7 +196,7 @@ public final class TravelAbility implements AbilityModule {
             String via = choice.via();
             TerrainPermit permit = TerrainPermit.of(goal.permissions());
             TravelDestination destination = roomy(ready.destination());
-            if (TravelVia.WALK.name().equals(via) || via == null && !anyModeWorksHere()) {
+            if (walksOnly(via)) {
                 return new StepDecision.Run(new TravelInput(destination, maxSeconds(goal), permit));
             }
             return new StepDecision.Run(new JourneyInput(new JourneyTask.Journey(destination, via,
@@ -216,6 +223,12 @@ public final class TravelAbility implements AbilityModule {
         }
         return new StepDecision.Finish(TaskResult.failed("出行：去不了",
                 ((DestinationResolver.Resolution.DeadEnd) resolution).problem()));
+    }
+
+    // 同一个维度里只走路：指定了 walk，或没指定方式而此刻所在维度没有用得上的方式（主世界里的折跃门）。
+    // 下达同维度出行、跨维度那一程前后的那段都按这一条分出行任务还是行程。
+    private boolean walksOnly(String via) {
+        return TravelVia.WALK.name().equals(via) || via == null && !anyModeWorksHere();
     }
 
     // 这个维度有没有用得上的出行方式：联动的哪儿都算，末地折跃门只在末地算；读不到角色在哪按读到的维度为空问。
@@ -302,27 +315,58 @@ public final class TravelAbility implements AbilityModule {
 
     @Override
     public void registerTasks(TaskFactories factories) {
-        factories.register(TravelInput.class, input -> {
-            // 每次运行新建出行任务；走到与垫方块记录通过闭包交给任务，不经全局单例。
-            return new TravelTask(input.destination(), input.maxSeconds(), input.permit(),
-                    walks, placedBlocks, progressListener, world);
-        });
-        factories.register(JourneyInput.class, input -> {
-            // 换交通的行程：走路的几段每段新建一个出行任务，挖垫、泅渡、落地救援照只走路的那一套。
-            JourneyTask.Journey journey = input.journey();
-            return new JourneyTask(journey, world, modes, destination -> new TravelTask(destination,
-                    journey.maxSeconds(), input.permit(), walks, placedBlocks, progressListener, world));
-        });
+        // 每次运行新建出行任务；走到与垫方块记录通过闭包交给任务，不经全局单例。
+        factories.register(TravelInput.class, input -> travelTask(input.destination(), input.maxSeconds(), input.permit()));
+        factories.register(JourneyInput.class, input -> journeyTask(input.journey(), input.permit()));
         factories.register(OpenSkyInput.class, input -> {
             // 回露天：旁边见天先走出去，许可动土时挖楼梯上去，再不行找路走到远处的露天落脚处。
             return new ReachOpenSkyTask(input.maxSeconds(), input.permissions(), world, walks, stairsUp, placedBlocks);
         });
         factories.register(DimensionTravelInput.class, input -> {
-            // 跨维度行程：找门、进门、建门与末地门房间都从这个任务里按阶段走。
+            // 跨维度行程：找门、进门、建门与末地门房间都从这个任务里按阶段走；到了接着去坐标、
+            // 外岛先过折跃门回主岛，交给和下达同维度出行同一个取舍的那一份。
             return new DimensionTravelTask(new DimensionTravelTask.Journey(input.targetDimension(),
                     input.destination(), input.searchDistance(), input.maxSeconds(), input.permissions()),
-                    dimensionServices);
+                    dimensionServices, sameDimension);
         });
+    }
+
+    // 只走路的一趟：挖垫、泅渡、落地救援、脱困照出行任务的那一套。
+    private Task travelTask(TravelDestination destination, int maxSeconds, TerrainPermit permit) {
+        return new TravelTask(destination, maxSeconds, permit, walks, placedBlocks, progressListener, world);
+    }
+
+    // 换交通的行程：走路的几段每段新建一个出行任务，挖垫、泅渡、落地救援照只走路的那一套。
+    private Task journeyTask(JourneyTask.Journey journey, TerrainPermit permit) {
+        return new JourneyTask(journey, world, modes,
+                destination -> travelTask(destination, journey.maxSeconds(), permit));
+    }
+
+    /** 跨维度那一程前后在同一个维度里的那段怎么建；离线测试从这里拿来直接看它建出什么任务。 */
+    SameDimensionTravel sameDimensionTravel() {
+        return sameDimension;
+    }
+
+    /**
+     * 跨维度那一程前后在同一个维度里的那段：和下达同维度出行同一个取舍。到了目标维度那一刻，那个维度有用得上的方式
+     * （末地的折跃门）就交给行程，隔着虚空先过门；没有就只走路。只用一种方式送一段要它登记过，没登记就建不出来。
+     */
+    private final class SameDimensionTrips implements SameDimensionTravel {
+        @Override public Task toward(TravelDestination destination, Permissions permissions, int maxSeconds) {
+            TerrainPermit permit = TerrainPermit.of(permissions);
+            if (walksOnly(null)) {
+                return travelTask(destination, maxSeconds, permit);
+            }
+            return journeyTask(new JourneyTask.Journey(destination, null, Map.of(), permissions, maxSeconds), permit);
+        }
+
+        @Override public Optional<Task> only(TravelVia via, Permissions permissions, int maxSeconds) {
+            if (modes.stream().noneMatch(mode -> mode.via().name().equals(via.name()))) {
+                return Optional.empty();
+            }
+            return Optional.of(journeyTask(new JourneyTask.Journey(null, via.name(), Map.of(), permissions, maxSeconds),
+                    TerrainPermit.of(permissions)));
+        }
     }
 
     /** 秒换内部用的整数时限；没给就不设时限。 */
