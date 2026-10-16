@@ -17,6 +17,7 @@ import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.behavior.travel.spi.TravelVia;
 import org.maiwithu.maicraft.game.world.EndExitPortal;
+import org.maiwithu.maicraft.kernel.child.ChildTaskAction;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;

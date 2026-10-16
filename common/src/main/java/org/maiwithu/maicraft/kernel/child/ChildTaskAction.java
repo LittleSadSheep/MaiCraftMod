@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.behavior.travel;
+package org.maiwithu.maicraft.kernel.child;
 
-import org.maiwithu.maicraft.kernel.child.ChildTaskRunner;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -13,15 +12,16 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
 /**
- * 外层任务的一个阶段交给一件子任务做时，把这件子任务包成这个阶段的动作：跨过去接着走的那段、
- * 外岛回主岛的那段、建门、去要塞激活末地门，以及建门里交施工引擎砌框、交浇筑浇框。
+ * 子任务动作：外层任务的一个阶段交给一件子任务做时，把这件子任务包成这个阶段的动作。
+ * 例如建门交施工引擎砌框、建机器交施工引擎放格、补光交施工引擎插灯。
  *
  * <p>外层被生存需求打断时它跟着暂停，走路、施工都松手，处理完从原地接着做；外层被叫先到安全处再停时转给它
  * （悬空的先落地、等传送的那一下等完）；外层提前结束（被替换、取消、角色没了）时它按取消收尾。
- * 它交代的变化、没能确认的交互、试过的办法记进外层任务的记账口。此刻能不能打断要看它手上的动作，
- * 外层任务改写可打断程度时问 {@link #interruptibility(TickContext)}。
+ * 它交代的变化、没能确认的交互、试过的办法记进外层任务的记账口。此刻能不能打断看它手上的动作。
+ *
+ * <p>用法：阶段进入时建好交给基类，每刻 {@code runAction} 推进，不在做了就调一次 {@link #settle()} 拿子任务的结果。
  */
-final class ChildTaskAction implements Action {
+public final class ChildTaskAction implements Action {
     private final ChildTaskRunner runner = new ChildTaskRunner(ChildTaskRunner.NO_LIMIT);
     private final Task task;
     private final TaskRecords records;
@@ -32,7 +32,7 @@ final class ChildTaskAction implements Action {
      * @param task    要交给它做的子任务，还没开始
      * @param records 外层任务的记账口：子任务收场或被收尾时交代的事实并进外层这次的结果
      */
-    ChildTaskAction(Task task, TaskRecords records) {
+    public ChildTaskAction(Task task, TaskRecords records) {
         this.task = task;
         this.records = records;
     }
@@ -54,7 +54,7 @@ final class ChildTaskAction implements Action {
     }
 
     /** 子任务结束了：事实并进外层，交回它的结果。动作报完成之后调一次。 */
-    TaskResult settle() {
+    public TaskResult settle() {
         settled = true;
         TaskResult result = runner.result();
         copyFacts(result);
@@ -62,7 +62,7 @@ final class ChildTaskAction implements Action {
     }
 
     /** 此刻能不能打断看子任务的：扔出珍珠等传送、悬空搭桥、等游戏确认放方块时停不得。 */
-    Interruptibility interruptibility(TickContext context) {
+    public Interruptibility interruptibility(TickContext context) {
         return runner.interruptibility(context);
     }
 
