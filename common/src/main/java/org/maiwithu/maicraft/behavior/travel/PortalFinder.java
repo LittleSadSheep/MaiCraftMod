@@ -35,8 +35,8 @@ public final class PortalFinder {
     private static final int INITIAL_WINDOW = 32;
     /** 一次查询给索引的建账预算（毫秒级粒度由扫描服务掌握）。 */
     private static final int QUERY_BUDGET = 200;
-    /** 整扇门识别的格数上限：下界门框最大 23×23，留足余量又封得住失控洪泛。 */
-    private static final int MAX_CONNECTED_CELLS = 256;
+    /** 整扇门识别的格数上限：下界门框最大 23×23，留足余量又封得住失控洪泛。末地出口门认整扇门也用它。 */
+    static final int MAX_CONNECTED_CELLS = 256;
 
     private final Supplier<PlayerContext> context;
     private final BlockScanService scans;

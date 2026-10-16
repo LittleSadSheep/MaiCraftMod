@@ -87,6 +87,6 @@ class FollowJudgmentsTest {
         assertEquals("minecraft:the_nether", PortalTrail.destination("minecraft:overworld", "minecraft:nether_portal"));
         assertEquals("minecraft:overworld", PortalTrail.destination("minecraft:the_nether", "minecraft:nether_portal"));
         assertEquals("minecraft:the_end", PortalTrail.destination("minecraft:overworld", "minecraft:end_portal"));
-        assertNull(PortalTrail.destination("minecraft:the_end", "minecraft:end_portal"), "末地回程门不归出行");
+        assertNull(PortalTrail.destination("minecraft:the_end", "minecraft:end_portal"), "出口门送人回各自的重生点，跟不过去");
     }
 }

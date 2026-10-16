@@ -5,7 +5,8 @@ import org.maiwithu.maicraft.behavior.travel.DimensionRoute;
 
 /**
  * 他走进的那扇门通到哪个维度：下界门连着主世界与下界，末地门从主世界通到末地。
- * 末地里的末地门是打败末影龙后的回程门，出行不代劳，答不出（为 null）。纯函数。
+ * 末地里的末地门是龙死后亮起的出口门，它把每个人送回各自的重生点，跟进去也落不到他身边，
+ * 所以答不出（为 null）。纯函数。
  */
 final class PortalTrail {
 

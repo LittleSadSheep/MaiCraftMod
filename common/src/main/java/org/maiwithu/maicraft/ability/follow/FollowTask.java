@@ -517,7 +517,8 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
                 return Next.go(Phase.PORTAL, "他进了传送门，跟进去");
             }
             lost = Lost.PORTAL_FAILED;
-            tell("他走进了末地的回程门，这扇门出行不代劳，跟不过去；在原地等他回来");
+            // 出口门把每个人送回各自的重生点：跟进去也落不到他身边，就在原地等。
+            tell("他走进了末地的出口门，这扇门把人送回各自的重生点，跟进去也找不到他；在原地等他回来");
             return Next.go(Phase.SEARCH, "他进了跟不过去的门");
         }
         if (view.presence(context) == FollowView.Presence.OFFLINE) {

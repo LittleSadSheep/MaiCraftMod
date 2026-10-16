@@ -31,6 +31,7 @@ import org.maiwithu.maicraft.kernel.task.TickResult;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -232,15 +233,136 @@ class DimensionTravelTaskTest {
                 "建议里写明提许可：" + result.problem().suggestion());
     }
 
-    @Test
-    void returnFromTheEndIsNotTravelsBusiness() {
+    private DimensionTravelTask taskHomeFromTheEnd() {
         world.dimension = DimensionRoute.END;
-        DimensionTravelTask task = new DimensionTravelTask(new DimensionTravelTask.Journey(
+        return new DimensionTravelTask(new DimensionTravelTask.Journey(
                 DimensionRoute.OVERWORLD, null, 128, 0, Permissions.DEFAULT), services);
-        TaskResult result = run(task);
+    }
+
+    private static Map.Entry<Boolean, Runnable> touch(Runnable effect) {
+        return new AbstractMap.SimpleEntry<>(true, effect);
+    }
+
+    @Test
+    void litExitPortalIsWalkedIntoAndSettledAtTheRespawnPoint() {
+        // 龙死了门亮着：不扫描，直接从出口门挑入口走过去跳进去；落在重生点，不再离落点几步。
+        world.feet = new BlockPos(30, 61, 4);
+        world.lightExitPortal();
+        world.touchScript.add(touch(null));
+        world.touchScript.add(touch(() -> {
+            world.dimension = DimensionRoute.OVERWORLD;
+            world.feet = new BlockPos(120, 70, -35);
+        }));
+        TaskResult result = run(taskHomeFromTheEnd());
+
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary() + " / " + result.problem());
+        assertEquals(1, walks.started.size(), "只走近门口一段，到了重生点不离落点");
+        DimensionTravelDetails details = (DimensionTravelDetails) result.details();
+        assertEquals(DimensionRoute.OVERWORLD, details.arrivedDimension());
+        WorldPosition door = details.portalAt();
+        assertEquals(DimensionRoute.END, door.dimension(), "用的门按末地坐标写");
+        assertEquals(Blocks.END_PORTAL, world.blocks.get(new BlockPos(door.x(), door.y(), door.z())).getBlock(),
+                "入口是出口门的门格：" + door);
+        assertNull(details.expectedLanding(), "出口门落在重生点，没有换算预期");
+        assertEquals(-1, details.landingOffset());
+        assertFalse(details.oneWay(), "走出口门回来不再提回程要打龙");
+        assertTrue(result.summary().contains("重生点"), result.summary());
+        assertTrue(result.summary().contains("120, 70, -35"), "报实测落点：" + result.summary());
+    }
+
+    @Test
+    void firstExitPlaysTheEndPoemAndItIsSkipped() {
+        // 第一次过出口门原版放终末之诗：像按 Esc 一样关掉一次，原版随即把人送回去，结果里写明跳过了。
+        world.lightExitPortal();
+        world.touchScript.add(touch(() -> world.poemShowing = true));
+        world.onPoemClosed = () -> {
+            world.poemShowing = false;
+            world.dimension = DimensionRoute.OVERWORLD;
+        };
+        TaskResult result = run(taskHomeFromTheEnd());
+
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary() + " / " + result.problem());
+        assertEquals(1, world.poemCloses, "关一次就够");
+        assertTrue(result.summary().contains("终末之诗"), result.summary());
+    }
+
+    @Test
+    void poemIsNeverTouchedOnOtherRoutes() {
+        // 不是走出口门：屏幕上就算有那张界面也不去关，只认维度。
+        world.poemShowing = true;
+        world.putPortal(Blocks.NETHER_PORTAL, ENTRANCE);
+        world.enqueuePortals(new PortalFinder.Round(List.of(
+                new PortalFinder.Entrance(ENTRANCE, Set.of(ENTRANCE.asLong()))), true));
+        crossToNetherOnThirdRead();
+        TaskResult result = run(taskToNether(Permissions.DEFAULT));
+
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(0, world.poemCloses);
+    }
+
+    @Test
+    void unlitExitPortalSaysBeatTheDragonFirst() {
+        // 门座在、门洞是空的：龙还活着，一步不走，说要先用 fight 打龙，不去找别的门。
+        TaskResult result = run(taskHomeFromTheEnd());
+
         assertEquals(TaskResult.Status.FAILED, result.status());
-        assertEquals(Problem.Kind.UNSUPPORTED, result.problem().kind());
-        assertTrue(result.problem().message().contains("末影龙"), "回程归战斗域要写明");
+        assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, result.problem().kind());
+        assertTrue(result.problem().message().contains("末影龙"), result.problem().message());
+        assertTrue(result.problem().suggestion().contains("fight"), result.problem().suggestion());
+        assertTrue(walks.started.isEmpty(), "门没亮不往哪儿走");
+    }
+
+    @Test
+    void unloadedIslandCenterSaysGoBackToTheIsland() {
+        // 主岛中心那一片没加载（人在外岛）：看不见门，不冒充"没亮"，也不自己往虚空那边走。
+        world.exitLoaded = false;
+        TaskResult result = run(taskHomeFromTheEnd());
+
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertEquals(Problem.Kind.NOT_FOUND, result.problem().kind());
+        assertTrue(result.problem().suggestion().contains("主岛"), result.problem().suggestion());
+        assertTrue(walks.started.isEmpty());
+    }
+
+    @Test
+    void respawnAnchorInTheNetherKeepsGoingThroughANetherPortal() {
+        // 重生锚设在下界：出口门先送到下界，从那里接着走下界门回主世界，结果里先交代这一段。
+        world.lightExitPortal();
+        world.touchScript.add(touch(null));
+        world.touchScript.add(touch(() -> {
+            world.dimension = DimensionRoute.NETHER;
+            world.feet = new BlockPos(10, 70, 10);
+        }));
+        world.putPortal(Blocks.NETHER_PORTAL, ENTRANCE);
+        world.enqueuePortals(new PortalFinder.Round(List.of(
+                new PortalFinder.Entrance(ENTRANCE, Set.of(ENTRANCE.asLong()))), true));
+        world.touchScript.add(touch(null));
+        world.touchScript.add(touch(() -> world.dimension = DimensionRoute.OVERWORLD));
+        TaskResult result = run(taskHomeFromTheEnd());
+
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary() + " / " + result.problem());
+        assertTrue(result.summary().contains("重生锚"), result.summary());
+        DimensionTravelDetails details = (DimensionTravelDetails) result.details();
+        assertEquals(DimensionRoute.OVERWORLD, details.arrivedDimension());
+        assertEquals(DimensionRoute.NETHER, details.portalAt().dimension(), "后一段用的是下界门");
+        assertEquals(3, walks.started.size(), "走近出口门、走近下界门、离下界门落点各一段");
+    }
+
+    @Test
+    void everyExitCellTriedEndsUnreachableWithEachReason() {
+        // 门洞边一格都走不过去：二十格逐个排除，不去找别的门；每格的原因各记一条，条数就是门格数。
+        world.lightExitPortal();
+        for (int i = 0; i < 20; i++) {
+            walks.enqueue(new TravelFakes.ScriptedWalk(WalkReport.failed(
+                    Problem.of(Problem.Kind.UNREACHABLE, "门洞边被围死了"), new BlockPos(30, 61, 4), false)));
+        }
+        TaskResult result = run(taskHomeFromTheEnd());
+
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertEquals(Problem.Kind.UNREACHABLE, result.problem().kind());
+        assertTrue(result.problem().message().contains("20 个门格"), result.problem().message());
+        assertEquals(20, result.attempts().size(), "一格一条：" + result.attempts());
+        assertEquals(20, walks.started.size());
     }
 
     @Test

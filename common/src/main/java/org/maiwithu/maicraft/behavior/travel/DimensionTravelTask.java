@@ -1,16 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.travel;
 
+import java.util.List;
 import java.util.Set;
 
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
+import org.maiwithu.maicraft.game.world.EndExitPortal;
 import org.maiwithu.maicraft.kernel.child.ChildTaskRunner;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -29,6 +32,8 @@ import org.maiwithu.maicraft.kernel.task.TickResult;
 /**
  * 跨维度段的任务：路由 → 找活门 → 走到门口 → 直走进门 → 等维度交接 → 先离门口再结算；
  * 附近没门时按许可建门（下界）或去要塞激活末地门（末地），带坐标的目标到了新维度接着步行。
+ * 在末地回主世界只走主岛中心那扇出口门：门亮了就走过去跳进门洞，第一次放的终末之诗像按 Esc 一样关掉；
+ * 落点是重生点，没有门，不离落点直接结算；重生点在下界时从那里接着走下界门回主世界。
  *
  * <p>每段步行沿用出行任务的全部保证：走近门口与离门口的走交给走到，自己不算路。
  * 到达以维度为准：已在目标维度才算跨维度段完成，不数秒冒充到达；结算前先走出门口，
@@ -48,6 +53,8 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
     private static final long STUCK_AFTER_TICKS = 20L * 60;
     /** 整段没给时限时最多做多久：一段到不了的门不该占着一刻钟以上。 */
     private static final long MAX_TICKS = 20L * 60 * 20;
+    /** 关了终末之诗过这么久（刻，1 秒）界面还在，就再关一次：原版关界面当刻就发重生请求，还在说明那一下没生效。 */
+    private static final int POEM_RETRY_TICKS = 20;
 
     /** 这趟行程的给定输入：去哪个维度、到了接着去哪、找门范围、时限与许可。 */
     public record Journey(String targetDimension, TravelDestination destination, int searchDistance,
@@ -72,6 +79,15 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
     private String startDimension;
     private BlockPos startFeet;
     private DimensionTravelDetails settlement;
+    /** 这一程是在末地走出口门回去：门格直接从出口门认，不扫描；到了不离落点。 */
+    private boolean exitRoute;
+    /** 出口门门洞那一层连成一片的门格；不走出口门时为空。 */
+    private Set<Long> exitCells = Set.of();
+    /** 这趟放过终末之诗、被关掉了：结果里写明。 */
+    private boolean poemSkipped;
+    private int poemTicks;
+    /** 出口门先把人送到了别的维度（重生锚在下界）：从那里接着走时，结果里先交代这一段。 */
+    private String detour;
 
     public DimensionTravelTask(Journey journey, DimensionTravelServices services) {
         super("跨维度出行", Phase.ROUTE, new ProgressTracker(STUCK_AFTER_TICKS,
@@ -122,10 +138,14 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
                 && services.world().touchesPortal(portalBlock(), portalCells)) {
             return Interruptibility.UNSAFE_TO_STOP;
         }
+        // 终末之诗放着时人已经过了门、还没落地：这时插进别的事只会在界面后面乱按，等它关掉、人回去再说。
+        if (exitRoute && phase() == Phase.CROSS && services.world().endPoemShowing()) {
+            return Interruptibility.UNSAFE_TO_STOP;
+        }
         return super.interruptibility(context);
     }
 
-    /** 路由：同维度不出跨维度段；末地的回程不归出行；其余按维度对认门。 */
+    /** 路由：同维度不出跨维度段；在末地回主世界走出口门；其余按维度对认门。 */
     private Next<Phase> decideRoute() {
         startDimension = services.world().currentDimension();
         startFeet = services.world().feet();
@@ -140,15 +160,47 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
             case SAME_DIMENSION -> sameDimension("出发时已经在目标维度");
             case NETHER_PORTAL -> Next.go(Phase.FIND_PORTAL, "走下界传送门");
             case END_PORTAL -> {
-                // 末地的回程门要打败末影龙才出现，归战斗域；站在末地里去主世界不是这趟行程做得了的。
+                // 站在末地里去主世界：只有主岛中心那扇出口门通回去，龙死后才亮。
                 if (DimensionRoute.END.equals(startDimension)) {
-                    yield Next.fail(Problem.of(Problem.Kind.UNSUPPORTED,
-                            "末地的回程要走打败末影龙后才出现的出口门，归战斗域，出行不代劳"));
+                    yield exitPortalRoute();
                 }
                 yield Next.go(Phase.FIND_PORTAL, "走末地传送门");
             }
             case NO_DIRECT_PORTAL, UNKNOWN_DIMENSION -> Next.fail(route.problem());
         };
+    }
+
+    /**
+     * 末地回程：先看主岛中心的出口门。看不见门（那一片没加载）就说先回主岛；门没亮是龙还活着，
+     * 要先打龙，不去找别的门也不代打；门亮了就把门洞那一层连成一片的门格当这扇门，走过去跳进去。
+     */
+    private Next<Phase> exitPortalRoute() {
+        EndExitPortal.Sighting exit = services.world().exitPortal();
+        if (exit == null || !exit.loaded()) {
+            return Next.fail(Problem.of(Problem.Kind.NOT_FOUND,
+                    "主岛中心 (" + EndExitPortal.CENTER_X + ", " + EndExitPortal.CENTER_Z
+                            + ") 那一片没加载，看不见出口门亮没亮",
+                    "先回主岛（离 0, 0 一百多格内）再出行回主世界"));
+        }
+        Set<Long> cells = exit.lit() ? exitPortalCells(exit.center()) : Set.of();
+        if (cells.isEmpty()) {
+            return Next.fail(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+                    "出口门还没亮：要先打败末影龙，门才会亮",
+                    "先用 fight 打败末影龙，看到出口门亮了再出行回主世界"));
+        }
+        exitRoute = true;
+        exitCells = cells;
+        return Next.go(Phase.FIND_PORTAL, "出口门亮着，走过去跳进门洞");
+    }
+
+    /** 出口门的门格：从门心旁亮着的那一格起，同一层连成一片的末地传送门方块。 */
+    private Set<Long> exitPortalCells(BlockPos center) {
+        for (BlockPos ring : EndExitPortal.ringCells(center)) {
+            if (PortalFinder.aliveOf(services.world()::stateAt, ring, Blocks.END_PORTAL)) {
+                return PortalFinder.connectedCells(services.world()::stateAt, ring, PortalFinder.MAX_CONNECTED_CELLS);
+            }
+        }
+        return Set.of();
     }
 
     private Next<Phase> sameDimension(String why) {
@@ -161,6 +213,9 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
 
     /** 找活门：分刻扫描，没扫完不下"没找到"；门方块还在的整扇门按列底部挑入口。 */
     private Next<Phase> findPortal() {
+        if (exitRoute) {
+            return pickExitEntrance();
+        }
         PortalFinder.Round round = services.world().scanPortals(portalBlock(), journey.searchDistance(), attemptedEntrances);
         if (round.hasEntrance()) {
             PortalFinder.Entrance chosen = round.entrances().get(0);
@@ -188,6 +243,23 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
             return Next.go(Phase.BUILD_PORTAL, "已加载区没有活门，按许可建一扇");
         }
         return Next.go(Phase.END_ROOM, "已加载区没有开着的末地门，去要塞找门房间激活");
+    }
+
+    /** 出口门挑入口：门格已经认好了，不扫描、不管找门范围；按离人近到远挑一格没试过的。 */
+    private Next<Phase> pickExitEntrance() {
+        BlockPos feet = services.world().feet();
+        List<BlockPos> left = PortalFinder.entranceColumns(exitCells, attemptedEntrances,
+                feet == null ? BlockPos.ZERO : feet);
+        if (left.isEmpty()) {
+            // 门洞边一格一格都试过了：不去找别的门（末地通主世界的只有这一扇），把每格的原因交代清楚。
+            return Next.fail(Problem.of(Problem.Kind.UNREACHABLE,
+                    "出口门的 " + exitCells.size() + " 个门格都试过了，走不进去（每格的原因见试过的办法）",
+                    "看看门洞边是不是被挡住，清出一条路再出行"));
+        }
+        entrance = left.get(0);
+        portalCells = exitCells;
+        recordProgress("挑好出口门的入口，走过去");
+        return Next.go(Phase.APPROACH, "走到出口门边");
     }
 
     private String noPortalFoundText() {
@@ -223,6 +295,10 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
 
     /** 直走进门：20 秒进不去排除这扇门；门在途中没了换下一候选。 */
     private Next<Phase> enterPortal(TickContext context) {
+        if (exitRoute && services.world().endPoemShowing()) {
+            // 终末之诗已经放起来了：人已经过了门，交给等维度交接那一步去关它。
+            return Next.go(Phase.CROSS, "进了出口门，原版放起了终末之诗");
+        }
         if (++entryTicks > MAX_ENTRY_TICKS) {
             excludeEntrance("直走了 " + MAX_ENTRY_TICKS / 20 + " 秒没能走进门格");
             return Next.go(Phase.FIND_PORTAL, "这扇门进不去，换下一个候选");
@@ -240,14 +316,59 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
 
     /** 等维度交接：以维度为准，不数秒；身体被挤出门格而维度没变就再走进去。 */
     private Next<Phase> cross() {
-        if (journey.targetDimension().equals(services.world().currentDimension())) {
+        String now = services.world().currentDimension();
+        if (journey.targetDimension().equals(now)) {
+            if (exitRoute) {
+                // 出口门把人送到重生点，那里没有门，不用离门口：直接取实测落点结算。
+                return settleCrossing(null);
+            }
             return Next.go(Phase.WALK_OUT, "到 " + shortDimension(journey.targetDimension()) + " 了，先离门口再结算");
+        }
+        if (exitRoute && now != null && !now.equals(startDimension)) {
+            return landedElsewhere(now);
+        }
+        if (exitRoute && services.world().endPoemShowing()) {
+            return skipEndPoem();
         }
         if (!services.world().touchesPortal(portalBlock(), portalCells)) {
             prepared = new WalksIntoPortal(services.world(), services.context(), portalBlock(), entrance, portalCells);
             return Next.go(Phase.ENTER, "还没传过去人已离开门格，再走进去");
         }
         return Next.stay();
+    }
+
+    /**
+     * 终末之诗：像玩家按 Esc 一样关掉，原版随即把人送回去；一秒后还在就再关一次。
+     * 关的那一下算真实进展，界面一直关不掉才会被判卡住。
+     */
+    private Next<Phase> skipEndPoem() {
+        if (!poemSkipped) {
+            poemSkipped = true;
+            recordAttempt("过出口门", "原版放起了终末之诗，像按 Esc 一样跳过");
+        }
+        if (poemTicks++ % POEM_RETRY_TICKS == 0) {
+            services.world().closeEndPoem();
+            recordProgress("关掉终末之诗，等原版把人送回去");
+        }
+        return Next.stay();
+    }
+
+    /**
+     * 出口门把人送到了重生点所在的别的维度（充了能的重生锚在下界）：没到目标维度，
+     * 从那里按维度路由接着跨一次（下界走下界门），结果里先交代这一段。
+     */
+    private Next<Phase> landedElsewhere(String now) {
+        detour = "出口门先把人送到了重生点所在的 " + shortDimension(now) + "（重生锚设在那里）";
+        recordAttempt("走出口门回 " + shortDimension(journey.targetDimension()), detour);
+        exitRoute = false;
+        exitCells = Set.of();
+        route = null;
+        entrance = null;
+        portalCells = Set.of();
+        // 试过的入口是末地的坐标，换了维度不再作数。
+        attemptedEntrances.clear();
+        recordProgress(detour);
+        return Next.go(Phase.ROUTE, detour + "，从这里接着回 " + shortDimension(journey.targetDimension()));
     }
 
     /** 离门口：走到落脚格；走不动也结算——跨维度段以维度为准，离门是纪律不是达成条件。 */
@@ -280,7 +401,9 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
         settlement = new DimensionTravelDetails(now,
                 entrance == null ? null
                         : new WorldPosition(entrance.getX(), entrance.getY(), entrance.getZ(), startDimension),
-                expected, offset, route != null && route.way() == DimensionRoute.Way.END_PORTAL, portalBuiltHow);
+                // 单程只说主世界进末地那扇门：走出口门回来的这一程不再提"回程要打龙"。
+                expected, offset, route != null && route.way() == DimensionRoute.Way.END_PORTAL && !exitRoute,
+                portalBuiltHow);
         if (!journey.targetDimension().equals(now)) {
             return Next.fail(Problem.of(Problem.Kind.UNREACHABLE,
                     "跨维度没成：还在 " + shortDimension(now == null ? "未知" : now)
@@ -304,7 +427,8 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
             copyFacts(finished.result());
             TaskResult result = finished.result();
             runner = null;
-            String summary = "先到 " + shortDimension(journey.targetDimension()) + "，" + result.summary();
+            String summary = "先到 " + shortDimension(journey.targetDimension()) + crossingNotes() + "，"
+                    + result.summary();
             if (result.status() == TaskResult.Status.FAILED) {
                 return Next.fail(result.problem());
             }
@@ -393,9 +517,25 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
         String expectation = settlement.expectedLanding() == null ? ""
                 : "；按 1:8 换算预期 (" + settlement.expectedLanding().x() + ", " + settlement.expectedLanding().z()
                 + ")，偏差 " + settlement.landingOffset() + " 格";
-        String oneWay = settlement.oneWay() ? "；末地门是单程，回程要打败末影龙（归战斗域）" : "";
+        String oneWay = settlement.oneWay()
+                ? "；末地门是单程：回来要先打败末影龙（fight），出口门亮了再用 travel 回主世界" : "";
         return "已到 " + shortDimension(journey.targetDimension()) + "，" + place + expectation
-                + (note == null ? "" : "；" + note) + oneWay;
+                + (note == null ? "" : "；" + note) + oneWay + crossingNotes();
+    }
+
+    /** 走出口门这一路上要交代的：落点是重生点、放过终末之诗、先被送到了别的维度。 */
+    private String crossingNotes() {
+        StringBuilder notes = new StringBuilder();
+        if (exitRoute) {
+            notes.append("；出口门送回重生点（床边，没床是世界出生点）");
+        }
+        if (poemSkipped) {
+            notes.append("；第一次过出口门放了终末之诗，跳过了");
+        }
+        if (detour != null) {
+            notes.append("；").append(detour).append("，又从那里走过来");
+        }
+        return notes.toString();
     }
 
     private Block portalBlock() {

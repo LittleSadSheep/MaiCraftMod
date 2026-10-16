@@ -35,6 +35,7 @@ import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
+import org.maiwithu.maicraft.game.world.EndExitPortal;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -64,6 +65,13 @@ final class DimensionFakes {
         final Deque<Scan> blockScans = new ArrayDeque<>();
         /** 身体沾没沾门格的脚本：每步可以先跑一段现场改动（比如把维度换过去），再回答这一刻沾没沾。 */
         final Deque<Map.Entry<Boolean, Runnable>> touchScript = new ArrayDeque<>();
+        /** 出口门门心（门洞那一层）与那一片加载没有；亮没亮照方块表按出口门的认法算。 */
+        BlockPos exitCenter = new BlockPos(0, 60, 0);
+        boolean exitLoaded = true;
+        /** 终末之诗在不在屏幕上、被关了几次；关掉时跑一段现场改动（比如把人送回主世界）。 */
+        boolean poemShowing;
+        int poemCloses;
+        Runnable onPoemClosed;
 
         void putPortal(Block block, BlockPos cell) {
             alivePortals.add(block);
@@ -132,6 +140,33 @@ final class DimensionFakes {
 
         @Override public List<BackpackStack> carriedStacks() {
             return List.copyOf(stacks);
+        }
+
+        /** 摆一扇亮着的出口门：门洞那一层离门心不到 2.5 格、不是门心的二十格都是末地传送门方块。 */
+        void lightExitPortal() {
+            for (int dx = -2; dx <= 2; dx++) {
+                for (int dz = -2; dz <= 2; dz++) {
+                    if ((dx != 0 || dz != 0) && dx * dx + dz * dz < 6.25) {
+                        blocks.put(exitCenter.offset(dx, 0, dz), Blocks.END_PORTAL.defaultBlockState());
+                    }
+                }
+            }
+        }
+
+        @Override public EndExitPortal.Sighting exitPortal() {
+            return new EndExitPortal.Sighting(exitCenter, exitLoaded,
+                    exitLoaded && EndExitPortal.lit(this::stateAt, exitCenter));
+        }
+
+        @Override public boolean endPoemShowing() {
+            return poemShowing;
+        }
+
+        @Override public void closeEndPoem() {
+            poemCloses++;
+            if (onPoemClosed != null) {
+                onPoemClosed.run();
+            }
         }
 
         @Override public Scan scanBlocks(Block target, int searchDistance, int want) {

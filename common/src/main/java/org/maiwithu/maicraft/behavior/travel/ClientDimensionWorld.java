@@ -11,13 +11,16 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 
+import org.maiwithu.maicraft.game.menu.EndPoemScreen;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.BlockScanService;
+import org.maiwithu.maicraft.game.world.EndExitPortal;
 
 /**
  * 跨维度现场的生产读端：每刻从角色上下文读维度与脚下，找门交给找活门，
- * 扫黑曜石与末地门框架交给方块扫描服务，只读不写。
+ * 扫黑曜石与末地门框架交给方块扫描服务，出口门按出口门那一份游戏事实读；只读不写，
+ * 只有终末之诗交给游戏接口层关掉。
  * 启动时建一份交给跨维度任务；替身测试不经过它。
  */
 public final class ClientDimensionWorld implements DimensionWorldView {
@@ -108,6 +111,27 @@ public final class ClientDimensionWorld implements DimensionWorldView {
             return List.of();
         }
         return List.copyOf(current.backpack().stacks());
+    }
+
+    @Override
+    public EndExitPortal.Sighting exitPortal() {
+        PlayerContext current = context.get();
+        if (current == null || current.level() == null) {
+            // 不在世界里：看不见门，按没加载答，不冒充"没亮"。
+            return new EndExitPortal.Sighting(new BlockPos(EndExitPortal.CENTER_X, 0, EndExitPortal.CENTER_Z),
+                    false, false);
+        }
+        return EndExitPortal.look(current.level(), EndExitPortal.CENTER_X, EndExitPortal.CENTER_Z);
+    }
+
+    @Override
+    public boolean endPoemShowing() {
+        return EndPoemScreen.showing();
+    }
+
+    @Override
+    public void closeEndPoem() {
+        EndPoemScreen.close();
     }
 
     @Override
