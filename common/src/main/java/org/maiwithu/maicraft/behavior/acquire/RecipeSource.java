@@ -56,6 +56,8 @@ public final class RecipeSource implements ItemSource {
     private static final int MAX_VARIANTS = 12;
     /** 一趟最多做几份：分批做，料不够时中间件和最后一步交替用料，不把共用的料先全做成中间件。 */
     static final int MAX_CRAFTS_PER_RUN = 16;
+    /** 现做时身上每缺一件原料报价加几格（和"说不准有没有"同一把尺子）：野外现成的床先拆回来，不先打三只羊做一张。 */
+    static final double SHORTFALL_BLOCKS_PER_ITEM = 32;
     /** 排远近前最多看几种做法：装了加木头的模组时木板有几十种，先全拿来按远近排，再取最近的几种试。 */
     private static final int VARIANT_POOL = 64;
 
@@ -132,19 +134,21 @@ public final class RecipeSource implements ItemSource {
                     StationFallbacks.noRecipeReason(request.wanted(), recipes.recipesProducing(request.wanted()), kinds));
         }
         WorkstationRecipe recipe = candidates.getFirst();
+        // 身上缺几件原料就把先去弄它们的麻烦算进报价：缺料的做法排在现成的、近的来路后面。
+        double shortfall = missingFor(recipe, request.count()) * SHORTFALL_BLOCKS_PER_ITEM;
         // 摆得进 2×2 的合成在背包合成格里做：不用找工作台，也不用先摆一个，新世界开局做木板、工作台就靠它。
         if (inInventory(recipe)) {
             return new SourceQuote.Offer(describe(), request.count(),
-                    new AcquisitionCost(0, 4 + recipe.ingredients().size()),
+                    new AcquisitionCost(0, 4 + recipe.ingredients().size(), shortfall),
                     "在背包的合成格里做，不用工作台", recipe.id());
         }
         Optional<MemoryRecord> station = handyStation(recipe.kind(), context);
         if (station.isEmpty()) {
-            return placementQuote(recipe, request.count(), context);
+            return placementQuote(recipe, request.count(), context, shortfall);
         }
         int times = timesNeeded(recipe, request.count());
         return new SourceQuote.Offer(describe(), request.count(),
-                new AcquisitionCost(distance(station.get(), context), 6 + recipe.ingredients().size()),
+                new AcquisitionCost(distance(station.get(), context), 6 + recipe.ingredients().size(), shortfall),
                 riskNote(recipe, times, context), recipe.id());
     }
 
@@ -395,7 +399,7 @@ public final class RecipeSource implements ItemSource {
         if (station == null && !recipe.kind().placeable()) {
             // 报价时记得的高炉、烟熏炉动手时不见了：不会为它去摆一台，整串以问题收场，由引擎换别的路（熔炉照旧能用）。
             steps.add(StationFallbacks.stationGone(recipe.kind()));
-            return new StepwiseActions("记得的" + workstationName(recipe.kind()) + "不见了",
+            return new StepwiseActions("记得的" + recipe.kind().displayName() + "不见了",
                     steps.toArray(Action[]::new));
         }
         if (station == null) {
@@ -403,7 +407,7 @@ public final class RecipeSource implements ItemSource {
             // 动手那一步等摆完才认新设施的位置（它的记录是摆台这一步才写下的），少这一步就只剩摆台、不做东西。
             steps.addAll(placeSteps(recipe, permissions));
             steps.add(shortfall.explaining(runAtPlacedStation(recipe, times, permissions, context.records())));
-            return new StepwiseActions("就地摆下" + workstationName(recipe.kind()) + "再做"
+            return new StepwiseActions("就地摆下" + recipe.kind().displayName() + "再做"
                     + recipe.result().describe(), steps.toArray(Action[]::new));
         }
         Optional<Action> run = runs.run(recipe, station, times, permissions, context.records());
@@ -415,7 +419,7 @@ public final class RecipeSource implements ItemSource {
                             steps.toArray(Action[]::new));
         }
         steps.add(shortfall.explaining(run.get()));
-        return new StepwiseActions("备齐原料后去" + workstationName(recipe.kind()) + "做"
+        return new StepwiseActions("备齐原料后去" + recipe.kind().displayName() + "做"
                 + recipe.result().describe(), steps.toArray(Action[]::new));
     }
 
@@ -432,7 +436,7 @@ public final class RecipeSource implements ItemSource {
                     run = runs.runAtRememberedStation(recipe, times, permissions, records).orElse(null);
                     if (run == null) {
                         return ActionStatus.failed(Problem.of(Problem.Kind.STUCK,
-                                workstationName(recipe.kind()) + "摆下了，但记忆里没有它的位置，做不了"
+                                recipe.kind().displayName() + "摆下了，但记忆里没有它的位置，做不了"
                                         + recipe.result().describe()));
                     }
                 }
@@ -453,7 +457,7 @@ public final class RecipeSource implements ItemSource {
 
             @Override public String describe() {
                 return run == null
-                        ? "到刚摆下的" + workstationName(recipe.kind()) + "跟前做" + recipe.result().describe()
+                        ? "到刚摆下的" + recipe.kind().displayName() + "跟前做" + recipe.result().describe()
                         : run.describe();
             }
         };
@@ -644,7 +648,7 @@ public final class RecipeSource implements ItemSource {
 
     // 摆一个设施要的几步：身上没有设施方块就先去弄一个，然后在身边放下。摆不了（没接上）时给一个当场说明问题的动作。
     private List<Action> placeSteps(WorkstationRecipe recipe, Permissions permissions) {
-        String blockType = workstationBlockType(recipe.kind());
+        String blockType = recipe.kind().blockType();
         List<Action> steps = new ArrayList<>();
         int carried = CarriedItems.matching(backpack, offhand, WantedItem.ofItem(blockType), tags);
         if (carried < 1) {
@@ -662,20 +666,20 @@ public final class RecipeSource implements ItemSource {
     }
 
     // 报价时没找到记住的设施：能就地摆就报"摆一个再做"，摆不了就如实说没有设施。
-    private SourceQuote placementQuote(WorkstationRecipe recipe, int count, SourceContext context) {
+    private SourceQuote placementQuote(WorkstationRecipe recipe, int count, SourceContext context, double shortfall) {
         if (placer == null) {
             return new SourceQuote.Unavailable(describe(),
-                    "有配方（" + recipe.id() + "），但没记得附近有" + workstationName(recipe.kind())
+                    "有配方（" + recipe.id() + "），但没记得附近有" + recipe.kind().displayName()
                             + "；用过一次才会记得它在哪");
         }
         if (context.permissions().changeBlocks() == Permissions.BlockChanges.NONE) {
             return new SourceQuote.Unavailable(describe(),
-                    "有配方（" + recipe.id() + "），附近没有" + workstationName(recipe.kind())
+                    "有配方（" + recipe.id() + "），附近没有" + recipe.kind().displayName()
                             + "，就地放一个需要改方块的许可，这次的许可不给");
         }
         return new SourceQuote.Offer(describe(), count,
-                new AcquisitionCost(0, 8 + recipe.ingredients().size()),
-                "附近没有" + workstationName(recipe.kind()) + "，会在身边放一个（消耗一个）并记下位置",
+                new AcquisitionCost(0, 8 + recipe.ingredients().size(), shortfall),
+                "附近没有" + recipe.kind().displayName() + "，会在身边放一个（消耗一个）并记下位置",
                 recipe.id());
     }
 
@@ -720,7 +724,7 @@ public final class RecipeSource implements ItemSource {
         return new Action() {
             @Override public ActionStatus tick(TickContext context) {
                 return ActionStatus.failed(Problem.of(Problem.Kind.UNSUPPORTED,
-                        "在" + workstationName(recipe.kind()) + "上做" + recipe.result().describe()
+                        "在" + recipe.kind().displayName() + "上做" + recipe.result().describe()
                                 + "的现场动作还没接上，做不了"));
             }
             @Override public String describe() {
@@ -745,7 +749,7 @@ public final class RecipeSource implements ItemSource {
     }
 
     private Optional<MemoryRecord> findStation(WorkstationRecipe.Kind kind, SourceContext context) {
-        String blockType = workstationBlockType(kind);
+        String blockType = kind.blockType();
         // 记得好几台时挑离得最近的那台：世界记忆按记下的先后排，最新记的不一定最近。
         // 眼下看得到已经没了的（被挖走、被炸掉）先从记忆里划掉：不然会走过去点一块空地，整件合成白白失败，
         // 身上明明还有一张工作台也不会放下来用。
@@ -770,18 +774,9 @@ public final class RecipeSource implements ItemSource {
             note.append(ingredient.describe()).append("×").append(ingredient.count() * times).append(" ");
         }
         if (recipe.kind().cooks()) {
-            note.append("；").append(workstationName(recipe.kind())).append("烧").append(times).append("次还要燃料");
+            note.append("；").append(recipe.kind().displayName()).append("烧").append(times).append("次还要燃料");
         }
         return note.toString().trim();
-    }
-
-    /** 设施的方块类型：配方在哪种设施上做，就在记忆里找哪种；只在设施种类那一处记。 */
-    private static String workstationBlockType(WorkstationRecipe.Kind kind) {
-        return kind.blockType();
-    }
-
-    private static String workstationName(WorkstationRecipe.Kind kind) {
-        return kind.displayName();
     }
 
     private static double distance(MemoryRecord record, SourceContext context) {
