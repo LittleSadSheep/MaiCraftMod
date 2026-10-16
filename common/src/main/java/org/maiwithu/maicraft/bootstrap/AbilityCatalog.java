@@ -738,45 +738,6 @@ public final class AbilityCatalog {
                 deps.facilities(), () -> networks.stream().findFirst());
     }
 
-    /**
-     * 拿到物品引擎的内需入口：来源备料缺原料缺工具时回到引擎，但引擎要等来源清单
-     * 建好才建得出来。这里先接住内需、引擎建好后接上，来源用它时不觉得有先后。
-     */
-    private static final class DeferredInnerNeeds implements ItemNeeds {
-
-        private ItemNeeds engine;
-
-        /** 引擎建好后接上；这之后内需才真的往下问。 */
-        void attach(ItemNeeds engine) {
-            this.engine = Objects.requireNonNull(engine, "engine");
-        }
-
-        @Override public Action actionFor(ItemRequest request, Permissions permissions) {
-            if (engine == null) {
-                throw new IllegalStateException("拿到物品的引擎还没建好，内需没有可以回的地方");
-            }
-            return engine.actionFor(request, permissions);
-        }
-
-        @Override public Action actionFor(ItemRequest request, Permissions permissions, TaskRecords records) {
-            if (engine == null) {
-                throw new IllegalStateException("拿到物品的引擎还没建好，内需没有可以回的地方");
-            }
-            return engine.actionFor(request, permissions, records);
-        }
-
-        // 引擎还没建好时谁也没在拿东西，没有已知拿不到的。
-        @Override public boolean knownUnobtainable(WantedItem wanted) {
-            return engine != null && engine.knownUnobtainable(wanted);
-        }
-
-        // 挑可以互换的原料时问最省的一条路；引擎还没建好时问不出，按配方里的先后。
-        @Override public Optional<Double> cheapestCost(ItemRequest request, Permissions permissions,
-                boolean includeMaking) {
-            return engine == null ? Optional.empty() : engine.cheapestCost(request, permissions, includeMaking);
-        }
-    }
-
     /** 采集的靠近：目标落实成一格方块后交给靠近模型，走过去能动多少地形按这次任务的许可来。 */
     private static ApproachesTargets approaches(LiveApproaches bringsClose) {
         return (target, permissions) -> bringsClose.toward(ApproachTarget.ofBlock(target), permissions);
