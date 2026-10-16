@@ -79,6 +79,11 @@ public final class ClientStairsDown implements DigsStairsDown {
         /** 一格的方块注册 ID，例如 minecraft:stone。 */
         String blockType(TickContext context, BlockPos cell);
 
+        /** 这一格是会往下掉的方块（沙子、沙砾、混凝土粉末这类）：下面挖空了它就掉下来。读不到答不会。 */
+        default boolean falls(TickContext context, BlockPos cell) {
+            return false;
+        }
+
         /** 当前维度：许可检查按它找保护记录。 */
         String dimension(TickContext context);
 

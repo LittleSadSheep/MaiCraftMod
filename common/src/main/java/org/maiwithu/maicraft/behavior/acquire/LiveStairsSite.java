@@ -11,6 +11,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.BedBlock;
+import net.minecraft.world.level.block.FallingBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
@@ -69,6 +70,13 @@ public final class LiveStairsSite implements ClientStairsDown.Site {
             return ClientStairsDown.Ground.BUILT;
         }
         return ClientStairsDown.Ground.DIGGABLE;
+    }
+
+    // 往上挖楼梯时看头顶上面：沙子、沙砾这类方块下面一空就掉下来，砸进人站的那一格。
+    @Override
+    public boolean falls(TickContext context, BlockPos cell) {
+        ClientLevel level = level(context);
+        return level != null && level.isLoaded(cell) && level.getBlockState(cell).getBlock() instanceof FallingBlock;
     }
 
     @Override
