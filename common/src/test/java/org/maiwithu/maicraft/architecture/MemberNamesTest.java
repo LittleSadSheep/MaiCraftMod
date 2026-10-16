@@ -23,6 +23,7 @@ import com.tngtech.archunit.core.domain.JavaMethod;
 import com.tngtech.archunit.core.domain.JavaModifier;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -60,6 +61,13 @@ class MemberNamesTest {
             if (parts.length == 3 && parts[0].equals("allow")) allowed.add(parts[1]);
         }
         assertTrue(!bannedWords.isEmpty(), "naming-rules.txt 里没有 word 规则");
+    }
+
+    // 查完成员名就放掉整份类导入：静态字段不清空会一直占着到测试进程结束，
+    // 等后面 ArchUnit 的 LayerRulesTest、CodingRulesTest 再导入一份时两份同时在堆里，全量单测会因此堆溢出。
+    @AfterAll
+    static void release() {
+        classes = null;
     }
 
     @Test
