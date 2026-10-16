@@ -6,7 +6,9 @@ import com.google.gson.JsonObject;
 import org.maiwithu.maicraft.behavior.recipe.GameRecipeTable;
 import org.maiwithu.maicraft.behavior.recipe.RecipeLookup;
 import org.maiwithu.maicraft.game.ModIdentity;
+import org.maiwithu.maicraft.game.world.IdKind;
 import org.maiwithu.maicraft.game.world.ReadsItemDescriptions;
+import org.maiwithu.maicraft.game.world.ReadsRegisteredIds;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.ability.AbilitySpec;
@@ -51,27 +53,42 @@ public final class LookupTool implements McpTool {
     private final KnowledgeLibrary offline = KnowledgeLibrary.offline();
     private final RecipeLookup recipes;
     private final ReadsItemDescriptions items;
+    private final ReadsRegisteredIds registered;
     private final ClientThread clientThread;
 
     /**
      * @param knowledge    知识库：随包常识、物品资料页与联动模组的资料来源
      * @param recipes      配方查询
      * @param items        读物品名字、按名字找物品
+     * @param registered   本实例注册了哪些 ID：物品 ID 写错时从这里挑相近的名字
      * @param clientThread 读游戏现场的部分交给客户端线程
      */
     public LookupTool(AbilityRegistry registry, KnowledgeLibrary knowledge, RecipeLookup recipes,
-                      ReadsItemDescriptions items, ClientThread clientThread) {
+                      ReadsItemDescriptions items, ReadsRegisteredIds registered, ClientThread clientThread) {
         this.registry = Objects.requireNonNull(registry, "registry");
         this.knowledge = Objects.requireNonNull(knowledge, "knowledge");
         this.recipes = Objects.requireNonNull(recipes, "recipes");
         this.items = Objects.requireNonNull(items, "items");
+        this.registered = Objects.requireNonNull(registered, "registered");
         this.clientThread = Objects.requireNonNull(clientThread, "clientThread");
     }
 
     /** 离线的 lookup：角色永远不在世界里，只查得到能力与随包常识；接口快照与离线测试用。 */
     public LookupTool(AbilityRegistry registry, KnowledgeLibrary knowledge) {
-        this(registry, knowledge, new RecipeLookup(List.of(), new GameRecipeTable(Optional::empty)), NO_ITEMS, NEVER_IN_WORLD);
+        this(registry, knowledge, new RecipeLookup(List.of(), new GameRecipeTable(Optional::empty)), NO_ITEMS,
+                NO_IDS, NEVER_IN_WORLD);
     }
+
+    /** 离线时没有注册表可读：写错的 ID 只说不存在。 */
+    private static final ReadsRegisteredIds NO_IDS = new ReadsRegisteredIds() {
+        @Override public List<String> ids(IdKind kind) {
+            return List.of();
+        }
+
+        @Override public List<String> tags(IdKind kind) {
+            return List.of();
+        }
+    };
 
     /** 离线时没有物品可读。 */
     private static final ReadsItemDescriptions NO_ITEMS = new ReadsItemDescriptions() {
@@ -237,7 +254,8 @@ public final class LookupTool implements McpTool {
         String itemId = rawId.strip().toLowerCase(Locale.ROOT);
         Optional<ReadsItemDescriptions.ItemDescription> item = items.describe(itemId);
         if (item.isEmpty()) {
-            return ToolReply.error(ErrorCode.UNKNOWN_ID, "没有这件物品：" + rawId
+            // 写岔的物品 ID 带上本实例里相近的名字，再提示只知道名字时怎么找。
+            return ToolReply.error(ErrorCode.UNKNOWN_ID, registered.missing(IdKind.ITEM, rawId.strip())
                     + "；只知道名字时用 lookup(topic=recipe, query=名字) 找它的 ID");
         }
         List<String> notes = new ArrayList<>(check.notes());

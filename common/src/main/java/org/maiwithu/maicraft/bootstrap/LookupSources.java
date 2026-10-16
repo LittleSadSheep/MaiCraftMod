@@ -13,6 +13,7 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.ClientItemDescriptions;
 import org.maiwithu.maicraft.game.world.ClientRegisteredIds;
 import org.maiwithu.maicraft.game.world.ReadsItemDescriptions;
+import org.maiwithu.maicraft.game.world.ReadsRegisteredIds;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.knowledge.KnowledgeSource;
 import org.maiwithu.maicraft.mcp.knowledge.IdCatalogPages;
@@ -40,12 +41,14 @@ final class LookupSources {
             ClientThread clientWork) {
         RecipeLookup recipes = new RecipeLookup(compat.recipeViewers(), new GameRecipeTable(GameRecipes.fromPlayer(now)));
         ReadsItemDescriptions items = new ClientItemDescriptions(now);
+        // 群系与结构目录、配方里物品 ID 写错时挑相近的名字，都读这一份：群系从角色当刻所在世界的注册表读。
+        ReadsRegisteredIds registered = new ClientRegisteredIds(now);
         List<KnowledgeSource> modSources = compat.knowledgeSources();
         List<KnowledgeSource> sources = new ArrayList<>();
         sources.add(new ItemPages(items, recipes, modSources));
-        // 群系与结构目录：群系从角色当刻所在世界的注册表读，探索认不出群系时指到这一页。
-        sources.add(new IdCatalogPages(new ClientRegisteredIds(now)));
+        // 群系与结构目录：探索认不出群系时指到这一页。
+        sources.add(new IdCatalogPages(registered));
         sources.addAll(modSources);
-        return new LookupTool(abilities, new KnowledgeLibrary(sources), recipes, items, clientWork);
+        return new LookupTool(abilities, new KnowledgeLibrary(sources), recipes, items, registered, clientWork);
     }
 }

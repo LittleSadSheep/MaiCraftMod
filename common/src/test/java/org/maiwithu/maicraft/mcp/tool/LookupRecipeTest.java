@@ -17,7 +17,9 @@ import org.maiwithu.maicraft.behavior.recipe.RecipeViewer;
 import org.maiwithu.maicraft.behavior.recipe.ShownIngredient;
 import org.maiwithu.maicraft.behavior.recipe.ShownRecipe;
 import org.maiwithu.maicraft.behavior.recipe.ShownStack;
+import org.maiwithu.maicraft.game.world.IdKind;
 import org.maiwithu.maicraft.game.world.ReadsItemDescriptions;
+import org.maiwithu.maicraft.game.world.ReadsRegisteredIds;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.knowledge.KnowledgeDocument;
 import org.maiwithu.maicraft.kernel.knowledge.KnowledgeNotReady;
@@ -85,6 +87,11 @@ class LookupRecipeTest {
 
         JsonObject unknown = lookup(true).call(args("recipe", "create:no_such_thing", null, null));
         assertEquals(ErrorCode.UNKNOWN_ID.wireName(), unknown.getAsJsonObject("error").get("code").getAsString());
+
+        // 写岔一个字母：报错带上本实例里相近的物品 ID。
+        JsonObject typo = lookup(true).call(args("recipe", "create:mechanical_mixr", null, null));
+        assertTrue(typo.getAsJsonObject("error").get("message").getAsString()
+                .startsWith("物品 create:mechanical_mixr 不存在；你是不是要 create:mechanical_mixer；"), typo::toString);
     }
 
     @Test
@@ -123,7 +130,7 @@ class LookupRecipeTest {
             }
         };
         LookupTool lookup = new LookupTool(new AbilityRegistry(new TaskFactories(), modId -> false), new KnowledgeLibrary(List.of(slow)),
-                new RecipeLookup(List.of(), new MixingViewer()), new Items(), thread);
+                new RecipeLookup(List.of(), new MixingViewer()), new Items(), new Ids(), thread);
 
         JsonObject data = ok(lookup.call(args("knowledge", "maicraft://knowledge/ponder/create/mechanical_mixer/1", null, null)));
 
@@ -158,7 +165,7 @@ class LookupRecipeTest {
             @Override public String status() { return "思索：可用，1 个场景"; }
         };
         return new LookupTool(new AbilityRegistry(new TaskFactories(), modId -> false), new KnowledgeLibrary(List.of(ponder)),
-                new RecipeLookup(List.of(new MixingViewer()), new MixingViewer()), new Items(), thread);
+                new RecipeLookup(List.of(new MixingViewer()), new MixingViewer()), new Items(), new Ids(), thread);
     }
 
     /** 替身物品表：安山合金与动力搅拌器。 */
@@ -174,6 +181,17 @@ class LookupRecipeTest {
 
         @Override public String nameOf(String itemId) {
             return itemId.equals(ALLOY) ? "安山合金" : "动力搅拌器";
+        }
+    }
+
+    /** 替身注册表：只注册了安山合金与动力搅拌器两件物品。 */
+    private static final class Ids implements ReadsRegisteredIds {
+        @Override public List<String> ids(IdKind kind) {
+            return kind == IdKind.ITEM ? List.of(ALLOY, MIXER) : List.of();
+        }
+
+        @Override public List<String> tags(IdKind kind) {
+            return List.of();
         }
     }
 
