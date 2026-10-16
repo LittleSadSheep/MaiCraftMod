@@ -33,7 +33,10 @@ public interface HuntMoves {
      */
     boolean sameWater(TickContext context, int entityId);
 
-    /** 在水里朝这只猎物游过去：镜头一直跟着它，要下潜就下潜、要上浮就上浮；氧气不够先浮上去换满再回来接着追。 */
+    /**
+     * 在水里朝这只猎物（或它掉出来、漂在水里的东西）游过去：镜头一直跟着它，要下潜就下潜、要上浮就上浮；
+     * 氧气不够先浮上去换满再回来接着游。掉落游到跟前由原版吸进包。
+     */
     Action swimTo(int entityId);
 
     /**

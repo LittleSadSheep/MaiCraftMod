@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -91,9 +92,21 @@ class LiveHuntsTest {
             return sameWater;
         }
 
+        /** 游到跟前时要发生的事（掉落被吸进包）；没有就什么都不做。 */
+        Runnable onSwim = () -> { };
+
         @Override public Action swimTo(int entityId) {
-            done.add("游过去追");
-            return instant();
+            done.add("游过去 " + entityId);
+            return new Action() {
+                @Override public ActionStatus tick(TickContext context) {
+                    onSwim.run();
+                    return ActionStatus.done();
+                }
+
+                @Override public String describe() {
+                    return "游过去替身";
+                }
+            };
         }
 
         @Override public Action swimAlongside(int entityId) {
@@ -211,13 +224,53 @@ class LiveHuntsTest {
         Action hunting = hunts(moves).hunt(List.of(sheep()), wool(), Permissions.DEFAULT).orElseThrow();
         for (int i = 0; i < 3; i++) hunting.tick(TICK);
         // 寻路在水里到不了水下它跟前：直接游，不再一遍遍算路停在它头顶上。
-        assertTrue(moves.done.contains("游过去追"), moves.done.toString());
+        assertTrue(moves.done.contains("游过去 3"), moves.done.toString());
         assertFalse(moves.done.stream().anyMatch(done -> done.startsWith("走到")), moves.done.toString());
         moves.inReach = true;
         hunting.tick(TICK);
         // 在水里出手不停下：出手的同时接着朝它游，边追边砍。
         assertTrue(moves.done.contains("打"), moves.done.toString());
         assertEquals("边追边砍", moves.done.get(moves.done.size() - 1), moves.done.toString());
+    }
+
+    @Test
+    void 水里打倒的_掉落漂在水里_直接游过去捡_不走回倒下的地方() {
+        FakeMoves moves = new FakeMoves();
+        moves.sameWater = true;
+        moves.inReach = true;
+        moves.targetAt = new double[] {5, 64, 0};
+        FakeSight sight = new FakeSight();
+        Set<Integer> onGround = new HashSet<>();
+        List<String> picked = new ArrayList<>();
+        PicksUpDrops floating = new PicksUpDrops() {
+            @Override public Set<Integer> nearby() {
+                return Set.copyOf(onGround);
+            }
+
+            @Override public Action pickUpNewSince(Set<Integer> before) {
+                return new Action() {
+                    @Override public ActionStatus tick(TickContext context) {
+                        picked.add("走过去捡");
+                        return ActionStatus.done();
+                    }
+
+                    @Override public String describe() {
+                        return "走过去捡替身";
+                    }
+                };
+            }
+        };
+        // 游到跟前，原版把它吸进包：地上那件不见了。
+        moves.onSwim = () -> onGround.remove(99);
+        Action hunting = hunts(moves, floating, sight).hunt(List.of(sheep()), wool(), Permissions.DEFAULT).orElseThrow();
+        hunting.tick(TICK); // 挑中这只
+        hunting.tick(TICK); // 出手
+        sight.visible = Optional.empty();
+        onGround.add(99);
+        for (int i = 0; i < 6; i++) hunting.tick(TICK);
+        assertTrue(moves.done.contains("游过去 99"), moves.done.toString());
+        assertFalse(moves.done.contains("走到 5"), "漂在水里的掉落不走回它倒下的地方：" + moves.done);
+        assertEquals(1, Collections.frequency(moves.done, "游过去 99"), "捡到了就不再游：" + moves.done);
     }
 
     @Test

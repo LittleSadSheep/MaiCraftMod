@@ -9,6 +9,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
@@ -196,7 +197,8 @@ public final class LiveHuntMoves implements HuntMoves {
     }
 
     /**
-     * 在水里游过去追一只：每刻按 {@link SwimChase} 的判断转镜头、按键。它不在了、人出了水就收手，交回狩猎重新决定
+     * 在水里游过去追一只（或捡一件漂着的掉落）：每刻按 {@link SwimChase} 的判断转镜头、按键。它不在了（掉落被吸进包也算）、
+     * 人出了水就收手，交回狩猎重新决定
      * （上了岸改走寻路，打倒了去收掉落）；不会自己判失败，追多久由狩猎每只猎物的期限管。
      */
     private static final class SwimAfter implements Action {
@@ -246,7 +248,8 @@ public final class LiveHuntMoves implements HuntMoves {
             PlayerInput.Movement keys = keys(self, body, stroke);
             input.applyMovement(keys, tick);
             logKeys(self, keys, stroke, eye.distanceTo(body), tick);
-            what = stroke.surfacing() ? "浮上去换口气再回来追"
+            what = stroke.surfacing() ? "浮上去换口气再回来"
+                    : target instanceof ItemEntity ? "游过去捡掉落"
                     : "游过去追 " + EntityType.getKey(target.getType()).getPath();
             double distance = eye.distanceTo(body);
             if (distance < best - PROGRESS_GAIN) {

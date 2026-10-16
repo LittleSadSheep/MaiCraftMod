@@ -2,10 +2,12 @@
 package org.maiwithu.maicraft.behavior.acquire;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.Set;
 import java.util.function.Supplier;
 
@@ -47,8 +49,12 @@ public final class LiveHunts implements Hunts {
     private static final long PER_TARGET_TICKS = 20L * 40;
     /** 出去找时，走向一个搜索点的期限（刻）；走不到就换下一个点。 */
     private static final long PER_POINT_TICKS = 20L * 30;
+    /** 没在游过去捡哪一件掉落。 */
+    private static final int NO_DROP = Integer.MIN_VALUE;
     /** 还没为哪一只换过武器。 */
     private static final int NOT_ARMED = Integer.MIN_VALUE;
+    /** 游过去捡掉落这件事在"正在推进的动作"里的名字前缀。 */
+    private static final String SWIM_TO_DROP = "游过去捡 ";
     /** 换武器这件事在"正在推进的动作"里的名字。 */
     private static final String ARMING = "拿武器";
     /** 追猎物时按多大的方格认"它挪地方了"（格）：挪出这一格就按新位置重新走。 */
@@ -110,6 +116,10 @@ public final class LiveHunts implements Hunts {
         private Action current;
         private String currentKey;
         private Action loot;
+        /** 正游过去捡的那一件掉落（实体编号），和在它身上游了多久；游太久没捡到的记进放弃名单，交回走过去捡。 */
+        private int swimmingFor = NO_DROP;
+        private long swimTicks;
+        private final Set<Integer> gaveUpSwimming = new HashSet<>();
         /** 在水里出手时跟着按键的游泳动作：边追边砍；不在水里出手、换了一只、去收掉落时收掉。 */
         private Action alongside;
         /** 走近这一只用的是游还是寻路：换了才记一行日志，实机对得上走的是哪条路。 */
@@ -372,6 +382,9 @@ public final class LiveHunts implements Hunts {
         // 收掉落：先回到它倒下的地方（走不到就到此为止），再一件件捡这次新掉出来的；
         // 捡完（或没捡到如实认了）再看身上，够了就收工，不够换下一只。
         private ActionStatus lootDrops(TickContext tick) {
+            if (swimToFloatingDrop(tick)) {
+                return ActionStatus.running();
+            }
             if (lootSpot != null) {
                 keep("回到倒下的地方 " + (int) lootSpot[0] + "," + (int) lootSpot[2],
                         () -> moves.walkTo(lootSpot[0], lootSpot[1], lootSpot[2]));
@@ -395,6 +408,57 @@ public final class LiveHunts implements Hunts {
             loot.close();
             loot = null;
             return afterLoot();
+        }
+
+        // 在水里打倒的：掉落漂在水面或沉在水里、和人泡在同一片水里——寻路到不了水下那一层，水面上的也常常
+        // 走过去了还在，像追鱼一样直接游过去，游到跟前原版自己吸进包，不再走回它倒下的地方。挑最近的一件，
+        // 捡到了（它不在了）再挑下一件；一件游了三十秒还没捡到就不游它了，交回走过去捡，捡不到由捡的动作如实记。
+        private boolean swimToFloatingDrop(TickContext tick) {
+            OptionalInt drop = nearestFloatingDrop(tick);
+            if (drop.isEmpty()) {
+                if (swimmingFor != NO_DROP) {
+                    swimmingFor = NO_DROP;
+                    dropCurrent();
+                }
+                return false;
+            }
+            int id = drop.getAsInt();
+            if (id != swimmingFor) {
+                swimmingFor = id;
+                swimTicks = 0;
+                LOG.info("[狩猎] {}掉出来的东西漂在水里，游过去捡（实体 {}）", target.describe(), id);
+            }
+            lootSpot = null;
+            keep(SWIM_TO_DROP + id, () -> moves.swimTo(id));
+            stepCurrent(tick, "游过去捡掉落");
+            if (++swimTicks > PER_POINT_TICKS) {
+                gaveUpSwimming.add(id);
+                swimmingFor = NO_DROP;
+                dropCurrent();
+            }
+            return true;
+        }
+
+        // 这一下新掉出来的、和人泡在同一片水里的掉落里离人最近的一件；没有为空。
+        private OptionalInt nearestFloatingDrop(TickContext tick) {
+            double[] self = moves.selfPosition(tick);
+            int nearest = NO_DROP;
+            double nearestDistance = Double.MAX_VALUE;
+            for (int id : drops.nearby()) {
+                if (dropsBefore != null && dropsBefore.contains(id) || gaveUpSwimming.contains(id)) continue;
+                if (!moves.sameWater(tick, id)) continue;
+                Optional<double[]> at = moves.positionOf(tick, id);
+                if (at.isEmpty()) continue;
+                double dx = at.get()[0] - self[0];
+                double dy = at.get()[1] - self[1];
+                double dz = at.get()[2] - self[2];
+                double distance = dx * dx + dy * dy + dz * dz;
+                if (distance < nearestDistance) {
+                    nearestDistance = distance;
+                    nearest = id;
+                }
+            }
+            return nearest == NO_DROP ? OptionalInt.empty() : OptionalInt.of(nearest);
         }
 
         private ActionStatus afterLoot() {
@@ -504,7 +568,8 @@ public final class LiveHunts implements Hunts {
                         : struck ? "打 " + target.describe()
                         : currentKey != null && currentKey.startsWith("游过去追") ? "游过去追 " + target.describe()
                         : "走近 " + target.describe();
-                case LOOT -> (lootSpot != null ? "回它倒下的地方捡" : "捡")
+                case LOOT -> (currentKey != null && currentKey.startsWith(SWIM_TO_DROP) ? "游过去捡"
+                        : lootSpot != null ? "回它倒下的地方捡" : "捡")
                         + (target == null ? "猎物" : target.describe()) + "掉出来的东西";
             };
         }
