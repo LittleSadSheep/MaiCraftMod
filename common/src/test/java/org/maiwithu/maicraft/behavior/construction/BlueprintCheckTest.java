@@ -52,6 +52,30 @@ class BlueprintCheckTest {
     private static final String DIM = "minecraft:overworld";
 
     @Test
+    void 整份比对的明细_每格写清要什么现场是什么() {
+        // 改完一栋房子对整栋比一遍：没对上的格逐一列出，没加载的不按空气算，范围里多出来的只作信息。
+        var cells = List.of(
+                PlannedCell.block(new BlockPos(0, 0, 0), Blocks.STONE.defaultBlockState(), Set.of()),
+                PlannedCell.block(new BlockPos(1, 0, 0), Blocks.STONE.defaultBlockState(), Set.of()),
+                PlannedCell.block(new BlockPos(3, 0, 0), Blocks.STONE.defaultBlockState(), Set.of()));
+        Blueprint blueprint = new Blueprint(DIM, BlockPos.ZERO, cells);
+        FakeWorld world = new FakeWorld()
+                .put(new BlockPos(0, 0, 0), Blocks.STONE.defaultBlockState())
+                .put(new BlockPos(1, 0, 0), Blocks.DIRT.defaultBlockState())
+                .put(new BlockPos(2, 0, 0), Blocks.CRAFTING_TABLE.defaultBlockState());
+        BlueprintCheck.Report report = BlueprintCheck.report(blueprint, world);
+        assertFalse(report.complete(), "有一格没加载就不给整份一致");
+        assertFalse(report.allMatch());
+        assertEquals(List.of(
+                new BlueprintCheck.Difference(new BlockPos(1, 0, 0), "wrong_block", "minecraft:stone", "minecraft:dirt"),
+                new BlueprintCheck.Difference(new BlockPos(3, 0, 0), "unknown", "minecraft:stone", "没加载")), report.differences());
+        assertEquals(List.of(new BlockPos(2, 0, 0)), report.extra());
+        assertEquals(Map.of("matches", 1, "wrong_block", 1, "unknown", 1, "extra", 1), report.counts());
+        assertEquals("minecraft:oak_stairs[facing=north,half=bottom,shape=straight,waterlogged=false]",
+                BlueprintCheck.describe(Blocks.OAK_STAIRS.defaultBlockState()));
+    }
+
+    @Test
     void 每种结论各一格() {
         BlockState stairs = Blocks.OAK_STAIRS.defaultBlockState().setValue(StairBlock.HALF, Half.TOP);
         var cells = List.of(

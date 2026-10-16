@@ -2,16 +2,12 @@
 package org.maiwithu.maicraft.ability.machine;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.state.BlockState;
@@ -21,7 +17,6 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.PartCell;
 import org.maiwithu.maicraft.behavior.construction.Blueprint;
 import org.maiwithu.maicraft.behavior.construction.BlueprintCheck;
-import org.maiwithu.maicraft.behavior.construction.CellState;
 import org.maiwithu.maicraft.behavior.construction.PlannedCell;
 import org.maiwithu.maicraft.behavior.construction.ReadsBlocks;
 
@@ -31,10 +26,6 @@ import org.maiwithu.maicraft.behavior.construction.ReadsBlocks;
  * 有一格没加载就不给"整机一致"的结论。结构一致不等于能转，转不转看各台机器的运行状态。
  */
 final class ArchiveCheck {
-
-    /** 一格没对上：在哪、结论、蓝图要什么、现场是什么。 */
-    record Difference(BlockPos at, String state, String wanted, String found) {
-    }
 
     /** 一段安装段或一个部件核对的结论。 */
     record EntryCheck(String what, String where, boolean done) {
@@ -50,7 +41,7 @@ final class ArchiveCheck {
      * @param installations 每段安装段装成没有
      * @param parts        每个部件装上没有
      */
-    record Result(boolean complete, Map<String, Integer> counts, List<Difference> differences, List<BlockPos> extra,
+    record Result(boolean complete, Map<String, Integer> counts, List<BlueprintCheck.Difference> differences, List<BlockPos> extra,
                   List<EntryCheck> installations, List<EntryCheck> parts) {
 
         Result {
@@ -87,25 +78,11 @@ final class ArchiveCheck {
 
     /** 拿档案对现场比一遍。 */
     static Result compare(MachineArchive archive, MachineServices services) {
+        // 逐格的部分和建筑的整栋比对是同一份；机器自己再核对安装段与部件。
         Blueprint target = targetPlan(archive.blueprint(), archive.anchor(), archive.dimension());
-        ReadsBlocks world = worldOf(services);
-        BlueprintCheck.Result check = BlueprintCheck.compare(target, world, Set.of());
-        Map<String, Integer> counts = new LinkedHashMap<>();
-        for (CellState state : CellState.values()) {
-            if (check.count(state) > 0) counts.put(state.name().toLowerCase(Locale.ROOT), check.count(state));
-        }
-        List<Difference> differences = new ArrayList<>();
-        for (PlannedCell cell : target.cells()) {
-            CellState state = check.states().get(cell.pos());
-            if (state == CellState.MATCHES || state == CellState.CHECKED_BY_MACHINE) continue;
-            String found = state == CellState.UNKNOWN ? "没加载" : describe(world.state(cell.pos()));
-            differences.add(new Difference(cell.pos(), state.name().toLowerCase(Locale.ROOT), describe(cell.state()),
-                    found));
-        }
-        List<BlockPos> extra = BlueprintCheck.extras(target, world);
-        if (!extra.isEmpty()) counts.put(CellState.EXTRA.name().toLowerCase(Locale.ROOT), extra.size());
-        return new Result(check.complete(), counts, differences, extra, installations(archive, services),
-                parts(archive, services));
+        BlueprintCheck.Report report = BlueprintCheck.report(target, worldOf(services));
+        return new Result(report.complete(), report.counts(), report.differences(), report.extra(),
+                installations(archive, services), parts(archive, services));
     }
 
     private static List<EntryCheck> installations(MachineArchive archive, MachineServices services) {
@@ -141,13 +118,5 @@ final class ArchiveCheck {
                 return services.world().stateAt(pos).orElse(Blocks.AIR.defaultBlockState());
             }
         };
-    }
-
-    // 方块 ID 加上点名的几个属性：差异里写清"要的是哪种朝向的轴、现场是什么"。
-    static String describe(BlockState state) {
-        String id = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
-        Optional<String> properties = state.getValues().isEmpty() ? Optional.empty()
-                : Optional.of(state.toString().substring(state.toString().indexOf('[')));
-        return properties.filter(text -> text.startsWith("[")).map(text -> id + text).orElse(id);
     }
 }

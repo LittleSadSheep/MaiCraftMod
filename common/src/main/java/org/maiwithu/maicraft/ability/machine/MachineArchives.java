@@ -6,12 +6,10 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -19,16 +17,9 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.item.Item;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.properties.Property;
 
-import org.maiwithu.maicraft.behavior.construction.CellKind;
-import org.maiwithu.maicraft.behavior.construction.PlacedBy;
 import org.maiwithu.maicraft.behavior.construction.PlannedCell;
+import org.maiwithu.maicraft.behavior.construction.PlannedCellCodec;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 
 /**
@@ -78,7 +69,7 @@ final class MachineArchives {
         return name.trim().toLowerCase(Locale.ROOT);
     }
 
-    // 档案的正文：蓝图逐格按"位置、种类、方块 ID、属性表、点名属性、谁来放"存，读回后原样重建。
+    // 档案的正文：蓝图逐格照计划格的存盘写法存（建筑档案也是这一份），读回后原样重建。
     private static String encode(MachineArchive archive) {
         JsonObject root = new JsonObject();
         root.addProperty("name", archive.name());
@@ -120,7 +111,7 @@ final class MachineArchives {
         JsonObject body = new JsonObject();
         JsonArray cells = new JsonArray();
         for (PlannedCell cell : blueprint.cells()) {
-            cells.add(encodeCell(cell));
+            cells.add(PlannedCellCodec.encode(cell));
         }
         body.add("cells", cells);
         body.add("parts", MachineBlueprintCodec.parts(blueprint));
@@ -133,66 +124,12 @@ final class MachineArchives {
     private static MachineBlueprint decodeBlueprint(JsonObject body) {
         List<PlannedCell> cells = new ArrayList<>();
         for (JsonElement element : body.getAsJsonArray("cells")) {
-            cells.add(decodeCell(element.getAsJsonObject()));
+            cells.add(PlannedCellCodec.decode(element.getAsJsonObject()));
         }
         return new MachineBlueprint(cells,
                 MachineBlueprintCodec.readParts(body.getAsJsonArray("parts")),
                 MachineBlueprintCodec.readInstallations(body.getAsJsonArray("installations")),
                 MachineBlueprintCodec.readSettings(body.getAsJsonArray("settings")),
                 MachineBlueprintCodec.readProcesses(body.getAsJsonArray("processes")));
-    }
-
-    private static JsonObject encodeCell(PlannedCell cell) {
-        JsonObject json = new JsonObject();
-        json.addProperty("pos", cell.pos().asLong());
-        json.addProperty("kind", cell.kind().name());
-        json.addProperty("block", BuiltInRegistries.BLOCK.getKey(cell.state().getBlock()).toString());
-        JsonObject properties = new JsonObject();
-        for (Map.Entry<Property<?>, Comparable<?>> entry : cell.state().getValues().entrySet()) {
-            if (!entry.getValue().equals(cell.state().getBlock().defaultBlockState().getValue(entry.getKey()))) {
-                properties.addProperty(entry.getKey().getName(), getName(entry.getKey(), entry.getValue()));
-            }
-        }
-        json.add("properties", properties);
-        JsonArray required = new JsonArray();
-        for (String name : cell.required()) {
-            required.add(name);
-        }
-        json.add("required", required);
-        json.addProperty("item", BuiltInRegistries.ITEM.getKey(cell.item()).toString());
-        json.addProperty("placed_by", cell.placedBy().name());
-        return json;
-    }
-
-    private static PlannedCell decodeCell(JsonObject json) {
-        BlockPos pos = BlockPos.of(json.get("pos").getAsLong());
-        CellKind kind = CellKind.valueOf(json.get("kind").getAsString());
-        Block block = BuiltInRegistries.BLOCK.get(ResourceLocation.parse(json.get("block").getAsString()));
-        BlockState state = block.defaultBlockState();
-        if (json.has("properties")) {
-            for (Map.Entry<String, JsonElement> entry : json.getAsJsonObject("properties").entrySet()) {
-                Property<?> property = block.getStateDefinition().getProperty(entry.getKey());
-                state = withValue(state, property, entry.getValue().getAsString());
-            }
-        }
-        Set<String> required = new LinkedHashSet<>();
-        for (JsonElement name : json.getAsJsonArray("required")) {
-            required.add(name.getAsString());
-        }
-        Item item = BuiltInRegistries.ITEM.get(ResourceLocation.parse(json.get("item").getAsString()));
-        PlacedBy placedBy = PlacedBy.valueOf(json.get("placed_by").getAsString());
-        return new PlannedCell(pos, kind, state, item, required, placedBy);
-    }
-
-    private static String getName(Property<?> property, Comparable<?> value) {
-        @SuppressWarnings({"unchecked", "rawtypes"})
-        String name = ((Property) property).getName(value);
-        return name;
-    }
-
-    private static <T extends Comparable<T>> BlockState withValue(BlockState state, Property<T> property,
-            String value) {
-        return state.setValue(property, property.getValue(value)
-                .orElseThrow(() -> new IllegalStateException("档案里存了不认识的属性取值：" + value)));
     }
 }
