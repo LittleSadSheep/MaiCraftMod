@@ -21,6 +21,8 @@ import org.maiwithu.maicraft.game.player.ClientBackpackView;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.game.player.EverydayFood;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.world.ClientRegisteredIds;
+import org.maiwithu.maicraft.game.world.IdKind;
 
 /**
  * 身上有什么的读端合集：副手、物品标签、角色位置、物品注册表与工具要求，
@@ -94,6 +96,12 @@ public final class LiveCarryReads {
                 var key = TagKey.create(Registries.ITEM, parse(tagId.startsWith("#") ? tagId.substring(1) : tagId));
                 return BuiltInRegistries.ITEM.getTag(key)
                         .map(set -> !set.stream().toList().isEmpty()).orElse(false);
+            }
+
+            @Override
+            public String missing(String itemIdOrTag) {
+                // 物品与物品标签都在游戏内置的注册表里，不进世界也能挑出相近的名字。
+                return ClientRegisteredIds.builtIn().missing(IdKind.ITEM, itemIdOrTag);
             }
         };
     }

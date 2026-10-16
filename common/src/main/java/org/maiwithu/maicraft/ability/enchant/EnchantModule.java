@@ -103,12 +103,10 @@ public final class EnchantModule implements AbilityModule {
                 (int) Math.min(radius, Integer.MAX_VALUE), step.goal().target(), step.goal().permissions()));
     }
 
-    /** 物品 ID 注册过、或标签下挂着注册物品；都没有给一句说得清的原因，通过返回 null。 */
+    /** 物品 ID 注册过、或标签下挂着注册物品；都没有就说"…不存在；你是不是要 …"，通过返回 null。 */
     private String checkWanted(String item) {
-        if (item.startsWith("#")) {
-            return registry.tagHasItems(item.substring(1)) ? null : "标签 " + item + " 下没有注册的物品";
-        }
-        return registry.itemExists(item) ? null : "物品 " + item + " 不在这个游戏里";
+        boolean known = item.startsWith("#") ? registry.tagHasItems(item.substring(1)) : registry.itemExists(item);
+        return known ? null : registry.missing(item);
     }
 
     @Override public void registerTasks(TaskFactories factories) {

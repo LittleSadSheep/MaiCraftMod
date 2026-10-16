@@ -13,4 +13,10 @@ public interface ReadsItemRegistry {
 
     /** 这个标签下至少挂着一件注册物品；一个都没挂的标签要不了东西。 */
     boolean tagHasItems(String tagId);
+
+    /**
+     * 写岔的物品 ID 或 # 标签的统一说法："物品 minecraft:toch 不存在；你是不是要 minecraft:torch"；
+     * 本实例里没有相近的就只说不存在。
+     */
+    String missing(String itemIdOrTag);
 }

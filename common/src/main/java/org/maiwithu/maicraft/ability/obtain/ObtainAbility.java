@@ -101,12 +101,10 @@ public final class ObtainAbility implements AbilityModule {
         } catch (IllegalArgumentException wrong) {
             return invalidGoal(List.of("要拿的东西写法不对：" + wrong.getMessage()));
         }
-        if (wanted.isTag()) {
-            if (!registry.tagHasItems(wanted.tagId())) {
-                invalid.add("标签 " + wanted.specifier() + " 下一件注册物品都没有，要不了东西");
-            }
-        } else if (!registry.itemExists(wanted.itemId())) {
-            invalid.add("物品 " + wanted.specifier() + " 不在这个游戏里（注册表里查不到）");
+        // 写岔的物品或空标签不进世界：说成"…不存在；你是不是要 …"，LLM 照着改一次就对。
+        boolean known = wanted.isTag() ? registry.tagHasItems(wanted.tagId()) : registry.itemExists(wanted.itemId());
+        if (!known) {
+            invalid.add(registry.missing(wanted.specifier()));
         }
         if (params.has("count") && params.integer("count") < 1) {
             invalid.add("count 至少为 1");

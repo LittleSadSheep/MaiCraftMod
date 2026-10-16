@@ -19,6 +19,7 @@ import org.maiwithu.maicraft.behavior.acquire.ReadsItemRegistry;
 import org.maiwithu.maicraft.behavior.acquire.StartsAcquisition;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
+import org.maiwithu.maicraft.game.world.SimilarIds;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
@@ -45,6 +46,13 @@ class ObtainAbilityTest {
 
         @Override public boolean tagHasItems(String tagId) {
             return tagId.equals("minecraft:logs");
+        }
+
+        @Override public String missing(String itemIdOrTag) {
+            List<String> known = itemIdOrTag.startsWith("#") ? List.of("minecraft:logs")
+                    : List.of("minecraft:torch", "minecraft:coal");
+            return SimilarIds.missing(itemIdOrTag.startsWith("#") ? "物品标签" : "物品", itemIdOrTag,
+                    SimilarIds.closest(known, itemIdOrTag));
         }
     }
 
@@ -92,7 +100,8 @@ class ObtainAbilityTest {
         TaskResult result = finish.result();
         assertEquals(TaskResult.Status.FAILED, result.status());
         assertEquals(Problem.Kind.INVALID_PARAMETER, result.problem().kind());
-        assertTrue(result.problem().message().contains("minecraft:toch"));
+        assertEquals("物品 minecraft:toch 不存在；你是不是要 minecraft:torch", result.problem().message(),
+                "写错的物品带上相近的名字");
     }
 
     @Test
@@ -102,6 +111,11 @@ class ObtainAbilityTest {
         StepDecision.Finish finish = assertInstanceOf(StepDecision.Finish.class, decide(params));
         assertEquals(Problem.Kind.INVALID_PARAMETER, finish.result().problem().kind());
         assertTrue(finish.result().problem().message().contains("#minecraft:nope"));
+
+        params.addProperty("item", "#minecraft:log");
+        StepDecision.Finish typo = assertInstanceOf(StepDecision.Finish.class, decide(params));
+        assertEquals("物品标签 #minecraft:log 不存在；你是不是要 #minecraft:logs", typo.result().problem().message(),
+                "标签只和标签比");
     }
 
     @Test
