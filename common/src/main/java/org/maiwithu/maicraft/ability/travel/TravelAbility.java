@@ -48,7 +48,8 @@ import java.util.stream.Collectors;
  * 把目标对象落成目的地（说不清就向 LLM 提问，已经站在那里就直接结束）：同维度的目的地交给
  * 出行任务步行；落在别的维度或"就是去那个维度"交给跨维度任务（找活门、走进门、没门按许可建门、
  * 末地去要塞激活，到了带坐标的目的地接着步行）。装了联动的出行方式（电梯、喷气背包、火车）时，同维度的
- * 出行交给行程任务：近处走路，远处或走不通比各方式的报价，可用 via 指定方式。需要的走到、解析、扫描、交互、
+ * 出行交给行程任务：近处走路，远处或走不通比各方式的报价，可用 via 指定方式。末地里还有原版自带的折跃门：
+ * 主岛与外岛隔着虚空时只能过门，也交给行程任务；别的维度里没有用得上的方式，照原样直接步行。需要的走到、解析、扫描、交互、
  * 施工这些现场部件都从构造函数传入；本能力不认任何具体的服务实现。
  */
 public final class TravelAbility implements AbilityModule {
@@ -151,8 +152,8 @@ public final class TravelAbility implements AbilityModule {
         Choice choice = choose(goal.params());
         if (choice.problem() != null) return new StepDecision.Finish(TaskResult.failed("出行：参数对不上", choice.problem()));
         if (goal.target() == null) {
-            if (choice.via() != null && !choice.options().isEmpty()) {
-                // 只用那种方式、不往别处去：只坐电梯换楼层（via=elevator 加 floor），不给 target。
+            if (choice.via() != null && (!choice.options().isEmpty() || goesAlone(choice.via()))) {
+                // 只用那种方式、不往别处去：只坐电梯换楼层（via=elevator 加 floor），或过最近的一扇折跃门（via=end_gateway），不给 target。
                 return new StepDecision.Run(new JourneyInput(new JourneyTask.Journey(null, choice.via(), choice.options(),
                         goal.permissions(), maxSeconds(goal)), TerrainPermit.of(goal.permissions())));
             }
@@ -165,11 +166,12 @@ public final class TravelAbility implements AbilityModule {
         // 落在别的维度按维度路由认门，认不出的维度对在这里就以走不了结束。
         var resolution = resolver.resolve(goal.target(), goal.params().number("radius"));
         if (resolution instanceof DestinationResolver.Resolution.Ready ready) {
-            // 同维度：没有出行方式或指定只走路，就是出行任务；否则交给行程，近处走、远处比报价、给了 via 只用它。
+            // 同维度：指定只走路，或没指定方式而这个维度没有用得上的方式（主世界里的折跃门），就是出行任务；
+            // 否则交给行程，近处走、远处比报价、隔着虚空只能过折跃门、给了 via 只用它。
             String via = choice.via();
             TerrainPermit permit = TerrainPermit.of(goal.permissions());
             TravelDestination destination = roomy(ready.destination());
-            if (modes.isEmpty() || TravelVia.WALK.name().equals(via)) {
+            if (TravelVia.WALK.name().equals(via) || via == null && !anyModeWorksHere()) {
                 return new StepDecision.Run(new TravelInput(destination, maxSeconds(goal), permit));
             }
             return new StepDecision.Run(new JourneyInput(new JourneyTask.Journey(destination, via,
@@ -196,6 +198,18 @@ public final class TravelAbility implements AbilityModule {
         }
         return new StepDecision.Finish(TaskResult.failed("出行：去不了",
                 ((DestinationResolver.Resolution.DeadEnd) resolution).problem()));
+    }
+
+    // 这个维度有没有用得上的出行方式：联动的哪儿都算，末地折跃门只在末地算；读不到角色在哪按读到的维度为空问。
+    private boolean anyModeWorksHere() {
+        WorldPosition spot = world == null ? null : world.currentSpot();
+        String dimension = spot == null ? null : spot.dimension();
+        return modes.stream().anyMatch(mode -> mode.worksIn(dimension));
+    }
+
+    // 只给 via 不给 target 也知道送到哪的方式（过最近的一扇折跃门）。
+    private boolean goesAlone(String via) {
+        return modes.stream().anyMatch(mode -> mode.via().name().equals(via) && mode.goesWithoutDestination());
     }
 
     /** 用什么方式、给它的话；参数自相矛盾时带问题。 */

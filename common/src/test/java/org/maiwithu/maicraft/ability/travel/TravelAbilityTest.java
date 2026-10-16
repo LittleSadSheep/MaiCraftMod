@@ -10,6 +10,9 @@ import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
 import org.maiwithu.maicraft.behavior.travel.DestinationResolver;
+import org.maiwithu.maicraft.behavior.travel.DimensionRoute;
+import org.maiwithu.maicraft.behavior.travel.DimensionTravelServices;
+import org.maiwithu.maicraft.behavior.travel.PearlCrossing;
 import org.maiwithu.maicraft.behavior.travel.ReadsPlacedBlocks;
 import org.maiwithu.maicraft.behavior.travel.TravelProgressListener;
 import org.maiwithu.maicraft.behavior.travel.TravelDestination;
@@ -286,6 +289,42 @@ class TravelAbilityTest {
                 Permissions.DEFAULT, List.of(), null);
         StepDecision.Finish finish = assertInstanceOf(StepDecision.Finish.class, withModes.decide(step(wrong)));
         assertEquals(Problem.Kind.INVALID_PARAMETER, finish.result().problem().kind());
+    }
+
+    @Test
+    void endGatewayPlansOnlyInTheEndAndGoesWithoutTarget() {
+        // 折跃门原版自带、参数表里总有 via；主世界里没指定方式照旧直接走路，末地里交给行程（隔着虚空只能过门），
+        // 只给 via=end_gateway 不给 target 也能下：过最近的一扇门。
+        PearlCrossing gateway = new PearlCrossing(new DimensionTravelServices(null, null, null, null, null, null,
+                null, null, null, null));
+        TravelAbility overworld = standingIn(DimensionRoute.OVERWORLD, gateway);
+        Goal far = new Goal("maicraft:travel", null, new Target.Position(5, 120, 5, null), params("{}"),
+                Permissions.DEFAULT, List.of(), null);
+        assertInstanceOf(TravelInput.class,
+                assertInstanceOf(StepDecision.Run.class, overworld.decide(step(far))).input());
+
+        TravelAbility end = standingIn(DimensionRoute.END, gateway);
+        assertInstanceOf(JourneyInput.class, assertInstanceOf(StepDecision.Run.class, end.decide(step(far))).input());
+
+        ParseResult alone = end.spec().paramSpecs().parse(JsonParser.parseString("{\"via\":\"end_gateway\"}")
+                .getAsJsonObject());
+        assertTrue(alone.ok(), alone.errors().toString());
+        Goal hop = new Goal("maicraft:travel", null, null, alone.params(), Permissions.DEFAULT, List.of(), null);
+        JourneyInput input = assertInstanceOf(JourneyInput.class,
+                assertInstanceOf(StepDecision.Run.class, end.decide(step(hop))).input());
+        assertEquals("end_gateway", input.journey().via());
+        assertEquals(null, input.journey().destination(), "不给 target 就是过最近的门，到了对面就算到");
+    }
+
+    /** 站在某个维度原点、只登记了这几种出行方式的出行能力。 */
+    private TravelAbility standingIn(String dimension, TravelMode... modes) {
+        StubWorld world = new StubWorld() {
+            @Override public WorldPosition currentSpot() {
+                return new WorldPosition(0, 64, 0, dimension);
+            }
+        };
+        return new TravelAbility(walks, new DestinationResolver(world, name -> Optional.empty(), id -> Optional.empty()),
+                List::of, progress -> {}, null, world, List.of(modes));
     }
 
     /** 能力决定阶段不会开始走到；真走了说明薄皮越界。 */

@@ -210,10 +210,12 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
         };
     }
 
-    // 非它不可的那一段：挑它没试过、最快的那份；它答不出就照它的原因结束，不改走路（走路过不去船上）。
+    // 非它不可的那一段：挑它没试过、坐完再走到目的地总共最快的那份（几扇折跃门挑朝着目的地的那扇）；
+    // 它答不出就照它的原因结束，不改走路（走路过不去船上，也过不去末地的虚空）。
     private TravelPlanner.Plan claimed() {
+        BlockPos aim = request == null ? null : request.to();
         return offers.stream().filter(offer -> !tried.contains(TravelPlanner.key(offer)))
-                .min(Comparator.comparingLong(TravelOffer::estimatedTicks))
+                .min(Comparator.comparingLong(offer -> TravelPlanner.total(offer, aim)))
                 .<TravelPlanner.Plan>map(TravelPlanner.Plan.Ride::new)
                 .orElseGet(() -> new TravelPlanner.Plan.DeadEnd(declined.isEmpty()
                         ? Problem.of(Problem.Kind.UNREACHABLE, claiming.getFirst().via().name() + " 这一趟能试的都试过了，没走成")

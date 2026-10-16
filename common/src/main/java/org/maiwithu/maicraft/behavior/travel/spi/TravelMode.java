@@ -6,7 +6,7 @@ import java.util.List;
 import org.maiwithu.maicraft.kernel.param.ParamSpec;
 
 /**
- * 出行方式：把角色往目的地送一段的一种办法（Create 电梯、喷气背包、火车、自己的载具）。
+ * 出行方式：把角色往目的地送一段的一种办法（Create 电梯、喷气背包、火车、自己的载具，原版自带的末地折跃门）。
  * 行程规划先向每种方式问一份报价（只读，可以分几刻答完），比耗时挑一份，再让那种方式跑这一段；
  * 跑完从当前位置接着规划。步行由行程自己做，不在这里登记。
  */
@@ -27,6 +27,22 @@ public interface TravelMode {
      * 不管近不近、指定了什么方式；它答不出就照它的原因结束。默认不是。
      */
     default boolean claims(TravelRequest request) {
+        return false;
+    }
+
+    /**
+     * 在这个维度用得上吗：用不上的维度里，没指定方式的出行不为它绕进行程规划，照原样直接走路。
+     * 末地折跃门只在末地有；联动的方式默认哪儿都用得上，由报价自己说这一趟送不送。
+     */
+    default boolean worksIn(String dimension) {
+        return true;
+    }
+
+    /**
+     * 只给 via、不给 target 时它自己知道送到哪吗：过最近的一扇折跃门，到了对面就算到。
+     * 电梯这种要再说一句去哪（floor）的不算，默认不是。
+     */
+    default boolean goesWithoutDestination() {
         return false;
     }
 

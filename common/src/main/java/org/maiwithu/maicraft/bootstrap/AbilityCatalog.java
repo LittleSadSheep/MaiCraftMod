@@ -155,6 +155,7 @@ import org.maiwithu.maicraft.behavior.travel.DestinationResolver;
 import org.maiwithu.maicraft.behavior.travel.ClientDimensionWorld;
 import org.maiwithu.maicraft.behavior.travel.DimensionTravelServices;
 import org.maiwithu.maicraft.behavior.travel.LiveBlockUses;
+import org.maiwithu.maicraft.behavior.travel.PearlCrossing;
 import org.maiwithu.maicraft.behavior.travel.PortalFinder;
 import org.maiwithu.maicraft.behavior.travel.SceneSeenTargets;
 import org.maiwithu.maicraft.behavior.travel.TravelProgressListener;
@@ -584,7 +585,7 @@ public final class AbilityCatalog {
         registry.register(new TravelAbility(deps.walks(),
                 new DestinationResolver(deps.travelWorld(), deps.memory(), new SceneSeenTargets(deps::scene)),
                 deps.walkInternals(), deps.travelProgress(), portals,
-                deps.travelWorld(), travelModes(deps, services)));
+                deps.travelWorld(), travelModes(deps, services, portals)));
 
         // 寻找：方块与实体扫已加载区，结构查记过的产地线索；命中直接在场景的观察编号表上领编号。
         registry.register(FindModule.live(deps.context(), deps.blockScans(), deps.creatures(),
@@ -621,15 +622,17 @@ public final class AbilityCatalog {
     }
 
     /**
-     * 出行的方式：联动登记的（电梯、喷气背包、火车、上下船），装了能开载具的联动时再加开自己的载具（via=vehicle）。
+     * 出行的方式：联动登记的（电梯、喷气背包、火车、上下船），装了能开载具的联动时再加开自己的载具（via=vehicle）；
+     * 原版自带的末地折跃门（via=end_gateway）总在，只在末地用得上，用跨维度那一份现场部件读格、走到、扔珍珠。
      */
-    private static List<TravelMode> travelModes(Deps deps, PlayerServices services) {
+    private static List<TravelMode> travelModes(Deps deps, PlayerServices services, DimensionTravelServices portals) {
         List<TravelMode> modes = new ArrayList<>(deps.compat().travelModes(services));
         List<VehicleDriver> drivers = deps.compat().vehicleDrivers(services);
         if (!drivers.isEmpty()) {
             modes.add(new VehicleTravelMode(drivers, deps.compat().vehicleReaders(services), vehicleControls(deps),
                     id -> deps.scene().seen().structureOf(id)));
         }
+        modes.add(new PearlCrossing(portals));
         return modes;
     }
 

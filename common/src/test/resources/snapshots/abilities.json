@@ -234,7 +234,7 @@
       {
         "ability": "maicraft:travel",
         "summary": "走到一个地方：给坐标、地点名、看得见的东西或往某方向走多远；给维度就是去那个维度",
-        "parameters": "radius: number = 2.0, max_distance: number = 128.0, max_seconds?: integer",
+        "parameters": "radius: number = 2.0, max_distance: number = 128.0, max_seconds?: integer, via?: string",
         "targets": [
           "dimension",
           "direction",
@@ -1357,6 +1357,16 @@
           "type": "integer",
           "required": false,
           "doc": "最多走多久（秒）；超时以卡住结束，写明停在哪、离目标多远"
+        },
+        {
+          "name": "via",
+          "type": "string",
+          "required": false,
+          "doc": "只用这种方式去（首尾免不了的步行除外），用不了会说明原因，不悄悄改走路；不给就近处走、远处挑最快的：walk 只走路（挖垫照许可）；end_gateway 过末地折跃门：对着门扔一颗末影珍珠，传到主岛与外岛的另一头（只在末地；要 use_rare_items）",
+          "choices": [
+            "walk",
+            "end_gateway"
+          ]
         }
       ],
       "targets": [
