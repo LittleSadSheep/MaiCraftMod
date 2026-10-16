@@ -14,6 +14,8 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.maiwithu.maicraft.behavior.combat.MeleeStrike;
 import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
@@ -40,10 +42,14 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  */
 public final class LiveHuntMoves implements HuntMoves {
 
+    private static final Logger LOG = LoggerFactory.getLogger(LiveHuntMoves.class);
+
     /** 触及距离留的余量（格）：量到包围盒刚好在边上时准星常打不中，先多走半步。 */
     private static final double REACH_MARGIN = 0.4;
 
     private final WalkTo walks;
+    /** 上一次"是不是同一片水"的三项事实：变了才记一行日志。 */
+    private String lastWaterFacts;
     /** 换武器时用的这一刻的角色：换手动作开背包、关背包要读它。 */
     private PlayerContext current;
     private final ClientMovesToMainhand hands = new ClientMovesToMainhand(() -> this.current);
@@ -92,12 +98,19 @@ public final class LiveHuntMoves implements HuntMoves {
         var player = context.player();
         var self = player == null ? null : player.localPlayer();
         var target = self == null || player.level() == null ? null : player.level().getEntity(entityId);
-        if (target == null || !self.isInWater() || !target.isInWater()) return false;
+        if (target == null) return false;
         // 眼睛到它身体中心一路没有方块挡着（水不算挡）：同一片水里直着游得过去；隔着岸、隔着墙的照旧交给寻路绕。
         Vec3 eye = self.getEyePosition();
         Vec3 body = target.getBoundingBox().getCenter();
-        return player.level().clip(new ClipContext(eye, body, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, self))
-                .getType() == HitResult.Type.MISS;
+        boolean clear = player.level().clip(new ClipContext(eye, body, ClipContext.Block.COLLIDER,
+                ClipContext.Fluid.NONE, self)).getType() == HitResult.Type.MISS;
+        // 三项事实变了才记一行：实机里对得上为什么这一只是游过去还是走寻路。
+        String facts = "自己在水里 " + self.isInWater() + "，它在水里 " + target.isInWater() + "，中间没挡着 " + clear;
+        if (!facts.equals(lastWaterFacts)) {
+            lastWaterFacts = facts;
+            LOG.info("[狩猎] 和 {} 是不是同一片水：{}", EntityType.getKey(target.getType()).getPath(), facts);
+        }
+        return self.isInWater() && target.isInWater() && clear;
     }
 
     @Override public Action swimTo(int entityId) {
@@ -192,6 +205,9 @@ public final class LiveHuntMoves implements HuntMoves {
         private PlayerContext player;
         private double best = Double.MAX_VALUE;
         private String what = "游过去追猎物";
+        /** 上一次按的键：变了、或隔两秒，记一行日志，实机对得上游的时候按了什么、人挪没挪。 */
+        private String lastKeys;
+        private long lastKeysTick;
 
         SwimAfter(int entityId) {
             this.entityId = entityId;
@@ -215,7 +231,9 @@ public final class LiveHuntMoves implements HuntMoves {
                     self.getMaxAirSupply(), surfaceAbove(self) - eye.y), self.getYRot());
             PlayerInput input = player.input();
             input.requestLook(stroke.yaw(), stroke.pitch(), tick);
-            input.applyMovement(keys(self, body, stroke), tick);
+            PlayerInput.Movement keys = keys(self, body, stroke);
+            input.applyMovement(keys, tick);
+            logKeys(self, keys, stroke, eye.distanceTo(body), tick);
             what = stroke.surfacing() ? "浮上去换口气再回来追"
                     : "游过去追 " + EntityType.getKey(target.getType()).getPath();
             double distance = eye.distanceTo(body);
@@ -225,6 +243,23 @@ public final class LiveHuntMoves implements HuntMoves {
             }
             return ActionStatus.running();
         }
+
+        // 按的键变了、或者隔了两秒，记一行：前进、横移、跳、潜行、疾跑，人在哪、眼睛进没进水、离它多远。
+        private void logKeys(LocalPlayer self, PlayerInput.Movement keys, SwimChase.Stroke stroke, double distance,
+                long tick) {
+            String now = String.format("前进 %.2f 横移 %.2f 跳 %s 潜行 %s 疾跑 %s 换气 %s", keys.forward(), keys.strafe(),
+                    keys.jumping(), keys.sneaking(), keys.sprinting(), stroke.surfacing());
+            if (now.equals(lastKeys) && tick - lastKeysTick < LOG_EVERY_TICKS) return;
+            lastKeys = now;
+            lastKeysTick = tick;
+            LOG.info("[狩猎] 游：{}；人在 {}, {}, {}，眼睛在水里 {}，踩着地 {}，离它 {} 格", now,
+                    String.format("%.2f", self.getX()), String.format("%.2f", self.getY()),
+                    String.format("%.2f", self.getZ()), self.isEyeInFluid(FluidTags.WATER), self.onGround(),
+                    String.format("%.1f", distance));
+        }
+
+        /** 按键没变时多久再记一行（刻）。 */
+        private static final long LOG_EVERY_TICKS = 40;
 
         // 眼睛进了水：按着前进与疾跑，原版顺着镜头游（镜头正对着它）；水面上、浅水里站着：前进只管水平，
         // 按此刻实际朝向折成前后左右，镜头还没转过去也朝它挪。上浮按跳、下沉按潜行由判断给。

@@ -9,6 +9,9 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.maiwithu.maicraft.behavior.inventory.PicksUpDrops;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
 import org.maiwithu.maicraft.behavior.perception.DirectionWords;
@@ -37,6 +40,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 见到合格的候选就地转入狩猎，走满愿意走的距离还没见到就如实收场。
  */
 public final class LiveHunts implements Hunts {
+
+    private static final Logger LOG = LoggerFactory.getLogger(LiveHunts.class);
 
     /** 一只猎物身上的期限（刻）：围着一只打半天没打倒，先不追了，换下一只或如实收场。 */
     private static final long PER_TARGET_TICKS = 20L * 40;
@@ -105,6 +110,8 @@ public final class LiveHunts implements Hunts {
         private Action current;
         private String currentKey;
         private Action loot;
+        /** 走近这一只用的是游还是寻路：换了才记一行日志，实机对得上走的是哪条路。 */
+        private String approach;
         /** 已经为哪一只换过武器：换一只猎物再看一眼手上，已经拿着最好的剑斧就不动。 */
         private int armedFor = NOT_ARMED;
         /** 目标与搜索点各自的计时：超了就换，不在一只猎物、一个点上耗死。 */
@@ -228,10 +235,12 @@ public final class LiveHunts implements Hunts {
                 if (moves.sameWater(tick, target.entityId())) {
                     // 人和它泡在同一片水里、中间一路是水：寻路在水里只在水面那一层找路，到不了水下它跟前，只会停在它头顶上
                     // 够不着。直接游过去追，镜头跟着它往下扎或往上浮；氧气不够先上去换满再回来，进了出手距离就砍。
+                    noteApproach("游过去追");
                     keep("游过去追 " + target.entityId(), () -> moves.swimTo(target.entityId()));
                     stepCurrent(tick, "游过去追 " + target.describe());
                     return ActionStatus.running();
                 }
+                noteApproach("走寻路走近");
                 // 被墙挡住或还够不着：朝它现在的位置走过去，看得见又够得着再出手；一直走不到就超时换下一只。
                 // 它挪出原来那片（四格见方）就按新位置重新走，不追着扫描时的旧位置跑。
                 double[] at = where.orElse(new double[] {
@@ -250,6 +259,14 @@ public final class LiveHunts implements Hunts {
             }
             stepCurrent(tick, "打 " + target.describe());
             return ActionStatus.running();
+        }
+
+        // 走近的办法换了（游 ↔ 寻路）才记一行：实机里看日志就知道这只是游过去的还是走过去的。
+        private void noteApproach(String how) {
+            String now = target.entityId() + how;
+            if (now.equals(approach)) return;
+            approach = now;
+            LOG.info("[狩猎] {}：{}", target.describe(), how);
         }
 
         // 锁定一只后、追它之前，先把最好的剑斧拿到手上（主背包里的也开背包拿出来）：等追到跟前才出手，那时贴着它
@@ -458,7 +475,9 @@ public final class LiveHunts implements Hunts {
                 case WALK_POINT -> "走出去找会掉出" + request.wanted().describe() + "的生物";
                 case LOOK_AROUND -> "看看这一片有没有猎物";
                 case TARGET -> target == null ? "在挑猎物"
-                        : (struck ? "打 " + target.describe() : "走近 " + target.describe());
+                        : struck ? "打 " + target.describe()
+                        : currentKey != null && currentKey.startsWith("游过去追") ? "游过去追 " + target.describe()
+                        : "走近 " + target.describe();
                 case LOOT -> (lootSpot != null ? "回它倒下的地方捡" : "捡")
                         + (target == null ? "猎物" : target.describe()) + "掉出来的东西";
             };
