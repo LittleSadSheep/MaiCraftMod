@@ -157,6 +157,8 @@ public final class DesignInspection {
             result.addProperty("roof", true);
             return;
         }
+        // 层图没有面与棱可涂：图例和每层的字符图已经在对象正文里原样给了。
+        if (first.layers()) return;
         result.addProperty("face_geometry_space", "primitive_local_minecraft_y_up");
         result.addProperty("surface_topology_stage", "primitive_before_boolean");
         JsonArray faces = new JsonArray();

@@ -29,8 +29,8 @@ public final class DesignSampling {
 
     record Raster(Leaf leaf, Paint paint, List<Leaf> cutters) {}
 
-    /** 采样前的准备：展开结果、要采样的图元、屋顶叶子、预计的工作量。 */
-    public record Plan(DesignExpansion model, List<Raster> meshes, List<Leaf> roofs, long work) {}
+    /** 采样前的准备：展开结果、要采样的图元、屋顶叶子、层图叶子、预计的工作量。 */
+    public record Plan(DesignExpansion model, List<Raster> meshes, List<Leaf> roofs, List<Leaf> layers, long work) {}
 
     private record Cell(JsonObject state, String owner, boolean voidOnly) {}
 
@@ -47,11 +47,17 @@ public final class DesignSampling {
         DesignExpansion model = DesignExpansion.expand(drawing);
         List<Raster> meshes = new ArrayList<>();
         List<Leaf> roofs = new ArrayList<>();
+        List<Leaf> layers = new ArrayList<>();
         Map<String, JsonObject> cache = new HashMap<>();
         long work = 0;
         for (var leaf : model.leaves) {
             if (leaf.roof()) {
                 roofs.add(leaf);
+                work = add(work, leaf.bounds().volume());
+                continue;
+            }
+            if (leaf.layers()) {
+                layers.add(leaf);
                 work = add(work, leaf.bounds().volume());
                 continue;
             }
@@ -74,7 +80,7 @@ public final class DesignSampling {
             }
             meshes.add(new Raster(leaf, paint, cutters));
         }
-        return new Plan(model, List.copyOf(meshes), List.copyOf(roofs), work);
+        return new Plan(model, List.copyOf(meshes), List.copyOf(roofs), List.copyOf(layers), work);
     }
 
     private static long add(long work, long more) {
@@ -94,6 +100,11 @@ public final class DesignSampling {
         for (Leaf roof : plan.roofs) {
             var states = Roof.cells(roof, (material, cell) -> MaterialStates.resolve(plan.model, material, roof, cell, cache));
             for (var entry : states.entrySet()) put(cells, entry.getKey(), entry.getValue(), roof.name(), overlaps);
+        }
+        // 层图按图里写的字符逐格给：材料照普通对象结算（混色按坐标挑、方块朝向随对象的直角变换一起转）。
+        for (Leaf drawn : plan.layers) {
+            var states = Layers.cells(drawn, (material, cell) -> MaterialStates.resolve(plan.model, material, drawn, cell, cache));
+            for (var entry : states.entrySet()) put(cells, entry.getKey(), entry.getValue(), drawn.name(), overlaps);
         }
         if (cells.isEmpty()) throw bad("图纸里没有一个格中心落在对象里；加厚或换位置");
         Map<Point, JsonObject> ordered = new LinkedHashMap<>();

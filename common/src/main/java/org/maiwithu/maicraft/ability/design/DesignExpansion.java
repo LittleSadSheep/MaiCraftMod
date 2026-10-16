@@ -25,7 +25,7 @@ import org.maiwithu.maicraft.ability.design.DesignTransform.Box;
  */
 public final class DesignExpansion {
 
-    /** 展开后的一片叶子：一个图元实例，或一个屋顶（shape 为空）。 */
+    /** 展开后的一片叶子：一个图元实例，或一个屋顶、一张层图（这两种 shape 为空，格由自己的做法逐格给）。 */
     public record Leaf(String name, JsonObject node, DesignShape shape, Box bounds, DesignTransform transform,
                        List<String> ownCuts, List<String> inheritedCuts, List<JsonObject> materialMaps, String stateAxes) {
 
@@ -41,7 +41,12 @@ public final class DesignExpansion {
 
         /** 屋顶不是凸图元，格由屋顶做法逐格算。 */
         public boolean roof() {
-            return shape == null;
+            return "ROOF".equals(node.get("type").getAsString());
+        }
+
+        /** 层图不是凸图元，格就是图里声明的那些字符。 */
+        public boolean layers() {
+            return "LAYERS".equals(node.get("type").getAsString());
         }
     }
 
@@ -129,6 +134,8 @@ public final class DesignExpansion {
                     localCutters.contains(node.get("name").getAsString()) || node.has("role") && node.get("role").getAsString().equals("cutter"));
         } else if (type.equals("ROOF")) {
             Roof.checkMaterials(drawing.getAsJsonObject("materials"), node);
+        } else if (type.equals("LAYERS")) {
+            Layers.checkMaterials(drawing.getAsJsonObject("materials"), node);
         } else if (!components.has(node.get("component").getAsString())) {
             throw bad("没有这个组件：" + node.get("component").getAsString());
         }
@@ -241,6 +248,8 @@ public final class DesignExpansion {
         Leaf leaf;
         if (type.equals("ROOF")) {
             leaf = new Leaf(path, node, null, Roof.bounds(node, transform), transform, List.of(), List.of(), mappings, axes);
+        } else if (type.equals("LAYERS")) {
+            leaf = new Leaf(path, node, null, Layers.bounds(node, transform), transform, List.of(), List.of(), mappings, axes);
         } else {
             Vec3 dimensions = DesignTransform.dimensions(node, blender);
             // 每片叶子落到整张图纸后按同一个坐标半径校验，设计原点不变。

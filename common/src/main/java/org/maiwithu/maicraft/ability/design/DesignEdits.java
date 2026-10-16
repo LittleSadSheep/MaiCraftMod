@@ -17,6 +17,7 @@ import com.google.gson.JsonObject;
 /**
  * 改图：按名字合并修改。对象字段逐项覆盖（只改 location 会保留原材质和尺寸），modifiers 若给了就整份替换；
  * 组件定义整条替换；材料按名整条覆盖；未提到的对象保留原顺序，新对象加在末尾。
+ * 层图对象的 layers 只换写到的那几层，另给 set 逐格改（只在改图时写，不存进图纸）。
  * 同一对象不能一次里既删又改，也不能改两次。合并后的整张图纸由调用方重新校验。
  */
 public final class DesignEdits {
@@ -63,8 +64,14 @@ public final class DesignEdits {
                 JsonObject object = element.getAsJsonObject();
                 String name = object.get("name").getAsString();
                 if (!edited.add(name) || removed.contains(name)) throw bad("同一个对象不能改两次，也不能又删又改：" + name);
-                JsonObject merged = objects.containsKey(name) ? objects.get(name).deepCopy() : new JsonObject();
-                object.entrySet().forEach(entry -> merged.add(entry.getKey(), entry.getValue().deepCopy()));
+                JsonObject existing = objects.containsKey(name) ? objects.get(name).deepCopy() : new JsonObject();
+                boolean drawn = "LAYERS".equals(typeOf(object, existing));
+                JsonObject merged = drawn ? Layers.merge(existing, object) : existing;
+                // 层图的 layers 按 y 并过了、set 逐格改过了，其余字段照普通对象逐项覆盖。
+                object.entrySet().forEach(entry -> {
+                    if (drawn && Set.of("layers", "legend", "set").contains(entry.getKey())) return;
+                    merged.add(entry.getKey(), entry.getValue().deepCopy());
+                });
                 objects.put(name, merged);
             }
         }
@@ -78,6 +85,12 @@ public final class DesignEdits {
             drawing.add("materials", materials);
         }
         return drawing;
+    }
+
+    // 这个对象是哪一种：补丁里写了就按补丁，没写按原来的。
+    private static String typeOf(JsonObject patch, JsonObject existing) {
+        if (patch.has("type")) return patch.get("type").getAsString();
+        return existing.has("type") ? existing.get("type").getAsString() : null;
     }
 
     /** 修改可以只给一部分字段；先查这一批字段合法，合并后再由整张图纸的校验查完整性和引用。 */
@@ -111,7 +124,10 @@ public final class DesignEdits {
         if (edits.has("objects")) {
             for (var entry : array(edits.get("objects"), 0, DesignLimits.MAX_OBJECTS, "objects")) {
                 JsonObject object = object(entry, "objects 的一项");
-                DesignFormat.validateNodePatch(object);
+                // set 只在改层图时写：单独查它的写法，其余字段照对象补丁查。
+                JsonObject node = object.deepCopy();
+                if (node.has("set")) Layers.validateSet(node.remove("set"));
+                DesignFormat.validateNodePatch(node);
                 if (!names.add(DesignFormat.name(object.get("name")))) throw bad("同一个对象不能改两次，也不能又删又改");
             }
         }

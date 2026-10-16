@@ -19,7 +19,7 @@ import com.google.gson.JsonObject;
  *
  * <p>图纸正文：name、coordinate_system（minecraft_y_up / blender_z_up）、materials（材料表，一项是一种方块状态或
  * 一组按权重混用的 mix）、objects（对象）、components（可复用组件）、block_state_axes（方块朝向跟局部轴还是世界轴）、
- * overlap_policy（叠加时后写的赢还是报错）。对象分三种：MESH 图元、INSTANCE 组件实例、ROOF 参数化屋顶。
+ * overlap_policy（叠加时后写的赢还是报错）。对象分四种：MESH 图元、INSTANCE 组件实例、ROOF 参数化屋顶、LAYERS 层图。
  */
 public final class DesignFormat {
 
@@ -35,7 +35,7 @@ public final class DesignFormat {
     static final Set<String> INSTANCE = Set.of("component", "material_map");
     static final Set<String> ROOF = Set.of("footprint", "material", "shape", "curve", "overhang", "corner_lift",
             "gable_material", "ridge_material", "eave_material", "soffit_material", "hollow");
-    static final Set<String> TYPES = Set.of("MESH", "INSTANCE", "ROOF");
+    static final Set<String> TYPES = Set.of("MESH", "INSTANCE", "ROOF", "LAYERS");
     static final Set<String> ROOF_SHAPES = Set.of("xuanshan", "gable", "wudian", "hip", "xieshan", "half_hip",
             "zuanjian", "pyramid", "shed");
 
@@ -123,11 +123,12 @@ public final class DesignFormat {
         allowed.addAll(MESH);
         allowed.addAll(INSTANCE);
         allowed.addAll(ROOF);
+        allowed.addAll(Layers.FIELDS);
         keys(node, allowed, "对象");
         if (complete) name(node.get("name")); else string(node.get("name"), 64, "对象名");
         String type = node.has("type") ? string(node.get("type"), 16, "type") : null;
-        if (complete && type == null) throw bad("对象要写 type：MESH、INSTANCE 或 ROOF");
-        if (type != null && !TYPES.contains(type)) throw bad("type 只能是 MESH、INSTANCE 或 ROOF");
+        if (complete && type == null) throw bad("对象要写 type：MESH、INSTANCE、ROOF 或 LAYERS");
+        if (type != null && !TYPES.contains(type)) throw bad("type 只能是 MESH、INSTANCE、ROOF 或 LAYERS");
         if (type != null) checkFieldsBelongToType(node, type);
         if (complete) checkRequiredFields(node, type);
         if (node.has("component")) name(node.get("component"));
@@ -138,6 +139,8 @@ public final class DesignFormat {
         checkGeometry(node);
         checkBindings(node);
         if ("ROOF".equals(type)) checkRoof(node);
+        // 层图：图例与每层每行的写法在这里查；补丁里只写了一部分时只查写了的。
+        if ("LAYERS".equals(type) || type == null && (node.has("legend") || node.has("layers"))) checkLayers(node);
         if (node.has("array")) validateArray(object(node.get("array"), "array"));
         // 改图或新建时先核对图案字段；图案所在的平面要等尺寸换成统一局部坐标后再查。
         if (node.has("pattern")) PanelPattern.validate(object(node.get("pattern"), "pattern"));
@@ -148,6 +151,7 @@ public final class DesignFormat {
         Set<String> own = switch (type) {
             case "MESH" -> MESH;
             case "INSTANCE" -> INSTANCE;
+            case "LAYERS" -> Layers.FIELDS;
             default -> ROOF;
         };
         for (String key : node.keySet()) {
@@ -170,6 +174,9 @@ public final class DesignFormat {
             }
             case "INSTANCE" -> {
                 if (!node.has("component")) throw bad("实例要写 component");
+            }
+            case "LAYERS" -> {
+                for (String field : List.of("location", "legend", "layers")) if (!node.has(field)) throw bad("层图要写 " + field);
             }
             default -> {
                 for (String field : List.of("location", "footprint", "material")) if (!node.has(field)) throw bad("屋顶要写 " + field);
@@ -231,6 +238,11 @@ public final class DesignFormat {
         if (node.has("mirror") && node.getAsJsonArray("mirror").asList().stream().anyMatch(value -> "y".equals(value.getAsString()))) {
             throw bad("屋顶不能沿 y 镜像");
         }
+    }
+
+    private static void checkLayers(JsonObject node) {
+        if (node.has("modifiers")) throw bad("层图不支持布尔切割；要挖掉的格在图里改成别的字符");
+        Layers.validate(node);
     }
 
     private static void checkModifiers(JsonArray modifiers) {

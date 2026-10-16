@@ -71,7 +71,7 @@
 - `minecraft:air` 材料的对象表示**清空**这些格：施工会把里面的东西挖掉。房间内部要留空就这么写，别指望"没画到"等于空。
 - 原木的 `axis`、楼梯的 `facing` 这些朝向跟着对象的旋转与镜像一起转（`block_state_axes` 为 `local` 时）；转不出游戏里存在的状态（例如把半砖转成竖的）会被拒绝。
 
-## 三种对象
+## 四种对象
 
 每个对象都有 `name`（同一组里不重复）、`type`，以及可选的 `location`、`rotation_euler`、`mirror`、`array`、`modifiers`、`block_state_axes`。
 
@@ -80,6 +80,43 @@
 | `MESH` | 一个图元 | `primitive`、`dimensions`、`material`、`role`、`fill`、`wall_thickness`、`face_materials`、`edge_material`、`edge_materials`、`edge_width`、`open_faces`、`segments`、`vertices`、`faces`、`pattern` |
 | `INSTANCE` | 把一个组件摆一份 | `component`、`material_map` |
 | `ROOF` | 参数化屋顶 | `footprint`、`material`、`shape`、`curve`、`overhang`、`corner_lift`、`gable_material`、`ridge_material`、`eave_material`、`soffit_material`、`hollow`（见屋顶那一篇） |
+| `LAYERS` | 层图：一层一张字符图，一个字符一格 | `legend`、`layers` |
+
+## LAYERS：层图
+
+一层一张字符图。方向和 `observe` 的格子一样：北朝上（-Z）、东朝右（+X）。`layers` 里每层写 `y`（高度偏移）和 `rows`：第几行就是 z 偏移几，一行里第几个字符就是 x 偏移几。偏移都相对对象的 `location`。
+
+- `legend` 把一个字符对到材料表里的一项材料名。字符不能是 `.`、`?` 或空白。
+- `.` 是空着、`?` 是读现场时没看到：这两种都**不声明**，施工不管那一格。要把一格清空，就用一个对到 Clear（`minecraft:air` 材料）的字符。
+- 两格的方块两格都要画：门的上下半各一个字符（`half` 写 `lower` / `upper`），床的床脚、床头各一个（`part` 写 `foot` / `head`）。
+- 层图不支持 `modifiers` 布尔切割；要挖掉的格在图里改成别的字符。`location`、`rotation_euler`、`mirror`、`array` 照普通对象用，方块朝向跟着一起转。
+
+```json
+{
+  "name": "小屋一角",
+  "coordinate_system": "minecraft_y_up",
+  "materials": {
+    "Plank": {"block_id": "minecraft:spruce_planks"},
+    "DoorLow": {"block_id": "minecraft:spruce_door", "properties": {"facing": "south", "half": "lower"}},
+    "DoorUp": {"block_id": "minecraft:spruce_door", "properties": {"facing": "south", "half": "upper"}},
+    "Clear": {"block_id": "minecraft:air"}
+  },
+  "objects": [
+    {"name": "现场", "type": "LAYERS", "location": [0, 0, 0],
+     "legend": {"P": "Plank", "D": "DoorLow", "d": "DoorUp", "_": "Clear"},
+     "layers": [
+       {"y": 0, "rows": ["PPPPP", "PPPPP", "PPPPP"]},
+       {"y": 1, "rows": ["PPDPP", "P___P", "PPPPP"]},
+       {"y": 2, "rows": ["PPdPP", "P___P", "PPPPP"]}
+     ]}
+  ]
+}
+```
+
+改层图（`design(update)` 的 `edits.objects` 里按对象名写）：
+
+- 给 `layers` 只换写到的那几层（按 `y` 对上），别的层留着。
+- 给 `set` 逐格改：`[{"at": [x, y, z], "material": "材料名"}]`，`at` 是相对对象 `location` 的行列与层高；`material` 写 `.` 是改成不声明。用到图例里没有的材料会自动分一个字符（材料本身要在材料表里，新材料同时写进 `edits.materials`）。
 
 ## MESH：十二种图元
 
