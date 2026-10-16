@@ -111,7 +111,8 @@ public final class WorldScope {
     private PlayerContext observing;
     /**
      * 设施观察的读端：只建一个。每刻新建会每刻重新遍历整张方块注册表找床（大型整合包里几万种方块），
-     * 还会每刻重复登记同一批方块，扫描索引的引用计数只增不减。
+     * 还会每刻重复登记同一批方块，扫描索引的引用计数只增不减。告示牌也由它读，牌子上的字按画面上显示的读：
+     * 客户端开着文字过滤时读过滤后的那一份。
      */
     private final ClientNearbyBlocksSight facilitySight;
     /** 联动模组的观察（电梯、车站、列车、物理结构）：场景每次刷新时问。 */
@@ -154,7 +155,7 @@ public final class WorldScope {
         this.goalRuns = new DocumentGoalRunStore(documents, identity.key(), abilities);
         this.kinds = new FacilityKinds(new RegistryBlockTags());
         this.scene = new Scene(memory, kinds);
-        this.facilitySight = new ClientNearbyBlocksSight(blockScans, () -> observing, kinds);
+        this.facilitySight = new ClientNearbyBlocksSight(blockScans, () -> observing, kinds, minecraft::isTextFilteringEnabled);
         // 保护判断：归属记录按区块问服务端（还没问到的按受保护处理；自己刚放下的按服务端推来的确认当刻记上），
         // 区域读每刻抄一份的快照，地标问世界记忆；
         this.ownership = new OwnershipMap(session, minecraft.player.getUUID().toString());
@@ -250,6 +251,8 @@ public final class WorldScope {
         facilities.addAll(kinds.workstationBlockTypes());
         observing = current;
         scene.updateFacilities(gameTick, when, facilitySight.nearby(facilities));
+        // 看得见的告示牌连同牌子上的字：主播在基地立的路牌、留言，observe 里读得到。
+        scene.updateSigns(gameTick, facilitySight.signs());
         // 模组的东西：电梯、车站、列车、物理结构，联动模组各自报角色附近看得到的。
         List<ModThing> things = new ArrayList<>();
         AABB around = new AABB(player.blockPosition()).inflate(THINGS_RADIUS);

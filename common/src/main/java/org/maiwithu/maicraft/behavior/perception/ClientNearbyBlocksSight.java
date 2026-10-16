@@ -9,13 +9,18 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.SignBlock;
+import net.minecraft.world.level.block.entity.SignBlockEntity;
+import net.minecraft.world.level.block.entity.SignText;
 
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.BlockScanService;
@@ -30,6 +35,9 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
  * 向扫描服务登记一次，之后每次查询走索引，一刻只花小预算；扫完之前返回已找到的部分，
  * "没扫完"不冒充"没有"。查到的每一格再用与观察同一套遮挡判断筛一遍——
  * 墙后的箱子不报成看见。索引登记的方块种类以设施分类为限，感知只认设施。
+ *
+ * <p>告示牌另查一份，不和箱子抢名额：注册表里凡是原版告示牌方块的（立牌、挂墙、悬挂、挂墙悬挂四种，
+ * 模组继承它们的也算）都登记，看得见的再读它的方块实体上客户端收到的两面文字。
  */
 public final class ClientNearbyBlocksSight implements NearbyBlocksSight {
 
@@ -45,11 +53,20 @@ public final class ClientNearbyBlocksSight implements NearbyBlocksSight {
     private final ScanTargets registered;
     /** 感知常驻关心的设施种类（容器、工作站、床）；第一次用到时按标签与注册表找齐。 */
     private Set<Block> facilities;
+    /** 告示牌方块：第一次用到时从注册表找齐。 */
+    private Set<Block> signBlocks;
+    /** 客户端开着文字过滤：开着时牌子上显示的是过滤后的字，读的也是它。 */
+    private final BooleanSupplier textFiltering;
 
-    public ClientNearbyBlocksSight(BlockScanService scans, Supplier<PlayerContext> context, FacilityKinds kinds) {
+    /**
+     * @param textFiltering 客户端此刻开没开文字过滤；读告示牌时按它取画面上显示的那一份字
+     */
+    public ClientNearbyBlocksSight(BlockScanService scans, Supplier<PlayerContext> context, FacilityKinds kinds,
+            BooleanSupplier textFiltering) {
         this.scans = Objects.requireNonNull(scans, "scans");
         this.context = Objects.requireNonNull(context, "context");
         this.kinds = Objects.requireNonNull(kinds, "kinds");
+        this.textFiltering = Objects.requireNonNull(textFiltering, "textFiltering");
         this.registered = new ScanTargets(scans);
     }
 
@@ -82,6 +99,66 @@ public final class ClientNearbyBlocksSight implements NearbyBlocksSight {
                     WorldPosition.here(hit.getX(), hit.getY(), hit.getZ()), typeId));
         }
         return sightings;
+    }
+
+    @Override
+    public List<SignSighting> signs() {
+        PlayerContext current = context.get();
+        if (current == null || current.localPlayer() == null || current.level() == null) {
+            return List.of();
+        }
+        LocalPlayer player = current.localPlayer();
+        ClientLevel level = current.level();
+        Set<Block> targets = signBlocks();
+        if (targets.isEmpty()) {
+            return List.of();
+        }
+        // 告示牌单独一份查询：主播基地里的箱子再多，也挤不掉看得见的路牌。
+        registered.ensure(level, targets);
+        var result = scans.query(level, player.blockPosition(), targets, WANT, MAX_CHUNK_RADIUS, BUILD_BUDGET);
+        List<SignSighting> sightings = new ArrayList<>();
+        for (BlockPos hit : result.hits()) {
+            // 墙后的牌子看不见上面的字，也不报成看见。
+            if (!ObservationVisibility.block(player, hit)) {
+                continue;
+            }
+            String typeId = BuiltInRegistries.BLOCK.getKey(level.getBlockState(hit).getBlock()).toString();
+            sightings.add(new SignSighting(WorldPosition.here(hit.getX(), hit.getY(), hit.getZ()), typeId,
+                    linesAt(level, hit, textFiltering.getAsBoolean())));
+        }
+        return sightings;
+    }
+
+    // 牌子上写的字以客户端收到的方块实体为准：模组的告示牌只要方块实体是原版告示牌那一类就照读；
+    // 方块实体还没同步过来时不知道写了什么，交空，不冒充一块空牌子。
+    private static SignLines linesAt(ClientLevel level, BlockPos at, boolean filtered) {
+        if (!(level.getBlockEntity(at) instanceof SignBlockEntity sign)) {
+            return null;
+        }
+        return new SignLines(linesOf(sign.getFrontText(), filtered), linesOf(sign.getBackText(), filtered));
+    }
+
+    // 一面的四行字，按牌子上从上到下；客户端开着文字过滤就读过滤后的那一份，和画面上显示的一致。
+    private static List<String> linesOf(SignText side, boolean filtered) {
+        List<String> lines = new ArrayList<>();
+        for (Component line : side.getMessages(filtered)) {
+            lines.add(line.getString());
+        }
+        return lines;
+    }
+
+    // 告示牌方块：注册表里凡是原版告示牌方块一类的都算，第一次用到时找齐，之后复用。
+    private Set<Block> signBlocks() {
+        if (this.signBlocks == null) {
+            Set<Block> signs = new LinkedHashSet<>();
+            for (Block block : BuiltInRegistries.BLOCK) {
+                if (block instanceof SignBlock) {
+                    signs.add(block);
+                }
+            }
+            this.signBlocks = Set.copyOf(signs);
+        }
+        return this.signBlocks;
     }
 
     // 感知常驻关心的设施种类：第一次用到时找齐，之后复用。

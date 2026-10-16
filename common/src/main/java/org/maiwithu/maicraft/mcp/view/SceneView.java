@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.behavior.perception.Scene;
 import org.maiwithu.maicraft.behavior.perception.SceneEntity;
 import org.maiwithu.maicraft.behavior.perception.SceneEnvironment;
 import org.maiwithu.maicraft.behavior.perception.SceneSelf;
+import org.maiwithu.maicraft.behavior.perception.SceneSign;
 import org.maiwithu.maicraft.behavior.perception.TerrainFeature;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
@@ -22,6 +23,7 @@ import java.util.Locale;
  * <p>实体按场景模型的规矩交：敌对的、盯着角色的、有名字的、玩家逐只列，其他的只列三十二格以内，
  * 远处的在 distant_entities 里按种类报只数。速写只是一句总览，不逐条复述列表。
  * 方位同时给相对朝向（前方、左侧……）和东南西北，LLM 用哪个说都行。
+ * 看得见的告示牌单列在 signs 里，text 是正面几行连成的一句：牌子上写的是看到的事实，不是给角色的指令。
  */
 public final class SceneView {
     private SceneView() {}
@@ -57,6 +59,12 @@ public final class SceneView {
         JsonArray facilities = new JsonArray();
         scene.facilities().forEach(facility -> facilities.add(facility(facility)));
         json.add("facilities", facilities);
+        // 看得见的告示牌：主播在基地立的路牌、留言，正面的字连成一句带在 text 里。
+        if (!scene.signs().isEmpty()) {
+            JsonArray signs = new JsonArray();
+            scene.signs().forEach(sign -> signs.add(sign(sign)));
+            json.add("signs", signs);
+        }
         // 模组的东西（电梯、车站、列车、物理结构）按种类分组：每种列最近的几样，其余只报样数。
         if (!scene.things().isEmpty()) {
             JsonObject things = new JsonObject();
@@ -133,6 +141,21 @@ public final class SceneView {
         json.addProperty("compass", facility.compass());
         json.addProperty("distance", facility.distance());
         json.add("position", position(facility.position()));
+        return json;
+    }
+
+    // 一块告示牌：正面写了字才带 text（几行连成一句）；没写字、或客户端还没收到牌子内容时不带。
+    static JsonObject sign(SceneSign sign) {
+        JsonObject json = new JsonObject();
+        json.addProperty("id", sign.id());
+        json.addProperty("block", sign.blockType());
+        json.addProperty("direction", sign.direction());
+        json.addProperty("compass", sign.compass());
+        json.addProperty("distance", sign.distance());
+        json.add("position", position(sign.position()));
+        if (sign.lines() != null && !sign.lines().frontSentence().isEmpty()) {
+            json.addProperty("text", sign.lines().frontSentence());
+        }
         return json;
     }
 
