@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.travel;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Supplier;
 
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.core.BlockPos;
@@ -16,7 +17,6 @@ import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.behavior.travel.spi.TravelVia;
 import org.maiwithu.maicraft.game.world.EndExitPortal;
-import org.maiwithu.maicraft.kernel.child.ChildTaskRunner;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
@@ -25,13 +25,11 @@ import org.maiwithu.maicraft.kernel.result.ResultDetails;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
-import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.Next;
 import org.maiwithu.maicraft.kernel.task.PhasedTask;
 import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TickContext;
-import org.maiwithu.maicraft.kernel.task.TickResult;
 
 /**
  * 跨维度段的任务：路由 → 找活门 → 走到门口 → 直走进门 → 等维度交接 → 先离门口再结算；
@@ -41,9 +39,10 @@ import org.maiwithu.maicraft.kernel.task.TickResult;
  * 人在末地外岛看不见主岛中心时，先只用折跃门送一段回主岛，等那一片加载出来再看出口门。
  *
  * <p>跨维度那一程前后、在同一个维度里的那段（到了接着去坐标、外岛先回主岛）交给同维度出行的取舍：
- * 那个维度有用得上的出行方式就是行程（末地里隔着虚空先过折跃门），没有就只走路；这一段按动作推进，
- * 整趟暂停、收尾、能不能停都转给它。去末地外岛的坐标要扔珍珠过折跃门，末地门又是单程，
- * 不许用稀有品时出发前就说清，不先进末地再困住。
+ * 那个维度有用得上的出行方式就是行程（末地里隔着虚空先对着折跃门扔珍珠过去），没有就只走路。
+ *
+ * <p>交给子任务做的阶段（接着去坐标、外岛回主岛、建门、去要塞激活末地门）都按动作推进：
+ * 整趟被生存需求打断时它跟着暂停，先到安全处再停、提前结束时的收尾、此刻能不能打断都转给它。
  *
  * <p>每段步行沿用出行任务的全部保证：走近门口与离门口的走交给走到，自己不算路。
  * 到达以维度为准：已在目标维度才算跨维度段完成，不数秒冒充到达；结算前先走出门口，
@@ -80,10 +79,13 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
     private final Journey journey;
     private final DimensionTravelServices services;
     private final SameDimensionTravel sameDimension;
+    /** 附近没有下界门时建一扇的子任务怎么建。 */
+    private final Supplier<Task> portalBuilder;
+    /** 附近没有开着的末地门时去要塞插眼激活的子任务怎么建。 */
+    private final Supplier<Task> endPortalRoom;
 
     private DimensionRoute.Decision route;
     private WalkRun walk;
-    private ChildTaskRunner runner;
     private Action prepared;
     private final Set<Long> attemptedEntrances = new LongOpenHashSet();
     private BlockPos entrance;
@@ -105,8 +107,8 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
     private int poemTicks;
     /** 出口门先把人送到了别的维度（重生锚在下界）：从那里接着走时，结果里先交代这一段。 */
     private String detour;
-    /** 同一个维度里正在走的那段（接着去坐标、外岛回主岛）；没在走为 null。 */
-    private OnwardLeg onward;
+    /** 这一阶段交给子任务做的那件事（接着去坐标、外岛回主岛、建门、去要塞激活末地门）；没在做为 null。 */
+    private ChildTaskAction child;
     /** 外岛先过折跃门回到了主岛：那一段自己的一句（过的哪扇门、落在哪），结果里先交代；没过为 null。 */
     private String mainIslandReturn;
     /** 回到主岛后等了几刻主岛中心加载出来。 */
@@ -119,11 +121,24 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
      *                      跟着别人过门用只走路的那一份
      */
     public DimensionTravelTask(Journey journey, DimensionTravelServices services, SameDimensionTravel sameDimension) {
+        this(journey, services, sameDimension,
+                () -> new PortalBuilder(journey.permissions(), journey.searchDistance(), services),
+                () -> new EndPortalRoomTask(journey.permissions(), journey.searchDistance(), services));
+    }
+
+    /**
+     * @param portalBuilder 附近没有下界门时建一扇的子任务怎么建；离线测试换成替身
+     * @param endPortalRoom 附近没有开着的末地门时去要塞激活的子任务怎么建；离线测试换成替身
+     */
+    DimensionTravelTask(Journey journey, DimensionTravelServices services, SameDimensionTravel sameDimension,
+            Supplier<Task> portalBuilder, Supplier<Task> endPortalRoom) {
         super("跨维度出行", Phase.ROUTE, new ProgressTracker(STUCK_AFTER_TICKS,
                 journey.maxSeconds() > 0 ? journey.maxSeconds() * 20L : MAX_TICKS));
         this.journey = journey;
         this.services = services;
         this.sameDimension = sameDimension;
+        this.portalBuilder = portalBuilder;
+        this.endPortalRoom = endPortalRoom;
     }
 
     @Override
@@ -142,10 +157,13 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
                 yield walk;
             }
             // 到了目标维度接着去坐标：交给同维度出行的取舍，隔着虚空的那段由行程先过折跃门。
-            case WALK_ON -> onward = new OnwardLeg(sameDimension.toward(journey.destination(), journey.permissions(),
-                    journey.maxSeconds()));
+            case WALK_ON -> child = new ChildTaskAction(sameDimension.toward(journey.destination(),
+                    journey.permissions(), journey.maxSeconds()), records());
             // 外岛回主岛那一段在认路时就建好了（建不出来当场如实结束）。
-            case TO_MAIN_ISLAND -> onward;
+            case TO_MAIN_ISLAND -> child;
+            // 附近没门：下界按许可建一扇，末地去要塞插眼激活；吃饭、自卫插进来时砌框、走路跟着停下松手。
+            case BUILD_PORTAL -> child = new ChildTaskAction(portalBuilder.get(), records());
+            case END_ROOM -> child = new ChildTaskAction(endPortalRoom.get(), records());
             default -> null;
         };
     }
@@ -162,7 +180,7 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
             case ENTER -> enterPortal(context);
             case CROSS -> cross();
             case WALK_OUT -> walkOut(context);
-            case BUILD_PORTAL, END_ROOM -> runPreparation(context);
+            case BUILD_PORTAL, END_ROOM -> afterPreparation(context);
             case WALK_ON -> walkOn(context);
         };
     }
@@ -179,9 +197,9 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
         if (exitRoute && phase() == Phase.CROSS && services.world().endPoemShowing()) {
             return Interruptibility.UNSAFE_TO_STOP;
         }
-        // 同一个维度里的那段能不能停看它自己的：扔出珍珠等传送、悬空搭桥时停不得。
-        if ((phase() == Phase.WALK_ON || phase() == Phase.TO_MAIN_ISLAND) && onward != null) {
-            return onward.interruptibility(context);
+        // 交给子任务的阶段能不能停看子任务手上的动作：扔出珍珠等传送、悬空搭桥、砌框等游戏确认放方块时停不得。
+        if (action() instanceof ChildTaskAction running) {
+            return running.interruptibility(context);
         }
         return super.interruptibility(context);
     }
@@ -241,7 +259,7 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
                     "人在外岛：先用 travel 给 via=" + PearlCrossing.VIA.name()
                             + "（不给 target）过折跃门回主岛，再出行回主世界"));
         }
-        onward = new OnwardLeg(crossing.get());
+        child = new ChildTaskAction(crossing.get(), records());
         return Next.go(Phase.TO_MAIN_ISLAND, "人在外岛，看不见主岛中心，先过折跃门回主岛");
     }
 
@@ -253,7 +271,7 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
         if (runAction(context) instanceof ActionStatus.Running) {
             return Next.stay();
         }
-        TaskResult result = onward.settle();
+        TaskResult result = child.settle();
         if (result.status() != TaskResult.Status.DONE) {
             Problem why = result.problem() != null ? result.problem()
                     : Problem.of(Problem.Kind.UNREACHABLE, result.summary());
@@ -529,7 +547,7 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
         if (runAction(context) instanceof ActionStatus.Running) {
             return Next.stay();
         }
-        TaskResult result = onward.settle();
+        TaskResult result = child.settle();
         if (result.status() == TaskResult.Status.FAILED) {
             Problem why = result.problem() != null ? result.problem()
                     : Problem.of(Problem.Kind.UNREACHABLE, result.summary());
@@ -568,44 +586,34 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
     }
 
     /** 建门或末地门房间：子任务做完门活了回找门；门没活按各自的收场结束，不循环。 */
-    private Next<Phase> runPreparation(TickContext context) {
-        if (runner == null) {
-            runner = new ChildTaskRunner(ChildTaskRunner.NO_LIMIT);
-            runner.begin(phase() == Phase.BUILD_PORTAL
-                    ? new PortalBuilder(journey.permissions(), journey.searchDistance(), services)
-                    : new EndPortalRoomTask(journey.permissions(), journey.searchDistance(), services), context);
+    private Next<Phase> afterPreparation(TickContext context) {
+        // 子任务还在做（走路、砌框、插眼）：它的真实进展已由动作报给整趟。
+        if (runAction(context) instanceof ActionStatus.Running) {
             return Next.stay();
         }
-        if (runner.tick(context) instanceof TickResult.Finished finished) {
-            copyFacts(finished.result());
-            TaskResult result = finished.result();
-            runner = null;
-            if (result.status() == TaskResult.Status.FAILED) {
-                return Next.fail(result.problem());
-            }
-            if (phase() == Phase.BUILD_PORTAL) {
-                // 建门怎么建的（摆黑曜石、浇筑）随结果带回来，写进这趟的结果细节。
-                if (result.details() instanceof PortalBuildDetails built) {
-                    portalBuiltHow = built.portalBuiltHow();
-                    settlement = new DimensionTravelDetails(services.world().currentDimension(), null, null, -1,
-                            false, portalBuiltHow);
-                }
-                if (result.status() == TaskResult.Status.DONE) {
-                    // 门点着了、门面验出来了：回去找这扇门走进去；只建这一次，再找不到入口就如实结束。
-                    portalBuilt = true;
-                    return Next.go(Phase.FIND_PORTAL, "门建好点着了，回去找这扇门走进去");
-                }
-                // 施工做完门框没成型就是建门没成：整个目标就此结束，保留施工事实，不循环。
-                return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL,
-                                "建门做完但没验出活门，" + result.summary())
-                        .problem(Problem.of(Problem.Kind.NOT_FOUND, "施工结束后门口没有出现下界传送门方块",
-                                "看看试过的办法里差在哪，补齐门框或换个地方再建")).build());
-            }
-            return Next.go(Phase.FIND_PORTAL, "末地门激活了，回去找开着的门");
+        TaskResult result = child.settle();
+        if (result.status() == TaskResult.Status.FAILED) {
+            return Next.fail(result.problem());
         }
-        // 建门、找末地门房间的子任务有真实进展就算整趟有进展。
-        runner.progressedNow().ifPresent(this::recordProgress);
-        return Next.stay();
+        if (phase() == Phase.BUILD_PORTAL) {
+            // 建门怎么建的（摆黑曜石、浇筑）随结果带回来，写进这趟的结果细节。
+            if (result.details() instanceof PortalBuildDetails built) {
+                portalBuiltHow = built.portalBuiltHow();
+                settlement = new DimensionTravelDetails(services.world().currentDimension(), null, null, -1,
+                        false, portalBuiltHow);
+            }
+            if (result.status() == TaskResult.Status.DONE) {
+                // 门点着了、门面验出来了：回去找这扇门走进去；只建这一次，再找不到入口就如实结束。
+                portalBuilt = true;
+                return Next.go(Phase.FIND_PORTAL, "门建好点着了，回去找这扇门走进去");
+            }
+            // 施工做完门框没成型就是建门没成：整个目标就此结束，保留施工事实，不循环。
+            return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL,
+                            "建门做完但没验出活门，" + result.summary())
+                    .problem(Problem.of(Problem.Kind.NOT_FOUND, "施工结束后门口没有出现下界传送门方块",
+                            "看看试过的办法里差在哪，补齐门框或换个地方再建")).build());
+        }
+        return Next.go(Phase.FIND_PORTAL, "末地门激活了，回去找开着的门");
     }
 
     private WalkRun startWalk(GoalCompiler.Compiled target) {
@@ -621,18 +629,6 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
         }
         entrance = null;
         portalCells = Set.of();
-    }
-
-    private void copyFacts(TaskResult result) {
-        for (var change : result.changes()) {
-            recordChange(change);
-        }
-        for (var change : result.unconfirmed()) {
-            recordUnconfirmed(change);
-        }
-        for (var attempt : result.attempts()) {
-            recordAttempt(attempt.tried(), attempt.result());
-        }
     }
 
     private String crossSummary(BlockPos feet, String note) {
@@ -700,80 +696,5 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
     @Override
     public boolean resumesAnywhere() {
         return true;
-    }
-
-    /**
-     * 同一个维度里的那段（接着去坐标、外岛回主岛）包成动作：整趟被生存需求打断时连着它一起暂停，
-     * 被叫先到安全处再停时转给它（坐着的那一段先落地、等传送那一下等完），整趟提前结束时它按取消收尾；
-     * 它交代的变化、试过的办法照样并进这趟。
-     */
-    private final class OnwardLeg implements Action {
-        private final ChildTaskRunner runner = new ChildTaskRunner(ChildTaskRunner.NO_LIMIT);
-        private final Task task;
-        private boolean started;
-        private boolean settled;
-
-        OnwardLeg(Task task) {
-            this.task = task;
-        }
-
-        @Override public ActionStatus tick(TickContext context) {
-            if (!started) {
-                started = true;
-                runner.begin(task, context);
-                if (runner.finished()) {
-                    return ActionStatus.done();
-                }
-            }
-            if (runner.tick(context) instanceof TickResult.Finished) {
-                return ActionStatus.done();
-            }
-            // 那一段这一刻有真实进展（离目的地更近、扔出珍珠），整趟也算有进展，外层不按"没进展"掐掉它。
-            return runner.progressedNow().isPresent() ? ActionStatus.progressed() : ActionStatus.running();
-        }
-
-        /** 那一段结束了：事实并进这趟，交回它的结果。 */
-        TaskResult settle() {
-            settled = true;
-            TaskResult result = runner.result();
-            copyFacts(result);
-            return result;
-        }
-
-        Interruptibility interruptibility(TickContext context) {
-            return runner.interruptibility(context);
-        }
-
-        @Override public void pause() {
-            if (started && !runner.finished()) {
-                runner.pause();
-            }
-        }
-
-        @Override public boolean stopSafely() {
-            return started && runner.stopSafely();
-        }
-
-        @Override public boolean stoppedSafely() {
-            return runner.stoppedSafely();
-        }
-
-        // 整趟提前结束（被替换、取消、角色没了）：那一段按取消收尾，交代的事实照样并进这趟。
-        @Override public void close() {
-            if (settled) {
-                return;
-            }
-            settled = true;
-            if (started && !runner.finished()) {
-                runner.close(CloseReason.CANCELLED);
-            }
-            if (runner.finished()) {
-                copyFacts(runner.result());
-            }
-        }
-
-        @Override public String describe() {
-            return started ? runner.describe() : "准备出发";
-        }
     }
 }

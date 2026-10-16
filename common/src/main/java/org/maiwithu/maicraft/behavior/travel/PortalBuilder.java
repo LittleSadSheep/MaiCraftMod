@@ -31,7 +31,6 @@ import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.PlayerContext;
-import org.maiwithu.maicraft.kernel.child.ChildTaskRunner;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -39,10 +38,10 @@ import org.maiwithu.maicraft.kernel.result.ResultDetails;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.Next;
 import org.maiwithu.maicraft.kernel.task.PhasedTask;
 import org.maiwithu.maicraft.kernel.task.TickContext;
-import org.maiwithu.maicraft.kernel.task.TickResult;
 
 /**
  * 建门：附近没有活门且许可允许时，勘察场址、备点火用品、把门框建起来、点火、验活。
@@ -53,6 +52,9 @@ import org.maiwithu.maicraft.kernel.task.TickResult;
  * 摆框的清障、备黑曜石、站位、放置与核对全交给施工引擎，浇筑由浇筑建门做，建门自己只做
  * 勘察选点、建法选择、点火与验活。点火是点火用品换到主手、对门框底部内侧下一格的顶面使用；
  * 门框内侧出现下界门方块才算建好。施工或浇筑做完门框没成型就结束，保留事实、写明差在哪，不循环。
+ *
+ * <p>砌框与浇筑按动作推进：建门被生存需求打断时它们跟着暂停、松手，先到安全处再停、
+ * 提前结束时的收尾、此刻能不能打断都转给它们，它们交代的事实并进建门的结果。
  */
 final class PortalBuilder extends PhasedTask<PortalBuilder.Phase> {
 
@@ -91,7 +93,8 @@ final class PortalBuilder extends PhasedTask<PortalBuilder.Phase> {
     /** 上次判过池岸时已收到的岩浆源数；-1 表示还没判过。 */
     private int judgedSeeds = -1;
     private WalkRun walk;
-    private ChildTaskRunner runner;
+    /** 砌框（施工引擎）或浇筑这一阶段交给的那件子任务；没在做为 null。 */
+    private ChildTaskAction child;
     private String ignitionItem;
     private final Set<String> triedIgnitionItems = new HashSet<>();
 
@@ -109,8 +112,23 @@ final class PortalBuilder extends PhasedTask<PortalBuilder.Phase> {
             case SWAP_IGNITION -> services.toMainhand().moveToMainhand(ignitionItem).orElse(null);
             case WALK_TO_IGNITE -> startWalk();
             case IGNITE -> services.uses().useBlock(igniteCell(), litConfirmation());
+            // 门框编成蓝图交施工引擎砌；吃饭、自卫插进来时施工跟着停下松手，回来从原地接着砌。
+            case CONSTRUCT -> child = new ChildTaskAction(new ConstructionTask(
+                    new ConstructionInput(frameBlueprint(), permissions, "建下界门"), construction()), records());
+            // 去池岸浇门框：同样跟着建门暂停、收尾，正倒岩浆等确认时停不得。
+            case CAST -> child = new ChildTaskAction(
+                    new PortalLavaCasting(castingSite, permissions, services, construction()), records());
             default -> null;
         };
+    }
+
+    @Override
+    public Interruptibility interruptibility(TickContext context) {
+        // 砌框、浇筑时能不能停看子任务手上的动作：等游戏确认放方块、倒岩浆，或悬空垫脚时停不得。
+        if (action() instanceof ChildTaskAction running) {
+            return running.interruptibility(context);
+        }
+        return super.interruptibility(context);
     }
 
     @Override
@@ -274,24 +292,16 @@ final class PortalBuilder extends PhasedTask<PortalBuilder.Phase> {
 
     /** 浇筑：交给浇筑建门做完整套；缺桶缺水按它的问题失败，浇完（哪怕没浇全）都去验框。 */
     private Next<Phase> cast(TickContext context) {
-        if (runner == null) {
-            runner = new ChildTaskRunner(ChildTaskRunner.NO_LIMIT);
-            runner.begin(new PortalLavaCasting(castingSite, permissions, services, construction()), context);
+        // 浇出一格、放下一块都是真实进展，由动作报给建门，外层不按"没进展"掐掉。
+        if (runAction(context) instanceof ActionStatus.Running) {
             return Next.stay();
         }
-        if (runner.tick(context) instanceof TickResult.Finished finished) {
-            copyFacts(finished.result());
-            TaskResult result = finished.result();
-            runner = null;
-            if (result.status() == TaskResult.Status.FAILED) {
-                return Next.fail(result.problem());
-            }
-            builtHow = PortalBuildDetails.LAVA_CASTING;
-            return Next.go(Phase.VERIFY_FRAME, "浇筑做完，看看门框成型没有");
+        TaskResult result = child.settle();
+        if (result.status() == TaskResult.Status.FAILED) {
+            return Next.fail(result.problem());
         }
-        // 浇出一格、放下一块都是真实进展，外层不按"没进展"掐掉。
-        runner.progressedNow().ifPresent(this::recordProgress);
-        return Next.stay();
+        builtHow = PortalBuildDetails.LAVA_CASTING;
+        return Next.go(Phase.VERIFY_FRAME, "浇筑做完，看看门框成型没有");
     }
 
     /** 打火石没弄到换火弹；两种都备不齐如实 NEED_ITEM 结束。 */
@@ -309,26 +319,16 @@ final class PortalBuilder extends PhasedTask<PortalBuilder.Phase> {
 
     /** 门框交施工引擎：清障、备黑曜石、站位、放置与核对都复用全仓唯一一份施工。 */
     private Next<Phase> construct(TickContext context) {
-        if (runner == null) {
-            runner = new ChildTaskRunner(ChildTaskRunner.NO_LIMIT);
-            runner.begin(new ConstructionTask(
-                    new ConstructionInput(frameBlueprint(), permissions, "建下界门"),
-                    construction()), context);
+        // 砌门框的施工引擎有真实进展由动作报给建门，外层不按"没进展"掐掉。
+        if (runAction(context) instanceof ActionStatus.Running) {
             return Next.stay();
         }
-        if (runner.tick(context) instanceof TickResult.Finished finished) {
-            copyFacts(finished.result());
-            TaskResult result = finished.result();
-            runner = null;
-            if (result.status() == TaskResult.Status.FAILED) {
-                return Next.fail(result.problem());
-            }
-            builtHow = PortalBuildDetails.OBSIDIAN;
-            return Next.go(Phase.VERIFY_FRAME, "施工做完，看看门框成型没有");
+        TaskResult result = child.settle();
+        if (result.status() == TaskResult.Status.FAILED) {
+            return Next.fail(result.problem());
         }
-        // 砌门框的施工引擎有真实进展就算建门有进展，外层不按"没进展"掐掉。
-        runner.progressedNow().ifPresent(this::recordProgress);
-        return Next.stay();
+        builtHow = PortalBuildDetails.OBSIDIAN;
+        return Next.go(Phase.VERIFY_FRAME, "施工做完，看看门框成型没有");
     }
 
     /** 验框：框齐且内侧空着才点火；没成型就此结束、保留施工事实、不循环。 */
@@ -422,18 +422,6 @@ final class PortalBuilder extends PhasedTask<PortalBuilder.Phase> {
             return FLINT_AND_STEEL;
         }
         return services.world().carries(FIRE_CHARGE) ? FIRE_CHARGE : null;
-    }
-
-    private void copyFacts(TaskResult result) {
-        for (var change : result.changes()) {
-            recordChange(change);
-        }
-        for (var change : result.unconfirmed()) {
-            recordUnconfirmed(change);
-        }
-        for (var attempt : result.attempts()) {
-            recordAttempt(attempt.tried(), attempt.result());
-        }
     }
 
     private String dimension() {

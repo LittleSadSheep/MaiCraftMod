@@ -40,10 +40,13 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.CloseReason;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -368,6 +371,114 @@ class PortalBuilderTest {
                 "勘察事实：" + result.attempts());
     }
 
+    @Test
+    void layingTheFrameIsPausedAndClosedWithTheBuilder() {
+        // 砌框交施工引擎按动作推进：施工正走向下一格时，建门的暂停、收尾转到施工手上，能不能停也看它的。
+        Map<BlockPos, BlockState> world = new HashMap<>();
+        layFrame(world, FRAME.cell(1, 3));
+        DimensionFakes.FakeWorld view = new DimensionFakes.FakeWorld();
+        view.blocks.putAll(world);
+        view.enqueueScan(new DimensionWorldView.Scan(List.of(FRAME.cell(0, -1)), true));
+        view.carried = PortalBuilder.FLINT_AND_STEEL;
+        ConstructionFakes site = new ConstructionFakes(view.blocks);
+        HeldAction walking = new HeldAction();
+        site.approach = walking;
+        PortalBuilder builder = new PortalBuilder(Permissions.DEFAULT, 128, services(view,
+                new DimensionFakes.FakeObtain(), site, new DimensionFakes.FakeUses()));
+        runUntilBusy(builder, walking);
+
+        assertEquals(Interruptibility.UNSAFE_TO_STOP, builder.interruptibility(tick()),
+                "施工手上那一下停不得，建门就停不得");
+        builder.pause();
+        assertEquals(1, walking.pauses, "建门暂停，施工跟着停下松手");
+        builder.close(CloseReason.CANCELLED);
+        assertEquals(1, walking.closes, "建门收尾，施工跟着收尾");
+    }
+
+    @Test
+    void castingIsPausedStoppedAndClosedWithTheBuilder() {
+        // 浇筑按动作推进：去舀水那一下在做时，建门的暂停、先到安全处再停、收尾都转到浇筑手上。
+        DimensionFakes.FakeWorld view = new DimensionFakes.FakeWorld();
+        view.blocks.putAll(CastingFakes.straightShore(SHORE, 2));
+        view.feet = SHORE.cell(0, 1, 2);
+        view.carried = PortalBuilder.FLINT_AND_STEEL;
+        CastingFakes site = new CastingFakes(view.blocks);
+        site.allowFlowAround(SHORE);
+        site.feet = view.feet;
+        site.give(CastingFakes.BUCKET, 1);
+        site.give(CastingFakes.COBBLESTONE, 16);
+        view.stacks.addAll(site.stacks());
+        view.enqueueScan(new DimensionWorldView.Scan(List.of(), true));
+        view.enqueueScan(new DimensionWorldView.Scan(SHORE.startRow(), true));
+        HeldAction scooping = new HeldAction();
+        // 身上只有空桶：浇筑先去舀一桶水，这一下停在半路。
+        ItemNeeds needs = (request, permissions) -> CastingFakes.WATER_BUCKET.equals(request.wanted().itemId())
+                ? scooping : site.actionFor(request, permissions);
+        PortalBuilder builder = new PortalBuilder(Permissions.DEFAULT, 128, new DimensionTravelServices(
+                view, () -> new DimensionFakes.FakeContext(), new DimensionFakes.FakeWalks(), needs,
+                new DimensionFakes.FakeToMainhand(), new DimensionFakes.FakeUses(),
+                permissions -> site.services(), null, () -> List.of(), progress -> {}));
+        runUntilBusy(builder, scooping);
+
+        assertEquals(Interruptibility.UNSAFE_TO_STOP, builder.interruptibility(tick()),
+                "浇筑手上那一下停不得，建门就停不得");
+        assertTrue(builder.stopSafely(), "叫建门先到安全处再停，转给浇筑去收尾");
+        assertEquals(1, scooping.stops, "浇筑手上那一下收到先停稳");
+        assertFalse(builder.stoppedSafely(), "那一下还没停稳，建门也没停稳");
+        builder.pause();
+        assertEquals(1, scooping.pauses, "建门暂停，浇筑跟着停下松手");
+        builder.close(CloseReason.CANCELLED);
+        assertEquals(1, scooping.closes, "建门收尾，浇筑跟着收尾");
+    }
+
+    /** 推进建门直到子任务手上那一下开始做；途中收场说明没走到那一步。 */
+    private static void runUntilBusy(PortalBuilder builder, HeldAction held) {
+        builder.start(tick());
+        for (int i = 0; i < 400 && held.ticks == 0; i++) {
+            assertFalse(builder.tick(tick()) instanceof TickResult.Finished, "建门没走到那一下就收场了");
+        }
+        assertTrue(held.ticks > 0, "走到了那一下");
+    }
+
+    /** 一直在做、停不得的一下（走着、舀着水）：记下被推进、叫停稳、暂停、收尾了几次。 */
+    private static final class HeldAction implements Action {
+        int ticks;
+        int stops;
+        int pauses;
+        int closes;
+
+        @Override public ActionStatus tick(TickContext context) {
+            ticks++;
+            return ActionStatus.running();
+        }
+
+        // 悬在半空：先到安全处再停要先落地，这几刻里一直没停稳。
+        @Override public boolean stopSafely() {
+            stops++;
+            return true;
+        }
+
+        @Override public boolean stoppedSafely() {
+            return false;
+        }
+
+        @Override public void pause() {
+            pauses++;
+        }
+
+        @Override public void close() {
+            closes++;
+        }
+
+        @Override public Interruptibility interruptibility() {
+            return Interruptibility.UNSAFE_TO_STOP;
+        }
+
+        @Override public String describe() {
+            return "停不得的一下";
+        }
+    }
+
     private static Function<BlockPos, Optional<BlockState>> readOf(
             Map<BlockPos, BlockState> world) {
         return cell -> Optional.ofNullable(world.get(cell));
@@ -384,6 +495,8 @@ class PortalBuilderTest {
         boolean failPlacing;
         /** 每次放置后的现场改动：模拟施工期间掉进门里的东西。 */
         Runnable afterPlace;
+        /** 走近时交出的动作；没给就一刻走到。 */
+        Action approach;
 
         ConstructionFakes(Map<BlockPos, BlockState> world) {
             this.world = world;
@@ -456,7 +569,7 @@ class PortalBuilderTest {
         @Override public void temporaryRemoved(BlockPos pos) { temporaries.remove(pos); }
         @Override public List<BlockPos> temporaries() { return List.copyOf(temporaries); }
         @Override public Action toward(ApproachTarget target, Permissions permissions) {
-            return immediate(() -> { });
+            return approach != null ? approach : immediate(() -> { });
         }
 
         ConstructionServices services() {

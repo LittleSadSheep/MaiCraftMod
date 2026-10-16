@@ -46,7 +46,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 跨维度段的任务：扫描没完成不收场、门没了换下一候选、20 秒进不去排除、
  * 维度变了才算到、先离门口再结算、没门且不许动地形就按没门结束；
- * 主世界一趟去外岛的坐标中途过折跃门、外岛一趟回主世界先过门回主岛，各自的失败收场。
+ * 主世界一趟去外岛的坐标中途过折跃门、外岛一趟回主世界先过门回主岛，各自的失败收场；
+ * 交给子任务的阶段（接着去坐标、建门、去要塞激活末地门）跟着整趟暂停、先到安全处再停、收尾。
  */
 class DimensionTravelTaskTest {
 
@@ -694,9 +695,55 @@ class DimensionTravelTaskTest {
                 "那段收尾交代的事实并进整趟：" + closed.attempts());
     }
 
-    /** 一直在走、停不得的那段：记下被推进、暂停、收尾了几次，收尾时交代一条试过的办法。 */
+    @Test
+    void buildingThePortalIsPausedStoppedAndClosedWithTheTrip() {
+        // 附近没下界门：建门按动作推进，整趟暂停、先到安全处再停、能不能停、收尾都转给它。
+        world.enqueuePortals(new PortalFinder.Round(List.of(), true));
+        HeldLeg building = new HeldLeg();
+        DimensionTravelTask task = new DimensionTravelTask(new DimensionTravelTask.Journey(DimensionRoute.NETHER, null,
+                128, 0, Permissions.DEFAULT), services, SameDimensionTravel.walkingOnly(services),
+                () -> building, () -> {
+                    throw new AssertionError("去下界不找末地门房间");
+                });
+        followsTheTrip(task, building);
+    }
+
+    @Test
+    void activatingTheEndPortalIsPausedStoppedAndClosedWithTheTrip() {
+        // 附近没开着的末地门：去要塞激活按动作推进，同样跟着整趟暂停、停稳、收尾。
+        world.enqueuePortals(new PortalFinder.Round(List.of(), true));
+        HeldLeg activating = new HeldLeg();
+        DimensionTravelTask task = new DimensionTravelTask(new DimensionTravelTask.Journey(DimensionRoute.END, null,
+                128, 0, Permissions.DEFAULT), services, SameDimensionTravel.walkingOnly(services),
+                () -> {
+                    throw new AssertionError("去末地不建下界门");
+                }, () -> activating);
+        followsTheTrip(task, activating);
+    }
+
+    /** 推进到交给子任务的那段在做，再依次叫整趟先停稳、暂停、收尾，看每一下都转到了那段上。 */
+    private static void followsTheTrip(DimensionTravelTask task, HeldLeg held) {
+        task.start(tick());
+        for (int i = 0; i < 5; i++) {
+            assertFalse(task.tick(tick()) instanceof TickResult.Finished, "那段一直在做，整趟不收场");
+        }
+        assertTrue(held.ticks > 0, "那段在做");
+        assertEquals(Interruptibility.UNSAFE_TO_STOP, task.interruptibility(tick()), "那段说停不得，整趟就停不得");
+        assertTrue(task.stopSafely(), "叫整趟先到安全处再停，转给那段去收尾");
+        assertEquals(1, held.stops, "那段收到先停稳");
+        assertFalse(task.stoppedSafely(), "那段还没停稳，整趟也没停稳");
+        task.pause();
+        assertEquals(1, held.pauses, "整趟暂停，那段跟着暂停");
+        TaskResult closed = task.close(CloseReason.CANCELLED);
+        assertEquals(1, held.closes, "整趟收尾，那段按取消收尾");
+        assertTrue(closed.attempts().stream().anyMatch(attempt -> attempt.tried().equals("悬空搭桥")),
+                "那段收尾交代的事实并进整趟：" + closed.attempts());
+    }
+
+    /** 一直在做、停不得的那段：记下被推进、叫停稳、暂停、收尾了几次，收尾时交代一条试过的办法。 */
     private static final class HeldLeg implements Task {
         int ticks;
+        int stops;
         int pauses;
         int closes;
 
@@ -707,6 +754,16 @@ class DimensionTravelTaskTest {
 
         @Override public void pause() {
             pauses++;
+        }
+
+        // 悬在半空：先到安全处再停要先落地，这几刻里一直没停稳。
+        @Override public boolean stopSafely() {
+            stops++;
+            return true;
+        }
+
+        @Override public boolean stoppedSafely() {
+            return false;
         }
 
         @Override public Interruptibility interruptibility(TickContext context) {
