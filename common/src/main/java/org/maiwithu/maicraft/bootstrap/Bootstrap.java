@@ -524,15 +524,15 @@ public final class Bootstrap {
             combatMemory = new CombatMemory();
             // 联动的远程武器（土豆加农炮）：登记表在启动完成时才定，这里给取表的办法；口粮不当弹药按同一份食物数值认。
             ModRangedWeapons ranged = new ModRangedWeapons(() -> compat.rangedWeapons(), foods);
-            combatSenses = new LiveCombatSenses(combatMemory, foods, ranged);
+            // 当前世界的保护判断：打龙射水晶前看爆炸范围、挖三填一看脚下、换气挖开头顶都问同一份。
+            Supplier<Protection> protection = () -> worldScope[0] == null ? null : worldScope[0].protection();
+            combatSenses = new LiveCombatSenses(combatMemory, foods, ranged, protection);
             // 控制循环按急迫程度登记生存需求：必须立刻处理的先登记，同样急时它先插进来；
             // 生存需求的事件从同一条任务事件流出去。主任务由目标运行表挂上：LLM 用 execute 派了活，目标就成为主任务。
             // 交互动作入口与按住使用键投影：生存需求的落地放水、能力清单在进世界时都用它们。
             interactions = new Interactions(useKeyProjection);
             // 挖三填一：挖用原生挖掘、封口换方块原生放下、出坑用走到；脚下是不是别人的东西问当前世界的保护判断。
             Supplier<PlayerContext> now = () -> playerControl.activeContext().orElse(null);
-            // 换气时水面被盖住，挖开头顶那一格也问同一份保护判断。
-            Supplier<Protection> protection = () -> worldScope[0] == null ? null : worldScope[0].protection();
             Supplier<BlockBreaking> diggings = () -> new NativeBlockBreaking(interactionSender, menuActions);
             LiveBurrow burrow = new LiveBurrow(now, diggings, interactions, new ClientMovesToMainhand(now), walks,
                     protection);

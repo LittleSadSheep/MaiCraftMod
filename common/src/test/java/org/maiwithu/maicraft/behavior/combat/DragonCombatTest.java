@@ -125,8 +125,8 @@ class DragonCombatTest {
 
     @Test
     void crystalIsShotFromOutsideTheBlastAndCountedWhenItVanishes() {
-        DragonArena.Crystal crystal = new DragonArena.Crystal(5, 40.5, 90, 0.5, false, false, false);
-        DragonArena.Crystal other = new DragonArena.Crystal(6, -40.5, 90, 0.5, false, false, false);
+        DragonArena.Crystal crystal = new DragonArena.Crystal(5, 40.5, 90, 0.5, false, null, false);
+        DragonArena.Crystal other = new DragonArena.Crystal(6, -40.5, 90, 0.5, false, null, false);
         // 站在柱子二十格外：离水晶三十多格、在爆炸范围外，弹道算得出就射，射程放到 48 格。
         Battle.Moment moment = tick(0, field(20.5, 0.5, 20, arena(0, circling(), List.of(crystal, other), List.of())));
         assertEquals(Battle.State.SHOOTING, moment.state());
@@ -142,7 +142,7 @@ class DragonCombatTest {
 
     @Test
     void unloadedCrystalIsReportedAsUnseenNotDestroyed() {
-        DragonArena.Crystal crystal = new DragonArena.Crystal(5, 40.5, 90, 0.5, false, false, false);
+        DragonArena.Crystal crystal = new DragonArena.Crystal(5, 40.5, 90, 0.5, false, null, false);
         tick(0, field(20.5, 0.5, 20, arena(0, circling(), List.of(crystal), List.of())));
         moves.loaded = false;
         tick(1, field(20.5, 0.5, 20, arena(1, circling(), List.of(), List.of())));
@@ -154,7 +154,7 @@ class DragonCombatTest {
 
     @Test
     void crystalOutOfPlaceIsApproachedFromAStance() {
-        DragonArena.Crystal crystal = new DragonArena.Crystal(5, 40.5, 70, 0.5, false, false, false);
+        DragonArena.Crystal crystal = new DragonArena.Crystal(5, 40.5, 70, 0.5, false, null, false);
         // 矮柱子（水晶离地六格）脚下五格：在爆炸范围里，不射，走去一圈站位里最近的那个。
         Battle.Moment moment = tick(0, field(36, 0.5, 20, arena(0, circling(), List.of(crystal), List.of())));
         assertEquals(Battle.State.FIGHTING, moment.state());
@@ -166,7 +166,7 @@ class DragonCombatTest {
     void cagedCrystalWithNoStanceIsGivenUpAndSaysWhy() {
         moves.arc = false;
         moves.surface = (x, z) -> OptionalInt.empty();
-        DragonArena.Crystal caged = new DragonArena.Crystal(5, 40.5, 90, 0.5, true, false, false);
+        DragonArena.Crystal caged = new DragonArena.Crystal(5, 40.5, 90, 0.5, true, null, false);
         Battle.Moment moment = tick(0, field(20.5, 0.5, 20, arena(0, circling(), List.of(caged), List.of())));
         assertTrue(moment.doing().contains("铁栏笼"), moment.doing());
         assertEquals("铁栏笼挡着，射不进去", combat.memory(new Tick(0)).givenUp().get(5));

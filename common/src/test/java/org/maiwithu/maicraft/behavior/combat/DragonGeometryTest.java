@@ -32,7 +32,7 @@ class DragonGeometryTest {
 
     @Test
     void crystalBlastReachesTwelveBlocksAndStancesStayOutsideIt() {
-        DragonArena.Crystal crystal = new DragonArena.Crystal(5, 40.5, 90, 0.5, false, false, false);
+        DragonArena.Crystal crystal = new DragonArena.Crystal(5, 40.5, 90, 0.5, false, null, false);
         assertEquals(12.0, DragonGeometry.CRYSTAL_BLAST);
         assertTrue(DragonGeometry.inBlast(crystal, 40.5, 80, 0.5));
         assertFalse(DragonGeometry.inBlast(crystal, 40.5, 64, 0.5), "柱子底下二十多格不在爆炸范围里");
@@ -50,7 +50,7 @@ class DragonGeometryTest {
             assertTrue(Math.hypot(first.getX() + 0.5, first.getZ() + 0.5) <= Math.hypot(stance.getX() + 0.5, stance.getZ() + 0.5) + 1e-9);
         }
         // 太高的水晶（离地 60 格）站在哪都超出射程：一个站位也没有。
-        DragonArena.Crystal tooHigh = new DragonArena.Crystal(6, 40.5, 124, 0.5, false, false, false);
+        DragonArena.Crystal tooHigh = new DragonArena.Crystal(6, 40.5, 124, 0.5, false, null, false);
         assertTrue(DragonGeometry.crystalStances(tooHigh, List.of(), island(70), 0, 0).isEmpty());
     }
 
@@ -131,7 +131,7 @@ class DragonGeometryTest {
 
     @Test
     void waitRestAndCollectSpotsSitOnTheirRings() {
-        DragonArena.Crystal crystal = new DragonArena.Crystal(5, 25.5, 70, 0.5, false, false, false);
+        DragonArena.Crystal crystal = new DragonArena.Crystal(5, 25.5, 70, 0.5, false, null, false);
         for (BlockPos spot : DragonGeometry.waitSpots(PORTAL, List.of(), island(60), 0, 0)) {
             double r = Math.hypot(spot.getX() + 0.5 - PORTAL.x(), spot.getZ() + 0.5 - PORTAL.z());
             assertTrue(r >= 7 && r <= 15, spot + " " + r);

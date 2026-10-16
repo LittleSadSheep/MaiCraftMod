@@ -133,6 +133,11 @@ public record Battlefield(Me me, List<Foe> foes, DragonArena arena) {
         default int dragonId() {
             return -1;
         }
+
+        /** 这次任务额外保护的地标：打龙时水晶爆炸范围碰到它们的地盘就不射。 */
+        default Set<String> protectedLandmarks() {
+            return Set.of();
+        }
     }
 
     /** 读一份战场：给定半径内的追兵与名单上的，按威胁先后排好。 */
@@ -196,7 +201,8 @@ public record Battlefield(Me me, List<Foe> foes, DragonArena arena) {
         }
         foes.sort(Comparator.comparing(Foe::assessed, ThreatAssessment.BY_THREAT));
         // 打龙：龙不在对手里（战斗感观不把龙当普通威胁），龙场另读；龙不在了（死了、走远了）就没有龙场。
-        DragonArena arena = roster.fightsDragon() ? senses.dragonArena(context, roster.dragonId()).orElse(null) : null;
+        DragonArena arena = roster.fightsDragon()
+                ? senses.dragonArena(context, roster.dragonId(), roster.protectedLandmarks()).orElse(null) : null;
         return new Battlefield(me, foes, arena);
     }
 

@@ -66,7 +66,7 @@ class FightDragonTest {
 
         @Override public Entity entityById(TickContext context, int entityId) { return null; }
 
-        @Override public Optional<DragonArena> dragonArena(TickContext context, int dragonId) {
+        @Override public Optional<DragonArena> dragonArena(TickContext context, int dragonId, Set<String> landmarks) {
             return arena(context.gameTick(), dragonId);
         }
     }
@@ -151,8 +151,8 @@ class FightDragonTest {
     @Test
     void crystalsWithoutABowNeedArrowsAndSayWhere() {
         moves.bow = false;
-        crystals = List.of(new DragonArena.Crystal(5, 42.5, 90, 0.5, false, false, false),
-                new DragonArena.Crystal(6, -12.5, 82, 40.5, true, false, false));
+        crystals = List.of(new DragonArena.Crystal(5, 42.5, 90, 0.5, false, null, false),
+                new DragonArena.Crystal(6, -12.5, 82, 40.5, true, null, false));
         FightTask fight = task(List.of());
         fight.start(new Tick(0));
         TaskResult result = run(fight, 0, 5);

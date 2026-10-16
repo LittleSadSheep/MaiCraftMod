@@ -187,4 +187,41 @@ public final class Protection {
     private boolean inProtectedLandmark(WorldPosition position, Set<String> protectedLandmarks) {
         return protectedLandmarkHit(position, protectedLandmarks).isPresent();
     }
+
+    /**
+     * 一片范围（以 center 为心、radius 格为半径的球）碰不碰得到记住的区域或这次任务额外保护的地标的地盘：
+     * 碰得到就说是哪一块，例如"记住的区域「河东的农场」"。
+     *
+     * <p>末影水晶这类一炸一大片的事用它：只看这片范围和记住的地盘有没有交叠，不逐格问方块归属——
+     * 归属没问到服务端的格一律按受保护，拿逐格的判断查一片没人碰过的末地石，会把整片都判成碰不得。
+     * 维度不同的不算交叠（一方没写维度就当相配，宁可多算进保护）。
+     */
+    public Optional<String> protectedAreaNear(WorldPosition center, double radius, Set<String> protectedLandmarks) {
+        for (RememberedRegion region : regions.regions()) {
+            if (sameDimension(region.center(), center)
+                    && distance(region.center(), center) <= region.radiusBlocks() + radius) {
+                return Optional.of("记住的区域「" + region.name() + "」");
+            }
+        }
+        for (String name : protectedLandmarks) {
+            Optional<WorldPosition> spot = places.place(name);
+            if (spot.isPresent() && sameDimension(spot.get(), center)
+                    && distance(spot.get(), center) <= LANDMARK_RADIUS + radius) {
+                return Optional.of("额外保护的地标「" + name + "」");
+            }
+        }
+        return Optional.empty();
+    }
+
+    // 两个位置在不在同一个维度：一方没写维度（角色当前所在维度）就当相配。
+    private static boolean sameDimension(WorldPosition a, WorldPosition b) {
+        return a.dimension() == null || b.dimension() == null || a.dimension().equals(b.dimension());
+    }
+
+    private static double distance(WorldPosition a, WorldPosition b) {
+        double dx = a.x() - b.x();
+        double dy = a.y() - b.y();
+        double dz = a.z() - b.z();
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
 }

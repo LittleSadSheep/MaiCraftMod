@@ -5,6 +5,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.Set;
 import java.util.UUID;
 
 import net.minecraft.world.entity.Entity;
@@ -43,9 +44,10 @@ public interface CombatSenses {
     /**
      * 打龙的龙场：龙、龙头、水晶、龙息、龙火球、末影人、出口门。没有加载着的活龙（或在死亡动画里的龙）为空。
      *
-     * @param dragonId 打哪一条（实体编号）；-1 为离出口门最近的那条
+     * @param dragonId           打哪一条（实体编号）；-1 为离出口门最近的那条
+     * @param protectedLandmarks 这次任务额外保护的地标名：水晶爆炸范围碰到它们的地盘就不射
      */
-    default Optional<DragonArena> dragonArena(TickContext context, int dragonId) {
+    default Optional<DragonArena> dragonArena(TickContext context, int dragonId, Set<String> protectedLandmarks) {
         return Optional.empty();
     }
 

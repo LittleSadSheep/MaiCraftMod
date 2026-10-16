@@ -145,4 +145,39 @@ class ProtectionTest {
         var protection = new Protection(unknown, List::of, name -> Optional.empty(), GuessesPlayerMade.NOTHING, SELF);
         assertTrue(protection.blockProtected(WALL, null, Set.of()));
     }
+
+    @Test
+    void 一片范围只看记住的地盘_归属没问到不算_别的维度不算() {
+        ReadsBlockOwnership unknown = new ReadsBlockOwnership() {
+            @Override public Optional<PlacedBy> whoPlaced(String dimension, int x, int y, int z) {
+                return Optional.empty();
+            }
+
+            @Override public boolean known(String dimension, int x, int y, int z) {
+                return false;
+            }
+        };
+        WorldPosition crystal = new WorldPosition(42, 90, 0, "minecraft:the_end");
+        // 末地岛上什么都没记：归属一格都没问到，这片照样碰得——水晶能射。
+        var bare = new Protection(unknown, List::of, name -> Optional.empty(), GuessesPlayerMade.NOTHING, SELF);
+        assertEquals(Optional.empty(), bare.protectedAreaNear(crystal, 12, Set.of()));
+        // 主世界同一个坐标附近记过的农场、地标"家"：不在末地，不算。
+        var overworldFarm = new RememberedRegion("河东的农场", new WorldPosition(40, 70, 0, "minecraft:overworld"), 16);
+        var overworldHome = Map.of("家", new WorldPosition(45, 70, 0, "minecraft:overworld"));
+        var elsewhere = new Protection(unknown, fixed(List.of(overworldFarm)), remembered(overworldHome),
+                GuessesPlayerMade.NOTHING, SELF);
+        assertEquals(Optional.empty(), elsewhere.protectedAreaNear(crystal, 12, Set.of("家")));
+        // 末地里记过的区域：地盘边缘离水晶 12 格以内就碰得到；离得更远不算。
+        var nearBase = new RememberedRegion("末地小屋", new WorldPosition(60, 90, 0, "minecraft:the_end"), 8);
+        var farBase = new RememberedRegion("末地远处的塔", new WorldPosition(80, 90, 0, "minecraft:the_end"), 8);
+        assertEquals(Optional.of("记住的区域「末地小屋」"), new Protection(unknown, fixed(List.of(nearBase)),
+                remembered(Map.of()), GuessesPlayerMade.NOTHING, SELF).protectedAreaNear(crystal, 12, Set.of()));
+        assertEquals(Optional.empty(), new Protection(unknown, fixed(List.of(farBase)),
+                remembered(Map.of()), GuessesPlayerMade.NOTHING, SELF).protectedAreaNear(crystal, 12, Set.of()));
+        // 这次任务额外保护的地标：地标八格地盘与爆炸范围交叠就算；名字不在清单里不算。
+        var endHome = Map.of("观景台", new WorldPosition(30, 90, 10, "minecraft:the_end"));
+        var landmark = new Protection(unknown, List::of, remembered(endHome), GuessesPlayerMade.NOTHING, SELF);
+        assertEquals(Optional.of("额外保护的地标「观景台」"), landmark.protectedAreaNear(crystal, 12, Set.of("观景台")));
+        assertEquals(Optional.empty(), landmark.protectedAreaNear(crystal, 12, Set.of()));
+    }
 }

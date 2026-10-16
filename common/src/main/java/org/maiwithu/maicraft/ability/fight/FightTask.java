@@ -171,7 +171,7 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     // 打龙模式：点名的里有一条龙；或者不点名、身边加载着活龙、没限定别的种类（限定了 ender_dragon 也算）。
     private void noticeDragon() {
         for (SeenTargets.Locked locked : named) {
-            Optional<DragonArena> arena = senses.dragonArena(currentContext, locked.entityId());
+            Optional<DragonArena> arena = senses.dragonArena(currentContext, locked.entityId(), landmarks());
             if (arena.isPresent() && arena.get().dragon().id() == locked.entityId()) {
                 dragonEntity = locked.entityId();
                 dragonName = describeOf(locked);
@@ -180,7 +180,7 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
             }
         }
         if (!named.isEmpty()) return;
-        Optional<DragonArena> nearby = senses.dragonArena(currentContext, -1);
+        Optional<DragonArena> nearby = senses.dragonArena(currentContext, -1, landmarks());
         if (nearby.isEmpty()) return;
         DragonArena.Dragon dragon = nearby.get().dragon();
         if (input.entityType() != null && !input.entityType().equals(dragon.type())) return;
@@ -228,7 +228,7 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     // 打龙开打前：龙不按普通怪评估（打不过不开打那套按怪的种类和数量算，套不到龙身上），改查装备，
     // 缺什么如实说；血低不拒战，引擎会先退开回血。这一批别的敌对生物照常认下、照常评估写进结果。
     private Next<Phase> assessDragon(TickContext context) {
-        Optional<DragonArena> arena = senses.dragonArena(context, dragonEntity);
+        Optional<DragonArena> arena = senses.dragonArena(context, dragonEntity, landmarks());
         if (arena.isEmpty()) {
             return Next.fail(Problem.of(Problem.Kind.TARGET_GONE, dragonName + " 开打前就不见了（走远或卸载了）",
                     "回到主岛出口门附近，看得到龙再打"));
@@ -398,6 +398,12 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
             return dragonEntity;
         }
 
+        // 打龙时水晶爆炸范围碰到这次任务额外保护的地标，就不射那颗。
+        @Override
+        public Set<String> protectedLandmarks() {
+            return landmarks();
+        }
+
         @Override
         public boolean wanted(CombatSenses.Threat threat, boolean attacker, boolean chasing) {
             if (threat.entityId() == dragonEntity) return false;
@@ -421,6 +427,11 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
             ids.remove(Integer.valueOf(dragonEntity));
             return ids;
         }
+    }
+
+    // 这次任务额外保护的地标名（permissions.protected_landmarks）。
+    private Set<String> landmarks() {
+        return input.permissions().protectedLandmarks();
     }
 
     private boolean countReached() {

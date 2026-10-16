@@ -58,7 +58,15 @@ public final class ClientCreatureSituations implements ReadsCreatureSituation {
         if (found == null || found.isRemoved()) {
             return Optional.empty();
         }
-        return Optional.of(new CreatureSituation(
+        return Optional.of(of(level, self, found));
+    }
+
+    /**
+     * 手上已经拿着这只生物时直接读它的处境，不再按 UUID 满世界找一遍：打龙前逐颗看水晶爆炸范围里的生物用它，
+     * 和按 UUID 问的是同一套判断。
+     */
+    public static CreatureSituation of(ClientLevel level, LocalPlayer self, Entity found) {
+        return new CreatureSituation(
                 found instanceof Player && found != self,
                 found instanceof Enemy,
                 found.hasCustomName(),
@@ -66,7 +74,7 @@ public final class ClientCreatureSituations implements ReadsCreatureSituation {
                 found instanceof Leashable leashable && leashable.isLeashed(),
                 enclosedBy(level::getBlockState, found.blockPosition()),
                 // 坐在船里、矿车里的：多半是有人运着的牲口；骑在蜘蛛上的骷髅这类不算。
-                found.getVehicle() instanceof Boat || found.getVehicle() instanceof AbstractMinecart));
+                found.getVehicle() instanceof Boat || found.getVehicle() instanceof AbstractMinecart);
     }
 
     /**

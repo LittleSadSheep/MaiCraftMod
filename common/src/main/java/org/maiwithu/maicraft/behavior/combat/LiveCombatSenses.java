@@ -11,6 +11,7 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
@@ -33,6 +34,7 @@ import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
+import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.game.player.ReadsFoodValues;
 import org.maiwithu.maicraft.game.world.Hostility;
 import org.maiwithu.maicraft.game.world.InteractionRange;
@@ -56,6 +58,8 @@ public final class LiveCombatSenses implements CombatSenses {
     private final ModRangedWeapons weapons;
     /** 龙场的读数：记着龙与火球上一刻的位置估速度、龙的这件事干了几刻。 */
     private final LiveDragonSight dragonSight = new LiveDragonSight();
+    /** 当前世界的保护判断：射水晶前问爆炸范围里有没有受保护的；没进世界时给 null。 */
+    private final Supplier<Protection> protection;
 
     /** @param foods 食物数值：数"带了几份口粮"时按游戏的食物组件认，不按物品名猜。 */
     public LiveCombatSenses(CombatMemory memory, ReadsFoodValues foods) {
@@ -64,9 +68,16 @@ public final class LiveCombatSenses implements CombatSenses {
 
     /** @param weapons 联动的远程武器：打不打得过也按真会拿来打的那件算 */
     public LiveCombatSenses(CombatMemory memory, ReadsFoodValues foods, ModRangedWeapons weapons) {
+        this(memory, foods, weapons, () -> null);
+    }
+
+    /** @param protection 当前世界的保护判断，打龙时看水晶爆炸范围里有没有受保护的东西 */
+    public LiveCombatSenses(CombatMemory memory, ReadsFoodValues foods, ModRangedWeapons weapons,
+                            Supplier<Protection> protection) {
         this.memory = memory;
         this.foods = Objects.requireNonNull(foods, "foods");
         this.weapons = Objects.requireNonNull(weapons, "weapons");
+        this.protection = Objects.requireNonNull(protection, "protection");
     }
 
     @Override
@@ -120,8 +131,8 @@ public final class LiveCombatSenses implements CombatSenses {
     }
 
     @Override
-    public Optional<DragonArena> dragonArena(TickContext context, int dragonId) {
-        return dragonSight.read(context, dragonId);
+    public Optional<DragonArena> dragonArena(TickContext context, int dragonId, Set<String> protectedLandmarks) {
+        return dragonSight.read(context, dragonId, protection.get(), protectedLandmarks);
     }
 
     @Override

@@ -77,11 +77,13 @@ public record DragonArena(long tick, Dragon dragon, List<Crystal> crystals, List
     /**
      * 一颗末影水晶。
      *
-     * @param caged        罩着原版那样的铁栏笼（柱顶 5×5、四格高的一圈）
-     * @param spared       爆炸范围里有别的玩家或有主的生物（有名字、驯服、拴着）：不射
-     * @param endermanNear 爆炸范围里有末影人：炸到它算我打的，会惹毛它，先等它走开
+     * @param caged            罩着原版那样的铁栏笼（柱顶 5×5、四格高的一圈）
+     * @param protectedInBlast 爆炸范围里受保护的是什么（别的玩家、有主的生物、记住的区域、这次额外保护的地标），
+     *                         一句话说清，例如"爆炸范围里有别的玩家 Steve"；没有为 null。有就不射
+     * @param endermanNear     爆炸范围里有末影人：炸到它算我打的，会惹毛它，先等它走开
      */
-    public record Crystal(int id, double x, double y, double z, boolean caged, boolean spared, boolean endermanNear) {}
+    public record Crystal(int id, double x, double y, double z, boolean caged, String protectedInBlast,
+                          boolean endermanNear) {}
 
     /**
      * 一团龙息（龙喷的、龙火球落地的药水云）。

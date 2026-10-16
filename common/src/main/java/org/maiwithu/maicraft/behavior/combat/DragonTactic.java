@@ -17,8 +17,8 @@ import java.util.Map;
  *   <li>先对付贴脸的：惹毛的末影人、别的敌对生物马上够得着我——交回普通打法（返回 null），打完接着打龙；</li>
  *   <li>龙死了：进了死亡动画就停手，去出口门边收经验；</li>
  *   <li>退开回血：血到 12 以下退，回到 18 或满血再回来；</li>
- *   <li>射水晶：正给龙回血的那颗先射（打掉它龙自己掉 10 点血），其余近的先；爆炸范围里有别的玩家、有主的生物不射，
- *       有末影人先等它走开（最多 10 秒）；</li>
+ *   <li>射水晶：正给龙回血的那颗先射（打掉它龙自己掉 10 点血），其余近的先；爆炸范围里有别的玩家、有主的生物、
+ *       记住的区域或这次额外保护的地标不射，有末影人先等它走开（最多 10 秒）；</li>
  *   <li>龙趴着：砍龙头（趴着的龙箭射不动）；吼到第 30 刻与喷的时候退出龙头前方；</li>
  *   <li>龙飞着：有能射的、32 格内看得见就射；</li>
  *   <li>都不是：到出口门旁等它趴下。</li>
@@ -58,7 +58,7 @@ public final class DragonTactic {
     /** 退开回血，附上为什么。 */
     public record Rest(String why) implements Move {}
 
-    /** 放弃这颗水晶，附上为什么（爆炸范围里一直有别的玩家或有主的生物）。 */
+    /** 放弃这颗水晶，附上为什么（爆炸范围里一直有受保护的东西）。 */
     public record SkipCrystal(DragonArena.Crystal crystal, String why) implements Move {}
 
     /** 射这颗水晶。 */
@@ -154,7 +154,8 @@ public final class DragonTactic {
                 .thenComparingInt(DragonArena.Crystal::id));
         DragonArena.Crystal blocked = null;
         for (DragonArena.Crystal crystal : open) {
-            if (crystal.spared()) {
+            // 爆炸范围里有受保护的（别的玩家、有主的生物、记住的区域、这次额外保护的地标）：先跳过，射别的。
+            if (crystal.protectedInBlast() != null) {
                 if (blocked == null) blocked = crystal;
                 continue;
             }
@@ -164,7 +165,8 @@ public final class DragonTactic {
             }
             return new ShootCrystal(crystal);
         }
-        if (blocked != null) return new SkipCrystal(blocked, "爆炸范围里一直有别的玩家或有主的生物");
+        // 能射的都射完了，剩下的爆炸范围里还有受保护的：放弃最前面那颗，结果里写明是什么挡着。
+        if (blocked != null) return new SkipCrystal(blocked, blocked.protectedInBlast());
         // 只剩等末影人走开的：先去打龙，回头再射。
         return null;
     }

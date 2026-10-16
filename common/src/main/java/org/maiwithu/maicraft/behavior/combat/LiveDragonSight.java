@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
@@ -15,22 +16,23 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.AreaEffectCloud;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.Mob;
-import net.minecraft.world.entity.OwnableEntity;
 import net.minecraft.world.entity.boss.EnderDragonPart;
 import net.minecraft.world.entity.boss.enderdragon.EndCrystal;
 import net.minecraft.world.entity.boss.enderdragon.EnderDragon;
 import net.minecraft.world.entity.boss.enderdragon.phases.EnderDragonPhase;
 import net.minecraft.world.entity.monster.EnderMan;
-import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.DragonFireball;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
+import org.maiwithu.maicraft.behavior.permission.ClientCreatureSituations;
+import org.maiwithu.maicraft.behavior.permission.Protection;
+import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
 import org.maiwithu.maicraft.game.world.EndExitPortal;
 import org.maiwithu.maicraft.game.world.ObservationVisibility;
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -57,8 +59,13 @@ final class LiveDragonSight {
     private final Map<Integer, Vec3> lastFireballs = new HashMap<>();
     private long lastFireballTick;
 
-    /** 读一份龙场；附近没有加载着的龙（活的或在死亡动画里）为空。 */
-    Optional<DragonArena> read(TickContext context, int preferredId) {
+    /**
+     * 读一份龙场；附近没有加载着的龙（活的或在死亡动画里）为空。
+     *
+     * @param protection 当前世界的保护判断：水晶爆炸范围里的生物、记住的区域与地标归它回答；还没进世界为 null
+     * @param landmarks  这次任务额外保护的地标名
+     */
+    Optional<DragonArena> read(TickContext context, int preferredId, Protection protection, Set<String> landmarks) {
         var player = context.player();
         LocalPlayer self = player == null ? null : player.localPlayer();
         ClientLevel level = player == null ? null : player.level();
@@ -69,7 +76,7 @@ final class LiveDragonSight {
         BlockPos origin = dragon.getFightOrigin();
         DragonArena.Portal portal = portal(level, origin.getX(), origin.getZ());
         DragonArena.Dragon seen = dragon(self, dragon, tick);
-        List<DragonArena.Crystal> crystals = crystals(level, self, portal);
+        List<DragonArena.Crystal> crystals = crystals(level, self, portal, protection, landmarks);
         return Optional.of(new DragonArena(tick, seen, crystals, clouds(level, self), fireballs(level, self, tick),
                 endermen(level, self), portal, self.getMaxHealth(),
                 self.getItemBySlot(EquipmentSlot.HEAD).is(Items.CARVED_PUMPKIN)));
@@ -144,33 +151,44 @@ final class LiveDragonSight {
         return DragonArena.Activity.CIRCLING;
     }
 
-    // 主岛的水晶：有没有铁栏笼；爆炸范围里有没有别的玩家、有主的生物、末影人。
-    private static List<DragonArena.Crystal> crystals(ClientLevel level, LocalPlayer self, DragonArena.Portal portal) {
+    // 主岛的水晶：有没有铁栏笼；爆炸范围里有没有受保护的（别的玩家、有主的生物、记住的区域、这次额外保护的地标）、末影人。
+    private static List<DragonArena.Crystal> crystals(ClientLevel level, LocalPlayer self, DragonArena.Portal portal,
+                                                      Protection protection, Set<String> landmarks) {
+        String dimension = level.dimension().location().toString();
         AABB island = new AABB(portal.x() - DragonGeometry.ISLAND_RADIUS, level.getMinBuildHeight(),
                 portal.z() - DragonGeometry.ISLAND_RADIUS, portal.x() + DragonGeometry.ISLAND_RADIUS,
                 level.getMaxBuildHeight(), portal.z() + DragonGeometry.ISLAND_RADIUS);
         List<DragonArena.Crystal> crystals = new ArrayList<>();
         for (EndCrystal crystal : level.getEntitiesOfClass(EndCrystal.class, island, EndCrystal::isAlive)) {
             AABB blast = crystal.getBoundingBox().inflate(DragonGeometry.CRYSTAL_BLAST);
-            boolean spared = false;
+            String guarded = null;
             boolean endermanNear = false;
             for (LivingEntity near : level.getEntitiesOfClass(LivingEntity.class, blast,
                     living -> living != self && living.isAlive()
                             && living.distanceTo(crystal) <= DragonGeometry.CRYSTAL_BLAST)) {
                 if (near instanceof EnderMan) endermanNear = true;
-                else if (near instanceof Player || owned(near)) spared = true;
+                else if (guarded == null) guarded = bystander(level, self, near, protection);
+            }
+            // 没有受保护的生物，再看爆炸范围碰不碰到记住的区域、这次额外保护的地标：只看地盘交不交叠，
+            // 不逐格问方块归属（归属没问到的格一律算受保护，那样整圈水晶都射不成）。末地岛上什么都没记就都能射。
+            if (guarded == null && protection != null) {
+                WorldPosition at = new WorldPosition(crystal.getBlockX(), crystal.getBlockY(), crystal.getBlockZ(), dimension);
+                guarded = protection.protectedAreaNear(at, DragonGeometry.CRYSTAL_BLAST, landmarks)
+                        .map(area -> "爆炸范围碰到" + area).orElse(null);
             }
             crystals.add(new DragonArena.Crystal(crystal.getId(), crystal.getX(), crystal.getY(), crystal.getZ(),
-                    caged(level, crystal.blockPosition()), spared, endermanNear));
+                    caged(level, crystal.blockPosition()), guarded, endermanNear));
         }
         return crystals;
     }
 
-    // 有主的生物：起了名字、被驯服、拴着绳。
-    private static boolean owned(LivingEntity living) {
-        if (living.hasCustomName()) return true;
-        if (living instanceof OwnableEntity ownable && ownable.getOwnerUUID() != null) return true;
-        return living instanceof Mob mob && mob.isLeashed();
+    // 爆炸范围里这只受不受保护，和别处碰不碰生物同一个判断：别的玩家；有名字、驯服、拴着、圈着、坐在船或矿车里的。
+    // 受保护就说清是谁，不受保护为 null。
+    private static String bystander(ClientLevel level, LocalPlayer self, LivingEntity near, Protection protection) {
+        ReadsCreatureSituation.CreatureSituation situation = ClientCreatureSituations.of(level, self, near);
+        if (situation.player()) return "爆炸范围里有别的玩家 " + near.getName().getString();
+        boolean bonded = protection != null ? protection.creatureProtected(situation) : situation.bondedToSomeone();
+        return bonded ? "爆炸范围里有别人的生物 " + BuiltInRegistries.ENTITY_TYPE.getKey(near.getType()) : null;
     }
 
     // 原版铁栏笼：水晶周围 5×5、从水晶脚下一格往上四格的那一圈铁栏，数够了就算。

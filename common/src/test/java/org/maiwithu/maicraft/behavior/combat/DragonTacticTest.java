@@ -40,7 +40,7 @@ class DragonTacticTest {
     }
 
     private static DragonArena.Crystal crystal(int id, double x, double z) {
-        return new DragonArena.Crystal(id, x, 90, z, false, false, false);
+        return new DragonArena.Crystal(id, x, 90, z, false, null, false);
     }
 
     private static DragonArena arena(long tick, DragonArena.Dragon dragon, List<DragonArena.Crystal> crystals,
@@ -147,15 +147,25 @@ class DragonTacticTest {
 
     @Test
     void crystalsWithBystandersWaitOrAreGivenUp() {
-        DragonArena.Crystal guarded = new DragonArena.Crystal(5, 10, 90, 20, false, true, false);
+        DragonArena.Crystal guarded = new DragonArena.Crystal(5, 10, 90, 20, false, "爆炸范围里有别的玩家 Steve", false);
         DragonArena.Crystal other = crystal(6, 40, -30);
         DragonArena both = arena(0, circling(80), List.of(guarded, other), List.of(), List.of());
         assertEquals(6, assertInstanceOf(DragonTactic.ShootCrystal.class,
                 decide(me(20, true, true), both, DragonTactic.Memory.FRESH)).crystal().id(), "爆炸范围里有别人的先跳过");
         DragonArena alone = arena(0, circling(80), List.of(guarded), List.of(), List.of());
-        assertEquals(5, assertInstanceOf(DragonTactic.SkipCrystal.class,
-                decide(me(20, true, true), alone, DragonTactic.Memory.FRESH)).crystal().id(), "只剩它还有别人：放弃并写明");
-        DragonArena.Crystal enderman = new DragonArena.Crystal(7, 10, 90, 20, false, false, true);
+        DragonTactic.SkipCrystal skipped = assertInstanceOf(DragonTactic.SkipCrystal.class,
+                decide(me(20, true, true), alone, DragonTactic.Memory.FRESH));
+        assertEquals(5, skipped.crystal().id(), "只剩它还有别人：放弃并写明");
+        assertEquals("爆炸范围里有别的玩家 Steve", skipped.why(), "结果里写明挡着的是谁");
+        // 爆炸范围碰到记住的区域：和有别人一样先射别的，只剩它时放弃并写明是哪块地盘。
+        DragonArena.Crystal nearBase = new DragonArena.Crystal(8, 10, 90, 20, false, "爆炸范围碰到记住的区域「末地小屋」", false);
+        assertEquals(6, assertInstanceOf(DragonTactic.ShootCrystal.class, decide(me(20, true, true),
+                arena(0, circling(80), List.of(nearBase, other), List.of(), List.of()), DragonTactic.Memory.FRESH))
+                .crystal().id(), "碰到记住区域的先跳过");
+        assertEquals("爆炸范围碰到记住的区域「末地小屋」", assertInstanceOf(DragonTactic.SkipCrystal.class,
+                decide(me(20, true, true), arena(0, circling(80), List.of(nearBase), List.of(), List.of()),
+                        DragonTactic.Memory.FRESH)).why());
+        DragonArena.Crystal enderman = new DragonArena.Crystal(7, 10, 90, 20, false, null, true);
         DragonArena waiting = arena(300, circling(80), List.of(enderman), List.of(), List.of());
         DragonTactic.Memory justSeen = new DragonTactic.Memory(false, Map.of(), Map.of(7, 250L), false);
         assertInstanceOf(DragonTactic.WaitForPerch.class, decide(me(20, true, true), waiting, justSeen),
