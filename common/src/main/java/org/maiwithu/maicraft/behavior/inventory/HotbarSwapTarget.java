@@ -9,7 +9,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.ItemStack;
 
 /**
- * 主背包里的东西要换到快捷栏时换进哪一格，全仓只有这一份：走路要垫的料、挖路的工具、打架的武器都按它挑。
+ * 主背包里的东西要换到快捷栏时换进哪一格，全仓只有这一份：走路要垫的料、挖路的工具、拿到手上用的东西（打架的武器、无线终端、床）都按它挑。
  *
  * <p>空格先于放着零碎东西的格子；有耐久的（工具、武器、盔甲、盾、打火石）、能吃的、桶、火把、不死图腾、
  * 正要用的东西不换走——换走了挖方块没镐子、掉下去没水桶、打完架挖矿又得开背包把镐换回来。
@@ -47,6 +47,16 @@ public final class HotbarSwapTarget {
             if (fallback >= 0) return fallback;
         }
         return -1;
+    }
+
+    /**
+     * 拿主背包里的一件东西到手上用（打架的剑、存东西的无线终端、要放的床）时换进快捷栏哪一格：按 {@link #pick} 挑空格
+     * 或零碎格；九格全是不能动的，就换进最靠右、不是手上那格的一格——挤走别的一件，也不把手里正拿着的剑、镐挤回背包。
+     */
+    public static int forHand(List<Holding> hotbar, int selected) {
+        int target = pick(hotbar, selected);
+        if (target >= 0) return target;
+        return selected == HOTBAR_SIZE - 1 ? HOTBAR_SIZE - 2 : HOTBAR_SIZE - 1;
     }
 
     /** 有耐久的（工具、武器、盔甲、盾、打火石）、能吃的、桶、火把、不死图腾、正要用的不挪；别的零碎可以换进背包。 */

@@ -85,7 +85,7 @@ final class ModShot implements Action {
         return switch (stage) {
             case ARM -> runStep(context, () -> idOf(player.localPlayer().getMainHandItem()).equals(ready.weaponItem()) ? null
                     // 联动的远程武器也和弓一样：换进快捷栏空格再选中，不挤掉手里的。
-                    : hands.weaponToMainhand(ready.weaponItem()).orElse(null), Stage.AMMO, "没能把" + ready.weaponItem() + "拿到手上");
+                    : hands.actionToMainhand(ready.weaponItem()).orElse(null), Stage.AMMO, "没能把" + ready.weaponItem() + "拿到手上");
             case AMMO -> runStep(context, () -> ready.offhandAmmo() == null
                     || idOf(player.localPlayer().getOffhandItem()).equals(ready.offhandAmmo()) ? null
                     : gear.wear(ready.offhandAmmo(), GearSlotName.OFFHAND).orElse(null), Stage.AIM,

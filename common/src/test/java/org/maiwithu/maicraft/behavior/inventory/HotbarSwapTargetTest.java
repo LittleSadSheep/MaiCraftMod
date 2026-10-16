@@ -40,6 +40,18 @@ class HotbarSwapTargetTest {
     }
 
     @Test
+    void takingSomethingIntoTheHandNeverPushesOutWhatIsHeld() {
+        // 手上拿着剑（第 0 格），快捷栏还放着一块零碎：无线终端换进零碎那格，剑留在第 0 格。
+        List<Holding> hotbar = new ArrayList<>(List.of(Holding.KEEP, Holding.KEEP, Holding.KEEP, Holding.MOVABLE,
+                Holding.KEEP, Holding.KEEP, Holding.KEEP, Holding.KEEP, Holding.KEEP));
+        assertEquals(3, HotbarSwapTarget.forHand(hotbar, 0));
+        // 九格全是工具、吃的：换进最靠右、不是手上的那一格，手里的剑还是不动。
+        hotbar.set(3, Holding.KEEP);
+        assertEquals(8, HotbarSwapTarget.forHand(hotbar, 0));
+        assertEquals(7, HotbarSwapTarget.forHand(hotbar, 8));
+    }
+
+    @Test
     void toolsFoodBucketsAndTorchesStayAndOddsAndEndsMayGo() {
         assertEquals(Holding.KEEP, HotbarSwapTarget.holding(new ItemStack(Items.STONE_PICKAXE), ItemsToKeep.NOTHING));
         assertEquals(Holding.KEEP, HotbarSwapTarget.holding(new ItemStack(Items.BREAD), ItemsToKeep.NOTHING));

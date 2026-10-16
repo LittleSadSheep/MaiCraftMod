@@ -50,50 +50,27 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
     }
 
     /**
-     * 把这件东西弄到主手的动作；已经在主手时给空。
-     * 身上没有、或它穿在盔甲格里（那是穿卸装备的事）时也如实给空。
+     * 把这件东西弄到主手的动作，不挤掉手里拿着的：在快捷栏就按数字键选中它；在副手经原生副手交换；在主背包就开背包把它
+     * 换进快捷栏的空格（没有空格换进放零碎东西的那格，按 {@link HotbarSwapTarget#forHand} 挑），关上背包再按数字键选中
+     * 那一格——手里的剑、镐留在原来那格。打架换武器、拿无线终端存东西、拿床去放都是这一套：存完一趟东西剑还在快捷栏，
+     * 接着打猎按数字键就切回来，不会贴着鱼拿着终端一下一下敲。
+     * 已经在手上、身上没有、穿在盔甲格里（那是穿卸装备的事）时如实给空。
      */
     public Optional<Action> actionToMainhand(String itemId) {
         PlayerContext context = contexts.get();
-        if (context == null) return Optional.empty();
-        int source = findItem(context.localPlayer(), itemId);
-        if (source == ALREADY_SELECTED) return Optional.empty();
-        // 身上没有这件东西：接缝如实给空，缺的自己去拿是拿到物品模型的事。
-        if (source == NOT_CARRIED) return Optional.empty();
-        // 穿在身上的（盔甲格）不是这里换的：那是穿卸装备的事，如实给空不冒充换得了。
-        if (source >= 36 && source <= 39) return Optional.empty();
-        return Optional.of(new MoveAction("把 " + itemId + " 换到主手", source));
-    }
-
-    /**
-     * 把打架用的武器拿到手上，不挤掉手里拿着的：在快捷栏就按数字键选中它；在主背包就开背包把它换进快捷栏的空格
-     * （没有空格换进放零碎东西的那格，按 {@link HotbarSwapTarget} 挑），关上背包再按数字键选中那一格——
-     * 手里的镐留在原来那格，挖矿时不用再开背包换回来，下回打架武器已在快捷栏，按数字键就切过去。
-     * 快捷栏九格全是工具、吃的这类不能动的，就换进最靠右、不是手上那格的一格。副手的经原生副手交换换到手上。
-     * 已经在手上、身上没有、穿在盔甲格里时给空。
-     */
-    public Optional<Action> weaponToMainhand(String itemId) {
-        PlayerContext context = contexts.get();
         if (context == null || context.localPlayer() == null) return Optional.empty();
         int source = findItem(context.localPlayer(), itemId);
-        if (source == ALREADY_SELECTED || source == NOT_CARRIED || source >= 36 && source <= 39) return Optional.empty();
-        if (source < FIRST_MAIN_SLOT || source > LAST_MAIN_SLOT) {
-            // 已在快捷栏（按数字键）或在副手（原生副手交换）：和普通换到主手一样，不开背包。
-            return Optional.of(new MoveAction("把 " + itemId + " 换到主手", source));
-        }
-        Inventory inventory = context.localPlayer().getInventory();
-        int selected = VanillaHotbar.swapTarget(inventory.selected);
-        int target = HotbarSwapTarget.pick(HotbarSwapTarget.hotbar(inventory.items, ItemsToKeep.NOTHING), selected);
-        if (target < 0) target = selected == LAST_HOTBAR_SLOT ? LAST_HOTBAR_SLOT - 1 : LAST_HOTBAR_SLOT;
-        return Optional.of(new MoveAction("把 " + itemId + " 换进快捷栏第 " + target + " 格拿到手上", source, target, true));
+        // 身上没有这件东西：接缝如实给空，缺的自己去拿是拿到物品模型的事。
+        if (source == ALREADY_SELECTED || source == NOT_CARRIED) return Optional.empty();
+        // 穿在身上的（盔甲格）不是这里换的：那是穿卸装备的事，如实给空不冒充换得了。
+        if (source >= 36 && source <= 39) return Optional.empty();
+        return Optional.of(keepingHeld(context.localPlayer().getInventory(), source, "把 " + itemId + " 换到主手"));
     }
 
-    /** 原版换快捷栏的点击只认 0~8 格，最右一格是 8。 */
-    private static final int LAST_HOTBAR_SLOT = 8;
-
     /**
-     * 把背包指定那一格（0~35）上的东西弄到主手：同种的东西有好几件时拿的就是这一格的那件。
-     * 那一格已经是选中的快捷栏格时给空（不用换）；格号不在主背包与快捷栏范围、或那一格空着时也给空。
+     * 把背包指定那一格（0~35）上的东西弄到主手：同种的东西有好几件时拿的就是这一格的那件；主背包里的同样换进快捷栏的
+     * 空格再选中，不挤掉手里拿着的。那一格已经是选中的快捷栏格时给空（不用换）；格号不在主背包与快捷栏范围、
+     * 或那一格空着时也给空。
      */
     public Optional<Action> actionToMainhandFrom(int sourceSlot, String what) {
         PlayerContext context = contexts.get();
@@ -102,7 +79,15 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
         }
         var inventory = context.localPlayer().getInventory();
         if (sourceSlot == inventory.selected || inventory.getItem(sourceSlot).isEmpty()) return Optional.empty();
-        return Optional.of(new MoveAction(what, sourceSlot));
+        return Optional.of(keepingHeld(inventory, sourceSlot, what));
+    }
+
+    // 快捷栏的按数字键、副手的原生交换，都不开背包；主背包的换进快捷栏空格（或零碎格）后再选中那一格。
+    private MoveAction keepingHeld(Inventory inventory, int source, String what) {
+        if (source < FIRST_MAIN_SLOT || source > LAST_MAIN_SLOT) return new MoveAction(what, source);
+        int target = HotbarSwapTarget.forHand(HotbarSwapTarget.hotbar(inventory.items, ItemsToKeep.NOTHING),
+                VanillaHotbar.swapTarget(inventory.selected));
+        return new MoveAction(what + "（换进快捷栏第 " + target + " 格）", source, target, true);
     }
 
     /**

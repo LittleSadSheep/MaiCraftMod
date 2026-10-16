@@ -92,7 +92,7 @@ public final class MeleeStrike implements Action {
         if (best.slot() == self.getInventory().selected) return Optional.empty();
         if (!betterThanHeld(best, carried, self, shielding)) return Optional.empty();
         // 在快捷栏按数字键选中；在主背包就换进快捷栏的空格（或放零碎的格）再选中，手里的镐留在原格。
-        return hands.weaponToMainhand(best.itemId());
+        return hands.actionToMainhand(best.itemId());
     }
 
     // 挑中的比手里拿着的强才换：手里已经是一样好的剑斧，别为一样的东西来回切；手里不是剑斧就换。

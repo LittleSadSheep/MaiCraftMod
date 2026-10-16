@@ -82,7 +82,7 @@ public final class LiveCombatHands {
         if (distance <= ARM_DISTANCE) return;
         WeaponChoice.Picked best = WeaponChoice.pickMelee(WeaponCarriedReader.read(self), false);
         if (best.weapon() == WeaponChoice.Weapon.BARE_HANDS || best.slot() == self.getInventory().selected) return;
-        arming = hands.weaponToMainhand(best.itemId()).orElse(null);
+        arming = hands.actionToMainhand(best.itemId()).orElse(null);
     }
 
     /**
