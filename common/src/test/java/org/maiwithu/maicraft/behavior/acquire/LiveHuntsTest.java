@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -55,6 +56,15 @@ class LiveHuntsTest {
         final List<String> done = new ArrayList<>();
         boolean inReach;
         double[] targetAt = {12, 64, 0};
+        /** 身上有一把剑斧还没拿到手上：要它时给一个换武器的动作，换完就拿在手上了。 */
+        boolean weaponInBackpack;
+
+        @Override public Optional<Action> readyWeapon(TickContext context) {
+            if (!weaponInBackpack) return Optional.empty();
+            weaponInBackpack = false;
+            done.add("拿武器");
+            return Optional.of(instant());
+        }
 
         @Override public Action strike(TickContext context, int entityId) {
             done.add("打");
@@ -163,6 +173,18 @@ class LiveHuntsTest {
         moves.inReach = true;
         hunting.tick(TICK);
         assertEquals("打", moves.done.get(moves.done.size() - 1), moves.done.toString());
+    }
+
+    @Test
+    void 锁定一只后先把剑斧拿到手上再去追_手上有了就不再换() {
+        FakeMoves moves = new FakeMoves();
+        moves.weaponInBackpack = true;
+        Action hunting = hunts(moves).hunt(List.of(sheep()), wool(), Permissions.DEFAULT).orElseThrow();
+        for (int i = 0; i < 4; i++) hunting.tick(TICK);
+        // 追到跟前才出手，那时不为换武器开背包：所以先换好武器再走过去。
+        assertEquals("拿武器", moves.done.get(0), moves.done.toString());
+        assertTrue(moves.done.contains("走到 12"), moves.done.toString());
+        assertEquals(1, Collections.frequency(moves.done, "拿武器"), moves.done.toString());
     }
 
     @Test

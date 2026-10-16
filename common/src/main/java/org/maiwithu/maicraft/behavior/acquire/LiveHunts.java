@@ -41,6 +41,10 @@ public final class LiveHunts implements Hunts {
     private static final long PER_TARGET_TICKS = 20L * 40;
     /** 出去找时，走向一个搜索点的期限（刻）；走不到就换下一个点。 */
     private static final long PER_POINT_TICKS = 20L * 30;
+    /** 还没为哪一只换过武器。 */
+    private static final int NOT_ARMED = Integer.MIN_VALUE;
+    /** 换武器这件事在"正在推进的动作"里的名字。 */
+    private static final String ARMING = "拿武器";
     /** 追猎物时按多大的方格认"它挪地方了"（格）：挪出这一格就按新位置重新走。 */
     private static final double APPROACH_CELL = 4.0;
 
@@ -100,6 +104,8 @@ public final class LiveHunts implements Hunts {
         private Action current;
         private String currentKey;
         private Action loot;
+        /** 已经为哪一只换过武器：换一只猎物再看一眼手上，已经拿着最好的剑斧就不动。 */
+        private int armedFor = NOT_ARMED;
         /** 目标与搜索点各自的计时：超了就换，不在一只猎物、一个点上耗死。 */
         private long stageTicks;
         /** 正在走向的搜索点；走到了看一片，看完换下一个。 */
@@ -214,6 +220,9 @@ public final class LiveHunts implements Hunts {
                 dropTarget();
                 return ActionStatus.progressed();
             }
+            if (arming(tick)) {
+                return ActionStatus.running();
+            }
             if (!seen.get() || !moves.inReach(tick, target.entityId())) {
                 // 被墙挡住或还够不着：朝它现在的位置走过去，看得见又够得着再出手；一直走不到就超时换下一只。
                 // 它挪出原来那片（四格见方）就按新位置重新走，不追着扫描时的旧位置跑。
@@ -233,6 +242,24 @@ public final class LiveHunts implements Hunts {
             }
             stepCurrent(tick, "打 " + target.describe());
             return ActionStatus.running();
+        }
+
+        // 锁定一只后、追它之前，先把最好的剑斧拿到手上（主背包里的也开背包拿出来）：等追到跟前才出手，那时贴着它
+        // 不为换武器开背包，手里拿着终端、镐就只能用它敲。换完或换不成都只做一次，换不成照样追，出手时有什么用什么。
+        private boolean arming(TickContext tick) {
+            if (armedFor == target.entityId()) return false;
+            if (current == null || !ARMING.equals(currentKey)) {
+                Optional<Action> weapon = moves.readyWeapon(tick);
+                if (weapon.isEmpty()) {
+                    armedFor = target.entityId();
+                    return false;
+                }
+                keep(ARMING, weapon::get);
+            }
+            if (stepCurrent(tick, "把剑斧拿到手上")) {
+                armedFor = target.entityId();
+            }
+            return true;
         }
 
         /** 挑下一只：候选里还有就接着打；搜索模式下这一片打完了，接着走下一个点。 */

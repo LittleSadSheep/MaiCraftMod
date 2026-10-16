@@ -78,21 +78,31 @@ public final class MeleeStrike implements Action {
     // 拿哪件、怎么拿：已在主手不动；快捷栏的选中；主背包的看对手远近决定开不开背包。
     private Optional<Action> chooseArming(LocalPlayer self, Entity target) {
         boolean shielding = target instanceof LivingEntity living && living.isBlocking();
+        // 在快捷栏按数字键选中；在主背包就换进快捷栏的空格（或放零碎的格）再选中，手里的镐留在原格。
+        return weaponWorthTaking(self, shielding, self.distanceTo(target) < INVENTORY_SWAP_DISTANCE)
+                .flatMap(hands::actionToMainhand);
+    }
+
+    /**
+     * 该换到手上的那把近战武器（物品编号）：剑斧里最好的那把；对手举盾时斧优先。手里已经是一样好的、身上没有剑斧时为空。
+     * 出手前贴着对手（{@code hotbarOnly}）不为换武器开背包，只在快捷栏里挑；还没贴脸、要去追一只猎物之前不限，
+     * 主背包里的也拿出来——等游到跟前再发现手里拿的是终端，就只能拿它一下一下敲。
+     */
+    public static Optional<String> weaponWorthTaking(LocalPlayer self, boolean opponentShielding, boolean hotbarOnly) {
         List<WeaponChoice.Carried> carried = WeaponCarriedReader.read(self);
-        WeaponChoice.Picked best = WeaponChoice.pickMelee(carried, shielding);
+        WeaponChoice.Picked best = WeaponChoice.pickMelee(carried, opponentShielding);
         if (best.weapon() == WeaponChoice.Weapon.BARE_HANDS) return Optional.empty();
-        if (!WeaponChoice.inHotbar(best.slot()) && self.distanceTo(target) < INVENTORY_SWAP_DISTANCE) {
+        if (!WeaponChoice.inHotbar(best.slot()) && hotbarOnly) {
             List<WeaponChoice.Carried> hotbar = new ArrayList<>();
             for (WeaponChoice.Carried stack : carried) {
                 if (WeaponChoice.inHotbar(stack.slot())) hotbar.add(stack);
             }
-            best = WeaponChoice.pickMelee(hotbar, shielding);
+            best = WeaponChoice.pickMelee(hotbar, opponentShielding);
             if (best.weapon() == WeaponChoice.Weapon.BARE_HANDS) return Optional.empty();
         }
         if (best.slot() == self.getInventory().selected) return Optional.empty();
-        if (!betterThanHeld(best, carried, self, shielding)) return Optional.empty();
-        // 在快捷栏按数字键选中；在主背包就换进快捷栏的空格（或放零碎的格）再选中，手里的镐留在原格。
-        return hands.actionToMainhand(best.itemId());
+        if (!betterThanHeld(best, carried, self, opponentShielding)) return Optional.empty();
+        return Optional.of(best.itemId());
     }
 
     // 挑中的比手里拿着的强才换：手里已经是一样好的剑斧，别为一样的东西来回切；手里不是剑斧就换。

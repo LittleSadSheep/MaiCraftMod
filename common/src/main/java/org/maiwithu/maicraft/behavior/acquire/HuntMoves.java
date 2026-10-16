@@ -15,6 +15,12 @@ public interface HuntMoves {
     /** 对这只生物出手一次：先把挑好的近战武器拿到主手，再原生攻击（充能够格才挥、逐刻确认）。 */
     Action strike(TickContext context, int entityId);
 
+    /**
+     * 开追之前把身上最好的剑斧拿到手上：在快捷栏按数字键，在主背包也开背包换进快捷栏的空格再选中。
+     * 手里已经是一样好的剑斧、身上没有剑斧时为空。出手那一刻已经贴着猎物，那时不为换武器开背包，所以要在追之前换好。
+     */
+    Optional<Action> readyWeapon(TickContext context);
+
     /** 站在这儿够不够得着它：按角色的实体触及距离量到它的包围盒，够不着就得先走近。 */
     boolean inReach(TickContext context, int entityId);
 

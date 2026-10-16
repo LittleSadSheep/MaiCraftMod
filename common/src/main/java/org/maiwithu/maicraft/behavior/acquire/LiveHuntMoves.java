@@ -9,10 +9,12 @@ import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 
 import org.maiwithu.maicraft.behavior.combat.MeleeStrike;
+import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
 import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
 import it.unimi.dsi.fastutil.longs.LongSets;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
+import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.InteractionRange;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -23,8 +25,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 狩猎出手的生产实现：原生攻击与走到。
  *
  * <p>出手和自卫、点名战斗是同一个近战出手：先把剑斧里最好的那把换到主手，再原生攻击——充能够格才挥、
- * 换手当刻与目标无敌帧不挥，这些逐刻确认都在交互里。够不够得着按角色的实体触及距离量，
- * 够不着由狩猎先走近；走位只走不改，追猎物不挖路不垫路。
+ * 换手当刻与目标无敌帧不挥，这些逐刻确认都在交互里。剑斧在追之前就换到手上：出手时贴着猎物，不为换武器开背包。
+ * 够不够得着按角色的实体触及距离量，够不着由狩猎先走近；走位只走不改，追猎物不挖路不垫路。
  */
 public final class LiveHuntMoves implements HuntMoves {
 
@@ -32,9 +34,19 @@ public final class LiveHuntMoves implements HuntMoves {
     private static final double REACH_MARGIN = 0.4;
 
     private final WalkTo walks;
+    /** 换武器时用的这一刻的角色：换手动作开背包、关背包要读它。 */
+    private PlayerContext current;
+    private final ClientMovesToMainhand hands = new ClientMovesToMainhand(() -> this.current);
 
     public LiveHuntMoves(WalkTo walks) {
         this.walks = Objects.requireNonNull(walks, "walks");
+    }
+
+    @Override public Optional<Action> readyWeapon(TickContext context) {
+        current = context.player();
+        if (current == null || current.localPlayer() == null) return Optional.empty();
+        // 还没追到跟前：主背包里的剑斧也拿出来，换进快捷栏的空格再选中；猎物不还手，开一下背包没关系。
+        return MeleeStrike.weaponWorthTaking(current.localPlayer(), false, false).flatMap(hands::actionToMainhand);
     }
 
     @Override public Action strike(TickContext context, int entityId) {
