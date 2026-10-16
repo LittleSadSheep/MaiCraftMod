@@ -6,6 +6,8 @@ import java.util.function.IntSupplier;
 
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
+import org.maiwithu.maicraft.game.player.BackpackStack;
+import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Change;
@@ -20,7 +22,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 捡起掉出来的那台，从世界记忆里划掉这一格。真人在野外掏出工作台做完东西，也会顺手挖起来揣回包里。
  *
  * <p>被吃饭、自卫打断时手上那一步停住，回来接着做、接着收。收回只是顺手的事：收不回（挖不下来、掉的没捡到）
- * 记进 attempts，交出去的仍是做东西那一步的结论。
+ * 记进 attempts，交出去的仍是做东西那一步的结论。动手前先看一眼：台子已经不在那一格（被挖走、换成了别的方块）
+ * 就不去挖那一格；背包里没地方装这台就留着它，不把它挖成地上一个捡不起来的掉落物。
  */
 final class TakesBackPlacedStation implements Action {
 
@@ -33,6 +36,8 @@ final class TakesBackPlacedStation implements Action {
     private final TaskRecords records;
     private final SetsUpWorkstation placer;
     private final WorldMemory memory;
+    /** 背包：收回前看还有没有地方装这台。 */
+    private final BackpackView backpack;
     /** 身上此刻有几台这种设施：收回后多出来才算捡回了包里。 */
     private final IntSupplier carried;
     /** 做东西那一步交出的结论；还没做完为 null。 */
@@ -43,7 +48,7 @@ final class TakesBackPlacedStation implements Action {
 
     TakesBackPlacedStation(Action run, WorkstationRecipe.Kind kind, AtomicReference<WorldPosition> placedAt,
             Permissions permissions, TaskRecords records, SetsUpWorkstation placer, WorldMemory memory,
-            IntSupplier carried) {
+            BackpackView backpack, IntSupplier carried) {
         this.run = run;
         this.kind = kind;
         this.placedAt = placedAt;
@@ -51,6 +56,7 @@ final class TakesBackPlacedStation implements Action {
         this.records = records;
         this.placer = placer;
         this.memory = memory;
+        this.backpack = backpack;
         this.carried = carried;
     }
 
@@ -71,10 +77,20 @@ final class TakesBackPlacedStation implements Action {
         return result;
     }
 
-    // 做完了：摆台没成就没东西要收；收回的现场动作没接上，如实记一笔，台子留在原地。
+    // 做完了：摆台没成就没东西要收。台子已经不在那一格就不挖（那里现在是别的方块，挖了是挖别人的），从记忆里划掉；
+    // 背包装不下就留着台子，照样能用；收回的现场动作没接上，如实记一笔，台子留在原地。
     private ActionStatus startTakingBack() {
         WorldPosition at = placedAt.get();
         if (at == null || placer == null) return result;
+        if (placer.gone(at, kind.blockType())) {
+            memory.forget(MemoryKind.WORKSTATION, at);
+            attempt("台子已经不在 " + spot(at) + " 了（被挖走或换成了别的方块），没东西可收");
+            return result;
+        }
+        if (!roomFor(kind.blockType())) {
+            attempt("背包里没地方装，台子留在 " + spot(at));
+            return result;
+        }
         carriedBefore = carried.getAsInt();
         takingBack = placer.takeBack(at, permissions).orElse(null);
         if (takingBack == null) {
@@ -101,6 +117,15 @@ final class TakesBackPlacedStation implements Action {
         } else {
             attempt("没收回，台子留在 " + spot(at) + why);
         }
+    }
+
+    // 背包里装得下一台：有空格，或者同种的那一格还没叠满。
+    private boolean roomFor(String itemId) {
+        if (backpack.usedSlots() < backpack.totalSlots()) return true;
+        for (BackpackStack stack : backpack.stacks()) {
+            if (stack.itemId().equals(itemId) && stack.count() < stack.maxStackSize()) return true;
+        }
+        return false;
     }
 
     private void change(String note) {

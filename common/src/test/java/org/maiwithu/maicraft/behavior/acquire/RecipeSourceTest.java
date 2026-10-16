@@ -848,6 +848,61 @@ class RecipeSourceTest {
         assertEquals(List.of("收回临时摆的工作台：挖下来了，掉出来的工作台没捡回背包：掉落物没捡到"), records.attempts);
     }
 
+    /** 替身：在刚摆的台上做一次，做的时候现场顺带变了（台子被人挖走、做出来的东西把背包塞满）。 */
+    private static RecipeRuns craftingWhile(Runnable meanwhile) {
+        return new RecipeRuns() {
+            @Override public Optional<Action> run(WorkstationRecipe recipe, WorldPosition station, int times,
+                    Permissions permissions, TaskRecords records) {
+                return Optional.empty();
+            }
+
+            @Override public Optional<Action> runAtRememberedStation(WorkstationRecipe recipe, int times,
+                    Permissions permissions, TaskRecords records) {
+                return Optional.of(new Action() {
+                    @Override public ActionStatus tick(TickContext context) {
+                        meanwhile.run();
+                        return ActionStatus.done();
+                    }
+
+                    @Override public String describe() {
+                        return "在工作台上做";
+                    }
+                });
+            }
+        };
+    }
+
+    @Test
+    void 台子在做的时候被人挖走了_不去挖那一格_记忆划掉() {
+        // 那一格现在可能是别人放的别的方块：不挖，只把记忆里这台划掉。
+        WorldMemory memory = memory();
+        PlacesWorkstation placer = new PlacesWorkstation(memory, true);
+        CollectedRecords records = new CollectedRecords();
+
+        assertInstanceOf(ActionStatus.Done.class, makePickaxe(
+                pickaxeSource(memory, craftingWhile(() -> placer.goneAt = PLACED_AT), placer), records));
+        assertTrue(placer.takenBack.isEmpty(), "台子不在了就不去挖那一格");
+        assertTrue(memory.recordAt(MemoryKind.WORKSTATION, PLACED_AT).isEmpty());
+        assertEquals(List.of("收回临时摆的工作台：台子已经不在 3, 64, 3 了（被挖走或换成了别的方块），没东西可收"),
+                records.attempts);
+    }
+
+    @Test
+    void 背包塞满了_台子留在原地_不挖成地上的掉落物() {
+        WorldMemory memory = memory();
+        PlacesWorkstation placer = new PlacesWorkstation(memory, true);
+        CollectedRecords records = new CollectedRecords();
+        Runnable fillUp = () -> {
+            while (backpack.usedSlots() < backpack.totalSlots()) backpack.add("minecraft:dirt", 64);
+        };
+
+        assertInstanceOf(ActionStatus.Done.class, makePickaxe(pickaxeSource(memory, craftingWhile(fillUp), placer),
+                records));
+        assertTrue(placer.takenBack.isEmpty(), "装不下就不拆");
+        assertTrue(memory.recordAt(MemoryKind.WORKSTATION, PLACED_AT).isPresent(), "留着的台子照样记着，下次还能用");
+        assertEquals(List.of("收回临时摆的工作台：背包里没地方装，台子留在 3, 64, 3"), records.attempts);
+    }
+
     @Test
     void 收回时被打断_回来接着收() {
         // 挖台子挖到一半肚子饿了：先去吃一口，回来接着挖，不把台子丢在原地。

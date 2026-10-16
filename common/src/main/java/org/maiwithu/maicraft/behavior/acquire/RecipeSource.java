@@ -421,8 +421,8 @@ public final class RecipeSource implements ItemSource {
             steps.addAll(placeSteps(recipe, permissions, placedAt));
             Action run = shortfall.explaining(runAtPlacedStation(recipe, times, permissions, context.records()));
             steps.add(recipe.kind().cooks() ? run : new TakesBackPlacedStation(run, recipe.kind(), placedAt,
-                    permissions, context.records(), placer, memory, () -> CarriedItems.matching(backpack, offhand,
-                            WantedItem.ofItem(recipe.kind().blockType()), tags)));
+                    permissions, context.records(), placer, memory, backpack, () -> CarriedItems.matching(backpack,
+                            offhand, WantedItem.ofItem(recipe.kind().blockType()), tags)));
             return new StepwiseActions("就地摆下" + recipe.kind().displayName() + "再做"
                     + recipe.result().describe(), steps.toArray(Action[]::new));
         }
