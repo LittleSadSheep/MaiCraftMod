@@ -7,9 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 
@@ -25,7 +23,6 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.travel.spi.OfferSink;
 import org.maiwithu.maicraft.behavior.travel.spi.TravelOffer;
 import org.maiwithu.maicraft.behavior.travel.spi.TravelRequest;
-import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -34,12 +31,8 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
-import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
-import org.maiwithu.maicraft.kernel.task.Task;
-import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
-import org.maiwithu.maicraft.kernel.goal.Target;
 
 /**
  * 过折跃门：报价只在末地、隔着虚空时非它不可、要稀有品许可；一段里先备珍珠、走到站位、扔、等落到虚空另一边，
@@ -65,7 +58,7 @@ class PearlCrossingTest {
     private final DimensionFakes.FakeWalks walks = new DimensionFakes.FakeWalks();
     private final DimensionFakes.FakeToMainhand hands = new DimensionFakes.FakeToMainhand();
     private final PearlSupply supply = new PearlSupply();
-    private final Throws throwing = new Throws();
+    private final DimensionFakes.Throws throwing = new DimensionFakes.Throws();
     private final DimensionTravelServices services = new DimensionTravelServices(world, () -> null, walks, supply,
             hands, throwing, null, null, null, null);
     private final TravelFakes.TestTick tick = new TravelFakes.TestTick();
@@ -77,23 +70,8 @@ class PearlCrossingTest {
         world.blocks.put(STANCE.below(), Blocks.END_STONE.defaultBlockState());
     }
 
-    /** 摆一扇原版样子的折跃门：四周一片空气，门上下一格十字形基岩、再上下一格一块基岩。 */
     private void gateAt(BlockPos gate) {
-        for (int dx = -6; dx <= 6; dx++) {
-            for (int dy = -4; dy <= 4; dy++) {
-                for (int dz = -6; dz <= 6; dz++) {
-                    world.blocks.putIfAbsent(gate.offset(dx, dy, dz), Blocks.AIR.defaultBlockState());
-                }
-            }
-        }
-        world.blocks.put(gate, Blocks.END_GATEWAY.defaultBlockState());
-        for (int dy : new int[] {-1, 1}) {
-            for (BlockPos arm : List.of(gate, gate.east(), gate.west(), gate.north(), gate.south())) {
-                world.blocks.put(arm.offset(0, dy, 0), Blocks.BEDROCK.defaultBlockState());
-            }
-        }
-        world.blocks.put(gate.above(2), Blocks.BEDROCK.defaultBlockState());
-        world.blocks.put(gate.below(2), Blocks.BEDROCK.defaultBlockState());
+        DimensionFakes.gateAt(world, gate);
     }
 
     private void carryPearls(int count) {
@@ -187,7 +165,7 @@ class PearlCrossingTest {
     @Test
     void 身上没珍珠先去弄一颗_扔一次就到了外岛_落地站稳() {
         carryPearls(0);
-        throwing.plan.add(new Throw(null, () -> {
+        throwing.plan.add(new DimensionFakes.Throw(null, () -> {
             carryPearls(pearls() - 1);
             world.feet = new BlockPos(1030, 62, 4);
         }));
@@ -206,8 +184,8 @@ class PearlCrossingTest {
     @Test
     void 扔歪一次_记一笔再扔一次过去了() {
         carryPearls(2);
-        throwing.plan.add(new Throw(null, () -> carryPearls(pearls() - 1)));
-        throwing.plan.add(new Throw(null, () -> {
+        throwing.plan.add(new DimensionFakes.Throw(null, () -> carryPearls(pearls() - 1)));
+        throwing.plan.add(new DimensionFakes.Throw(null, () -> {
             carryPearls(pearls() - 1);
             world.feet = new BlockPos(1030, 62, 4);
         }));
@@ -223,8 +201,8 @@ class PearlCrossingTest {
     @Test
     void 两次都没进门_交回走不通_两次经过都写上() {
         carryPearls(5);
-        throwing.plan.add(new Throw(null, () -> carryPearls(pearls() - 1)));
-        throwing.plan.add(new Throw(null, () -> carryPearls(pearls() - 1)));
+        throwing.plan.add(new DimensionFakes.Throw(null, () -> carryPearls(pearls() - 1)));
+        throwing.plan.add(new DimensionFakes.Throw(null, () -> carryPearls(pearls() - 1)));
         PearlCrossingLeg leg = new PearlCrossingLeg(EAST_GATE, RARE, services);
 
         ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class,
@@ -239,8 +217,8 @@ class PearlCrossingTest {
     @Test
     void 站着看不见门洞_换个站位再扔_不算扔过() {
         carryPearls(1);
-        throwing.plan.add(new Throw(Problem.of(Problem.Kind.UNREACHABLE, "从当前位置看不到门洞"), null));
-        throwing.plan.add(new Throw(null, () -> {
+        throwing.plan.add(new DimensionFakes.Throw(Problem.of(Problem.Kind.UNREACHABLE, "从当前位置看不到门洞"), null));
+        throwing.plan.add(new DimensionFakes.Throw(null, () -> {
             carryPearls(0);
             world.feet = new BlockPos(1030, 62, 4);
         }));
@@ -283,7 +261,7 @@ class PearlCrossingTest {
     @Test
     void 等传送时停下不安全() {
         carryPearls(1);
-        throwing.plan.add(new Throw(null, () -> carryPearls(0)));
+        throwing.plan.add(new DimensionFakes.Throw(null, () -> carryPearls(0)));
         PearlCrossingLeg leg = new PearlCrossingLeg(EAST_GATE, RARE, services);
         for (int i = 0; i < 10; i++) {
             leg.tick(tick);
@@ -296,7 +274,7 @@ class PearlCrossingTest {
     void 行程里隔着虚空只问它_挑朝着目的地的门_过去后走完剩下的路() {
         gateAt(SOUTH_GATE);
         carryPearls(1);
-        throwing.plan.add(new Throw(null, () -> {
+        throwing.plan.add(new DimensionFakes.Throw(null, () -> {
             carryPearls(0);
             world.feet = new BlockPos(1030, 62, 4);
         }));
@@ -313,9 +291,9 @@ class PearlCrossingTest {
     void 一扇门扔两颗都没过去_行程换下一扇() {
         gateAt(SOUTH_GATE);
         carryPearls(3);
-        throwing.plan.add(new Throw(null, () -> carryPearls(pearls() - 1)));
-        throwing.plan.add(new Throw(null, () -> carryPearls(pearls() - 1)));
-        throwing.plan.add(new Throw(null, () -> {
+        throwing.plan.add(new DimensionFakes.Throw(null, () -> carryPearls(pearls() - 1)));
+        throwing.plan.add(new DimensionFakes.Throw(null, () -> carryPearls(pearls() - 1)));
+        throwing.plan.add(new DimensionFakes.Throw(null, () -> {
             carryPearls(pearls() - 1);
             world.feet = new BlockPos(1030, 62, 4);
         }));
@@ -332,20 +310,12 @@ class PearlCrossingTest {
 
     /** 在主岛上跑一趟去外岛某处的行程：只登记折跃门这一种方式，走路段一刻就到。 */
     private TaskResult runJourney(BlockPos to, List<TravelDestination> walked, int maxTicks) {
-        TravelWorldView spots = new TravelWorldView() {
-            @Override public WorldPosition currentSpot() {
-                return new WorldPosition(world.feet.getX(), world.feet.getY(), world.feet.getZ(), world.dimension);
-            }
-
-            @Override public Target.Toward currentFacing() {
-                return Target.Toward.NORTH;
-            }
-        };
+        TravelWorldView spots = DimensionFakes.spots(world);
         JourneyTask journey = new JourneyTask(new JourneyTask.Journey(
                 TravelDestination.confirmed(new WorldPosition(to.getX(), to.getY(), to.getZ(), DimensionRoute.END), 2),
                 null, Map.of(), RARE, 0), spots, List.of(new PearlCrossing(services)), destination -> {
                     walked.add(destination);
-                    return new ArrivingWalk();
+                    return new DimensionFakes.ArrivingWalk();
                 });
         journey.start(tick);
         for (int i = 0; i < maxTicks; i++) {
@@ -371,26 +341,6 @@ class PearlCrossingTest {
         }
     }
 
-    /** 一次扔：要么瞄不上（带问题），要么扔出去，扔出去之后现场怎么变由测试摆。 */
-    private record Throw(Problem refused, Runnable effect) {}
-
-    /** 朝一格扔东西的替身：按剧本一次一次扔，记下对着哪一格。 */
-    private static final class Throws implements UsesBlocks {
-        final List<BlockPos> aimedAt = new ArrayList<>();
-        final Deque<Throw> plan = new ArrayDeque<>();
-
-        @Override public Action useBlock(BlockPos target, InteractionConfirmation confirmation) {
-            throw new AssertionError("过折跃门不右键方块");
-        }
-
-        @Override public Action useHeldItemToward(BlockPos target, InteractionConfirmation confirmation) {
-            aimedAt.add(target);
-            Throw next = plan.isEmpty() ? new Throw(null, () -> {}) : plan.remove();
-            return next.refused() != null ? DimensionFakes.FakeObtain.failing(next.refused())
-                    : DimensionFakes.FakeObtain.immediate(next.effect());
-        }
-    }
-
     /** 拿珍珠的替身：弄到一颗就放进背包；也可以按给定问题弄不到。 */
     private final class PearlSupply implements ItemNeeds {
         final List<ItemRequest> asked = new ArrayList<>();
@@ -400,23 +350,6 @@ class PearlCrossingTest {
             asked.add(request);
             if (failure != null) return DimensionFakes.FakeObtain.failing(failure);
             return DimensionFakes.FakeObtain.immediate(() -> carryPearls(pearls() + request.count()));
-        }
-    }
-
-    /** 走路段替身：一刻就到。 */
-    private static final class ArrivingWalk implements Task {
-        @Override public TickResult tick(TickContext context) {
-            return TickResult.finished(TaskResult.done("出行：到了"));
-        }
-
-        @Override public void pause() {}
-
-        @Override public TaskResult close(CloseReason reason) {
-            return TaskResult.done("出行：到了");
-        }
-
-        @Override public String describe() {
-            return "走路替身";
         }
     }
 }

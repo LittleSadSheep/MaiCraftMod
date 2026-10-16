@@ -37,13 +37,18 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
 import org.maiwithu.maicraft.game.world.EndExitPortal;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
+import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.CloseReason;
+import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.maiwithu.maicraft.kernel.task.TickResult;
 
-/** 跨维度出行的离线测试替身：摆现场、演找门与用品，不碰游戏对象。 */
+/** 跨维度出行的离线测试替身：摆现场、演找门与用品、摆折跃门与扔珍珠，不碰游戏对象。 */
 final class DimensionFakes {
 
     private DimensionFakes() {}
@@ -348,5 +353,73 @@ final class DimensionFakes {
     static TravelFakes.ScriptedWalk failedWalk(String why) {
         return new TravelFakes.ScriptedWalk(
                 WalkReport.failed(Problem.of(Problem.Kind.UNREACHABLE, why, null), new BlockPos(0, 64, 0), false));
+    }
+
+    /** 摆一扇原版样子的折跃门：四周一片空气，门上下一格十字形基岩、再上下一格一块基岩。 */
+    static void gateAt(FakeWorld world, BlockPos gate) {
+        for (int dx = -6; dx <= 6; dx++) {
+            for (int dy = -4; dy <= 4; dy++) {
+                for (int dz = -6; dz <= 6; dz++) {
+                    world.blocks.putIfAbsent(gate.offset(dx, dy, dz), Blocks.AIR.defaultBlockState());
+                }
+            }
+        }
+        world.blocks.put(gate, Blocks.END_GATEWAY.defaultBlockState());
+        for (int dy : new int[] {-1, 1}) {
+            for (BlockPos arm : List.of(gate, gate.east(), gate.west(), gate.north(), gate.south())) {
+                world.blocks.put(arm.offset(0, dy, 0), Blocks.BEDROCK.defaultBlockState());
+            }
+        }
+        world.blocks.put(gate.above(2), Blocks.BEDROCK.defaultBlockState());
+        world.blocks.put(gate.below(2), Blocks.BEDROCK.defaultBlockState());
+    }
+
+    /** 一次扔：要么瞄不上（带问题），要么扔出去，扔出去之后现场怎么变由测试摆。 */
+    record Throw(Problem refused, Runnable effect) {}
+
+    /** 朝一格扔东西的替身：按剧本一次一次扔，记下对着哪一格。 */
+    static final class Throws implements UsesBlocks {
+        final List<BlockPos> aimedAt = new ArrayList<>();
+        final Deque<Throw> plan = new ArrayDeque<>();
+
+        @Override public Action useBlock(BlockPos target, InteractionConfirmation confirmation) {
+            throw new AssertionError("过折跃门不右键方块");
+        }
+
+        @Override public Action useHeldItemToward(BlockPos target, InteractionConfirmation confirmation) {
+            aimedAt.add(target);
+            Throw next = plan.isEmpty() ? new Throw(null, () -> {}) : plan.remove();
+            return next.refused() != null ? FakeObtain.failing(next.refused()) : FakeObtain.immediate(next.effect());
+        }
+    }
+
+    /** 行程读角色此刻在哪：照现场替身的脚下与维度。 */
+    static TravelWorldView spots(FakeWorld world) {
+        return new TravelWorldView() {
+            @Override public WorldPosition currentSpot() {
+                return new WorldPosition(world.feet.getX(), world.feet.getY(), world.feet.getZ(), world.dimension);
+            }
+
+            @Override public Target.Toward currentFacing() {
+                return Target.Toward.NORTH;
+            }
+        };
+    }
+
+    /** 走路段替身：一刻就到。 */
+    static final class ArrivingWalk implements Task {
+        @Override public TickResult tick(TickContext context) {
+            return TickResult.finished(TaskResult.done("出行：到了"));
+        }
+
+        @Override public void pause() {}
+
+        @Override public TaskResult close(CloseReason reason) {
+            return TaskResult.done("出行：到了");
+        }
+
+        @Override public String describe() {
+            return "走路替身";
+        }
     }
 }
