@@ -62,6 +62,7 @@ import org.maiwithu.maicraft.behavior.landing.BoatPlan;
 import org.maiwithu.maicraft.behavior.landing.LandingAid;
 import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationProtection;
 import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationObstacles;
+import org.maiwithu.maicraft.behavior.navigation.baritone.WalkDropPolicy;
 import org.maiwithu.maicraft.behavior.navigation.baritone.MaiCraftGoals;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -98,6 +99,8 @@ public class CalculationContext {
     public final boolean allowDownward;
     public int minFallHeight;
     public final FallDamage fallDamageBudget;
+    /** 开算这一刻的最大生命：往下跳摔完要剩它的一半才照跳。 */
+    private final float maxHealth;
     private final BlockPos fallOrigin;
     private final double fallOriginY;
     public final double waterWalkSpeed;
@@ -191,6 +194,7 @@ public class CalculationContext {
                 () -> NavigationObstacles.capture(world, player).all(),
                 player.getBbWidth(), player.getBbHeight());
         this.fallDamageBudget = FallDamage.capture(player);
+        this.maxHealth = player.getMaxHealth();
         this.fallOrigin = baritone.getPlayerContext().playerFeet().immutable();
         this.fallOriginY = player.getY();
         this.toolSet = new ToolSet(player);
@@ -290,6 +294,17 @@ public class CalculationContext {
                                        int destX, int supportY, int destZ, BlockState support) {
         return fallDamageBudget.damage(fallDistance(x, y, z, effectiveStartHeight, destX, supportY, destZ),
                 FallDamage.Landing.of(support), initialFall(x, y, z, effectiveStartHeight)) == 0;
+    }
+
+    /**
+     * 会摔伤的一跳折成的代价：摔完还剩一半以上的血就照跳，扣的血按每点约四格路加进去；剩不到一半为 COST_INF，
+     * 交给落地办法或绕路。按开算这一刻的身体算，出发前还会按当刻再算一次。
+     */
+    public double fallInjuryCost(int x, int y, int z, int effectiveStartHeight,
+                                 int destX, int supportY, int destZ, BlockState support) {
+        return WalkDropPolicy.injuryCost(fallDamageBudget, maxHealth,
+                fallDistance(x, y, z, effectiveStartHeight, destX, supportY, destZ),
+                FallDamage.Landing.of(support), initialFall(x, y, z, effectiveStartHeight));
     }
 
     /** Survival estimate; route admission separately requires protecting any predicted injury. */

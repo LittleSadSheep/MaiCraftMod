@@ -655,7 +655,9 @@ final class BaritoneWalkRun implements WalkRun {
     // 升一级脱困：只在任务许可低于挖天然方块、人又困在封死的坑里时；新开关写进引擎、从原地重新算路。
     private boolean raiseToEscape(IBaritone engine, BlockPos feet, long tick) {
         ClientLevel level = lastContext == null ? null : lastContext.level();
-        if (level == null || !escape.raise(() -> TrapCheck.trapped(new LiveTrapCells(level), feet), tick)) {
+        LocalPlayer self = lastContext == null ? null : lastContext.localPlayer();
+        if (level == null || self == null
+                || !escape.raise(() -> TrapCheck.trapped(new LiveTrapCells(level), feet, WalkDropPolicy.maxDrop(self)), tick)) {
             return false;
         }
         LOG.info("卡在坑里（{}），地形许可临时升到 {} 脱困", feet.toShortString(), escape.effective().changes());
@@ -669,7 +671,7 @@ final class BaritoneWalkRun implements WalkRun {
     // 脱困中隔几刻看一眼：站在地上、从这里只走已经出得去了，就降回任务原来的许可，站稳后按原许可重新算路。
     private void restoreAfterEscape(PlayerContext context, LocalPlayer player, BlockPos feet) {
         if (!escape.dueCheck(context.clientTick()) || !player.onGround() || context.level() == null) return;
-        if (TrapCheck.trapped(new LiveTrapCells(context.level()), feet)) return;
+        if (TrapCheck.trapped(new LiveTrapCells(context.level()), feet, WalkDropPolicy.maxDrop(player))) return;
         escape.restore();
         owner.applyTerrain(this);
         replanWhenSafe = true;

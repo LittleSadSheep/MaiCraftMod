@@ -54,6 +54,16 @@ class TrapCheckTest {
     }
 
     @Test
+    void pillarTopIsATrapOnlyWhenTheJumpDownHurtsTooMuch() {
+        // 站在五格高的柱顶上：只认三格的跳法下不去，算困住；按走路的线（摔完剩一半的血）跳得下去，就不算。
+        Ground ground = new Ground();
+        for (int y = 64; y <= 68; y++) ground.solid.add(new BlockPos(0, y, 0));
+        BlockPos top = new BlockPos(0, 69, 0);
+        assertTrue(TrapCheck.trapped(ground, top, WalkDropPolicy.MIN_DROP));
+        assertFalse(TrapCheck.trapped(ground, top, 5));
+    }
+
+    @Test
     void twoDeepOneByOnePitIsATrap() {
         Ground ground = new Ground();
         ground.dugOut.add(new BlockPos(0, 63, 0));

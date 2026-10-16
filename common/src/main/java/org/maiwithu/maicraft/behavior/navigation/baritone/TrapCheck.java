@@ -9,8 +9,8 @@ import net.minecraft.core.BlockPos;
 
 /**
  * 卡坑判断：只走不挖不垫，从脚下这格能走到的地方是不是一个封死的坑。
- * 在水平 16 格、上下 12 格的盒子里按玩家走路的样子铺开——平走、跳上一格台阶、往下跳三格以内、
- * 水里上下游（从水流游上去也算走得出去）——铺到盒子边上就是出得去；铺不到边，
+ * 在水平 16 格、上下 12 格的盒子里按玩家走路的样子铺开——平走、跳上一格台阶、往下跳到走路肯跳的高度
+ * （摔完还剩一半以上的血，至少三格）、水里上下游（从水流游上去也算走得出去）——铺到盒子边上就是出得去；铺不到边，
  * 又只有很小一片（不到 24 格站得住的地方），或整片都见不到天，就是困住了。
  *
  * <p>围起来的大院子、见得到天的大圈不算坑：多半是有人围的，任务许可说不动土就不动。
@@ -23,8 +23,6 @@ final class TrapCheck {
     static final int HEIGHT = 12;
     /** 封死的一片站得住的格子不到这么多，就算小坑，见不见得到天都算困住。 */
     static final int SMALL_POCKET = 24;
-    /** 往下跳最多几格：再高会摔伤，只走的路线也不跳。 */
-    static final int MAX_DROP = 3;
     /** 铺到这么多格还没铺完，说明是一大片，按出得去处理。 */
     private static final int MAX_VISITED = 6000;
 
@@ -49,8 +47,17 @@ final class TrapCheck {
 
     private TrapCheck() {}
 
-    /** 脚下这格是不是困在封死的坑里。 */
+    /** 脚下这格是不是困在封死的坑里；往下只认三格以内的跳法。 */
     static boolean trapped(Cells cells, BlockPos feet) {
+        return trapped(cells, feet, WalkDropPolicy.MIN_DROP);
+    }
+
+    /**
+     * 脚下这格是不是困在封死的坑里。
+     *
+     * @param maxDrop 往下跳最多几格：和走路算路同一条线，摔完还剩一半以上的血的落差（至少三格）
+     */
+    static boolean trapped(Cells cells, BlockPos feet, int maxDrop) {
         int fx = feet.getX();
         int fy = feet.getY();
         int fz = feet.getZ();
@@ -62,7 +69,7 @@ final class TrapCheck {
         while (!queue.isEmpty()) {
             BlockPos at = queue.removeFirst();
             sawSky |= cells.sky(at.getX(), at.getY() + 1, at.getZ());
-            for (BlockPos next : moves(cells, at)) {
+            for (BlockPos next : moves(cells, at, maxDrop)) {
                 if (next == null) return false;
                 if (Math.abs(next.getX() - fx) > RADIUS || Math.abs(next.getZ() - fz) > RADIUS
                         || Math.abs(next.getY() - fy) > HEIGHT) {
@@ -77,8 +84,8 @@ final class TrapCheck {
         return seen.size() < SMALL_POCKET || !sawSky;
     }
 
-    // 从这一格只走能到的相邻格：平走、跳上一格、往下跳三格以内、水里上下游。区块没加载的方向给 null（说不清，按出得去）。
-    private static BlockPos[] moves(Cells cells, BlockPos at) {
+    // 从这一格只走能到的相邻格：平走、跳上一格、往下跳 maxDrop 格以内、水里上下游。区块没加载的方向给 null（说不清，按出得去）。
+    private static BlockPos[] moves(Cells cells, BlockPos at, int maxDrop) {
         int x = at.getX();
         int y = at.getY();
         int z = at.getZ();
@@ -88,7 +95,7 @@ final class TrapCheck {
             int nx = x + side[0];
             int nz = z + side[1];
             if (!cells.loaded(nx, nz)) return new BlockPos[] {null};
-            BlockPos step = step(cells, x, y, z, nx, nz);
+            BlockPos step = step(cells, x, y, z, nx, nz, maxDrop);
             if (step != null) found[count++] = step;
         }
         // 水里：往上游、往下潜都算走。
@@ -101,12 +108,12 @@ final class TrapCheck {
         return result;
     }
 
-    // 往一个方向走一步：同一层能站就平走；头顶有空、前面高一格能站就跳上去；前面是空的就往下找三格内能站的地方。
-    private static BlockPos step(Cells cells, int x, int y, int z, int nx, int nz) {
+    // 往一个方向走一步：同一层能站就平走；头顶有空、前面高一格能站就跳上去；前面是空的就往下找 maxDrop 格内能站的地方。
+    private static BlockPos step(Cells cells, int x, int y, int z, int nx, int nz, int maxDrop) {
         if (stand(cells, nx, y, nz)) return new BlockPos(nx, y, nz);
         if (cells.open(x, y + 2, z) && stand(cells, nx, y + 1, nz)) return new BlockPos(nx, y + 1, nz);
         if (!cells.open(nx, y, nz) || !cells.open(nx, y + 1, nz)) return null;
-        for (int drop = 1; drop <= MAX_DROP; drop++) {
+        for (int drop = 1; drop <= maxDrop; drop++) {
             if (!cells.open(nx, y - drop, nz)) return null;
             if (stand(cells, nx, y - drop, nz)) return new BlockPos(nx, y - drop, nz);
         }

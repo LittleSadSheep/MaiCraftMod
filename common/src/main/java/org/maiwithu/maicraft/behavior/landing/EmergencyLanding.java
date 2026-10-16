@@ -43,8 +43,10 @@ public final class EmergencyLanding {
         // 看不清下面落在哪（没加载、读不懂）时，掉得很快就当会掉血；看得清就按预计伤害算，护住了的（羽毛掉落、落在床上）不接手。
         if (ground == null) return player.getDeltaMovement().y <= FAST_FALL_SPEED;
         if (liquidOnTheWay(player, ground)) return false;
-        // 摔掉半颗心以内、血又还多：真人不会为这点伤开喷气背包、倒水桶。原先预计伤害大于零就接手，
-        // 实机在三格高的垫块上施工，一踩空就开喷气背包刹车，十五秒里来回九次。血少时照旧一点都不让摔。
+        // 摔完还剩一半以上的血：真人不会为这点伤开喷气背包、倒水桶，走路有意往下跳的一跳也按这条线收，
+        // 不让坠落救援在半空接手、把走路打断。剩不到一半时，摔掉一颗心以上、或这一下会掉到只剩一颗心就接手；
+        // 实机在三格高的垫块上施工，一踩空就开喷气背包刹车，十五秒里来回九次，所以一颗心以内、血又还多的不接。
+        if (keepsHalf(player, ground)) return false;
         float damage = predictedDamage(player, ground);
         return damage >= MINOR_FALL_DAMAGE || damage > 0 && damage >= player.getHealth() - MINOR_FALL_DAMAGE;
     }
@@ -182,9 +184,19 @@ public final class EmergencyLanding {
     }
 
     private static float predictedDamage(LocalPlayer player, BlockPos support) {
+        return FallDamage.capture(player).damage(dropTo(player, support),
+                FallDamage.Landing.of(player.level().getBlockState(support)), true);
+    }
+
+    private static boolean keepsHalf(LocalPlayer player, BlockPos support) {
+        return FallDamage.capture(player).keepsHalf(player.getMaxHealth(), dropTo(player, support),
+                FallDamage.Landing.of(player.level().getBlockState(support)), true);
+    }
+
+    // 脚到落点方块顶面还有多高；顶面高度读不懂时按整格算。
+    private static double dropTo(LocalPlayer player, BlockPos support) {
         double height = AirSteering.supportHeight(player.level(), support);
         if (!Double.isFinite(height)) height = 1;
-        return FallDamage.capture(player).damage(Math.max(0, player.getY() - support.getY() - height),
-                FallDamage.Landing.of(player.level().getBlockState(support)), true);
+        return Math.max(0, player.getY() - support.getY() - height);
     }
 }

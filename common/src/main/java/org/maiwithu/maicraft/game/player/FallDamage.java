@@ -70,6 +70,38 @@ public record FallDamage(float health, float absorption, float safeFallDistance,
                 && Float.isFinite(damage) && health - Math.max(damage - absorption, 0) > 0;
     }
 
+    /** 摔完还剩多少血：黄心先扣，扣完的才从血里扣；算不出（距离非法、数据不对）为负无穷。 */
+    public float healthAfter(double remainingDistance, Landing landing, boolean includeAccumulated) {
+        float damage = damage(remainingDistance, landing, includeAccumulated);
+        if (!Float.isFinite(health) || !Float.isFinite(absorption) || absorption < 0 || !Float.isFinite(damage)) {
+            return Float.NEGATIVE_INFINITY;
+        }
+        return health - Math.max(damage - absorption, 0);
+    }
+
+    /**
+     * 摔完还剩至少一半的血（按最大生命算，满血 20 时是 10 点、五颗心）：玩家这么高的坎会直接跳，
+     * 走路往下跳与踩空要不要开救援都按这一条，同一条线只算这一处。
+     */
+    public boolean keepsHalf(float maxHealth, double remainingDistance, Landing landing, boolean includeAccumulated) {
+        return Float.isFinite(maxHealth) && maxHealth > 0
+                && healthAfter(remainingDistance, landing, includeAccumulated) >= maxHealth / 2;
+    }
+
+    /**
+     * 摔完还剩至少 keep 点血的最大整格落差：普通落点、从站着起跳（不算已经在掉的那段），最多查到 limit 格。
+     * 一格都不行为 0；免伤、缓降撑得到落地时直接给 limit。
+     */
+    public int maxDropKeeping(float keep, int limit) {
+        int best = 0;
+        for (int drop = 1; drop <= limit; drop++) {
+            // 伤害随落差只增不减：这一格摔完血不够，再高的也不够，不用往下查。
+            if (healthAfter(drop, Landing.ORDINARY, false) < keep) break;
+            best = drop;
+        }
+        return best;
+    }
+
     public float damage(double remainingDistance, Landing landing, boolean includeAccumulated) {
         if (!Double.isFinite(remainingDistance) || remainingDistance < 0
                 || !Float.isFinite(safeFallDistance) || !Double.isFinite(damageMultiplier)

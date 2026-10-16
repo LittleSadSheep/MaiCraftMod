@@ -219,10 +219,19 @@ public class MovementDescend extends Movement {
             if (ontoBlock.getBlock() == Blocks.FARMLAND) {
                 return false; // 长距离坠落在农田上会把耕地踩回泥土,落点禁耕地
             }
-            // 落地会掉血的一跳：落点有接得住人的办法（现成的水、蛛网，或身上带着水桶、干草这类）才收，
-            // 多算一次放东西的代价，由走路在出发点备好、空中放下、落地收回；没有东西接就不让角色白挨摔，路线另找下法。
+            // 落地会掉血的一跳：摔完还剩一半以上的血就像玩家那样直接跳，扣的血折成路程代价，附近能走下去就走下去；
+            // 再高才看落点有没有接得住人的办法（现成的水、蛛网，或身上带着水桶、干草这类），
+            // 多算一次放东西的代价，由走路在出发点备好、空中放下、落地收回；都没有就不让角色白挨摔，路线另找下法。
             if (reachedMinimum && !context.canLandWithoutDamage(x, y, z, effectiveStartHeight,
                     destX, newY, destZ, ontoBlock)) {
+                double injury = context.fallInjuryCost(x, y, z, effectiveStartHeight, destX, newY, destZ, ontoBlock);
+                if (injury < COST_INF) {
+                    res.x = destX;
+                    res.y = newY + 1;
+                    res.z = destZ;
+                    res.cost = tentativeCost + injury;
+                    return false;
+                }
                 BlockPos landing = new BlockPos(destX, newY + 1, destZ);
                 int drop = effectiveStartHeight - newY - 1;
                 if (!context.landingPlans(landing, drop).isEmpty()

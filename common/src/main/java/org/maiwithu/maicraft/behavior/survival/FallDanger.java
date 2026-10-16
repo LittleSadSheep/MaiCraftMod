@@ -42,7 +42,7 @@ public final class FallDanger {
         /** 落点是水：落进水里不掉血。 */
         boolean landsInWater();
 
-        /** 落地不会掉血：预计落地伤害为零（落点看不清时按没在快速坠落算）。 */
+        /** 落地不用救：不掉血、摔完还剩一半以上的血、或只摔掉一颗心以内又血多（落点看不清时按没在快速坠落算）。 */
         boolean landsUnhurt();
     }
 }
