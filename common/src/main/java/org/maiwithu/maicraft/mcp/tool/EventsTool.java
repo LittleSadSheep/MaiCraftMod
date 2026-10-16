@@ -124,7 +124,8 @@ public final class EventsTool implements McpTool {
         try {
             JsonObject goal = clientThread.call(context -> {
                 GoalRun run = table.find(goalId).orElse(null);
-                return run == null ? null : ResultJson.goalRun(run, table.pendingQuestion(goalId).orElse(null),
+                // 附的是目标的默认样子：大块证据折起来，按 goal(get, path) 读，一次读事件不被几十 KB 的结果撑大。
+                return run == null ? null : ResultJson.goalRunFolded(run, table.pendingQuestion(goalId).orElse(null),
                         table.doing(goalId).orElse(null));
             });
             if (goal == null) {

@@ -17,6 +17,8 @@ import org.maiwithu.maicraft.kernel.goal.PlayerControlHandover;
 import org.maiwithu.maicraft.kernel.goal.Question;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.interrupt.ControlLoop;
+import org.maiwithu.maicraft.kernel.result.Attempt;
+import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -230,6 +232,43 @@ class ToolsTest {
         assertEquals("cancelled", cancelled.getAsJsonObject("result").get("status").getAsString());
         assertEquals(1, data(call("goal", "{\"operation\": \"list\"}")).getAsJsonArray("goals").size());
         assertEquals("unknown_id", errorCode(call("goal", "{\"operation\": \"get\", \"goal_id\": 999}")));
+    }
+
+    @Test
+    void finishedGoalsFoldBigEvidenceAndReadItBackByPath() {
+        // 结束了的目标默认只给结论与问题，试过的办法折起来写明路径与几条；按路径读回原样，事件附的目标也是折起来的。
+        use.decision = new StepDecision.Finish(TaskResult.builder(TaskResult.Status.FAILED, "没拿到圆石")
+                .problem(Problem.of(Problem.Kind.NEED_ITEM, "附近箱子里都没有圆石"))
+                .attempt(new Attempt("开门口的箱子", "没有圆石"))
+                .attempt(new Attempt("开屋里的箱子", "没有圆石"))
+                .build());
+        long id = data(call("execute", "{\"goal\": {\"ability\": \"use\"}}")).get("goal_id").getAsLong();
+        assertEquals("invalid_parameter", errorCode(call("goal",
+                "{\"operation\": \"get\", \"goal_id\": " + id + ", \"path\": \"/attempts\"}")), "还没结束没有结果可读");
+        runTicks(2);
+
+        JsonObject result = data(call("goal", "{\"operation\": \"get\", \"goal_id\": " + id + "}")).getAsJsonObject("result");
+        assertEquals("NEED_ITEM", result.getAsJsonObject("problem").get("kind").getAsString());
+        assertFalse(result.has("attempts"));
+        JsonObject folded = result.getAsJsonArray("folded").get(0).getAsJsonObject();
+        assertEquals("/attempts", folded.get("path").getAsString());
+        assertEquals(2, folded.get("items").getAsInt());
+        assertTrue(data(call("events", "{\"goal_id\": " + id + "}")).getAsJsonObject("goal")
+                .getAsJsonObject("result").has("folded"), "事件附的目标也折起来");
+
+        JsonObject page = data(call("goal", "{\"operation\": \"get\", \"goal_id\": " + id + ", \"path\": \"/attempts\"}"));
+        assertEquals(2, page.get("total").getAsInt());
+        assertEquals("开屋里的箱子", page.getAsJsonArray("value").get(1).getAsJsonObject().get("tried").getAsString());
+        JsonObject second = call("goal", "{\"operation\": \"get\", \"goal_id\": " + id
+                + ", \"path\": \"/attempts\", \"limit\": 1}");
+        assertEquals(1, second.getAsJsonObject("next").getAsJsonObject("arguments").get("offset").getAsInt(),
+                "还有下一页时 next 照抄就是下一页");
+        assertEquals("invalid_parameter", errorCode(call("goal",
+                "{\"operation\": \"cancel\", \"goal_id\": " + id + ", \"path\": \"/attempts\"}")));
+        assertEquals("invalid_parameter", errorCode(call("goal",
+                "{\"operation\": \"get\", \"goal_id\": " + id + ", \"offset\": 1}")));
+        assertEquals("invalid_parameter", errorCode(call("goal",
+                "{\"operation\": \"get\", \"goal_id\": " + id + ", \"path\": \"/details/cells\"}")));
     }
 
     @Test

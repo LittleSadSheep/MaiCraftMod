@@ -67,6 +67,19 @@ public final class ResultJson {
     }
 
     /**
+     * 目标运行的默认样子：结束了的结果只留结论、问题与小块事实，大块证据折起来列进 result.folded，
+     * 用 goal(get, goal_id, path) 按路径读。goal 查到的、events 带 goal_id 附上的都是这一种；
+     * execute 当场做完的只读报告是 LLM 要的那份报告本身，照原样整份给（{@link #goalRun}）。
+     */
+    static JsonObject goalRunFolded(GoalRun run, Question pending, String doing) {
+        JsonObject json = goalRun(run, pending, doing);
+        if (json.has("result")) {
+            json.add("result", FoldedEvidence.fold(json.getAsJsonObject("result")));
+        }
+        return json;
+    }
+
+    /**
      * 目标运行：LLM 用 goal 查到的样子。
      *
      * @param pending 此刻在等的问题（sequence 时是正在跑的那一步的问题）；没有时为 null
