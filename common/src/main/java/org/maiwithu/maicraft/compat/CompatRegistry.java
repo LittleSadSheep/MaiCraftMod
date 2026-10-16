@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat;
 
+import org.maiwithu.maicraft.behavior.acquire.spi.FluidTransforms;
 import org.maiwithu.maicraft.behavior.interaction.spi.DismantleTool;
 import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import java.util.ArrayList;
@@ -74,6 +75,7 @@ public final class CompatRegistry {
     private final List<PlacementRules> placementRules = new ArrayList<>();
     private final List<RangedWeapon> rangedWeapons = new ArrayList<>();
     private final List<ObstacleSource> obstacleSources = new ArrayList<>();
+    private final List<FluidTransforms> fluidTransforms = new ArrayList<>();
     private final List<FallBrake> fallBrakes = new ArrayList<>();
     private final List<StowBeforeWalking> stowsBeforeWalking = new ArrayList<>();
     private final List<FlyUpGear> flyUpGears = new ArrayList<>();
@@ -87,7 +89,7 @@ public final class CompatRegistry {
     private final List<List<?>> slots = List.of(itemSources, machineTypes, networkReaders, questBooks,
             breakAccelerators, dismantleTools, menuLayouts, carriedBackpacks, knowledgeSources, recipeViewers,
             serverReads, placementRules, rangedWeapons, itemSettings, travelModes, obstacleSources, fallBrakes, stowsBeforeWalking, flyUpGears, modSights, vehicleAssemblers,
-            vehicleDrivers, vehicleReaders, trainSchedulers, rideAlongs, networkStorages);
+            vehicleDrivers, vehicleReaders, trainSchedulers, rideAlongs, networkStorages, fluidTransforms);
     private final List<String> decisions = new ArrayList<>();
 
     private CompatRegistry() {}
@@ -296,6 +298,11 @@ public final class CompatRegistry {
         obstacleSources.add(new CompatObstacleSource(module, source));
     }
 
+    /** 联动入口交一份"扔进流体里会变"的配方表（AE2 的转化）：包一层后交给拿东西；模组停用后一条都不给。 */
+    public void fluidTransforms(CompatModule module, FluidTransforms transforms) {
+        fluidTransforms.add(new CompatFluidTransforms(module, transforms));
+    }
+
     /** 联动入口交一个随身背包。腾背包还没有接上调用方，接上时要像物品来源一样包一层，停用后回答放不下。 */
     public void carriedBackpack(CarriedBackpack backpack) {
         carriedBackpacks.add(Objects.requireNonNull(backpack, "backpack"));
@@ -446,6 +453,11 @@ public final class CompatRegistry {
     /** 联动模组的障碍来源：进世界时交给寻路。 */
     public List<ObstacleSource> obstacleSources() {
         return Collections.unmodifiableList(obstacleSources);
+    }
+
+    /** 联动模组的"扔进流体里会变"的配方表：拿东西为每一份建一条途径。 */
+    public List<FluidTransforms> fluidTransforms() {
+        return Collections.unmodifiableList(fluidTransforms);
     }
 
     /** 联动模组的远程武器，按联动清单的顺序。 */

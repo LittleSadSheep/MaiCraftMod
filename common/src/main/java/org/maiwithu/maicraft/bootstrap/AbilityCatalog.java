@@ -26,8 +26,13 @@ import org.maiwithu.maicraft.ability.design.api.BuildingRecords;
 import org.maiwithu.maicraft.ability.design.api.DesignStore;
 import org.maiwithu.maicraft.ability.chat.ReadsChatEcho;
 import org.maiwithu.maicraft.ability.enchant.EnchantModule;
+import org.maiwithu.maicraft.behavior.acquire.FluidTransformSource;
+import org.maiwithu.maicraft.behavior.acquire.LiveTransformSites;
+import org.maiwithu.maicraft.behavior.acquire.TransformSites;
+import org.maiwithu.maicraft.behavior.acquire.spi.FluidTransforms;
 import org.maiwithu.maicraft.behavior.interaction.spi.DismantleTool;
 import org.maiwithu.maicraft.behavior.construction.spi.PlacementRules;
+import org.maiwithu.maicraft.behavior.inventory.StepsAside;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.ability.deposit.DepositModule;
@@ -338,7 +343,7 @@ public final class AbilityCatalog {
                         deps.memory(), deps.context(), deps.compat().menuLayouts()));
         registry.register(obtainModule(deps, shared.playerServices(), shared.bringClose(), shared.toMainhand(),
                 shared.permission(), shared.innerNeeds(), shared.collects(), stairs, shared.space(),
-                containerSource, shared.drops()));
+                containerSource, shared.drops(), shared.dropping().stepsAside()));
 
         // 存东西：找容器把现场扫描与世界记忆并起来，打开容器、逐笔搬运与挖盖子都接上了。
         registry.register(depositModule(deps, shared.storing(), shared.collects(), shared.networks()));
@@ -680,7 +685,7 @@ public final class AbilityCatalog {
     private static AbilityModule obtainModule(Deps deps, PlayerServices playerServices, LiveApproaches bringsClose,
             ClientMovesToMainhand toMainhand, PermissionCheck permission, DeferredInnerNeeds innerNeeds,
             ClientCollectsBlocks collects, DigsStairsDown stairs, InventorySpace space, ContainerSource containerSource,
-            ClientDropPickup drops) {
+            ClientDropPickup drops, Optional<StepsAside> stepsAside) {
         RegistryRecipeReads recipeReads = new RegistryRecipeReads(deps.context(), deps.itemTags(), deps.furnaceFuels());
         // 在工作站上动手：熔炉添燃料时按同一份燃料表挑身上烧得最久的。
         RecipeRuns recipeRuns = new MenuRecipeRuns(bringsClose, deps.interactions(),
@@ -720,6 +725,11 @@ public final class AbilityCatalog {
                 new ReclaimSource(deps.memory(), placer, deps.protection(), permission, collects, deps.itemTags())));
         // 联动来源进世界时带着这一份玩家行为建：缺东西去拿也回到同一个引擎（内需入口），许可原样传下去。
         sources.addAll(deps.compat().itemSources(playerServices));
+        // 联动交来的"扔进水里会变"的配方表（AE2 的转化）：每一份一条途径，扔料、退开、等、捡用和捡掉落物同一套。
+        TransformSites sites = new LiveTransformSites(playerServices);
+        for (FluidTransforms transforms : deps.compat().fluidTransforms()) {
+            sources.add(new FluidTransformSource(transforms, sites, playerServices, drops, stepsAside));
+        }
         ItemAcquisition acquisition = new ItemAcquisition(sources,
                 deps.backpack(), deps.offhand(), deps.itemTags(),
                 deps.characterPosition(), Optional.of(space), ItemAcquisition.DEFAULT_MAX_DEPTH);

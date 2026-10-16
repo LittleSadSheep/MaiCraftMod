@@ -401,7 +401,7 @@ public final class TossesOnto implements Action {
     }
 
     // 落地且不再滑、不在潜行（潜行时眼睛矮一截，出手点跟着变）才按此刻的眼睛算抛物线。
-    private static boolean settled(LocalPlayer body) {
+    static boolean settled(LocalPlayer body) {
         return body.onGround() && !body.isCrouching() && body.getDeltaMovement().horizontalDistanceSqr() < 1.0e-4;
     }
 
@@ -423,7 +423,7 @@ public final class TossesOnto implements Action {
     }
 
     // 世界里一格的碰撞框；没加载的格当作挡住。
-    private static TossArc.Obstacles obstacles(ClientLevel level) {
+    static TossArc.Obstacles obstacles(ClientLevel level) {
         return cell -> {
             if (!level.isLoaded(cell)) return null;
             List<AABB> boxes = new ArrayList<>();

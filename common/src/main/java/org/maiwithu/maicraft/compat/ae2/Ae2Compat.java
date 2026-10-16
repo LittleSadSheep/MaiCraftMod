@@ -15,6 +15,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 
 import org.maiwithu.maicraft.compat.CompatModule;
@@ -29,6 +30,7 @@ import org.maiwithu.maicraft.compat.CompatRegistry;
  * ME 终端来源的建法——来源要用的保护判断、靠近与交互是进世界后才有的，进世界时登记表带着它们建来源；
  * 每次进世界建一份新的"上次看到的网络存货"，换世界、重开游戏都从没看过开始。
  * 机器这一半：每种 ME 设备的机器类型（线缆格还管接线缆、装部件）、ME 网络读取器，以及要向服务端问的只读操作 ae2.network。
+ * 拿东西还多一条途径 ae2_transform：AE2 的转化配方（往水里扔充能石英、红石、下界石英变福鲁伊克斯水晶）交给玩家行为层去扔。
  */
 public final class Ae2Compat extends CompatModule {
 
@@ -40,18 +42,26 @@ public final class Ae2Compat extends CompatModule {
     private final Ae2TerminalMenu menus;
     private final Ae2Grid grid;
     private final Ae2Patterns patterns;
+    private final Ae2Transforms transforms;
 
     /** 没有样板读写端时：认不出样板，样板供应器的界面也不认。 */
     public Ae2Compat(Ae2Terminals terminals, Ae2TerminalMenu menus, Ae2Grid grid) {
         this(terminals, menus, grid, Ae2Patterns.NONE);
     }
 
+    /** 没有转化配方读写端时：往水里扔料这条途径给不了。 */
     public Ae2Compat(Ae2Terminals terminals, Ae2TerminalMenu menus, Ae2Grid grid, Ae2Patterns patterns) {
+        this(terminals, menus, grid, patterns, Ae2Transforms.NONE);
+    }
+
+    public Ae2Compat(Ae2Terminals terminals, Ae2TerminalMenu menus, Ae2Grid grid, Ae2Patterns patterns,
+            Ae2Transforms transforms) {
         super(MOD_ID, "应用能源2");
         this.terminals = Objects.requireNonNull(terminals, "terminals");
         this.menus = Objects.requireNonNull(menus, "menus");
         this.grid = Objects.requireNonNull(grid, "grid");
         this.patterns = Objects.requireNonNull(patterns, "patterns");
+        this.transforms = Objects.requireNonNull(transforms, "transforms");
     }
 
     @Override public void contribute(CompatRegistry registry) {
@@ -72,6 +82,13 @@ public final class Ae2Compat extends CompatModule {
         registry.networkReader(this, services -> new MeNetworkReader(this, services));
         registry.serverRead(this, NETWORK_OPERATION, 1);
         registry.knowledgeSource(this, new Ae2MachineKnowledge());
+        // 拿东西：往水里扔料让它变（福鲁伊克斯水晶），配方从 AE2 读，扔料、等、捡由玩家行为层做。
+        registry.fluidTransforms(this, new Ae2FluidTransforms(this));
+    }
+
+    /** 这个世界里泡在流体里的转化配方；见 {@link Ae2Transforms#fluidRecipes}。 */
+    public List<Ae2Transforms.Recipe> transformRecipes(Level level) {
+        return call("读 AE2 的转化配方", () -> transforms.fluidRecipes(level));
     }
 
     /** 注册 ID 换成方块对象；注册表里没有的不算进来。 */
