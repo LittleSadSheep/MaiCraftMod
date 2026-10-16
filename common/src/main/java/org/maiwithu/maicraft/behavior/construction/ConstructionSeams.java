@@ -45,6 +45,11 @@ public final class ConstructionSeams {
 
         /** 身上最不值钱的整块建材，拿来垫临时方块；没有为空。 */
         Optional<String> temporaryMaterial();
+
+        /** 角色所在的维度里岩浆流得远（下界这类超热维度）：倒岩浆前圈流路时按它取流距。 */
+        default boolean lavaSpreadsFar() {
+            return false;
+        }
     }
 
     /** 许可：角色自己挑的一格能不能挖、能不能放，全仓只有许可检查点回答。 */

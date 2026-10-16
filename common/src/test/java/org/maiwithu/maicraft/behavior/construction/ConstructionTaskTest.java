@@ -34,6 +34,7 @@ import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
+import org.maiwithu.maicraft.behavior.approach.ProtectedCells;
 import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
@@ -196,6 +197,24 @@ class ConstructionTaskTest {
         @Override public void temporaryRemoved(BlockPos pos) { temporaries.remove(pos); }
         @Override public List<BlockPos> temporaries() { return List.copyOf(temporaries); }
         @Override public Action toward(ApproachTarget target, Permissions permissions) { return new Immediate(() -> { }); }
+        /** 每次带着"这些格不许站"去靠近时记下那份判断，按靠近的先后。 */
+        final List<ProtectedCells> avoided = new ArrayList<>();
+        /** 避开某些格时一个站位都站不了：带着要避开的格去靠近就走不到。 */
+        boolean noSpotOutsideAvoided;
+        @Override public Action toward(ApproachTarget target, Permissions permissions, ProtectedCells avoid) {
+            avoided.add(avoid);
+            if (noSpotOutsideAvoided) {
+                return new Action() {
+                    @Override public ActionStatus tick(TickContext context) {
+                        return ActionStatus.failed(Problem.of(Problem.Kind.UNREACHABLE, "附近没有能站的位置"));
+                    }
+                    @Override public String describe() { return "靠近"; }
+                };
+            }
+            return toward(target, permissions);
+        }
+        boolean nether;
+        @Override public boolean lavaSpreadsFar() { return nether; }
 
         ConstructionServices services() {
             return new ConstructionServices(this, this, this, this, this, this, this, this, this, null, dismantlers, rules);
@@ -380,6 +399,57 @@ class ConstructionTaskTest {
         TaskResult result = run(fake, blueprint);
         assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
         assertEquals(List.of("lava_bucket", "water_bucket"), fake.pouredItems);
+    }
+
+    @Test
+    void 倒岩浆_先挑岩浆流不到的站位_倒水不挑() {
+        // 平地上倒一格岩浆：源格外三格内的地上站不得，脚下那层往下一格、头伸进流路的也站不得；第四格、高一层的站得。
+        Fake fake = new Fake().ground(63);
+        fake.carried.put("minecraft:lava_bucket", 1);
+        fake.carried.put("minecraft:water_bucket", 1);
+        Blueprint blueprint = new Blueprint(DIM, new BlockPos(0, 64, 0), List.of(
+                PlannedCell.block(new BlockPos(0, 64, 0), Blocks.LAVA.defaultBlockState(), Set.of()),
+                PlannedCell.block(new BlockPos(0, 64, 5), Blocks.WATER.defaultBlockState(), Set.of())));
+        TaskResult result = run(fake, blueprint);
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+
+        assertEquals(1, fake.avoided.size(), "只有倒岩浆那一下带着避开的格去靠近，倒水照常靠近");
+        ProtectedCells avoid = fake.avoided.getFirst();
+        assertTrue(avoid.contains(new BlockPos(3, 64, 0)), "源格外第 3 格流得到");
+        assertTrue(avoid.contains(new BlockPos(1, 63, 0)), "脚在下一层、头在流路里也不行");
+        assertTrue(!avoid.contains(new BlockPos(4, 64, 0)), "第 4 格流不到，站得");
+        assertTrue(!avoid.contains(new BlockPos(1, 65, 0)), "站在源格那一层之上不受限");
+    }
+
+    @Test
+    void 岩浆流不到的站位一个都站不了_照常站位倒并记下试过() {
+        // 只是挑站位的先后：圈外站不了就照常靠近倒下去，不为预计会流到脚下就不倒。
+        Fake fake = new Fake().ground(63);
+        fake.noSpotOutsideAvoided = true;
+        fake.carried.put("minecraft:lava_bucket", 1);
+        Blueprint blueprint = new Blueprint(DIM, new BlockPos(0, 64, 0), List.of(
+                PlannedCell.block(new BlockPos(0, 64, 0), Blocks.LAVA.defaultBlockState(), Set.of())));
+        TaskResult result = run(fake, blueprint);
+
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(List.of("lava_bucket"), fake.pouredItems);
+        assertTrue(result.attempts().stream().anyMatch(attempt -> attempt.tried().startsWith("站到岩浆流不到的地方倒")
+                && attempt.result().contains("照常挑站位倒")), result.attempts().toString());
+    }
+
+    @Test
+    void 下界倒岩浆流得更远_圈不清时先挑源格那一层之上() {
+        // 下界流 7 格：替身的地只铺到 x=-3，往西流出地面一路往下落，算不完，先挑高处。
+        Fake fake = new Fake().ground(63);
+        fake.nether = true;
+        fake.carried.put("minecraft:lava_bucket", 1);
+        Blueprint blueprint = new Blueprint(DIM, new BlockPos(0, 64, 0), List.of(
+                PlannedCell.block(new BlockPos(0, 64, 0), Blocks.LAVA.defaultBlockState(), Set.of())));
+        run(fake, blueprint);
+
+        ProtectedCells avoid = fake.avoided.getFirst();
+        assertTrue(avoid.contains(new BlockPos(8, 64, 8)), "源格那一层哪里都不站");
+        assertTrue(!avoid.contains(new BlockPos(1, 65, 0)), "高一层的站得");
     }
 
     @Test

@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
+import org.maiwithu.maicraft.game.world.LavaFlow;
 
 /**
  * 随身造危险的选格：用身上的打火石、火焰弹点火，或倒岩浆桶，在身边挑一格站进去。
@@ -28,10 +29,10 @@ final class CarriedHazards {
     static final int READS_PER_TICK = 8192;
     /** 类别 F：原版的火向四周蔓延 1 格。 */
     static final int FIRE_SPREAD = 1;
-    /** 类别 F：岩浆在普通维度流 3 格。 */
-    static final int LAVA_FLOW = 3;
+    /** 类别 F：岩浆在普通维度流 3 格；流距这条事实只在岩浆流路里写一份。 */
+    static final int LAVA_FLOW = LavaFlow.REACH;
     /** 类别 F：岩浆在超热维度（下界）流 7 格。 */
-    static final int LAVA_FLOW_HOT = 7;
+    static final int LAVA_FLOW_HOT = LavaFlow.REACH_HOT;
     /** 类别 F：岩浆流经处会点着 3 格内的可燃物。 */
     static final int LAVA_IGNITES = 3;
     /** 类别 F：火与岩浆往下烧 1 格、往上烧 4 格。 */

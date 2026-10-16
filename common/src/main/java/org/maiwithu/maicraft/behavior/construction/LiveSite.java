@@ -46,6 +46,12 @@ public final class LiveSite implements ConstructionSeams.ReadsSite {
         return level == null ? null : level.dimension().location().toString();
     }
 
+    // 下界这类超热维度岩浆每格只少一级、流得更远：倒岩浆前圈流路按维度类型的这一项取流距。
+    @Override public boolean lavaSpreadsFar() {
+        ClientLevel level = level();
+        return level != null && level.dimensionType().ultraWarm();
+    }
+
     @Override public BlockPos feet() {
         LocalPlayer player = player();
         return player == null ? null : player.blockPosition();
