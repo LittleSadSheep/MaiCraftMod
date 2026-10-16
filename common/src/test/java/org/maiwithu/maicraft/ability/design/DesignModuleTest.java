@@ -20,6 +20,10 @@ import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.ability.design.api.DesignStore;
+import org.maiwithu.maicraft.kernel.storage.DocumentStore;
+import org.maiwithu.maicraft.ability.design.api.BuildingRecords;
+import org.maiwithu.maicraft.ability.design.api.BuildingArchives;
+import org.maiwithu.maicraft.ability.design.api.BuildingArchive;
 import org.maiwithu.maicraft.behavior.construction.AnchorResolver;
 import org.maiwithu.maicraft.behavior.construction.Blueprint;
 import org.maiwithu.maicraft.kernel.goal.Goal;
@@ -47,12 +51,18 @@ class DesignModuleTest {
     private final List<Blueprint> shown = new ArrayList<>();
     private final Path directory;
     private final DesignModule module;
+    private final FakeSite site = FakeSite.cottage();
+    private final BuildingArchives archives;
+    private final List<BuildingArchive> remembered = new ArrayList<>();
 
     DesignModuleTest() throws Exception {
         directory = Files.createTempDirectory("design-module-");
         AnchorResolver anchors = new AnchorResolver(id -> Optional.empty(), name -> Optional.empty(),
                 () -> new WorldPosition(5, 64, 5, DIM), (x, z) -> Optional.of(70));
-        module = new DesignModule(new DesignStore(directory.resolve("designs.sqlite")), anchors, shown::add, directory.resolve("schematics"));
+        archives = new BuildingArchives(new DocumentStore(directory.resolve("world.sqlite")), "w".repeat(64));
+        BuildingRecords records = new BuildingRecords(archives, name -> Optional.empty(), remembered::add, id -> id.equals("minecraft:chest"));
+        module = new DesignModule(new DesignStore(directory.resolve("designs.sqlite")), anchors, shown::add, directory.resolve("schematics"),
+                records, site);
     }
 
     private TaskResult run(Target target, JsonObject raw) {
@@ -80,6 +90,43 @@ class DesignModuleTest {
         TaskResult result = run(null, raw);
         assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
         return assertInstanceOf(DesignDetails.class, result.details());
+    }
+
+    @Test
+    void 读现场_读成层图_给布局_起了名就建档() {
+        // 床是自己放的：屋里看不见也读得到。
+        site.selfPlaced.add(new BlockPos(3, 64, 1));
+        site.selfPlaced.add(new BlockPos(3, 64, 2));
+        JsonObject raw = operation("read_site");
+        raw.addProperty("name", "庇护所");
+        TaskResult result = run(new Target.Position(2, 64, 0, null), raw);
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        DesignDetails details = assertInstanceOf(DesignDetails.class, result.details());
+        assertEquals(new WorldPosition(0, 62, 0, DIM), details.anchor(), "设计原点是范围最小角");
+        assertEquals("LAYERS", details.site().get("type").getAsString());
+        assertEquals("庇护所", details.archive());
+        assertEquals(1, details.layout().doors().size(), details.layout().toString());
+        assertEquals(1, details.layout().beds().size());
+        assertTrue(!details.layout().freeFloor().isEmpty(), "屋里有能放东西的空地");
+        BuildingArchive created = archives.find("庇护所").orElseThrow();
+        assertEquals(details.designId(), created.designId(), "档案照读出来的这一版");
+        assertEquals(List.of(created), remembered);
+        // 指着刚建的档案再读：读档案的范围，另给整栋比对。
+        JsonObject again = operation("read_site");
+        TaskResult second = run(new Target.Landmark("庇护所"), again);
+        DesignDetails compared = assertInstanceOf(DesignDetails.class, second.details());
+        assertTrue(compared.check().allMatch(), compared.check().toString());
+        assertEquals("庇护所", compared.archive());
+    }
+
+    @Test
+    void 看图带布局() {
+        JsonObject drawing = DesignSamples.drawing(DesignSamples.mesh("Box", "cube", new double[] {1, 1, 1}, new int[] {2, 2, 2}, "Body"));
+        DesignDetails created = create(drawing);
+        JsonObject raw = operation("inspect");
+        raw.addProperty("design_id", created.designId());
+        DesignDetails inspected = assertInstanceOf(DesignDetails.class, run(null, raw).details());
+        assertNotNull(inspected.layout(), "看图也给这张图纸的布局");
     }
 
     @Test

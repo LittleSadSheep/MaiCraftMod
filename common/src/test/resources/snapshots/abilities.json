@@ -98,7 +98,7 @@
       {
         "ability": "maicraft:design",
         "summary": "画一张建筑图纸、改它、看它、投影到世界里预览，或导出成结构文件；图纸不绑地点",
-        "parameters": "operation: string, drawing?: object, design_id?: string, edits?: object, name?: string, page: integer = 0, rotation: integer = 0, format: string = json",
+        "parameters": "operation: string, drawing?: object, design_id?: string, edits?: object, name?: string, radius?: integer, page: integer = 0, rotation: integer = 0, format: string = json",
         "targets": [
           "here",
           "landmark",
@@ -759,13 +759,14 @@
           "name": "operation",
           "type": "string",
           "required": true,
-          "doc": "create 新建；update 按名合并修改成新的一版；inspect 看；preview 投到 target 预览；export 导出",
+          "doc": "create 新建；update 按名合并修改成新的一版；inspect 看；preview 投到 target 预览；export 导出；read_site 把 target 处已有的一栋建筑读成一版层图，带楼层、门、门洞、床这些布局",
           "choices": [
             "create",
             "update",
             "inspect",
             "preview",
-            "export"
+            "export",
+            "read_site"
           ]
         },
         {
@@ -790,7 +791,15 @@
           "name": "name",
           "type": "string",
           "required": false,
-          "doc": "inspect 用：看某个对象（展开路径也行）；看组件在名字前加 component:"
+          "doc": "inspect 用：看某个对象（展开路径也行）；看组件在名字前加 component:。read_site 用：新图纸的名字，这一栋还没有建筑档案时用这个名字建档"
+        },
+        {
+          "name": "radius",
+          "type": "integer",
+          "required": false,
+          "doc": "read_site 用：不自动框整栋，改读以 target 为中心、边长 2×radius+1 的方盒",
+          "min": 0,
+          "max": 15
         },
         {
           "name": "page",
@@ -871,7 +880,7 @@
           "name": "rotation",
           "type": "integer",
           "required": false,
-          "doc": "绕锚点转 0 / 90 / 180 / 270 度；只配 design_id 或 file；改建照档案的朝向，不用给",
+          "doc": "绕锚点转 0 / 90 / 180 / 270 度；只配 design_id 或 file；改建不用给：照档案那一版改出来的图按档案的朝向，读现场读出来的照现场",
           "default": 0,
           "min": 0,
           "max": 270

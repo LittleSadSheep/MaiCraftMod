@@ -75,7 +75,7 @@ public final class BuildModule implements AbilityModule {
                     ParamSpec.of("block", ParamType.BLOCK_OR_TAG).doc("只放一格（四选一）：放在 target 那一格；落在某一栋的范围里就并进那一栋").build(),
                     ParamSpec.of("properties", ParamType.JSON_OBJECT).doc("配 block：要求的方块状态属性，例如 {\"facing\":\"north\"}").build(),
                     ParamSpec.of("file", ParamType.TEXT).doc("schematics 目录下的结构文件名（四选一）：.nbt / .snbt / .litematic / .schem，或 design 导出的 .json；摆设实体不装").build(),
-                    ParamSpec.of("rotation", ParamType.INTEGER).range(0, 270).defaultValue(0).doc("绕锚点转 0 / 90 / 180 / 270 度；只配 design_id 或 file；改建照档案的朝向，不用给").build(),
+                    ParamSpec.of("rotation", ParamType.INTEGER).range(0, 270).defaultValue(0).doc("绕锚点转 0 / 90 / 180 / 270 度；只配 design_id 或 file；改建不用给：照档案那一版改出来的图按档案的朝向，读现场读出来的照现场").build(),
                     ParamSpec.of("name", ParamType.TEXT).doc("新建筑的档案名；不给就用图纸名，撞名加 @x,y,z；target 已经是档案时不用给").build()),
             Set.of(TargetKind.HERE, TargetKind.SEEN, TargetKind.LANDMARK, TargetKind.POSITION),
             ExecutionMode.CONTROLS_PLAYER,
@@ -201,12 +201,15 @@ public final class BuildModule implements AbilityModule {
         try {
             Source source = source(params);
             boolean patch = params.has("cells") || params.has("block");
-            Blueprint construction = Blueprint.at(archive.dimension(), archive.anchor(),
-                    patch ? Rotation.NONE : Blueprint.turnOf(archive.rotation()), source.cells());
+            // 照档案当初那一版改出来的图纸、结构文件按档案的朝向转；读现场读出来的、另画的图纸本来就照现场的东南西北画，不再转。
+            boolean turned = !patch && (params.has("file") || descendsFrom(source.designId(), archive.designId()));
+            int rotation = turned ? archive.rotation() : 0;
+            Blueprint construction = Blueprint.at(archive.dimension(), archive.anchor(), Blueprint.turnOf(rotation), source.cells());
             List<PlannedCell> drawn = BuildingRecorder.relative(construction);
             BuildingArchive planned = patch
                     ? archive.with(BlueprintPatch.merge(archive.cells(), drawn), archive.designId(), archive.lastCheckAt(), archive.lastCheckNote())
-                    : archive.with(drawn, source.designId(), archive.lastCheckAt(), archive.lastCheckNote());
+                    : new BuildingArchive(archive.name(), archive.dimension(), archive.anchor(), rotation, source.designId(), drawn,
+                            archive.lastCheckAt(), archive.lastCheckNote());
             return new StepDecision.Run(new BuildInput(
                     new ConstructionInput(construction, step.goal().permissions(), "施工", source.fixturesSkipped(),
                             new BuildingRecorder(records, planned, true)),
@@ -218,6 +221,21 @@ public final class BuildModule implements AbilityModule {
         } catch (IllegalArgumentException invalid) {
             return fail(invalid.getMessage(), Problem.Kind.INVALID_PARAMETER, "按错误里的定位改参数再试");
         }
+    }
+
+    // 这一版图纸是不是从 ancestor 那一版一路改出来的：沿父版本往上找；读不出来的版本当作不是。
+    private boolean descendsFrom(String designId, String ancestor) {
+        if (designId == null || ancestor == null) return false;
+        String current = designId;
+        for (int depth = 0; depth < 256 && current != null; depth++) {
+            if (current.equals(ancestor)) return true;
+            try {
+                current = designs.load(current).parentId();
+            } catch (IllegalArgumentException missing) {
+                return false;
+            }
+        }
+        return false;
     }
 
     /**

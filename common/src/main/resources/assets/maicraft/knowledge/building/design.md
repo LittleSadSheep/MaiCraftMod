@@ -80,7 +80,7 @@
 | `MESH` | 一个图元 | `primitive`、`dimensions`、`material`、`role`、`fill`、`wall_thickness`、`face_materials`、`edge_material`、`edge_materials`、`edge_width`、`open_faces`、`segments`、`vertices`、`faces`、`pattern` |
 | `INSTANCE` | 把一个组件摆一份 | `component`、`material_map` |
 | `ROOF` | 参数化屋顶 | `footprint`、`material`、`shape`、`curve`、`overhang`、`corner_lift`、`gable_material`、`ridge_material`、`eave_material`、`soffit_material`、`hollow`（见屋顶那一篇） |
-| `LAYERS` | 层图：一层一张字符图，一个字符一格 | `legend`、`layers` |
+| `LAYERS` | 层图：一层一张字符图，一个字符一格 | `legend`、`layers`（`design(operation="read_site")` 读现场读出来的就是它） |
 
 ## LAYERS：层图
 

@@ -65,7 +65,7 @@ class BuildModuleTest {
 
     /** 一套替身：施工能力、建筑档案库、记过的地点、记进世界记忆的那几栋。 */
     private record Fixture(BuildModule module, BuildingArchives archives, Map<String, WorldPosition> places,
-                           List<BuildingArchive> remembered) {}
+                           List<BuildingArchive> remembered, DesignStore designs) {}
 
     private static Fixture fixture() throws Exception {
         Path root = Files.createTempDirectory("build-module-");
@@ -82,7 +82,7 @@ class BuildModuleTest {
         BuildModule module = new BuildModule(store, anchors, schematics, permissions -> {
             throw new UnsupportedOperationException("计划阶段不拼服务");
         }, records);
-        return new Fixture(module, archives, places, remembered);
+        return new Fixture(module, archives, places, remembered, store);
     }
 
     private static BuildModule module() throws Exception {
@@ -182,6 +182,25 @@ class BuildModuleTest {
         BuildInput input = run(fixture.module(), new Target.Landmark("小屋"), json("{\"file\":\"house\"}"));
         // 文件里的格 (10,0,0) 照档案的 90 度绕锚点 (10,64,10) 转到 (10,64,20)。
         assertTrue(input.construction().blueprint().cellAt(new BlockPos(10, 64, 20)).isPresent(), "没给 rotation 就照档案的朝向");
+    }
+
+    @Test
+    void 改建的图纸_从档案那一版改出来的照档案朝向_读现场画的照现场() throws Exception {
+        Fixture fixture = fixture();
+        JsonObject oneStone = json("""
+                {"name":"一块","coordinate_system":"minecraft_y_up","materials":{"S":{"block_id":"minecraft:stone"}},
+                 "objects":[{"name":"石","type":"MESH","primitive":"cube","location":[1.5,0.5,0.5],"dimensions":[1,1,1],"material":"S"}]}
+                """);
+        var original = fixture.designs().create(oneStone);
+        var child = fixture.designs().update(original.id(), json("{\"name\":\"改过的一块\"}"));
+        var unrelated = fixture.designs().create(oneStone);
+        assertTrue(fixture.archives().save(new BuildingArchive("小屋", DIM, new BlockPos(10, 64, 10), 90, original.id(),
+                List.of(stone(0)), null, null)));
+        // 图纸里那一格在 (1,0,0)：照档案朝向转 90 度落到 (10,64,11)，不转就在 (11,64,10)。
+        BuildInput derived = run(fixture.module(), new Target.Landmark("小屋"), json("{\"design_id\":\"" + child.id() + "\"}"));
+        assertEquals(new BlockPos(10, 64, 11), derived.construction().blueprint().cells().getFirst().pos());
+        BuildInput fresh = run(fixture.module(), new Target.Landmark("小屋"), json("{\"design_id\":\"" + unrelated.id() + "\"}"));
+        assertEquals(new BlockPos(11, 64, 10), fresh.construction().blueprint().cells().getFirst().pos());
     }
 
     @Test

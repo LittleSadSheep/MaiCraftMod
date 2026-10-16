@@ -20,6 +20,7 @@ import org.maiwithu.maicraft.ability.machine.MachineAbilities;
 import org.maiwithu.maicraft.ability.machine.MachineVehicles;
 import org.maiwithu.maicraft.ability.chat.ChatAbility;
 import org.maiwithu.maicraft.ability.design.DesignModule;
+import org.maiwithu.maicraft.ability.design.LiveSiteCells;
 import org.maiwithu.maicraft.ability.design.api.BuildingArchives;
 import org.maiwithu.maicraft.ability.design.api.BuildingRecords;
 import org.maiwithu.maicraft.ability.design.api.DesignStore;
@@ -496,8 +497,11 @@ public final class AbilityCatalog {
         AnchorResolver anchors = anchors(deps);
         // design 导出与 build 导入用同一个 schematics 目录：导出的文件名直接当 file 参数喂回去。
         Path schematics = deps.configDirectory().resolveSibling("schematics");
-        registry.register(new DesignModule(designs, anchors, deps.preview(), schematics));
-        registry.register(new BuildModule(designs, anchors, schematics, construction, buildingRecords(deps)));
+        // 读现场按这一刻的客户端世界读：看不看得见与观察同一套遮挡，自己放的问这个世界的保护判断。
+        BuildingRecords buildings = buildingRecords(deps);
+        registry.register(new DesignModule(designs, anchors, deps.preview(), schematics, buildings,
+                new LiveSiteCells(deps.context(), deps.protection())));
+        registry.register(new BuildModule(designs, anchors, schematics, construction, buildings));
     }
 
     /**
