@@ -32,6 +32,8 @@ public final class LiveTravels implements ConstructionSeams.Travels {
     @Override
     public Optional<Action> toward(WorldPosition where, Permissions permissions) {
         TravelDestination destination = TravelDestination.confirmed(where, NEAR_ENOUGH);
-        return Optional.of(walks.start(new GoalCompiler.Compiled(destination.navGoal(), LongSets.emptySet()), TerrainPermit.of(permissions)));
+        // 施工交给走到的那几段不许跑酷跳：脚手架、刚砌的墙头上几格也跳容易从高处掉下去，一步一步挪。
+        return Optional.of(walks.start(new GoalCompiler.Compiled(destination.navGoal(), LongSets.emptySet()),
+                TerrainPermit.of(permissions).withoutParkour()));
     }
 }

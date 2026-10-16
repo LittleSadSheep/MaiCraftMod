@@ -15,8 +15,14 @@ import org.maiwithu.maicraft.kernel.goal.Permissions;
  *
  * @param changes           能改变哪些方块，取值就是任务许可里的 changeBlocks（none/temporary/natural/any）
  * @param mayUseLandingAids 会摔伤的一跳能否放东西接住自己（用完收回）
+ * @param mayParkour        这一路能不能跑酷跳；赶长路才允许，脚手架与墙头上换站位要一步一步挪
  */
-public record TerrainPermit(Permissions.BlockChanges changes, boolean mayUseLandingAids) {
+public record TerrainPermit(Permissions.BlockChanges changes, boolean mayUseLandingAids, boolean mayParkour) {
+
+    /** 两参构造：跑酷默认放开——赶路是走路的常态，只有施工这类场景主动关掉。 */
+    public TerrainPermit(Permissions.BlockChanges changes, boolean mayUseLandingAids) {
+        this(changes, mayUseLandingAids, true);
+    }
 
     /** 只走不改：不挖、不垫、不放落地办法。 */
     public static final TerrainPermit WALK_ONLY = new TerrainPermit(Permissions.BlockChanges.NONE, false);
@@ -42,5 +48,10 @@ public record TerrainPermit(Permissions.BlockChanges changes, boolean mayUseLand
     /** 还能不能动土（挖或垫任一）；路线要不要绕开要动土的地方看它。 */
     public boolean mayChangeTerrain() {
         return changes != Permissions.BlockChanges.NONE;
+    }
+
+    /** 这一路不许跑酷跳：施工里在脚手架、刚砌的墙头上换站位时用，其余档位与落地办法照旧。 */
+    public TerrainPermit withoutParkour() {
+        return new TerrainPermit(changes, mayUseLandingAids, false);
     }
 }

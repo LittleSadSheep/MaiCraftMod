@@ -64,11 +64,11 @@ final class TrapEscape {
         return true;
     }
 
-    /** 往上一级：只走升到只垫，只垫升到挖天然方块；已经能挖的不再升（不会升到"一切不受保护的"）。落地办法照任务的。 */
+    /** 往上一级：只走升到只垫，只垫升到挖天然方块；已经能挖的不再升（不会升到"一切不受保护的"）。落地办法照任务的，跑酷开关也照原路的。 */
     static TerrainPermit next(TerrainPermit permit) {
         return switch (permit.changes()) {
-            case NONE -> new TerrainPermit(Permissions.BlockChanges.TEMPORARY, permit.mayUseLandingAids());
-            case TEMPORARY -> new TerrainPermit(Permissions.BlockChanges.NATURAL, permit.mayUseLandingAids());
+            case NONE -> new TerrainPermit(Permissions.BlockChanges.TEMPORARY, permit.mayUseLandingAids(), permit.mayParkour());
+            case TEMPORARY -> new TerrainPermit(Permissions.BlockChanges.NATURAL, permit.mayUseLandingAids(), permit.mayParkour());
             case NATURAL, ANY -> null;
         };
     }

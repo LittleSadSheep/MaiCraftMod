@@ -347,7 +347,8 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
         // 背包换槽由原生交换流程负责，这里不开放引擎的直接背包操作。
         settings.allowInventory.value = false;
         settings.allowSprint.value = true;
-        settings.allowParkour.value = true;
+        // 跑酷跳由这次的许可决定：赶路照旧跑跳，施工在脚手架、墙头上换站位那几步不许跳，不按距离猜是不是施工。
+        settings.allowParkour.value = switches.allowParkour();
         settings.sprintAscends.value = true;
         settings.sprintInWater.value = true;
         settings.renderPath.value = false;

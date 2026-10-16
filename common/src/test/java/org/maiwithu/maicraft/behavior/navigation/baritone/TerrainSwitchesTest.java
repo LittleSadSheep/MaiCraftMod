@@ -61,4 +61,28 @@ class TerrainSwitchesTest {
         assertEquals(new TerrainPermit(Permissions.BlockChanges.NATURAL, false).mayChangeTerrain(),
                 noWater.allowPlace());
     }
+
+    @Test
+    void parkourStaysOnForOrdinaryWalks() {
+        // 赶长路照旧跑酷跳：两参构造与各档许可默认都开着跑酷。
+        for (TerrainPermit permit : new TerrainPermit[] {TerrainPermit.WALK_ONLY, TerrainPermit.TEMPORARY,
+                TerrainPermit.NATURAL, TerrainPermit.ANY,
+                new TerrainPermit(Permissions.BlockChanges.NATURAL, true)}) {
+            assertTrue(TerrainSwitches.of(permit).allowParkour(), permit.changes() + " 默认应能跑酷");
+        }
+    }
+
+    @Test
+    void parkourTurnsOffWhenPermitSaysSo() {
+        // 施工换站位那几步：动土档位与落地办法不动，只把跑酷跳关掉。
+        TerrainPermit permit = TerrainPermit.of(Permissions.DEFAULT).withoutParkour();
+        TerrainSwitches switches = TerrainSwitches.of(permit);
+        assertTrue(switches.allowBreak());
+        assertTrue(switches.allowPlace());
+        assertTrue(switches.allowDownward());
+        assertTrue(switches.allowLandingAids());
+        assertFalse(switches.allowParkour());
+        // 跑酷垫跟着跑酷一起关：不允许跳就没有跑酷中途垫块。
+        assertFalse(switches.allowParkourPlace());
+    }
 }
