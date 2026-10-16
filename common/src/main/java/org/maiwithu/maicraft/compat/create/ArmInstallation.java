@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.compat.create;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -14,9 +15,11 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
+import org.maiwithu.maicraft.ability.machine.spi.MachineCopy;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.compat.HandThenClick;
 import org.maiwithu.maicraft.compat.StepsInOrder;
@@ -114,6 +117,11 @@ final class ArmInstallation implements CreateInstallation {
 
     @Override public boolean installed(ClientLevel level, Installation installation) {
         return matches(compat.armPoints(level, installation.cells().getFirst()), installation);
+    }
+
+    // 读现场：选过取放点的机械臂写成一段"机械臂加取放点"，没选过点的照抄成方块。
+    @Override public Optional<MachineCopy> copy(ClientLevel level, Map<BlockPos, BlockState> cells) {
+        return Optional.of(CreateCopies.arms(cells, at -> compat.armPoints(level, at)));
     }
 
     /** 放好的机械臂记着的点和要的一样，纯函数：位置与取放一一对上，不多不少。 */

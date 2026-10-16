@@ -2,12 +2,15 @@
 package org.maiwithu.maicraft.compat.create;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 
+import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
+import org.maiwithu.maicraft.ability.machine.spi.MachineCopy;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
 
@@ -35,5 +38,14 @@ interface CreateInstallation {
      */
     default List<BlockPos> placedCells(Installation installation) {
         return List.of();
+    }
+
+    /**
+     * 读现场时把这种机器认领的格抄成机器蓝图的写法：两头的轴、整段安装段；不会抄的给空，机器能力照抄方块。
+     *
+     * @param cells 这台机器里这种机器认领的格与此刻的方块状态
+     */
+    default Optional<MachineCopy> copy(ClientLevel level, Map<BlockPos, BlockState> cells) {
+        return Optional.empty();
     }
 }

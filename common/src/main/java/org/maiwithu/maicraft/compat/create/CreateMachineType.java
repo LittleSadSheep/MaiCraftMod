@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.compat.create;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -16,6 +17,7 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.FullRun;
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
+import org.maiwithu.maicraft.ability.machine.spi.MachineCopy;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
@@ -148,6 +150,13 @@ final class CreateMachineType implements MachineType {
     @Override public Optional<List<BlockPos>> placedBy(Installation wanted) {
         if (installation.isEmpty() || !installation.get().kind().equals(wanted.kind())) return Optional.empty();
         return Optional.of(installation.get().placedCells(wanted));
+    }
+
+    // 读现场：会装安装段的机器（传送带、链条输送机、机械臂）按安装段的写法抄，其余照抄方块；不在世界里读不到就照抄。
+    @Override public Optional<MachineCopy> copy(Map<BlockPos, BlockState> cells) {
+        ClientLevel level = level();
+        if (level == null || installation.isEmpty()) return Optional.empty();
+        return installation.get().copy(level, cells);
     }
 
     @Override public Optional<Action> mount(PartCell part, Permissions permissions) {

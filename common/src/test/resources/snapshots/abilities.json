@@ -121,8 +121,8 @@
       },
       {
         "ability": "maicraft:machine_inspect",
-        "summary": "看一台机器或一片机器区：组成、运行状态、进出口、挂在哪些网络上；指档案名时再和档案整机比对（只读）",
-        "parameters": "radius: integer = 16, item?: string, balance?: string",
+        "summary": "看一台机器或一片机器区：组成、运行状态、进出口、挂在哪些网络上；指档案名时再和档案整机比对；operation=read_site 把 target 那一台读成机器蓝图并建档（只读）",
+        "parameters": "radius: integer = 16, item?: string, balance?: string, operation: string = inspect, name?: string",
         "targets": [
           "here",
           "landmark",
@@ -905,7 +905,7 @@
     },
     {
       "ability": "maicraft:machine_inspect",
-      "summary": "看一台机器或一片机器区：组成、运行状态、进出口、挂在哪些网络上；指档案名时再和档案整机比对（只读）",
+      "summary": "看一台机器或一片机器区：组成、运行状态、进出口、挂在哪些网络上；指档案名时再和档案整机比对；operation=read_site 把 target 那一台读成机器蓝图并建档（只读）",
       "parameters": [
         {
           "name": "radius",
@@ -931,6 +931,23 @@
             "forces",
             "ballast"
           ]
+        },
+        {
+          "name": "operation",
+          "type": "string",
+          "required": false,
+          "doc": "inspect 看（默认）；read_site 把 target 指的那一台机器读成能直接喂回 machine_build 的机器蓝图（结果 site.blueprint），并按 name 建一份档案；指档案名时不另建档，给整机比对",
+          "default": "inspect",
+          "choices": [
+            "inspect",
+            "read_site"
+          ]
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "doc": "read_site 时新档案的名字；不给按锚点起\"机器@x,y,z\""
         }
       ],
       "targets": [

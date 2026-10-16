@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.machine;
 
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -19,6 +22,8 @@ import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
+import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.ResultDetails;
@@ -35,6 +40,9 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * <p>"看着像机器但没有机器类型认领"的格（有方块实体、又不是原版方块）按方块 ID 归并着报，
  * 写明缺哪个联动；没加载的格只数个数，不按空气算。指的是档案名时看档案的范围，并和档案整机比对：
  * 没对上的每一格、多出来的格、安装段与部件装没装成都列全；没指档案只给现状，不凭空生成参考设计。
+ *
+ * <p>读现场（read_site）时多走一步：挑出 target 那一台，按它的包围盒逐格抄成机器蓝图，再建一份档案；
+ * 指着档案读时不另建档，和档案的整机比对照给。
  */
 final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
 
@@ -47,9 +55,17 @@ final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
     /** 一个方块 ID 的没认领格先列几个位置当例子；总数照实给，不悄悄截断。 */
     private static final int SAMPLE_POSITIONS = 8;
 
+    /** 读现场时包围盒最多读这么多格：一台机器远用不到，再大一刻读不完。 */
+    private static final long SITE_CELL_LIMIT = 131_072;
+
     private final MachineInspectInput input;
     private final MachineServices services;
     private final MachineTargets targets;
+    /** 读现场时建档用；只看时为 null。 */
+    private final MachineArchives archives;
+    private final WorldMemory memory;
+    /** 读现场抄出来的那一台；只看、或还没走到交付为 null。 */
+    private MachineDetails.SiteRead site;
     /** 落实下来的扫描中心与维度。 */
     private BlockPos center;
     private String dimension;
@@ -68,11 +84,19 @@ final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
     /** 交付前等网络读数等了几刻。 */
     private int deliverWaits;
 
+    /** 只看不抄：不建档，用不着档案库与世界记忆。 */
     MachineInspectTask(MachineInspectInput input, MachineServices services) {
-        super("看机器", Phase.SCAN, new ProgressTracker(400, 2400));
+        this(input, services, null, null);
+    }
+
+    MachineInspectTask(MachineInspectInput input, MachineServices services, MachineArchives archives,
+            WorldMemory memory) {
+        super(input.readSite() ? "读现场机器" : "看机器", Phase.SCAN, new ProgressTracker(400, 2400));
         this.input = input;
         this.services = services;
         this.targets = new MachineTargets(services);
+        this.archives = archives;
+        this.memory = memory;
     }
 
     @Override protected Action enter(Phase phase) {
@@ -179,11 +203,110 @@ final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
             archiveCheck = ArchiveCheck.compare(input.archive(), services);
             recordProgress("和档案「" + input.archive().name() + "」比完");
         }
+        if (input.readSite()) {
+            Optional<Problem> unread = readSite();
+            if (unread.isPresent()) return Next.fail(unread.get());
+        }
         return Next.done(TaskResult.done(summary()));
+    }
+
+    // 读现场：挑出 target 那一台（指档案时是和档案有交集的几台），框包围盒逐格抄成机器蓝图，再建档。
+    private Optional<Problem> readSite() {
+        List<MachineGrouping.Machine> chosen = siteMachines();
+        if (chosen.isEmpty() && input.archive() == null) {
+            return Optional.of(Problem.of(Problem.Kind.NOT_FOUND, "这一片没有认得的机器，读不成机器蓝图",
+                    "target 指机器的一格，或加大 radius"));
+        }
+        Set<BlockPos> cells = new LinkedHashSet<>();
+        chosen.forEach(machine -> cells.addAll(machine.cells()));
+        if (input.archive() != null) cells.addAll(LineRoutes.cellsOf(input.archive()));
+        BlockPos min = corner(cells, true);
+        BlockPos max = corner(cells, false);
+        long volume = (long) (max.getX() - min.getX() + 1) * (max.getY() - min.getY() + 1) * (max.getZ() - min.getZ() + 1);
+        if (volume > SITE_CELL_LIMIT) {
+            return Optional.of(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "这台机器的包围盒有 " + volume + " 格，一次读不完",
+                    "让 target 指小一点的那一台，或分几块读"));
+        }
+        BlockPos anchor = input.archive() != null ? input.archive().anchor() : min;
+        MachineSiteCopy.Result copied = MachineSiteCopy.copy(anchor, min, max, services.world()::stateAt,
+                services::claiming);
+        List<String> notes = new ArrayList<>(copied.notes());
+        // 机器格碰到看的范围边上：分组只认范围里的格，伸出去的那部分没算进这台，抄出来缺一块。
+        boolean reachesEdge = input.archive() == null && cells.stream()
+                .anyMatch(cell -> Math.sqrt(cell.distSqr(center)) >= radius - 1);
+        if (reachesEdge) {
+            notes.add("这台机器碰到了这次看的范围边上（半径 " + radius + " 格），伸出去的部分没算进来；加大 radius 再读");
+        }
+        if (copied.unread() > 0) notes.add(copied.unread() + " 格没加载，没抄，不按空气算");
+        if (copied.flowing() > 0) notes.add(copied.flowing() + " 格流动的水或岩浆没写：源格倒下去它自己会流");
+        if (copied.blueprint().cells().isEmpty()) {
+            notes.add("逐格清单是空的（只有安装段与部件），machine_build 要至少一格方块：照着建前在 cells 里补一格");
+        }
+        String name = input.archive() != null ? input.archive().name()
+                : input.name() != null ? input.name() : "机器@" + anchor.getX() + "," + anchor.getY() + "," + anchor.getZ();
+        boolean archived = input.archive() == null && archive(name, anchor, copied.blueprint(), notes);
+        String machinesRead = String.join("、", chosen.stream().map(machine -> "m" + machine.number()).toList());
+        site = new MachineDetails.SiteRead(machinesRead, name, archived, anchor,
+                List.of(copied.size().getX(), copied.size().getY(), copied.size().getZ()), copied.json(),
+                copied.blueprint().cells().size(), copied.blueprint().installations().size(),
+                copied.blueprint().parts().size(), copied.unread(), copied.unread() == 0 && !reachesEdge, notes);
+        recordProgress("读成机器蓝图：" + site.cells() + " 格方块、" + site.installations() + " 段安装段、"
+                + site.parts() + " 个部件");
+        return Optional.empty();
+    }
+
+    // 读现场挑哪几台：指档案时是和档案格有交集的几台；不然是 target 落在的那一台，不在任何一台上就挑离它最近的。
+    private List<MachineGrouping.Machine> siteMachines() {
+        if (input.archive() != null) {
+            Set<BlockPos> archived = new HashSet<>(LineRoutes.cellsOf(input.archive()));
+            return machines.stream().filter(machine -> machine.cells().stream().anyMatch(archived::contains)).toList();
+        }
+        for (MachineGrouping.Machine machine : machines) {
+            if (machine.cells().contains(center)) return List.of(machine);
+        }
+        return machines.stream()
+                .min(Comparator.comparingDouble(machine -> machine.cells().stream()
+                        .mapToDouble(cell -> cell.distSqr(center)).min().orElse(Double.MAX_VALUE)))
+                .map(List::of).orElse(List.of());
+    }
+
+    /** 一组格的最小角或最大角。 */
+    static BlockPos corner(Set<BlockPos> cells, boolean lowest) {
+        int x = lowest ? Integer.MAX_VALUE : Integer.MIN_VALUE;
+        int y = x;
+        int z = x;
+        for (BlockPos cell : cells) {
+            x = lowest ? Math.min(x, cell.getX()) : Math.max(x, cell.getX());
+            y = lowest ? Math.min(y, cell.getY()) : Math.max(y, cell.getY());
+            z = lowest ? Math.min(z, cell.getZ()) : Math.max(z, cell.getZ());
+        }
+        return new BlockPos(x, y, z);
+    }
+
+    // 建档：名字已经有一台机器在用就不覆盖；存进去了在世界记忆里记一条"这台机器在哪"。存不进只记说明，不改判。
+    private boolean archive(String name, BlockPos anchor, MachineBlueprint blueprint, List<String> notes) {
+        if (archives.find(name).isPresent()) {
+            notes.add("档案名「" + name + "」已经有一台机器在用，没另建档案；换一个 name 再读");
+            return false;
+        }
+        if (!archives.save(MachineArchive.fresh(name, dimension, anchor, blueprint, null))) {
+            notes.add("档案「" + name + "」没存进去：蓝图照样给在 blueprint 里");
+            return false;
+        }
+        memory.rememberMachine(new WorldPosition(anchor.getX(), anchor.getY(), anchor.getZ(), dimension), name,
+                Instant.now());
+        return true;
     }
 
     private String summary() {
         StringBuilder line = new StringBuilder();
+        if (site != null) {
+            line.append("把 ").append(site.machine().isEmpty() ? "档案「" + site.archive() + "」那一片" : site.machine())
+                    .append(" 读成了机器蓝图（").append(site.cells()).append(" 格方块、").append(site.installations())
+                    .append(" 段安装段、").append(site.parts()).append(" 个部件）")
+                    .append(site.archived() ? "，建了档案「" + site.archive() + "」" : "")
+                    .append(site.complete() ? "" : "，没读全，见 site.notes").append("；");
+        }
         if (machines.isEmpty()) {
             line.append("这一片没有认得的机器");
         } else {
@@ -233,7 +356,7 @@ final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
                 .map(entry -> new MachineDetails.UnrecognizedBlock(entry.getKey(), entry.getValue().cells,
                         entry.getValue().samples, missing)).toList(),
                 unloadedSoFar, scanComplete, input.archive() == null ? null : input.archive().name(), archiveCheck,
-                note());
+                note(), site);
     }
 
     private String note() {

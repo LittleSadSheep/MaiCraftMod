@@ -19,6 +19,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.FullRun;
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
+import org.maiwithu.maicraft.ability.machine.spi.MachineCopy;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
@@ -123,6 +124,8 @@ final class MachineTestDoubles {
         Predicate<Installation> installedOk = installation -> false;
         /** 拆整台时这一段自己放下的格；默认不认这种安装段。 */
         Function<Installation, Optional<List<BlockPos>>> placed = installation -> Optional.empty();
+        /** 读现场时这种机器自己的抄法；默认没有，照抄方块。 */
+        Function<Map<BlockPos, BlockState>, Optional<MachineCopy>> copier = cells -> Optional.empty();
         Predicate<PartCell> mountedOk = part -> false;
         /** 装安装段与装部件的动作脚本：每次调用弹一个；空了给空，按"这种机器不给装"对待。 */
         final Deque<Action> installActions = new ArrayDeque<>();
@@ -194,6 +197,10 @@ final class MachineTestDoubles {
 
         @Override public Optional<List<BlockPos>> placedBy(Installation installation) {
             return placed.apply(installation);
+        }
+
+        @Override public Optional<MachineCopy> copy(Map<BlockPos, BlockState> cells) {
+            return copier.apply(cells);
         }
 
         @Override public Optional<Action> mount(PartCell part, Permissions permissions) {

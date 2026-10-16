@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.ability.machine.spi;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import net.minecraft.core.BlockPos;
@@ -71,6 +72,16 @@ public interface MachineType {
      * 不认这种安装段时给空，认但这一段没放方块时给空表。
      */
     default Optional<List<BlockPos>> placedBy(Installation installation) {
+        return Optional.empty();
+    }
+
+    /**
+     * 读现场时把一台机器里归这种机器认领的格抄成机器蓝图的写法：传送带、链条输送机之间的链、机械臂、
+     * ME 线缆与部件照抄方块建不回来，写成安装段与部件；照抄方块与属性就建得回来的给空，由机器能力照抄。
+     *
+     * @param cells 这台机器里这种机器认领的格与它们此刻的方块状态，世界坐标
+     */
+    default Optional<MachineCopy> copy(Map<BlockPos, BlockState> cells) {
         return Optional.empty();
     }
 

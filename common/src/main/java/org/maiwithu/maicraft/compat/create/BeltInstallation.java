@@ -2,17 +2,23 @@
 package org.maiwithu.maicraft.compat.create;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
+import org.maiwithu.maicraft.ability.machine.spi.MachineCopy;
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.WantedItem;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
@@ -38,6 +44,8 @@ final class BeltInstallation implements CreateInstallation {
 
     static final String KIND = "create:belt";
     static final String CONNECTOR = "create:belt_connector";
+    /** 传送带两头要先放的轴。 */
+    static final String SHAFT = "create:shaft";
 
     private final CreateCompat compat;
     private final PlayerServices services;
@@ -104,6 +112,21 @@ final class BeltInstallation implements CreateInstallation {
 
     @Override public boolean installed(ClientLevel level, Installation installation) {
         return builtAlong(installation.cells(), at -> compat.beltSegment(level, at));
+    }
+
+    // 读现场：每格读它属于哪条带、第几格，带头带尾与带轮按带子的轴向写回轴，整条带写成一段。
+    @Override public Optional<MachineCopy> copy(ClientLevel level, Map<BlockPos, BlockState> cells) {
+        return Optional.of(CreateCopies.belts(cells.keySet(), at -> compat.beltSegment(level, at)
+                .flatMap(segment -> CreateCopies.beltAxis(cells.get(at)).map(axis -> new CreateCopies.BeltCell(
+                        segment, axis, CreateCopies.beltEncased(cells.get(at))))), BeltInstallation::shaftAlong));
+    }
+
+    /** 某个轴向的 Create 轴；没注册 Create 的轴给空。 */
+    static Optional<BlockState> shaftAlong(Direction.Axis axis) {
+        return BuiltInRegistries.BLOCK.getOptional(ResourceLocation.parse(SHAFT))
+                .map(block -> block.defaultBlockState())
+                .filter(state -> state.hasProperty(BlockStateProperties.AXIS))
+                .map(state -> state.setValue(BlockStateProperties.AXIS, axis));
     }
 
     /**

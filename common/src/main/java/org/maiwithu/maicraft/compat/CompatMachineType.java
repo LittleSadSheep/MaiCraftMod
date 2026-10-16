@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.compat;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
@@ -10,6 +11,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
+import org.maiwithu.maicraft.ability.machine.spi.MachineCopy;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
@@ -83,6 +85,11 @@ public final class CompatMachineType implements MachineType {
 
     @Override public Optional<List<BlockPos>> placedBy(Installation installation) {
         return ask(() -> type.placedBy(installation), Optional.empty());
+    }
+
+    // 模组停用后不替它抄：交回空，机器能力照抄方块，抄出来的格照实写着建不回来。
+    @Override public Optional<MachineCopy> copy(Map<BlockPos, BlockState> cells) {
+        return ask(() -> type.copy(cells), Optional.empty());
     }
 
     @Override public Optional<Action> mount(PartCell part, Permissions permissions) {

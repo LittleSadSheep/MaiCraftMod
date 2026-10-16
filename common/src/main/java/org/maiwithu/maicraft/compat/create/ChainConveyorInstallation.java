@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.compat.create;
 
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -11,9 +12,11 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
+import org.maiwithu.maicraft.ability.machine.spi.MachineCopy;
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.WantedItem;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
@@ -116,6 +119,11 @@ final class ChainConveyorInstallation implements CreateInstallation {
         BlockPos from = installation.cells().get(0);
         BlockPos to = installation.cells().get(1);
         return linked(compat.chainConnections(level, from), compat.chainConnections(level, to), from, to);
+    }
+
+    // 读现场：链条输送机照抄方块，两头都在这台机器里的链写成一段；连到外面的只进说明。
+    @Override public Optional<MachineCopy> copy(ClientLevel level, Map<BlockPos, BlockState> cells) {
+        return Optional.of(CreateCopies.chains(cells, at -> compat.chainConnections(level, at)));
     }
 
     /** 两台上都记着这条连接才算连上（Create 两头各记一份相对位置），纯函数。 */

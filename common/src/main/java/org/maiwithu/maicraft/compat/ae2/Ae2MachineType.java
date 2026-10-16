@@ -22,6 +22,7 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
+import org.maiwithu.maicraft.ability.machine.spi.MachineCopy;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
@@ -125,6 +126,18 @@ final class Ae2MachineType implements MachineType {
     @Override public Optional<List<BlockPos>> placedBy(Installation installation) {
         if (!isCableBus() || !compat.cableItem(installation.kind())) return Optional.empty();
         return Optional.of(installation.cells());
+    }
+
+    // 读现场：线缆格不写成方块，同种线缆连着的写成一段段线缆、各面的部件写进部件；别的 ME 设备照抄方块。
+    @Override public Optional<MachineCopy> copy(Map<BlockPos, BlockState> cells) {
+        ClientLevel level = level();
+        if (!isCableBus() || level == null) return Optional.empty();
+        Map<BlockPos, Ae2Grid.GridCell> read = new LinkedHashMap<>();
+        for (BlockPos at : cells.keySet()) {
+            compat.gridCell(level, at).ifPresent(cell -> read.put(at, cell));
+        }
+        return Optional.of(MeCableCopies.copy(cells.keySet(), read,
+                at -> compat.gridCell(level, at).map(cell -> !cell.cableBus()).orElse(false)));
     }
 
     @Override public Optional<Action> mount(PartCell part, Permissions permissions) {
