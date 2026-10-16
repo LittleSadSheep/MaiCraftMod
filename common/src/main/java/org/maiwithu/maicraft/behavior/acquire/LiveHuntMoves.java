@@ -115,7 +115,11 @@ public final class LiveHuntMoves implements HuntMoves {
     }
 
     @Override public Action swimTo(int entityId) {
-        return new SwimAfter(entityId);
+        return new SwimAfter(entityId, true);
+    }
+
+    @Override public Action swimAlongside(int entityId) {
+        return new SwimAfter(entityId, false);
     }
 
     @Override public Action walkTo(double x, double y, double z) {
@@ -203,6 +207,8 @@ public final class LiveHuntMoves implements HuntMoves {
 
         private final int entityId;
         private final SwimChase chase = new SwimChase();
+        /** 镜头归不归它转：追的时候它盯着鱼；边追边砍时镜头归出手去瞄，它只按键。 */
+        private final boolean steersCamera;
         private PlayerContext player;
         private double best = Double.MAX_VALUE;
         private String what = "游过去追猎物";
@@ -210,8 +216,9 @@ public final class LiveHuntMoves implements HuntMoves {
         private String lastKeys;
         private long lastKeysTick;
 
-        SwimAfter(int entityId) {
+        SwimAfter(int entityId, boolean steersCamera) {
             this.entityId = entityId;
+            this.steersCamera = steersCamera;
         }
 
         @Override public ActionStatus tick(TickContext context) {
@@ -235,7 +242,7 @@ public final class LiveHuntMoves implements HuntMoves {
                     self.getY() - body.y, self.isEyeInFluid(FluidTags.WATER), self.onGround(), self.getAirSupply(),
                     self.getMaxAirSupply(), surfaceAbove(self) - eye.y), self.getYRot());
             PlayerInput input = player.input();
-            input.requestLook(stroke.yaw(), stroke.pitch(), tick);
+            if (steersCamera) input.requestLook(stroke.yaw(), stroke.pitch(), tick);
             PlayerInput.Movement keys = keys(self, body, stroke);
             input.applyMovement(keys, tick);
             logKeys(self, keys, stroke, eye.distanceTo(body), tick);

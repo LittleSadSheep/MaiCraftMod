@@ -96,6 +96,23 @@ class LiveHuntsTest {
             return instant();
         }
 
+        @Override public Action swimAlongside(int entityId) {
+            done.add("边追边砍");
+            return running();
+        }
+
+        private static Action running() {
+            return new Action() {
+                @Override public ActionStatus tick(TickContext context) {
+                    return ActionStatus.running();
+                }
+
+                @Override public String describe() {
+                    return "接着游的替身";
+                }
+            };
+        }
+
         @Override public double[] selfPosition(TickContext context) {
             return new double[] {0, 64, 0};
         }
@@ -198,7 +215,19 @@ class LiveHuntsTest {
         assertFalse(moves.done.stream().anyMatch(done -> done.startsWith("走到")), moves.done.toString());
         moves.inReach = true;
         hunting.tick(TICK);
-        assertEquals("打", moves.done.get(moves.done.size() - 1), moves.done.toString());
+        // 在水里出手不停下：出手的同时接着朝它游，边追边砍。
+        assertTrue(moves.done.contains("打"), moves.done.toString());
+        assertEquals("边追边砍", moves.done.get(moves.done.size() - 1), moves.done.toString());
+    }
+
+    @Test
+    void 不在水里出手照旧站着砍_不跟着游() {
+        FakeMoves moves = new FakeMoves();
+        moves.inReach = true;
+        Action hunting = hunts(moves).hunt(List.of(sheep()), wool(), Permissions.DEFAULT).orElseThrow();
+        for (int i = 0; i < 3; i++) hunting.tick(TICK);
+        assertTrue(moves.done.contains("打"), moves.done.toString());
+        assertFalse(moves.done.contains("边追边砍"), moves.done.toString());
     }
 
     @Test

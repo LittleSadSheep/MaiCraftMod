@@ -110,6 +110,8 @@ public final class LiveHunts implements Hunts {
         private Action current;
         private String currentKey;
         private Action loot;
+        /** 在水里出手时跟着按键的游泳动作：边追边砍；不在水里出手、换了一只、去收掉落时收掉。 */
+        private Action alongside;
         /** 走近这一只用的是游还是寻路：换了才记一行日志，实机对得上走的是哪条路。 */
         private String approach;
         /** 已经为哪一只换过武器：换一只猎物再看一眼手上，已经拿着最好的剑斧就不动。 */
@@ -232,6 +234,8 @@ public final class LiveHunts implements Hunts {
                 return ActionStatus.running();
             }
             if (!seen.get() || !moves.inReach(tick, target.entityId())) {
+                // 出了出手距离：边追边砍的那份按键收掉，下面重新决定是游过去还是走过去。
+                stopAlongside();
                 if (moves.sameWater(tick, target.entityId())) {
                     // 人和它泡在同一片水里、中间一路是水：寻路在水里只在水面那一层找路，到不了水下它跟前，只会停在它头顶上
                     // 够不着。直接游过去追，镜头跟着它往下扎或往上浮；氧气不够先上去换满再回来，进了出手距离就砍。
@@ -258,7 +262,25 @@ public final class LiveHunts implements Hunts {
                 dropsBefore = drops.nearby();
             }
             stepCurrent(tick, "打 " + target.describe());
+            swimAlongside(tick);
             return ActionStatus.running();
+        }
+
+        // 出手这一刻人和它还泡在同一片水里：出手先停下按键、转镜头去瞄，接着由游泳动作把键按回去，
+        // 一边朝它游一边等出手——鱼一挨近就躲，站着瞄它早游走了。上了岸或不在同一片水里就收掉，照旧站着砍。
+        private void swimAlongside(TickContext tick) {
+            if (!moves.sameWater(tick, target.entityId())) {
+                stopAlongside();
+                return;
+            }
+            if (alongside == null) alongside = moves.swimAlongside(target.entityId());
+            ActionStatus status = alongside.tick(tick);
+            if (status instanceof ActionStatus.Done || status instanceof ActionStatus.Failed) stopAlongside();
+        }
+
+        private void stopAlongside() {
+            if (alongside != null) alongside.close();
+            alongside = null;
         }
 
         // 走近的办法换了（游 ↔ 寻路）才记一行：实机里看日志就知道这只是游过去的还是走过去的。
@@ -338,6 +360,7 @@ public final class LiveHunts implements Hunts {
         }
 
         private void startLoot() {
+            stopAlongside();
             // 掉落物散在它倒下的地方那一片：先走回那里，远处（八格外）的才进得了"附近"的名单。
             lootSpot = lastKnownAt;
             loot = drops.pickUpNewSince(dropsBefore == null ? Set.of() : dropsBefore);
@@ -405,6 +428,7 @@ public final class LiveHunts implements Hunts {
 
         /** 放下当前目标：换个候选从头来。 */
         private void dropTarget() {
+            stopAlongside();
             target = null;
             struck = false;
             dropsBefore = null;
@@ -455,11 +479,13 @@ public final class LiveHunts implements Hunts {
 
         @Override public void pause() {
             if (current != null) current.pause();
+            if (alongside != null) alongside.pause();
             if (loot != null) loot.pause();
         }
 
         @Override public void close() {
             dropCurrent();
+            stopAlongside();
             if (loot != null) {
                 loot.close();
                 loot = null;

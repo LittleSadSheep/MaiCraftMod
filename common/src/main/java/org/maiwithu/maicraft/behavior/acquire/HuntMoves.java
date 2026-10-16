@@ -36,6 +36,12 @@ public interface HuntMoves {
     /** 在水里朝这只猎物游过去：镜头一直跟着它，要下潜就下潜、要上浮就上浮；氧气不够先浮上去换满再回来接着追。 */
     Action swimTo(int entityId);
 
+    /**
+     * 出手的同时接着朝它游：只按键不转镜头（镜头归出手去瞄）。鱼一挨近就躲开，站着等镜头转到它早游走了，
+     * 所以在水里边追边砍，出手停下按键的那一下由它接着按回去。
+     */
+    Action swimAlongside(int entityId);
+
     /** 朝一个位置走过去（只走不改）。 */
     Action walkTo(double x, double y, double z);
 
