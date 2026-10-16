@@ -18,7 +18,6 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
-import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.player.BackpackView;
@@ -83,6 +82,8 @@ public final class RecipeSource implements ItemSource {
     private final PermissionCheck permission;
     /** 可以互换的原料怎么数、缺了去弄哪一样。 */
     private final IngredientChoice choice;
+    /** 记得的工作站：挑哪台、烧炉子正忙时换哪几台。 */
+    private final RememberedStations stations;
     /** 拿东西的引擎此刻在推进的那一串请求（外层在前）；没接上为空串。 */
     private Supplier<List<ItemRequest>> chain = List::of;
 
@@ -103,6 +104,7 @@ public final class RecipeSource implements ItemSource {
         this.choice = new IngredientChoice(backpack, offhand, tags, needs);
         this.placer = placer;
         this.permission = permission;
+        this.stations = new RememberedStations(memory, placer, SEARCH_RADIUS_BLOCKS);
     }
 
     /** 认所有种类配方、不就地摆设施的来源：就地摆放与种类分路接入前的老写法。 */
@@ -410,7 +412,11 @@ public final class RecipeSource implements ItemSource {
             return new StepwiseActions("就地摆下" + recipe.kind().displayName() + "再做"
                     + recipe.result().describe(), steps.toArray(Action[]::new));
         }
-        Optional<Action> run = runs.run(recipe, station, times, permissions, context.records());
+        // 烧炉子时把记得的同种炉子都按远近交过去：挑中的那台点开发现在烧别人的东西，关上换下一台。
+        Optional<Action> run = recipe.kind().cooks()
+                ? runs.runAtAnyOf(recipe, stations.nearestFirst(recipe.kind(), station, context.characterAt()), times,
+                        permissions, context.records())
+                : runs.run(recipe, station, times, permissions, context.records());
         if (run.isEmpty()) {
             // 备齐了也动不了手（设施没了、界面进不去）：整串放弃，由引擎换别的路。
             return steps.isEmpty()
@@ -749,23 +755,7 @@ public final class RecipeSource implements ItemSource {
     }
 
     private Optional<MemoryRecord> findStation(WorkstationRecipe.Kind kind, SourceContext context) {
-        String blockType = kind.blockType();
-        // 记得好几台时挑离得最近的那台：世界记忆按记下的先后排，最新记的不一定最近。
-        // 眼下看得到已经没了的（被挖走、被炸掉）先从记忆里划掉：不然会走过去点一块空地，整件合成白白失败，
-        // 身上明明还有一张工作台也不会放下来用。
-        List<MemoryRecord> remembered = memory.recordsNear(context.characterAt(), SEARCH_RADIUS_BLOCKS).stream()
-                .filter(record -> record.kind() == MemoryKind.WORKSTATION)
-                .filter(record -> blockType.equals(record.blockType()))
-                .toList();
-        List<MemoryRecord> standing = new ArrayList<>();
-        for (MemoryRecord record : remembered) {
-            if (placer != null && placer.gone(record.position(), blockType)) {
-                memory.forget(MemoryKind.WORKSTATION, record.position());
-            } else {
-                standing.add(record);
-            }
-        }
-        return standing.stream().min(Comparator.comparingDouble(record -> distance(record, context)));
+        return stations.nearest(kind, context.characterAt());
     }
 
     private String riskNote(WorkstationRecipe recipe, int times, SourceContext context) {
@@ -780,11 +770,6 @@ public final class RecipeSource implements ItemSource {
     }
 
     private static double distance(MemoryRecord record, SourceContext context) {
-        var at = record.position();
-        var here = context.characterAt();
-        double dx = at.x() - here.x();
-        double dy = at.y() - here.y();
-        double dz = at.z() - here.z();
-        return Math.sqrt(dx * dx + dy * dy + dz * dz);
+        return RememberedStations.distance(record.position(), context.characterAt());
     }
 }

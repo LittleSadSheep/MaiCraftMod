@@ -91,6 +91,13 @@ public final class MenuRecipeRuns implements RecipeRuns {
     @Override
     public Optional<Action> run(WorkstationRecipe recipe, WorldPosition station, int times, Permissions permissions,
             TaskRecords records) {
+        return runAtAnyOf(recipe, List.of(station), times, permissions, records);
+    }
+
+    // 记得好几台同种炉子时都交给烧炉子的动作：第一台正忙就换下一台。合成与石切台站在跟前一口气做完，只用第一台。
+    @Override
+    public Optional<Action> runAtAnyOf(WorkstationRecipe recipe, List<WorldPosition> stations, int times,
+            Permissions permissions, TaskRecords records) {
         PlayerContext current = context.get();
         ClientLevel level = current == null ? null : current.level();
         if (level == null) {
@@ -103,9 +110,9 @@ public final class MenuRecipeRuns implements RecipeRuns {
         }
         // 烧炼要关着界面等炉子、烧好再回来取，单独一个动作；合成与石切台站在跟前一口气做完。
         return level.getRecipeManager().byKey(id).map(holder -> recipe.kind().cooks()
-                ? new FurnaceRun(holder, recipe, station, times, () -> visit(recipe, station, permissions), fuels,
+                ? new FurnaceRun(holder, recipe, stations, times, at -> visit(recipe, at, permissions), fuels,
                         memory, records)
-                : new WorkAction(holder, recipe, station, times, permissions, records));
+                : new WorkAction(holder, recipe, stations.getFirst(), times, permissions, records));
     }
 
     // 到设施跟前点开界面的一趟：站位、点开、等同步、认界面类型，做配方和烧炉子共用。

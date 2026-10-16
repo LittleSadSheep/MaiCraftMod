@@ -7,7 +7,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.function.Supplier;
+import java.util.function.Function;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -43,7 +43,9 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  *
  * <p>等的时候界面关着：吃东西、自卫打断碰不到炉子里的东西，回来照常取；界面被关掉（打断或别的原因）
  * 不当成烧完了，重新走到跟前点开接着照看。炉子亮着就是在烧，按真实进展报，不让任务把等待当成原地打转。
- * 炉子里是别人的东西（投入口是别的原料、产出格是别的成品）就是正忙，不动它，如实说出来。
+ * 炉子里是别人的东西（投入口是别的原料、产出格是别的成品）就是正忙，不动它：这台里还没放过这次的东西，
+ * 就关上界面换记得的下一台同种炉子（近的在前，连第一台最多三台，见 {@link FurnaceChoices}），换过去的那台
+ * 走不到、点不开也接着换；都没用上才收场，逐台说清在哪、为什么。已经放过东西的那台不丢下，照旧在那台收场。
  */
 final class FurnaceRun implements Action {
 
@@ -62,6 +64,8 @@ final class FurnaceRun implements Action {
     private static final int LIT_REPORT_TICKS = 100;
     /** 走过去、点开、装料、收货、收拾的余量：总期限是烧的时间加上它。 */
     private static final int HANDLING_TICKS = 20 * 120;
+    /** 换一台炉子多给的时间：走到下一台、点开看一眼。 */
+    private static final int SWITCH_TICKS = 20 * 60;
     /** 界面不是被打断关上、而是无缘无故没了，最多重开几次。 */
     private static final int MAX_REOPENS = 3;
     /** 零碎燃料的上限：木棍、树苗一件只烧半件，有木板以上的燃料时不拿它们。 */
@@ -93,14 +97,18 @@ final class FurnaceRun implements Action {
 
     private final RecipeHolder<?> holder;
     private final WorkstationRecipe recipe;
-    private final WorldPosition station;
-    private final BlockPos at;
-    private final Supplier<StationVisit> visits;
+    /** 记得的几台同种炉子，近的在前；眼下用的是其中一台。 */
+    private final FurnaceChoices choices;
+    private WorldPosition station;
+    private BlockPos at;
+    /** 到某一台炉子跟前点开的一趟。 */
+    private final Function<WorldPosition, StationVisit> visits;
     private final ReadsFuels fuels;
     private final WorldMemory memory;
     private final int targetItems;
     private final int cookTicks;
-    private final long giveUpTicks;
+    /** 总期限：烧的时间加上照看的余量，每换一台炉子再多给一些。 */
+    private long giveUpTicks;
 
     private Stage stage = Stage.VISIT;
     private StationVisit visit;
@@ -108,6 +116,8 @@ final class FurnaceRun implements Action {
     private MenuSession closingSession;
     /** 关上界面以后是去旁边等（true）还是收场（false）。 */
     private boolean awayAfterClose;
+    /** 关上界面以后换下一台炉子：这台正忙，里面又没有这次放的东西。 */
+    private boolean moveOnAfterClose;
     private long awayTicks;
     private long awayUntil;
     private long unlitSince = -1;
@@ -138,11 +148,16 @@ final class FurnaceRun implements Action {
     private ItemStack splitKind = ItemStack.EMPTY;
     private String splitWhat = "";
 
-    FurnaceRun(RecipeHolder<?> holder, WorkstationRecipe recipe, WorldPosition station, int times,
-            Supplier<StationVisit> visits, ReadsFuels fuels, WorldMemory memory, TaskRecords records) {
+    /**
+     * @param stations 记得的同种炉子，近的在前，第一台是挑中的那台；正忙时按次序换下一台
+     * @param visits   到某一台炉子跟前点开的一趟
+     */
+    FurnaceRun(RecipeHolder<?> holder, WorkstationRecipe recipe, List<WorldPosition> stations, int times,
+            Function<WorldPosition, StationVisit> visits, ReadsFuels fuels, WorldMemory memory, TaskRecords records) {
         this.holder = Objects.requireNonNull(holder, "holder");
         this.recipe = Objects.requireNonNull(recipe, "recipe");
-        this.station = Objects.requireNonNull(station, "station");
+        this.choices = new FurnaceChoices(stations);
+        this.station = choices.current();
         this.at = new BlockPos(station.x(), station.y(), station.z());
         this.visits = Objects.requireNonNull(visits, "visits");
         this.fuels = Objects.requireNonNull(fuels, "fuels");
@@ -181,13 +196,17 @@ final class FurnaceRun implements Action {
     }
 
     // 走到熔炉跟前点开：每次回来都重新走一遍，人可能被挤开、撤离过。
+    // 换过去的那台走不到、点不开，里面又没有这次放的东西：记下原因接着换下一台，不在这一台上收场。
     private ActionStatus visit(TickContext tick) {
         if (visit == null) {
-            visit = visits.get();
+            visit = visits.apply(station);
         }
         ActionStatus status = visit.tick(tick);
         if (status instanceof ActionStatus.Failed failed) {
             Problem why = failed.problem();
+            if (!choices.onFirst() && nothingOfOursInside()) {
+                return unreachable(why.headline());
+            }
             return fail(why.kind(), why.message()
                     + (inputLoaded ? "；" + stove() + "里可能还有这次放进去的原料或烧好的成品" : ""));
         }
@@ -212,7 +231,7 @@ final class FurnaceRun implements Action {
         MenuContent.Reading open = reading.get();
         SlotSnapshot input = open.containerSnapshots().get(INPUT);
         SlotSnapshot output = open.containerSnapshots().get(OUTPUT);
-        // 炉子里是别人的东西：不动它，如实说熔炉正忙。
+        // 炉子里是别人的东西：不动它。这台里还没放过这次的东西就关上换下一台，放过的照旧如实说正忙。
         if (!output.isEmpty() && !isResult(output.stack())) {
             return busy("产出格里放着" + output.stack().getHoverName().getString());
         }
@@ -402,6 +421,12 @@ final class FurnaceRun implements Action {
             }
         }
         dropVisit();
+        if (moveOnAfterClose) {
+            // 正忙的那台关好了：走去下一台，从点开看一眼重新来。
+            moveOnAfterClose = false;
+            goTo(choices.current());
+            return ActionStatus.progressed();
+        }
         if (awayAfterClose) {
             long now = tick.player().clientTick();
             awayUntil = now + awayTicks;
@@ -424,10 +449,56 @@ final class FurnaceRun implements Action {
         return ActionStatus.progressed();
     }
 
-    // 炉子正忙：不动别人的东西，收拾自己放进去的就走。
+    // 炉子正忙：不动别人的东西。这台里没有这次放的东西就换下一台；放过的收拾自己放进去的就走。
+    // 只记得这一台时照旧一句"正忙"收场，由引擎换别的路。
     private ActionStatus busy(String what) {
-        return finish(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "熔炉正忙：" + what + "，不是这次要烧的",
-                "换一台熔炉，或等它烧完再来"));
+        if (nothingOfOursInside() && choices.skip("正忙，" + what)) {
+            return moveOn();
+        }
+        if (choices.tried() > 1 && nothingOfOursInside()) {
+            return finish(allSkipped());
+        }
+        return finish(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, stove() + "正忙：" + what + "，不是这次要烧的",
+                "换一台" + stove() + "，或等它烧完再来"));
+    }
+
+    // 换过去的那台走不到、点不开（界面没开着）：还有下一台就直接走过去，试满了以逐台说明收场。
+    private ActionStatus unreachable(String why) {
+        if (choices.skip(why)) {
+            giveUpTicks += SWITCH_TICKS;
+            goTo(choices.current());
+            return ActionStatus.progressed();
+        }
+        failure = allSkipped();
+        return ActionStatus.failed(failure);
+    }
+
+    // 正忙的这台界面开着：先关上（不收拾，里面没有自己的东西），关好了再走去下一台。
+    private ActionStatus moveOn() {
+        giveUpTicks += SWITCH_TICKS;
+        moveOnAfterClose = true;
+        awayAfterClose = false;
+        stage = Stage.CLOSE;
+        return ActionStatus.progressed();
+    }
+
+    // 换到某一台炉子：之后的走过去、点开、看炉子亮不亮、记用过的设施都按这一台。
+    private void goTo(WorldPosition next) {
+        station = next;
+        at = new BlockPos(next.x(), next.y(), next.z());
+        dropVisit();
+        stage = Stage.VISIT;
+    }
+
+    // 试满了都没用上：逐台说清在哪、为什么，一件没烧出来交给引擎换别的路。
+    private Problem allSkipped() {
+        return Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, choices.summary(stove()),
+                "等它们烧完再来，或换别的路（例如就地摆一台新的" + stove() + "）");
+    }
+
+    // 这台炉子里没有这次放进去的东西：没装过原料、没添过燃料，丢下它去别处不落下自己的东西。
+    private boolean nothingOfOursInside() {
+        return !inputLoaded && fuelPlaced == null;
     }
 
     // 界面没了：被生存需求打断时关的、或别的原因关的，都回到熔炉跟前重新点开接着照看，不当成烧完了。
@@ -630,7 +701,8 @@ final class FurnaceRun implements Action {
 
     @Override
     public String describe() {
-        String progress = "（已收 " + produced + "/" + targetItems + "）";
+        String progress = "（已收 " + produced + "/" + targetItems
+                + (choices.tried() > 1 ? "，换到第 " + choices.tried() + " 台" : "") + "）";
         return stage == Stage.AWAY ? "关着界面等熔炉烧" + recipe.result().describe() + progress
                 : "用熔炉烧" + recipe.result().describe() + progress;
     }

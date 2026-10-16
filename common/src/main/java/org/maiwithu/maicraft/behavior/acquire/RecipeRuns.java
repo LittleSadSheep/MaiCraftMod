@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.acquire;
 
+import java.util.List;
 import java.util.Optional;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -27,6 +28,15 @@ public interface RecipeRuns {
      */
     Optional<Action> run(WorkstationRecipe recipe, WorldPosition station, int times, Permissions permissions,
             TaskRecords records);
+
+    /**
+     * 在记得的几台同种设施里挑一台做：stations 近的在前，第一台是挑中的那台。烧炉子时第一台点开发现在烧别人的东西，
+     * 关上换下一台；实现不会换台时只用第一台。其余同 {@link #run}。
+     */
+    default Optional<Action> runAtAnyOf(WorkstationRecipe recipe, List<WorldPosition> stations, int times,
+            Permissions permissions, TaskRecords records) {
+        return run(recipe, stations.getFirst(), times, permissions, records);
+    }
 
     /**
      * 在"刚记进世界记忆的那台设施"上做：附近本来没有设施、就地放了一个新的时，

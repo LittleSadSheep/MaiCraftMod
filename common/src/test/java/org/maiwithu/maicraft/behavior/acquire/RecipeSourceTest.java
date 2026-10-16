@@ -534,6 +534,40 @@ class RecipeSourceTest {
     }
 
     @Test
+    void 记得几台熔炉_烧炉子的动作拿到全部_近的在前() {
+        // 近的那台点开发现在烧别人的东西时要换下一台：动手时把记得的熔炉都按离角色远近交过去，挑中的那台排第一。
+        WorldMemory memory = memory();
+        memory.rememberWorkstationUsed(new WorldPosition(30, 64, 0, null), "minecraft:furnace", NOW);
+        memory.rememberWorkstationUsed(new WorldPosition(5, 64, 0, null), "minecraft:furnace", NOW);
+        memory.rememberWorkstationUsed(new WorldPosition(12, 64, 0, null), "minecraft:furnace", NOW);
+        memory.rememberWorkstationUsed(new WorldPosition(2, 64, 0, null), "minecraft:smoker", NOW);
+        backpack.add("minecraft:raw_iron", 1);
+        backpack.add("minecraft:coal", 1);
+        List<List<WorldPosition>> handed = new ArrayList<>();
+        RecipeRuns runs = new RecipeRuns() {
+            @Override public Optional<Action> run(WorkstationRecipe recipe, WorldPosition station, int times,
+                    Permissions permissions, TaskRecords records) {
+                throw new AssertionError("烧炉子要把几台都交过去");
+            }
+
+            @Override public Optional<Action> runAtAnyOf(WorkstationRecipe recipe, List<WorldPosition> stations,
+                    int times, Permissions permissions, TaskRecords records) {
+                handed.add(stations);
+                return FakeRuns.READY.run(recipe, stations.getFirst(), times, permissions, records);
+            }
+        };
+        RecipeSource recipeSource = new RecipeSource(wanted -> List.of(ironSmelting()), memory,
+                itemId -> "minecraft:coal".equals(itemId) ? 1600 : 0, runs, backpack, offhand, tags,
+                new CapturingNeeds());
+        ItemRequest request = new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), 1, "工具准备");
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, recipeSource.quote(request, CONTEXT));
+        recipeSource.begin(request, offer, CONTEXT).orElseThrow();
+
+        assertEquals(List.of(new WorldPosition(5, 64, 0, null), new WorldPosition(12, 64, 0, null),
+                new WorldPosition(30, 64, 0, null)), handed.getFirst(), "只交熔炉，烟熏炉不算；近的在前");
+    }
+
+    @Test
     void 报价认的配方没了_交回空由引擎换路() {
         SourceQuote.Offer stale = new SourceQuote.Offer("自己做", 4,
                 new AcquisitionCost(5, 6), null, "minecraft:gone_recipe");
