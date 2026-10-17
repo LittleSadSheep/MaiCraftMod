@@ -263,12 +263,23 @@ public final class RecipeSource implements ItemSource {
                 .filter(recipe -> recipe.kind().placeable() || findStation(recipe.kind(), context).isPresent())
                 .filter(recipe -> !consumesWhatIsWanted(recipe, request.wanted()))
                 .filter(recipe -> !consumesOuterWanted(recipe))
-                .sorted(MaterialPreference.first(preferred(request), tags)
+                .sorted(Comparator.<WorkstationRecipe>comparingInt(candidate ->
+                                remakeNeedingMaterials(candidate, request) ? 1 : 0)
+                        .thenComparing(MaterialPreference.first(preferred(request), tags))
                         .thenComparingInt((WorkstationRecipe candidate) -> missingFor(candidate, request.count()))
                         .thenComparingInt(candidate -> inInventory(candidate) ? 0 : 1)
                         .thenComparingInt(candidate -> candidate.ingredients().size())
                         .thenComparingInt(candidate -> candidate.kind().plannedCookTicks()))
                 .toList();
+    }
+
+    // 同类改造（染床、染羊毛这类"拿同类换同类"的染色配方）还缺料时排在直配后面：它收的是"别的颜色"，
+    // 不含要的颜色本身，缺料数又总比直配少（染一张床缺一张床，直配缺三块羊毛），照缺料排会先去
+    // "弄一张白床再染色"，白床又要白羊毛、白染料、杀骷髅，一路绕到天亮（实机 10-15/10-16 做品红床整晚没做成）。
+    // 身上的料现成能改（一件不缺）时它仍是最快的，照常参与排序。
+    private boolean remakeNeedingMaterials(WorkstationRecipe recipe, ItemRequest request) {
+        return recipe.ingredients().stream().anyMatch(ingredient -> choice.kindred(ingredient, request.wanted()))
+                && missingFor(recipe, request.count()) > 0;
     }
 
     // LLM 说的材料倾向：这次请求点的，加上外层还在做的请求点的（备料时沿配方链往下传）。

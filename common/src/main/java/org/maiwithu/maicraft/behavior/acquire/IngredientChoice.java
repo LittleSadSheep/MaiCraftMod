@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.acquire;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
@@ -55,6 +56,23 @@ final class IngredientChoice {
             } else if (wanted.isTag() ? wanted.tagId().equals(item.tagId())
                     : tags.tagsOf(wanted.itemId()).contains(item.tagId())) {
                 return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 这一格收的原料与要的东西是同一类东西（床与床、羊毛与羊毛）：染成品配方收的是"别的颜色"，
+ * 不含要的那个颜色本身，satisfies 认不出，得靠共享的物品标签认同类。
+     * 同类改造还缺料时不如直配（缺一张床 vs 缺三块羊毛，缺料数排序总偏向改造，一绕就绕到
+     * "弄白床 → 弄白羊毛 → 弄白染料 → 杀骷髅"的深链），排序时把它排到后面。
+     */
+    boolean kindred(WorkstationRecipe.IngredientStack ingredient, WantedItem wanted) {
+        Set<String> wantedTags = wanted.isTag() ? Set.of(wanted.tagId()) : tags.tagsOf(wanted.itemId());
+        for (WantedItem option : ingredient.options()) {
+            Set<String> optionTags = option.isTag() ? Set.of(option.tagId()) : tags.tagsOf(option.itemId());
+            for (String tag : optionTags) {
+                if (wantedTags.contains(tag)) return true;
             }
         }
         return false;

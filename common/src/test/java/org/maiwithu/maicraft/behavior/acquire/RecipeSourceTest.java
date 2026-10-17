@@ -1119,6 +1119,64 @@ class RecipeSourceTest {
         assertInstanceOf(SourceQuote.Unavailable.class, quote, "做块要用外层正要的合金：不算做法");
     }
 
+    @Test
+    void 染成品配方还缺料时排在直配后面() {
+        // 实机 10-15/10-16：要品红床，直配（3 品红羊毛+3 木板）缺 2 块羊毛、染床配方（染料+任一张别的床）
+        // 只缺一张床，缺料数排序让引擎先去"弄一张白床再染色"，白床又要白羊毛、白染料、杀骷髅，整晚没做成。
+        // 现在同类改造还缺料时排直配后面；身上的床现成能改时它照常最快（见下一个场景）。
+        for (String color : List.of("white", "black", "red")) {
+            tags.put("minecraft:" + color + "_bed", "minecraft:beds");
+            tags.put("minecraft:" + color + "_wool", "minecraft:wool");
+        }
+        tags.put("minecraft:magenta_bed", "minecraft:beds");
+        tags.put("minecraft:magenta_wool", "minecraft:wool");
+        tags.put("minecraft:magenta_dye", "minecraft:dyes");
+        WorkstationRecipe direct = new WorkstationRecipe("minecraft:magenta_bed", WorkstationRecipe.Kind.CRAFTING,
+                WantedItem.ofItem("minecraft:magenta_bed"), 1,
+                List.of(new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:magenta_wool"), 3),
+                        new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:spruce_planks"), 3)));
+        WorkstationRecipe dye = new WorkstationRecipe("minecraft:dye_magenta_bed", WorkstationRecipe.Kind.CRAFTING,
+                WantedItem.ofItem("minecraft:magenta_bed"), 1,
+                List.of(new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:magenta_dye"), 1),
+                        new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:white_bed"), 1,
+                                List.of("minecraft:white_bed", "minecraft:black_bed", "minecraft:red_bed"))));
+        backpack.add("minecraft:magenta_wool", 1);
+        WorldMemory memory = memory();
+        memory.rememberWorkstationUsed(TABLE_AT, "minecraft:crafting_table", NOW);
+        // 染床配方排在读端给出的第一位，排序要能把直配翻到前面。
+        SourceQuote quote = source(memory, wanted -> List.of(dye, direct), new CapturingNeeds())
+                .quote(new ItemRequest(WantedItem.ofItem("minecraft:magenta_bed"), 1, "睡觉"), CONTEXT);
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, quote);
+        assertEquals("minecraft:magenta_bed", offer.hint(), "直配优先，不先绕去弄一张别的颜色的床");
+    }
+
+    @Test
+    void 身上的床现成能改时染色配方照常最快() {
+        // 身上有一张白床和品红染料：染一下就是品红床，不必为"缺 3 块品红羊毛"的直配去打羊。
+        for (String color : List.of("white", "black", "red")) {
+            tags.put("minecraft:" + color + "_bed", "minecraft:beds");
+        }
+        tags.put("minecraft:magenta_bed", "minecraft:beds");
+        tags.put("minecraft:magenta_dye", "minecraft:dyes");
+        WorkstationRecipe direct = new WorkstationRecipe("minecraft:magenta_bed", WorkstationRecipe.Kind.CRAFTING,
+                WantedItem.ofItem("minecraft:magenta_bed"), 1,
+                List.of(new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:magenta_wool"), 3),
+                        new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:spruce_planks"), 3)));
+        WorkstationRecipe dye = new WorkstationRecipe("minecraft:dye_magenta_bed", WorkstationRecipe.Kind.CRAFTING,
+                WantedItem.ofItem("minecraft:magenta_bed"), 1,
+                List.of(new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:magenta_dye"), 1),
+                        new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:white_bed"), 1,
+                                List.of("minecraft:white_bed", "minecraft:black_bed", "minecraft:red_bed"))));
+        backpack.add("minecraft:white_bed", 1);
+        backpack.add("minecraft:magenta_dye", 1);
+        WorldMemory memory = memory();
+        memory.rememberWorkstationUsed(TABLE_AT, "minecraft:crafting_table", NOW);
+        SourceQuote quote = source(memory, wanted -> List.of(direct, dye), new CapturingNeeds())
+                .quote(new ItemRequest(WantedItem.ofItem("minecraft:magenta_bed"), 1, "睡觉"), CONTEXT);
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, quote);
+        assertEquals("minecraft:dye_magenta_bed", offer.hint(), "身上的料现成能改，染色一步到位");
+    }
+
     private int countOf(String itemId) {
         return backpack.stacks().stream()
                 .filter(stack -> stack.itemId().equals(itemId))
