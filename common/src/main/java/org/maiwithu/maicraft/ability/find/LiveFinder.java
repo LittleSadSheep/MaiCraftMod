@@ -49,6 +49,11 @@ final class LiveFinder implements FindsAround {
     private static final int BUILD_BUDGET = 4096;
     /** 看结构地表特征时一次要几处证据：凑一个村庄的组合够用。 */
     private static final int CLUE_WANT = 64;
+    /**
+     * 要塞的线索在多远以内都算（格）：要塞之间隔着上千格，记得的那条就是最近的那一个；
+     * 扔眼找到后走远了再找，不该为一条已经记下的线索再扔眼。
+     */
+    private static final int STRONGHOLD_LEAD_REACH = 1024;
 
     private final BlockScanService scans;
     private final Supplier<PlayerContext> context;
@@ -223,7 +228,8 @@ final class LiveFinder implements FindsAround {
     private Round structureLeads(FindInput input, BlockPos center, String dimension) {
         WorldPosition here = new WorldPosition(center.getX(), center.getY(), center.getZ(), dimension);
         List<Hit> hits = new ArrayList<>();
-        for (MemoryRecord record : memory.recordsNear(here, input.radius())) {
+        int reach = input.followsEyes() ? Math.max(input.radius(), STRONGHOLD_LEAD_REACH) : input.radius();
+        for (MemoryRecord record : memory.recordsNear(here, reach)) {
             if (record.kind() != MemoryKind.SITE) {
                 continue;
             }

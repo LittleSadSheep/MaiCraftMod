@@ -45,6 +45,8 @@ public final class ClientDropPickup implements PicksUpDrops {
     private static final int APPEAR_TICKS = 10;
     /** 每件东西的耐心；到点没捡到就放弃这一件，不在一件东西上耗着。 */
     private static final int GIVE_UP_TICKS = 100;
+    /** 点名捡的那一件多给些耐心：落在十几格外、还在往下掉，走过去要几秒。 */
+    private static final int ONE_GIVE_UP_TICKS = 200;
     /** 改成挖开、扒开走进去以后，一件最多再等这么多刻：挖几格要时间。 */
     private static final int OPEN_UP_GIVE_UP_TICKS = 400;
     /** 走到了旁边、它还躺着这么多刻（刻）：多半钻在树冠底下够不着，扒开树叶走进那一格。 */
@@ -77,7 +79,15 @@ public final class ClientDropPickup implements PicksUpDrops {
 
     @Override
     public Action pickUpNewSince(Set<Integer> before) {
-        return new PickUp(before);
+        return new PickUp(before, null);
+    }
+
+    /**
+     * 捡起指定的那一件（扔出去的末影之眼落下的那颗）：离得远一点也走过去，别的东西不碰；
+     * 那一件没捡到（走不过去、被别人捡走、消失了）如实失败，不把"走过去了"当成"捡到了"。
+     */
+    public Action pickUpOne(int entityId) {
+        return new PickUp(Set.of(), entityId);
     }
 
     private LocalPlayer player() {
@@ -90,6 +100,8 @@ public final class ClientDropPickup implements PicksUpDrops {
 
         /** 出手前就在地上的，以及捡不到放弃了的：都不再去碰。 */
         private final Set<Integer> skip;
+        /** 只捡这一件（游戏实体编号）；为 null 时捡脚边新冒出来的全部。 */
+        private final Integer only;
         private Integer current;
         private BlockPos walkingTo;
         private WalkRun walk;
@@ -108,8 +120,9 @@ public final class ClientDropPickup implements PicksUpDrops {
         /** 还没看到新东西冒出来时已经等了几刻：掉落物要过一两刻才同步到客户端。 */
         private int appearWaited;
 
-        PickUp(Set<Integer> before) {
+        PickUp(Set<Integer> before, Integer only) {
             this.skip = new HashSet<>(before);
+            this.only = only;
         }
 
         @Override
@@ -129,7 +142,8 @@ public final class ClientDropPickup implements PicksUpDrops {
                     missed++;
                 }
                 current = null;
-            } else if (current != null && ++waited > (clearingLeaves ? OPEN_UP_GIVE_UP_TICKS : GIVE_UP_TICKS)) {
+            } else if (current != null && ++waited > (clearingLeaves ? OPEN_UP_GIVE_UP_TICKS
+                    : only != null ? ONE_GIVE_UP_TICKS : GIVE_UP_TICKS)) {
                 skip.add(current);
                 gaveUp(drop);
                 current = null;
@@ -140,6 +154,11 @@ public final class ClientDropPickup implements PicksUpDrops {
                     return ActionStatus.running();
                 }
                 stopWalking();
+                // 点名捡的那一件没进包：走不过去、被别人捡走或消失了，如实说没捡到。
+                if (only != null && picked == 0) {
+                    return ActionStatus.failed(Problem.of(Problem.Kind.STUCK,
+                            "那一件没捡到（走不过去，或被别人捡走、消失了）", null));
+                }
                 // 只有走过去了还躺在地上的才算没捡到；"不见了"多半是几块原木落地并成了一堆、并进去的那堆随后被收进包，
                 // 拿到多少由上层按身上的重新清点。原先一见"不见了"就整个放弃，砍树挖了几格就不挖了。
                 // 捡到了一些、只剩个别够不着的（卡在树叶缝里）：不让一件东西挡住后面，算这一批做完，上层清点后还缺就再挖。
@@ -157,9 +176,9 @@ public final class ClientDropPickup implements PicksUpDrops {
             return walkToward(player.clientLevel.getEntity(current), tick);
         }
 
-        // 挑下一件这次新掉出来的、离得最近的东西；没有了返回假。
+        // 挑下一件这次新掉出来的、离得最近的东西；点名捡一件时只看那一件还在不在。没有了返回假。
         private boolean pickNext(LocalPlayer player) {
-            Set<Integer> fresh = nearby();
+            Set<Integer> fresh = only == null ? nearby() : stillThere(player, only);
             fresh.removeAll(skip);
             Entity best = null;
             for (int id : fresh) {
@@ -180,6 +199,14 @@ public final class ClientDropPickup implements PicksUpDrops {
             waited = 0;
             clearingLeaves = false;
             return true;
+        }
+
+        // 点名的那一件还躺在世界里就只看它，不论离得多远。
+        private Set<Integer> stillThere(LocalPlayer player, int id) {
+            Set<Integer> found = new HashSet<>();
+            Entity entity = player.clientLevel.getEntity(id);
+            if (entity != null && entity.isAlive()) found.add(id);
+            return found;
         }
 
         // 东西还在滚动：它换了格子就重新起步走向新的那一格。

@@ -1484,7 +1484,7 @@
           "name": "structure",
           "type": "string",
           "required": false,
-          "doc": "找哪种结构（命名空间 ID）；按记过的产地线索找，没记过就看眼前这一片凑不凑得齐它的地表特征，到附近还要亲眼确认；与 block、blocks、entity 三选一"
+          "doc": "找哪种结构（命名空间 ID）；按记过的产地线索找，没记过就看眼前这一片凑不凑得齐它的地表特征，到附近还要亲眼确认；要塞附近没有线索时扔末影之眼指路、一路走过去；与 block、blocks、entity 三选一"
         },
         {
           "name": "count",

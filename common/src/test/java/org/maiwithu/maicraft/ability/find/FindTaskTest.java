@@ -2,6 +2,11 @@
 package org.maiwithu.maicraft.ability.find;
 
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.behavior.explore.EnderEyeSearch;
+import org.maiwithu.maicraft.behavior.explore.EyeFlight;
+import org.maiwithu.maicraft.behavior.explore.FollowsEnderEyes;
+import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
+import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 import org.maiwithu.maicraft.behavior.perception.FakeBlockTags;
 import org.maiwithu.maicraft.behavior.perception.RemembersSightings;
@@ -11,6 +16,8 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
+import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
@@ -19,6 +26,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -51,7 +59,34 @@ class FindTaskTest {
         }
     }
 
+    /** 扔末影之眼的替身：身上有几只眼；扔出去的眼往脚下钻（要塞就在原点东南几格的地下），碎掉不用捡。 */
+    private static final class DivingEyes implements FollowsEnderEyes {
+        int carried;
+        int thrown;
+
+        @Override public int eyesCarried() { return carried; }
+        @Override public Optional<WorldPosition> feet() { return Optional.of(WorldPosition.here(0, 64, 0)); }
+        @Override public EyeThrow throwEye() {
+            return new EyeThrow() {
+                @Override public Optional<EyeFlight> flight() {
+                    return Optional.of(new EyeFlight(0, 65, 0, 3, 40, 4, EyeFlight.Landing.SHATTERED, -1));
+                }
+                @Override public ActionStatus tick(TickContext context) {
+                    carried--;
+                    thrown++;
+                    return ActionStatus.done();
+                }
+                @Override public String describe() { return "演出来的扔眼"; }
+            };
+        }
+        @Override public Action fetch(int dropEntity) { throw new AssertionError("碎了的眼不该去捡"); }
+        @Override public WalkRun walkToward(int x, int z, TerrainPermit permit) {
+            throw new AssertionError("眼往下钻就不用再走");
+        }
+    }
+
     private final FakeMemory memory = new FakeMemory();
+    private final DivingEyes eyes = new DivingEyes();
     private final ScriptedFinder finder = new ScriptedFinder();
     private final Scene scene = new Scene(memory, new FacilityKinds(FakeBlockTags.vanilla()));
     private long tick;
@@ -67,7 +102,7 @@ class FindTaskTest {
     }
 
     private TaskResult run(FindInput input) {
-        FindTask task = new FindTask(input, scene, finder, memory);
+        FindTask task = new FindTask(input, scene, finder, memory, eyes);
         tick = 0;
         task.start(tick());
         for (int i = 0; i < 400; i++) {
@@ -186,5 +221,49 @@ class FindTaskTest {
         FindDetails.Found found = ((FindDetails) result.details()).found().get(0);
         assertTrue(found.id().matches("f[0-9]+"), "结构线索是 f# 编号：" + found.id());
         assertFalse(found.creatureProtected());
+    }
+
+    @Test
+    void 附近没有要塞线索就扔末影之眼指路() {
+        eyes.carried = 2;
+        finder.script.add(new FindsAround.Round(List.of(), true, false));
+        TaskResult result = run(new FindInput(FindInput.FindKind.STRUCTURE,
+                List.of(EnderEyeSearch.STRONGHOLD), 1, 48));
+
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(1, eyes.thrown);
+        FindDetails.Found found = ((FindDetails) result.details()).found().get(0);
+        assertTrue(found.id().matches("f[0-9]+"), "要塞的大概位置领结构线索的编号：" + found.id());
+        assertEquals(3, found.position().x());
+        assertEquals(4, found.position().z());
+        assertTrue(result.summary().contains("末影之眼指路") && result.summary().contains("碎了 1 只"),
+                result.summary());
+        assertEquals(List.of(EnderEyeSearch.STRONGHOLD), memory.sites.get(0).roughlyThere(), "记成要塞线索");
+        assertTrue(result.changes().stream().anyMatch(change -> change.what().equals(EnderEyeSearch.ENDER_EYE)),
+                "碎了的眼记进这次寻找的变化：" + result.changes());
+    }
+
+    @Test
+    void 找要塞身上没眼按缺东西说() {
+        finder.script.add(new FindsAround.Round(List.of(), true, false));
+        TaskResult result = run(new FindInput(FindInput.FindKind.STRUCTURE,
+                List.of(EnderEyeSearch.STRONGHOLD), 1, 48));
+
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertEquals(Problem.Kind.NEED_ITEM, result.problem().kind());
+        assertTrue(result.problem().suggestion().contains(EnderEyeSearch.ENDER_EYE), result.problem().suggestion());
+    }
+
+    @Test
+    void 记过的要塞线索直接给不扔眼() {
+        eyes.carried = 2;
+        FindsAround.Hit lead = FindsAround.Hit.place(FindInput.FindKind.STRUCTURE,
+                EnderEyeSearch.STRONGHOLD, WorldPosition.here(400, 64, -300));
+        finder.script.add(new FindsAround.Round(List.of(lead), true, false));
+        TaskResult result = run(new FindInput(FindInput.FindKind.STRUCTURE,
+                List.of(EnderEyeSearch.STRONGHOLD), 1, 48));
+
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertEquals(0, eyes.thrown, "有线索就不扔眼");
     }
 }

@@ -67,7 +67,7 @@ class FindModuleTest {
     private FindModule module() {
         Scene scene = new Scene(NO_MEMORY, new FacilityKinds(FakeBlockTags.vanilla()));
         return new FindModule(types(), input -> new FindsAround.Round(List.of(), true, false),
-                scene, NO_MEMORY);
+                scene, NO_MEMORY, null);
     }
 
     /** 推进一刻用的决定上下文：只有目标。 */

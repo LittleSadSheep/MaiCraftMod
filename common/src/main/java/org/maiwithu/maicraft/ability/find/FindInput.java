@@ -2,6 +2,8 @@
 package org.maiwithu.maicraft.ability.find;
 
 import java.util.List;
+import org.maiwithu.maicraft.behavior.explore.EnderEyeSearch;
+import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.TaskInput;
 
 /**
@@ -11,11 +13,23 @@ import org.maiwithu.maicraft.kernel.task.TaskInput;
  * @param selectors 方块 ID 或标签、实体类型 ID，或结构 ID，按种类解释
  * @param count     要找到几个；找满即收工
  * @param radius    扫描半径，单位格，以角色为圆心；只扫已加载区
+ * @param permissions 这次任务的许可：扔末影之眼找要塞时走的那几段按它能不能挖垫
  */
-record FindInput(FindKind kind, List<String> selectors, int count, int radius) implements TaskInput {
+record FindInput(FindKind kind, List<String> selectors, int count, int radius, Permissions permissions)
+        implements TaskInput {
 
     FindInput {
         selectors = List.copyOf(selectors);
+        permissions = permissions == null ? Permissions.DEFAULT : permissions;
+    }
+
+    FindInput(FindKind kind, List<String> selectors, int count, int radius) {
+        this(kind, selectors, count, radius, Permissions.DEFAULT);
+    }
+
+    /** 要找的是末影之眼指得到的结构（要塞）：附近没有线索时扔眼指路。 */
+    boolean followsEyes() {
+        return kind == FindKind.STRUCTURE && selectors.stream().anyMatch(EnderEyeSearch::locates);
     }
 
     /** 找什么的三个种类；群系不在其中，群系发现归勘察。 */

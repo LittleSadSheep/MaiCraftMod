@@ -9,6 +9,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.maiwithu.maicraft.behavior.explore.EnderEyeSearch;
+import org.maiwithu.maicraft.behavior.explore.FollowsEnderEyes;
+import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.perception.DirectionWords;
 import org.maiwithu.maicraft.behavior.perception.RemembersSightings;
 import org.maiwithu.maicraft.behavior.perception.Scene;
@@ -28,42 +31,59 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * <p>命中复核与视线闸在读端裁决过才到这里；任务这边守住计数纪律——
  * 同一次运行里每样只数一次，读端重复给出的不再收；扫完了还不足就按结算如实交账。
  * 视线验证过的方块命中顺路写进世界记忆（来源=亲眼看到），后续采集与出行不再被重复质疑。
+ *
+ * <p>找要塞时附近扫完也没有线索：要塞在地下，像真人一样扔末影之眼指路（玩家行为层的一趟扔眼），
+ * 找到的位置照样领一个结构线索的编号；身上没眼按缺东西说。
  */
 final class FindTask extends PhasedTask<FindTask.Phase> {
 
-    /** 寻找的阶段：只扫描，不动身体。 */
-    enum Phase { SCAN }
+    /** 寻找的阶段：扫描附近（不动身体）；找要塞没有线索时扔末影之眼指路。 */
+    enum Phase { SCAN, EYES }
 
     // 十秒没有新命中就该问问是不是扫完了；两分钟还扫不完按卡住收场，不无限等。
     private static final long STUCK_AFTER_TICKS = 200;
     private static final long MAX_TICKS = 20L * 120;
+    /** 扔眼找要塞要一路走过去，远的在一两千格外：整件事放宽到半小时，有真实进展就不算卡住。 */
+    private static final long EYES_MAX_TICKS = 20L * 60 * 30;
 
     private final FindInput input;
     private final Scene scene;
     private final FindsAround finder;
     private final RemembersSightings memory;
+    private final FollowsEnderEyes eyes;
+    /** 扔眼找要塞的那一趟；没走到这一步为 null。 */
+    private EnderEyeSearch eyeSearch;
 
     /** 已经数过的命中，按观察编号收着，结算时由近到远给出。 */
     private final Map<String, FindDetails.Found> accepted = new LinkedHashMap<>();
     /** 去重的凭据：实体按游戏实体编号，方块与线索按位置。 */
     private final Set<String> counted = new HashSet<>();
 
-    FindTask(FindInput input, Scene scene, FindsAround finder, RemembersSightings memory) {
-        super("寻找", Phase.SCAN, new ProgressTracker(STUCK_AFTER_TICKS, MAX_TICKS));
+    FindTask(FindInput input, Scene scene, FindsAround finder, RemembersSightings memory, FollowsEnderEyes eyes) {
+        super("寻找", Phase.SCAN, new ProgressTracker(STUCK_AFTER_TICKS,
+                input.followsEyes() ? EYES_MAX_TICKS : MAX_TICKS));
         this.input = input;
         this.scene = scene;
         this.finder = finder;
         this.memory = memory;
+        this.eyes = eyes;
     }
 
     @Override
     protected Action enter(Phase phase) {
-        // 扫描读端自己分刻推进，这里没有要先动手准备的东西。
+        // 扫描读端自己分刻推进，这里没有要先动手准备的东西；扔眼那一趟按这次任务的许可走。
+        if (phase == Phase.EYES) {
+            eyeSearch = new EnderEyeSearch(eyes, memory, TerrainPermit.of(input.permissions()), records());
+            return eyeSearch;
+        }
         return null;
     }
 
     @Override
     protected Next<Phase> tick(Phase phase, TickContext context) {
+        if (phase == Phase.EYES) {
+            return runActionThen(context, () -> foundByEyes(context));
+        }
         FindsAround.Round round = finder.scan(input);
         if (round.worldChanged()) {
             // 扫描中换了世界：这一轮的命中作废，如实结束，不冒充任何找没找到的结论。
@@ -80,9 +100,26 @@ final class FindTask extends PhasedTask<FindTask.Phase> {
             return Next.done(FindSettlement.done(input, found, countByType(found)));
         }
         if (round.complete()) {
+            if (input.followsEyes() && found.isEmpty()) {
+                // 附近查完没有要塞的线索：要塞在地下看不见，扔末影之眼指路；身上一只都没有就按缺东西说。
+                return eyes.eyesCarried() > 0 ? Next.go(Phase.EYES, "附近没有要塞的线索，扔末影之眼指路")
+                        : Next.fail(EnderEyeSearch.carriesNoEyes());
+            }
             return Next.done(FindSettlement.insufficient(input, found, countByType(found), round.hiddenLead()));
         }
         return Next.stay();
+    }
+
+    // 扔眼那一趟找到了：要塞的大概位置领一个结构线索的编号，结论用那一趟的一句话。
+    private Next<Phase> foundByEyes(TickContext context) {
+        SceneSelf self = scene.self();
+        if (self == null) {
+            return Next.stay();
+        }
+        accept(self, List.of(FindsAround.Hit.place(FindInput.FindKind.STRUCTURE, EnderEyeSearch.STRONGHOLD,
+                eyeSearch.conclusion().orElseThrow())), context.gameTick());
+        List<FindDetails.Found> found = found();
+        return Next.done(FindSettlement.byEyes(input, found, countByType(found), eyeSearch.summary()));
     }
 
     /** 收下这一轮没数过的命中：由近到远收，发观察编号，方块命中顺路写进世界记忆。 */
@@ -173,6 +210,6 @@ final class FindTask extends PhasedTask<FindTask.Phase> {
 
     @Override
     protected String describePhase(Phase value) {
-        return input.describe();
+        return value == Phase.EYES ? "扔末影之眼找要塞" : input.describe();
     }
 }

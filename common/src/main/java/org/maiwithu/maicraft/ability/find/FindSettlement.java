@@ -22,6 +22,15 @@ final class FindSettlement {
                 .build();
     }
 
+    /** 扔末影之眼找到了要塞：结论用扔眼那一趟的一句话（在哪、离多远、扔了几只碎了几只），再说去末地怎么接。 */
+    static TaskResult byEyes(FindInput input, List<FindDetails.Found> found, Map<String, Integer> byType,
+            String eyes) {
+        return TaskResult.builder(TaskResult.Status.DONE,
+                        eyes + "；要去末地，走到那附近再用 travel 去 minecraft:the_end，会按这条线索找末地门")
+                .details(new FindDetails(found, input.radius(), true, byType))
+                .build();
+    }
+
     /** 扫完了却不够数：有收获按部分完成，一个都没有按没找到失败；两种都写明查了多大范围。 */
     static TaskResult insufficient(FindInput input, List<FindDetails.Found> found,
             Map<String, Integer> byType) {
