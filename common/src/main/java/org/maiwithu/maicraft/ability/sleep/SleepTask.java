@@ -201,11 +201,14 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
             return Next.stay();
         }
         scanWaitTicks = 0;
-        // 附近没有能用的床：身上有就放自带的，没有就先去弄一张；弄不到时拿床那条路自己给原因。
+        // 附近没有能用的床：先弄清是"没扫到床"还是"有床都开不出去"，带上分类说明——
+        // 只说一句"没有床"，下游会拿去当"这一片根本没床"（实机 10-16 世界里有床，全因床边有怪被筛掉）。
+        String screening = BedChooser.screen(scan.candidates(), excluded, input.bedArea(), bedWalkLimit()).describe();
+        // 身上有就放自带的，没有就先去弄一张；弄不到时拿床那条路自己给原因。
         if (carriedBed.get().isPresent() && placer.placeCarriedBed().isPresent()) {
             return Next.go(Phase.PLACE_BED, "附近没有能用的床，放自带的");
         }
-        return noBedNearby();
+        return noBedNearby(screening);
     }
 
     /** 选床最远走多远（格，直线）：公开睡觉不另设限，床区半径与扫描范围自己有边；夜休只走近处的床。 */
@@ -213,8 +216,8 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
         return Double.MAX_VALUE;
     }
 
-    /** 附近没有能用的床、身上也没有：公开睡觉先去弄一张；夜休改写成不在夜里去弄床。 */
-    protected Next<Phase> noBedNearby() {
+    /** 附近没有能用的床、身上也没有：公开睡觉先去弄一张；夜休改写成不在夜里去弄床。带选床筛选的分类说明。 */
+    protected Next<Phase> noBedNearby(String screening) {
         return Next.go(Phase.GET_BED, "附近没有床、身上也没有，先弄一张");
     }
 

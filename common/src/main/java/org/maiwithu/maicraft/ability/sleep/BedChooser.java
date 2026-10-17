@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.sleep;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -59,6 +60,69 @@ public final class BedChooser {
                         || withinArea(bed.cell(), bedArea, BED_AREA_RADIUS_BLOCKS))
                 .sorted(Comparator.comparingDouble(BedCandidate::distance))
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * 一次筛选的分类：扫到的床各有几张开不出去、还剩几张能用。
+     * 每张床只归一个主因，按"试过 → 被占用 → 床边有怪 → 受保护 → 太远 → 出了床区"的先后归类，各类相加等于扫到的总数。
+     */
+    public record Screening(int scanned, int tried, int occupied, int hostileNear, int protectedLand,
+            int tooFar, int outOfArea, int usable) {
+
+        /** 给人看的一句话：附近有没有床、开不出去的开不在哪，找床失败的说明带上它才分得清"没床"和"有床睡不上"。 */
+        public String describe() {
+            if (scanned == 0) {
+                return "附近扫过了，没有看到床块";
+            }
+            if (usable > 0) {
+                return "扫到 " + scanned + " 张床，其中 " + usable + " 张能睡";
+            }
+            StringBuilder why = new StringBuilder("扫到 ").append(scanned).append(" 张床，都睡不上");
+            List<String> reasons = new ArrayList<>();
+            if (tried > 0) reasons.add(tried + " 张试过睡不上");
+            if (occupied > 0) reasons.add(occupied + " 张被占用");
+            if (hostileNear > 0) reasons.add(hostileNear + " 张床边有怪");
+            if (protectedLand > 0) reasons.add(protectedLand + " 张在受保护的地标里");
+            if (tooFar > 0) reasons.add(tooFar + " 张超出这次肯走的距离");
+            if (outOfArea > 0) reasons.add(outOfArea + " 张在指定床区之外");
+            for (String reason : reasons) {
+                why.append("：").append(reason);
+            }
+            return why.toString();
+        }
+    }
+
+    /**
+     * 只筛不选：把同一批候选按选床的规矩分类数一遍。
+     * 找床失败时拿它说清"范围内确实没有床"还是"有床但都开不出去、开不在哪"，下游不会把两种情况混成一句"没有床"。
+     */
+    public static Screening screen(List<BedCandidate> candidates, Set<BlockPos> excluded,
+            WorldPosition bedArea, double maxDistance) {
+        int tried = 0;
+        int occupied = 0;
+        int hostileNear = 0;
+        int protectedLand = 0;
+        int tooFar = 0;
+        int outOfArea = 0;
+        int usable = 0;
+        for (BedCandidate bed : candidates) {
+            if (excluded.contains(bed.cell())) {
+                tried++;
+            } else if (bed.occupied()) {
+                occupied++;
+            } else if (bed.hostileNear()) {
+                hostileNear++;
+            } else if (bed.protectedLand()) {
+                protectedLand++;
+            } else if (bed.distance() > maxDistance) {
+                tooFar++;
+            } else if (bedArea != null && !withinArea(bed.cell(), bedArea, BED_AREA_RADIUS_BLOCKS)) {
+                outOfArea++;
+            } else {
+                usable++;
+            }
+        }
+        return new Screening(candidates.size(), tried, occupied, hostileNear, protectedLand, tooFar, outOfArea, usable);
     }
 
     /** 一张床在不在床区半径内：按水平距离算，高度差是玩家常识里"这一片"的一部分，也计入。 */

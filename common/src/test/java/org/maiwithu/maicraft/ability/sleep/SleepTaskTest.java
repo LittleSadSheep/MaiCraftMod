@@ -509,8 +509,39 @@ class SleepTaskTest {
         assertEquals(TaskResult.Status.FAILED, result.status());
         assertEquals(Problem.Kind.NOT_FOUND, result.problem().kind());
         assertTrue(result.problem().message().contains("32 格内没有能睡的床"));
+        // 明细说清床为什么开不出去，不把"有床被筛掉"说成"没扫到床"。
+        assertTrue(result.problem().message().contains("1 张超出这次肯走的距离"), result.problem().message());
         assertNull(obtain.last, "夜里不去弄床");
         assertTrue(approaches.targets.isEmpty(), "远处的床不去");
+    }
+
+    @Test
+    void nightRestWithHostileGuardedBedReportsScreeningInsteadOfNoBed() {
+        // 实机 10-16：世界里明明有床，只因床边有怪被筛掉，失败却只说"没有能睡的床"，
+        // 下游得出"附近根本没床"的误判，整夜去现做一张做不出来的床。现在失败句带上筛选的分类。
+        FakeScanner scanner = new FakeScanner();
+        scanner.offer(new BedScanner.BedScan(List.of(
+                new BedCandidate(BED_A, false, false, true, 10),
+                new BedCandidate(BED_B, true, false, false, 12)), true));
+        TaskResult result = runTicks(nightRest(scanner, new StubPlacer(), new StubObtain(), new StubApproaches(),
+                new StubUsesBeds(), Optional::empty, moment -> false), 20);
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        String message = result.problem().message();
+        assertTrue(message.contains("扫到 2 张床，都睡不上"), message);
+        assertTrue(message.contains("1 张床边有怪"), message);
+        assertTrue(message.contains("1 张被占用"), message);
+        assertFalse(message.contains("没有看到床块"), message);
+    }
+
+    @Test
+    void nightRestWithNoBedSeenAtAllSaysSoExplicitly() {
+        // 扫描扫完、一张床都没有：失败句明说"没有看到床块"，与"有床睡不上"分得开。
+        FakeScanner scanner = new FakeScanner();
+        scanner.offer(new BedScanner.BedScan(List.of(), true));
+        TaskResult result = runTicks(nightRest(scanner, new StubPlacer(), new StubObtain(), new StubApproaches(),
+                new StubUsesBeds(), Optional::empty, moment -> false), 20);
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertTrue(result.problem().message().contains("没有看到床块"), result.problem().message());
     }
 
     @Test
