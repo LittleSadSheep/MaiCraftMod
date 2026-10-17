@@ -337,6 +337,22 @@ class ItemAcquisitionTest {
     }
 
     @Test
+    void 来源接不下这次执行_也记一笔_失败说明里不缺原因() {
+        // 实机 10-16：做床失败只报"问过各来源都拿不到"，craft 来源接不下执行被划掉时没记任何经过，
+        // 失败说明一条原因都没有，agent 不知道该修什么。
+        ScriptedSource refusing = new ScriptedSource("自己做", backpack)
+                .answer(new SourceQuote.Offer("自己做", 1,
+                        new AcquisitionCost(0, 2, 0), "有配方",
+                        "minecraft:magenta_bed"))
+                .onBegin(ScriptedSource.Ending.UNAVAILABLE);
+        ActionStatus status = runToSettlement(
+                engine(refusing).need(new ItemRequest(WantedItem.ofItem("minecraft:magenta_bed"), 1, "睡觉"),
+                        PERMISSIONS));
+        ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, status);
+        assertTrue(failed.problem().message().contains("接不下这次执行"), failed.problem().message());
+    }
+
+    @Test
     void 全被许可挡下_交许可问题() {
         ScriptedSource guarded = new ScriptedSource("采掘", backpack)
                 .answer(new SourceQuote.NeedsApproval("采掘", Problem.of(Problem.Kind.NEED_APPROVAL,

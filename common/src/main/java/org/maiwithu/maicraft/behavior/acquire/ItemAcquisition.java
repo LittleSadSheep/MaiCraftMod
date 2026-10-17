@@ -376,7 +376,8 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                 switch (source.quote(request.just(stillNeeded), context)) {
                     case SourceQuote.Offer offer -> {
                         // 报价写的来源名和来源自称的不一样时（同一来源分好几路报价），也按报价上的名字认划掉的：
-                        // 不然做砸了划掉的名字对不上，又来问价、又去跑同一趟，原地转圈。
+                        // 不然做砸了划掉的名字对不上，又来问价、又去跑同一趟，原地转圈。划掉的来源必在
+                        // deadEnds 里有当时的经过，这里静默跳过不丢原因。
                         if (excluded.contains(offer.source())) continue;
                         if (scope.maxDistanceBlocks() != null
                                 && offer.cost().distanceBlocks() > scope.maxDistanceBlocks()) {
@@ -538,8 +539,10 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             Optional<Action> begun = planned.source()
                     .begin(request.just(Math.max(1, stillNeeded)), planned.offer(), context);
             if (begun.isEmpty()) {
-                // 来源接不下这次执行（现场动作还没接上、设施没了）：划掉换下一个，下一轮重新问价。
+                // 来源接不下这次执行（报价时选的做法动手时已经不在、设施没了）：划掉换下一个，下一轮重新问价。
+                // 也记一笔经过，不然全部来源都这样走完时，失败说明里一条原因都没有（实机做床失败只剩一句"问过各来源都拿不到"）。
                 excluded.add(planned.offer().source());
+                deadEnds.add(planned.offer().source() + "（接不下这次执行，动手时现场对不上了）");
                 stage = Stage.CONSULT;
                 return ActionStatus.progressed();
             }
