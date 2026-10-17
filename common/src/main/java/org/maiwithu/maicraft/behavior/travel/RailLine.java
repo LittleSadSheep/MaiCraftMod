@@ -110,19 +110,22 @@ public final class RailLine {
         };
     }
 
-    // 两格铁轨连不连：先看这格的接口里有没有对面；坡顶坡底的接缝对面在水平方向上对得着就算连上——
-    // 平层相接要对面接口也对得上（丁字路口的第三根不在轨形接口里，不连）；
-    // 这格是坡顶或平台、对面低一格时，对面得是一块朝着这头的坡（或同轴的平轨），车才滑得下去。
+    // 两格铁轨连不连。平层相接要两头的轨形接口互相指着（丁字路口的第三根不算连着）；
+    // 上坡（对面高一格）：对面在水平方向上对得着就算连上——坡顶那一格是平轨或接着往上的坡，车滑得上去；
+    // 下坡（对面低一格）：对面得是一块高端正好落在这一格的坡道，车才滑得下去——
+    // 平轨接斜下一格的平轨，轴向再对得上原版也走不过去，不当连通。
     static boolean linked(BlockPos from, RailShape fromShape, BlockPos to, RailShape toShape) {
         if (!connections(from, fromShape).contains(to)) {
-            if (from.getY() - to.getY() != 1) return false;
-            return flatSides(to, toShape).contains(horizontalOf(from.subtract(to)));
+            return from.getY() - to.getY() == 1 && connections(to, toShape).contains(from);
         }
         if (connections(to, toShape).contains(from)) return true;
-        if (to.getY() - from.getY() == 1) {
-            return flatSides(to, toShape).contains(horizontalOf(from.subtract(to)));
-        }
-        return false;
+        return to.getY() - from.getY() == 1
+                && flatSides(to, toShape).contains(horizontalOf(from.subtract(to)));
+    }
+
+    /** 水平位移换成朝向（只看水平分量，斜位移按分量大的靠）：线路首段方向、推车方向都用它。 */
+    public static Direction directionOf(BlockPos delta) {
+        return horizontalOf(delta);
     }
 
     /** 水平位移换成朝向（只看水平分量，斜位移按分量大的靠）。 */

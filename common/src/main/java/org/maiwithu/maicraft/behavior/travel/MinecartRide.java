@@ -95,13 +95,17 @@ final class MinecartRide implements TravelLeg {
     private BlockPos cartLeftAt;
     private String stoppedNote = "";
     private boolean stopRequested;
+    /** 线路第一段的朝向：推车往这边顶；线路没算出来为 null，推车按整条线路的主轴猜，失败说明里写清没把握。 */
+    private final Direction firstMove;
 
-    /** @param startCell 要上车的起点轨道格 @param endCell 离目的地最近的轨道格 */
-    MinecartRide(BlockPos startCell, BlockPos endCell, Permissions permissions, DimensionTravelServices services) {
+    /** @param startCell 要上车的起点轨道格 @param endCell 离目的地最近的轨道格 @param firstMove 线路第一段的朝向，算不出给 null */
+    MinecartRide(BlockPos startCell, BlockPos endCell, Permissions permissions, DimensionTravelServices services,
+            Direction firstMove) {
         this.startCell = startCell.immutable();
         this.endCell = endCell.immutable();
         this.permissions = permissions;
         this.services = services;
+        this.firstMove = firstMove;
     }
 
     @Override public ActionStatus tick(TickContext tick) {
@@ -148,22 +152,23 @@ final class MinecartRide implements TravelLeg {
         };
     }
 
-    // 备车：已经坐在矿车里（非它不可的那种）直接去坐；身上有矿车换到主手准备放；
-    // 没有就看起点轨道旁停着的空车，走过去用它；两样都没有如实失败，不现合成。
+    // 备车：已经坐在矿车里（非它不可的那种）直接去坐；先看轨道旁停着的空车——
+    // 世界记忆里记过上次留在哪的也查，到现场核实还在、没人坐就用它，不用消耗身上的；
+    // 没有停着的才把身上的换到主手准备放；两样都没有如实失败，不现合成。
     private ActionStatus cart(LocalPlayer player) {
         if (ridingCart(player) != null) return next(Step.RIDE);
+        Optional<AbstractMinecart> parked = MinecartMode.usableParkedCart(services.context().get(), startCell,
+                services.memory());
+        if (parked.isPresent()) {
+            cartId = parked.get().getUUID();
+            usedParkedCart = true;
+            return next(Step.WALK);
+        }
         if (carryingCart()) {
             Optional<Action> move = services.toMainhand().moveToMainhand(MinecartMode.CART_ITEM);
             if (move.isEmpty()) return next(Step.WALK);
             current = move.get();
             return ActionStatus.progressed();
-        }
-        Optional<AbstractMinecart> parked = MinecartMode.parkedCart(services.context().get(), startCell,
-                MinecartMode.PARKED_CART_RANGE);
-        if (parked.isPresent()) {
-            cartId = parked.get().getUUID();
-            usedParkedCart = true;
-            return next(Step.WALK);
         }
         return failed(Problem.Kind.NEED_ITEM, "报价时身上有矿车或轨道旁停着一辆，现在两样都没有了",
                 "先弄到一辆矿车，或把车放回轨道上");
@@ -240,7 +245,9 @@ final class MinecartRide implements TravelLeg {
         }
         dropCurrent();
         if (++pushTicks > MAX_PUSH_TICKS) {
-            return failed(Problem.Kind.STUCK, "推了 " + MAX_PUSH_TICKS / 20 + " 秒车都没动起来（前面被挡住了？）", null);
+            return failed(Problem.Kind.STUCK, firstMove == null
+                    ? "推了 " + MAX_PUSH_TICKS / 20 + " 秒车都没动起来（线路方向没算出来，可能推反了；前面也可能被挡住）"
+                    : "推了 " + MAX_PUSH_TICKS / 20 + " 秒车都没动起来（前面被挡住了？）", null);
         }
         lookAt(context, player, cart.getBoundingBox().getCenter().add(direction.scale(2)));
         context.input().applyMovement(new PlayerInput.Movement(1.0f, 0.0f, false, false, false),
@@ -337,7 +344,7 @@ final class MinecartRide implements TravelLeg {
         if (cartLeftAt == null) cartLeftAt = feet.immutable();
         String dimension = services.world().currentDimension();
         if (dimension != null) {
-            services.memory().remember("停着的矿车",
+            services.memory().remember(MinecartMode.REMEMBERED_CART,
                     new WorldPosition(cartLeftAt.getX(), cartLeftAt.getY(), cartLeftAt.getZ(), dimension));
         }
         facts.change(Change.of(Change.Kind.ENTITY_AFFECTED,
@@ -401,8 +408,10 @@ final class MinecartRide implements TravelLeg {
         return count;
     }
 
-    // 推车方向：从起点轨道格朝终点轨道格的主轴方向（车只能在轨道上走，朝主轴顶就行）。
+    // 推车方向：线路第一段的朝向（起点段就拐弯的线路按首段推，按主轴猜会推不动）；
+    // 线路没算出来才退回整条线路的主轴方向。
     private Vec3 pushDirection() {
+        if (firstMove != null) return new Vec3(firstMove.getStepX(), 0, firstMove.getStepZ());
         double dx = endCell.getX() - startCell.getX();
         double dz = endCell.getZ() - startCell.getZ();
         if (Math.abs(dx) >= Math.abs(dz)) return new Vec3(dx >= 0 ? 1 : -1, 0, 0);
