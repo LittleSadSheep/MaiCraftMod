@@ -15,6 +15,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.animal.Sheep;
+import net.minecraft.world.entity.decoration.ItemFrame;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 
@@ -78,7 +79,7 @@ public final class ClientEntitySight implements EntitySight {
         return entity instanceof Mob mob && mob.getTarget() == player;
     }
 
-    /** 看得出来的特征：着火、幼年、羊的毛与剪毛、掉落物是什么几件、手持物、身上穿的盔甲。看不出来就不写。观察与找东西共用这一份。 */
+    /** 看得出来的特征：着火、幼年、羊的毛与剪毛、掉落物是什么几件、展示框里放着什么、手持物、身上穿的盔甲。看不出来就不写。观察与找东西共用这一份。 */
     public static Map<String, String> traits(Entity entity) {
         Map<String, String> traits = new LinkedHashMap<>();
         if (entity.isOnFire()) {
@@ -102,6 +103,10 @@ public final class ClientEntitySight implements EntitySight {
         if (entity instanceof ItemEntity item && !item.getItem().isEmpty()) {
             traits.put("物品", itemTypeId(item.getItem()));
             traits.put("数量", String.valueOf(item.getItem().getCount()));
+        }
+        // 展示框里放着什么（末地城的鞘翅、别人挂的东西）：LLM 才知道打哪一个取出来，空框写明是空的。
+        if (entity instanceof ItemFrame frame) {
+            traits.put("框里", frame.getItem().isEmpty() ? "空" : itemTypeId(frame.getItem()));
         }
         if (entity instanceof LivingEntity living) {
             if (!living.getMainHandItem().isEmpty()) {

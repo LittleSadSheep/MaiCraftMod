@@ -10,6 +10,7 @@ import org.maiwithu.maicraft.behavior.acquire.DigsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
 import org.maiwithu.maicraft.behavior.acquire.ReadsToolRequirements;
 import org.maiwithu.maicraft.behavior.acquire.ReplantsCrops;
+import org.maiwithu.maicraft.behavior.interaction.HitsItemFrames;
 import org.maiwithu.maicraft.behavior.inventory.PicksUpDrops;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.game.player.BackpackView;
@@ -34,7 +35,7 @@ import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 
 /**
- * 采集的能力：对世界里的一个目标做一次采集动作——收熟庄稼、挖方块、捡掉落物。
+ * 采集的能力：对世界里的一个目标做一次采集动作——收熟庄稼、挖方块、捡掉落物、打一下展示框取出里面的东西。
  * 决定只做一件事：把目标对象落实成一个位置（观察编号查最后看到的方位；坐标缺高度找柱列顶面），
  * 之后走到、看清、动手、等掉落物入包都交给采集任务；单点动作，不接来源排序，也不递归备料。
  */
@@ -50,10 +51,11 @@ public final class GatherAbility implements AbilityModule {
     private final PermissionCheck permission;
     private final BackpackView backpack;
     private final OffhandContents offhand;
+    private final HitsItemFrames frames;
 
     public GatherAbility(SeesTargets seen, ReadsSpot world, ApproachesTargets approaches, DigsBlocks digs,
             ReadsToolRequirements tools, ReplantsCrops replants, PicksUpDrops drops, PermissionCheck permission,
-            BackpackView backpack, OffhandContents offhand) {
+            BackpackView backpack, OffhandContents offhand, HitsItemFrames frames) {
         this.seen = seen;
         this.world = world;
         this.approaches = approaches;
@@ -64,6 +66,7 @@ public final class GatherAbility implements AbilityModule {
         this.permission = permission;
         this.backpack = backpack;
         this.offhand = offhand;
+        this.frames = frames;
     }
 
     /** 观察编号对应的现场：最后看到的方位，以及它是方块/设施还是实体（掉落物）。 */
@@ -71,14 +74,21 @@ public final class GatherAbility implements AbilityModule {
 
         Optional<SeenTarget> lookup(String id);
 
-        /** @param at     最后看到它的位置 */
-        record SeenTarget(WorldPosition at, boolean block) {
+        /**
+         * @param at        最后看到它的位置
+         * @param itemFrame 是展示框时它的游戏实体编号，不是为 -1
+         */
+        record SeenTarget(WorldPosition at, boolean block, int itemFrame) {
+
+            SeenTarget(WorldPosition at, boolean block) {
+                this(at, block, -1);
+            }
         }
     }
 
     @Override public AbilitySpec spec() {
         return new AbilitySpec("maicraft:gather",
-                "采掉、收获、捡起世界里指定的东西",
+                "采掉、收获、捡起世界里指定的东西；点名展示框就打一下取出里面的东西",
                 AbilityDoc.forAbility("gather"),
                 ParamSpecs.of(
                         ParamSpec.of("block", ParamType.BLOCK_OR_TAG)
@@ -101,8 +111,8 @@ public final class GatherAbility implements AbilityModule {
             // 观察编号在册与否当场能查：不在册或已失效，都是"目标没了"，不猜、不当成参数写岔。
             return seen.lookup(seenId.id())
                     .map(found -> (StepDecision) new StepDecision.Run(new GatherSpot(found.at(), !found.block(),
-                            null, expectedItem, goal.permissions(), true,
-                            "采集 " + seenId.id() + (found.block() ? " 处的方块" : " 的掉落物"))))
+                            null, expectedItem, goal.permissions(), true, describe(seenId.id(), found),
+                            found.itemFrame())))
                     .orElseGet(() -> gone("观察编号 " + seenId.id() + " 对应的东西不在了（失效、走远或被拆）"));
         }
         if (target instanceof Target.Position position) {
@@ -113,6 +123,12 @@ public final class GatherAbility implements AbilityModule {
         }
         return invalid("目标对象说不清：gather 的 target 只认 seen（观察编号）或 position 加 block，"
                 + "坐标要能落到一格上（缺高度时附近也找不到顶面）");
+    }
+
+    // 给日志与面板的一句话：点名的是方块、掉落物，还是要打一下的展示框。
+    private static String describe(String id, SeesTargets.SeenTarget found) {
+        if (found.itemFrame() >= 0) return "打一下 " + id + " 展示框，取出里面的东西";
+        return "采集 " + id + (found.block() ? " 处的方块" : " 的掉落物");
     }
 
     // 坐标目标：y 可以省略，找这一柱列的顶面；整列没加载就说不清，不瞎猜高度。
@@ -152,6 +168,6 @@ public final class GatherAbility implements AbilityModule {
 
     @Override public void registerTasks(TaskFactories factories) {
         factories.register(GatherSpot.class, input -> new GatherTask(input, approaches, digs, tools,
-                world, replants, drops, permission, backpack, offhand, input.permissions()));
+                world, replants, drops, permission, backpack, offhand, frames, input.permissions()));
     }
 }

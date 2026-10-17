@@ -46,6 +46,7 @@ import org.maiwithu.maicraft.ability.fight.LiveFightMoves;
 import org.maiwithu.maicraft.behavior.combat.LiveBattleMoves;
 import org.maiwithu.maicraft.behavior.combat.ModRangedWeapons;
 import org.maiwithu.maicraft.behavior.explore.ClientEnderEyes;
+import org.maiwithu.maicraft.behavior.interaction.ClientItemFrameHits;
 import org.maiwithu.maicraft.ability.fight.LiveSeenTargets;
 import org.maiwithu.maicraft.ability.follow.FollowModule;
 import org.maiwithu.maicraft.ability.follow.LiveFollowMoves;
@@ -367,13 +368,8 @@ public final class AbilityCatalog {
         // 睡觉：选床、放自带床、现做一张、白天备床与夜间自动休息都从这里接，见 registerSleep。
         registerSleep(registry, deps, shared);
 
-        // 采集：观察编号从场景查，现场从世界读，靠近用站位与走到，挖用原生挖掘；
-        // 收完把身上的种子补种回原格，没有种子就不补，不额外去找。
-        registry.register(new GatherAbility(new LiveSceneTargets(deps::scene), new LiveSpotReads(deps.context()),
-                approaches(shared.bringClose()), shared.digging(),
-                deps.toolRequirements(),
-                new ClientCropReplanting(shared.toMainhand(), deps.interactions(), deps.context()),
-                shared.drops(), shared.permission(), deps.backpack(), deps.offhand()));
+        // 采集：挖、收、捡、打展示框，接线见 gatherModule。
+        registry.register(gatherModule(deps, shared));
 
         // 建筑设计与施工：画图不控制角色，施工经玩家行为层的施工引擎，见 registerConstruction。
         DesignStore designs = new DesignStore(DesignStore.fileIn(deps.configDirectory()));
@@ -785,6 +781,18 @@ public final class AbilityCatalog {
     }
 
     /** 采集的靠近：目标落实成一格方块后交给靠近模型，走过去能动多少地形按这次任务的许可来。 */
+    /**
+     * 采集：观察编号从场景查，现场从世界读，靠近用站位与走到，挖用原生挖掘；收完把身上的种子补种回原格，
+     * 没有种子就不补，不额外去找。点名展示框时走近按实体的够得着规则，左键打一下再捡弹出来的东西。
+     */
+    private static GatherAbility gatherModule(Deps deps, Shared shared) {
+        ClientItemFrameHits frames = new ClientItemFrameHits(deps.context(), shared.bringClose());
+        return new GatherAbility(new LiveSceneTargets(deps::scene, frames), new LiveSpotReads(deps.context()),
+                approaches(shared.bringClose()), shared.digging(), deps.toolRequirements(),
+                new ClientCropReplanting(shared.toMainhand(), deps.interactions(), deps.context()),
+                shared.drops(), shared.permission(), deps.backpack(), deps.offhand(), frames);
+    }
+
     private static ApproachesTargets approaches(LiveApproaches bringsClose) {
         return (target, permissions) -> bringsClose.toward(ApproachTarget.ofBlock(target), permissions);
     }

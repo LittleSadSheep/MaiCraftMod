@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.ability.gather;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -16,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.acquire.DigsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.ReadsToolRequirements;
 import org.maiwithu.maicraft.behavior.acquire.ReplantsCrops;
+import org.maiwithu.maicraft.behavior.interaction.HitsItemFrames;
 import org.maiwithu.maicraft.behavior.inventory.PicksUpDrops;
 import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
@@ -220,7 +222,7 @@ class GatherTaskTest {
         FakeActions actions = new FakeActions(backpack, "minecraft:wheat", 1);
         FakeReplants replants = new FakeReplants();
         GatherTask task = new GatherTask(blockSpot(null), actions, actions, new NoToolsNeeded(),
-                new FakeWorld("minecraft:wheat", true), replants, actions, permission(), backpack, null, PERMS);
+                new FakeWorld("minecraft:wheat", true), replants, actions, permission(), backpack, null, null, PERMS);
         TaskResult result = run(task);
         assertEquals(TaskResult.Status.DONE, result.status());
         assertEquals("补种了", replants.log);
@@ -235,7 +237,7 @@ class GatherTaskTest {
         FakeBackpack backpack = new FakeBackpack();
         FakeActions actions = new FakeActions(backpack, "minecraft:wheat", 1);
         GatherTask task = new GatherTask(blockSpot(null), actions, actions, new NoToolsNeeded(),
-                new FakeWorld("minecraft:wheat", false), null, actions, permission(), backpack, null, PERMS);
+                new FakeWorld("minecraft:wheat", false), null, actions, permission(), backpack, null, null, PERMS);
         TaskResult result = run(task);
         assertEquals(TaskResult.Status.FAILED, result.status());
         assertEquals(Problem.Kind.WRONG_TIME, result.problem().kind());
@@ -247,7 +249,7 @@ class GatherTaskTest {
         FakeBackpack backpack = new FakeBackpack();
         FakeActions actions = new FakeActions(backpack, "minecraft:cobblestone", 1);
         GatherTask task = new GatherTask(blockSpot(null), actions, actions, new IronPickRequired(),
-                new FakeWorld("minecraft:stone", false), null, actions, permission(), backpack, null, PERMS);
+                new FakeWorld("minecraft:stone", false), null, actions, permission(), backpack, null, null, PERMS);
         TaskResult result = run(task);
         assertEquals(TaskResult.Status.FAILED, result.status());
         assertEquals(Problem.Kind.NEED_ITEM, result.problem().kind());
@@ -265,7 +267,7 @@ class GatherTaskTest {
         FakeBackpack byPosition = new FakeBackpack();
         FakeActions positionActions = new FakeActions(byPosition, "minecraft:cobblestone", 1);
         TaskResult refused = run(new GatherTask(blockSpot(null), positionActions, positionActions, new NoToolsNeeded(),
-                new FakeWorld("minecraft:stone", false), null, positionActions, guarded, byPosition, null, PERMS));
+                new FakeWorld("minecraft:stone", false), null, positionActions, guarded, byPosition, null, null, PERMS));
         assertEquals(TaskResult.Status.FAILED, refused.status());
         assertTrue(positionActions.log.stream().noneMatch(line -> line.startsWith("挖")), "按坐标给的不该动手挖");
 
@@ -273,7 +275,7 @@ class GatherTaskTest {
         FakeActions namedActions = new FakeActions(byName, "minecraft:cobblestone", 1);
         GatherSpot named = new GatherSpot(AT, false, null, null, PERMS, true, "采集 b7 处的方块");
         TaskResult dug = run(new GatherTask(named, namedActions, namedActions, new NoToolsNeeded(),
-                new FakeWorld("minecraft:stone", false), null, namedActions, guarded, byName, null, PERMS));
+                new FakeWorld("minecraft:stone", false), null, namedActions, guarded, byName, null, null, PERMS));
         assertEquals(TaskResult.Status.DONE, dug.status(), dug.summary());
         assertTrue(namedActions.log.stream().anyMatch(line -> line.startsWith("挖")), "点名的应当挖");
     }
@@ -285,7 +287,7 @@ class GatherTaskTest {
         FakeReplants replants = new FakeReplants();
         replants.fail = true;
         GatherTask task = new GatherTask(blockSpot(null), actions, actions, new NoToolsNeeded(),
-                new FakeWorld("minecraft:wheat", true), replants, actions, permission(), backpack, null, PERMS);
+                new FakeWorld("minecraft:wheat", true), replants, actions, permission(), backpack, null, null, PERMS);
         TaskResult result = run(task);
         assertEquals(TaskResult.Status.DONE, result.status(), "补种失败不该让已收的庄稼白收");
         assertEquals("补种失败", replants.log);
@@ -311,7 +313,7 @@ class GatherTaskTest {
             }
         };
         GatherTask task = new GatherTask(blockSpot("minecraft:coal"), actions, actions, new NoToolsNeeded(),
-                new FakeWorld("minecraft:stone", false), null, actions, permission(), backpack, null, PERMS);
+                new FakeWorld("minecraft:stone", false), null, actions, permission(), backpack, null, null, PERMS);
         TaskResult result = run(task);
         assertEquals(TaskResult.Status.FAILED, result.status());
         assertEquals(Problem.Kind.NEED_ITEM, result.problem().kind());
@@ -325,7 +327,7 @@ class GatherTaskTest {
         FakeActions actions = new FakeActions(backpack, "minecraft:cobblestone", 1);
         GatherSpot spot = new GatherSpot(AT, false, "minecraft:diamond_ore", null, PERMS, false, "采集测试方块");
         GatherTask task = new GatherTask(spot, actions, actions, new IronPickRequired(),
-                new FakeWorld("minecraft:stone", false), null, actions, permission(), backpack, null, PERMS);
+                new FakeWorld("minecraft:stone", false), null, actions, permission(), backpack, null, null, PERMS);
         TaskResult result = run(task);
         assertEquals(TaskResult.Status.FAILED, result.status());
         assertEquals(Problem.Kind.TARGET_GONE, result.problem().kind());
@@ -352,7 +354,7 @@ class GatherTaskTest {
         };
         GatherSpot spot = new GatherSpot(AT, true, null, "minecraft:rotten_flesh", PERMS, false, "捡起 e9");
         GatherTask task = new GatherTask(spot, actions, actions, new NoToolsNeeded(),
-                new FakeWorld(null, false), null, actions, permission(), backpack, null, PERMS);
+                new FakeWorld(null, false), null, actions, permission(), backpack, null, null, PERMS);
         TaskResult result = run(task);
         assertEquals(TaskResult.Status.DONE, result.status());
         assertEquals(1, result.changes().size());
@@ -366,7 +368,7 @@ class GatherTaskTest {
         FakeActions actions = new FakeActions(backpack, "minecraft:wheat", 3);
         FakeReplants replants = new FakeReplants();
         GatherTask task = new GatherTask(blockSpot(null), actions, actions, new NoToolsNeeded(),
-                new FakeWorld("minecraft:wheat", true), replants, actions, permission(), backpack, null, PERMS);
+                new FakeWorld("minecraft:wheat", true), replants, actions, permission(), backpack, null, null, PERMS);
         TaskResult result = run(task);
         assertEquals(TaskResult.Status.DONE, result.status());
         assertEquals(3, result.changes().get(1).count(), "只记这次多出来的");
@@ -383,10 +385,109 @@ class GatherTaskTest {
             return Optional.empty();
         };
         GatherTask task = new GatherTask(blockSpot(null), actions, actions, new NoToolsNeeded(),
-                new FakeWorld("minecraft:wheat", true), replants, actions, permission(), backpack, null, PERMS);
+                new FakeWorld("minecraft:wheat", true), replants, actions, permission(), backpack, null, null, PERMS);
         TaskResult result = run(task);
         assertEquals(TaskResult.Status.DONE, result.status());
         assertEquals("minecraft:wheat", crop[0]);
         assertTrue(actions.log.indexOf("捡") < actions.log.indexOf("补种"), actions.log.toString());
+    }
+
+    /** 展示框替身：框里放着什么，打一下成不成；打成了框里就空了。 */
+    static final class FakeFrames implements HitsItemFrames {
+        String inside;
+        boolean hitWorks = true;
+        int hits;
+
+        FakeFrames(String inside) {
+            this.inside = inside;
+        }
+
+        @Override public Optional<String> contents(int frame) {
+            return Optional.ofNullable(inside);
+        }
+
+        @Override public Action approach(int frame, Permissions permissions) {
+            return done("走到展示框跟前");
+        }
+
+        @Override public Action hit(int frame) {
+            hits++;
+            return new Action() {
+                @Override public ActionStatus tick(TickContext context) {
+                    if (!hitWorks) {
+                        return ActionStatus.failed(Problem.of(Problem.Kind.REFUSED_BY_GAME, "攻击没得到游戏确认"));
+                    }
+                    inside = "";
+                    return ActionStatus.done();
+                }
+
+                @Override public String describe() {
+                    return "打一下展示框";
+                }
+            };
+        }
+
+        private static Action done(String describe) {
+            return new Action() {
+                @Override public ActionStatus tick(TickContext context) {
+                    return ActionStatus.done();
+                }
+
+                @Override public String describe() {
+                    return describe;
+                }
+            };
+        }
+    }
+
+    private GatherTask frameTask(FakeBackpack backpack, FakeActions actions, FakeFrames frames) {
+        GatherSpot spot = new GatherSpot(AT, true, null, null, PERMS, true, "打一下 e4 展示框，取出里面的东西", 42);
+        return new GatherTask(spot, actions, actions, new NoToolsNeeded(), new FakeWorld(null, false), null, actions,
+                permission(), backpack, null, frames, PERMS);
+    }
+
+    @Test
+    void 打一下展示框弹出来的东西捡进包() {
+        FakeBackpack backpack = new FakeBackpack();
+        // 捡起弹出来的那件：替身在捡的时候把鞘翅放进背包。
+        FakeActions actions = new FakeActions(backpack, "minecraft:elytra", 1) {
+            @Override public Action pickUpNewSince(Set<Integer> before) {
+                backpack.add("minecraft:elytra", 1);
+                return super.pickUpNewSince(before);
+            }
+        };
+        FakeFrames frames = new FakeFrames("minecraft:elytra");
+        TaskResult result = run(frameTask(backpack, actions, frames));
+
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(1, frames.hits);
+        assertTrue(result.changes().stream().anyMatch(change -> change.kind() == Change.Kind.ENTITY_AFFECTED
+                && change.what().contains("minecraft:elytra")), result.changes().toString());
+        assertTrue(result.changes().stream().anyMatch(change -> change.kind() == Change.Kind.ITEM_GAINED
+                && change.what().equals("minecraft:elytra")), result.changes().toString());
+        assertFalse(actions.log.contains("挖"), "展示框不挖");
+    }
+
+    @Test
+    void 空展示框不打() {
+        FakeBackpack backpack = new FakeBackpack();
+        FakeFrames frames = new FakeFrames("");
+        TaskResult result = run(frameTask(backpack, new FakeActions(backpack, null, 0), frames));
+
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertEquals(Problem.Kind.NOT_FOUND, result.problem().kind());
+        assertTrue(result.problem().message().contains("空"), result.problem().message());
+        assertEquals(0, frames.hits, "空框再打就把框本身打下来了");
+    }
+
+    @Test
+    void 打了没弹出来如实说() {
+        FakeBackpack backpack = new FakeBackpack();
+        FakeFrames frames = new FakeFrames("minecraft:diamond");
+        frames.hitWorks = false;
+        TaskResult result = run(frameTask(backpack, new FakeActions(backpack, null, 0), frames));
+
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertTrue(result.problem().message().contains("没弹出来"), result.problem().message());
     }
 }

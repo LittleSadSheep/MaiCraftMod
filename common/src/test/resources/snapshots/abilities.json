@@ -88,7 +88,7 @@
       },
       {
         "ability": "maicraft:gather",
-        "summary": "采掉、收获、捡起世界里指定的东西",
+        "summary": "采掉、收获、捡起世界里指定的东西；点名展示框就打一下取出里面的东西",
         "parameters": "block?: string, item?: string",
         "targets": [
           "position",
@@ -741,7 +741,7 @@
     },
     {
       "ability": "maicraft:gather",
-      "summary": "采掉、收获、捡起世界里指定的东西",
+      "summary": "采掉、收获、捡起世界里指定的东西；点名展示框就打一下取出里面的东西",
       "parameters": [
         {
           "name": "block",

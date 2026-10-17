@@ -16,9 +16,16 @@ import org.maiwithu.maicraft.kernel.task.TaskInput;
  * @param permissions  这次任务的许可；动哪一格由它说了算
  * @param named        目标是 LLM 用观察编号点名的：点名即许可，玩家放的也照挖；按坐标给的走完整的保护检查
  * @param describeText 给日志与面板的一句话，例如"采集 b7 的方块"
+ * @param itemFrame    点名的是展示框时它的游戏实体编号：打一下把里面的东西打出来再捡；不是展示框为 -1
  */
 record GatherSpot(WorldPosition at, boolean drop, String declaredType,
-        String expectedItem, Permissions permissions, boolean named, String describeText) implements TaskInput {
+        String expectedItem, Permissions permissions, boolean named, String describeText, int itemFrame)
+        implements TaskInput {
+
+    GatherSpot(WorldPosition at, boolean drop, String declaredType, String expectedItem, Permissions permissions,
+            boolean named, String describeText) {
+        this(at, drop, declaredType, expectedItem, permissions, named, describeText, -1);
+    }
 
     GatherSpot {
         if (at == null) throw new IllegalArgumentException("采集必须有位置");
@@ -30,5 +37,10 @@ record GatherSpot(WorldPosition at, boolean drop, String declaredType,
 
     @Override public String describe() {
         return describeText;
+    }
+
+    /** 点名的是展示框：走过去打一下，不挖也不当掉落物捡。 */
+    boolean frame() {
+        return itemFrame >= 0;
     }
 }

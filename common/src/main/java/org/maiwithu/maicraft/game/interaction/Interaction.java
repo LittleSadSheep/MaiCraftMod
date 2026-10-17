@@ -113,6 +113,8 @@ public final class Interaction {
      * 精确 useBlock 默认关闭；forHit 的调用方自行决定是否开启。
      */
     private boolean itemFallthrough;
+    /** 左键打实体时由调用方给的"打成了"条件（展示框这类不掉血的目标）；为 null 时按活物挨打的三证据确认。 */
+    private InteractionConfirmation strikeConfirmation;
     private PendingMenuAction closePending;
     private PendingInteraction pending;
     private PendingInteraction lastUsePending;
@@ -160,6 +162,17 @@ public final class Interaction {
                                            PlayerInput playerInput, Entity target) {
         return new Interaction(context.localPlayer(), sender, menuActions, playerInput,
                 Button.ATTACK, null, target, InteractionHand.MAIN_HAND, Timing.once());
+    }
+
+    /**
+     * 左键攻击实体一次，打没打成按调用方给的条件确认：展示框、盔甲架这类不掉血、不红闪的目标，
+     * 由调用方说清打成了是什么样（框里的东西弹出来了），不套用活物的掉血红闪。
+     */
+    public static Interaction attackEntity(PlayerContext context, InteractionSender sender, MenuActions menuActions,
+                                           PlayerInput playerInput, Entity target, InteractionConfirmation struck) {
+        Interaction interaction = attackEntity(context, sender, menuActions, playerInput, target);
+        interaction.strikeConfirmation = struck;
+        return interaction;
     }
 
     /** 右键 {@code pos} 方块，用手持物品放置方块或激活目标。 */
@@ -490,7 +503,7 @@ public final class Interaction {
         pending = sender.attack(
                 context,
                 entity,
-                InteractionConfirmation.entityStruck(player, entity),
+                strikeConfirmation != null ? strikeConfirmation : InteractionConfirmation.entityStruck(player, entity),
                 CONFIRM_TIMEOUT_TICKS);
         return false;
     }

@@ -83,7 +83,7 @@ class GatherAbilityTest {
                 (target, permissions) -> {
                     throw new IllegalStateException("决定阶段不该靠近");
                 },
-                unusableDigs(), noTools, null, null, permission(), emptyBackpack(), null);
+                unusableDigs(), noTools, null, null, permission(), emptyBackpack(), null, null);
     }
 
     private StepDecision decide(Target target) {
@@ -144,6 +144,19 @@ class GatherAbilityTest {
         assertEquals(3, spot.at().x());
         assertEquals(false, spot.drop(), "b 开头是方块，不是掉落物");
         assertTrue(spot.named(), "观察编号点名的目标，挖时点名即许可");
+    }
+
+    @Test
+    void 点名的展示框落成打一下的任务输入() {
+        var seen = new FakeSeen(Map.of("e4",
+                new GatherAbility.SeesTargets.SeenTarget(WorldPosition.here(3, 70, 4), false, 42)));
+        Goal goal = new Goal("maicraft:gather", null, new Target.Seen("e4"),
+                ability(null).spec().paramSpecs().parse(new JsonObject()).params(), null, List.of(), null);
+        GatherSpot spot = assertInstanceOf(GatherSpot.class,
+                assertInstanceOf(StepDecision.Run.class, ability(seen).decide(stepOf(goal))).input());
+        assertTrue(spot.frame(), "展示框打一下，不当掉落物捡");
+        assertEquals(42, spot.itemFrame());
+        assertTrue(spot.describe().contains("展示框"), spot.describe());
     }
 
     @Test

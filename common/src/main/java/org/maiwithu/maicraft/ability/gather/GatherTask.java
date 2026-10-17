@@ -15,6 +15,7 @@ import org.maiwithu.maicraft.behavior.acquire.DigsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
 import org.maiwithu.maicraft.behavior.acquire.ReadsToolRequirements;
 import org.maiwithu.maicraft.behavior.acquire.ReplantsCrops;
+import org.maiwithu.maicraft.behavior.interaction.HitsItemFrames;
 import org.maiwithu.maicraft.behavior.inventory.PicksUpDrops;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.game.player.BackpackView;
@@ -35,11 +36,12 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 收完庄稼、种子进了包再顺手种回去（种子从这次收获里出，没有就不补，补不上也不白收）；
  * 工具不够格不自己去做一把，如实说缺什么等级的工具——备工具是拿东西的事，两件事分开才都看得清。
  * 拿没拿到按背包里数量的变化确认：冷却中的掉落物照常等，不误报"附近没有"。
+ * 点名的是展示框：走到够得着的地方左键打一下，框里的东西弹出来再捡；框空着不打（再打会把框本身打下来）。
  */
 final class GatherTask extends PhasedTask<GatherTask.Phase> {
 
-    /** 任务的阶段：走近 → 看现场 → 动手（挖/收）→ 捡掉落物 → 补种。掉落物目标走近后直接捡。 */
-    enum Phase { WALK, JUDGE, DIG, PICK_UP, REPLANT }
+    /** 任务的阶段：走近 → 看现场 → 动手（挖/收）→ 捡掉落物 → 补种。掉落物目标走近后直接捡；展示框走近后打一下再捡。 */
+    enum Phase { WALK, JUDGE, DIG, HIT, PICK_UP, REPLANT }
 
     /** 半分钟没有真实进展算卡住；整件事最多做五分钟。 */
     private static final long STUCK_AFTER_TICKS = 20L * 30;
@@ -55,6 +57,7 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
     private final PermissionCheck permission;
     private final BackpackView backpack;
     private final OffhandContents offhand;
+    private final HitsItemFrames frames;
     private final Permissions permissions;
 
     /** 动手前背包里每样东西有几件；捡没捡到以它和结算时的差为准。 */
@@ -67,10 +70,12 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
     private Set<Integer> dropsBefore = Set.of();
     /** 下一阶段的动作：上一刻按现场备好，进入阶段时交给基类持有。 */
     private Action prepared;
+    /** 打展示框之前框里放着的东西（物品 ID）：结算时说清打出来的是什么。 */
+    private String frameItem;
 
     GatherTask(GatherSpot spot, ApproachesTargets approaches, DigsBlocks digs, ReadsToolRequirements tools,
             ReadsSpot world, ReplantsCrops replants, PicksUpDrops drops, PermissionCheck permission,
-            BackpackView backpack, OffhandContents offhand, Permissions permissions) {
+            BackpackView backpack, OffhandContents offhand, HitsItemFrames frames, Permissions permissions) {
         super("采集", Phase.WALK, new ProgressTracker(STUCK_AFTER_TICKS, MAX_TICKS));
         this.spot = spot;
         this.approaches = approaches;
@@ -82,6 +87,7 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
         this.permission = permission;
         this.backpack = backpack;
         this.offhand = offhand;
+        this.frames = frames;
         this.permissions = permissions;
     }
 
@@ -89,8 +95,9 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
         if (phase == Phase.WALK) {
             // 出发前记下背包里每样东西有几件：走过去时顺路吸进包的掉落物也算这次捡到的。
             snapshotBaseline();
-            // 走近交给站位与靠近的模型。
-            return approaches.toward(asBlock(spot.at()), spot.permissions());
+            // 走近交给站位与靠近的模型；展示框按它挂着的包围盒找够得着的站位。
+            return spot.frame() ? frames.approach(spot.itemFrame(), spot.permissions())
+                    : approaches.toward(asBlock(spot.at()), spot.permissions());
         }
         Action next = prepared;
         prepared = null;
@@ -100,12 +107,14 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
     @Override protected Next<Phase> tick(Phase phase, TickContext context) {
         return switch (phase) {
             case WALK -> runActionThen(context, () -> {
-                // 掉落物目标：走到了就把附近地上的东西捡起来（出手前没有"原来就在"的那一批）。
+                // 展示框：到了先看框里有没有东西再打；掉落物目标：走到了就把附近地上的东西捡起来（出手前没有"原来就在"的那一批）。
+                if (spot.frame()) return judgeFrame();
                 return spot.drop() ? goWith(Phase.PICK_UP, drops.pickUpNewSince(Set.of()), "是掉落物，走过去捡")
                         : Next.go(Phase.JUDGE, "到跟前了，先看清是什么");
             });
             case JUDGE -> judge();
             case DIG -> digDone(context);
+            case HIT -> hitDone(context);
             case PICK_UP -> pickedUp(context);
             case REPLANT -> replantDone(context);
         };
@@ -166,6 +175,36 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
         return goWith(Phase.DIG, dig.get(), why);
     }
 
+    // 到展示框跟前了：框不在了、框里空着都如实说（空框再打就把框本身打下来了，不打）；
+    // 有东西就记下脚边原有的掉落物，左键打一下。点名即许可，和挖点名的方块同一条。
+    private Next<Phase> judgeFrame() {
+        Optional<String> inside = frames.contents(spot.itemFrame());
+        if (inside.isEmpty()) {
+            return Next.fail(Problem.of(Problem.Kind.TARGET_GONE, "展示框不在了：被拆了，或者已经走出看得见的范围"));
+        }
+        if (inside.get().isEmpty()) {
+            return Next.fail(Problem.of(Problem.Kind.NOT_FOUND, "展示框里是空的，打一下也弹不出东西（再打会把框本身打下来）",
+                    "用 observe 看看别的展示框里放着什么"));
+        }
+        frameItem = inside.get();
+        dropsBefore = drops.nearby();
+        return goWith(Phase.HIT, frames.hit(spot.itemFrame()), "框里是 " + frameItem + "，打一下让它弹出来");
+    }
+
+    // 打完了：弹出来就走过去捡；打了没反应、够不着都如实说（确认没等到但框已经空了也照样去捡）。
+    private Next<Phase> hitDone(TickContext context) {
+        ActionStatus status = runAction(context);
+        if (status instanceof ActionStatus.Running) return Next.stay();
+        boolean emptied = frames.contents(spot.itemFrame()).map(String::isEmpty).orElse(true);
+        if (status instanceof ActionStatus.Failed failed && !emptied) {
+            return Next.fail(Problem.of(failed.problem().kind(),
+                    "打了一下展示框，框里的 " + frameItem + " 没弹出来：" + failed.problem().message(),
+                    "换个站位再试；框被固定住或这里不让动的话打不出来"));
+        }
+        recordChange(Change.of(Change.Kind.ENTITY_AFFECTED, "从展示框里打出 " + frameItem, 1));
+        return goWith(Phase.PICK_UP, drops.pickUpNewSince(dropsBefore), "框里的东西弹出来了，走过去捡");
+    }
+
     // 挖开了：记下拆掉的方块，走过去捡这一下掉出来的东西。
     private Next<Phase> digDone(TickContext context) {
         return switch (runAction(context)) {
@@ -216,6 +255,10 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
         }
         if (!gained.isEmpty()) {
             return Next.done(TaskResult.done("采集完成：" + gainedText(gained) + " 进了背包"));
+        }
+        if (spot.frame()) {
+            return Next.fail(Problem.of(Problem.Kind.NOT_FOUND, frameItem
+                    + " 从展示框里打出来了，但没进背包（掉在够不着的地方，或被别人捡走）", "看看附近地上，用 gather 点名那个掉落物再捡"));
         }
         if (spot.expectedItem() != null) {
             return Next.fail(Problem.of(Problem.Kind.NEED_ITEM,
