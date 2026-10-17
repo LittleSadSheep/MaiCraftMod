@@ -198,10 +198,7 @@ public final class DimensionTravelTask extends PhasedTask<DimensionTravelTask.Ph
         if (exitRoute && phase() == Phase.CROSS && services.world().endPoemShowing()) {
             return Interruptibility.UNSAFE_TO_STOP;
         }
-        // 交给子任务的阶段能不能停看子任务手上的动作：扔出珍珠等传送、悬空搭桥、砌框等游戏确认放方块时停不得。
-        if (action() instanceof ChildTaskAction running) {
-            return running.interruptibility(context);
-        }
+        // 交给子任务的阶段由基类问手上的子任务动作：扔出珍珠等传送、悬空搭桥、砌框等游戏确认放方块时停不得。
         return super.interruptibility(context);
     }
 

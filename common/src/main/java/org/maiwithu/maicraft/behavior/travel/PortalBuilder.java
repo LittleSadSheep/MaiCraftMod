@@ -39,7 +39,6 @@ import org.maiwithu.maicraft.kernel.result.ResultDetails;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
-import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.Next;
 import org.maiwithu.maicraft.kernel.task.PhasedTask;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -121,15 +120,6 @@ final class PortalBuilder extends PhasedTask<PortalBuilder.Phase> {
                     new PortalLavaCasting(castingSite, permissions, services, construction()), records());
             default -> null;
         };
-    }
-
-    @Override
-    public Interruptibility interruptibility(TickContext context) {
-        // 砌框、浇筑时能不能停看子任务手上的动作：等游戏确认放方块、倒岩浆，或悬空垫脚时停不得。
-        if (action() instanceof ChildTaskAction running) {
-            return running.interruptibility(context);
-        }
-        return super.interruptibility(context);
     }
 
     @Override

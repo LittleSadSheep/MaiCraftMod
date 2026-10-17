@@ -266,7 +266,8 @@ public abstract class PhasedTask<P extends Enum<P>> implements Task {
     @Override
     public Interruptibility interruptibility(TickContext context) {
         // 没有进行中的动作，说明正处在两个动作之间，不急的事可以趁这个空当插进来。
-        return action == null ? Interruptibility.BETWEEN_ACTIONS : action.interruptibility();
+        // 有动作就带着这一刻的现场问它：包着子任务的动作按子任务手上那一下说，外层不用各自改写。
+        return action == null ? Interruptibility.BETWEEN_ACTIONS : action.interruptibility(context);
     }
 
     /** 此刻在哪个阶段、走过哪几段、多久没进展；任务已经结束时为空。 */

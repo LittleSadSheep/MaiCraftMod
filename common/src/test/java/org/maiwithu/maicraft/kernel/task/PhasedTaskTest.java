@@ -243,6 +243,37 @@ class PhasedTaskTest {
     }
 
     @Test
+    void asksTheRunningActionWithThisMomentsScene() {
+        // 包着子任务的动作按这一刻的现场说能不能停（子任务手上那一下在等游戏确认）：分阶段任务照它说的报，子类不用改写。
+        Action waiting = new Action() {
+            @Override public ActionStatus tick(TickContext context) {
+                return ActionStatus.running();
+            }
+
+            @Override public Interruptibility interruptibility(TickContext context) {
+                return Interruptibility.UNSAFE_TO_STOP;
+            }
+
+            @Override public String describe() {
+                return "等游戏确认放方块";
+            }
+        };
+        PhasedTask<Phase> task = new PhasedTask<>("测试", Phase.APPROACH, new ProgressTracker(20, 1000)) {
+            @Override protected Action enter(Phase phase) {
+                return waiting;
+            }
+
+            @Override protected Next<Phase> tick(Phase phase, TickContext context) {
+                return Next.stay();
+            }
+        };
+        task.start(new TestTick(0));
+
+        assertEquals(Interruptibility.UNSAFE_TO_STOP, task.interruptibility(new TestTick(1)),
+                "手上的动作看现场说停不得，任务就停不得");
+    }
+
+    @Test
     void reportsBetweenActionsWhenNoActionIsRunning() {
         var task = new GoToBed(Map.of(), new ProgressTracker(20, 1000));
         task.start(new TestTick(0));

@@ -331,12 +331,6 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
         return pos == null ? "未知" : pos.toShortString();
     }
 
-    @Override public Interruptibility interruptibility(TickContext context) {
-        // 走路这一段能不能停看出行任务自己的（悬空、正在搭桥时不能停）。
-        if (phase() == Phase.WALK && walk != null) return walk.interruptibility(context);
-        return super.interruptibility(context);
-    }
-
     @Override protected ResultDetails details() {
         BlockPos aim = lastFeet == null ? null : aim(lastFeet);
         return new JourneyDetails(arrivedAt,
@@ -415,7 +409,8 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
                     now - startTick, outcome));
         }
 
-        Interruptibility interruptibility(TickContext context) {
+        // 走路这一段能不能停看出行任务自己的（悬空、正在搭桥时不能停）：分阶段任务问手上的动作时问到这里。
+        @Override public Interruptibility interruptibility(TickContext context) {
             return runner.interruptibility(context);
         }
 

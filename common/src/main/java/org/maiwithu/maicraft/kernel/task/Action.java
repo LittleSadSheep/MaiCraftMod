@@ -34,6 +34,15 @@ public interface Action {
         return Interruptibility.WORKING;
     }
 
+    /**
+     * 此刻能不能被打断，带着这一刻的现场问；分阶段任务问手上的动作走这里。
+     * 包着子任务的动作（砌框、放机器格、插灯）改写它，按子任务手上那一下说：等游戏确认放方块、悬空时停不得。
+     * 默认同 {@link #interruptibility()}。
+     */
+    default Interruptibility interruptibility(TickContext context) {
+        return interruptibility();
+    }
+
     /** 给调试面板和日志的一句话，例如"正在走向床边（第 2 个站位）"。 */
     String describe();
 }

@@ -17,7 +17,8 @@ import org.maiwithu.maicraft.kernel.task.TickResult;
  *
  * <p>外层被生存需求打断时它跟着暂停，走路、施工都松手，处理完从原地接着做；外层被叫先到安全处再停时转给它
  * （悬空的先落地、等传送的那一下等完）；外层提前结束（被替换、取消、角色没了）时它按取消收尾。
- * 它交代的变化、没能确认的交互、试过的办法记进外层任务的记账口。此刻能不能打断看它手上的动作。
+ * 它交代的变化、没能确认的交互、试过的办法记进外层任务的记账口。此刻能不能打断看它手上的动作，
+ * 分阶段任务问手上的动作时自动问到这里。
  *
  * <p>用法：阶段进入时建好交给基类，每刻 {@code runAction} 推进，不在做了就调一次 {@link #settle()} 拿子任务的结果。
  */
@@ -62,7 +63,7 @@ public final class ChildTaskAction implements Action {
     }
 
     /** 此刻能不能打断看子任务的：扔出珍珠等传送、悬空搭桥、等游戏确认放方块时停不得。 */
-    public Interruptibility interruptibility(TickContext context) {
+    @Override public Interruptibility interruptibility(TickContext context) {
         return runner.interruptibility(context);
     }
 
