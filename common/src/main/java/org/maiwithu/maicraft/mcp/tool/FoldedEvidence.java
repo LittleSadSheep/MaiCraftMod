@@ -12,8 +12,9 @@ import com.google.gson.JsonObject;
 
 /**
  * 任务结果里折起来、按路径读的大块证据。目标的默认样子（goal 查到的、events 带 goal_id 附上的）只留
- * status、summary、problem 和小块的事实；试过的办法、细节里超过约 4KB 的一项、超过约 4KB 的列表
- * 从结果里拿掉，在 {@code folded} 里写明路径、形状、几项、多少字。{@code goal(get, goal_id, path)} 读回那一段，
+ * status、summary、problem 和小块的事实；超过约 4KB 的试过的办法、细节里超过约 4KB 的一项、超过约 4KB 的列表
+ * 从结果里拿掉，在 {@code folded} 里写明路径、形状、几项、多少字。两三条短的试过的办法照原样留着：
+ * 没做成时 LLM 一眼就看到为什么，不用再按路径读一轮。{@code goal(get, goal_id, path)} 读回那一段，
  * 列表与对象再带 offset / limit 翻页。
  *
  * <p>不是删：拿掉的每一块都在 folded 里留了路径与大小，按路径读得回原样，读到的那一段里再大的子块照同样的规矩折起来。
@@ -31,8 +32,6 @@ final class FoldedEvidence {
     static final int MAX_LIMIT = 200;
     /** 默认样子里始终留着的：达成情况、一句话结论、卡在哪。 */
     private static final Set<String> ALWAYS_SHOWN = Set.of("status", "summary", "problem");
-    /** 试过的办法：做下一步决定时先看结论与问题，办法的明细按路径读。 */
-    private static final String ATTEMPTS = "attempts";
     /** 能力特有的细节：整体不大就整块留着，大了只折起大的那几项。 */
     private static final String DETAILS = "details";
 
@@ -46,10 +45,9 @@ final class FoldedEvidence {
             String key = entry.getKey();
             JsonElement value = entry.getValue();
             String path = childPath("", key);
+            // 试过的办法和别的块一样按大小定：短的几条原样留着，长到超过一折才折起来按路径读。
             if (ALWAYS_SHOWN.contains(key) || isEmpty(value)) {
                 shown.add(key, value);
-            } else if (key.equals(ATTEMPTS)) {
-                folded.add(reference(path, value));
             } else if (chars(value) <= FOLD_CHARS) {
                 shown.add(key, value);
             } else if (key.equals(DETAILS) && value.isJsonObject()) {

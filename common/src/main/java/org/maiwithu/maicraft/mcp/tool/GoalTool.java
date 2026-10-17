@@ -13,8 +13,9 @@ import java.util.Objects;
  * goal：查看、暂停、解除暂停、取消下达过的目标，回答目标提出的问题；goal_id 是 execute 返回的编号。
  * 暂停、解除暂停、取消、回答之后都返回目标此刻的样子，不用再查一次。
  *
- * <p>结束了的目标默认只给结论、问题和小块事实，大块证据（试过的办法、细节里大的那几项、长列表）折起来，
+ * <p>结束了的目标默认只给结论、问题和小块事实，大块证据（长的试过的办法、细节里大的那几项、长列表）折起来，
  * 路径与大小列在 result.folded；get 带 path 读回那一段，列表与对象再带 offset / limit 翻页。
+ * 两三条短的试过的办法照原样留着，没做成时一眼看到为什么。
  */
 public final class GoalTool implements McpTool {
     private static final List<String> OPERATIONS = List.of("get", "list", "pause", "resume", "cancel", "answer");

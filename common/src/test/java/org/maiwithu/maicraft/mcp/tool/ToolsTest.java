@@ -236,12 +236,13 @@ class ToolsTest {
 
     @Test
     void finishedGoalsFoldBigEvidenceAndReadItBackByPath() {
-        // 结束了的目标默认只给结论与问题，试过的办法折起来写明路径与几条；按路径读回原样，事件附的目标也是折起来的。
-        use.decision = new StepDecision.Finish(TaskResult.builder(TaskResult.Status.FAILED, "没拿到圆石")
-                .problem(Problem.of(Problem.Kind.NEED_ITEM, "附近箱子里都没有圆石"))
-                .attempt(new Attempt("开门口的箱子", "没有圆石"))
-                .attempt(new Attempt("开屋里的箱子", "没有圆石"))
-                .build());
+        // 结束了的目标默认只给结论与问题，超过一折的试过的办法折起来写明路径与几条；按路径读回原样，事件附的目标也是折起来的。
+        TaskResult.Builder failed = TaskResult.builder(TaskResult.Status.FAILED, "没拿到圆石")
+                .problem(Problem.of(Problem.Kind.NEED_ITEM, "附近箱子里都没有圆石"));
+        for (int i = 0; i < 150; i++) {
+            failed.attempt(new Attempt("开第 " + i + " 个箱子", "没有圆石"));
+        }
+        use.decision = new StepDecision.Finish(failed.build());
         long id = data(call("execute", "{\"goal\": {\"ability\": \"use\"}}")).get("goal_id").getAsLong();
         assertEquals("invalid_parameter", errorCode(call("goal",
                 "{\"operation\": \"get\", \"goal_id\": " + id + ", \"path\": \"/attempts\"}")), "还没结束没有结果可读");
@@ -252,13 +253,13 @@ class ToolsTest {
         assertFalse(result.has("attempts"));
         JsonObject folded = result.getAsJsonArray("folded").get(0).getAsJsonObject();
         assertEquals("/attempts", folded.get("path").getAsString());
-        assertEquals(2, folded.get("items").getAsInt());
+        assertEquals(150, folded.get("items").getAsInt());
         assertTrue(data(call("events", "{\"goal_id\": " + id + "}")).getAsJsonObject("goal")
                 .getAsJsonObject("result").has("folded"), "事件附的目标也折起来");
 
         JsonObject page = data(call("goal", "{\"operation\": \"get\", \"goal_id\": " + id + ", \"path\": \"/attempts\"}"));
-        assertEquals(2, page.get("total").getAsInt());
-        assertEquals("开屋里的箱子", page.getAsJsonArray("value").get(1).getAsJsonObject().get("tried").getAsString());
+        assertEquals(150, page.get("total").getAsInt());
+        assertEquals("开第 1 个箱子", page.getAsJsonArray("value").get(1).getAsJsonObject().get("tried").getAsString());
         JsonObject second = call("goal", "{\"operation\": \"get\", \"goal_id\": " + id
                 + ", \"path\": \"/attempts\", \"limit\": 1}");
         assertEquals(1, second.getAsJsonObject("next").getAsJsonObject("arguments").get("offset").getAsInt(),
@@ -269,6 +270,23 @@ class ToolsTest {
                 "{\"operation\": \"get\", \"goal_id\": " + id + ", \"offset\": 1}")));
         assertEquals("invalid_parameter", errorCode(call("goal",
                 "{\"operation\": \"get\", \"goal_id\": " + id + ", \"path\": \"/details/cells\"}")));
+    }
+
+    @Test
+    void shortAttemptsStayInTheFinishedResult() {
+        // 两三条短的试过的办法不折：没做成时一眼看到为什么，不用再按路径读一轮。
+        use.decision = new StepDecision.Finish(TaskResult.builder(TaskResult.Status.FAILED, "没拿到圆石")
+                .problem(Problem.of(Problem.Kind.NEED_ITEM, "附近箱子里都没有圆石"))
+                .attempt(new Attempt("开门口的箱子", "没有圆石"))
+                .attempt(new Attempt("开屋里的箱子", "没有圆石"))
+                .build());
+        long id = data(call("execute", "{\"goal\": {\"ability\": \"use\"}}")).get("goal_id").getAsLong();
+        runTicks(2);
+
+        JsonObject result = data(call("goal", "{\"operation\": \"get\", \"goal_id\": " + id + "}")).getAsJsonObject("result");
+        assertEquals(2, result.getAsJsonArray("attempts").size());
+        assertEquals("开屋里的箱子", result.getAsJsonArray("attempts").get(1).getAsJsonObject().get("tried").getAsString());
+        assertFalse(result.has("folded"), "没有要折的就不出现 folded");
     }
 
     @Test

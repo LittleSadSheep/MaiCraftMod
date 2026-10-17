@@ -60,19 +60,30 @@ class FoldedEvidenceTest {
     }
 
     @Test
-    void 小结果只折起试过的办法其余照原样() {
+    void 小结果连两三条试过的办法都照原样() {
         JsonObject shown = FoldedEvidence.fold(result(3, 2));
 
         assertEquals("东墙没砌完", shown.get("summary").getAsString());
         assertEquals("NEED_ITEM", shown.getAsJsonObject("problem").get("kind").getAsString());
         assertEquals(1, shown.getAsJsonArray("changes").size(), "小块的变化照原样给");
         assertEquals(3, shown.getAsJsonObject("details").getAsJsonArray("cells").size());
-        assertFalse(shown.has("attempts"), "试过的办法按路径读");
+        // 短的试过的办法不折：没做成时一眼看到为什么，不用再 goal(get, path=/attempts) 一轮。
+        assertEquals(2, shown.getAsJsonArray("attempts").size());
+        assertFalse(shown.has("folded"), "没有要折的就和原样一样");
+        assertEquals(0, shown.getAsJsonArray("unconfirmed").size(), "空的列表照原样留着，形状不变");
+    }
+
+    @Test
+    void 试过的办法超过一折才折起来() {
+        JsonObject full = result(3, 150);
+        assertTrue(FoldedEvidence.chars(full.get("attempts")) > FoldedEvidence.FOLD_CHARS, "这份试过的办法确实超过一折");
+
+        JsonObject shown = FoldedEvidence.fold(full);
+        assertFalse(shown.has("attempts"), "长的按路径读");
         JsonObject attempts = foldedEntry(shown, "/attempts");
         assertEquals("list", attempts.get("type").getAsString());
-        assertEquals(2, attempts.get("items").getAsInt());
-        assertTrue(attempts.get("chars").getAsInt() > 0);
-        assertEquals(0, shown.getAsJsonArray("unconfirmed").size(), "空的列表照原样留着，形状不变");
+        assertEquals(150, attempts.get("items").getAsInt());
+        assertEquals(3, shown.getAsJsonObject("details").getAsJsonArray("cells").size(), "别的小块照原样");
     }
 
     @Test
