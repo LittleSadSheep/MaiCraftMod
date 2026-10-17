@@ -355,7 +355,7 @@ class GatherTaskTest {
         };
         GatherSpot spot = new GatherSpot(AT, false, "minecraft:stone", null, PERMS, false, "采集脚下石头");
         GatherTask task = new GatherTask(spot, actions, actions, new NoToolsNeeded(),
-                new FakeWorld("minecraft:stone", false), null, actions, permission(), backpack, null, PERMS);
+                new FakeWorld("minecraft:stone", false), null, actions, permission(), backpack, null, null, PERMS);
         TaskResult result = run(task);
         assertEquals(TaskResult.Status.DONE, result.status());
         assertEquals(1, result.attempts().size());
