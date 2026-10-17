@@ -262,6 +262,8 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         private String stepSource;
         private String stepSourceVia;
         private int carriedAtStepStart;
+        /** 当前来源动手前身上每样东西各几件：一件要的都没拿到时，比一比说得出进包的是什么。 */
+        private Map<String, Integer> carriedByItemAtStepStart = Map.of();
         /** 当前来源动作已经交回过几句没能确认的交互：收尾时再交一次也不重复。 */
         private int forwardedFacts;
         /** 拿够了是身上有几件：第一次推进时身上原有的加上这次要多拿的；还没推进过为 -1。 */
@@ -468,7 +470,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                     int carried = CarriedItems.matching(backpack, offhand, request, tags);
                     if (carried <= carriedAtStepStart) {
                         excluded.add(stepSource);
-                        deadEnds.add(stepSource + "（做完了，但一件都没拿到）");
+                        deadEnds.add(stepSource + "（做完了，但一件都没拿到" + otherGains() + "）");
                     } else {
                         spotFailures.remove(stepSource);
                         // 真有东西进了背包：这条途径记进 obtained_via。
@@ -485,16 +487,27 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                     if (!onlySpots || spotFailures.merge(stepSource, 1, Integer::sum) >= MAX_SPOT_FAILURES) {
                         excluded.add(stepSource);
                     }
-                    deadEnds.add(stepSource + "（" + failed.problem().message() + "）");
+                    // 一件要的都没拿到、却有别的进了包（按掉落线索挖了模组矿，掉的是别的）：如实写进了什么。
+                    boolean gainedWanted = CarriedItems.matching(backpack, offhand, request, tags) > carriedAtStepStart;
+                    deadEnds.add(stepSource + "（" + failed.problem().message() + (gainedWanted ? "" : otherGains()) + "）");
                     // 收尾时出了岔子，但这一步里东西确实进了背包：途径照记，不说成"身上已有的"。
-                    if (onDelivered != null
-                            && CarriedItems.matching(backpack, offhand, request, tags) > carriedAtStepStart) {
+                    if (onDelivered != null && gainedWanted) {
                         onDelivered.accept(stepSourceVia);
                     }
                     stage = Stage.CONSULT;
                     yield ActionStatus.progressed();
                 }
             };
+        }
+
+        // 这一趟要的东西一件没进包时，别的进了什么：挖了掉的、打了掉的不是要的东西，照实写给 LLM 改线索或换做法；
+        // 什么都没进为空。
+        private String otherGains() {
+            Map<String, Integer> gained = CarriedItems.gainedSince(carriedByItemAtStepStart, backpack, offhand);
+            if (gained.isEmpty()) return "";
+            List<String> parts = new ArrayList<>();
+            gained.forEach((itemId, count) -> parts.add(itemId + " " + count + " 个"));
+            return "；进包的是 " + String.join("、", parts) + "，不是要的" + request.wanted().describe();
         }
 
         // 来源动作里没能确认的交互一句一条记进发起任务的结果；只记新交回的，收尾时再问一次也不重复。
@@ -534,6 +547,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             stepSource = planned.offer().source();
             stepSourceVia = planned.source().via().name();
             carriedAtStepStart = CarriedItems.matching(backpack, offhand, request, tags);
+            carriedByItemAtStepStart = CarriedItems.byItem(backpack, offhand);
             forwardedFacts = 0;
             stage = Stage.RUN;
             return ActionStatus.progressed();

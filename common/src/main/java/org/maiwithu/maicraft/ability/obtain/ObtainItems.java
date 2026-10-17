@@ -3,13 +3,14 @@ package org.maiwithu.maicraft.ability.obtain;
 
 import java.util.List;
 
+import org.maiwithu.maicraft.behavior.acquire.DropsFrom;
 import org.maiwithu.maicraft.behavior.acquire.ItemAcquisition;
 import org.maiwithu.maicraft.behavior.acquire.WantedItem;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.TaskInput;
 
 /**
- * 一次拿东西的任务输入：要什么、再多拿几件、走哪几条途径、愿意走多远、在多大范围里找。
+ * 一次拿东西的任务输入：要什么、再多拿几件、走哪几条途径、愿意走多远、在多大范围里找，以及 LLM 给的掉落线索。
  * 参数在能力下决定时就换成了带类型的取值，任务不再碰原始 JSON。
  *
  * @param wanted            想要的东西（一种物品或一个标签）
@@ -19,13 +20,15 @@ import org.maiwithu.maicraft.kernel.task.TaskInput;
  * @param purpose           用途标签，写进结果与腾背包的备注，例如"按需要拿取"
  * @param describeText      给日志与面板的一句话，例如"再拿 8 个 minecraft:torch"
  * @param prefer            倾向用的材料（物品 ID 或 # 标签）；没有为空
+ * @param dropsFrom         掉落线索：要的东西从哪些方块挖得到、哪些生物打得到；没给为 {@link DropsFrom#NONE}
  */
 record ObtainItems(WantedItem wanted, int count, ItemAcquisition.Scope scope,
-        Permissions permissions, String purpose, String describeText, List<String> prefer) implements TaskInput {
+        Permissions permissions, String purpose, String describeText, List<String> prefer, DropsFrom dropsFrom)
+        implements TaskInput {
 
     ObtainItems(WantedItem wanted, int count, ItemAcquisition.Scope scope, Permissions permissions, String purpose,
             String describeText) {
-        this(wanted, count, scope, permissions, purpose, describeText, List.of());
+        this(wanted, count, scope, permissions, purpose, describeText, List.of(), DropsFrom.NONE);
     }
 
     ObtainItems {
@@ -36,6 +39,7 @@ record ObtainItems(WantedItem wanted, int count, ItemAcquisition.Scope scope,
         if (purpose == null || purpose.isBlank()) throw new IllegalArgumentException("拿东西必须带用途标签");
         if (describeText == null || describeText.isBlank()) throw new IllegalArgumentException("任务输入必须有一句话描述");
         prefer = prefer == null ? List.of() : List.copyOf(prefer);
+        dropsFrom = dropsFrom == null ? DropsFrom.NONE : dropsFrom;
     }
 
     @Override public String describe() {

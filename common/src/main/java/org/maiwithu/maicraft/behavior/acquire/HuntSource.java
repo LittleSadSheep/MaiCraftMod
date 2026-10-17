@@ -2,8 +2,10 @@
 package org.maiwithu.maicraft.behavior.acquire;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquisitionCost;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
@@ -18,7 +20,8 @@ import org.maiwithu.maicraft.kernel.task.Action;
 /**
  * 狩猎的来源：打掉会掉出想要东西的动物或生物，捡走掉落。
  *
- * <p>要羊毛找羊、要皮革找牛——"哪种生物掉什么"按写死的原版对照（客户端读不到生物掉落表）。
+ * <p>要羊毛找羊、要皮革找牛——"哪种生物掉什么"按写死的原版对照（客户端读不到生物掉落表），
+ * LLM 用掉落线索（drops_from）点名的生物也打。
  * 候选在已加载、radius 内都算：猎物少且会走动，按看见筛会漏掉墙后走着的羊；出手前必须看得见
  * 才攻击（射线核对把关），和采掘"只算看得见的"不同。幼崽不掉东西也不打；剪过毛的羊与颜色不对的
  * 羊没有羊毛；有名字、被驯服、拴绳、圈养的是别人的。许可是逐只判断的：动物照 kill_animals，
@@ -61,10 +64,12 @@ public final class HuntSource implements ItemSource {
     }
 
     @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
-        List<String> types = VanillaEntityDrops.creatureTypes(request.wanted(), tags);
+        List<String> types = creatureTypes(request);
         if (types.isEmpty()) {
+            // 原版对照里没有、也没给掉落线索：模组生物掉什么客户端读不到，要 LLM 用线索点名。
             return new SourceQuote.Unavailable(describe(),
-                    "没有哪种生物会掉出" + request.wanted().describe() + "——它是做出来的或有别的来路，打猎打不出来");
+                    "没有哪种生物会掉出" + request.wanted().describe() + "——它是做出来的或有别的来路，打猎打不出来；"
+                            + "是打哪种模组生物得来的，用 drops_from 写上那种生物");
         }
         HuntCandidates.Screen screen = screen(types, request, context);
         if (!screen.allowed().isEmpty()) {
@@ -81,7 +86,7 @@ public final class HuntSource implements ItemSource {
     }
 
     @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
-        List<String> types = VanillaEntityDrops.creatureTypes(request.wanted(), tags);
+        List<String> types = creatureTypes(request);
         if (types.isEmpty()) {
             return Optional.empty();
         }
@@ -101,6 +106,16 @@ public final class HuntSource implements ItemSource {
             return Optional.empty();
         }
         return hunts.hunt(screen.allowed(), request, context.permissions());
+    }
+
+    /**
+     * 打哪几种生物：原版对照里会掉它的，加上掉落线索（drops_from）点名的生物——模组生物掉什么客户端读不到，
+     * 按 LLM 说的去打；打倒了掉的是什么以进包的为准，打了没见到要的东西照常换下一只。
+     */
+    private List<String> creatureTypes(ItemRequest request) {
+        Set<String> types = new LinkedHashSet<>(VanillaEntityDrops.creatureTypes(request.wanted(), tags));
+        types.addAll(request.dropsFrom().entities());
+        return List.copyOf(types);
     }
 
     /** 附近没有候选：愿意走就按 max_distance 出去找，没给就如实结束。 */

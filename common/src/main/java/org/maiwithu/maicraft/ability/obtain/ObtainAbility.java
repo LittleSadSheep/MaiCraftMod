@@ -8,6 +8,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import org.maiwithu.maicraft.behavior.acquire.DropsFrom;
 import org.maiwithu.maicraft.behavior.acquire.ItemAcquisition;
 import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
 import org.maiwithu.maicraft.behavior.acquire.ReadsItemRegistry;
@@ -15,6 +16,7 @@ import org.maiwithu.maicraft.behavior.acquire.ReadsItemTags;
 import org.maiwithu.maicraft.behavior.acquire.StartsAcquisition;
 import org.maiwithu.maicraft.behavior.acquire.WantedItem;
 import org.maiwithu.maicraft.game.player.BackpackView;
+import org.maiwithu.maicraft.game.world.ReadsRegisteredIds;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilitySpec;
@@ -34,8 +36,8 @@ import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 
 /**
  * 拿东西的能力：让背包里某样东西再多几件。决定只做两件事——
- * 把参数在游戏里立得住与否一次查清（物品 ID 存在、标签下有注册物品，不进世界就能发现），
- * 以及把 via、radius、max_distance 换成引擎认的限定；真正问来源、挑路、动手、重新清点
+ * 把参数在游戏里立得住与否一次查清（物品 ID 存在、标签下有注册物品、掉落线索里的方块与实体注册过，
+ * 不进世界就能发现），以及把 via、radius、max_distance 换成引擎认的限定；真正问来源、挑路、动手、重新清点
  * 全在玩家行为层的拿到物品引擎里，这里不做第二份。
  */
 public final class ObtainAbility implements AbilityModule {
@@ -49,13 +51,15 @@ public final class ObtainAbility implements AbilityModule {
     private final BackpackView backpack;
     private final OffhandContents offhand;
     private final ReadsItemTags tags;
+    /** 方块与实体注册了哪些 ID：掉落线索按它分出方块与生物，写错的给相近的名字。 */
+    private final ReadsRegisteredIds registeredIds;
 
     /**
      * @param vias 登记的来源自报的途径，按来源顺序、去重：via 的可选值与说明从它生成，
      *               联动模组接入的途径装了才在里面
      */
     public ObtainAbility(StartsAcquisition acquisition, List<AcquireVia> vias, ReadsItemRegistry registry,
-            BackpackView backpack, OffhandContents offhand, ReadsItemTags tags) {
+            BackpackView backpack, OffhandContents offhand, ReadsItemTags tags, ReadsRegisteredIds registeredIds) {
         this.acquisition = acquisition;
         this.vias = List.copyOf(Objects.requireNonNull(vias, "vias"));
         if (this.vias.isEmpty()) throw new IllegalArgumentException("拿东西至少要有一条途径");
@@ -63,6 +67,7 @@ public final class ObtainAbility implements AbilityModule {
         this.backpack = backpack;
         this.offhand = offhand;
         this.tags = tags;
+        this.registeredIds = Objects.requireNonNull(registeredIds, "registeredIds");
     }
 
     @Override public AbilitySpec spec() {
@@ -83,7 +88,11 @@ public final class ObtainAbility implements AbilityModule {
                                 .doc("愿意为此走多远（格）").build(),
                         ParamSpec.of("prefer", ParamType.ITEM_LIST)
                                 .doc("倾向用的材料（物品 ID 或 # 标签的列表）：几种做法都行时用到它们的排前面，"
-                                        + "备料时沿配方链往下传；只影响先后，不禁用别的做法").build()),
+                                        + "备料时沿配方链往下传；只影响先后，不禁用别的做法").build(),
+                        ParamSpec.of("drops_from", ParamType.BLOCK_LIST)
+                                .doc("要的东西从哪些方块挖得到、哪些生物打得到（方块 ID、# 方块标签或实体类型 ID 的列表），"
+                                        + "模组矿、模组生物掉什么认不出时用，例如要 create:raw_zinc 写 [\"create:zinc_ore\"]；"
+                                        + "采掘、收庄稼、狩猎照它去挖去打，拿到几件以实际进包为准；只管 item 这一样，备料不往下传").build()),
                 Set.of(), ExecutionMode.CONTROLS_PLAYER, Set.of(), List.of(), Listing.LISTED);
     }
 
@@ -109,6 +118,13 @@ public final class ObtainAbility implements AbilityModule {
         if (params.has("count") && params.integer("count") < 1) {
             invalid.add("count 至少为 1");
         }
+        // 掉落线索里写错的方块、实体也不进世界：一项一句"…不存在；你是不是要 …"，和物品写错同一种说法。
+        DropsFrom dropsFrom = DropsFrom.NONE;
+        if (params.has("drops_from")) {
+            DropsFrom.Sorted sorted = DropsFrom.sort(params.list("drops_from"), registeredIds);
+            invalid.addAll(sorted.problems());
+            dropsFrom = sorted.dropsFrom();
+        }
         if (!invalid.isEmpty()) {
             return invalidGoal(invalid);
         }
@@ -117,7 +133,7 @@ public final class ObtainAbility implements AbilityModule {
                 ? params.list("prefer").stream().map(id -> id.toLowerCase(Locale.ROOT)).toList() : List.of();
         return new StepDecision.Run(new ObtainItems(wanted, count, scope(params),
                 goal.permissions(), purposeLabel(goal),
-                "再拿 " + count + " 个 " + wanted.specifier(), prefer));
+                "再拿 " + count + " 个 " + wanted.specifier(), prefer, dropsFrom));
     }
 
     // 拿东西在哪做都一样：被自卫撤离带离原地后，从新地点重新看现场接着拿，不停在半路等 LLM。

@@ -18,6 +18,7 @@
     "direction": "扇形朝向：forward / backward / left / right / north / south / east / west；探索用，出发时按当时朝向固定",
     "distance": "保持的距离，单位格，例如跟随时与目标相隔几格",
     "drawing": "建筑图纸的正文（JSON 对象）：材料表、对象、组件",
+    "drops_from": "掉落线索：要的东西从哪些方块挖得到、哪些生物打得到（方块 ID、# 方块标签或实体类型 ID 的列表）",
     "edits": "对图纸按名合并的修改（JSON 对象）：objects、materials、components、remove_objects、remove_components、block_state_axes、overlap_policy、name",
     "entity": "实体类型 ID，可给一个或几种",
     "face": "点方块的哪一面：up / down / north / south / east / west；用扳手转机器时点哪一面决定绕哪根轴转",

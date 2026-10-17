@@ -40,7 +40,8 @@ import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
  * 知道在哪几层生成的矿（铁、钻石这类，见 OreHeights）附近看不见时长程挖矿：往下挖台阶到矿最多的那层，
  * 再横着挖通道，看见了就挖；装了连锁挖时台阶、通道一行一行连锁挖，矿整脉连锁挖。
  * 做出来的加工品（铁锭、木板这类）没有方块直接掉它，明确回答"这里给不了"，
- * 不装作能挖；挖矿要的工具（合用的镐）缺了就先按同一套需求去弄，用途标签写清是采掘要用的。
+ * 不装作能挖；模组矿掉什么客户端读不到，LLM 用掉落线索（drops_from）点名的方块也当作会掉它去挖，
+ * 掉没掉以挖完进包的为准；挖矿要的工具（合用的镐）缺了就先按同一套需求去弄，用途标签写清是采掘要用的。
  * 挖哪几格由许可说了算：别人搭的、玩家放的，一格都不动。
  * 走不到跟前、挖不下来的格记一阵（见 FailedSpots），这一阵里先挑别的格、别的树、别的矿；
  * 一次动手只坏在这几格时告诉引擎换别处还能接着拿，不把整个采掘划掉。
@@ -109,12 +110,14 @@ public final class MiningSource implements ItemSource {
     }
 
     @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
-        if (!minables.anyBlockDrops(request.wanted())) {
+        if (!minables.anyBlockDrops(request.wanted(), request.dropsFrom())) {
+            // 原版对照里没有、也没给掉落线索：多半是做出来的；模组方块挖得到的，客户端读不到掉落表，要 LLM 用线索点名。
             return new SourceQuote.Unavailable(describe(),
                     "没有方块直接掉出" + request.wanted().describe()
-                            + "——它是做出来的，去合成或烧炼");
+                            + "——它是做出来的就去合成或烧炼；是挖哪种模组方块得来的，用 drops_from 写上那种方块");
         }
-        List<MinableSpot> seen = minables.minable(request.wanted(), context.characterAt(), searchRadius(context));
+        List<MinableSpot> seen = minables.minable(request.wanted(), request.dropsFrom(), context.characterAt(),
+                searchRadius(context));
         List<MinableSpot> spots = withoutFailed(seen, context.characterAt().dimension());
         if (spots.isEmpty() && !minables.scanComplete()) {
             // 附近的方块还没扫完：说不准有没有，让引擎等一会儿再问，不把没扫完当成没有。
@@ -152,8 +155,8 @@ public final class MiningSource implements ItemSource {
     @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
         // 动手前重新扫一遍：问价到动手之间矿可能被挖走了，以现场为准；刚试过做不成的格这一阵不挑。
         String dimension = context.characterAt().dimension();
-        List<MinableSpot> spots = withoutFailed(
-                minables.minable(request.wanted(), context.characterAt(), searchRadius(context)), dimension);
+        List<MinableSpot> spots = withoutFailed(minables.minable(request.wanted(), request.dropsFrom(),
+                context.characterAt(), searchRadius(context)), dimension);
         if (spots.isEmpty() && !minables.scanComplete()) {
             // 还没扫完就不动手：交回空，引擎重新问价时会等它扫完。
             return Optional.empty();
@@ -317,7 +320,7 @@ public final class MiningSource implements ItemSource {
         String dimension = context.characterAt().dimension();
         SpotWork[] work = new SpotWork[1];
         DigsStairsDown.Tunnel tunnel = new DigsStairsDown.Tunnel(deposit.workingY(), deposit.band().minY(),
-                blockType -> minables.dropsWanted(request.wanted(), blockType), request.count(),
+                blockType -> minables.dropsWanted(request.wanted(), request.dropsFrom(), blockType), request.count(),
                 feet -> !inSight(request, at(feet, dimension), permissions).isEmpty(),
                 feet -> mineInSight(request, at(feet, dimension), permissions, cell -> work[0].note(dimension, cell)));
         Optional<Action> digging = stairs.tunnelToward(tunnel, permissions);
@@ -331,8 +334,8 @@ public final class MiningSource implements ItemSource {
 
     // 站在通道里看得见的、许可准挖的那几格要的矿；刚试过做不成的这一阵不算看见。
     private List<MinableSpot> inSight(ItemRequest request, WorldPosition here, Permissions permissions) {
-        List<MinableSpot> spots = withoutFailed(minables.minable(request.wanted(), here, SIGHT_RADIUS_BLOCKS),
-                here.dimension());
+        List<MinableSpot> spots = withoutFailed(
+                minables.minable(request.wanted(), request.dropsFrom(), here, SIGHT_RADIUS_BLOCKS), here.dimension());
         return PermittedSpots.screen(spots, MinableSpot::pos, MinableSpot::blockType, permissions, permission).allowed();
     }
 
@@ -354,7 +357,7 @@ public final class MiningSource implements ItemSource {
     private Action digStairs(ItemRequest request, Permissions permissions) {
         List<Action> steps = new ArrayList<>();
         toolStep(BURIED_STONE, request, permissions).ifPresent(steps::add);
-        steps.add(stairs.digDown(blockType -> minables.dropsWanted(request.wanted(), blockType),
+        steps.add(stairs.digDown(blockType -> minables.dropsWanted(request.wanted(), request.dropsFrom(), blockType),
                 request.count(), permissions));
         return new StepwiseActions("往下挖楼梯找" + request.wanted().describe(), steps.toArray(Action[]::new));
     }
@@ -369,7 +372,7 @@ public final class MiningSource implements ItemSource {
             double dy = pos.getY() - here.y();
             double dz = pos.getZ() - here.z();
             if (dx * dx + dy * dy + dz * dz > (double) radius * radius) return false;
-            Optional<String> blockType = minables.minableAt(request.wanted(), pos);
+            Optional<String> blockType = minables.minableAt(request.wanted(), request.dropsFrom(), pos);
             return blockType.isPresent() && permission.blockAllowed(permissions, PermissionCheck.WorldAction.DIG_BLOCK,
                     WorldPosition.here(pos.getX(), pos.getY(), pos.getZ()), blockType.get()).isEmpty();
         };

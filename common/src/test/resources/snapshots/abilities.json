@@ -46,7 +46,7 @@
       {
         "ability": "maicraft:obtain",
         "summary": "让背包里某样东西再多几件；可用 via 指定途径",
-        "parameters": "item: string, count: integer = 1, via?: string, radius?: integer, max_distance?: integer, prefer?: array",
+        "parameters": "item: string, count: integer = 1, via?: string, radius?: integer, max_distance?: integer, prefer?: array, drops_from?: array",
         "targets": [],
         "mode": "controls_player"
       },
@@ -599,6 +599,12 @@
           "type": "array",
           "required": false,
           "doc": "倾向用的材料（物品 ID 或 # 标签的列表）：几种做法都行时用到它们的排前面，备料时沿配方链往下传；只影响先后，不禁用别的做法"
+        },
+        {
+          "name": "drops_from",
+          "type": "array",
+          "required": false,
+          "doc": "要的东西从哪些方块挖得到、哪些生物打得到（方块 ID、# 方块标签或实体类型 ID 的列表），模组矿、模组生物掉什么认不出时用，例如要 create:raw_zinc 写 [\"create:zinc_ore\"]；采掘、收庄稼、狩猎照它去挖去打，拿到几件以实际进包为准；只管 item 这一样，备料不往下传"
         }
       ],
       "targets": [],

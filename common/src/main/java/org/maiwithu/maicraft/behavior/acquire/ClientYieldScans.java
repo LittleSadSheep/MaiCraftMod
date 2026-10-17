@@ -37,7 +37,8 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
  *
  * <p>方块与产出对不上号的部分如实说没有：客户端读不到掉落表，会掉什么按原版常识对照
  * （见 VanillaBlockDrops、VanillaCropProducts），对照没有的物品报"附近没有"，
- * 不冒充找遍了。扫描分刻推进，没扫完时返回已找到的部分，"没扫完"不冒充"没有"。
+ * 不冒充找遍了。LLM 给了掉落线索时，线索点名的方块（含方块标签下的）也当作会掉想要的东西去找，
+ * 是作物的熟了才收。扫描分刻推进，没扫完时返回已找到的部分，"没扫完"不冒充"没有"。
  *
  * <p>采掘候选不透视：只算从角色眼睛看得见的那几格（与观察、find 同一套遮挡判断），埋在石头里的不算，
  * 要先下矿洞、挖开或走近。索引只是帮忙快点找到，不是"世界里哪里有矿"的答案。
@@ -65,7 +66,7 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
     }
 
     @Override
-    public List<MinableSpot> minable(WantedItem wanted, WorldPosition center, int radiusBlocks) {
+    public List<MinableSpot> minable(WantedItem wanted, DropsFrom dropsFrom, WorldPosition center, int radiusBlocks) {
         if (notInWorld()) {
             return List.of();
         }
@@ -76,6 +77,9 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
                 blockOf(blockTypeId).ifPresent(targets::add);
             }
         }
+        // 掉落线索点名的方块（模组矿这类，原版对照里没有）一并登记去找。
+        Set<Block> told = toldBlocks(dropsFrom);
+        targets.addAll(told);
         List<BlockPos> hits = scan(targets, center, radiusBlocks, MINABLE_WANT);
         List<MinableSpot> spots = new ArrayList<>();
         PlayerContext current = context();
@@ -98,6 +102,11 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
             // 把机器的进料箱挖了，掉的箱子还没捡回来。
             if (current.level().getBlockState(hit).hasBlockEntity()) continue;
             String blockTypeId = blockTypeIdOf(current, hit);
+            // 线索点名的方块按 LLM 说的算会掉要的东西：挖了掉的是什么，挖完以进包的为准。
+            if (told.contains(current.level().getBlockState(hit).getBlock())) {
+                spots.add(new MinableSpot(hit, blockTypeId, wanted.specifier()));
+                continue;
+            }
             String dropped = VanillaBlockDrops.droppedBy(blockTypeId);
             // 同名通例带出的方块未必真的掉想要的东西：掉落对不上这次要的就不报。
             if (productIds.contains(dropped)) {
@@ -108,7 +117,9 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
     }
 
     @Override
-    public boolean anyBlockDrops(WantedItem wanted) {
+    public boolean anyBlockDrops(WantedItem wanted, DropsFrom dropsFrom) {
+        // 线索点名了本实例注册了的方块：有方块掉它，去看看附近有没有。
+        if (!toldBlocks(dropsFrom).isEmpty()) return true;
         for (String productId : expand(wanted)) {
             for (String blockTypeId : VanillaBlockDrops.blocksDropping(productId)) {
                 if (blockOf(blockTypeId).isPresent()) {
@@ -130,12 +141,14 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
     }
 
     @Override
-    public boolean dropsWanted(WantedItem wanted, String blockTypeId) {
+    public boolean dropsWanted(WantedItem wanted, DropsFrom dropsFrom, String blockTypeId) {
+        // 往下挖楼梯、长程挖矿的通道正好穿过线索点名的方块，也算挖到了要的东西。
+        if (blockOf(blockTypeId).filter(toldBlocks(dropsFrom)::contains).isPresent()) return true;
         return expand(wanted).contains(VanillaBlockDrops.droppedBy(blockTypeId));
     }
 
     @Override
-    public Optional<String> minableAt(WantedItem wanted, BlockPos pos) {
+    public Optional<String> minableAt(WantedItem wanted, DropsFrom dropsFrom, BlockPos pos) {
         if (notInWorld()) return Optional.empty();
         PlayerContext current = context();
         // 客户端世界的 hasChunkAt 永远答“加载着”，没加载的格读出来是空气；按区块真加载没加载判。
@@ -145,7 +158,10 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
         if (state.isAir() || state.hasBlockEntity()) return Optional.empty();
         if (!NaturalBlocks.grown(state, pos, current.level(), current.level()::isLoaded, new HashMap<>())) return Optional.empty();
         String blockTypeId = blockTypeIdOf(current, pos);
-        return expand(wanted).contains(VanillaBlockDrops.droppedBy(blockTypeId)) ? Optional.of(blockTypeId) : Optional.empty();
+        // 连锁挖逐格核：线索点名的方块与原版对照里掉要的东西的方块都算。
+        boolean yields = toldBlocks(dropsFrom).contains(state.getBlock())
+                || expand(wanted).contains(VanillaBlockDrops.droppedBy(blockTypeId));
+        return yields ? Optional.of(blockTypeId) : Optional.empty();
     }
 
     @Override
@@ -159,7 +175,7 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
     }
 
     @Override
-    public List<CropSpot> mature(WantedItem wanted, WorldPosition center, int radiusBlocks) {
+    public List<CropSpot> mature(WantedItem wanted, DropsFrom dropsFrom, WorldPosition center, int radiusBlocks) {
         if (notInWorld()) {
             return List.of();
         }
@@ -168,6 +184,10 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
             for (String blockTypeId : VanillaCropProducts.cropsProducing(productId)) {
                 blockOf(blockTypeId).ifPresent(targets::add);
             }
+        }
+        // 线索点名的方块里是作物的（模组作物这类）也去找，熟了才收；不是作物的归采掘。
+        for (Block told : toldBlocks(dropsFrom)) {
+            if (told instanceof CropBlock) targets.add(told);
         }
         List<BlockPos> hits = scan(targets, center, radiusBlocks, WANT);
         List<CropSpot> spots = new ArrayList<>();
@@ -248,6 +268,22 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
 
     private static String blockTypeIdOf(PlayerContext current, BlockPos at) {
         return BuiltInRegistries.BLOCK.getKey(current.level().getBlockState(at).getBlock()).toString();
+    }
+
+    // 掉落线索点名的方块：写的方块 ID 与方块标签下的全部方块，本实例没注册的认不出就不算。
+    private static Set<Block> toldBlocks(DropsFrom dropsFrom) {
+        Set<Block> blocks = new LinkedHashSet<>();
+        for (String blockTypeId : dropsFrom.blocks()) {
+            blockOf(blockTypeId).ifPresent(blocks::add);
+        }
+        for (String tag : dropsFrom.blockTags()) {
+            ResourceLocation tagId = ResourceLocation.tryParse(tag.toLowerCase(Locale.ROOT));
+            if (tagId == null) continue;
+            for (var holder : BuiltInRegistries.BLOCK.getTagOrEmpty(TagKey.create(Registries.BLOCK, tagId))) {
+                blocks.add(holder.value());
+            }
+        }
+        return blocks;
     }
 
     private static Optional<Block> blockOf(String blockTypeId) {

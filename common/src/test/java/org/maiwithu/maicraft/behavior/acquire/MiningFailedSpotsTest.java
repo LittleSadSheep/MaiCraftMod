@@ -73,10 +73,10 @@ class MiningFailedSpotsTest {
 
     /** 替身：看得见的原木固定这几格。 */
     private record Logs(List<MinableSpot> spots) implements ScansMinables {
-        @Override public List<MinableSpot> minable(WantedItem wanted, WorldPosition center, int radiusBlocks) {
+        @Override public List<MinableSpot> minable(WantedItem wanted, DropsFrom dropsFrom, WorldPosition center, int radiusBlocks) {
             return spots;
         }
-        @Override public boolean anyBlockDrops(WantedItem wanted) {
+        @Override public boolean anyBlockDrops(WantedItem wanted, DropsFrom dropsFrom) {
             return true;
         }
         @Override public boolean scanComplete() {
@@ -85,7 +85,7 @@ class MiningFailedSpotsTest {
         @Override public boolean buriedUnderfoot(WantedItem wanted) {
             return false;
         }
-        @Override public boolean dropsWanted(WantedItem wanted, String blockTypeId) {
+        @Override public boolean dropsWanted(WantedItem wanted, DropsFrom dropsFrom, String blockTypeId) {
             return true;
         }
     }

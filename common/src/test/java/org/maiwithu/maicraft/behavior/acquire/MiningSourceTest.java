@@ -72,16 +72,16 @@ class MiningSourceTest {
         @Override public boolean scanComplete() {
             return complete;
         }
-        @Override public List<MinableSpot> minable(WantedItem wanted, WorldPosition center, int radiusBlocks) {
+        @Override public List<MinableSpot> minable(WantedItem wanted, DropsFrom dropsFrom, WorldPosition center, int radiusBlocks) {
             return spots;
         }
-        @Override public boolean anyBlockDrops(WantedItem wanted) {
+        @Override public boolean anyBlockDrops(WantedItem wanted, DropsFrom dropsFrom) {
             return anyDrops;
         }
         @Override public boolean buriedUnderfoot(WantedItem wanted) {
             return buried;
         }
-        @Override public boolean dropsWanted(WantedItem wanted, String blockTypeId) {
+        @Override public boolean dropsWanted(WantedItem wanted, DropsFrom dropsFrom, String blockTypeId) {
             return blockTypeId.equals("minecraft:stone");
         }
         // 粗铁是铁矿掉的，知道铁矿在哪几层生成：附近看不见时长程挖矿。
@@ -89,7 +89,7 @@ class MiningSourceTest {
             return "minecraft:raw_iron".equals(wanted.itemId()) ? Optional.of("minecraft:iron_ore") : Optional.empty();
         }
         // 连锁逐格核：64 层都是天然煤矿，只有 x=4 那格是搭出来的。
-        @Override public Optional<String> minableAt(WantedItem wanted, BlockPos pos) {
+        @Override public Optional<String> minableAt(WantedItem wanted, DropsFrom dropsFrom, BlockPos pos) {
             return pos.getY() == 64 && pos.getX() != 4 ? Optional.of("minecraft:coal_ore") : Optional.empty();
         }
     }
@@ -372,11 +372,11 @@ class MiningSourceTest {
     /** 替身：一开始附近看不见铁矿，挖进通道以后看见一格。 */
     private static final class SeenLater implements ScansMinables {
         List<MinableSpot> spots = List.of();
-        @Override public List<MinableSpot> minable(WantedItem wanted, WorldPosition center, int radiusBlocks) { return spots; }
-        @Override public boolean anyBlockDrops(WantedItem wanted) { return true; }
+        @Override public List<MinableSpot> minable(WantedItem wanted, DropsFrom dropsFrom, WorldPosition center, int radiusBlocks) { return spots; }
+        @Override public boolean anyBlockDrops(WantedItem wanted, DropsFrom dropsFrom) { return true; }
         @Override public boolean scanComplete() { return true; }
         @Override public boolean buriedUnderfoot(WantedItem wanted) { return false; }
-        @Override public boolean dropsWanted(WantedItem wanted, String blockTypeId) { return blockTypeId.equals("minecraft:iron_ore"); }
+        @Override public boolean dropsWanted(WantedItem wanted, DropsFrom dropsFrom, String blockTypeId) { return blockTypeId.equals("minecraft:iron_ore"); }
         @Override public Optional<String> depositOre(WantedItem wanted) { return Optional.of("minecraft:iron_ore"); }
     }
 

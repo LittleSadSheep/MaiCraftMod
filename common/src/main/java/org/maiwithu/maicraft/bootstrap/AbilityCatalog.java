@@ -90,6 +90,7 @@ import org.maiwithu.maicraft.behavior.acquire.ItemAcquisition;
 import org.maiwithu.maicraft.behavior.acquire.ItemsInUse;
 import org.maiwithu.maicraft.behavior.acquire.MerchantTradeTakes;
 import org.maiwithu.maicraft.game.world.ClientCommandTree;
+import org.maiwithu.maicraft.game.world.ClientRegisteredIds;
 import org.maiwithu.maicraft.game.world.DropConfirmations;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
@@ -745,8 +746,9 @@ public final class AbilityCatalog {
         // 拿东西途中走路垫脚，不把正在拿的东西垫掉：引擎此刻在推进的那一串就是正要用的。
         deps.itemsInUse().watch(acquisition::inProgress);
         // via 的可选值就是这些来源自报的途径：来源列表变了，能力说明里的参数表跟着变。
-        return new ObtainAbility(acquisition, viasOf(sources),
-                deps.itemRegistry(), deps.backpack(), deps.offhand(), deps.itemTags());
+        // 掉落线索里的方块与实体都在游戏内置注册表里，不进世界也分得出、挑得出相近的名字。
+        return new ObtainAbility(acquisition, viasOf(sources), deps.itemRegistry(), deps.backpack(), deps.offhand(),
+                deps.itemTags(), ClientRegisteredIds.builtIn());
     }
 
     /**

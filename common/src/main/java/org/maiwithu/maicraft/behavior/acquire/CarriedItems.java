@@ -55,6 +55,29 @@ public final class CarriedItems {
         return counts;
     }
 
+    /** 身上（主背包与副手）每样东西各几件：来源做完一趟后比一比，说得出这一趟进包的是什么。 */
+    public static Map<String, Integer> byItem(BackpackView backpack, OffhandContents offhand) {
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        for (var stack : backpack.stacks()) {
+            counts.merge(stack.itemId(), stack.count(), Integer::sum);
+        }
+        if (offhand != null) {
+            offhand.heldInOffhand().ifPresent(stack -> counts.merge(stack.itemId(), stack.count(), Integer::sum));
+        }
+        return counts;
+    }
+
+    /** 比起先前那次清点，身上多出来的东西各几件；少了的、没变的不算。 */
+    public static Map<String, Integer> gainedSince(Map<String, Integer> before, BackpackView backpack,
+            OffhandContents offhand) {
+        Map<String, Integer> gained = new LinkedHashMap<>();
+        byItem(backpack, offhand).forEach((itemId, count) -> {
+            int more = count - before.getOrDefault(itemId, 0);
+            if (more > 0) gained.put(itemId, more);
+        });
+        return gained;
+    }
+
     /** 身上有没有一件够格的工具：挖矿前先看它，缺了才去准备。 */
     public static boolean hasToolThatSuffices(BackpackView backpack, OffhandContents offhand,
             String blockType, ReadsToolRequirements requirements) {

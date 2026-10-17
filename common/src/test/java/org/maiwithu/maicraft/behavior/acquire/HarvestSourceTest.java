@@ -36,7 +36,7 @@ class HarvestSourceTest {
 
     /** 替身：固定一批熟了的作物。 */
     private record FakeCrops(List<CropSpot> spots) implements ScansMatureCrops {
-        @Override public List<CropSpot> mature(WantedItem wanted, WorldPosition center, int radiusBlocks) {
+        @Override public List<CropSpot> mature(WantedItem wanted, DropsFrom dropsFrom, WorldPosition center, int radiusBlocks) {
             return spots;
         }
     }

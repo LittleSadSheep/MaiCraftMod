@@ -14,8 +14,9 @@ public interface ScansMatureCrops {
      * 半径内熟了的、收了能拿到想要的东西的作物，由近及远。
      *
      * @param wanted       想要的东西，例如 minecraft:wheat；按作物的产出对上
+     * @param dropsFrom    掉落线索：点名的方块是作物时，熟了的也算收得到想要的东西（模组作物的产出客户端读不到）
      * @param center       从哪里找起
      * @param radiusBlocks 半径，单位格
      */
-    List<CropSpot> mature(WantedItem wanted, WorldPosition center, int radiusBlocks);
+    List<CropSpot> mature(WantedItem wanted, DropsFrom dropsFrom, WorldPosition center, int radiusBlocks);
 }

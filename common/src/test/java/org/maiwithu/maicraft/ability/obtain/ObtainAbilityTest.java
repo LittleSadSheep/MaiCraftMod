@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.function.Consumer;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 
 import org.junit.jupiter.api.Test;
@@ -19,6 +20,8 @@ import org.maiwithu.maicraft.behavior.acquire.ReadsItemRegistry;
 import org.maiwithu.maicraft.behavior.acquire.StartsAcquisition;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
+import org.maiwithu.maicraft.game.world.IdKind;
+import org.maiwithu.maicraft.game.world.ReadsRegisteredIds;
 import org.maiwithu.maicraft.game.world.SimilarIds;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -56,6 +59,21 @@ class ObtainAbilityTest {
         }
     }
 
+    /** 替身：本实例注册了锌矿与石头两种方块、僵尸一种实体；掉落线索按它分拣。 */
+    private record FakeIds() implements ReadsRegisteredIds {
+        @Override public List<String> ids(IdKind kind) {
+            return switch (kind) {
+                case BLOCK -> List.of("create:zinc_ore", "minecraft:stone");
+                case ENTITY_TYPE -> List.of("minecraft:zombie");
+                default -> List.of();
+            };
+        }
+
+        @Override public List<String> tags(IdKind kind) {
+            return List.of();
+        }
+    }
+
     /** 替身：不该被调用的引擎；被调了就报错，说明校验没拦住。 */
     private record UselessAcquisition() implements StartsAcquisition {
         @Override public Action need(ItemRequest request, Permissions permissions,
@@ -68,7 +86,7 @@ class ObtainAbilityTest {
         return new ObtainAbility(new UselessAcquisition(),
                 List.of(AcquireVia.CRAFT, AcquireVia.SMELT, AcquireVia.CONTAINER,
                         AcquireVia.MINE, AcquireVia.HARVEST, AcquireVia.TRADE),
-                new FakeRegistry(), emptyBackpack(), null, itemId -> Set.of());
+                new FakeRegistry(), emptyBackpack(), null, itemId -> Set.of(), new FakeIds());
     }
 
     private StepDecision decide(JsonObject params) {
@@ -133,6 +151,40 @@ class ObtainAbilityTest {
         assertEquals(Set.of("craft"), input.scope().vias());
         assertEquals(Double.valueOf(40), input.scope().maxDistanceBlocks());
         assertEquals(Integer.valueOf(16), input.scope().radiusBlocks());
+    }
+
+    @Test
+    void 掉落线索分成方块与生物_带进任务输入() {
+        JsonObject params = new JsonObject();
+        params.addProperty("item", "minecraft:coal");
+        JsonArray dropsFrom = new JsonArray();
+        dropsFrom.add("create:zinc_ore");
+        dropsFrom.add("minecraft:zombie");
+        params.add("drops_from", dropsFrom);
+        StepDecision.Run run = assertInstanceOf(StepDecision.Run.class, decide(params));
+        ObtainItems input = assertInstanceOf(ObtainItems.class, run.input());
+        assertEquals(List.of("create:zinc_ore"), input.dropsFrom().blocks());
+        assertEquals(List.of("minecraft:zombie"), input.dropsFrom().entities());
+    }
+
+    @Test
+    void 掉落线索写错进不了世界_给相近的名字() {
+        JsonObject params = new JsonObject();
+        params.addProperty("item", "minecraft:coal");
+        params.addProperty("drops_from", "create:zinc_or");
+        StepDecision.Finish finish = assertInstanceOf(StepDecision.Finish.class, decide(params));
+        assertEquals(Problem.Kind.INVALID_PARAMETER, finish.result().problem().kind());
+        assertEquals("方块或实体 create:zinc_or 不存在；你是不是要 create:zinc_ore",
+                finish.result().problem().message());
+    }
+
+    @Test
+    void 没给掉落线索_任务输入里没有线索() {
+        JsonObject params = new JsonObject();
+        params.addProperty("item", "minecraft:torch");
+        ObtainItems input = assertInstanceOf(ObtainItems.class,
+                assertInstanceOf(StepDecision.Run.class, decide(params)).input());
+        assertTrue(input.dropsFrom().isEmpty());
     }
 
     @Test

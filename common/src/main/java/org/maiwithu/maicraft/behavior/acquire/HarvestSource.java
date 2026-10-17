@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 /**
  * 采集的来源：收成熟作物。只收熟了的（没熟的被踩掉就白长了），收哪几格由许可说了算——
  * 别人田里的不碰。一格收完不一定掉一件，报价里如实写上这个变数；挖的动作本身走挖方块的执行接缝。
+ * 掉落线索（drops_from）点名的作物（模组作物）也收，熟了的才收，收了掉什么以进包的为准。
  */
 public final class HarvestSource implements ItemSource {
 
@@ -57,7 +58,7 @@ public final class HarvestSource implements ItemSource {
     }
 
     @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
-        List<CropSpot> spots = crops.mature(request.wanted(), context.characterAt(), SEARCH_RADIUS_BLOCKS);
+        List<CropSpot> spots = crops.mature(request.wanted(), request.dropsFrom(), context.characterAt(), SEARCH_RADIUS_BLOCKS);
         if (spots.isEmpty()) {
             return new SourceQuote.Unavailable(describe(),
                     "附近没有熟了可以收的" + request.wanted().describe());
@@ -74,7 +75,7 @@ public final class HarvestSource implements ItemSource {
 
     @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
         // 动手前重新扫一遍：问价到动手之间庄稼可能被收走了，以现为准。
-        List<CropSpot> spots = crops.mature(request.wanted(), context.characterAt(), SEARCH_RADIUS_BLOCKS);
+        List<CropSpot> spots = crops.mature(request.wanted(), request.dropsFrom(), context.characterAt(), SEARCH_RADIUS_BLOCKS);
         PermittedSpots.Screen<CropSpot> screened = PermittedSpots.screen(spots, CropSpot::pos,
                 CropSpot::blockType, context.permissions(), permission);
         if (screened.allowed().isEmpty()) {
