@@ -160,6 +160,7 @@
     "resumed",
     "step_finished",
     "finished",
+    "stalled",
     "temporary_task_started",
     "temporary_task_finished",
     "need_unhandled",
