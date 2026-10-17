@@ -32,7 +32,10 @@ import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
-/** 换交通的一趟出行：近处走、远处比报价、走不通换方式、一段失败接着规划、指定方式如实结束、取消照样交代。 */
+/**
+ * 换交通的一趟出行：近处走、远处比报价、走不通换方式、一段失败接着规划、指定方式如实结束、取消照样交代；
+ * 坐着的一段与走路的一段被叫先到安全处再停时都转给它们。
+ */
 class JourneyTaskTest {
 
     private static final TravelVia ELEVATOR = new TravelVia("elevator", "坐电梯");
@@ -101,6 +104,38 @@ class JourneyTaskTest {
         elevator.failure = null;
         TaskResult result = run(task, 50);
         assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+    }
+
+    @Test
+    void 走路这一段悬在半空时_先停稳转给它_没落地整趟不报停稳() {
+        // 走路途中被叫暂停：转给走路这一段的出行任务去落地，落地前整趟不报停稳；放回来接着走到，不另开一段。
+        nextWalk = destination -> {
+            FakeWalk walk = new FakeWalk(TaskResult.done("出行：到了"), destination.center());
+            walk.airborne = true;
+            return walk;
+        };
+        JourneyTask task = journey(at(10, 64, 0), null);
+        task.start(tick);
+        for (int i = 0; i < 10 && (walks.isEmpty() || walks.getFirst().ticks == 0); i++) {
+            task.tick(tick);
+            tick.nextTick();
+        }
+        FakeWalk walk = walks.getFirst();
+        assertEquals(1, walk.ticks, "走路这一段走在半路");
+
+        assertTrue(task.stopSafely(), "走路这一段悬在半空，要先落地");
+        assertEquals(1, walk.safeStops, "走路这一段收到先停稳");
+        assertFalse(task.stoppedSafely(), "还没落地，整趟没停稳");
+        for (int i = 0; i < 3; i++) {
+            task.tick(tick);
+            tick.nextTick();
+        }
+        assertTrue(task.stoppedSafely(), "落地站稳，整趟停稳");
+
+        task.pause();
+        TaskResult result = run(task, 20);
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(1, walks.size(), "接着走完这一段，不另开一段");
     }
 
     @Test
@@ -219,6 +254,11 @@ class JourneyTaskTest {
         private final BlockPos landing;
         private int ticks;
         CloseReason closedWith;
+        /** 走在半路悬着：叫它先停稳要再推进两刻才落地，落地后站着等。 */
+        boolean airborne;
+        int safeStops;
+        /** 叫停之后推进了几刻；没在收尾为 -1。 */
+        private int stopTicks = -1;
 
         FakeWalk(TaskResult outcome, BlockPos landing) {
             this.outcome = outcome;
@@ -226,12 +266,29 @@ class JourneyTaskTest {
         }
 
         @Override public TickResult tick(TickContext context) {
+            if (stopTicks >= 0) {
+                stopTicks++;
+                return TickResult.RUNNING;
+            }
             if (++ticks < 2 || outcome == null) return TickResult.RUNNING;
             if (landing != null) world.spot = WorldPosition.here(landing.getX(), landing.getY(), landing.getZ());
             return TickResult.finished(outcome);
         }
 
-        @Override public void pause() {}
+        @Override public boolean stopSafely() {
+            if (!airborne) return false;
+            safeStops++;
+            stopTicks = 0;
+            return true;
+        }
+
+        @Override public boolean stoppedSafely() {
+            return stopTicks < 0 || stopTicks >= 2;
+        }
+
+        @Override public void pause() {
+            stopTicks = -1;
+        }
 
         @Override public TaskResult close(CloseReason reason) {
             closedWith = reason;

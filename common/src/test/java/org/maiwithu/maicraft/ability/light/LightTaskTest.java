@@ -236,7 +236,7 @@ class LightTaskTest {
 
     @Test
     void 插灯施工跟着补光暂停与收尾_能不能停看施工手上的() {
-        // 插灯交施工引擎按动作推进：施工正走向灯位时，补光的暂停、收尾转到施工手上，能不能停也看它的。
+        // 插灯交施工引擎按动作推进：施工正走向灯位时，补光的暂停、先到安全处再停、收尾转到施工手上，能不能停也看它的。
         Fake fake = new Fake().ground(-6, 6);
         fake.carried.put("minecraft:torch", 64);
         Held walking = new Held();
@@ -251,21 +251,35 @@ class LightTaskTest {
 
         assertEquals(Interruptibility.UNSAFE_TO_STOP, task.interruptibility(TickContext.of(401, null)),
                 "施工手上那一下停不得，补光就停不得");
+        assertTrue(task.stopSafely(), "叫补光先到安全处再停，转给施工手上那一下去落地");
+        assertEquals(1, walking.stops, "走着的那一下收到先停稳");
+        assertFalse(task.stoppedSafely(), "那一下还没停稳，补光也没停稳");
         task.pause();
         assertEquals(1, walking.pauses, "补光暂停，施工跟着停下松手");
         task.close(CloseReason.CANCELLED);
         assertEquals(1, walking.closes, "补光收尾，施工跟着收尾");
     }
 
-    /** 一直在走、停不得的一下：记下被推进、暂停、收尾了几次。 */
+    /** 一直在走、停不得的一下：记下被推进、叫停稳、暂停、收尾了几次。 */
     private static final class Held implements Action {
         int ticks;
+        int stops;
         int pauses;
         int closes;
 
         @Override public ActionStatus tick(TickContext context) {
             ticks++;
             return ActionStatus.running();
+        }
+
+        // 悬在半空：先到安全处再停要先落地，这几刻里一直没停稳。
+        @Override public boolean stopSafely() {
+            stops++;
+            return true;
+        }
+
+        @Override public boolean stoppedSafely() {
+            return false;
         }
 
         @Override public void pause() {

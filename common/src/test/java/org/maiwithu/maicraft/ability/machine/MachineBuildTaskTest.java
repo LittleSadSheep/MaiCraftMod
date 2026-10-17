@@ -341,7 +341,7 @@ Rig rig = new Rig(tempDir);
 
     @Test
     void 施工跟着建机器暂停与收尾_能不能停看施工手上的() {
-        // 普通格交施工引擎按动作推进：施工正走向那一格时，建机器的暂停、收尾转到施工手上，能不能停也看它的。
+        // 普通格交施工引擎按动作推进：施工正走向那一格时，建机器的暂停、先到安全处再停、收尾转到施工手上，能不能停也看它的。
         Rig rig = new Rig(tempDir);
         MachineTestDoubles.Held walking = new MachineTestDoubles.Held();
         rig.site.approach = walking;
@@ -350,6 +350,9 @@ Rig rig = new Rig(tempDir);
 
         assertEquals(Interruptibility.UNSAFE_TO_STOP, task.interruptibility(rig.tick()),
                 "施工手上那一下停不得，建机器就停不得");
+        assertTrue(task.stopSafely(), "叫建机器先到安全处再停，转给施工手上那一下去落地");
+        assertEquals(1, walking.stops, "走着的那一下收到先停稳");
+        assertFalse(task.stoppedSafely(), "那一下还没停稳，建机器也没停稳");
         task.pause();
         assertEquals(1, walking.pauses, "建机器暂停，施工跟着停下松手");
         task.close(CloseReason.CANCELLED);

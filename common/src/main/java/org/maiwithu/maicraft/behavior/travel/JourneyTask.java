@@ -356,7 +356,7 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
     }
 
     /**
-     * 走路这一段包成动作：出行任务作为子任务逐刻推进；整趟被暂停、收尾时连着它一起暂停、收尾，
+     * 走路这一段包成动作：出行任务作为子任务逐刻推进；整趟被暂停、先到安全处再停、收尾时连着它一起暂停、停稳、收尾，
      * 它途中垫的方块、试过的办法照样记进这趟行程。
      */
     private final class WalkingLeg implements Action {
@@ -416,6 +416,16 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
 
         @Override public void pause() {
             if (started && !runner.finished()) runner.pause();
+        }
+
+        // 整趟被叫先到安全处再停（暂停、取消、不急的需求等不到空当）：转给走路的出行任务，悬空的先落地；
+        // 它没停稳整趟也不报停稳。这一段走完了，规划那一步看到在收尾就站着等，不开下一段。
+        @Override public boolean stopSafely() {
+            return started && runner.stopSafely();
+        }
+
+        @Override public boolean stoppedSafely() {
+            return runner.stoppedSafely();
         }
 
         // 整趟提前结束（被替换、取消、角色没了）：出行任务按取消收尾，它交代的事实照样记进这趟。

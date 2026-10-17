@@ -34,7 +34,7 @@ import org.maiwithu.maicraft.kernel.task.TickResult;
 /**
  * 浇筑建门：直岸整条顺序走完框成十格、模具收回；池只有一格深先挖再浇；起手已成直接砌模具；
  * 倒出圆石不重倒；没水按缺东西结束；中途舀不到岩浆停下仍拆模具、岩浆倒回；
- * 交施工引擎的放挡块跟着浇筑暂停、收尾，能不能停看施工手上的。
+ * 交施工引擎的放挡块跟着浇筑暂停、先停稳、收尾，能不能停看施工手上的。
  */
 class PortalLavaCastingTest {
 
@@ -212,7 +212,7 @@ class PortalLavaCastingTest {
 
     @Test
     void placingTheStopperIsPausedAndClosedWithTheCasting() {
-        // 放挡块交施工引擎按动作推进：施工正走向那一格时，浇筑的暂停、收尾转到施工手上，能不能停也看它的。
+        // 放挡块交施工引擎按动作推进：施工正走向那一格时，浇筑的暂停、先到安全处再停、收尾转到施工手上，能不能停也看它的。
         Scene scene = scene(2);
         scene.site().give(CastingFakes.BUCKET, 1);
         scene.site().give(CastingFakes.COBBLESTONE, 16);
@@ -229,21 +229,35 @@ class PortalLavaCastingTest {
 
         assertEquals(Interruptibility.UNSAFE_TO_STOP, casting.interruptibility(ticks),
                 "施工手上那一下停不得，浇筑就停不得");
+        assertTrue(casting.stopSafely(), "叫浇筑先到安全处再停，转给施工手上那一下去落地");
+        assertEquals(1, walking.stops, "走着的那一下收到先停稳");
+        assertFalse(casting.stoppedSafely(), "那一下还没停稳，浇筑也没停稳");
         casting.pause();
         assertEquals(1, walking.pauses, "浇筑暂停，施工跟着停下松手");
         casting.close(CloseReason.CANCELLED);
         assertEquals(1, walking.closes, "浇筑收尾，施工跟着收尾");
     }
 
-    /** 一直在走、停不得的一下：记下被推进、暂停、收尾了几次。 */
+    /** 一直在走、停不得的一下：记下被推进、叫停稳、暂停、收尾了几次。 */
     private static final class HeldAction implements Action {
         int ticks;
+        int stops;
         int pauses;
         int closes;
 
         @Override public ActionStatus tick(TickContext context) {
             ticks++;
             return ActionStatus.running();
+        }
+
+        // 悬在半空：先到安全处再停要先落地，这几刻里一直没停稳。
+        @Override public boolean stopSafely() {
+            stops++;
+            return true;
+        }
+
+        @Override public boolean stoppedSafely() {
+            return false;
         }
 
         @Override public void pause() {

@@ -18,6 +18,8 @@ import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.kernel.result.Attempt;
+import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -43,7 +45,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 跟随任务：迟滞起步与停下、走着换目标点、近了不跑；跟不过去先等再试；跟丢按原因找；
- * 停着看他、挡道就让；同乘与下车；帮打；陪着的人睡没睡。
+ * 停着看他、挡道就让；同乘与下车；帮打；陪着的人睡没睡；过门那一段先停稳转给它、事实并进跟随结果。
  */
 class FollowTaskTest {
 
@@ -269,6 +271,48 @@ class FollowTaskTest {
         }
     }
 
+    /** 过门的子任务替身：走在半路悬着，叫它先停稳要再推进两刻才落地；收尾时交代垫了一块、试过一次找门。 */
+    private static final class AirborneCrossing implements Task {
+        int safeStops;
+        /** 叫停之后推进了几刻；没在收尾为 -1。 */
+        int stopTicks = -1;
+        CloseReason closedWith;
+
+        @Override public TickResult tick(TickContext context) {
+            if (stopTicks >= 0) stopTicks++;
+            return TickResult.RUNNING;
+        }
+
+        @Override public boolean stopSafely() {
+            safeStops++;
+            stopTicks = 0;
+            return true;
+        }
+
+        @Override public boolean stoppedSafely() {
+            return stopTicks < 0 || stopTicks >= 2;
+        }
+
+        @Override public void pause() {
+            stopTicks = -1;
+        }
+
+        @Override public TaskResult close(CloseReason reason) {
+            closedWith = reason;
+            return TaskResult.builder(TaskResult.Status.CANCELLED, "跨维度：被取消")
+                    .change(new Change(Change.Kind.BLOCK_PLACED, "1, 64, 0", 1, "垫路"))
+                    .attempt(new Attempt("找门", "附近 16 格有一扇")).build();
+        }
+
+        @Override public Interruptibility interruptibility(TickContext context) {
+            return Interruptibility.UNSAFE_TO_STOP;
+        }
+
+        @Override public String describe() {
+            return "悬空过门";
+        }
+    }
+
     /** 记下发出的事件。 */
     private static final class Events implements TaskEventSink {
         final List<String> follow = new ArrayList<>();
@@ -472,6 +516,34 @@ class FollowTaskTest {
         view.visible = true;
         step(follow);
         assertTrue(events.said("又看见他了"));
+    }
+
+    @Test
+    void crossingAPortalIsAskedToLandFirstAndItsFactsJoinTheResult() {
+        // 跟着过门、正悬在半空：叫跟随先到安全处再停，转给过门那一段去落地，落地前跟随不报停稳；
+        // 跟随被取消时那一段按取消收尾，它交代的垫块与试过的办法并进跟随的结果。
+        view.him.gap = 4;
+        AirborneCrossing crossing = new AirborneCrossing();
+        moves.portalTask = crossing;
+        FollowTask follow = task(3, Permissions.DEFAULT);
+        run(follow, 2);
+        view.him.portal = "minecraft:nether_portal";
+        step(follow);
+        view.visible = false;
+        run(follow, 3);
+        assertEquals("minecraft:the_nether", moves.portalTarget, "跟着走进下界门");
+        assertEquals(Interruptibility.UNSAFE_TO_STOP, follow.interruptibility(new Tick(clock)), "过门那一下停不得");
+
+        assertTrue(follow.stopSafely(), "过门那一段悬在半空，要先落地");
+        assertEquals(1, crossing.safeStops, "过门那一段收到先停稳");
+        assertFalse(follow.stoppedSafely(), "还没落地，跟随没停稳");
+        run(follow, 3);
+        assertTrue(follow.stoppedSafely(), "落地站稳了，跟随停稳");
+
+        TaskResult result = follow.close(CloseReason.CANCELLED);
+        assertEquals(CloseReason.CANCELLED, crossing.closedWith, "跟随取消，过门那一段按取消收尾");
+        assertTrue(result.changes().stream().anyMatch(change -> change.what().equals("1, 64, 0")), result.changes().toString());
+        assertTrue(result.attempts().stream().anyMatch(attempt -> attempt.tried().equals("找门")), result.attempts().toString());
     }
 
     @Test

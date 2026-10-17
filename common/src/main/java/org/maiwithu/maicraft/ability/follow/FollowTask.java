@@ -15,7 +15,7 @@ import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
-import org.maiwithu.maicraft.kernel.child.ChildTaskRunner;
+import org.maiwithu.maicraft.kernel.child.ChildTaskAction;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -28,13 +28,11 @@ import org.maiwithu.maicraft.kernel.result.ResultDetails;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
-import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.Next;
 import org.maiwithu.maicraft.kernel.task.PhasedTask;
 import org.maiwithu.maicraft.kernel.task.Standing;
 import org.maiwithu.maicraft.kernel.task.TickContext;
-import org.maiwithu.maicraft.kernel.task.TickResult;
 
 /**
  * 跟随任务：像一个陪着走的玩家那样跟着一个人。常驻，不自己完成。
@@ -149,7 +147,7 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
     private long lostSince;
     private Vec3 lookOut;
 
-    private ChildTaskRunner portalRun;
+    private ChildTaskAction portalRun;
     private String portalTarget;
 
     private Action boarding;
@@ -191,8 +189,13 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
             if (boarding != null) boarding.pause();
             if (gettingOff != null) gettingOff.pause();
             if (help != null) help.pause();
-            if (portalRun != null && !portalRun.finished()) portalRun.pause();
+            if (portalRun != null) portalRun.pause();
         }
+
+        // 被叫先到安全处再停：过门那一段转给它（悬空的先落地），它没停稳跟随也不报停稳；别的几样此刻当场停。
+        @Override public boolean stopSafely() { return portalRun != null && portalRun.stopSafely(); }
+
+        @Override public boolean stoppedSafely() { return portalRun == null || portalRun.stoppedSafely(); }
 
         // 换阶段时基类也会叫收尾：手上的路、车、仗要带进下一阶段接着做，不收。
         // 真正结束（完成、失败、被取消、被替换）才把每一样都结清，不留一趟没人推进的路、一场没人管的仗悬着。
@@ -212,14 +215,13 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
                 gettingOff = null;
             }
             endHelp();
-            if (portalRun != null && !portalRun.finished()) {
-                portalRun.close(CloseReason.CANCELLED);
-            }
+            // 跟随结束时还在过门：那一段按取消收尾，它交代的事实照样并进跟随的结果。
+            if (portalRun != null) portalRun.close();
         }
 
         @Override
         public String describe() {
-            if (portalRun != null && !portalRun.finished()) return portalRun.describe();
+            if (portalRun != null) return portalRun.describe();
             if (help != null) return "帮他打：" + help.describe();
             if (boarding != null) return boarding.describe();
             if (gettingOff != null) return gettingOff.describe();
@@ -569,20 +571,16 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
         return Next.stay();
     }
 
-    // 过门：把出行的跨维度段当子任务跑；过去了就在那边找他，没过去也按跟丢找满 30 秒再说。
+    // 过门：把出行的跨维度段按动作交给跟随，它交代的事实并进跟随的结果；过去了就在那边找他，没过去也按跟丢找满 30 秒再说。
     private Next<Phase> portal(TickContext context) {
         if (portalRun == null) {
-            portalRun = new ChildTaskRunner(ChildTaskRunner.NO_LIMIT);
-            portalRun.begin(moves.crossPortal(portalTarget, input.permissions()), context);
+            portalRun = new ChildTaskAction(moves.crossPortal(portalTarget, input.permissions()), records());
         }
-        if (!portalRun.finished()) {
-            TickResult result = portalRun.tick(context);
-            if (result instanceof TickResult.Running) {
-                if (portalRun.progressedNow().isPresent()) recordProgress("跟着过传送门");
-                return Next.stay();
-            }
+        if (portalRun.tick(context) instanceof ActionStatus.Running running) {
+            if (running.progressed()) recordProgress("跟着过传送门");
+            return Next.stay();
         }
-        TaskResult crossed = portalRun.result();
+        TaskResult crossed = portalRun.settle();
         portalRun = null;
         lostSince = now;
         lookOut = null;
@@ -759,7 +757,7 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
 
     @Override
     public Interruptibility interruptibility(TickContext context) {
-        if (portalRun != null && !portalRun.finished()) return portalRun.interruptibility(context);
+        if (portalRun != null) return portalRun.interruptibility(context);
         if (help != null) return help.interruptibility();
         if (boarding != null) return boarding.interruptibility();
         if (gettingOff != null) return gettingOff.interruptibility();

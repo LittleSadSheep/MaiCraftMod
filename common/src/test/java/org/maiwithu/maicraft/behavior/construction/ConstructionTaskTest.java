@@ -7,6 +7,7 @@ import org.maiwithu.maicraft.behavior.interaction.spi.DismantleTool;
 import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import org.maiwithu.maicraft.behavior.construction.spi.PlacementRules;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.function.Predicate;
@@ -45,11 +46,15 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
-/** 施工任务用替身跑完整个流程：已满足不动手、砌与清障、受保护的格、材料尽头、垫临时方块再收回、倒桶、开关门。 */
+/**
+ * 施工任务用替身跑完整个流程：已满足不动手、砌与清障、受保护的格、材料尽头、垫临时方块再收回、倒桶、开关门；
+ * 先到安全处再停转给手上那一下。
+ */
 class ConstructionTaskTest {
 
     private static final String DIM = "minecraft:overworld";
@@ -196,7 +201,14 @@ class ConstructionTaskTest {
         @Override public void temporaryPlaced(BlockPos pos, String blockType, String purpose) { temporaries.add(pos); }
         @Override public void temporaryRemoved(BlockPos pos) { temporaries.remove(pos); }
         @Override public List<BlockPos> temporaries() { return List.copyOf(temporaries); }
-        @Override public Action toward(ApproachTarget target, Permissions permissions) { return new Immediate(() -> { }); }
+        /** 下一次走近交出的动作，只用一次；没给就一刻走到。用来演"施工正悬空走在半路"。 */
+        Action approach;
+        @Override public Action toward(ApproachTarget target, Permissions permissions) {
+            if (approach == null) return new Immediate(() -> { });
+            Action given = approach;
+            approach = null;
+            return given;
+        }
         /** 每次带着"这些格不许站"去靠近时记下那份判断，按靠近的先后。 */
         final List<ProtectedCells> avoided = new ArrayList<>();
         /** 避开某些格时一个站位都站不了：带着要避开的格去靠近就走不到。 */
@@ -236,6 +248,40 @@ class ConstructionTaskTest {
         @Override public String describe() { return "替身出岔子"; }
     }
 
+    /** 悬空走着的一下：叫它先停稳就再推进两刻落地，落地了就算这一下做完；落地前停不稳。 */
+    private static final class Landing implements Action {
+        int ticks;
+        int stops;
+        /** 叫停之后推进了几刻；没在收尾为 -1。 */
+        int stopTicks = -1;
+
+        @Override public ActionStatus tick(TickContext context) {
+            ticks++;
+            if (stopTicks >= 0) stopTicks++;
+            return landed() ? ActionStatus.done() : ActionStatus.running();
+        }
+
+        boolean landed() {
+            return stopTicks >= 2;
+        }
+
+        @Override public boolean stopSafely() {
+            stops++;
+            stopTicks = 0;
+            return true;
+        }
+
+        @Override public boolean stoppedSafely() {
+            return stopTicks < 0 || landed();
+        }
+
+        @Override public Interruptibility interruptibility() {
+            return landed() ? Interruptibility.BETWEEN_ACTIONS : Interruptibility.UNSAFE_TO_STOP;
+        }
+
+        @Override public String describe() { return "悬空走着"; }
+    }
+
     private record Failing(String why) implements Action {
         @Override public ActionStatus tick(TickContext context) { return ActionStatus.failed(Problem.of(Problem.Kind.NEED_ITEM, why)); }
         @Override public String describe() { return "替身失败"; }
@@ -252,6 +298,13 @@ class ConstructionTaskTest {
             if (result instanceof TickResult.Finished finished) return finished.result();
         }
         throw new AssertionError("五千刻还没做完");
+    }
+
+    private static TickContext at(long tick) {
+        return new TickContext() {
+            @Override public long gameTick() { return tick; }
+            @Override public PlayerContext player() { return null; }
+        };
     }
 
     private static Blueprint wall(BlockState state, BlockPos... cells) {
@@ -277,6 +330,41 @@ class ConstructionTaskTest {
         assertTrue(result.changes().isEmpty());
         assertEquals(1, details(result).cells().get("matches"));
         assertEquals(List.of("开工"), fake.siteNotes);
+    }
+
+    @Test
+    void 先到安全处再停转给手上那一下_落地前不报停稳_做完不开始下一下() {
+        // 施工正悬空走向第一格：叫它先到安全处再停，转给走着的那一下去落地，落地前施工不报停稳；
+        // 那一下落地做完了也不去放方块，站着等；暂停后接着做，两格照样砌完。
+        Fake fake = new Fake().ground(63);
+        fake.carried.put("minecraft:stone", 2);
+        Landing landing = new Landing();
+        fake.approach = landing;
+        Task task = new ConstructionTask(new ConstructionInput(
+                wall(STONE, new BlockPos(0, 64, 0), new BlockPos(1, 64, 0)), Permissions.DEFAULT, "施工"), fake.services());
+        long tick = 1;
+        for (; tick <= 400 && landing.ticks == 0; tick++) {
+            assertFalse(task.tick(at(tick)) instanceof TickResult.Finished, "施工没走到第一格就收场了");
+        }
+        assertTrue(landing.ticks > 0, "施工走在半路");
+        assertEquals(Interruptibility.UNSAFE_TO_STOP, task.interruptibility(at(tick)), "悬空走着，施工停不得");
+
+        assertTrue(task.stopSafely(), "手上那一下要先落地，施工开始收尾");
+        assertEquals(1, landing.stops, "走着的那一下收到先停稳");
+        assertFalse(task.stoppedSafely(), "还在空中，施工没停稳");
+        for (int i = 0; i < 6; i++) task.tick(at(tick++));
+        assertTrue(landing.landed(), "接着推进它，落地了");
+        assertTrue(task.stoppedSafely(), "落地了，施工停稳");
+        assertTrue(fake.clicks.isEmpty(), "收尾途中不开始下一下");
+
+        task.pause();
+        TaskResult result = null;
+        for (; tick <= 5000 && result == null; tick++) {
+            if (task.tick(at(tick)) instanceof TickResult.Finished finished) result = finished.result();
+        }
+        assertTrue(result != null, "五千刻还没做完");
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(2, fake.placedOrder.size(), "接着做时照原样往下，两格都砌上");
     }
 
     @Test

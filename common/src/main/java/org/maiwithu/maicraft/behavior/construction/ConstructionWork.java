@@ -10,7 +10,7 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 
 /**
  * 施工一个阶段的活：一串靠近、备手、出手、挖这样的小动作按顺序做，做完一格记一笔。
- * 每刻只推进当前的小动作；暂停、收尾、能不能打断都交给当前那个小动作，它正在等游戏确认时不打断。
+ * 每刻只推进当前的小动作；暂停、先到安全处再停、收尾、能不能打断都交给当前那个小动作，它正在等游戏确认时不打断。
  */
 abstract class ConstructionWork implements Action {
 
@@ -22,6 +22,8 @@ abstract class ConstructionWork implements Action {
     private String doing = "准备";
     /** 当前小动作已经做了几刻。 */
     private long currentTicks;
+    /** 被叫先到安全处再停、手上那一下说要先收尾：这一下做完就站着等，不开始下一下；暂停时清掉。 */
+    private boolean stopping;
 
     ConstructionWork(ConstructionServices services, ConstructionSite site, TaskRecords records) {
         this.services = services;
@@ -35,6 +37,8 @@ abstract class ConstructionWork implements Action {
         current = action;
         doing = what;
         currentTicks = 0;
+        // 收尾途中上一下没做成、换了个办法接着做：新的这一下也先叫它停稳，它说现在就能停，施工也就算停稳了。
+        if (stopping) action.stopSafely();
     }
 
     /** 一个小动作最多做多少刻，到点按没做成交给 {@link #failed}；默认不限。 */
@@ -49,7 +53,8 @@ abstract class ConstructionWork implements Action {
     protected abstract ActionStatus failed(TickContext context, ActionStatus.Failed failure);
 
     @Override public final ActionStatus tick(TickContext context) {
-        if (current == null) return advance(context);
+        // 正在收尾、手上那一下已经落地做完：站着等外层停下，接着做时再开始下一下。
+        if (current == null) return stopping ? ActionStatus.running() : advance(context);
         // 一个小动作卡在原地太久（例如收临时方块时人已经不在跟前，挖掘一直"还没开始挖"）：
         // 收掉它按没做成交给本阶段换下一个，不让整个施工被外层的卡住判定掐掉。
         if (++currentTicks > maxActionTicks()) {
@@ -65,7 +70,7 @@ abstract class ConstructionWork implements Action {
             case ActionStatus.Done done -> {
                 current.close();
                 current = null;
-                yield advance(context);
+                yield stopping ? ActionStatus.running() : advance(context);
             }
             case ActionStatus.Failed failure -> {
                 current.close();
@@ -75,8 +80,22 @@ abstract class ConstructionWork implements Action {
         };
     }
 
+    // 被生存需求打断，或收尾完了外层暂停：不再收尾，手上那一下停下松手，回来照原样接着做。
     @Override public void pause() {
+        stopping = false;
         if (current != null) current.pause();
+    }
+
+    // 被叫先到安全处再停（目标暂停或取消、不急的需求一直等不到空当）：转给手上那一下，走路悬空的先落地；
+    // 它说现在就能停，或手上没有正在做的一下（两格之间），施工现在就能停。
+    @Override public boolean stopSafely() {
+        stopping = current != null && current.stopSafely();
+        return stopping;
+    }
+
+    /** 收尾做完了：手上那一下停稳了，或已经做完、站着等。没在收尾为真。 */
+    @Override public boolean stoppedSafely() {
+        return !stopping || current == null || current.stoppedSafely();
     }
 
     @Override public void close() {
