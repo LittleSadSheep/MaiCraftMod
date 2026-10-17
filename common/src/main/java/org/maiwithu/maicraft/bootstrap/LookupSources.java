@@ -33,7 +33,7 @@ final class LookupSources {
 
     /**
      * @param abilities  能力注册表：查能力说明
-     * @param compat     联动登记表：配方查看器与资料来源
+     * @param compat     联动登记表：配方查看器、资料来源与这局装上了哪些联动模组
      * @param now        当刻的角色上下文：物品说明、配方表都从角色所在的世界读
      * @param clientWork 读游戏现场的部分交给客户端线程
      */
@@ -49,6 +49,8 @@ final class LookupSources {
         // 群系与结构目录：探索认不出群系时指到这一页。
         sources.add(new IdCatalogPages(registered));
         sources.addAll(modSources);
-        return new LookupTool(abilities, new KnowledgeLibrary(sources), recipes, items, registered, clientWork);
+        // 列能力时顶上那一行装了哪些联动模组，照登记表此刻的样子给：进没进世界都一样。
+        return new LookupTool(abilities, new KnowledgeLibrary(sources), recipes, items, registered, clientWork,
+                compat::installedModIds);
     }
 }

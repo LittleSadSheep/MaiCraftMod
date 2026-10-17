@@ -137,6 +137,26 @@ class CompatRegistryTest {
     }
 
     @Test
+    void 装上了哪些模组只列登记上且还开着的() {
+        AtomicInteger created = new AtomicInteger();
+        Contributing broken = new Contributing("ae") {
+            @Override public void contribute(CompatRegistry registry) {
+                registry.itemSource(this, services -> {
+                    throw new NoSuchMethodError("Terminal.open");
+                });
+            }
+        };
+        CompatRegistry registry = CompatRegistry.load(List.of(supported("create", created, null),
+                        supported("backpack", created, null), supported("mekanism", created, null),
+                        new SupportedMod<CompatModule>("ae", "测试模组 ae", TESTED, () -> broken)),
+                new FakeLoader().with("create", "3.25.69").with("backpack", "3.25.69").with("ae", "3.25.69"));
+        assertEquals(List.of("ae", "backpack", "create"), registry.installedModIds(), "没装的 mekanism 不列，按字母排");
+        // 进世界时建来源碰到接口对不上：ae 的联动停用，从此不再算装上了。
+        registry.itemSources(NO_SERVICES);
+        assertEquals(List.of("backpack", "create"), registry.installedModIds());
+    }
+
+    @Test
     void 空登记表什么都没有() {
         CompatRegistry registry = CompatRegistry.empty();
         assertTrue(registry.modules().isEmpty());
@@ -144,6 +164,7 @@ class CompatRegistryTest {
         assertTrue(registry.carriedBackpacks().isEmpty());
         assertTrue(registry.knowledgeSources().isEmpty());
         assertTrue(registry.decisions().isEmpty());
+        assertTrue(registry.installedModIds().isEmpty());
     }
 
     /** 联动入口替身：交什么由测试写在 contribute 里。 */

@@ -308,6 +308,14 @@ public final class CompatRegistry {
         carriedBackpacks.add(Objects.requireNonNull(backpack, "backpack"));
     }
 
+    /**
+     * 这局真正登记上、此刻还开着的联动模组 ID，按字母排：没装的、版本不对没登记的、用着用着接口对不上停用了的都不在里面。
+     * lookup 列能力时把它放在顶上，宿主据此决定哪些靠模组的技能进目录。
+     */
+    public List<String> installedModIds() {
+        return modules.stream().filter(CompatModule::active).map(CompatModule::modId).distinct().sorted().toList();
+    }
+
     /** 登记了的联动入口，按清单顺序。 */
     public List<CompatModule> modules() {
         return Collections.unmodifiableList(modules);

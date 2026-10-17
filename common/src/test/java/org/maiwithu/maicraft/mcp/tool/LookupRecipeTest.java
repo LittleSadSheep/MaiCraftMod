@@ -130,7 +130,7 @@ class LookupRecipeTest {
             }
         };
         LookupTool lookup = new LookupTool(new AbilityRegistry(new TaskFactories(), modId -> false), new KnowledgeLibrary(List.of(slow)),
-                new RecipeLookup(List.of(), new MixingViewer()), new Items(), new Ids(), thread);
+                new RecipeLookup(List.of(), new MixingViewer()), new Items(), new Ids(), thread, List::of);
 
         JsonObject data = ok(lookup.call(args("knowledge", "maicraft://knowledge/ponder/create/mechanical_mixer/1", null, null)));
 
@@ -165,7 +165,7 @@ class LookupRecipeTest {
             @Override public String status() { return "思索：可用，1 个场景"; }
         };
         return new LookupTool(new AbilityRegistry(new TaskFactories(), modId -> false), new KnowledgeLibrary(List.of(ponder)),
-                new RecipeLookup(List.of(new MixingViewer()), new MixingViewer()), new Items(), new Ids(), thread);
+                new RecipeLookup(List.of(new MixingViewer()), new MixingViewer()), new Items(), new Ids(), thread, List::of);
     }
 
     /** 替身物品表：安山合金与动力搅拌器。 */

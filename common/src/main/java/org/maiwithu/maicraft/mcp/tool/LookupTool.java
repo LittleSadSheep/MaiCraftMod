@@ -29,10 +29,12 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * lookup：查资料。不带 id 和 query 时返回全部能力的一行签名，宿主开局可以直接放进上下文；
- * 带 id 时返回这个能力的完整说明与参数表；带 query 时按名字和用途搜索。
+ * 带 id 时返回这个能力的完整说明与参数表；带 query 时按名字和用途搜索。列能力时顶上附一行
+ * installed_mods：这局装上了哪些联动模组（只列 ID），宿主按它决定靠模组的技能进不进目录。
  *
  * <p>topic=knowledge 查资料：随包的机制常识、物品资料页、联动模组登记的资料（思索、任务书……）。
  * 不带 id、query 列目录并附各来源现状，query 按关键词找，id 读一篇；id 给物品的注册 ID 读它的物品资料页。
@@ -55,6 +57,7 @@ public final class LookupTool implements McpTool {
     private final ReadsItemDescriptions items;
     private final ReadsRegisteredIds registered;
     private final ClientThread clientThread;
+    private final Supplier<List<String>> installedMods;
 
     /**
      * @param knowledge    知识库：随包常识、物品资料页与联动模组的资料来源
@@ -62,21 +65,24 @@ public final class LookupTool implements McpTool {
      * @param items        读物品名字、按名字找物品
      * @param registered   本实例注册了哪些 ID：物品 ID 写错时从这里挑相近的名字
      * @param clientThread 读游戏现场的部分交给客户端线程
+     * @param installedMods 这局登记上的联动模组 ID：每次列能力时问一遍，联动中途停用的就不再列
      */
     public LookupTool(AbilityRegistry registry, KnowledgeLibrary knowledge, RecipeLookup recipes,
-                      ReadsItemDescriptions items, ReadsRegisteredIds registered, ClientThread clientThread) {
+                      ReadsItemDescriptions items, ReadsRegisteredIds registered, ClientThread clientThread,
+                      Supplier<List<String>> installedMods) {
         this.registry = Objects.requireNonNull(registry, "registry");
         this.knowledge = Objects.requireNonNull(knowledge, "knowledge");
         this.recipes = Objects.requireNonNull(recipes, "recipes");
         this.items = Objects.requireNonNull(items, "items");
         this.registered = Objects.requireNonNull(registered, "registered");
         this.clientThread = Objects.requireNonNull(clientThread, "clientThread");
+        this.installedMods = Objects.requireNonNull(installedMods, "installedMods");
     }
 
-    /** 离线的 lookup：角色永远不在世界里，只查得到能力与随包常识；接口快照与离线测试用。 */
+    /** 离线的 lookup：角色永远不在世界里，只查得到能力与随包常识，没有联动模组；接口快照与离线测试用。 */
     public LookupTool(AbilityRegistry registry, KnowledgeLibrary knowledge) {
         this(registry, knowledge, new RecipeLookup(List.of(), new GameRecipeTable(Optional::empty)), NO_ITEMS,
-                NO_IDS, NEVER_IN_WORLD);
+                NO_IDS, NEVER_IN_WORLD, List::of);
     }
 
     /** 离线时没有注册表可读：写错的 ID 只说不存在。 */
@@ -158,6 +164,10 @@ public final class LookupTool implements McpTool {
             list.add(signature(spec));
         }
         JsonObject data = new JsonObject();
+        // 顶上一行这局装了哪些联动模组：靠模组的能力 required_mods 不一定写全，宿主拿这一行判断就够。
+        JsonArray mods = new JsonArray();
+        installedMods.get().forEach(mods::add);
+        data.add("installed_mods", mods);
         data.add("abilities", list);
         return ToolReply.ok(data, check.notes(), null);
     }
