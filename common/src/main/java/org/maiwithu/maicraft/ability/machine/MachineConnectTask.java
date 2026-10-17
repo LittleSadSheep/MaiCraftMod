@@ -6,7 +6,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.function.Function;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
@@ -17,20 +16,19 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkKind;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkSummary;
-import org.maiwithu.maicraft.behavior.construction.ConstructionServices;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
-import org.maiwithu.maicraft.kernel.child.ChildTaskRunner;
-import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.maiwithu.maicraft.kernel.child.ChildTaskAction;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.ResultDetails;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Next;
 import org.maiwithu.maicraft.kernel.task.PhasedTask;
+import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TickContext;
-import org.maiwithu.maicraft.kernel.task.TickResult;
 
 /**
  * 把机器接进网络的任务：认两端 → 已经接着就不再动（转速为零、过载也照实说接上了）→
@@ -49,7 +47,8 @@ final class MachineConnectTask extends PhasedTask<MachineConnectTask.Phase> {
     private final MachineServices services;
     private final MachineArchives archives;
     private final WorldMemory memory;
-    private final Function<Permissions, ConstructionServices> construction;
+    /** 线路写成的机器施工输入怎么建成任务：平时是按蓝图施工的同一套任务。 */
+    private final BuildsLine lineBuilding;
     private final MachineTargets targets;
     private final LineRoutes routes;
     private NetworkReader reader;
@@ -62,23 +61,36 @@ final class MachineConnectTask extends PhasedTask<MachineConnectTask.Phase> {
     private boolean preferredRunning;
     /** 规划出的线路；没走到规划为 null。 */
     private RoutePlanner.Plan route;
-    private ChildTaskRunner runner;
+    /** 铺线路那一段交给的施工子任务，包成动作推进；没走到施工为 null。 */
+    private ChildTaskAction child;
 
+    /** @param lineBuilding 线路写成的机器施工输入怎么建成任务：平时是按蓝图施工的同一套任务，离线测试换成替身 */
     MachineConnectTask(MachineConnectInput input, MachineServices services, MachineArchives archives,
-            WorldMemory memory, Function<Permissions, ConstructionServices> construction) {
+            WorldMemory memory, BuildsLine lineBuilding) {
         super("接网络", Phase.RESOLVE, new ProgressTracker(1200, 216000));
         this.input = input;
         this.services = services;
         this.archives = archives;
         this.memory = memory;
-        this.construction = construction;
+        this.lineBuilding = lineBuilding;
         this.targets = new MachineTargets(services);
         this.routes = new LineRoutes(services, archives);
     }
 
+    /** 铺线路的施工任务怎么建：线路写成的机器施工输入交给它，拿回要运行的任务。 */
+    interface BuildsLine {
+        Task task(MachineBuildInput line);
+    }
+
     @Override protected Action enter(Phase phase) {
-        // 施工那一步是子任务，其余阶段只做判断与读数。
-        return null;
+        // 施工那一步把线路交给按蓝图施工的子任务，包成动作：接网络被打断时它跟着停下松手，提前结束时它按取消收尾。
+        // 其余阶段只做判断与读数。
+        if (phase != Phase.BUILD) {
+            return null;
+        }
+        child = new ChildTaskAction(lineBuilding.task(routes.buildInput(route, reader.lineMaterials().orElseThrow(),
+                targetCell, targetDimension, input.archive(), input.permissions())), records());
+        return child;
     }
 
     @Override protected Next<Phase> tick(Phase phase, TickContext context) {
@@ -276,24 +288,16 @@ final class MachineConnectTask extends PhasedTask<MachineConnectTask.Phase> {
 
     // 施工：线路写成机器蓝图（目标有档案就并进去），交给按蓝图施工的同一套任务；它的结局原样接过来。
     private Next<Phase> build(TickContext context) {
-        if (runner == null) {
-            runner = new ChildTaskRunner(ChildTaskRunner.NO_LIMIT);
-            runner.begin(new MachineBuildTask(routes.buildInput(route, reader.lineMaterials().orElseThrow(), targetCell,
-                    targetDimension, input.archive(), input.permissions()), services, archives, memory, construction),
-                    context);
+        // 铺线路的施工在做：它的真实进展由动作报给接网络，和建机器一样不被一分钟没进展的卡住判定掐掉。
+        if (runAction(context) instanceof ActionStatus.Running) {
             return Next.stay();
         }
-        if (runner.tick(context) instanceof TickResult.Finished finished) {
-            runner = null;
-            copyFacts(finished.result());
-            if (finished.result().status() == TaskResult.Status.FAILED) {
-                return Next.fail(finished.result().problem());
-            }
-            return Next.go(Phase.CHECK, "线路铺完，核对两端");
+        TaskResult result = child.settle();
+        child = null;
+        if (result.status() == TaskResult.Status.FAILED) {
+            return Next.fail(result.problem());
         }
-        // 铺线路的施工引擎有真实进展就算接网络有进展：和建机器一样，外层收不到会被 60 秒卡住判定掐掉。
-        runner.progressedNow().ifPresent(this::recordProgress);
-        return Next.stay();
+        return Next.go(Phase.CHECK, "线路铺完，核对两端");
     }
 
     // 再核对：同一张网了就算接上（转不转照实说）；铺完还不同网就按部分完成交代，已放的线材不拆。
@@ -355,12 +359,6 @@ final class MachineConnectTask extends PhasedTask<MachineConnectTask.Phase> {
     }
 
     /** 把施工子任务已经确认的事实接到本任务的结果里：放了的方块、没确认的交互、试过的办法。 */
-    private void copyFacts(TaskResult result) {
-        result.changes().forEach(this::recordChange);
-        result.unconfirmed().forEach(this::recordUnconfirmed);
-        result.attempts().forEach(attempt -> recordAttempt(attempt.tried(), attempt.result()));
-    }
-
     @Override protected ResultDetails details() {
         if (reader == null || targetCell == null) {
             // 还没认出两端就结束的（种类不认、目标没落实）：没有两端可核对。

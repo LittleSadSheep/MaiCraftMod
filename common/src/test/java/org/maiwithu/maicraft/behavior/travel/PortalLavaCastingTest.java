@@ -24,12 +24,17 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
+import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.CloseReason;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
 /**
  * 浇筑建门：直岸整条顺序走完框成十格、模具收回；池只有一格深先挖再浇；起手已成直接砌模具；
- * 倒出圆石不重倒；没水按缺东西结束；中途舀不到岩浆停下仍拆模具、岩浆倒回。
+ * 倒出圆石不重倒；没水按缺东西结束；中途舀不到岩浆停下仍拆模具、岩浆倒回；
+ * 交施工引擎的放挡块跟着浇筑暂停、收尾，能不能停看施工手上的。
  */
 class PortalLavaCastingTest {
 
@@ -78,12 +83,15 @@ class PortalLavaCastingTest {
                 permissions -> scene.site().services(), null, () -> List.of(), progress -> {});
     }
 
-    private static TaskResult run(Scene scene) {
+    private static PortalLavaCasting casting(Scene scene) {
         // 世界视图替身的背包跟现场替身同步一次：石料够不够按它看。
         scene.view().stacks.clear();
         scene.view().stacks.addAll(scene.site().stacks());
-        PortalLavaCasting casting = new PortalLavaCasting(scene.candidate(), Permissions.DEFAULT, services(scene),
-                scene.site().services());
+        return new PortalLavaCasting(scene.candidate(), Permissions.DEFAULT, services(scene), scene.site().services());
+    }
+
+    private static TaskResult run(Scene scene) {
+        PortalLavaCasting casting = casting(scene);
         Ticks ticks = new Ticks();
         casting.start(ticks);
         for (int i = 0; i < 20000; i++) {
@@ -200,5 +208,58 @@ class PortalLavaCastingTest {
             assertFalse(scene.view().blocks.get(at).is(Blocks.COBBLESTONE), "模具照样拆：" + at.toShortString());
         }
         assertEquals(0, scene.site().carried(CastingFakes.LAVA_BUCKET), "岩浆倒回池子或从没舀上");
+    }
+
+    @Test
+    void placingTheStopperIsPausedAndClosedWithTheCasting() {
+        // 放挡块交施工引擎按动作推进：施工正走向那一格时，浇筑的暂停、收尾转到施工手上，能不能停也看它的。
+        Scene scene = scene(2);
+        scene.site().give(CastingFakes.BUCKET, 1);
+        scene.site().give(CastingFakes.COBBLESTONE, 16);
+        HeldAction walking = new HeldAction();
+        scene.site().approach = walking;
+        PortalLavaCasting casting = casting(scene);
+        Ticks ticks = new Ticks();
+        casting.start(ticks);
+        for (int i = 0; i < 400 && walking.ticks == 0; i++) {
+            assertFalse(casting.tick(ticks) instanceof TickResult.Finished, "浇筑没走到放挡块就收场了");
+        }
+        assertTrue(walking.ticks > 0, "施工走在半路");
+        assertTrue(casting.describe().contains("放挡块"), casting.describe());
+
+        assertEquals(Interruptibility.UNSAFE_TO_STOP, casting.interruptibility(ticks),
+                "施工手上那一下停不得，浇筑就停不得");
+        casting.pause();
+        assertEquals(1, walking.pauses, "浇筑暂停，施工跟着停下松手");
+        casting.close(CloseReason.CANCELLED);
+        assertEquals(1, walking.closes, "浇筑收尾，施工跟着收尾");
+    }
+
+    /** 一直在走、停不得的一下：记下被推进、暂停、收尾了几次。 */
+    private static final class HeldAction implements Action {
+        int ticks;
+        int pauses;
+        int closes;
+
+        @Override public ActionStatus tick(TickContext context) {
+            ticks++;
+            return ActionStatus.running();
+        }
+
+        @Override public void pause() {
+            pauses++;
+        }
+
+        @Override public void close() {
+            closes++;
+        }
+
+        @Override public Interruptibility interruptibility() {
+            return Interruptibility.UNSAFE_TO_STOP;
+        }
+
+        @Override public String describe() {
+            return "停不得的一下";
+        }
     }
 }

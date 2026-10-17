@@ -19,6 +19,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.FullRun;
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
+import org.maiwithu.maicraft.ability.machine.spi.LineMaterials;
 import org.maiwithu.maicraft.ability.machine.spi.MachineCopy;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
@@ -45,6 +46,7 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -96,6 +98,45 @@ final class MachineTestDoubles {
         }
     }
 
+    /** 一直在做、停不得的一下（走着、等游戏确认切换）：记下被推进、叫停稳、暂停、收尾了几次。 */
+    static final class Held implements Action {
+        int ticks;
+        int stops;
+        int pauses;
+        int closes;
+
+        @Override public ActionStatus tick(TickContext context) {
+            ticks++;
+            return ActionStatus.running();
+        }
+
+        // 悬在半空：先到安全处再停要先落地，这几刻里一直没停稳。
+        @Override public boolean stopSafely() {
+            stops++;
+            return true;
+        }
+
+        @Override public boolean stoppedSafely() {
+            return false;
+        }
+
+        @Override public void pause() {
+            pauses++;
+        }
+
+        @Override public void close() {
+            closes++;
+        }
+
+        @Override public Interruptibility interruptibility() {
+            return Interruptibility.UNSAFE_TO_STOP;
+        }
+
+        @Override public String describe() {
+            return "停不得的一下";
+        }
+    }
+
     /** 一格读出的事实。 */
     record WorldCell(BlockPos pos, BlockState state, boolean hasBlockEntity) {
     }
@@ -110,6 +151,8 @@ final class MachineTestDoubles {
         final Map<String, String> settingValues = new LinkedHashMap<>();
         /** 改设置时执行的动作：测试用它把读回的值真的改掉或让它打转。 */
         final Map<String, Runnable> onChange = new HashMap<>();
+        /** 改设置时交出的动作；没给按 onChange 一刻做完。用来演"正对着机器切换、等游戏确认"。 */
+        Action changing;
         /** 投料与取货脚本：每次调用弹一个；空了给空。 */
         final Deque<Action> feedActions = new ArrayDeque<>();
         final Deque<Action> takeActions = new ArrayDeque<>();
@@ -220,6 +263,10 @@ final class MachineTestDoubles {
         }
 
         @Override public Optional<Action> change(BlockPos at, String key, String value, Permissions permissions) {
+            if (changing != null) {
+                touched.add("change:" + key);
+                return Optional.of(changing);
+            }
             Runnable effect = onChange.get(key);
             if (effect == null) {
                 return Optional.empty();
@@ -256,6 +303,8 @@ final class MachineTestDoubles {
         private final NetworkKind kind;
         private final Map<BlockPos, String> members = new HashMap<>();
         private NetworkSummary summary = null;
+        /** 这种网怎么用方块接线；没给就是不会接线的网。 */
+        LineMaterials lines;
 
         FakeNetworkReader(String id, String description) {
             this.kind = new NetworkKind(id, description);
@@ -275,6 +324,10 @@ final class MachineTestDoubles {
 
         @Override public Optional<String> membership(BlockPos at) {
             return Optional.ofNullable(members.get(at));
+        }
+
+        @Override public Optional<LineMaterials> lineMaterials() {
+            return Optional.ofNullable(lines);
         }
 
         @Override public NetworkSummary summary(String networkId) {

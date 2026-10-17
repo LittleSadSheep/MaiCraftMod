@@ -55,6 +55,8 @@ import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.CloseReason;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 import java.time.Instant;
@@ -64,7 +66,7 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /**
  * 按机器蓝图施工的任务：已满足一个动作不做、施工与安装段部件设置按顺序做、机器的格引擎不放、
- * 施工缺料不回滚已放的、拆整台逐格挖并标档案、补丁并进档案。
+ * 施工缺料不回滚已放的、拆整台逐格挖并标档案、补丁并进档案；施工与改设置跟着建机器暂停、收尾。
  */
 class MachineBuildTaskTest {
 
@@ -337,6 +339,46 @@ Rig rig = new Rig(tempDir);
         assertTrue(details.installations().get(0).note().contains("没有机器类型认"), result.summary());
     }
 
+    @Test
+    void 施工跟着建机器暂停与收尾_能不能停看施工手上的() {
+        // 普通格交施工引擎按动作推进：施工正走向那一格时，建机器的暂停、收尾转到施工手上，能不能停也看它的。
+        Rig rig = new Rig(tempDir);
+        MachineTestDoubles.Held walking = new MachineTestDoubles.Held();
+        rig.site.approach = walking;
+        MachineBuildTask task = rig.runUntilBusy(buildInput(blueprint(null, null, null), null, "压机"), walking);
+        assertTrue(task.describe().contains("施工"), task.describe());
+
+        assertEquals(Interruptibility.UNSAFE_TO_STOP, task.interruptibility(rig.tick()),
+                "施工手上那一下停不得，建机器就停不得");
+        task.pause();
+        assertEquals(1, walking.pauses, "建机器暂停，施工跟着停下松手");
+        task.close(CloseReason.CANCELLED);
+        assertEquals(1, walking.closes, "建机器收尾，施工跟着收尾");
+    }
+
+    @Test
+    void 改设置跟着建机器暂停_先停稳与收尾() {
+        // 熔炉已经在位，施工没什么要放；改设置按动作推进：正对着机器切换时，建机器的暂停、先到安全处再停、收尾都转过去。
+        Rig rig = new Rig(tempDir);
+        rig.world.blocks.put(ANCHOR, FURNACE);
+        rig.type.settingValues.put("mode", "slow");
+        MachineTestDoubles.Held switching = new MachineTestDoubles.Held();
+        rig.type.changing = switching;
+        MachineBuildTask task = rig.runUntilBusy(buildInput(blueprint(null, null,
+                new MachineBlueprint.Setting(BlockPos.ZERO, "mode", "fast")), null, "压机"), switching);
+        assertTrue(task.describe().contains("改装后设置"), task.describe());
+
+        assertEquals(Interruptibility.UNSAFE_TO_STOP, task.interruptibility(rig.tick()),
+                "切换那一下停不得，建机器就停不得");
+        assertTrue(task.stopSafely(), "叫建机器先到安全处再停，转给改设置去收尾");
+        assertEquals(1, switching.stops, "切换那一下收到先停稳");
+        assertFalse(task.stoppedSafely(), "那一下还没停稳，建机器也没停稳");
+        task.pause();
+        assertEquals(1, switching.pauses, "建机器暂停，改设置跟着停下松手");
+        task.close(CloseReason.CANCELLED);
+        assertEquals(1, switching.closes, "建机器收尾，改设置跟着收尾");
+    }
+
     /** 一套离线替身：现场与施工引擎的接缝全在一个假对象上，什么都能一刻做完。 */
     private static final class FakeSite implements ConstructionSeams.ReadsSite, ConstructionSeams.PlansPlacement,
             ConstructionSeams.Clicks, DigsBlocks, ItemNeeds, ConstructionSeams.HoldsItem, ConstructionSeams.Guards,
@@ -347,6 +389,8 @@ Rig rig = new Rig(tempDir);
         final List<BlockPos> temporaries = new ArrayList<>();
         final List<PlacementRules> rules = new ArrayList<>();
         boolean fail;
+        /** 施工走近时交出的动作；没给就一刻走到。用来演"施工正走在半路"。 */
+        Action approach;
 
         FakeSite(Map<BlockPos, BlockState> sharedWorld) {
             this.world = sharedWorld;
@@ -425,7 +469,7 @@ Rig rig = new Rig(tempDir);
         @Override public void temporaryRemoved(BlockPos pos) { temporaries.remove(pos); }
         @Override public List<BlockPos> temporaries() { return List.copyOf(temporaries); }
         @Override public Action toward(ApproachTarget target, Permissions permissions) {
-            return immediate(() -> { });
+            return approach != null ? approach : immediate(() -> { });
         }
 
         ConstructionServices services() {
@@ -474,6 +518,18 @@ Rig rig = new Rig(tempDir);
             services = new MachineServices(() -> null, world, List.of(type), List.of(),
                     new MachineTestDoubles.FakeArea(), new RecipeLookup(List.of(), new GameRecipeTable(Optional::empty)),
                     site, site, clicks, new MachineTestDoubles.FakeSeen(), new MachineTestDoubles.FakePlaces());
+        }
+
+        /** 推进建机器直到那一下开始做；途中收场说明没走到那一步。 */
+        MachineBuildTask runUntilBusy(MachineBuildInput input, MachineTestDoubles.Held held) {
+            MachineBuildTask task = new MachineBuildTask(input, services, archives, memory,
+                    permissions -> site.services());
+            task.start(tick());
+            for (int i = 0; i < 400 && held.ticks == 0; i++) {
+                assertFalse(task.tick(tick()) instanceof TickResult.Finished, "建机器没走到那一下就收场了");
+            }
+            assertTrue(held.ticks > 0, "走到了那一下");
+            return task;
         }
 
         TaskResult run(MachineBuildInput input) {

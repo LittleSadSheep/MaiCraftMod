@@ -34,7 +34,7 @@ import org.maiwithu.maicraft.behavior.construction.PlannedCell;
 import org.maiwithu.maicraft.behavior.construction.ReadsBlocks;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
-import org.maiwithu.maicraft.kernel.child.ChildTaskRunner;
+import org.maiwithu.maicraft.kernel.child.ChildTaskAction;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -47,7 +47,6 @@ import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Next;
 import org.maiwithu.maicraft.kernel.task.PhasedTask;
 import org.maiwithu.maicraft.kernel.task.TickContext;
-import org.maiwithu.maicraft.kernel.task.TickResult;
 
 /**
  * 按机器蓝图施工的任务：先看档案是否已满足，普通格与流体交给施工引擎，之后装安装段、装部件、
@@ -59,6 +58,9 @@ import org.maiwithu.maicraft.kernel.task.TickResult;
  * 一律出"由机器核对"，由认领它们的机器类型按最终结构核对。拆整台是把档案范围换成全清空
  * 交给同一个引擎逐格挖。施工子任务失败按它的问题结束，已放的不回滚；机器条目做不成的不
  * 拦住其余部分，各记各的结局。
+ *
+ * <p>施工与逐条改设置这两种子任务按动作推进：整台机器被生存需求打断时它们跟着暂停、松手，
+ * 先到安全处再停、提前结束时的收尾、此刻能不能打断都转给它们，它们交代的事实并进这次的结果。
  */
 final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
 
@@ -82,8 +84,8 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
 
     /** 下一刻要推进的动作：上一刻按现场备好，原地重进阶段时交给基类。 */
     private Action prepared;
-    /** 正在推进的子任务（施工或一项设置）；一次一个。 */
-    private ChildTaskRunner runner;
+    /** 这一阶段交给的子任务（施工或一项设置），包成动作推进；一次一个，没在做为 null。 */
+    private ChildTaskAction child;
     private TaskResult constructionResult;
     /** 压在还没装的安装段上的格（带漏斗、隧道压在传送带上）：第一遍施工不放，装完安装段再放。 */
     private List<PlannedCell> afterInstall = List.of();
@@ -158,38 +160,35 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
     // 第一遍放普通格；装完安装段后若有压在段上的格（带漏斗、隧道），再走第二遍只放它们。
     private Next<Phase> construct(TickContext context) {
         boolean later = constructionResult != null;
-        if (runner == null) {
+        if (action() == null) {
             Optional<Blueprint> site = input.remove() ? Optional.of(removal) : later ? afterInstallPlan() : Optional.of(sitePlan());
             if (site.isEmpty()) {
                 laterConstruction = TaskResult.done("压着的安装段都没装成，没有能放的格");
                 return Next.go(nextWorkPhase(), "压在安装段上的格都放不了");
             }
-            runner = new ChildTaskRunner(ChildTaskRunner.NO_LIMIT);
-            runner.begin(new ConstructionTask(new ConstructionInput(site.get(), input.permissions(), purpose()),
-                    constructionServices.apply(input.permissions())), context);
+            // 施工包成这一阶段的动作：吃饭、自卫插进来时施工跟着停下松手，建机器提前结束时它按取消收尾。
+            prepared = child = new ChildTaskAction(new ConstructionTask(new ConstructionInput(site.get(),
+                    input.permissions(), purpose()), constructionServices.apply(input.permissions())), records());
+            return Next.go(Phase.CONSTRUCT, later ? "装完安装段，再放压在上面的格" : "交施工引擎放普通格与流体");
+        }
+        // 施工引擎在干活：它有真实进展（放下一格、挖掉一格）由动作报给整台机器，不被一分钟没进展的卡住判定掐掉。
+        if (runAction(context) instanceof ActionStatus.Running) {
             return Next.stay();
         }
-        if (runner.tick(context) instanceof TickResult.Finished finished) {
-            TaskResult result = finished.result();
-            if (later) {
-                laterConstruction = result;
-            } else {
-                constructionResult = result;
-            }
-            copyFacts(result);
-            runner = null;
-            if (result.status() == TaskResult.Status.FAILED) {
-                return Next.fail(result.problem());
-            }
-            if (result.status() == TaskResult.Status.PARTIAL && carriedProblem == null) {
-                carriedProblem = result.problem();
-            }
-            return Next.go(nextWorkPhase(), "现场做完，" + (nothingLeft() ? "整机比对" : "装机器自己的部分"));
+        TaskResult result = child.settle();
+        child = null;
+        if (later) {
+            laterConstruction = result;
+        } else {
+            constructionResult = result;
         }
-        // 施工引擎在干活：它有真实进展（放下一格、挖掉一格）就算整台机器有进展。原先外层收不到，
-        // 一边放一边被 60 秒卡住判定掐掉，引擎记下的尝试也跟着丢了（实机刷石机围墙两次"自开始之后没进展"）。
-        runner.progressedNow().ifPresent(this::recordProgress);
-        return Next.stay();
+        if (result.status() == TaskResult.Status.FAILED) {
+            return Next.fail(result.problem());
+        }
+        if (result.status() == TaskResult.Status.PARTIAL && carriedProblem == null) {
+            carriedProblem = result.problem();
+        }
+        return Next.go(nextWorkPhase(), "现场做完，" + (nothingLeft() ? "整机比对" : "装机器自己的部分"));
     }
 
     // 安装段：已经是要求的样子就过；不然交给机器类型的装法（两端的轴就位后用模组自己的方式连），按最终结构核对。
@@ -296,40 +295,39 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
 
     // 装后设置：逐条交给 machine_configure 的同一套任务（认机器、循环切换、读回核对），结果收回来记账。
     private Next<Phase> configure(TickContext context) {
-        if (runner == null) {
+        if (action() == null) {
             MachineBlueprint.Setting next = toConfigure.poll();
             if (next == null) {
                 return Next.go(Phase.SETTLE, "设置改完，整机比对");
             }
             configuring = next;
             BlockPos at = anchor.offset(next.offset());
-            runner = new ChildTaskRunner(ChildTaskRunner.NO_LIMIT);
-            runner.begin(new MachineConfigureTask(new MachineConfigureInput(
+            // 这一条包成这一阶段的动作：走过去、开界面、循环切换时被打断跟着停下松手，提前结束时它按取消收尾。
+            prepared = child = new ChildTaskAction(new MachineConfigureTask(new MachineConfigureInput(
                     new Target.Position(at.getX(), at.getY(), at.getZ(), null),
-                    Map.of(next.key(), next.value()), input.permissions()), services), context);
+                    Map.of(next.key(), next.value()), input.permissions()), services), records());
+            return Next.go(Phase.CONFIGURE, "改设置「" + next.key() + "」");
+        }
+        // 改设置的子任务在走过去、开界面、循环切换：它的真实进展由动作报给整台机器，
+        // 远处那台机器走一分钟也不会被判"没进展"，已建好的格、装好的段不跟着失败收场。
+        if (runAction(context) instanceof ActionStatus.Running) {
             return Next.stay();
         }
-        if (runner.tick(context) instanceof TickResult.Finished finished) {
-            runner = null;
-            MachineBlueprint.Setting done = configuring;
-            configuring = null;
-            boolean applied = finished.result().status() == TaskResult.Status.DONE;
-            String readback = readBack(anchor.offset(done.offset()), done.key());
-            settingResults.add(new MachineBuildDetails.SettingResult(done.key(),
-                    anchor.offset(done.offset()).toShortString(), applied, readback));
-            if (applied) {
-                recordProgress("「" + done.key() + "」改好了，读回 " + readback);
-            } else {
-                recordAttempt("改设置 " + done.key(), finished.result().summary());
-                carriedProblem = carriedProblem != null ? carriedProblem : finished.result().problem();
-            }
-            copyFacts(finished.result());
-            return Next.stay();
+        TaskResult result = child.settle();
+        child = null;
+        MachineBlueprint.Setting done = configuring;
+        configuring = null;
+        boolean applied = result.status() == TaskResult.Status.DONE;
+        String readback = readBack(anchor.offset(done.offset()), done.key());
+        settingResults.add(new MachineBuildDetails.SettingResult(done.key(),
+                anchor.offset(done.offset()).toShortString(), applied, readback));
+        if (applied) {
+            recordProgress("「" + done.key() + "」改好了，读回 " + readback);
+        } else {
+            recordAttempt("改设置 " + done.key(), result.summary());
+            carriedProblem = carriedProblem != null ? carriedProblem : result.problem();
         }
-        // 改设置的子任务在走过去、开界面、循环切换：它有真实进展就算整台机器有进展，
-        // 不然远处那台机器走一分钟就被父任务判"没进展"，已建好的格、装好的段跟着失败收场。
-        runner.progressedNow().ifPresent(this::recordProgress);
-        return Next.stay();
+        return Next.go(Phase.CONFIGURE, "这一条改完，接着下一条");
     }
 
     // 整机比对与落档：结构对不对、装没装成、档案存没存住三件事分开说，互不冒充。
@@ -699,19 +697,6 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
         return services.machineTypes().isEmpty()
                 ? "这个实例没有登记任何机器联动，认不出这个部件"
                 : "没有机器类型肯把这个部件装在宿主的这一面";
-    }
-
-    /** 把子任务（施工、改设置）已经确认的事实接到本任务的结果里：放了的方块、没确认的交互、试过的办法。 */
-    private void copyFacts(TaskResult result) {
-        for (var change : result.changes()) {
-            recordChange(change);
-        }
-        for (var change : result.unconfirmed()) {
-            recordUnconfirmed(change);
-        }
-        for (var attempt : result.attempts()) {
-            recordAttempt(attempt.tried(), attempt.result());
-        }
     }
 
     /** 读现场给整机比对：一格有没有加载看现场视图给没给状态。 */

@@ -31,7 +31,7 @@ import org.maiwithu.maicraft.behavior.lighting.LightSurveyor;
 import org.maiwithu.maicraft.behavior.lighting.LightingWorld;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.game.world.ReadsLightLevels;
-import org.maiwithu.maicraft.kernel.child.ChildTaskRunner;
+import org.maiwithu.maicraft.kernel.child.ChildTaskAction;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Change;
@@ -43,7 +43,6 @@ import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Next;
 import org.maiwithu.maicraft.kernel.task.PhasedTask;
 import org.maiwithu.maicraft.kernel.task.TickContext;
-import org.maiwithu.maicraft.kernel.task.TickResult;
 
 /**
  * 区域补光的任务：量光（采样范围内的可行走格或作物与耕地，分几刻扫完）→ 备光源（默认火把；身上不够就
@@ -54,6 +53,9 @@ import org.maiwithu.maicraft.kernel.task.TickResult;
  * <p>本任务声明"自己管照明"：太暗这项生存需求看到就让位，不往验收范围里插野火把。
  * 放灯、许可、临时方块、受保护格提问、每格结局全是施工引擎的事，这里只管量光、选灯位与亮没亮；
  * 照明不声明要清空的格子，蓝图没写的格子不要求为空。施工交代没做完的部分（没收回的临时方块）照样并进结果。
+ *
+ * <p>插灯的施工按动作推进：补光被生存需求打断时施工跟着暂停、松手，先到安全处再停、提前结束时的收尾、
+ * 此刻能不能打断都转给它，它交代的事实并进补光的结果。
  */
 final class LightTask extends PhasedTask<LightTask.Phase> implements HandlesOwnLighting {
 
@@ -81,7 +83,7 @@ final class LightTask extends PhasedTask<LightTask.Phase> implements HandlesOwnL
     private Observation obs;
     /** 没加载、要先走过去让它加载的列。 */
     private final Deque<BlockPos> pendingWalks = new ArrayDeque<>();
-    /** 下一刻要推进的动作：走到没加载的那一列。 */
+    /** 下一刻要推进的动作：走到没加载的那一列，或这一轮插灯的施工。 */
     private Action prepared;
     /** 正在走去的那一列：走到（或没走到）后连它一起重量。 */
     private BlockPos walkingTo;
@@ -117,9 +119,14 @@ final class LightTask extends PhasedTask<LightTask.Phase> implements HandlesOwnL
 
     /** 施工子任务与复测前的等待。 */
     private static final class Placing {
-        final ChildTaskRunner runner = new ChildTaskRunner(ChildTaskRunner.NO_LIMIT);
+        /** 这一轮插灯交给施工引擎的子任务，包成放置阶段的动作。 */
+        final ChildTaskAction construction;
         TaskResult result;
         long settleAt;
+
+        Placing(ChildTaskAction construction) {
+            this.construction = construction;
+        }
     }
 
     /** 量到的现场：样本冻结，方块光每次量完更新。 */
@@ -267,13 +274,13 @@ final class LightTask extends PhasedTask<LightTask.Phase> implements HandlesOwnL
         rounds.previousChosen = chosen;
         rounds.placedThisRound = 0;
         rounds.count++;
-        placing = new Placing();
         // 灯位清单转蓝图（绝对坐标，BLOCK 格）：许可、临时方块、受保护格提问、每格结局全按施工的规矩；
-        // 灯就是身上这些，施工不再去备料。
-        placing.runner.begin(new ConstructionTask(new ConstructionInput(
+        // 灯就是身上这些，施工不再去备料。施工包成放置阶段的动作：吃饭、自卫插进来时插灯跟着停下松手。
+        placing = new Placing(new ChildTaskAction(new ConstructionTask(new ConstructionInput(
                         new Blueprint(dimension(), chosen.iterator().next(), cells(sites)),
                         input.permissions(), "照明"),
-                services), context);
+                services), records()));
+        prepared = placing.construction;
         recordProgress("第 " + rounds.count + " 轮选中 " + sites.size() + " 处灯位");
         return Next.go(Phase.PLACE, "交给施工引擎插灯");
     }
@@ -295,27 +302,23 @@ final class LightTask extends PhasedTask<LightTask.Phase> implements HandlesOwnL
 
     // 放置：整段交给施工引擎这个子任务；它失败按它的问题结束，已放的不回滚。
     private Next<Phase> place(TickContext context) {
-        if (placing.runner.tick(context) instanceof TickResult.Finished finished) {
-            placing.result = finished.result();
-            copyFacts(placing.result);
-            copyRemainder(placing.result);
-            if (placing.result.status() == TaskResult.Status.FAILED) {
-                return Next.fail(placing.result.problem());
-            }
-            rounds.placedThisRound = placedCount();
-            rounds.placedTotal += rounds.placedThisRound;
-            if (rounds.placedThisRound == 0 && placing.result.problem() != null) {
-                // 许可这类一步都没走成的：把引擎的问题原样交出去，不静默变成"灯位不足"。
-                return Next.fail(placing.result.problem());
-            }
-            recordProgress("放下了 " + rounds.placedThisRound + " 支灯");
-            return Next.go(Phase.WAIT, "等几刻让光稳定");
+        // 引擎在干活：它的真实进展由动作报给补光，父任务的卡住判定不被施工时长骗到。
+        if (runAction(context) instanceof ActionStatus.Running) {
+            return Next.stay();
         }
-        // 引擎在干活：它有真实进展就算这个任务还有进展，父任务的卡住判定不被施工时长骗到。
-        placing.runner.currentProgress()
-                .filter(progress -> progress.ticksSinceProgress() == 0)
-                .ifPresent(progress -> recordProgress(progress.lastProgress()));
-        return Next.stay();
+        placing.result = placing.construction.settle();
+        copyRemainder(placing.result);
+        if (placing.result.status() == TaskResult.Status.FAILED) {
+            return Next.fail(placing.result.problem());
+        }
+        rounds.placedThisRound = placedCount();
+        rounds.placedTotal += rounds.placedThisRound;
+        if (rounds.placedThisRound == 0 && placing.result.problem() != null) {
+            // 许可这类一步都没走成的：把引擎的问题原样交出去，不静默变成"灯位不足"。
+            return Next.fail(placing.result.problem());
+        }
+        recordProgress("放下了 " + rounds.placedThisRound + " 支灯");
+        return Next.go(Phase.WAIT, "等几刻让光稳定");
     }
 
     // 等几刻：放完灯光要过几刻才同步稳定，复测前的等待归在亮度读取的使用纪律里。
@@ -557,12 +560,6 @@ final class LightTask extends PhasedTask<LightTask.Phase> implements HandlesOwnL
     }
 
     /** 施工子任务已经确认的事实接到本任务的结果里：放下的灯、没能确认的交互、试过的办法。 */
-    private void copyFacts(TaskResult result) {
-        for (Change change : result.changes()) recordChange(change);
-        for (Change change : result.unconfirmed()) recordUnconfirmed(change);
-        for (var attempt : result.attempts()) recordAttempt(attempt.tried(), attempt.result());
-    }
-
     /** 这轮施工放了多少支灯：按每格结局里的 placed 数；读不到就按放下方块的变化数。 */
     private int placedCount() {
         if (placing.result != null && placing.result.details() instanceof ConstructionDetails details) {

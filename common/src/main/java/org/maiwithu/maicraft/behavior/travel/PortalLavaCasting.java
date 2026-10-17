@@ -29,7 +29,7 @@ import org.maiwithu.maicraft.behavior.construction.PlannedCell;
 import org.maiwithu.maicraft.behavior.interaction.InteractionVerdict;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.BackpackStack;
-import org.maiwithu.maicraft.kernel.child.ChildTaskRunner;
+import org.maiwithu.maicraft.kernel.child.ChildTaskAction;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Change;
@@ -37,11 +37,9 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
-import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.Next;
 import org.maiwithu.maicraft.kernel.task.PhasedTask;
 import org.maiwithu.maicraft.kernel.task.TickContext;
-import org.maiwithu.maicraft.kernel.task.TickResult;
 
 /**
  * 浇筑建门：在岩浆池岸边用一只桶、一桶水和十来块石头把门框浇出来。
@@ -50,6 +48,9 @@ import org.maiwithu.maicraft.kernel.task.TickResult;
  * 底行与两侧底脚成黑曜石 → 收水 → 砌模具 → 高处倒水 → 一桶一格浇框：桶里没岩浆就去池里舀 →
  * 收水、等退水 → 拆模具、岩浆倒回池子。每一桶的经过如实记账：倒出圆石、还是岩浆都记下，这格不再倒第二桶；
  * 门框成型没成型由建门验框说，这里不循环。靠近、换手、倒桶、放块、挖格全走施工引擎的接缝。
+ *
+ * <p>交施工引擎的几段（整地、挡块、模具、拆模具）按动作推进：浇筑被生存需求打断时施工跟着暂停、松手，
+ * 先到安全处再停、提前结束时的收尾、此刻能不能打断都转给它，它交代的事实并进浇筑的结果。
  */
 final class PortalLavaCasting extends PhasedTask<PortalLavaCasting.Phase> {
 
@@ -57,7 +58,7 @@ final class PortalLavaCasting extends PhasedTask<PortalLavaCasting.Phase> {
     enum Phase { SUPPLY_BUCKET, SUPPLY_WATER, SUPPLY_STONES, PREPARE_SITE, STEP, REMOVE_MOLD, RETURN_LAVA }
 
     /** 刚做完的小动作是哪一类：做完后怎么记账、要不要回到同一步接着做。 */
-    private enum Pending { OBTAIN, PLACE_WATER, DIG, SCOOP_WATER, SCOOP_LAVA, POUR_LAVA, RETURN_LAVA }
+    private enum Pending { OBTAIN, BUILD, PLACE_WATER, DIG, SCOOP_WATER, SCOOP_LAVA, POUR_LAVA, RETURN_LAVA }
 
     static final String BUCKET = "minecraft:bucket";
     static final String WATER_BUCKET = "minecraft:water_bucket";
@@ -84,7 +85,8 @@ final class PortalLavaCasting extends PhasedTask<PortalLavaCasting.Phase> {
     private PortalCastingLayout.Step current;
     private Pending pending;
     private Action prepared;
-    private ChildTaskRunner runner;
+    /** 交施工引擎的那段子施工（整地、挡块、模具、拆模具）；没在做为 null。 */
+    private ChildTaskAction building;
     private BucketUse use;
     private BlockState before;
     private int waterRefills;
@@ -209,7 +211,7 @@ final class PortalLavaCasting extends PhasedTask<PortalLavaCasting.Phase> {
 
     /** 整地：站台要填的格放石料、净空格清空，编成一份蓝图交施工引擎；没什么要做就直接开浇。 */
     private Next<Phase> prepareSite(TickContext context) {
-        if (runner == null) {
+        if (action() == null) {
             List<PlannedCell> cells = new ArrayList<>(CastingStones.assign(site.bankFill(), stacks()));
             for (BlockPos at : layout.cellsToClear()) {
                 Optional<BlockState> state = read(at);
@@ -221,21 +223,15 @@ final class PortalLavaCasting extends PhasedTask<PortalLavaCasting.Phase> {
             if (cells.isEmpty()) {
                 return Next.go(Phase.STEP, "岸边不用整，直接开浇");
             }
-            beginConstruction(cells, "浇筑整地", context);
-            return Next.stay();
+            // 要整就编成蓝图交施工引擎，下一刻起按动作推进：吃饭、自卫插进来时整地跟着停下松手。
+            prepared = construct(cells, "浇筑整地");
+            return Next.go(Phase.PREPARE_SITE, "交施工引擎整地");
         }
         return afterConstruction(context, Phase.STEP, "整地做完，开浇");
     }
 
-    /** 逐步浇：有子施工先推它，有小动作先推它，都没有就按步序定下一步。 */
+    /** 逐步浇：手上有动作（挡块与模具的子施工，或倒水、舀岩浆这类小动作）先推它，没有就按步序定下一步。 */
     private Next<Phase> step(TickContext context) {
-        if (runner != null) {
-            Next<Phase> finished = afterConstruction(context, null, null);
-            if (finished != null) return finished;
-            if (runner != null) return Next.stay();
-            afterSubConstruction();
-            return Next.stay();
-        }
         if (action() != null) {
             return afterAction(context);
         }
@@ -265,8 +261,7 @@ final class PortalLavaCasting extends PhasedTask<PortalLavaCasting.Phase> {
                 if (state.isPresent() && solid(state.get())) {
                     yield finished();
                 }
-                beginConstruction(CastingStones.assign(List.of(at), stacks()), "浇筑挡块", context);
-                yield Next.stay();
+                yield buildStep(CastingStones.assign(List.of(at), stacks()), "浇筑挡块");
             }
             case MOLD -> {
                 List<BlockPos> cells = new ArrayList<>();
@@ -278,8 +273,7 @@ final class PortalLavaCasting extends PhasedTask<PortalLavaCasting.Phase> {
                     afterSubConstruction();
                     yield Next.stay();
                 }
-                beginConstruction(CastingStones.assign(cells, stacks()), "浇筑模具", context);
-                yield Next.stay();
+                yield buildStep(CastingStones.assign(cells, stacks()), "浇筑模具");
             }
             case POUR_WATER -> pourWater(at);
             case DIG -> {
@@ -419,6 +413,15 @@ final class PortalLavaCasting extends PhasedTask<PortalLavaCasting.Phase> {
             case OBTAIN -> {
                 // 要到东西了：回到同一步接着做。
             }
+            case BUILD -> {
+                // 挡块或模具的施工收场：施工自己失败（缺料、受保护）只记一笔，不为一格停整扇门；立着的模具记临时方块。
+                TaskResult built = building.settle();
+                building = null;
+                if (built.status() == TaskResult.Status.FAILED) {
+                    recordAttempt("浇筑的子施工", built.problem().message());
+                }
+                afterSubConstruction();
+            }
             case PLACE_WATER -> {
                 BlockState now = read(at).orElse(before);
                 recordChange(new Change(Change.Kind.BLOCK_CHANGED, blockId(now), 1,
@@ -537,7 +540,7 @@ final class PortalLavaCasting extends PhasedTask<PortalLavaCasting.Phase> {
 
     /** 拆模具：还立着的模具格编成清空蓝图交施工引擎，它收回方块、销掉临时方块账。 */
     private Next<Phase> removeMold(TickContext context) {
-        if (runner == null) {
+        if (action() == null) {
             List<PlannedCell> cells = new ArrayList<>();
             for (BlockPos cell : layout.mold()) {
                 Optional<BlockState> state = read(cell);
@@ -548,8 +551,9 @@ final class PortalLavaCasting extends PhasedTask<PortalLavaCasting.Phase> {
             if (cells.isEmpty()) {
                 return Next.go(Phase.RETURN_LAVA, "没有模具要拆");
             }
-            beginConstruction(cells, "拆浇筑模具", context);
-            return Next.stay();
+            // 拆模具也交施工引擎按动作推进：被打断时跟着停，浇筑提前结束时它收尾并交代收回了几块。
+            prepared = construct(cells, "拆浇筑模具");
+            return Next.go(Phase.REMOVE_MOLD, "交施工引擎拆模具");
         }
         return afterConstruction(context, Phase.RETURN_LAVA, "模具拆了");
     }
@@ -588,10 +592,9 @@ final class PortalLavaCasting extends PhasedTask<PortalLavaCasting.Phase> {
         // 卡住要收场：先把模具拆了、岩浆倒回去，再按卡住交代；善后阶段里再卡住就照常收场。
         if (givingUp || phase() == Phase.REMOVE_MOLD || phase() == Phase.RETURN_LAVA) return null;
         givingUp = true;
-        if (runner != null) {
-            runner.close(CloseReason.REPLACED);
-            runner = null;
-        }
+        // 手上那段施工（整地、挡块、模具）随换阶段按取消收尾，它交代的已放、已挖照样并进浇筑的结果，再去拆模具。
+        building = null;
+        pending = null;
         return stop(problem);
     }
 
@@ -606,39 +609,36 @@ final class PortalLavaCasting extends PhasedTask<PortalLavaCasting.Phase> {
                 .problem(stopReason).build();
     }
 
-    /** 把一份蓝图交施工引擎做：填台、挡块、模具、拆模具都走它。 */
-    private void beginConstruction(List<PlannedCell> cells, String purpose, TickContext context) {
-        Blueprint blueprint = new Blueprint(services.world().currentDimension(), layout.origin(), cells);
-        runner = new ChildTaskRunner(ChildTaskRunner.NO_LIMIT);
-        runner.begin(new ConstructionTask(new ConstructionInput(blueprint, permissions, purpose), construction), context);
-    }
-
     /**
-     * 推进子施工：做完抄事实；施工自己失败（缺料、受保护）照它的问题失败；
-     * {@code next} 为 null 时做完由调用方接着处理，返回 null。
+     * 把一份蓝图编成交施工引擎的子施工动作：填台、挡块、模具、拆模具都走它。
+     * 包成动作交给基类：浇筑被打断时施工跟着暂停，浇筑提前结束时它按取消收尾，事实记进浇筑的结果。
      */
-    private Next<Phase> afterConstruction(TickContext context, Phase next, String why) {
-        if (runner.tick(context) instanceof TickResult.Finished finished) {
-            copyFacts(finished.result());
-            TaskResult result = finished.result();
-            runner = null;
-            if (result.status() == TaskResult.Status.FAILED) {
-                if (next == null) {
-                    recordAttempt("浇筑的子施工", result.problem().message());
-                    return null;
-                }
-                return Next.fail(result.problem());
-            }
-            return next == null ? null : Next.go(next, why);
-        }
-        runner.progressedNow().ifPresent(this::recordProgress);
-        return next == null ? null : Next.stay();
+    private ChildTaskAction construct(List<PlannedCell> cells, String purpose) {
+        Blueprint blueprint = new Blueprint(services.world().currentDimension(), layout.origin(), cells);
+        building = new ChildTaskAction(new ConstructionTask(new ConstructionInput(blueprint, permissions, purpose),
+                construction), records());
+        return building;
     }
 
-    private void copyFacts(TaskResult result) {
-        for (Change change : result.changes()) recordChange(change);
-        for (Change change : result.unconfirmed()) recordUnconfirmed(change);
-        for (var attempt : result.attempts()) recordAttempt(attempt.tried(), attempt.result());
+    /** 一步里的子施工（挡块、模具）：备成这一步的动作，下一刻起推进，收场后回到这一步收账。 */
+    private Next<Phase> buildStep(List<PlannedCell> cells, String purpose) {
+        pending = Pending.BUILD;
+        prepared = construct(cells, purpose);
+        return Next.go(Phase.STEP, purpose);
+    }
+
+    /** 整地、拆模具这类整段施工收场：施工自己失败（缺料、受保护）照它的问题失败，做完换到下一阶段。 */
+    private Next<Phase> afterConstruction(TickContext context, Phase next, String why) {
+        // 施工还在做（走近、放块、挖格）：它的真实进展已由动作报给浇筑。
+        if (runAction(context) instanceof ActionStatus.Running) {
+            return Next.stay();
+        }
+        TaskResult result = building.settle();
+        building = null;
+        if (result.status() == TaskResult.Status.FAILED) {
+            return Next.fail(result.problem());
+        }
+        return Next.go(next, why);
     }
 
     private BucketUse pourLava(BlockPos at, InteractionConfirmation confirmation, String what) {

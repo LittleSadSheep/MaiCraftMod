@@ -127,7 +127,7 @@ final class MachineConnectModule implements AbilityModule {
 
     @Override public void registerTasks(TaskFactories factories) {
         // 铺线路用按蓝图施工的同一套任务：施工服务按这次任务的许可拼一份。
-        factories.register(MachineConnectInput.class,
-                input -> new MachineConnectTask(input, services, archives, memory, construction));
+        factories.register(MachineConnectInput.class, input -> new MachineConnectTask(input, services, archives, memory,
+                line -> new MachineBuildTask(line, services, archives, memory, construction)));
     }
 }

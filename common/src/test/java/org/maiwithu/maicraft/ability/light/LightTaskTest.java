@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.ability.light;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -46,6 +47,8 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.CloseReason;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
@@ -81,6 +84,8 @@ class LightTaskTest {
         /** 走得过去：走到没加载的列，那一列就加载了；记下走了哪几列。 */
         boolean walkLoads;
         final List<BlockPos> walkedTo = new ArrayList<>();
+        /** 施工走近灯位时交出的动作；没给就一刻走到。用来演"施工正走在半路"。 */
+        Action approach;
 
         Fake ground(int from, int to) {
             for (int x = from; x <= to; x++) {
@@ -146,7 +151,7 @@ class LightTaskTest {
         @Override public void temporaryRemoved(BlockPos pos) { }
         @Override public List<BlockPos> temporaries() { return List.of(); }
         @Override public Action toward(ApproachTarget target, Permissions permissions) {
-            return new Effect(() -> { });
+            return approach != null ? approach : new Effect(() -> { });
         }
         @Override public Optional<Action> toward(WorldPosition where, Permissions permissions) {
             if (!walkLoads) return Optional.empty();
@@ -227,6 +232,57 @@ class LightTaskTest {
             if (result instanceof TickResult.Finished finished) return finished.result();
         }
         throw new AssertionError("两万刻还没收场");
+    }
+
+    @Test
+    void 插灯施工跟着补光暂停与收尾_能不能停看施工手上的() {
+        // 插灯交施工引擎按动作推进：施工正走向灯位时，补光的暂停、收尾转到施工手上，能不能停也看它的。
+        Fake fake = new Fake().ground(-6, 6);
+        fake.carried.put("minecraft:torch", 64);
+        Held walking = new Held();
+        fake.approach = walking;
+        LightTask task = task(input(2, LightInput.Coverage.ALL, 8), fake);
+        task.start(TickContext.of(0, null));
+        for (long tick = 1; tick <= 400 && walking.ticks == 0; tick++) {
+            assertFalse(task.tick(TickContext.of(tick, null)) instanceof TickResult.Finished, "补光没走到插灯就收场了");
+        }
+        assertTrue(walking.ticks > 0, "施工走在半路");
+        assertTrue(task.describe().contains("插灯"), task.describe());
+
+        assertEquals(Interruptibility.UNSAFE_TO_STOP, task.interruptibility(TickContext.of(401, null)),
+                "施工手上那一下停不得，补光就停不得");
+        task.pause();
+        assertEquals(1, walking.pauses, "补光暂停，施工跟着停下松手");
+        task.close(CloseReason.CANCELLED);
+        assertEquals(1, walking.closes, "补光收尾，施工跟着收尾");
+    }
+
+    /** 一直在走、停不得的一下：记下被推进、暂停、收尾了几次。 */
+    private static final class Held implements Action {
+        int ticks;
+        int pauses;
+        int closes;
+
+        @Override public ActionStatus tick(TickContext context) {
+            ticks++;
+            return ActionStatus.running();
+        }
+
+        @Override public void pause() {
+            pauses++;
+        }
+
+        @Override public void close() {
+            closes++;
+        }
+
+        @Override public Interruptibility interruptibility() {
+            return Interruptibility.UNSAFE_TO_STOP;
+        }
+
+        @Override public String describe() {
+            return "停不得的一下";
+        }
     }
 
     private static LightTask task(LightInput input, Fake fake) {

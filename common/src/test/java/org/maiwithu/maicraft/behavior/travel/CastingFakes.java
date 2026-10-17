@@ -68,6 +68,8 @@ final class CastingFakes implements ConstructionSeams.ReadsSite, ConstructionSea
     /** 这些格倒岩浆进去成圆石（旁边是流动的岩浆、或别的意外），用来演"没成黑曜石"。 */
     final Set<BlockPos> castsCobblestone = new HashSet<>();
     BlockPos feet = new BlockPos(0, 65, 0);
+    /** 施工走近时交出的动作；没给就一刻走到。用来演"施工正走在半路"。 */
+    Action approach;
 
     CastingFakes(Map<BlockPos, BlockState> world) {
         this.world = world;
@@ -235,7 +237,7 @@ final class CastingFakes implements ConstructionSeams.ReadsSite, ConstructionSea
     @Override public List<BlockPos> temporaries() { return List.copyOf(temporaries); }
 
     @Override public Action toward(ApproachTarget target, Permissions permissions) {
-        return immediate(() -> { });
+        return approach != null ? approach : immediate(() -> { });
     }
 
     /** 原版流体的最简结算：水往模板范围里的空格流；岩浆源贴水成黑曜石，流动的岩浆成圆石。 */
