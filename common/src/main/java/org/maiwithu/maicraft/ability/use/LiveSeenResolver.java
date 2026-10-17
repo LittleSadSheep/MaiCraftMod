@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.use;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.behavior.perception.Scene;
+import org.maiwithu.maicraft.behavior.perception.SceneSign;
 
 /**
  * 观察编号解析的生产实现：编号在哪、是什么，从感知的场景表里读。
@@ -35,6 +37,13 @@ public final class LiveSeenResolver implements ResolvesSeen {
             if (type.isEmpty() && gameEntity == null) return Optional.empty();
             return Optional.of(new Resolved(entry.position(), type.orElse(null), gameEntity));
         });
+    }
+
+    // 地点名没记过时按牌子认地方：读的是 observe 里同一份看得见的告示牌。
+    @Override
+    public List<SceneSign> signs() {
+        Scene current = scene.get();
+        return current == null ? List.of() : current.signs();
     }
 
     // 编号在哪一路视图里就按那一路说它是什么；哪一路都没有就是这一轮场景里已经看不到了。

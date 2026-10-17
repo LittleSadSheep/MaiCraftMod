@@ -6,13 +6,14 @@ import java.util.Optional;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 
+import org.maiwithu.maicraft.behavior.travel.LandmarkResolver;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
 
 /**
  * 机器目标落实：把目标对象读成机器所在的那一格，附上那一格现在的方块状态。
- * 只读现场、给结论，不动角色：观察编号查场景表，地标查记过的地点，坐标与脚下直接用。
+ * 只读现场、给结论，不动角色：观察编号查场景表，地标查记过的地点、没记过认附近写着它的告示牌，坐标与脚下直接用。
  * 机器档案与观察编号 m# 还没有接入：指一台机器先指它的组成格（b#）或坐标。
  */
 final class MachineTargets {
@@ -63,12 +64,13 @@ final class MachineTargets {
             return found(cellOf(hit.get()), dimension);
         }
         if (target instanceof Target.Landmark landmark) {
-            Optional<WorldPosition> hit = services.places().place(landmark.name());
-            if (hit.isEmpty()) {
+            // 地标名：记过的地点优先，没记过认附近唯一写着它的告示牌，落在牌子那一格；那一格是什么照实读出来。
+            var located = LandmarkResolver.resolve(landmark.name(), services.places(), services.seenTargets()::signs);
+            if (located instanceof LandmarkResolver.Resolution.Missing missing) {
                 return new Resolution.DeadEnd(Problem.of(Problem.Kind.NOT_FOUND,
-                        "没有叫「" + landmark.name() + "」的记过地点或机器档案", "先用 remember 记下这个地点"));
+                        missing.reason(), missing.suggestionOr("先用 remember 记下这个地点")));
             }
-            return found(cellOf(hit.get()), dimension);
+            return found(cellOf(((LandmarkResolver.Resolution.Found) located).position()), dimension);
         }
         return new Resolution.DeadEnd(Problem.of(Problem.Kind.UNSUPPORTED,
                 "机器还不支持这种目标：" + target.kind()));

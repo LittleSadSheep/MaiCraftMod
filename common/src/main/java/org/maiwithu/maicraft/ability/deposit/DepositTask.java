@@ -19,6 +19,7 @@ import org.maiwithu.maicraft.behavior.inventory.ContainerChooser;
 import org.maiwithu.maicraft.behavior.inventory.KnownContainer;
 import org.maiwithu.maicraft.behavior.inventory.StoresInContainer;
 import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
+import org.maiwithu.maicraft.behavior.travel.LandmarkResolver;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -178,12 +179,20 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
             case Target.Position position -> Optional.of(position.y() == null
                     ? new ContainerChooser.Pick.NotFound("点名容器要给全坐标，包括 y")
                     : named(new WorldPosition(position.x(), position.y(), position.z(), position.dimension())));
-            case Target.Landmark landmark -> services.places().landmark(landmark.name())
-                    .map(at -> area(cellOf(at)))
-                    .orElseGet(() -> Optional.of(new ContainerChooser.Pick.NotFound(
-                            "没有记住叫「" + landmark.name() + "」的地点")));
+            case Target.Landmark landmark -> landmarkArea(landmark.name());
             default -> Optional.of(new ContainerChooser.Pick.NotFound("存东西不接受这种目标：" + input.target().kind()));
         };
+    }
+
+    // 地点名：记过的地点优先，没记过认附近唯一写着它的告示牌（"仓库"路牌），都当一片地方在附近找容器；
+    // 落不了就如实说没记过、牌子上也没有，或几块隔开的牌子都写着它，不退回脚边去存。
+    private Optional<ContainerChooser.Pick> landmarkArea(String name) {
+        var located = LandmarkResolver.resolve(name, services.places()::landmark, services.places()::signs);
+        if (located instanceof LandmarkResolver.Resolution.Found found) {
+            return area(cellOf(found.position()));
+        }
+        LandmarkResolver.Resolution.Missing missing = (LandmarkResolver.Resolution.Missing) located;
+        return Optional.of(new ContainerChooser.Pick.NotFound(missing.sentence()));
     }
 
     // 一片地方：radius 内的容器加上世界记忆里记过的，按"已放着同种 > 有空位 > 近"排；没扫完给空。

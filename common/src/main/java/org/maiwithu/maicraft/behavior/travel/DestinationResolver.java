@@ -15,8 +15,8 @@ import java.util.OptionalInt;
 /**
  * 目的地解析：把目标对象读成一段导航要求，只读现场、给结论，不动角色。
  *
- * <p>解析规矩：坐标给不全 y 也能去——先走到那一柱列；叫得出名字的地点查记过的地方，
- * 记不得就向玩家提问，不拿脚边顶替，也不把名字猜成别的东西；观察编号直接查它指向的位置，
+ * <p>解析规矩：坐标给不全 y 也能去——先走到那一柱列；叫得出名字的地点查记过的地方，没记过再认
+ * 附近看得见、写着这个名字的那块告示牌，都落不了就向玩家提问，不拿脚边顶替，也不把名字猜成别的东西；观察编号直接查它指向的位置，
  * 编号失效如实以"东西不在了"收场。"就是去那个维度"与落在别的维度的目的地都按维度路由
  * 认门：主世界与下界走下界门，主世界与末地走末地门，其余维度对如实说走不了。
  */
@@ -125,13 +125,17 @@ public final class DestinationResolver {
         return new Resolution.Ready(destination);
     }
 
+    // 地标名：记住的地点优先，没记过再认附近看得见、写着这个名字的那块告示牌，落出来的位置和记住的地点一样走；
+    // 都落不了（没有，或几块隔开的牌子都写着它）就提问，不拿脚边顶替，也不替玩家挑一块牌子。
     private Resolution resolveLandmark(Target.Landmark landmark, double radius) {
-        return rememberedPlaces.place(landmark.name())
-                .<Resolution>map(place -> resolveRemembered(place, radius))
-                .orElseGet(() -> new Resolution.Unclear(QuestionEscalation.unclearTarget(
-                        "没记住叫「" + landmark.name() + "」的地方，也不拿脚边顶替",
-                        List.of(new Question.Option("tell_where", "改用坐标或看得见的东西说明目的地"),
-                                new Question.Option("give_up", "这次不去，取消出行")))));
+        var located = LandmarkResolver.resolve(landmark.name(), rememberedPlaces, seenTargets::signs);
+        if (located instanceof LandmarkResolver.Resolution.Found found) {
+            return resolveRemembered(found.position(), radius);
+        }
+        LandmarkResolver.Resolution.Missing missing = (LandmarkResolver.Resolution.Missing) located;
+        return new Resolution.Unclear(QuestionEscalation.unclearTarget(missing.sentence(),
+                List.of(new Question.Option("tell_where", "改用坐标或看得见的东西说明目的地"),
+                        new Question.Option("give_up", "这次不去，取消出行"))));
     }
 
     /** 记住的地点可能在别的维度（记的时候人在下界）：落在哪个维度按哪个维度走。 */

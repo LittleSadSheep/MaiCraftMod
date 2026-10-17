@@ -82,6 +82,26 @@ class DestinationResolverTest {
     }
 
     @Test
+    void unrememberedLandmarkGoesToTheSignReadingIt() {
+        // 没记过"仓库"，但抬头看得见一块写着"仓库"的路牌：朝那块牌子去。
+        seen.sign("b4", WorldPosition.here(12, 64, -5), 13, "→ 仓库");
+        var ready = ready(resolver.resolve(new Target.Landmark("仓库"), 2));
+        assertTrue(ready.navGoal().isAt(new BlockPos(12, 64, -5)));
+    }
+
+    @Test
+    void twoSignsFarApartAskWhichOne() {
+        // 两块隔得老远的"仓库"：不替玩家挑，提问里列出两块的编号，让它用 seen 指一块。
+        seen.sign("b4", WorldPosition.here(12, 64, -5), 13, "仓库");
+        seen.sign("b9", WorldPosition.here(-40, 64, 0), 40, "仓库");
+        var unclear = assertInstanceOf(DestinationResolver.Resolution.Unclear.class,
+                resolver.resolve(new Target.Landmark("仓库"), 2));
+        assertEquals(Question.Reason.UNCLEAR_TARGET, TravelFakes.reasonOf(unclear.question()));
+        assertTrue(unclear.question().text().contains("b4") && unclear.question().text().contains("b9"),
+                unclear.question().text());
+    }
+
+    @Test
     void seenIdPointsAtWhereItWasSeen() {
         seen.put("f3", new WorldPosition(40, 65, 22, null));
         var ready = ready(resolver.resolve(new Target.Seen("f3"), 2));

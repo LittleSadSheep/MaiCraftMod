@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.use;
 
+import java.util.List;
 import java.util.Optional;
 
 import net.minecraft.core.BlockPos;
 
+import org.maiwithu.maicraft.behavior.perception.SceneSign;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 /**
@@ -17,6 +19,11 @@ public interface ResolvesSeen {
 
     /** 编号对应的东西此刻的位置与类型 ID；已经不在了、或感知侧没接上时给空。 */
     Optional<Resolved> resolve(String seenId);
+
+    /** 此刻场景里看得见的告示牌：地点名没记过时按牌子上的字认地方；感知侧没接上时为空。 */
+    default List<SceneSign> signs() {
+        return List.of();
+    }
 
     /**
      * 解析出的那样东西。

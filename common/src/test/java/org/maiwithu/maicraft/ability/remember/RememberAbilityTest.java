@@ -7,6 +7,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.maiwithu.maicraft.behavior.acquire.ReadsCharacterPosition;
+import org.maiwithu.maicraft.behavior.perception.SceneSign;
+import org.maiwithu.maicraft.behavior.perception.SignLines;
 import org.maiwithu.maicraft.behavior.travel.ReadsSeenTargets;
 import org.maiwithu.maicraft.behavior.worldmemory.RememberedRegion;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
@@ -199,6 +201,36 @@ class RememberAbilityTest {
                 ability.decide(step(goal(new Target.Landmark("家"), "{\"name\":\"门口\"}"))));
         runToFinish(run);
         assertEquals(memory.place("家"), memory.place("门口"));
+    }
+
+    @Test
+    void landmarkNotRememberedIsReadOffTheOnlySignSayingIt() {
+        // 没记过"矿洞"，但看得见一块写着"矿洞"的路牌：把牌子那一格记下来，往后不看见牌子也找得到。
+        WorldPosition signAt = new WorldPosition(3, 65, -20, "minecraft:overworld");
+        RememberAbility withSign = new RememberAbility(memory,
+                () -> new WorldPosition(12, 64, -8, "minecraft:overworld"),
+                new ReadsSeenTargets() {
+                    @Override public Optional<WorldPosition> positionOf(String observationId) {
+                        return Optional.empty();
+                    }
+
+                    @Override public List<SceneSign> signs() {
+                        return List.of(new SceneSign("b2", "minecraft:oak_wall_sign", signAt, "前方", "北", 14,
+                                new SignLines(List.of("→ 矿洞 ←", "", "", ""), List.of("", "", "", ""))));
+                    }
+                });
+
+        StepDecision.Run run = assertInstanceOf(StepDecision.Run.class,
+                withSign.decide(step(goal(new Target.Landmark("矿洞"), "{\"name\":\"矿洞\"}"))));
+        runToFinish(run);
+        assertEquals(Optional.of(signAt), memory.place("矿洞"));
+
+        // 牌子上写的是别的名字：照旧说没记过，句子里说清看得见的牌子上也没有。
+        StepDecision.Finish missing = assertInstanceOf(StepDecision.Finish.class,
+                withSign.decide(step(goal(new Target.Landmark("粮仓"), "{\"name\":\"粮仓\"}"))));
+        assertEquals(Problem.Kind.NOT_FOUND, missing.result().problem().kind());
+        assertTrue(missing.result().problem().message().contains("告示牌上也没有写着「粮仓」"),
+                missing.result().problem().message());
     }
 
     @Test

@@ -7,6 +7,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import org.maiwithu.maicraft.behavior.acquire.ReadsCharacterPosition;
+import org.maiwithu.maicraft.behavior.travel.LandmarkResolver;
 import org.maiwithu.maicraft.behavior.travel.ReadsSeenTargets;
 import org.maiwithu.maicraft.behavior.worldmemory.RememberedRegion;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
@@ -166,15 +167,16 @@ public final class RememberAbility implements AbilityModule {
             return position.map(Located::at).orElseGet(() -> Located.failed(gone(seen.id())));
         }
         if (kind instanceof Target.Landmark landmark) {
-            // 给同一个地方再起一个名字、或以记住的地点为中心圈地盘：位置从已经记住的地点读。
-            Optional<WorldPosition> position = memory.place(landmark.name());
-            if (position.isEmpty()) {
+            // 给同一个地方再起一个名字、或以记住的地点为中心圈地盘：位置从已经记住的地点读；
+            // 没记过就认附近唯一写着这个名字的告示牌，把牌子那一格记下来，往后不看见牌子也找得到。
+            var located = LandmarkResolver.resolve(landmark.name(), memory, seenTargets::signs);
+            if (located instanceof LandmarkResolver.Resolution.Missing missing) {
                 return Located.failed(new StepDecision.Finish(TaskResult.failed(
                         "没有叫「" + landmark.name() + "」的记住的地点",
-                        Problem.of(Problem.Kind.NOT_FOUND, "记得的地点里没有这个名字",
-                                "先用它的坐标或 here 记下来，或核对名字"))));
+                        Problem.of(Problem.Kind.NOT_FOUND, missing.reason(),
+                                missing.suggestionOr("先用它的坐标或 here 记下来，或核对名字")))));
             }
-            return Located.at(position.get());
+            return Located.at(((LandmarkResolver.Resolution.Found) located).position());
         }
         if (kind instanceof Target.Position position) {
             // 按坐标记必须给 y：记住的地点会被出行当作确认过的目的地，地盘中心的高度决定圈到哪几层，都不存猜的高度。

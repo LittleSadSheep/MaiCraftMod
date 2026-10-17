@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.deposit;
 
+import java.util.List;
 import java.util.Optional;
 
 import net.minecraft.core.BlockPos;
 
+import org.maiwithu.maicraft.behavior.perception.SceneSign;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -32,13 +34,18 @@ final class DepositSeams {
         Optional<Action> intoBackpack();
     }
 
-    /** 目标对象落在哪：观察编号此刻的位置、记得的地点、角色脚下。 */
+    /** 目标对象落在哪：观察编号此刻的位置、记得的地点、看得见的告示牌、角色脚下。 */
     interface FindsPlaces {
         /** 观察编号对应的东西此刻在哪；编号失效给空。 */
         Optional<WorldPosition> seen(String seenId);
 
         /** 记得的地点在哪；没记过给空。 */
         Optional<WorldPosition> landmark(String name);
+
+        /** 此刻看得见的告示牌：地点名没记过时按牌子上的字认地方；没接上场景时为空。 */
+        default List<SceneSign> signs() {
+            return List.of();
+        }
 
         /** 角色脚下那一格；不在世界里为 null。 */
         BlockPos feet();

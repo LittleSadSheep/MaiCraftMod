@@ -12,6 +12,7 @@ import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleAssembler;
 import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
+import org.maiwithu.maicraft.behavior.travel.LandmarkResolver;
 import org.maiwithu.maicraft.behavior.travel.ReadsSeenTargets;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
@@ -99,12 +100,14 @@ public final class VehicleAssembleModule implements AbilityModule {
         } else if (target instanceof Target.Position position) {
             near = new BlockPos(position.x(), position.y() != null ? position.y() : feet.get().getY(), position.z());
         } else if (target instanceof Target.Landmark landmark) {
-            Optional<WorldPosition> at = places.place(landmark.name());
-            if (at.isEmpty()) {
+            // 地点名：记过的地点优先，没记过认附近唯一写着它的告示牌，在牌子那一格附近组装；都落不了就说清为什么。
+            var located = LandmarkResolver.resolve(landmark.name(), places, seen::signs);
+            if (located instanceof LandmarkResolver.Resolution.Missing missing) {
                 return new StepDecision.Finish(TaskResult.failed("没记过这个地方", Problem.of(Problem.Kind.NOT_FOUND,
-                        "没记过叫「" + landmark.name() + "」的地方", "改用坐标或观察编号")));
+                        missing.reason(), missing.suggestionOr("改用坐标或观察编号"))));
             }
-            near = new BlockPos(at.get().x(), at.get().y(), at.get().z());
+            WorldPosition at = ((LandmarkResolver.Resolution.Found) located).position();
+            near = new BlockPos(at.x(), at.y(), at.z());
         } else {
             return invalid("组装只认坐标、记过的地点或观察编号");
         }

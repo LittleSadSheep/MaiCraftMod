@@ -4,7 +4,6 @@ package org.maiwithu.maicraft.ability.vehicle;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 
 import net.minecraft.core.BlockPos;
@@ -12,6 +11,8 @@ import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.ability.vehicle.api.VehicleControls;
 import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
+import org.maiwithu.maicraft.behavior.travel.LandmarkResolver;
+import org.maiwithu.maicraft.behavior.travel.ReadsSeenTargets;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -39,21 +40,24 @@ final class DrivePlan {
     private DrivePlan() {}
 
     /**
+     * @param seen 此刻看得见的告示牌从这里读：地点名没记过时按牌子认地方
      * @param feet 角色此刻脚下：坐标没给 y、按方向开多远都从这里算
      */
-    static Destination destination(Target target, ReadsRememberedPlaces places, BlockPos feet) {
+    static Destination destination(Target target, ReadsRememberedPlaces places, ReadsSeenTargets seen, BlockPos feet) {
         if (target instanceof Target.Position position) {
             boolean known = position.y() != null;
             return new Destination(new Vec3(position.x() + 0.5, known ? position.y() : feet.getY(), position.z() + 0.5),
                     known, null);
         }
         if (target instanceof Target.Landmark landmark) {
-            Optional<WorldPosition> place = places.place(landmark.name());
-            if (place.isEmpty()) {
+            // 地点名：记过的地点优先，没记过认附近唯一写着它的告示牌，开到牌子那一格；都落不了就说清为什么。
+            var located = LandmarkResolver.resolve(landmark.name(), places, seen::signs);
+            if (located instanceof LandmarkResolver.Resolution.Missing missing) {
                 return new Destination(null, false, Problem.of(Problem.Kind.NOT_FOUND,
-                        "没记过叫「" + landmark.name() + "」的地方", "改用坐标"));
+                        missing.reason(), missing.suggestionOr("改用坐标")));
             }
-            return new Destination(new Vec3(place.get().x() + 0.5, place.get().y(), place.get().z() + 0.5), true, null);
+            WorldPosition place = ((LandmarkResolver.Resolution.Found) located).position();
+            return new Destination(new Vec3(place.x() + 0.5, place.y(), place.z() + 0.5), true, null);
         }
         if (target instanceof Target.Direction direction) {
             int[] step = switch (direction.toward()) {

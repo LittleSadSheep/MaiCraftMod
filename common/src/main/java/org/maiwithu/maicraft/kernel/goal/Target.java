@@ -36,7 +36,7 @@ public sealed interface Target {
         }
     }
 
-    /** 记住的地点，或附近告示牌上的文字。 */
+    /** 地点名：记住的地点；没记过时认附近看得见、写着这个名字的那块告示牌（落在牌子那一格，几块隔开的同名牌子不挑）。 */
     record Landmark(String name) implements Target {
         public Landmark {
             if (name == null || name.isBlank()) throw new IllegalArgumentException("地标名不能为空");

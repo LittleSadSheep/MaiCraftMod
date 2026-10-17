@@ -11,6 +11,8 @@ import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
+import org.maiwithu.maicraft.behavior.perception.SceneSign;
+import org.maiwithu.maicraft.behavior.perception.SignLines;
 import org.maiwithu.maicraft.game.interaction.InteractionSender;
 import org.maiwithu.maicraft.game.menu.MenuActions;
 import org.maiwithu.maicraft.game.player.BackpackStack;
@@ -147,16 +149,27 @@ final class TravelFakes {
         }
     }
 
-    /** 观察编号替身：手工登记。 */
+    /** 观察编号替身：手工登记编号与看得见的告示牌。 */
     static final class FakeSeen implements ReadsSeenTargets {
         private final Map<String, WorldPosition> seen = new HashMap<>();
+        private final List<SceneSign> signs = new ArrayList<>();
 
         void put(String id, WorldPosition position) {
             seen.put(id, position);
         }
 
+        /** 摆一块看得见的告示牌：正面几行字，方位东、距离按给的算。 */
+        void sign(String id, WorldPosition position, int distance, String... frontLines) {
+            signs.add(new SceneSign(id, "minecraft:oak_sign", position, "前方", "东", distance,
+                    new SignLines(List.of(frontLines), List.of())));
+        }
+
         @Override public Optional<WorldPosition> positionOf(String observationId) {
             return Optional.ofNullable(seen.get(observationId));
+        }
+
+        @Override public List<SceneSign> signs() {
+            return List.copyOf(signs);
         }
     }
 

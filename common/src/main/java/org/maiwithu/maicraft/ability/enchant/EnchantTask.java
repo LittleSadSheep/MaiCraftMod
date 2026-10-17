@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.WantedItem;
 import org.maiwithu.maicraft.behavior.menu.MenuOpening;
 import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
+import org.maiwithu.maicraft.behavior.travel.LandmarkResolver;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -163,11 +164,12 @@ final class EnchantTask extends PhasedTask<EnchantTask.Phase> {
             return fromPosition(at.get(), context);
         }
         if (target instanceof Target.Landmark landmark) {
-            var at = services.places().place(landmark.name());
-            if (at.isEmpty()) {
-                return Next.fail(Problem.of(Problem.Kind.NOT_FOUND, "没有记过叫「" + landmark.name() + "」的地点"));
+            // 地标名：记过的地点优先，没记过认附近唯一写着它的告示牌；那一格不是附魔台，照常说它现在是什么。
+            var located = LandmarkResolver.resolve(landmark.name(), services.places(), services.seen()::signs);
+            if (located instanceof LandmarkResolver.Resolution.Missing missing) {
+                return Next.fail(Problem.of(Problem.Kind.NOT_FOUND, missing.reason(), missing.suggestion()));
             }
-            return fromPosition(at.get(), context);
+            return fromPosition(((LandmarkResolver.Resolution.Found) located).position(), context);
         }
         if (target instanceof Target.Position position) {
             // 坐标没给 y 是参数缺了，不当成 y=0 去看那格是什么，免得报"台子没了"让 LLM 以为台子被拆。

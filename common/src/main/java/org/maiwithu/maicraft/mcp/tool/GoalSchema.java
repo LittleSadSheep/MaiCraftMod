@@ -54,7 +54,7 @@ final class GoalSchema {
     // target：一个对象，kind 决定还要哪些字段。
     private static JsonObject target() {
         JsonObject properties = new JsonObject();
-        properties.add("kind", choice("here 原地；seen 看到的东西（id）；landmark 记住的地点（name）；player 玩家（name）；"
+        properties.add("kind", choice("here 原地；seen 看到的东西（id）；landmark 地点名（name：记住的地点，没记过时认附近看得见、写着这个名字的那块告示牌）；player 玩家（name）；"
                         + "position 坐标（x、z 必填，y、dimension 可省；直接写在 target 里，不要再套一层 position）；"
                         + "direction 朝某个方向走多远（toward、distance）；dimension 去某个维度（name，例如 minecraft:the_nether）；"
                         + "previous 前面某一步的结果（step，只在 sequence 里）",

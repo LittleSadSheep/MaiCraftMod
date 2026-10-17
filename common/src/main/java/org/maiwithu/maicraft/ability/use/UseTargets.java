@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.use;
 
+import java.util.List;
 import java.util.Optional;
 
 import net.minecraft.core.BlockPos;
 
+import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
+import org.maiwithu.maicraft.behavior.travel.LandmarkResolver;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -12,7 +15,7 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 /**
  * 找目标：把目标对象和 block、entity 参数落实成具体的一格方块或一只实体。
  *
- * <p>观察编号 b#、e# 和坐标就是那一个，block、entity 参数只用来核对；记得的地点、地形特征 f#、
+ * <p>观察编号 b#、e# 和坐标就是那一个，block、entity 参数只用来核对；记得的地点（或附近写着这个名字的告示牌）、地形特征 f#、
  * 脚边是一片地方，给了 block 或 entity 时在那片地方 radius 内找最近的，没给就用那一格本身。
  * 只给 item、不给目标时不对着任何东西用。别的维度去不了；没加载的先走过去，到了再找。
  * 扫描没扫完不冒充"没有"，下一刻接着问。
@@ -125,13 +128,16 @@ final class UseTargets {
         return block(cell, "坐标", false);
     }
 
-    // 记得的地点：没记过如实说没有，绝不退回到脚边去找；给了类型在那一片找，没给就是那一格。
+    // 地点名：记过的地点优先，没记过认附近唯一写着它的告示牌；都落不了如实说，绝不退回到脚边去找。
+    // 落出来的是一片地方：给了类型在那一片找（牌子旁边的拉杆、箱子），没给就是那一格。
     private Lookup landmark(String name) {
-        Optional<WorldPosition> place = services.memory() == null ? Optional.empty() : services.memory().place(name);
-        if (place.isEmpty()) {
-            return new Lookup.Failed(Problem.of(Problem.Kind.NOT_FOUND, "没有记住叫「" + name + "」的地点", null));
+        ReadsRememberedPlaces places = services.memory() == null ? unknown -> Optional.empty() : services.memory();
+        var located = LandmarkResolver.resolve(name, places,
+                () -> services.seen() == null ? List.of() : services.seen().signs());
+        if (located instanceof LandmarkResolver.Resolution.Missing missing) {
+            return new Lookup.Failed(Problem.of(Problem.Kind.NOT_FOUND, missing.reason(), missing.suggestion()));
         }
-        WorldPosition at = place.get();
+        WorldPosition at = ((LandmarkResolver.Resolution.Found) located).position();
         String here = services.world().dimension();
         if (at.dimension() != null && here != null && !at.dimension().equals(here)) {
             return new Lookup.Failed(Problem.of(Problem.Kind.UNREACHABLE,

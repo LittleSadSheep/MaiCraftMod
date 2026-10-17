@@ -138,7 +138,7 @@ public final class VehicleDriveModule implements AbilityModule {
             input = new VehicleDriveInput(new VehicleDriver.TestRequest(structure.get(), near, inputs, goal.permissions()),
                     null);
         } else {
-            DrivePlan.Destination destination = DrivePlan.destination(goal.target(), places, feet.get());
+            DrivePlan.Destination destination = DrivePlan.destination(goal.target(), places, seen, feet.get());
             if (destination.problem() != null) return new StepDecision.Finish(TaskResult.failed("去哪说不清", destination.problem()));
             Optional<VehicleReader.View> view = readers.stream().map(reader -> reader.read(structure.get()))
                     .flatMap(Optional::stream).findFirst();

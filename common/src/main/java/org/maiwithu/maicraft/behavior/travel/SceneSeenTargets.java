@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.travel;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.behavior.perception.Scene;
+import org.maiwithu.maicraft.behavior.perception.SceneSign;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 /**
@@ -29,5 +31,12 @@ public final class SceneSeenTargets implements ReadsSeenTargets {
             return Optional.empty();
         }
         return current.lookup(observationId).map(entry -> entry.position());
+    }
+
+    // 地标名没记过时按牌子认地方：读的是 observe 里同一份告示牌，看不见的、墙后的不在里面。
+    @Override
+    public List<SceneSign> signs() {
+        Scene current = scene.get();
+        return current == null ? List.of() : current.signs();
     }
 }
