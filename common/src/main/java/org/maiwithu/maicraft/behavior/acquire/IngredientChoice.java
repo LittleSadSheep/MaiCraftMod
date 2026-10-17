@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.acquire;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.IntSupplier;
 import java.util.Set;
 
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
@@ -62,10 +63,19 @@ final class IngredientChoice {
     }
 
     /**
+     * 这条配方是"还缺料的同类改造"：染床、染羊毛这类拿同类换同类的染色配方收的是"别的颜色"，
+     * 不含要的颜色本身，缺料数又总比直配少（染一张床缺一张床，直配缺三块羊毛），照缺料排会先去
+     * "弄一张白床再染色"，白床又要白羊毛、白染料、杀骷髅，一路绕到天亮（实机 10-15/10-16
+     * 做品红床整晚没做成）。排序把它排到直配后面；身上的料现成能改（一件不缺）时它仍是最快的。
+     */
+    boolean remakeNeedingMaterials(WorkstationRecipe recipe, WantedItem wanted, IntSupplier missingFor) {
+        return recipe.ingredients().stream().anyMatch(ingredient -> kindred(ingredient, wanted))
+                && missingFor.getAsInt() > 0;
+    }
+
+    /**
      * 这一格收的原料与要的东西是同一类东西（床与床、羊毛与羊毛）：染成品配方收的是"别的颜色"，
- * 不含要的那个颜色本身，satisfies 认不出，得靠共享的物品标签认同类。
-     * 同类改造还缺料时不如直配（缺一张床 vs 缺三块羊毛，缺料数排序总偏向改造，一绕就绕到
-     * "弄白床 → 弄白羊毛 → 弄白染料 → 杀骷髅"的深链），排序时把它排到后面。
+     * 不含要的那个颜色本身，satisfies 认不出，得靠共享的物品标签认同类。
      */
     boolean kindred(WorkstationRecipe.IngredientStack ingredient, WantedItem wanted) {
         Set<String> wantedTags = wanted.isTag() ? Set.of(wanted.tagId()) : tags.tagsOf(wanted.itemId());
