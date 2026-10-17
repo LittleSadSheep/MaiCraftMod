@@ -26,6 +26,9 @@ public interface BedScanner {
     /** 在这张床上躺下了：记下来，下次夜里离它不远就回来睡。 */
     default void sleptIn(BlockPos bed) {}
 
+    /** 自己放下的床收回背包了：那张床不再在世界里，从"睡过的床"里忘掉，免得下次按记忆走个空。 */
+    default void forgotBed(BlockPos bed) {}
+
     /** 一次扫描的结果。 */
     record BedScan(List<BedCandidate> candidates, boolean complete) {
     }

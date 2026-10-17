@@ -415,6 +415,11 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
         return enteredSleep;
     }
 
+    /** 给子类用的找床读端：夜休收回自己放的床时要把它从记忆里忘掉。 */
+    protected final BedScanner scanner() {
+        return scanner;
+    }
+
     /** 给子类读的此刻还在不在可睡窗口里（夜里或雷暴）。 */
     protected final boolean sleepWindowOpen(TickContext context) {
         return sleepWindow.open(context);

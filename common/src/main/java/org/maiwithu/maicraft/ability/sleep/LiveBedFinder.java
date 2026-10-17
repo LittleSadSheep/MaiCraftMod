@@ -121,14 +121,23 @@ public final class LiveBedFinder implements BedScanner, NightfallNeed.ReadsBedAv
     }
 
     // 自己睡过的床（家里那张）：不在附近两个区块里也算候选，夜里离家不远就回家睡，不在野外现找现做。
-    // 床还在、那一片加载着才算；拆掉了的不去。实机 10-14 离家八十格天黑了，家里的床不算，一夜反复去弄一张新床。
+    // 床所在那片加载着就现场核对（拆掉了的不去）；没加载的按记忆照报——能用得上 128 格召回的床
+    // 大多在加载区之外（实机 10-15 睡过的床在 70 格外，之后每晚都在它 32 格内报"没有床"），
+    // 占用与怪物到了跟前由原版结算，点不上再换。
     private void rememberedBeds(ClientLevel level, BlockPos center, PlayerContext current, Set<String> landmarks,
             Set<BlockPos> seen, List<BedCandidate> candidates) {
         if (memory == null) return;
         for (MemoryRecord record : memory.recordsNear(here(center), REMEMBERED_BED_RANGE)) {
             if (record.kind() != MemoryKind.WORKSTATION || !record.blockType().endsWith("_bed")) continue;
             BlockPos cell = new BlockPos(record.position().x(), record.position().y(), record.position().z());
-            if (!level.isLoaded(cell) || !(level.getBlockState(cell).getBlock() instanceof BedBlock)) continue;
+            if (!level.isLoaded(cell)) {
+                if (seen.add(cell)) {
+                    candidates.add(new BedCandidate(cell, false, false, false,
+                            Math.sqrt(current.localPlayer().blockPosition().distSqr(cell))));
+                }
+                continue;
+            }
+            if (!(level.getBlockState(cell).getBlock() instanceof BedBlock)) continue;
             BedCandidate bed = inspect(level, cell, current, landmarks);
             if (seen.add(bed.cell())) candidates.add(bed);
         }
@@ -141,6 +150,13 @@ public final class LiveBedFinder implements BedScanner, NightfallNeed.ReadsBedAv
         Block block = current.level().getBlockState(bed).getBlock();
         if (!(block instanceof BedBlock)) return;
         memory.rememberWorkstationUsed(here(bed), BuiltInRegistries.BLOCK.getKey(block).toString(), Instant.now());
+    }
+
+    @Override
+    public void forgotBed(BlockPos bed) {
+        // 收回的是自己放的床：它已经不在世界里，记忆里那条不删，下次召回还会按它指路。
+        if (memory == null) return;
+        memory.forget(MemoryKind.WORKSTATION, here(bed));
     }
 
     @Override

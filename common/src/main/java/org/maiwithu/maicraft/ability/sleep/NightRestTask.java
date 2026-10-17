@@ -230,11 +230,13 @@ final class NightRestTask extends SleepTask implements AnnouncesFinish {
         }
         List<BlockPos> rest = new ArrayList<>(cellsToCollect.subList(1, cellsToCollect.size()));
         if (rest.isEmpty()) {
-            // 床收回来了：记一条收回的变化，和放床那条对上，LLM 不会照着放床那条去原地找床。
+            // 床收回来了：记一条收回的变化，和放床那条对上，LLM 不会照着放床那条去原地找床；
+            // 也把这张床从"睡过的床"的记忆里忘掉——它已经不在世界里，留着会按记忆走个空。
             bedCollected = true;
             if (placedBed() != null) {
                 recordChange(new Change(Change.Kind.BLOCK_BROKEN, placedBedId(), 1,
                         "收回了放在 " + placedBed().toShortString() + " 的床"));
+                scanner().forgotBed(placedBed());
             }
             return Next.go(Phase.WALK_BACK, "床收好了，回到原来的站位");
         }
