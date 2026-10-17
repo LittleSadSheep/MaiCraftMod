@@ -61,6 +61,32 @@ class TradeOffersTest {
     }
 
     @Test
+    void 买不了时分开说没货和付款要稀有消耗品() {
+        Payment diamond = new Payment("minecraft:diamond", 1, true);
+        // 有货、第二格付款要钻石：只差许可，说清要的是什么、这次许可没开；普通的那格绿宝石不算进去。
+        List<View> rareOnly = List.of(offer(0, emeralds(1), diamond, "minecraft:bread", 4, false));
+        TradeOffers.Unbuyable rare = TradeOffers.whyUnbuyable(rareOnly, BREAD, TAGS, false);
+        assertTrue(rare.blockedByRareItems());
+        assertEquals("有货但付款要 minecraft:diamond（稀有消耗品，这次 use_rare_items=false）", rare.describe());
+        // 只是没货：不提许可。既没货又要钻石的那条只算没货，放开许可它也买不了。
+        List<View> soldOut = List.of(
+                offer(0, diamond, null, "minecraft:bread", 4, true),
+                offer(1, emeralds(1), null, "minecraft:bread", 4, true));
+        TradeOffers.Unbuyable empty = TradeOffers.whyUnbuyable(soldOut, BREAD, TAGS, false);
+        assertFalse(empty.blockedByRareItems());
+        assertEquals("2 条报价没货（存货卖完了）", empty.describe());
+        // 两样都有就都写；不卖面包的报价不算进来。
+        List<View> both = List.of(
+                offer(0, diamond, null, "minecraft:bread", 4, false),
+                offer(1, emeralds(1), null, "minecraft:bread", 4, true),
+                offer(2, new Payment("minecraft:emerald_block", 1, true), null, "minecraft:iron_pickaxe", 1, false));
+        assertEquals("有货但付款要 minecraft:diamond（稀有消耗品，这次 use_rare_items=false），另有 1 条报价没货（存货卖完了）",
+                TradeOffers.whyUnbuyable(both, BREAD, TAGS, false).describe());
+        // 许可开着时有货的不会被挡，只剩没货那条。
+        assertEquals("1 条报价没货（存货卖完了）", TradeOffers.whyUnbuyable(both, BREAD, TAGS, true).describe());
+    }
+
+    @Test
     void 缺几件买几件_付款缺口按身上的存货算() {
         // 想按一条报价（1 绿宝石 4 个面包）买 2 笔：身上只有 1 个绿宝石，还缺 1 个。
         View offer = offer(0, emeralds(1), null, "minecraft:bread", 4, false);

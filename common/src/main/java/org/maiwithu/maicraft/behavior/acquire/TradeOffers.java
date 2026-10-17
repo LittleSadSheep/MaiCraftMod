@@ -3,8 +3,10 @@ package org.maiwithu.maicraft.behavior.acquire;
 
 import java.util.function.ToIntFunction;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * 交易界面里的报价与挑选：报价读自游戏同步过来的列表，挑哪一条、缺多少付款是纯判断，可离线测。
@@ -47,6 +49,58 @@ public final class TradeOffers {
         public int paymentUnits() {
             return costA.count + costB.map(Payment::count).orElse(0);
         }
+    }
+
+    /**
+     * 卖想要东西的报价为什么一条都买不了，两种原因分开记：没货要等村民补货，付款要稀有消耗品要 LLM 放开许可，
+     * 混成一句 LLM 就分不清该等还是该改许可。
+     *
+     * @param outOfStock   卖想要东西、存货已经卖完的报价有几条（这些不论许可都买不了）
+     * @param rarePayments 有货、只因付款里有稀有消耗品而这次许可没开才不参与的报价，要的那几样稀有付款物品（去重，按报价顺序）
+     */
+    public record Unbuyable(int outOfStock, List<String> rarePayments) {
+
+        public Unbuyable {
+            rarePayments = List.copyOf(rarePayments);
+        }
+
+        /** 有一条有货的报价只差稀有消耗品许可：放开 use_rare_items 就买得了。 */
+        public boolean blockedByRareItems() {
+            return !rarePayments.isEmpty();
+        }
+
+        /** 一句话：有货但付款要 minecraft:diamond（稀有消耗品，这次 use_rare_items=false），另有 2 条报价没货（存货卖完了）。 */
+        public String describe() {
+            List<String> parts = new ArrayList<>();
+            if (blockedByRareItems()) {
+                parts.add("有货但付款要 " + String.join("、", rarePayments) + "（稀有消耗品，这次 use_rare_items=false）");
+            }
+            if (outOfStock > 0) {
+                parts.add((blockedByRareItems() ? "另有 " : "") + outOfStock + " 条报价没货（存货卖完了）");
+            }
+            return parts.isEmpty() ? "没有一条能买的报价" : String.join("，", parts);
+        }
+    }
+
+    /**
+     * 卖想要东西的报价为什么都买不了：先看有没有货，有货的再看付款超没超稀有消耗品许可。
+     * 既没货又要稀有付款的报价只算没货——放开许可它也买不了，不该让 LLM 白改一次许可。纯判断。
+     */
+    public static Unbuyable whyUnbuyable(List<View> offers, WantedItem wanted, ReadsItemTags tags,
+            boolean mayUseRareItems) {
+        int outOfStock = 0;
+        Set<String> rare = new LinkedHashSet<>();
+        for (View offer : offers) {
+            if (!wanted.matches(offer.resultItemId(), tags.tagsOf(offer.resultItemId()))) continue;
+            if (offer.outOfStock()) {
+                outOfStock++;
+            } else if (!paymentAllowed(offer, mayUseRareItems)) {
+                // 只列真正挡住它的那几样：两格付款里普通的那一格不算。
+                if (offer.costA().rare) rare.add(offer.costA().itemId());
+                offer.costB().filter(Payment::rare).ifPresent(payment -> rare.add(payment.itemId()));
+            }
+        }
+        return new Unbuyable(outOfStock, List.copyOf(rare));
     }
 
     /** 一次付款缺口：身上缺哪样付款物品、还缺几件。 */

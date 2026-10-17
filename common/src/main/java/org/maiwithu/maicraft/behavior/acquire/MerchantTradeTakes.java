@@ -113,6 +113,8 @@ public final class MerchantTradeTakes implements TradesWithMerchants {
         private final List<String> unconfirmed = new ArrayList<>();
         /** 每个村民身上卡住的原因：都试完后汇总成失败说明。 */
         private final List<String> deadEnds = new ArrayList<>();
+        /** 有村民有货、只因付款要稀有消耗品而这次许可没开才没买成：收场时建议放开 use_rare_items。 */
+        private boolean blockedByRareItems;
 
         TradeAction(Iterator<ScansMerchants.MerchantSpot> candidates, ItemRequest request, Permissions permissions) {
             this.candidates = candidates;
@@ -157,7 +159,8 @@ public final class MerchantTradeTakes implements TradesWithMerchants {
         private ActionStatus nextMerchant() {
             merchantTicks = 0;
             if (!candidates.hasNext()) {
-                return ActionStatus.failed(Problem.of(Problem.Kind.NEED_ITEM, describeSummary("一个都没买成"), null));
+                return ActionStatus.failed(Problem.of(Problem.Kind.NEED_ITEM, describeSummary("一个都没买成"),
+                        rareSuggestion()));
             }
             merchant = candidates.next();
             stage = Stage.APPROACH;
@@ -273,13 +276,19 @@ public final class MerchantTradeTakes implements TradesWithMerchants {
             Optional<TradeOffers.View> next = TradeOffers.nextBuy(TradeOffers.eligible(
                     offers.get(), request.wanted(), tags, permissions.useRareItems()));
             if (next.isEmpty()) {
-                // 说清这个村民到底卖什么：卖不卖要的东西，结果里一眼看得出来。
+                // 说清这个村民到底卖什么：卖不卖要的东西，结果里一眼看得出来。卖的话再分开说是没货，
+                // 还是有货但付款要稀有消耗品而许可没开：前者等村民补货或换人，后者放开 use_rare_items 就能买。
                 List<String> sells = offers.get().stream().map(TradeOffers.View::resultItemId).distinct().toList();
                 boolean sellsIt = offers.get().stream()
                         .anyMatch(offer -> request.wanted().matches(offer.resultItemId(), tags.tagsOf(offer.resultItemId())));
-                deadEnds.add(merchant.describe() + (sellsIt ? "卖" + request.wanted().describe()
-                        + "的报价都买不了（没货或付款超出许可）" : "不卖" + request.wanted().describe())
-                        + "，他卖的是：" + String.join("、", sells));
+                String why = "不卖" + request.wanted().describe();
+                if (sellsIt) {
+                    TradeOffers.Unbuyable unbuyable = TradeOffers.whyUnbuyable(offers.get(), request.wanted(), tags,
+                            permissions.useRareItems());
+                    blockedByRareItems |= unbuyable.blockedByRareItems();
+                    why = "卖" + request.wanted().describe() + "的报价都买不了：" + unbuyable.describe();
+                }
+                deadEnds.add(merchant.describe() + why + "，他卖的是：" + String.join("、", sells));
                 return toNextMerchantOrEnd();
             }
             currentOffer = next.get();
@@ -517,7 +526,7 @@ public final class MerchantTradeTakes implements TradesWithMerchants {
             if (boughtEnough()) return ActionStatus.done();
             if (!candidates.hasNext()) {
                 return ActionStatus.failed(Problem.of(Problem.Kind.NEED_ITEM,
-                        describeSummary("试过的村民都买不够"), null));
+                        describeSummary("试过的村民都买不够"), rareSuggestion()));
             }
             leaveMenu();
             stage = Stage.NEXT_MERCHANT;
@@ -538,6 +547,12 @@ public final class MerchantTradeTakes implements TradesWithMerchants {
             menu = null;
             session = null;
             currentOffer = null;
+        }
+
+        // 有村民只差稀有消耗品许可时建议放开它（交易付款照旧受这项许可管，不自己放开）；
+        // 别的原因不硬凑建议，交给按问题种类给的通用下一步。
+        private String rareSuggestion() {
+            return blockedByRareItems ? "要买就把 use_rare_items 设为 true" : null;
         }
 
         private String describeSummary(String why) {
