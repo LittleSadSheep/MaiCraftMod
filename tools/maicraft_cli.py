@@ -84,7 +84,7 @@ class McpConnection:
             {
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": {},
-                "clientInfo": {"name": "maicraft-cli", "version": "1.0.0"},
+                "clientInfo": {"name": "maicraft-cli", "version": "1.0.0-rc1"},
             },
         )
         if status != 200:

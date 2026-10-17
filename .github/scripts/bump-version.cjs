@@ -2,24 +2,82 @@
 
 const HEADLINE = 'ci(version): 为主分支集成构建递增补丁版本';
 
-// Mod 版本必须可明确递增，拒绝重复字段或非三段数字，避免两种加载器带着不同版本打包。
+// Mod 版本支持标准三段数字及可选预发布后缀（如 1.0.0-rc1），拒绝重复字段或非法格式。
+const VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*))?$/;
+
 function readVersion(text) {
   const fields = [...text.matchAll(/^version=([^\r\n]*)/gm)];
-  if (fields.length !== 1 || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(fields[0][1])) {
-    throw new Error('gradle.properties 必须包含唯一的 version=主版本.次版本.补丁版本');
+  if (fields.length !== 1) {
+    throw new Error('gradle.properties 必须包含唯一的 version=主版本.次版本.补丁版本[-预发布标识]');
   }
-  return fields[0][1].split('.').map(BigInt);
+  const match = fields[0][1].match(VERSION_PATTERN);
+  if (!match) {
+    throw new Error('gradle.properties 必须包含唯一的 version=主版本.次版本.补丁版本[-预发布标识]');
+  }
+  return {
+    raw: fields[0][1],
+    major: BigInt(match[1]),
+    minor: BigInt(match[2]),
+    patch: BigInt(match[3]),
+    prerelease: match[4] || null,
+  };
 }
 
-// 合入旧开发分支时保留主分支已递增的进度，再增加补丁号，防止版本倒退或重复。
+function compareVersions(a, b) {
+  if (a.major !== b.major) return a.major < b.major ? -1 : 1;
+  if (a.minor !== b.minor) return a.minor < b.minor ? -1 : 1;
+  if (a.patch !== b.patch) return a.patch < b.patch ? -1 : 1;
+  if (a.prerelease === b.prerelease) return 0;
+  // SemVer: 有预发布标识的版本优先级低于没有预发布标识的正式版本
+  if (a.prerelease && !b.prerelease) return -1;
+  if (!a.prerelease && b.prerelease) return 1;
+  // 两个都有预发布标识时，提取末尾数字进行递增比较
+  const matchA = a.prerelease.match(/^(.*?)(\d+)$/);
+  const matchB = b.prerelease.match(/^(.*?)(\d+)$/);
+  if (matchA && matchB && matchA[1] === matchB[1]) {
+    const numA = BigInt(matchA[2]);
+    const numB = BigInt(matchB[2]);
+    if (numA !== numB) return numA < numB ? -1 : 1;
+  }
+  return a.prerelease.localeCompare(b.prerelease);
+}
+
+function bumpPrerelease(prerelease) {
+  const match = prerelease.match(/^(.*?)(\d+)$/);
+  if (match) {
+    const nextNum = BigInt(match[2]) + 1n;
+    return `${match[1]}${nextNum}`;
+  }
+  return `${prerelease}2`;
+}
+
+// 合入旧开发分支时保留主分支已递增的进度；预发布版本支持保留显式声明或递增预览号，正式版本递增补丁号。
 function prepare(source, previous = source) {
-  const candidates = [readVersion(source), readVersion(previous)];
-  candidates.sort((a, b) => {
-    for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1;
-    return 0;
-  });
-  const [major, minor, patch] = candidates[1];
-  const version = `${major}.${minor}.${patch + 1n}`;
+  const sourceVer = readVersion(source);
+  const prevVer = previous ? readVersion(previous) : sourceVer;
+
+  let version;
+  if (sourceVer.prerelease) {
+    const cmp = compareVersions(sourceVer, prevVer);
+    if (cmp > 0) {
+      // source 显式指定了高于 previous 的新预发布版本（如从 0.1.10 跨到 1.0.0-rc1）
+      version = sourceVer.raw;
+    } else {
+      // 在同一预发布系列上继续集成，递增预发布号（如 rc1 -> rc2）
+      const nextPre = bumpPrerelease(prevVer.prerelease || sourceVer.prerelease);
+      version = `${prevVer.major}.${prevVer.minor}.${prevVer.patch}-${nextPre}`;
+    }
+  } else if (prevVer.prerelease && sourceVer.major === prevVer.major &&
+             sourceVer.minor === prevVer.minor && sourceVer.patch === prevVer.patch) {
+    // 从预发布转正为正式版本（如 1.0.0-rc2 -> 1.0.0），保留首个正式版本号
+    version = sourceVer.raw;
+  } else {
+    // 正式版本：保留原逻辑，取两者较大者并递增补丁号
+    const candidates = [sourceVer, prevVer];
+    candidates.sort(compareVersions);
+    const chosen = candidates[1];
+    version = `${chosen.major}.${chosen.minor}.${chosen.patch + 1n}`;
+  }
   return { version, content: source.replace(/^version=[^\r\n]*/m, `version=${version}`) };
 }
 

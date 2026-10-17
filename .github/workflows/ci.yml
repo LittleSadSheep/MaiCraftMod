@@ -177,14 +177,18 @@ jobs:
         run: |
           tag="v$VERSION"
           title="MaiCraft $VERSION"
+          prerelease_flag=""
+          if [[ "$VERSION" == *-* ]]; then
+            prerelease_flag="--prerelease"
+          fi
           test -s build/ci/release-jars.txt || { echo "::error::没有可发布的安装包清单"; exit 1; }
           mapfile -t jars < build/ci/release-jars.txt
           if gh release view "$tag" >/dev/null 2>&1; then
-            gh release edit "$tag" --title "$title" --notes-file build/ci/release-notes.md
+            gh release edit "$tag" --title "$title" --notes-file build/ci/release-notes.md $prerelease_flag
             gh release upload "$tag" "${jars[@]}" --clobber
           else
             gh release create "$tag" --draft --target "$COMMIT" --title "$title" \
-              --notes-file build/ci/release-notes.md "${jars[@]}"
+              --notes-file build/ci/release-notes.md $prerelease_flag "${jars[@]}"
           fi
           # 玩家看到的是 Release 上的附件名，逐个比对本次构建的安装包，名字或数量不对就不公开。
           expected="$(for jar in "${jars[@]}"; do basename "$jar"; done | sort)"

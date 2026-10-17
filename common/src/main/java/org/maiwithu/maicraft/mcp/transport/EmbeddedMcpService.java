@@ -306,7 +306,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
 
         JsonObject serverInfo = new JsonObject();
         serverInfo.addProperty("name", "maicraft");
-        serverInfo.addProperty("version", "1.0.0");
+        serverInfo.addProperty("version", "1.0.0-rc1");
 
         JsonObject result = new JsonObject();
         result.addProperty("protocolVersion", negotiated);
