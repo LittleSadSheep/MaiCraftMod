@@ -8,6 +8,7 @@ import java.util.Optional;
 import java.util.function.Function;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.behavior.travel.WaterCrossing.Kind;
@@ -76,6 +77,10 @@ public final class BoatLaunchSpots {
         if (top.isEmpty()) return Optional.empty();
         Top found = top.get();
         if (WaterCrossing.kindOf(found.state()) != Kind.WATER) return Optional.empty();
+        // 顶格是睡莲的不放：放下去船就被睡莲顶住，和自己的避障打架。
+        if (found.state().getBlock() == Blocks.LILY_PAD) {
+            return Optional.empty();
+        }
         if (feetY - (found.pos().getY() + 1) > MAX_DROP) return Optional.empty();
         // 水面上方两格要放得下船体：有实遮挡就放不下或上不了船。
         for (int above = 1; above <= 2; above++) {

@@ -3,8 +3,6 @@ package org.maiwithu.maicraft.behavior.travel;
 
 import java.util.List;
 import java.util.Objects;
-import java.util.IdentityHashMap;
-import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
 
@@ -21,6 +19,7 @@ import org.maiwithu.maicraft.behavior.travel.spi.TravelRequest;
 import org.maiwithu.maicraft.behavior.travel.spi.TravelVia;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
 
 /**
@@ -44,6 +43,8 @@ public final class BoatCrossing implements TravelMode {
     static final int MAX_LAUNCH_SPOTS = 3;
     /** 放船、上船、下船一共估多少刻。 */
     static final long OVERHEAD_TICKS = 20L * 6;
+    /** 划完留在岸边的船记进世界记忆用的名字，读回与写入同一处。 */
+    static final String LEFT_BOAT_PLACE = "留在岸边的船";
 
     private final DimensionTravelServices services;
 
@@ -119,7 +120,8 @@ public final class BoatCrossing implements TravelMode {
             default -> { }
         }
         WaterCrossing.Span span = survey.span();
-        Optional<BlockPos> freeBoat = nearestFreeBoat(services.context().get(), request.from());
+        Optional<BlockPos> freeBoat = rememberedFreeBoat().or(() -> nearestFreeBoat(services.context().get(),
+                request.from()));
         Optional<String> carried = carriedBoatItem();
         if (freeBoat.isEmpty() && carried.isEmpty()) {
             sink.decline(Problem.Kind.UNREACHABLE, "身上没有船物品，" + BOAT_SEARCH_DISTANCE
@@ -149,11 +151,8 @@ public final class BoatCrossing implements TravelMode {
         String hint = "放船站位 " + spots.getFirst().feet().toShortString() + "，靠岸点 "
                 + landings.getFirst().toShortString() + (carried.isEmpty()
                         ? "，用岸边那条船" : "，用身上的船");
-        Plan plan = new Plan(spots.getFirst().feet(), launchWater, freeBoat.orElse(null), landings,
-                carried.orElse(null), request.to());
         TravelOffer offer = new TravelOffer(VIA, spots.getFirst().feet(), landings.getFirst(), ticks,
                 List.of(needs), List.of(changes), hint);
-        plans.put(offer, plan);
         sink.offer(offer);
     }
 
@@ -179,25 +178,39 @@ public final class BoatCrossing implements TravelMode {
         TravelOffer offer = new TravelOffer(VIA, here, landing, ticks, List.of(),
                 List.of("把船开到岸边停下，人下船；船留在岸边"),
                 "先开到 " + landing.toShortString() + " 下船");
-        plans.put(offer, new Plan(null, null, null, landings, null, request.to()));
         sink.offer(offer);
     }
 
     @Override public TravelLeg start(TravelRequest request, TravelOffer offer) {
-        Plan plan = plans.remove(offer);
-        if (plan == null) {
-            // 规划隔了几刻才挑中这份报价，内存里的打算没跟上的按报价里的线索重算一份。
-            plan = replan(request, offer);
-        }
-        return new BoatCrossingLeg(plan, request.permissions(), services);
+        // 报价与开跑之间隔了几刻，世界本就可能变了：开跑时照当下现场重算打算，不存报价时的旧打算。
+        return new BoatCrossingLeg(planNow(request, offer), request.permissions(), services);
     }
 
-    // 丢了打算时按报价的起终点重算：站位与靠岸点重新挑，挑不出这段就走不通，让行程如实说。
-    private Plan replan(TravelRequest request, TravelOffer offer) {
+    /** 开跑这一刻的打算：人在船里就照报价的靠岸点开过去下船，否则重新挑备船办法、站位与靠岸点。 */
+    private Plan planNow(TravelRequest request, TravelOffer offer) {
         Function<BlockPos, Optional<BlockState>> read = services.world()::stateAt;
-        List<BlockPos> landings = BoatLandings.around(read, offer.to(), request.to() == null ? offer.to() : request.to());
-        return new Plan(offer.from(), offer.from(), null,
-                landings.isEmpty() ? List.of(offer.to()) : landings, null, request.to());
+        BlockPos aim = request.to() == null ? offer.to() : request.to();
+        List<BlockPos> landings = BoatLandings.around(read, offer.to(), aim);
+        if (landings.isEmpty()) landings = List.of(offer.to());
+        if (ridingVanillaBoat()) {
+            return new Plan(null, null, null, landings, null, request.to());
+        }
+        // 备船办法照当下重新认：岸边记得的、停着的船优先，身上有船物品其次；站位重新挑，挑不出按报价的起点凑。
+        Optional<BlockPos> freeBoat = rememberedFreeBoat().or(() -> nearestFreeBoat(services.context().get(),
+                request.from()));
+        Optional<String> carried = carriedBoatItem();
+        Optional<BoatLaunchSpots.Spot> spot = Optional.empty();
+        if (freeBoat.isEmpty() && carried.isPresent()) {
+            WaterCrossing.Survey survey = WaterCrossing.between(read, request.from(), aim);
+            if (survey.answer() == WaterCrossing.Answer.ACROSS_WATER) {
+                List<BoatLaunchSpots.Spot> spots = BoatLaunchSpots.around(read, survey.span().nearShore(),
+                        request.from(), survey.span().farShore(), MAX_LAUNCH_SPOTS);
+                spot = spots.stream().findFirst();
+            }
+        }
+        return new Plan(spot.map(BoatLaunchSpots.Spot::feet).orElse(offer.from()),
+                spot.map(BoatLaunchSpots.Spot::water).orElse(offer.from()),
+                freeBoat.orElse(null), landings, carried.orElse(null), request.to());
     }
 
     /** 出发点最近的一柱实地：从船的位置一圈圈往外找，找带着往目的地那边偏。 */
@@ -238,6 +251,17 @@ public final class BoatCrossing implements TravelMode {
         return best == null ? Optional.empty() : Optional.of(best.blockPosition());
     }
 
+    /**
+     * 记忆里"留在岸边的船"：那条是上次划完留下的，下次从这一侧回去先用它。
+     * 记忆可能过时，得到现场核实确实还停着一条没人坐的船才算数；核实不到就照现场扫描兜底。
+     */
+    private Optional<BlockPos> rememberedFreeBoat() {
+        Optional<WorldPosition> remembered = services.memory().place(LEFT_BOAT_PLACE);
+        if (remembered.isEmpty()) return Optional.empty();
+        BlockPos at = new BlockPos(remembered.get().x(), remembered.get().y(), remembered.get().z());
+        return nearestFreeBoat(services.context().get(), at).filter(pos -> pos.distSqr(at) <= 64.0);
+    }
+
     /** 身上带的船物品（各种木头的船、竹筏、运输船都算）：有就给物品 id，划完这条就少一条。 */
     private Optional<String> carriedBoatItem() {
         for (BackpackStack stack : services.world().carriedStacks()) {
@@ -255,7 +279,4 @@ public final class BoatCrossing implements TravelMode {
 
     /** 找最近的岸最多看多远（格）：坐在船里四周该看得见岸，再远就是在大海中央。 */
     static final int SHORE_SEARCH_DISTANCE = 48;
-
-    /** 报价与开跑之间传递打算：规划挑中哪份，开跑就照哪份走。 */
-    private final Map<TravelOffer, Plan> plans = new IdentityHashMap<>();
 }

@@ -200,6 +200,35 @@ class BoatCrossingTest {
     }
 
     @Test
+    void 水里的草和海带不算挡路() {
+        BlockState water = Blocks.WATER.defaultBlockState();
+        for (int x = 0; x <= 30; x++) {
+            put(x, 63, 0, Blocks.STONE.defaultBlockState());
+            put(x, 64, 0, water);
+        }
+        Vec3 boat = new Vec3(10.5, 64.0, 0.5);
+        float facingEast = -90.0F;
+        put(12, 65, 0, Blocks.SEAGRASS.defaultBlockState());
+        assertFalse(BoatSteering.blockedAhead(world(), boat, facingEast), "海草船穿得过去");
+        put(12, 64, 0, Blocks.KELP.defaultBlockState());
+        put(12, 65, 0, Blocks.KELP_PLANT.defaultBlockState());
+        assertFalse(BoatSteering.blockedAhead(world(), boat, facingEast), "海带柱也穿得过去");
+        put(12, 64, 0, water);
+        put(12, 65, 0, Blocks.AIR.defaultBlockState());
+    }
+
+    @Test
+    void 顶着睡莲的水面不放船() {
+        lake(10, 30, 64, Blocks.WATER.defaultBlockState());
+        put(10, 65, 0, Blocks.LILY_PAD.defaultBlockState());
+        // 朝目的地那边最近的水面被睡莲占了：站位要么换到别的水面，要么没有能用的。
+        List<BoatLaunchSpots.Spot> spots = BoatLaunchSpots.around(world(), new BlockPos(9, 65, 0),
+                new BlockPos(0, 65, 0), new BlockPos(45, 65, 0), 3);
+        assertTrue(spots.stream().noneMatch(spot -> spot.water().equals(new BlockPos(10, 64, 0))),
+                "睡莲顶格的水面不能放船：" + spots);
+    }
+
+    @Test
     void 人坐在原版船上时在主世界非它不可() {
         assertTrue(BoatCrossing.claimsFor("minecraft:overworld", true));
         assertFalse(BoatCrossing.claimsFor("minecraft:overworld", false), "没坐船还有的选");

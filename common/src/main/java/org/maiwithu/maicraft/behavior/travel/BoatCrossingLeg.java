@@ -10,7 +10,6 @@ import java.util.UUID;
 import java.util.function.Function;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.vehicle.Boat;
 import net.minecraft.world.level.ClipContext;
@@ -26,6 +25,7 @@ import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.behavior.travel.spi.TravelLeg;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.interaction.PendingInteraction;
+import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -55,6 +55,8 @@ final class BoatCrossingLeg implements TravelLeg {
     private static final int CONFIRM_TIMEOUT_TICKS = 30;
     /** 按住潜行这么久还没下船就放弃。 */
     private static final long DISMOUNT_LIMIT_TICKS = 40;
+    /** 下了船这么多刻还站不到地上（也没站得住的地方）就按落水收场。 */
+    private static final int DISMOUNT_SETTLE_LIMIT_TICKS = 60;
     /** 离靠岸点这么近（格）就开始贴岸下船。 */
     private static final double ARRIVAL_DISTANCE = 2.0;
     /** 上岸后脚下这么多刻没动算站稳。 */
@@ -67,6 +69,8 @@ final class BoatCrossingLeg implements TravelLeg {
     private Step step = Step.PREP;
     private Action current;
     private WalkRun walk;
+    private BlockPos walkTarget;
+    private List<BlockPos> walkStances = List.of();
     private UUID boatId;
     private int landingIndex;
     private Set<UUID> boatsBefore = Set.of();
@@ -75,6 +79,7 @@ final class BoatCrossingLeg implements TravelLeg {
     private PendingInteraction pending;
     private long lastTick = Long.MIN_VALUE;
     private long dismountStarted = Long.MIN_VALUE;
+    private int afterDismountTicks;
     private BlockPos windowAnchor;
     private long windowStart;
     private int stalledWindows;
@@ -123,7 +128,7 @@ final class BoatCrossingLeg implements TravelLeg {
             case ROW -> row(live);
             case DISMOUNT -> dismount(live);
             case SETTLE -> settleDown(live);
-            case WALK -> ActionStatus.running();
+            case WALK -> resumeWalk();
         };
     }
 
@@ -170,13 +175,20 @@ final class BoatCrossingLeg implements TravelLeg {
         return walkTo(plan.launchFeet(), List.of(plan.launchFeet()));
     }
 
-    // 走到岸边站位（或停着的船旁）：走到这里只走一次，完事按有没有现成的船分上船还是放船。
+    // 走到岸边站位（或停着的船旁）：记下要去哪，走到被让路收掉后从原地照原目标重走。
     private ActionStatus walkTo(BlockPos target, List<BlockPos> stances) {
         step = Step.WALK;
+        walkTarget = target.immutable();
+        walkStances = List.copyOf(stances);
         walk = services.walks().start(GoalCompiler.interactionStances(target, stances),
                 TerrainPermit.of(permissions));
         current = walk;
         return ActionStatus.progressed();
+    }
+
+    // 走到被让路（饿、被打）后回来：已停下的走到不会自己接着走，从原地照原目标重新上路。
+    private ActionStatus resumeWalk() {
+        return current == null ? walkTo(walkTarget, walkStances) : ActionStatus.running();
     }
 
     private ActionStatus afterWalk(Problem problem, PlayerContext live) {
@@ -351,8 +363,8 @@ final class BoatCrossingLeg implements TravelLeg {
         Boat boat = findBoat(live);
         leftTheBoatAt = boat != null ? boat.blockPosition() : player.blockPosition();
         changes.add(Change.of(Change.Kind.OTHER, "船留在 " + leftTheBoatAt.toShortString() + "，没有收回来", 1));
-        services.memory().remember("留在岸边的船", WorldPosition.here(leftTheBoatAt.getX(),
-                leftTheBoatAt.getY(), leftTheBoatAt.getZ()));
+        services.memory().remember(BoatCrossing.LEFT_BOAT_PLACE, new WorldPosition(leftTheBoatAt.getX(),
+                leftTheBoatAt.getY(), leftTheBoatAt.getZ(), services.world().currentDimension()));
         step = Step.SETTLE;
         still = 0;
         lastFeet = player.blockPosition();
@@ -407,14 +419,11 @@ final class BoatCrossingLeg implements TravelLeg {
         return null;
     }
 
-    /** 身上的船物品一共几件（主背包与快捷栏）。 */
-    private int countBoatItems(PlayerContext live) {
+    /** 身上的船物品一共几件：与报价用同一份身上清单，两条路径认的是同一批东西。 */
+    private int countBoatItems(PlayerContext ignored) {
         int count = 0;
-        for (int slot = 0; slot < live.localPlayer().getInventory().getContainerSize(); slot++) {
-            var stack = live.localPlayer().getInventory().getItem(slot);
-            if (BoatCrossing.isBoatItem(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString())) {
-                count += stack.getCount();
-            }
+        for (BackpackStack stack : services.world().carriedStacks()) {
+            if (BoatCrossing.isBoatItem(stack.itemId())) count += stack.count();
         }
         return count;
     }

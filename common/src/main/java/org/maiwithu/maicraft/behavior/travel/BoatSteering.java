@@ -5,6 +5,7 @@ import java.util.Optional;
 import java.util.function.Function;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
@@ -86,16 +87,23 @@ public final class BoatSteering {
         return false;
     }
 
-    /** 这一格挡不挡船：实方块、睡莲、冰都挡，水和空气不挡。 */
+    /** 这一格挡不挡船：实方块、睡莲、冰都挡；水、空气和水里的草、海带不挡（船穿得过去）。 */
     private static boolean blocking(Function<BlockPos, Optional<BlockState>> read, BlockPos cell) {
         Optional<BlockState> state = read.apply(cell);
         if (state.isEmpty()) return false;
         BlockState found = state.get();
-        if (found.isAir() || isWater(found)) return false;
+        if (found.isAir() || isWater(found) || isWaterPlant(found)) return false;
         return true;
     }
 
     private static boolean isWater(BlockState state) {
         return state.getBlock() == Blocks.WATER || state.getBlock() == Blocks.BUBBLE_COLUMN;
+    }
+
+    /** 长在水里的植物：海草（含高株两格）、海带（含长条），船身能直接穿过去。 */
+    private static boolean isWaterPlant(BlockState state) {
+        Block block = state.getBlock();
+        return block == Blocks.SEAGRASS || block == Blocks.TALL_SEAGRASS
+                || block == Blocks.KELP || block == Blocks.KELP_PLANT;
     }
 }
