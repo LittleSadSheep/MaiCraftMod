@@ -1,0 +1,154 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.behavior.navigation.baritone;
+
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonParser;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.tags.TagKey;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockState;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.Map;
+import java.util.function.Predicate;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.core.Direction;
+import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.block.LeavesBlock;
+import org.maiwithu.maicraft.behavior.acquire.NaturalTrees;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/** 寻路挖路与施工清场共用的方块类型白名单；默认包含自然地形与普通火把，不依赖服务端安装本模组。 */
+public final class ClearanceWhitelist {
+    private static final Logger LOG = LoggerFactory.getLogger(ClearanceWhitelist.class);
+    public static final String CONFIG = "config/maicraft-clearance.json";
+    private static final List<String> DEFAULTS = Arrays.stream(("""
+            stone granite diorite andesite deepslate tuff calcite dripstone_block pointed_dripstone
+            dirt grass_block coarse_dirt podzol mycelium rooted_dirt mud muddy_mangrove_roots clay
+            sand red_sand gravel sandstone red_sandstone terracotta white_terracotta orange_terracotta
+            yellow_terracotta brown_terracotta red_terracotta light_gray_terracotta
+            netherrack soul_sand soul_soil basalt smooth_basalt blackstone end_stone obsidian
+            coal_ore iron_ore copper_ore gold_ore redstone_ore emerald_ore lapis_ore diamond_ore
+            deepslate_coal_ore deepslate_iron_ore deepslate_copper_ore deepslate_gold_ore
+            deepslate_redstone_ore deepslate_emerald_ore deepslate_lapis_ore deepslate_diamond_ore
+            nether_gold_ore nether_quartz_ore ancient_debris raw_iron_block raw_copper_block
+            snow snow_block ice packed_ice blue_ice powder_snow moss_block moss_carpet
+            oak_log spruce_log birch_log jungle_log acacia_log dark_oak_log mangrove_log cherry_log
+            oak_leaves spruce_leaves birch_leaves jungle_leaves acacia_leaves dark_oak_leaves
+            mangrove_leaves cherry_leaves azalea_leaves flowering_azalea_leaves mangrove_roots
+            crimson_stem warped_stem nether_wart_block warped_wart_block shroomlight
+            crimson_nylium warped_nylium brown_mushroom_block red_mushroom_block mushroom_stem
+            short_grass tall_grass fern large_fern dead_bush vine glow_lichen hanging_roots
+            azalea flowering_azalea small_dripleaf big_dripleaf big_dripleaf_stem spore_blossom
+            cave_vines cave_vines_plant weeping_vines weeping_vines_plant twisting_vines twisting_vines_plant
+            crimson_roots warped_roots nether_sprouts crimson_fungus warped_fungus
+            dandelion poppy blue_orchid allium azure_bluet red_tulip orange_tulip white_tulip pink_tulip
+            oxeye_daisy cornflower lily_of_the_valley sunflower lilac rose_bush peony pink_petals
+            brown_mushroom red_mushroom sugar_cane cactus bamboo bamboo_sapling sweet_berry_bush
+            pumpkin melon lily_pad seagrass tall_seagrass kelp kelp_plant chorus_plant chorus_flower
+            torch wall_torch
+            """).trim().split("\\s+")).map(name -> "minecraft:" + name).toList();
+    private static final AtomicReference<Rules> CURRENT = new AtomicReference<>(parse(DEFAULTS));
+
+    private ClearanceWhitelist() {}
+
+    /** 客户端启动时读取本实例的名单；空表禁止清障，坏配置也关闭清障，避免意外放宽玩家的限制。 */
+    public static void initialize(Path gameDirectory) {
+        Path file = gameDirectory.resolve(CONFIG);
+        try {
+            if (!Files.exists(file)) {
+                Files.createDirectories(file.getParent());
+                Files.writeString(file, new GsonBuilder().setPrettyPrinting().create().toJson(DEFAULTS) + "\n",
+                        StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
+            }
+            var json = JsonParser.parseString(Files.readString(file, StandardCharsets.UTF_8));
+            if (!json.isJsonArray()) throw new IllegalArgumentException("expected an array of block IDs or #block_tags");
+            var entries = new ArrayList<String>();
+            for (var value : json.getAsJsonArray()) {
+                if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString())
+                    throw new IllegalArgumentException("whitelist entries must be strings");
+                entries.add(value.getAsString());
+            }
+            CURRENT.set(parse(entries));
+        } catch (IOException | RuntimeException invalid) {
+            CURRENT.set(parse(List.of()));
+            LOG.warn("[clearance] 清障白名单读取失败，已禁止自动清障：{}: {}", file, invalid.getMessage());
+        }
+    }
+
+    /** 已经是空气就无需清障；其他格严格按类型匹配，替换许可、流体和保护格仍由各执行段另行核验。 */
+    public static boolean allows(BlockState state) { return state.isAir() || CURRENT.get().allows(state); }
+
+    /**
+     * 这一格能不能当地形清掉：类型在名单里，原木还得长在天然树上、树叶得是自然长的。
+     * 村里木屋的原木地板、原木屋顶，玩家用原木搭的房子、人放的树叶都不算地形，寻路不挖、看不见也不挖开。
+     * 实机里角色困在村庄木屋里，名单只认类型，把原木地板挖了个坑、又把原木屋顶拆开钻出去。
+     *
+     * @param world  读这一格周围的方块（算路在后台线程上读它自己那份）
+     * @param loaded 哪些格读得到
+     * @param trunks 一次算路里查过的树干（键是树干顶），同一棵树不重复数叶子
+     */
+    public static boolean allowsAt(BlockState state, BlockPos pos, BlockGetter world, Predicate<BlockPos> loaded,
+            Map<BlockPos, Boolean> trunks) {
+        // 名单清空表示这个实例不许自动清障：照旧什么都不清。
+        if (CURRENT.get().empty()) return state.isAir();
+        // 树叶、原木按长没长在树上认，模组的也算（名单只列了原版的）：实机在 BOP 冷杉林里缺原木，
+        // 冷杉树叶不在名单里挖不开，一千多个站位全被树叶挡住，一根都砍不下来。人放的树叶、房子的原木照旧不清。
+        if (state.getBlock() instanceof LeavesBlock) {
+            return !(state.hasProperty(LeavesBlock.PERSISTENT) && state.getValue(LeavesBlock.PERSISTENT));
+        }
+        if (NaturalTrees.isLog(state)) return NaturalTrees.partOfNaturalTree(pos, world, loaded, trunks);
+        // 挨着传送门方块的（门框的黑曜石）是门的一部分，不算地形：拆了门就没了。
+        // 实机 10-14 进门失败后为了自己建门去挖黑曜石，把旁边那扇亮着的门框整个拆了。
+        if (state.is(Blocks.OBSIDIAN) && touchesPortal(pos, world, loaded)) return false;
+        return allows(state);
+    }
+
+    // 这一格六面有没有挨着传送门方块（下界门、末地门）。
+    private static boolean touchesPortal(BlockPos pos, BlockGetter world, Predicate<BlockPos> loaded) {
+        for (Direction side : Direction.values()) {
+            BlockPos next = pos.relative(side);
+            if (!loaded.test(next)) continue;
+            BlockState near = world.getBlockState(next);
+            if (near.is(Blocks.NETHER_PORTAL) || near.is(Blocks.END_PORTAL)) return true;
+        }
+        return false;
+    }
+
+    // 明确列举方块或引用实际同步的标签；不凭名称包含 stone、ore 等文字猜测模组机器是否属于自然地形。
+    static Rules parse(List<String> entries) {
+        Set<ResourceLocation> blocks = new LinkedHashSet<>();
+        Set<TagKey<Block>> tags = new LinkedHashSet<>();
+        for (String entry : entries) {
+            String text = entry.trim();
+            boolean tag = text.startsWith("#");
+            ResourceLocation id = ResourceLocation.tryParse(tag ? text.substring(1) : text);
+            if (id == null) throw new IllegalArgumentException("invalid clearance entry: " + entry);
+            if (tag) tags.add(TagKey.create(Registries.BLOCK, id)); else blocks.add(id);
+        }
+        return new Rules(Set.copyOf(blocks), Set.copyOf(tags));
+    }
+
+    record Rules(Set<ResourceLocation> blocks, Set<TagKey<Block>> tags) {
+        boolean empty() {
+            return blocks.isEmpty() && tags.isEmpty();
+        }
+
+        boolean allows(BlockState state) {
+            return blocks.contains(BuiltInRegistries.BLOCK.getKey(state.getBlock())) || tags.stream().anyMatch(state::is);
+        }
+    }
+}

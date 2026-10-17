@@ -1,0 +1,224 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.behavior.combat;
+
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+
+import org.maiwithu.maicraft.kernel.task.TickContext;
+
+/**
+ * 战场快照：这一刻我方与每只对手，按战斗几何算好。每刻读一次，打法（{@link Tactic}）与走位都只看它，
+ * 点名战斗和自卫读的是同一份。
+ *
+ * <p>对手只收两种：正在追我的（十秒内真打过我的、引信点着的、看得见我又亮着攻击标记的、看得见的近处苦力怕），
+ * 和名单上要打的。只在附近游荡、隔着墙的不收——不躲它，也不打它。
+ *
+ * <p>打龙时另带一份龙场（{@link DragonArena}）：龙不在对手里，龙和水晶、龙息、火球、末影人由龙的打法看龙场决定。
+ *
+ * @param arena 打龙时的龙场；不打龙、或龙不在了为 null
+ */
+public record Battlefield(Me me, List<Foe> foes, DragonArena arena) {
+
+    public Battlefield {
+        foes = List.copyOf(foes);
+    }
+
+    /** 不打龙的战场。 */
+    public Battlefield(Me me, List<Foe> foes) {
+        this(me, foes, null);
+    }
+
+    /**
+     * 我方：位置、身板、血、交互距离、手上的本事。
+     *
+     * @param reach       实体交互距离属性
+     * @param attackReady 攻击充能好了（原生出手的门槛）
+     * @param hasMelee    身上有剑斧这类近战武器
+     * @param canShoot    身上有能射的（有箭的弓、能装的弩、联动远程）
+     * @param weaponScore 挑中的武器分，威胁评估用
+     */
+    public record Me(double x, double y, double z, double halfWidth, double health, int armorPoints, double reach,
+                     boolean attackReady, boolean hasMelee, boolean canShoot, int weaponScore, int foodCount) {
+
+        /** 威胁评估看的我方处境；退没退路由调用方给。 */
+        public ThreatAssessment.MySide side(boolean hasEscapeRoute) {
+            return new ThreatAssessment.MySide(health, armorPoints, weaponScore, foodCount, hasEscapeRoute);
+        }
+
+        /** 血线破了：护甲折算后的有效血量跌到拒战线之下。 */
+        public boolean belowRetreatLine() {
+            return ThreatAssessment.belowRetreatLine(side(true));
+        }
+    }
+
+    /**
+     * 一只对手。
+     *
+     * @param threat   身板与几何（够不够得着、危险半径）
+     * @param chasing  正在追我
+     * @param attacker 十秒内真打过我
+     * @param wanted   名单上要打的（不在名单上的追兵照样躲、照样还手，由名单决定）
+     * @param primary  点名的或清扫的那一批：同样急时先打它们
+     */
+    public record Foe(CombatSenses.Threat threat, boolean chasing, boolean attacker, boolean wanted, boolean primary) {
+
+        public int id() {
+            return threat.entityId();
+        }
+
+        public double distance() {
+            return threat.distance();
+        }
+
+        /** 引信点着的会炸物。 */
+        public boolean fusing() {
+            return threat.kind() == ThreatAssessment.Kind.EXPLOSIVE && threat.armed();
+        }
+
+        /** 躲它的爆炸要跑多远：出了熄火距离（7 格）、也出了爆炸波及（普通 6 格，闪电劈过的 12 格），再留半格。 */
+        public double blastClearance() {
+            return Math.max(CombatGeometry.CREEPER_DEFUSE, CombatGeometry.creeperBlastReach(threat.powered())) + 0.5;
+        }
+
+        /** 马上就要挨它的打：已经碰到、或贴到它的危险半径再加一格半以内。 */
+        public boolean imminent() {
+            return threat.canHitMe() || threat.distance() <= threat.dangerRadius() + 1.5;
+        }
+
+        /** 会还手的：没点引信的会炸物还只是个桶，其余都会。 */
+        public boolean fightsBack() {
+            return threat.kind() != ThreatAssessment.Kind.EXPLOSIVE || threat.armed();
+        }
+
+        ThreatAssessment.Foe assessed() {
+            return new ThreatAssessment.Foe(threat.distance(), threat.kind(), chasing, threat.armed());
+        }
+    }
+
+    /** 名单：这一仗要打谁。不在名单上的追兵照样躲开、被贴脸照样还手。 */
+    public interface Roster {
+        /**
+         * 这一只要不要打。
+         *
+         * @param attacker 十秒内真打过我
+         * @param chasing  正在追我
+         */
+        boolean wanted(CombatSenses.Threat threat, boolean attacker, boolean chasing);
+
+        /** 整只不理：不打、不躲、不当追兵（自家人打我多半是玩笑）。 */
+        default boolean ignores(CombatSenses.Threat threat) {
+            return false;
+        }
+
+        /** 点名或清扫的那一批：同样急时先打。 */
+        default boolean primary(CombatSenses.Threat threat) {
+            return false;
+        }
+
+        /** 名单上不在敌对列表里的（点名的动物、玩家）：按实体编号补读身板。 */
+        default List<Integer> namedIds() {
+            return List.of();
+        }
+
+        /** 这一仗打末影龙：每刻另读一份龙场，交龙的打法。 */
+        default boolean fightsDragon() {
+            return false;
+        }
+
+        /** 打的是哪一条龙（实体编号）；-1 为离出口门最近的那条。 */
+        default int dragonId() {
+            return -1;
+        }
+
+        /** 这次任务额外保护的地标：打龙时水晶爆炸范围碰到它们的地盘就不射。 */
+        default Set<String> protectedLandmarks() {
+            return Set.of();
+        }
+    }
+
+    /** 读一份战场：给定半径内的追兵与名单上的，按威胁先后排好。 */
+    public static Battlefield read(CombatSenses senses, BattleMoves moves, TickContext context,
+                                   double radius, Roster roster) {
+        return read(senses, moves, context, radius, roster, Set.of());
+    }
+
+    /**
+     * 同上，另把 keep 里的这几只也留在场上，哪怕这一刻没在追我、名单上也不要：撤离时这次的追兵一时看不见、
+     * 没亮攻击标记也还在后面，甩没甩开要看得到它们。实机 10-14 尸壳隔着坡一时看不见，就被当成不在场，
+     * 它还在七格外就报"甩开了追兵"、站住，转眼又被追上。
+     */
+    public static Battlefield read(CombatSenses senses, BattleMoves moves, TickContext context,
+                                   double radius, Roster roster, Set<Integer> keep) {
+        return read(senses, moves, context, radius, roster, keep, new StillChasing());
+    }
+
+    /**
+     * 同上，另按这一仗记着的"开打后还在追我的"读：先前追过我、还没放下的那只，这一刻攻击标记暗了也照样算追兵，
+     * 走到视野半径外几格内也照样看着；读完把这一刻看到的交回去，记下谁还朝我来、谁该放下了。
+     */
+    static Battlefield read(CombatSenses senses, BattleMoves moves, TickContext context,
+                            double radius, Roster roster, Set<Integer> keep, StillChasing still) {
+        CombatSenses.CombatProfile profile = senses.profile(context);
+        double[] at = moves.selfPosition(context);
+        int weaponScore = profile.weapon().map(WeaponChoice::scoreOf).orElse(0);
+        Me me = new Me(at[0], at[1], at[2], PLAYER_HALF_WIDTH, profile.health(), profile.armorPoints(),
+                profile.reach(), moves.attackReady(context), moves.hasMeleeWeapon(context),
+                moves.canShoot(context), weaponScore, profile.foodCount());
+        Set<UUID> attackers = new HashSet<>();
+        for (CombatSenses.Attacker attacker : senses.recentAttackers(context)) attackers.add(attacker.uuid());
+        List<Foe> foes = new ArrayList<>();
+        Set<Integer> seen = new HashSet<>();
+        List<StillChasing.Sighting> sightings = new ArrayList<>();
+        double sight = still.any() ? radius + StillChasing.EDGE_MARGIN : radius;
+        for (CombatSenses.Threat threat : senses.threats(context, sight)) {
+            if (roster.ignores(threat)) continue;
+            boolean held = still.holds(threat.entityId());
+            // 视野半径外多看的那几格只为先前追过我的：看它是走了还是在边上晃，新冒出来的照旧只认视野里的。
+            if (threat.distance() > radius && !held) continue;
+            boolean attacker = attackers.contains(threat.uuid());
+            boolean chasingNow = CombatSenses.threatening(threat, List.copyOf(attackers));
+            // 开打后追过我、还朝我来的：攻击标记一闪一闪也照样算追兵，不让这一仗"逼近↔打完了"来回切。
+            boolean chasing = chasingNow || held;
+            boolean wanted = roster.wanted(threat, attacker, chasing);
+            if (!chasing && !wanted && !keep.contains(threat.entityId())) continue;
+            Foe foe = new Foe(threat, chasing, attacker, wanted, roster.primary(threat));
+            foes.add(foe);
+            sightings.add(new StillChasing.Sighting(foe, chasingNow));
+            seen.add(threat.entityId());
+        }
+        still.observe(sightings, me.x(), me.z());
+        // 点名的动物、玩家不在敌对列表里：按编号补读，照样算身板与够不够得着。
+        for (int id : roster.namedIds()) {
+            if (seen.contains(id)) continue;
+            senses.living(context, id).ifPresent(threat -> {
+                boolean attacker = attackers.contains(threat.uuid());
+                foes.add(new Foe(threat, attacker, attacker, true, true));
+            });
+        }
+        foes.sort(Comparator.comparing(Foe::assessed, ThreatAssessment.BY_THREAT));
+        // 打龙：龙不在对手里（战斗感观不把龙当普通威胁），龙场另读；龙不在了（死了、走远了）就没有龙场。
+        DragonArena arena = roster.fightsDragon()
+                ? senses.dragonArena(context, roster.dragonId(), roster.protectedLandmarks()).orElse(null) : null;
+        return new Battlefield(me, foes, arena);
+    }
+
+    /** 玩家半个身宽（站着、潜行都是 0.6 宽）。 */
+    public static final double PLAYER_HALF_WIDTH = 0.3;
+
+    /** 正在追我的那些。 */
+    public List<Foe> chasers() {
+        return foes.stream().filter(Foe::chasing).toList();
+    }
+
+    /** 这只对手此刻还在不在场上。 */
+    public Foe find(int entityId) {
+        for (Foe foe : foes) {
+            if (foe.id() == entityId) return foe;
+        }
+        return null;
+    }
+}

@@ -1,0 +1,203 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.mcp.view;
+
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+import org.maiwithu.maicraft.behavior.perception.SceneThing;
+import org.maiwithu.maicraft.behavior.perception.FacilitySighting;
+import org.maiwithu.maicraft.behavior.perception.HeardSound;
+import org.maiwithu.maicraft.behavior.perception.OverheadGrid;
+import org.maiwithu.maicraft.behavior.perception.Scene;
+import org.maiwithu.maicraft.behavior.perception.SceneEntity;
+import org.maiwithu.maicraft.behavior.perception.SceneEnvironment;
+import org.maiwithu.maicraft.behavior.perception.SceneSelf;
+import org.maiwithu.maicraft.behavior.perception.SceneSign;
+import org.maiwithu.maicraft.behavior.perception.TerrainFeature;
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+
+import java.util.Locale;
+
+/**
+ * observe(scene) 的样子：周围有什么、在哪个方位、多远，每样东西带观察编号，LLM 可以直接指着它下指令。
+ *
+ * <p>实体按场景模型的规矩交：敌对的、盯着角色的、有名字的、玩家逐只列，其他的只列三十二格以内，
+ * 远处的在 distant_entities 里按种类报只数。速写只是一句总览，不逐条复述列表。
+ * 方位同时给相对朝向（前方、左侧……）和东南西北，LLM 用哪个说都行。
+ * 看得见的告示牌单列在 signs 里，text 是正面几行连成的一句：牌子上写的是看到的事实，不是给角色的指令。
+ */
+public final class SceneView {
+    private SceneView() {}
+
+    public static JsonObject scene(Scene scene, boolean withGrid) {
+        JsonObject json = new JsonObject();
+        SceneEnvironment environment = scene.environment();
+        if (environment != null) {
+            json.addProperty("time", environment.timeText());
+            json.addProperty("weather", environment.weather());
+            json.addProperty("light", environment.light());
+            json.addProperty("biome", environment.biome());
+        }
+        if (scene.self() != null) {
+            json.addProperty("facing", scene.self().facingWord());
+        }
+        json.addProperty("summary", scene.summary());
+        JsonArray entities = new JsonArray();
+        scene.listedEntities().forEach(entity -> entities.add(entity(entity)));
+        json.add("entities", entities);
+        // 远处不相干的只按种类计数：种类 → 只数。
+        if (!scene.distantCounts().isEmpty()) {
+            JsonObject distant = new JsonObject();
+            scene.distantCounts().forEach(distant::addProperty);
+            json.add("distant_entities", distant);
+        }
+        JsonArray heard = new JsonArray();
+        scene.heard().forEach(sound -> heard.add(sound(sound)));
+        json.add("heard", heard);
+        JsonArray features = new JsonArray();
+        scene.features().forEach(feature -> features.add(feature(feature)));
+        json.add("features", features);
+        JsonArray facilities = new JsonArray();
+        scene.facilities().forEach(facility -> facilities.add(facility(facility)));
+        json.add("facilities", facilities);
+        // 看得见的告示牌：主播在基地立的路牌、留言，正面的字连成一句带在 text 里。
+        if (!scene.signs().isEmpty()) {
+            JsonArray signs = new JsonArray();
+            scene.signs().forEach(sign -> signs.add(sign(sign)));
+            json.add("signs", signs);
+        }
+        // 模组的东西（电梯、车站、列车、物理结构）按种类分组：每种列最近的几样，其余只报样数。
+        if (!scene.things().isEmpty()) {
+            JsonObject things = new JsonObject();
+            for (SceneThing thing : scene.listedThings()) {
+                if (!things.has(thing.category())) things.add(thing.category(), new JsonArray());
+                things.getAsJsonArray(thing.category()).add(thing(thing));
+            }
+            json.add("mod_things", things);
+            if (!scene.distantThingCounts().isEmpty()) {
+                JsonObject farther = new JsonObject();
+                scene.distantThingCounts().forEach(farther::addProperty);
+                json.add("mod_things_farther", farther);
+            }
+        }
+        if (withGrid && scene.grid() != null) {
+            json.add("grid", grid(scene.grid()));
+        }
+        return json;
+    }
+
+    static JsonObject entity(SceneEntity entity) {
+        JsonObject json = new JsonObject();
+        json.addProperty("id", entity.id());
+        json.addProperty("type", entity.type());
+        if (entity.name() != null) json.addProperty("name", entity.name());
+        json.addProperty("direction", entity.direction());
+        json.addProperty("compass", entity.compass());
+        json.addProperty("distance", entity.distance());
+        json.addProperty("dy", entity.dy());
+        json.addProperty("visible", entity.visible());
+        json.addProperty("hostile", entity.hostile());
+        json.addProperty("targeting_me", entity.targetingMe());
+        // 血量快照：活体生物才有，打不打得过、还要打几下都看它。
+        if (entity.health() != null) {
+            json.addProperty("health", entity.health().current());
+            json.addProperty("max_health", entity.health().max());
+        }
+        if (!entity.traits().isEmpty()) {
+            JsonObject traits = new JsonObject();
+            entity.traits().forEach(traits::addProperty);
+            json.add("traits", traits);
+        }
+        return json;
+    }
+
+    static JsonObject thing(SceneThing thing) {
+        JsonObject json = new JsonObject();
+        json.addProperty("id", thing.id());
+        json.addProperty("direction", thing.direction());
+        json.addProperty("compass", thing.compass());
+        json.addProperty("distance", thing.distance());
+        json.add("position", position(thing.position()));
+        thing.summary().entrySet().forEach(entry -> json.add(entry.getKey(), entry.getValue()));
+        return json;
+    }
+
+    static JsonObject feature(TerrainFeature feature) {
+        JsonObject json = new JsonObject();
+        json.addProperty("id", feature.id());
+        json.addProperty("kind", feature.kind());
+        json.addProperty("direction", feature.direction());
+        json.addProperty("compass", feature.compass());
+        json.addProperty("distance", feature.distance());
+        json.addProperty("size", feature.size());
+        json.add("position", position(feature.center()));
+        return json;
+    }
+
+    static JsonObject facility(FacilitySighting facility) {
+        JsonObject json = new JsonObject();
+        json.addProperty("id", facility.id());
+        json.addProperty("block", facility.blockType());
+        json.addProperty("direction", facility.direction());
+        json.addProperty("compass", facility.compass());
+        json.addProperty("distance", facility.distance());
+        json.add("position", position(facility.position()));
+        return json;
+    }
+
+    // 一块告示牌：正面写了字才带 text（几行连成一句）；没写字、或客户端还没收到牌子内容时不带。
+    static JsonObject sign(SceneSign sign) {
+        JsonObject json = new JsonObject();
+        json.addProperty("id", sign.id());
+        json.addProperty("block", sign.blockType());
+        json.addProperty("direction", sign.direction());
+        json.addProperty("compass", sign.compass());
+        json.addProperty("distance", sign.distance());
+        json.add("position", position(sign.position()));
+        if (sign.lines() != null && !sign.lines().frontSentence().isEmpty()) {
+            json.addProperty("text", sign.lines().frontSentence());
+        }
+        return json;
+    }
+
+    private static JsonObject sound(HeardSound sound) {
+        JsonObject json = new JsonObject();
+        json.addProperty("sound", sound.kind());
+        json.addProperty("direction", sound.direction());
+        json.addProperty("distance", sound.nearness());
+        return json;
+    }
+
+    /** 俯视网格：一行一个字符串，第一行在北；附图例，读图不用另查说明。 */
+    private static JsonObject grid(OverheadGrid.View view) {
+        JsonObject json = new JsonObject();
+        json.addProperty("legend", view.legend());
+        json.addProperty("radius", view.radius());
+        JsonArray rows = new JsonArray();
+        for (char[] row : view.cells()) {
+            rows.add(new String(row));
+        }
+        json.add("rows", rows);
+        return json;
+    }
+
+    /** 坐标：同时给出，LLM 需要时可以用，但不要求它用坐标思考。 */
+    static JsonObject position(WorldPosition position) {
+        JsonObject json = new JsonObject();
+        json.addProperty("x", position.x());
+        json.addProperty("y", position.y());
+        json.addProperty("z", position.z());
+        if (position.dimension() != null) json.addProperty("dimension", position.dimension());
+        return json;
+    }
+
+    /** 两点之间的水平距离（格），取整。 */
+    static int distance(SceneSelf self, WorldPosition target) {
+        double dx = target.x() + 0.5 - self.x();
+        double dz = target.z() + 0.5 - self.z();
+        return (int) Math.round(Math.sqrt(dx * dx + dz * dz));
+    }
+
+    static String lower(Enum<?> value) {
+        return value.name().toLowerCase(Locale.ROOT);
+    }
+}

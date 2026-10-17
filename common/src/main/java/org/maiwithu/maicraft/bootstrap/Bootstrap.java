@@ -1,0 +1,766 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.bootstrap;
+
+import com.google.gson.JsonObject;
+import java.io.IOException;
+import java.util.function.Function;
+import java.util.function.Predicate;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
+import java.util.List;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.Camera;
+import net.minecraft.client.gui.GuiGraphics;
+import org.joml.Matrix4f;
+import org.maiwithu.maicraft.behavior.inventory.PicksUpDrops;
+import org.maiwithu.maicraft.behavior.inventory.ClientDropPickup;
+import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
+import org.maiwithu.maicraft.debug.BlueprintOverlay;
+import org.maiwithu.maicraft.debug.DebugPanel;
+import org.maiwithu.maicraft.debug.PanelSettings;
+import org.maiwithu.maicraft.debug.StatusReader;
+import org.maiwithu.maicraft.mcp.tool.RecentToolCalls;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.ChatType;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.block.state.BlockState;
+import org.maiwithu.maicraft.behavior.interaction.Interactions;
+import org.maiwithu.maicraft.behavior.interaction.UseKeyHoldProjection;
+import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
+import org.maiwithu.maicraft.behavior.acquire.ItemsInUse;
+import org.maiwithu.maicraft.game.player.RestStatistics;
+import org.maiwithu.maicraft.behavior.reminder.PlayerReminders;
+import org.maiwithu.maicraft.kernel.event.TaskEvent;
+import org.maiwithu.maicraft.game.player.EquipmentConfirmations;
+import org.maiwithu.maicraft.game.world.DropConfirmations;
+import org.maiwithu.maicraft.behavior.acquire.LiveCarryReads;
+import org.maiwithu.maicraft.behavior.landing.CatchesFall;
+import org.maiwithu.maicraft.behavior.landing.FallRescues;
+import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
+import org.maiwithu.maicraft.behavior.navigation.WalkTo;
+import org.maiwithu.maicraft.behavior.lighting.FollowLighting;
+import org.maiwithu.maicraft.behavior.lighting.LightRegion;
+import org.maiwithu.maicraft.behavior.lighting.LiveLightingWorld;
+import org.maiwithu.maicraft.behavior.lighting.LightingWorld;
+import org.maiwithu.maicraft.behavior.perception.DimensionChanges;
+import org.maiwithu.maicraft.behavior.perception.HurtEpisodes;
+import org.maiwithu.maicraft.behavior.perception.SkyChanges;
+import org.maiwithu.maicraft.ability.timer.Timers;
+import org.maiwithu.maicraft.behavior.survival.BreathNeed;
+import org.maiwithu.maicraft.behavior.combat.ModRangedWeapons;
+import org.maiwithu.maicraft.behavior.survival.DarknessNeed;
+import org.maiwithu.maicraft.behavior.survival.LiveDarkView;
+import org.maiwithu.maicraft.behavior.survival.LiveTorchMoves;
+import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
+import org.maiwithu.maicraft.behavior.survival.DigOutNeed;
+import org.maiwithu.maicraft.behavior.survival.FallNeed;
+import org.maiwithu.maicraft.behavior.survival.NativeBlockBreaking;
+import org.maiwithu.maicraft.behavior.survival.EdgeProximityNeed;
+import org.maiwithu.maicraft.behavior.survival.EatSoonTask;
+import org.maiwithu.maicraft.behavior.survival.EatsCarriedFood;
+import org.maiwithu.maicraft.behavior.survival.HungerNeed;
+import org.maiwithu.maicraft.behavior.combat.LiveBattleMoves;
+import org.maiwithu.maicraft.behavior.combat.LiveCombatSenses;
+import org.maiwithu.maicraft.behavior.survival.LiveEdgeView;
+import org.maiwithu.maicraft.behavior.survival.LiveHungerView;
+import org.maiwithu.maicraft.behavior.survival.LiveNightAndEdgeMoves;
+import org.maiwithu.maicraft.behavior.survival.LiveBurrow;
+import org.maiwithu.maicraft.behavior.permission.Protection;
+import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
+import org.maiwithu.maicraft.behavior.survival.BlockBreaking;
+import org.maiwithu.maicraft.behavior.survival.LiveAirRoutes;
+import org.maiwithu.maicraft.behavior.survival.LiveCeilingDigs;
+import org.maiwithu.maicraft.behavior.survival.LiveNightView;
+import org.maiwithu.maicraft.behavior.survival.LostItemsNeed;
+import org.maiwithu.maicraft.behavior.survival.NightfallNeed;
+import org.maiwithu.maicraft.behavior.survival.SelfDefenseNeed;
+import org.maiwithu.maicraft.behavior.survival.SurvivalSituation;
+import org.maiwithu.maicraft.game.ModIdentity;
+import org.maiwithu.maicraft.game.interaction.DefaultInteractionSender;
+import org.maiwithu.maicraft.game.interaction.InteractionSender;
+import org.maiwithu.maicraft.game.menu.LeftoverScreens;
+import org.maiwithu.maicraft.game.menu.MenuActions;
+import org.maiwithu.maicraft.game.loader.LoaderEnvironment;
+import org.maiwithu.maicraft.game.ChatLog;
+import org.maiwithu.maicraft.game.ClientReceivedChat;
+import org.maiwithu.maicraft.game.ClientHooks;
+import org.maiwithu.maicraft.game.SubtitleFeed;
+import org.maiwithu.maicraft.game.menu.DefaultMenuActions;
+import org.maiwithu.maicraft.game.menu.RenderedScreens;
+import org.maiwithu.maicraft.game.player.DeathFacts;
+import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.player.PlayerControlBoundary;
+import org.maiwithu.maicraft.game.player.ReadsFoodValues;
+import org.maiwithu.maicraft.game.player.UseKeyHold;
+import org.maiwithu.maicraft.game.serverlink.ClientOperation;
+import org.maiwithu.maicraft.game.serverlink.LinkTransport;
+import org.maiwithu.maicraft.game.serverlink.ServerLinkSession;
+import org.maiwithu.maicraft.game.world.BlockScanService;
+import org.maiwithu.maicraft.game.world.ClientLightLevels;
+import org.maiwithu.maicraft.game.world.ReadsLightLevels;
+import org.maiwithu.maicraft.behavior.combat.CombatMemory;
+import org.maiwithu.maicraft.behavior.combat.CombatSenses;
+import org.maiwithu.maicraft.kernel.event.TaskEventSink;
+import org.maiwithu.maicraft.kernel.interrupt.ControlLoop;
+import org.maiwithu.maicraft.kernel.interrupt.DeathDecisionHost;
+import org.maiwithu.maicraft.kernel.goal.DeathRecovery;
+import org.maiwithu.maicraft.kernel.goal.DeathRecoveryActions;
+import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
+import org.maiwithu.maicraft.kernel.event.EventPublishingGoalRunStore;
+import org.maiwithu.maicraft.kernel.event.ReadsSelfBrief;
+import org.maiwithu.maicraft.kernel.event.TaskEventLog;
+import org.maiwithu.maicraft.kernel.event.ChatEventLog;
+import org.maiwithu.maicraft.kernel.goal.GoalRunStore;
+import org.maiwithu.maicraft.kernel.goal.GoalRunTable;
+import org.maiwithu.maicraft.kernel.goal.InMemoryGoalRunStore;
+import org.maiwithu.maicraft.kernel.goal.PlayerControlHandover;
+import org.maiwithu.maicraft.kernel.goal.RemembersPlaces;
+import org.maiwithu.maicraft.kernel.task.TaskFactories;
+import org.maiwithu.maicraft.mcp.tool.LookupTool;
+import org.maiwithu.maicraft.mcp.tool.ToolDispatcher;
+import org.maiwithu.maicraft.mcp.transport.EmbeddedMcpService;
+import org.maiwithu.maicraft.mcp.transport.McpConfig;
+import org.maiwithu.maicraft.network.MaiCraftPayload;
+import org.maiwithu.maicraft.server.BlockOwnershipRecord;
+import org.maiwithu.maicraft.server.OwnershipFile;
+import org.maiwithu.maicraft.server.OwnershipQuery;
+import org.maiwithu.maicraft.server.ServerConfirmations;
+import org.maiwithu.maicraft.server.ServerLinkNetwork;
+import org.maiwithu.maicraft.server.ServerLinkServices;
+import org.maiwithu.maicraft.server.ServerOperationRegistry;
+import org.maiwithu.maicraft.server.compat.ServerCompatModule;
+import org.maiwithu.maicraft.server.compat.ServerCompatRegistry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.maiwithu.maicraft.game.world.FurnaceFuels;
+import org.maiwithu.maicraft.compat.CompatModule;
+import org.maiwithu.maicraft.compat.CompatRegistry;
+import org.maiwithu.maicraft.compat.SupportedMod;
+
+/**
+ * 公共启动入口。两个加载器的入口类只调用这里，再把加载器事件转给返回的接收端。
+ *
+ * <p>启动顺序：通用部分（独立服务器与客户端都会执行）→ 客户端部分（只在客户端执行）。
+ * 能力与联动模组在这里按一份明确的清单创建和登记，不做类路径扫描，新增时在清单里加一行。
+ *
+ * <p>服务端一侧已接好：方块归属记录、交互确认通道与只读的归属查询。
+ * 客户端一侧已接好游戏接口层的每刻服务、和服务端 MaiCraft 的会话、七项生存需求与控制循环、
+ * 进世界时的世界记忆与感知场景，以及目标执行与四个 MCP 工具（lookup、execute、goal、events）。
+ */
+public final class Bootstrap {
+    private static final Logger LOG = LoggerFactory.getLogger(Bootstrap.class);
+
+    /** 方块归属记录有改动时多久存一次盘：五分钟，和原版自动存档的节奏一样。 */
+    private static final int OWNERSHIP_SAVE_INTERVAL_TICKS = 20 * 60 * 5;
+
+    private Bootstrap() {}
+
+    // 有改动才写；还没登记（第一刻之前）就什么都不做。
+    private static void saveOwnership(MinecraftServer server) {
+        BlockOwnershipRecord record = ServerLinkServices.ownership(server);
+        if (record != null) {
+            OwnershipFile.of(server).saveIfDirty(record);
+        }
+    }
+
+    /** 本刻的控制循环上下文：游戏刻号来自所在世界，角色来自控制权边界发出的当刻上下文。 */
+    private record ClientTickContext(long gameTick, PlayerContext player) implements TickContext {}
+
+    /**
+     * 通用部分：在两端都执行；只创建服务端一侧的东西，不引用任何仅客户端的类。
+     *
+     * @param compatCatalog 这个加载器服务端一侧的联动清单；没有联动的加载器传空列表
+     */
+    public static ServerLifecycle startOnBothSides(LoaderEnvironment loader, ServerConfirmations.Push push,
+                                              List<SupportedMod<ServerCompatModule>> compatCatalog) {
+        LOG.info("{} 通用部分启动（加载器：{}）", ModIdentity.NAME, loader.loaderName());
+        ServerOperationRegistry operations = new ServerOperationRegistry();
+        ServerLinkNetwork network = new ServerLinkNetwork(operations);
+        // 客户端可查询的只读操作：一个区块里哪些格是谁放的。归属记录按服务器实例在第一个刻结束时从存档读回并登记。
+        operations.register(OwnershipQuery.OPERATION, 1, false, new OwnershipQuery());
+        // 服务端一侧的联动清单逐行检查并写日志：通过的联动入口把客户端读不到的模组读数登记成只读操作，握手时协商。
+        ServerCompatLoading.load(compatCatalog, loader, new ServerCompatRegistry(operations));
+        return new ServerLifecycle() {
+            @Override public void tickEnd(MinecraftServer server) {
+                // 首刻从存档读回本服务器的归属记录并登记确认通道；之后每五分钟把改动存一次盘，停服时再存一次。
+                ServerLinkServices.attachIfAbsent(server, () -> OwnershipFile.of(server).load(),
+                        () -> new ServerConfirmations(push, network::hasSession));
+                if (server.getTickCount() % OWNERSHIP_SAVE_INTERVAL_TICKS == 0) {
+                    saveOwnership(server);
+                }
+            }
+
+            @Override public void stopped(MinecraftServer server) {
+                saveOwnership(server);
+                ServerLinkServices.detach(server);
+                network.stopped(server);
+                LOG.info("{} 服务端已停止", ModIdentity.NAME);
+            }
+
+            @Override public void clientEnvelope(ServerPlayer player, MaiCraftPayload payload,
+                                                 Consumer<JsonObject> reply) {
+                network.receive(player, payload, reply);
+            }
+
+            @Override public void clientDisconnected(ServerPlayer player) {
+                network.disconnected(player);
+            }
+
+            @Override public void clientWorldChanged(ServerPlayer player) {
+                network.worldChanged(player);
+            }
+
+            @Override public void playerBrokeBlock(ServerPlayer player, BlockPos position, BlockState state) {
+                // 方块被拆了，这一格原来的归属就不再对应任何方块。
+                var ownership = ServerLinkServices.ownership(player.serverLevel().getServer());
+                if (ownership != null) {
+                    ownership.forget(player.serverLevel().dimension().location().toString(), position);
+                }
+                var confirmations = ServerLinkServices.confirmations(player.serverLevel().getServer());
+                if (confirmations != null) confirmations.broke(player, position, state);
+            }
+        };
+    }
+
+    /**
+     * 控制循环的生存需求清单：按急迫程度登记，必须立刻处理的先登记，同样急时先插进来。
+     * 战斗感观由外面递进来，与战斗能力共用一份；走到已接上，撤离与绕行用真的走路完成；
+     * 饿了的临时任务吃随身食物：先换到主手，再原生按住吃完一口；身上没吃的就经拿东西的引擎有预算地弄口粮。
+     * 夜晚的"今晚有没有床"与夜间休息由睡觉能力进世界时接上桥，接上前按弄不到床对待。
+     * 太暗只在两个动作之间插（LATER）：走到暗处、包里有火把，就在眼前顺手插一支火把。
+     */
+    private static ControlLoop withSurvivalNeeds(
+            TaskEventSink events, DeathDecisionHost deathDecisions,
+            InteractionSender interactionSender, MenuActions menuActions, Interactions interactions,
+            CombatSenses combatSenses, WalkTo walks,
+            EatSoonTask.FoodMoves foodMoves, ReadsFoodValues foods, LiveBurrow burrow, LiveCeilingDigs ceilings,
+            SurvivalWiring survivalWiring, ItemsToKeep keeps, Supplier<Protection> protection,
+            FollowLighting followLighting, ReadsLightLevels lightLevels, ClientMovesToMainhand hands,
+            ModRangedWeapons ranged, Function<PlayerContext, CatchesFall> fallRescues, Predicate<UUID> trusted,
+            PicksUpDrops lostDrops, Supplier<ReadsRememberedPlaces> places) {
+        // 角色死亡这类循环自身的处境变化也从同一条事件流出去；死亡决策从挂载口交给目标运行表。
+        ControlLoop loop = new ControlLoop(List.of(
+                new DigOutNeed(new SurvivalSituation.FromPlayer(),
+                        () -> new NativeBlockBreaking(interactionSender, menuActions)),
+                new BreathNeed(new SurvivalSituation.FromPlayer(), ceilings, new LiveAirRoutes()),
+                // 走路里的落地救援、喷气背包飞的那一段、寻路"飞上去"那一步自己管着上下时，落地防护让开。
+                new FallNeed(new SurvivalSituation.FromPlayer(), fallRescues,
+                        () -> BaritoneInternals.landingInProgress() || ClientHooks.flightControlled()
+                                || BaritoneInternals.flyingUp()),
+                // 自家人打角色只发事件、不停工；别的玩家打角色退开举盾、停下等 LLM 决定。夜里撤不掉又打不过接同一套挖三填一。
+                // 打完把这一仗掉出来的东西和射出去的箭捡回来（用回去捡尸体的同一套）；撤离往记过的"家"那一侧跑。
+                new SelfDefenseNeed(combatSenses, new LiveBattleMoves(walks, interactions.heldProjection(), ranged), events,
+                        trusted, LiveNightAndEdgeMoves.burrow(burrow, events)).pickingUp(lostDrops).knowingHome(places),
+                new HungerNeed(new LiveHungerView(foods, keeps), foodMoves, events),
+                new DarknessNeed(new LiveDarkView(lightLevels),
+                        new LiveTorchMoves(interactions, hands, protection, Set.of()), followLighting),
+                new NightfallNeed(new LiveNightView(combatSenses),
+                        LiveNightAndEdgeMoves.burrow(burrow, events), survivalWiring, survivalWiring, survivalWiring.autoSleep()),
+                new EdgeProximityNeed(new LiveEdgeView(),
+                        LiveNightAndEdgeMoves.retreat(walks, events)),
+                // 刚重生、身上的东西撒在死的地方：五分钟内跑回去捡。
+                new LostItemsNeed(LiveNightAndEdgeMoves.players(),
+                        LiveNightAndEdgeMoves.lostItems(walks, lostDrops, events), events)), events, deathDecisions);
+        // 换一件事做之前先关掉上一件留下的界面（工作台、过滤器），再让新的那件动手。
+        loop.onTaskSwitch(context -> LeftoverScreens.close(context.player()));
+        return loop;
+    }
+
+    /**
+     * 客户端部分：只在客户端执行。创建游戏接口层的每刻服务、和服务端的会话、控制循环与生存需求、
+     * 目标执行与 MCP 工具；进世界时再创建世界记忆、感知场景与能力清单（见 WorldScope）。
+     *
+     * @param compatCatalog 这个加载器客户端一侧的联动清单；没有联动的加载器传空列表。
+     *                      清单在客户端启动完成时才逐行检查，那时所有模组都构造完了
+     */
+    public static ClientLifecycle startClient(LoaderEnvironment loader, LinkTransport transport,
+                                              List<SupportedMod<CompatModule>> compatCatalog) {
+        LOG.info("{} 客户端部分启动（加载器：{}，开发环境：{}）",
+                ModIdentity.NAME, loader.loaderName(), loader.isDevelopment());
+        ClientEntry entry = new ClientEntry(loader, compatCatalog);
+        entry.createSharedServices(loader);
+        entry.connectSession(transport);
+        return entry;
+    }
+
+    /** 客户端共享服务与每刻入口：进世界的现场（WorldScope）在这里建与丢。 */
+    private static final class ClientEntry implements ClientLifecycle {
+        private final PlayerControlBoundary playerControl = new PlayerControlBoundary();
+        private final BlockScanService blockScans = new BlockScanService();
+        // 正要用的东西一份：上一个目标拿到的、拿东西的引擎正在拿的；走路垫脚按它留够数，只垫多出来的。
+        private final ItemsInUse itemsInUse = new ItemsInUse(LiveCarryReads.itemTags());
+        private final BaritoneInternals walks = new BaritoneInternals(itemsInUse);
+        // 掉落物与装备耐久的事实确认：网络包经 Mixin 喂进来，捡掉落物、战斗拾荒、提醒都按它认事实。
+        private final DropConfirmations dropConfirmations = new DropConfirmations();
+        private EquipmentConfirmations equipmentConfirmations;
+        /** 伤害证据的记忆：自卫与提醒共用；服务器的伤害包经 Mixin 喂进来。 */
+        private CombatMemory combatMemory;
+        /** 角色身上的八条提醒：事件进任务事件流，证据经 observe(self) 交出去。 */
+        private PlayerReminders reminders;
+        private final RestStatistics restStatistics = new RestStatistics();
+        private final UseKeyHold useKeyHold = new UseKeyHold();
+        private final SubtitleFeed subtitles = new SubtitleFeed();
+        private final McpConfig mcpConfig = McpConfig.localForProcess(8766);
+        // 能力注册表客户端全程一份：进世界时按清单把各能力登记进来，退世界清掉，不跨世界残留；能力需要的模组装没装由加载器回答，没装的能力不登记。
+        private final AbilityRegistry abilities;
+        /** 这个加载器的联动清单；客户端启动完成时逐行检查成登记表。 */
+        private final List<SupportedMod<CompatModule>> compatCatalog;
+        /** 联动登记表：启动完成前是空的，之后是按清单检查过的那份；进世界建能力清单时把登记的来源交进去。 */
+        private CompatRegistry compat = CompatRegistry.empty();
+        /** 挨打的片段：每刻看一眼，到点发事件。 */
+        private HurtEpisodes hurtEpisodes;
+        // MCP 请求线程排工作、客户端刻里做：下达、暂停、回答与控制循环推进在同一个线程上。
+        private final ClientTickWork clientWork = new ClientTickWork();
+        // 任务事件流一份：目标处境变化与生存需求的事件都进它，events 工具从这里读。
+        private final TaskEventLog taskEvents = new TaskEventLog();
+        // 换维度与天色变化（天黑天亮、下雨雨停）：每刻看一眼，变了发事件，LLM 靠后者安排睡觉和户外的活。
+        private final DimensionChanges dimensionChanges = new DimensionChanges(taskEvents);
+        private final SkyChanges skyChanges = new SkyChanges(taskEvents);
+        // LLM 用 timer 挂的计时：每刻看一眼游戏时间，到点往任务事件流发 timer_due；离开世界清空。
+        private final Timers timers = new Timers(taskEvents);
+        // 聊天事件流一份：聊天栏收到的消息进它，events(topic=chat) 从这里读；和任务事件分开，刷屏挤不掉目标的事件。
+        private final ChatEventLog chatEvents = new ChatEventLog();
+        private final WorldScope[] worldScope = new WorldScope[1];
+        // 目标结束时附的一行自身摘要读当前世界的现场；不在世界里时不附，事件照发。
+        private final ReadsSelfBrief selfBriefs = () -> worldScope[0] == null ? Optional.empty() : worldScope[0].selfBrief();
+        private EmbeddedMcpService mcp;
+        /** MCP 入口启动失败的原因；启动成功时为 null。调试面板照实显示。 */
+        private String mcpStartFailure;
+        // MCP 入口最近收到的工具调用：调用分发处记，调试面板读它看 LLM 发了什么、成没成。
+        private final RecentToolCalls recentCalls = new RecentToolCalls();
+        /** F9 调试面板：启动完成后建，只读各层现状。 */
+        private DebugPanel debugPanel;
+        /** 施工预览：design 投影的蓝图留在这里，面板画它；进世界建能力清单时把它交给 design。 */
+        private final BlueprintOverlay blueprintOverlay = new BlueprintOverlay();
+        /** 启动时拿到的加载器环境：调试面板的设置文件放在它的 config 目录下。 */
+        private LoaderEnvironment loader;
+        private ServerLinkSession session;
+        /** 所有者的实例配置：启动时读一次，之后只读；不经任何工具参数暴露。 */
+        private InstanceConfig instanceConfig;
+        /** 熔炉燃料由加载器回答：进世界建能力清单时交给配方与燃料的读端。 */
+        private FurnaceFuels furnaceFuels;
+        private ControlLoop controlLoop;
+        private DefaultMenuActions menuActions;
+        private DefaultInteractionSender interactionSender;
+        private CombatSenses combatSenses;
+        // 只读亮度读取一份：感知、太暗生存需求与照明量的是同一条游戏事实。
+        private final ReadsLightLevels lightLevels = new ClientLightLevels(() -> playerControl.activeContext().orElse(null));
+        private final LightingWorld lightingWorld = new LiveLightingWorld(() -> playerControl.activeContext().orElse(null));
+        /** 随行补光的会话设置：太暗生存需求与 light 能力共用一份，进世界重置为默认。 */
+        private final FollowLighting followLighting = new FollowLighting();
+        /** 夜晚生存需求与睡觉能力之间的晚接：能力进世界登记后接上真实现。 */
+        private final SurvivalWiring survivalWiring = new SurvivalWiring();
+        private Interactions interactions;
+        private ToolDispatcher tools;
+        private GoalRunTable goals;
+        // 启动自动接管开关：maicraft.automation.on_join 开启时，进世界逐刻请求控制权直到拿到（默认关）。
+        // 它只管"进世界就接管"这一段：拿到之后开关就不再管，之后由目标下达的时机决定何时再请求，人类按 F8 抢回不会被开关立刻夺回；重新进世界（现场重建）时重新生效。
+        private final boolean automationOnJoin = Boolean.getBoolean("maicraft.automation.on_join");
+        private boolean startupAutomationPending;
+        /** 上一刻自动化是否拿着角色；变了就记一行日志，排查"下了目标却不动"时先看这里。 */
+        private boolean automationOwned;
+        // 每刻推进的各子系统各包一层：哪个抛了异常只跳过它这一刻，不把整个客户端带崩。
+        private final TickGuard tickGuard = new TickGuard();
+
+        ClientEntry(LoaderEnvironment loader, List<SupportedMod<CompatModule>> compatCatalog) {
+            this.abilities = new AbilityRegistry(new TaskFactories(), loader::isModLoaded);
+            this.compatCatalog = List.copyOf(compatCatalog);
+        }
+
+        /** 创建客户端全程共用的服务，并把 Mixin 需要的实例登记到静态登记点。 */
+        void createSharedServices(LoaderEnvironment loader) {
+            // 实例配置启动时读一次：所有者在 config/maicraft.json 里放的开关，全进程只认这份文件。
+            this.loader = loader;
+            instanceConfig = InstanceConfig.read(loader.configDirectory());
+            furnaceFuels = loader.furnaceFuels();
+            if (instanceConfig.allowGameCommands()) {
+                LOG.info("{} 本实例连管理员命令也允许角色执行（配置文件放开）", ModIdentity.NAME);
+            }
+            // 交互提交与容器界面操作共用角色上下文里同一份每刻一次的交互机会；两边建好后互相接上，再挂进角色上下文。
+            // 行为层的生存需求要靠这条轨道挖掘与放水，所以在这里创建并互相接好。
+            // 界面真正画出来的记录：渲染从 Mixin 进来记帧，容器界面点击前要等改变后的界面画过一帧。
+            RenderedScreens renderedScreens = new RenderedScreens();
+            ClientHooks.registerRenderedScreens(renderedScreens);
+            menuActions = new DefaultMenuActions(playerControl.input(), renderedScreens);
+            interactionSender = new DefaultInteractionSender(menuActions);
+            menuActions.attachSender(interactionSender);
+            playerControl.attachInteractionEntries(interactionSender, menuActions);
+            // 按住使用键的投影：持续使用的提交方接入前没有任务占用，投影读到的始终是真实键值。
+            UseKeyProjection useKeyProjection = new UseKeyHoldProjection(useKeyHold);
+            // 生存需求与战斗感观：控制循环在这里建好，目标运行表把主任务挂上去。
+            buildSurvival(useKeyProjection, deathDecisions());
+            // Mixin 钩子拿不到构造注入，只能在这里登记；服务本体仍以实例传递。
+            ClientHooks.registerPlayerControl(playerControl);
+            ClientHooks.registerBlockScans(blockScans);
+            ClientHooks.registerUseKeyHold(useKeyHold);
+            ClientHooks.registerSubtitleFeed(subtitles);
+            ClientHooks.registerChatLog(new ChatLog());
+            ClientHooks.registerDropConfirmations(dropConfirmations);
+            // 装备用坏了：发一条事件告诉 LLM 坏的是哪一件；不替它决定换不换。
+            equipmentConfirmations = new EquipmentConfirmations(broken -> taskEvents.publish(TaskEvent.Kind.GEAR_BROKEN,
+                    "装备用坏了：" + broken.slot() + " 的 " + broken.itemId() + " 耐久打空消灭了（满耐久 "
+                            + broken.maxDurability() + "，最后看到剩 " + broken.durabilityLastSeen() + "）"));
+            ClientHooks.registerEquipmentConfirmations(equipmentConfirmations);
+            reminders = new PlayerReminders(taskEvents,
+                    PlayerViews.foods(() -> playerControl.activeContext().orElse(null)), restStatistics);
+            ClientHooks.registerRestStatistics(restStatistics);
+            // 一次伤害包两处要：自卫的伤害证据，与提醒（黑暗里挨打、战斗压力）。
+            CombatMemory memory = combatMemory;
+            PlayerReminders playerReminders = reminders;
+            // 挨打的片段：攻击者看得见时带观察编号；碰着方块扎的先由吃过亏的方块认出、记下，那一句才说得出是它。
+            hurtEpisodes = new HurtEpisodes(taskEvents, entityId -> worldScope[0] == null ? Optional.empty()
+                    : worldScope[0].scene().seen().idOfEntity(entityId), type -> worldScope[0] == null
+                    ? Optional.empty() : worldScope[0].pains().culpritOf(type));
+            HurtEpisodes hurts = hurtEpisodes;
+            ClientHooks.registerDamageObserver((player, source, tick) -> {
+                memory.hurt(player, source, tick);
+                if (worldScope[0] != null) worldScope[0].pains().hurt(player, source, tick);
+                playerReminders.hurt(player, source, tick);
+                hurts.hurt(player, source, tick);
+            });
+            // 目标执行与 MCP 工具：LLM 用 execute 下达的目标经目标运行表成为控制循环的主任务；
+            // 目标处境与生存需求的事件都进同一条任务事件流，宿主用 events 读。
+            // 没进世界时的占位存储：进世界时换成那个世界的存盘（见 enterWorld），不在世界里也下达不了目标。
+            GoalRunStore goalRuns = new EventPublishingGoalRunStore(
+                    new NotesGoalGains(new InMemoryGoalRunStore(), itemsInUse), taskEvents, selfBriefs);
+            // 记地点交给当前世界的世界记忆；不在世界里时如实以程序错误收场，不悄悄丢掉。
+            RemembersPlaces places = (name, position) -> {
+                WorldScope scope = worldScope[0];
+                if (scope == null) {
+                    throw new IllegalStateException("角色不在世界里，记不住地点 " + name);
+                }
+                scope.memory().remember(name, position);
+            };
+            // 赋给字段：进世界时现场要经它把当期的世界记忆与目标存盘接上（enterWorld）。
+            // 控制权交接接在玩家控制权边界上：目标成为主任务时向输入层请求控制权（下一刻生效），
+            // 查询端读此刻自动化是否真的拥有控制权。启动与查询都发生在客户端刻里，线程要求满足。
+            goals = buildGoalRunTable(goalRuns, places);
+        }
+
+        /**
+         * 目标运行表：控制权交接接在玩家控制权边界上，死亡恢复的问题挂在它身上、
+         * 原生动作走角色本体自己的重生请求。表在控制循环之后建，死亡决策的挂载口
+         * 经一个转发接回来（见 deathDecisions）。
+         */
+        private GoalRunTable buildGoalRunTable(GoalRunStore goalRuns, RemembersPlaces places) {
+            // 控制权交接：目标成为主任务时向输入层请求控制权（下一刻生效），查询端读此刻谁拿着控制权。
+            PlayerControlHandover handover = new PlayerControlHandover() {
+                @Override public boolean automationOwnsControls() {
+                    return playerControl.input().automationOwnsControls();
+                }
+
+                @Override public boolean humanTookOver() {
+                    return playerControl.input().humanTookOver();
+                }
+
+                @Override public void requestControl() {
+                    // 本刻的角色上下文只在 beginTick 与 endTick 之间有效；下达与恢复都发生在客户端刻里，
+                    // 这里取的是当刻的玩家本体，不在世界里时边界会如实拒绝。
+                    playerControl.requestAutomationControl(
+                            playerControl.activeContext().orElseThrow(
+                                    () -> new IllegalStateException("不在世界里，请求不了控制权")).localPlayer());
+                }
+            };
+            // 死亡恢复的原生动作：重生与观战都走角色本体自己的重生请求（死亡界面按钮发的那个包），
+            // 成不成由游戏结算；上下文不在或发包出错就如实说发不出去，目标运行表会把问题重新挂上。
+            DeathRecoveryActions deathActions = new DeathRecoveryActions() {
+                @Override public boolean requestRespawn() {
+                    return sendNativeRespawn();
+                }
+
+                @Override public boolean requestSpectate() {
+                    return sendNativeRespawn();
+                }
+            };
+            return new GoalRunTable(abilities, goalRuns, places, controlLoop, handover,
+                    new DeathRecovery(taskEvents), deathActions);
+        }
+
+        /** 死亡决策的挂载口转发到目标运行表：表在控制循环之后建，转发到那时才有着落。 */
+        private DeathDecisionHost deathDecisions() {
+            return new DeathDecisionHost() {
+                @Override public void characterDied(DeathFacts facts, boolean connectionAlive) {
+                    if (goals != null) goals.characterDied(facts, connectionAlive);
+                }
+
+                @Override public void characterAliveAgain() {
+                    if (goals != null) goals.characterAliveAgain();
+                }
+
+                @Override public void stillDead(long gameTick) {
+                    if (goals != null) goals.stillDead(gameTick);
+                }
+            };
+        }
+
+        // 生存需求一套：吃随身食物、战斗感观、交互入口、挖三填一与换气挖顶，按急迫程度登记进控制循环。
+        private void buildSurvival(UseKeyProjection useKeyProjection, DeathDecisionHost deathDecisions) {
+            // 吃随身食物：挑一件能直接吃的，换到主手后原生按住吃完一口。
+            // 食物数值一份：饿了挑吃的、数口粮都按游戏的食物组件认。
+            ReadsFoodValues foods = PlayerViews.foods(() -> playerControl.activeContext().orElse(null));
+            // 换手一份：吃饭换手与随行插火把换手共用同一套界面搬运。
+            ClientMovesToMainhand hands = new ClientMovesToMainhand(() -> playerControl.activeContext().orElse(null));
+            // 饿了身上没吃的：经进世界后接上的拿东西引擎去弄口粮（网络、箱子、做、打猎）。
+            EatsCarriedFood foodMoves = new EatsCarriedFood(
+                    PlayerViews.backpack(() -> playerControl.activeContext().orElse(null)),
+                    foods,
+                    hands,
+                    useKeyProjection, itemsInUse, survivalWiring::food);
+            // 战斗感观一份：生存需求的自卫与战斗能力看的是同一份伤害证据。
+            combatMemory = new CombatMemory();
+            // 联动的远程武器（土豆加农炮）：登记表在启动完成时才定，这里给取表的办法；口粮不当弹药按同一份食物数值认。
+            ModRangedWeapons ranged = new ModRangedWeapons(() -> compat.rangedWeapons(), foods);
+            // 当前世界的保护判断：打龙射水晶前看爆炸范围、挖三填一看脚下、换气挖开头顶都问同一份。
+            Supplier<Protection> protection = () -> worldScope[0] == null ? null : worldScope[0].protection();
+            combatSenses = new LiveCombatSenses(combatMemory, foods, ranged, protection);
+            // 控制循环按急迫程度登记生存需求：必须立刻处理的先登记，同样急时它先插进来；
+            // 生存需求的事件从同一条任务事件流出去。主任务由目标运行表挂上：LLM 用 execute 派了活，目标就成为主任务。
+            // 交互动作入口与按住使用键投影：生存需求的落地放水、能力清单在进世界时都用它们。
+            interactions = new Interactions(useKeyProjection);
+            // 挖三填一：挖用原生挖掘、封口换方块原生放下、出坑用走到；脚下是不是别人的东西问当前世界的保护判断。
+            Supplier<PlayerContext> now = () -> playerControl.activeContext().orElse(null);
+            Supplier<BlockBreaking> diggings = () -> new NativeBlockBreaking(interactionSender, menuActions);
+            LiveBurrow burrow = new LiveBurrow(now, diggings, interactions, new ClientMovesToMainhand(now), walks,
+                    protection);
+            controlLoop = withSurvivalNeeds(taskEvents, deathDecisions, interactionSender, menuActions, interactions,
+                    combatSenses, walks, foodMoves, foods, burrow, new LiveCeilingDigs(diggings, protection),
+                    survivalWiring, itemsInUse, protection, followLighting, lightLevels, hands, ranged,
+                    // 意外往下掉：先问联动的刹车（穿着有气的喷气背包开悬停），刹不住再就地找落点放东西接住。
+                    FallRescues.withBrakes(() -> compat.fallBrakes()),
+                    // 自家人按进世界时读的实例配置认；还没进世界时谁都不算。
+                    uuid -> worldScope[0] != null && worldScope[0].trustedPlayers().includes(uuid.toString()),
+                    // 回去捡尸体用和采集、打猎同一套捡掉落物；自卫撤离往当前世界记忆里记过的"家"那一侧跑。
+                    new ClientDropPickup(now, walks, dropConfirmations), () -> worldScope[0] == null ? null : worldScope[0].memory());
+        }
+
+        /**
+         * 发原版重生请求：和人在死亡界面上点「重生」是同一个入口（角色本体自己发的那个包），
+         * 服务器按它的规则结算——普通重生或切到旁观都走这里。角色上下文不在（没进世界、
+         * 上下文过期）时发不出去，返回 false；发包出错同样如实返回 false，结果由下一刻的观察说话。
+         */
+        private boolean sendNativeRespawn() {
+            return playerControl.activeContext().map(context -> {
+                try {
+                    context.localPlayer().respawn();
+                    return true;
+                } catch (RuntimeException failure) {
+                    LOG.warn("原版重生请求发不出去", failure);
+                    return false;
+                }
+            }).orElse(false);
+        }
+
+        // 查资料与查配方：来源与配方查看器按联动登记表拼，读游戏现场都按当刻的角色。
+        private LookupTool lookupTool() {
+            return LookupSources.lookupTool(abilities, compat, () -> playerControl.activeContext().orElse(null), clientWork);
+        }
+
+        /** 建与服务端的会话，并在入服前登记客户端知道的操作清单。 */
+        void connectSession(LinkTransport transport) {
+            session = new ServerLinkSession(transport);
+            // 按区块查方块归属是第一个只读操作。
+            session.router().register(new ClientOperation(OwnershipQuery.OPERATION, 1, false));
+        }
+
+        @Override public void started() {
+            // 联动清单到这里才逐行检查：所有模组都构造完了，装没装、什么版本都已确定。
+            // 登记上来的物品来源进能力清单（进世界时建），知识来源现在就接进知识库。
+            compat = CompatRegistry.load(compatCatalog, loader);
+            // 联动模组要向服务端问的只读操作（ME 网络读数这类）入服前登记进请求路由，进世界后才问得了。
+            compat.serverReads().forEach(session.router()::register);
+            // 走路前要收起来的东西（误开的喷气背包）交给寻路：每次问都读当时的登记表。
+            walks.stowBeforeWalking(() -> compat.stowsBeforeWalking());
+            // 能直接飞上高处的装备（喷气背包）交给寻路：算路时拿它和垫方块往上搭比哪个省事。
+            walks.flyUpGear(() -> compat.flyUpGears());
+            // 能刹住往下跳的装备（穿着有气的喷气背包）也交给寻路：计划内的往下跳用它刹住，不翻背包找水桶。
+            walks.fallBrakes(() -> compat.fallBrakes());
+            tools = McpTools.dispatcher(abilities, goals, clientWork, taskEvents, chatEvents, () -> worldScope[0], recentCalls,
+                    lookupTool(), () -> reminders == null ? List.of() : reminders.snapshot());
+            try {
+                mcp = EmbeddedMcpService.startWithFallback(mcpConfig, 2, tools);
+                LOG.info("{} MCP 服务已启动（端口 {}；五个工具都已接上）",
+                        ModIdentity.NAME, mcp.port());
+            } catch (IOException exception) {
+                LOG.error("{} MCP 服务启动失败", ModIdentity.NAME, exception);
+                mcpStartFailure = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
+            }
+            startDebugPanel();
+            if (mcp != null) {
+                LOG.info("{} 客户端启动完成；生存需求、控制循环、目标执行与能力清单已接入", ModIdentity.NAME);
+            }
+        }
+
+        // 调试面板：只拿各层的只读现状和正在走的路线；MCP 没起来也照样建，面板上要说清 MCP 没在监听。
+        private void startDebugPanel() {
+            StatusReader reader = new PanelStatusReader(() -> mcp, () -> mcpStartFailure, recentCalls, session,
+                    playerControl, goals, controlLoop, taskEvents);
+            debugPanel = new DebugPanel(reader, walks::currentPath, blueprintOverlay, new PanelSettings(loader.configDirectory()));
+        }
+
+        @Override public void renderDebugPanel(GuiGraphics graphics) {
+            if (debugPanel != null) debugPanel.renderHud(graphics);
+        }
+
+        @Override public void renderWorldOverlay(Camera camera, Matrix4f view, Matrix4f projection) {
+            if (debugPanel != null) debugPanel.renderWorld(camera, view, projection);
+        }
+
+        @Override public void tickEnd(Minecraft minecraft) {
+            // 先核对这一刻谁能操作角色，再推进世界扫描与控制循环，最后把本刻输入写进玩家。
+            var context = playerControl.beginTick();
+            // 下面每一项各自兜底：某一项这一刻出错只跳过它，后面的照常推进，游戏不崩。
+            if (minecraft.level != null) tickGuard.run("方块扫描", () -> blockScans.tick(minecraft.level));
+            tickGuard.run("进出世界", () -> keepWorldScopeFresh(minecraft, context));
+            if (context.isEmpty()) clientWork.drain(null);
+            context.ifPresent(current -> tickInWorld(minecraft, current));
+            // 与服务端的会话跟着每个客户端刻推进。
+            tickGuard.run("服务端会话", () -> session.tick(minecraft));
+            // 调试面板最后取现状：这一刻控制循环与会话都推进完了，读到的是这一刻的结果。
+            if (debugPanel != null) tickGuard.run("调试面板", () -> debugPanel.tick(minecraft));
+        }
+
+        /** 进世界建现场、退世界丢现场：世界记忆按世界身份分开，感知场景不跨世界残留。
+         *  目标运行表的记地点入口跟着换：进世界指到当期的记忆，退世界摘掉。 */
+        private void keepWorldScopeFresh(Minecraft minecraft, Optional<PlayerContext> context) {
+            if (minecraft.level != null && worldScope[0] == null && context.isPresent()) {
+                UseKeyProjection useKeyProjection = new UseKeyHoldProjection(useKeyHold);
+                WorldScope scope = new WorldScope(minecraft, playerControl, blockScans, session,
+                        subtitles, interactions, useKeyProjection, walks, combatSenses,
+                        abilities, interactionSender, menuActions, instanceConfig, furnaceFuels,
+                        compat, survivalWiring, loader.configDirectory(), blueprintOverlay, itemsInUse, dropConfirmations,
+                        taskEvents, lightLevels, lightingWorld, followLighting, timers);
+                worldScope[0] = scope;
+                // 随行补光的会话设置回默认：开关与阈值不跨世界残留，仍暗的路线格作废。
+                followLighting.reset();
+                // 夜里自动去睡回默认（开）：上个世界里有人说"晚上别睡"，不带到这个世界。
+                survivalWiring.autoSleep().reset();
+                // 换了世界，任务事件流换一条新的，宿主手里的旧游标如实作废；再把这个世界上次没做完的目标读回来，
+                // 全部恢复为暂停，等 LLM 决定接不接着做。读回时的暂停事件进的是新的这条流。
+                taskEvents.restart();
+                goals.enterWorld(scope.memory(), new EventPublishingGoalRunStore(
+                        new NotesGoalGains(scope.goalRuns(), itemsInUse), taskEvents, selfBriefs));
+                // 开关开启时，这次进世界要逐刻请求控制权直到拿到；还没有目标时也守得住角色。
+                startupAutomationPending = automationOnJoin;
+            } else if (minecraft.level == null) {
+                leaveWorld();
+            }
+        }
+
+        // 离开世界：没做完的目标停手存成暂停（下次进这个世界时恢复），再把世界记忆里还没存盘的改动写下去，最后丢掉现场；
+        // 不让目标跟进下一个世界接着跑。方块扫描索引按维度名分开，不清空的话下一个世界的同名维度会读到上一个世界的命中。
+        private void leaveWorld() {
+            // 换世界、断线：没发出的挨打片段丢掉，维度与天色基准重来。
+            if (hurtEpisodes != null) hurtEpisodes.forget();
+            dimensionChanges.forget();
+            skyChanges.forget();
+            // 没到点的计时属于刚离开的那个世界，不跟到下一个。
+            timers.clear();
+            if (worldScope[0] != null) {
+                goals.leaveWorld();
+                worldScope[0].leave();
+                worldScope[0].memory().flush();
+                blockScans.dropAll();
+                // 聊天流在离开时换新：下一个世界登录后最早几条消息（谁进来了）可能比现场建好还早到，进世界时再换会把它们冲掉。
+                chatEvents.restart();
+            }
+            // 预览的蓝图属于刚离开的那个世界，不跟到下一个。
+            blueprintOverlay.hide();
+            worldScope[0] = null;
+        }
+
+        /**
+         * beginTick 与 endTick 之间要做的事：任务此刻发出的移动与转头指令，要等 endTick 统一写进角色。
+         * 世界扫描先整理感知场景；MCP 请求排进来的工作（下达、暂停、回答目标）在控制循环之前做完，
+         * 新下达的目标本刻就开始。自动化没有实际拿到控制权（例如 F8 已归还）时照样处理请求，
+         * 但不推进控制循环，生存需求不能去抢人类手上的角色。
+         */
+        private void tickInWorld(Minecraft minecraft, PlayerContext current) {
+            // 启动接管开关还欠着控制权时每刻请求一次；请求是幂等的，拿到为止。人按了 F8 就不再追着要。
+            if (startupAutomationPending && playerControl.input().humanTookOver()) {
+                startupAutomationPending = false;
+            }
+            if (startupAutomationPending) {
+                playerControl.requestAutomationControl(current.localPlayer());
+                if (playerControl.input().automationOwnsControls()) {
+                    startupAutomationPending = false;
+                }
+            }
+            // 世界扫描：感知各读端读当刻的观察事实，整理进场景；顺序在控制循环之前。
+            WorldScope scope = worldScope[0];
+            // 感知出错（世界记忆读不到、某个读端碰到没见过的方块实体）只跳过这一刻的观察，下一刻再看。
+            if (scope != null) {
+                tickGuard.run("世界扫描", () -> scope.observe(current, minecraft.level.getGameTime()));
+            }
+            long gameTick = minecraft.level.getGameTime();
+            // 装备耐久的基准每刻扫一遍：打空事件到了才说得出坏的是哪一件。
+            if (equipmentConfirmations != null) {
+                tickGuard.run("装备耐久基准", () -> equipmentConfirmations.observe(current.localPlayer()));
+            }
+            // 提醒每刻看一遍角色：人自己玩的时候也照样看，LLM 该知道的事不因控制权换手断掉。
+            if (reminders != null) tickGuard.run("提醒", () -> reminders.tick(current));
+            // 挨打的片段到点发、维度变了发、天黑天亮下雨雨停发：人自己玩的时候也照样发。
+            if (hurtEpisodes != null) tickGuard.run("挨打片段", () -> hurtEpisodes.tick(current));
+            tickGuard.run("换维度", () -> dimensionChanges.tick(current));
+            tickGuard.run("天色变化", () -> skyChanges.tick(current));
+            // 计时到点照样叫：人按 F8 接过角色时也发，计时是 LLM 自己的事。
+            tickGuard.run("计时", () -> timers.tick(current));
+            clientWork.drain(new ClientTickContext(gameTick, current));
+            boolean owned = playerControl.input().automationOwnsControls();
+            if (owned != automationOwned) {
+                // 控制权换手记一行：目标挂着不动时，先分清是没交给自动化，还是交了却没推进。
+                LOG.info(owned ? "自动化拿到角色控制权，控制循环开始推进" : "角色控制权回到玩家手上，控制循环停下");
+                automationOwned = owned;
+                // 人收回角色：正在走的路线立刻撤掉，引擎不再改走路朝向，人按 W 就朝视角方向走；交回后接着走。
+                if (!owned) walks.humanTookPlayer();
+                else walks.automationTookPlayer();
+            }
+            if (owned) {
+                // 主任务被临时任务带离原地、回不去：目标挂成暂停并发事件，LLM 才知道身体停着。
+                // 控制循环外面也兜一层：任务里的异常内核自己收，需求判断这类出错只跳过这一刻。
+                tickGuard.run("控制循环", () -> {
+                    if (controlLoop.tick(new ClientTickContext(gameTick, current)) instanceof ControlLoop.Decision.Parked parked
+                            && goals != null) {
+                        goals.mainParked(parked.where());
+                    }
+                });
+            }
+            // 本刻输入无论前面谁出错都要写进角色并收尾这一刻的控制边界。
+            playerControl.endTick(current);
+        }
+
+        @Override public void stopping() {
+            playerControl.shutdown();
+            blockScans.dropAll();
+            leaveWorld();
+            if (mcp != null) mcp.stop();
+            LOG.info("{} 客户端即将退出", ModIdentity.NAME);
+        }
+
+        @Override public void serverLinkReceived(Minecraft minecraft, String json) {
+            session.received(minecraft, json);
+        }
+
+        @Override public void serverLinkDisconnected(Minecraft minecraft) {
+            session.disconnected(minecraft);
+        }
+
+        // 聊天栏收到玩家说的话：认出发言人、私聊与自己的回显后记进聊天流；不在世界里时没有角色，不记。
+        @Override public void playerChatReceived(Minecraft minecraft, Component line, Component content, UUID senderId,
+                                                 String sender, ChatType.Bound chatType) {
+            if (minecraft.player == null) return;
+            ClientReceivedChat.player(minecraft, line, content, senderId, sender, chatType).ifPresent(chatEvents::append);
+        }
+
+        // 服务器的系统消息全收（进出、死亡播报、公告、命令反馈），动作栏提示不算聊天。
+        @Override public void systemMessageReceived(Minecraft minecraft, Component message, boolean actionBar) {
+            if (minecraft.player == null) return;
+            ClientReceivedChat.system(message, actionBar).ifPresent(chatEvents::append);
+        }
+    }
+}

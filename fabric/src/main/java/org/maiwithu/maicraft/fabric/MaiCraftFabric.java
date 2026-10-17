@@ -2,37 +2,47 @@
 package org.maiwithu.maicraft.fabric;
 
 import net.fabricmc.api.ModInitializer;
-import net.fabricmc.fabric.api.entity.event.v1.ServerEntityWorldChangeEvents;
-import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
-import org.maiwithu.maicraft.network.OptionalServerNetwork;
-import org.maiwithu.maicraft.network.OptionalServerPayload;
-import org.maiwithu.maicraft.server.machine.ServerMachineOperations;
-import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
-import org.maiwithu.maicraft.server.machine.watch.MachineWatchService;
+import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.server.level.ServerPlayer;
+import org.maiwithu.maicraft.bootstrap.Bootstrap;
+import org.maiwithu.maicraft.bootstrap.ServerLifecycle;
+import org.maiwithu.maicraft.game.ModIdentity;
+import org.maiwithu.maicraft.network.MaiCraftPayload;
+import java.util.List;
+import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 
-/** 公共引导程序可安全运行在独立服务器上，不会初始化客户端自动化。 */
+/**
+ * Fabric 的通用入口，独立服务器和客户端都会加载。
+ * 只把服务端事件转给公共代码，不写业务，也不引用任何仅客户端的类。
+ */
 public final class MaiCraftFabric implements ModInitializer {
     @Override public void onInitialize() {
-        ServerMachineOperations.register();
-        PayloadTypeRegistry.playC2S().register(OptionalServerPayload.TYPE, OptionalServerPayload.CODEC);
-        PayloadTypeRegistry.playS2C().register(OptionalServerPayload.TYPE, OptionalServerPayload.CODEC);
-        ServerPlayNetworking.registerGlobalReceiver(OptionalServerPayload.TYPE, (payload, context) -> {
-            if (ServerPlayNetworking.canSend(context.player(), OptionalServerPayload.TYPE))
-                OptionalServerNetwork.receive(context.player(), payload,
-                        response -> ServerPlayNetworking.send(context.player(), OptionalServerPayload.of(response)));
+        // 服务端把确认信封直接发给目标玩家的客户端；通道保持 optional，没装 Mod 的普通玩家照样进服。
+        // Fabric 一侧暂时没有联动模组，联动清单传空。
+        ServerLifecycle server = Bootstrap.startOnBothSides(new FabricLoaderEnvironment(),
+                (player, envelope) -> ServerPlayNetworking.send(player, MaiCraftPayload.of(envelope)), List.of());
+        PayloadTypeRegistry.playC2S().register(MaiCraftPayload.TYPE, MaiCraftPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(MaiCraftPayload.TYPE, MaiCraftPayload.CODEC);
+        ServerPlayNetworking.registerGlobalReceiver(MaiCraftPayload.TYPE, (payload, context) -> {
+            if (context.player() instanceof ServerPlayer player
+                    && ServerPlayNetworking.canSend(player, MaiCraftPayload.TYPE))
+                server.clientEnvelope(player, payload,
+                        response -> ServerPlayNetworking.send(player, MaiCraftPayload.of(response)));
         });
-        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) ->
-                OptionalServerNetwork.disconnected(handler.player));
-        ServerEntityWorldChangeEvents.AFTER_PLAYER_CHANGE_WORLD.register((player, origin, destination) ->
-                OptionalServerNetwork.worldChanged(player));
-        ServerPlayerEvents.AFTER_RESPAWN.register((previous, player, alive) ->
-                OptionalServerNetwork.worldChanged(player));
-        ServerLifecycleEvents.SERVER_STOPPED.register(OptionalServerNetwork::stopped);
-        ServerTickEvents.END_SERVER_TICK.register(
-                MachineWatchService::tick);
+        ServerTickEvents.END_SERVER_TICK.register(server::tickEnd);
+        ServerLifecycleEvents.SERVER_STOPPED.register(server::stopped);
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, ignored) -> {
+            if (handler.player != null) server.clientDisconnected(handler.player);
+        });
+        // 破坏方块的事件在方块真正消失后触发，结果可靠；放置由服务端 Mixin 钩子记录。
+        PlayerBlockBreakEvents.AFTER.register((world, player, pos, state, ignored) -> {
+            if (!world.isClientSide() && player instanceof ServerPlayer serverPlayer)
+                server.playerBrokeBlock(serverPlayer, pos, state);
+        });
     }
 }

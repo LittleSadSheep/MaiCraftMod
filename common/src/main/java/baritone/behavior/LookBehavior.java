@@ -26,11 +26,12 @@ import baritone.api.utils.IPlayerContext;
 import baritone.api.utils.Rotation;
 import baritone.behavior.look.ForkableRandom;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
-import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
+
 
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.Optional;
+import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 
 public final class LookBehavior extends Behavior implements ILookBehavior {
 
@@ -69,7 +70,7 @@ public final class LookBehavior extends Behavior implements ILookBehavior {
         // The target remains Baritone's pathing/ray contract, but the visible first-person camera
         // is leased and curved by MaiCraft's render-cadence body port. blockInteract marks
         // precision block-interaction aims, which must bypass the movement-aim deadband there.
-        EmbeddedBaritoneRuntime.requestLook(rotation.getYaw(), rotation.getPitch(), blockInteract);
+        BaritoneInternals.requestLook(rotation.getYaw(), rotation.getPitch(), blockInteract);
     }
 
     /** Release a stale movement target when MaiCraft ends the owning navigation. */
@@ -101,7 +102,8 @@ public final class LookBehavior extends Behavior implements ILookBehavior {
 
         switch (event.getState()) {
             case PRE: {
-                if (this.target.mode == Target.Mode.NONE) {
+                // 角色在人手里：不拿引擎的朝向换掉人的视角，人按 W 朝自己看的方向走。
+                if (this.target.mode == Target.Mode.NONE || BaritoneInternals.humanHoldsPlayer()) {
                     // Just return for PRE, we still want to set target to null on POST
                     return;
                 }
@@ -180,7 +182,8 @@ public final class LookBehavior extends Behavior implements ILookBehavior {
 
     @Override
     public void onPlayerRotationMove(RotationMoveEvent event) {
-        if (this.target != null) {
+        // 角色在人手里：走路、起跳按人自己的朝向，不按引擎留下的朝向。
+        if (this.target != null && !BaritoneInternals.humanHoldsPlayer()) {
             final Rotation actual = this.processor.peekRotation(this.target.rotation);
             event.setYaw(actual.getYaw());
             event.setPitch(actual.getPitch());

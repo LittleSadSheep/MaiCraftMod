@@ -1,0 +1,63 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.behavior.acquire.spi;
+
+import java.util.Objects;
+import java.util.regex.Pattern;
+
+/**
+ * 拿东西的途径：via 参数的一个取值，加一句给 LLM 看的说明。
+ * 每个物品来源自报自己属于哪条途径；拿东西能力的 via 可选值与说明就从登记的来源列表里收集，
+ * 玩家行为层自带的几条是这里的常量，联动模组接入的途径（例如随身背包）由它们的来源自报，装了才出现。
+ *
+ * @param name        取值本身，小写字母与下划线，例如 craft；参数、结果细节 obtained_via 都用它
+ * @param description 一句说明，写在能力说明的参数表里，例如"工作台上做出来（含石切台）"
+ */
+public record AcquireVia(String name, String description) {
+
+    // 取值的写法要先定好，下面的常量在类初始化时就要经它检查。
+    private static final Pattern NAME = Pattern.compile("[a-z][a-z0-9_]*");
+
+    /** 身上已有的（主背包与副手；装了随身背包模组，包里的也算身上的仓库）。 */
+    public static final AcquireVia CARRIED = new AcquireVia("carried", "身上已有的（主背包、副手与随身背包）");
+    /** 记得的箱子、现场看到的容器。 */
+    public static final AcquireVia CONTAINER = new AcquireVia("container", "记得的箱子、现场看到的容器");
+    /** 工作台上做出来（含石切台）。 */
+    public static final AcquireVia CRAFT = new AcquireVia("craft", "工作台上做出来（含石切台）");
+    /** 熔炉里烧出来；记得附近有高炉、烟熏炉时，矿石与食物在那里烧（快一倍）。 */
+    public static final AcquireVia SMELT = new AcquireVia("smelt", "熔炉里烧出来（记得附近有高炉、烟熏炉时在那里烧，快一倍）");
+    /** 挖掉会掉出它的方块。 */
+    public static final AcquireVia MINE = new AcquireVia("mine", "挖掉会掉出它的方块");
+    /** 收成熟的作物。 */
+    public static final AcquireVia HARVEST = new AcquireVia("harvest", "收成熟的作物");
+    /** 和附近已加载的村民与流浪商人买（付款收什么他摆什么，不还价）；会花掉付款，只有点名才做。 */
+    public static final AcquireVia TRADE = new AcquireVia("trade", "和村民交易（会花绿宝石等付款，只有点名 via=trade 才做）");
+    /** 打掉会掉出它的动物或生物：动物照 kill_animals、敌对生物照 fight 判许可。 */
+    public static final AcquireVia HUNT = new AcquireVia("hunt", "打掉会掉出它的动物或生物");
+    /** 走过去拆回角色自己放下的床、工作台、熔炉（家附近的不收）。 */
+    public static final AcquireVia RECLAIM = new AcquireVia("reclaim", "拆回自己放下的床、工作台、熔炉（家附近的不收）");
+
+
+    /**
+     * 这条途径是不是只有点名才做：不给 via 时按代价自己挑的来源里不含它。
+     * 交易要花掉绿宝石这类付款，绿宝石本身不算稀有物品、许可拦不住，所以不替 LLM 自作主张去买。
+     */
+    public static boolean onlyWhenNamed(String name) {
+        return TRADE.name().equals(name);
+    }
+
+    /** 这条途径是不是要现做的（合成、烧炼）：挑可以互换的原料时，现成的来路与现做分开比。 */
+    public static boolean makes(String name) {
+        return CRAFT.name().equals(name) || SMELT.name().equals(name);
+    }
+
+    public AcquireVia {
+        Objects.requireNonNull(name, "name");
+        Objects.requireNonNull(description, "description");
+        if (!NAME.matcher(name).matches()) {
+            throw new IllegalArgumentException("途径的取值要是小写字母、数字与下划线：" + name);
+        }
+        if (description.isBlank()) {
+            throw new IllegalArgumentException("途径 " + name + " 要写一句说明");
+        }
+    }
+}

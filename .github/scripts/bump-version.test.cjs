@@ -50,6 +50,19 @@ test('递增补丁并保留注释、换行和其他属性，旧开发版本不�
   }
 });
 
+test('支持预发布版本识别、显式设定、递增预览号与正式转正', () => {
+  // 首次引入新的预发布版本（如从 0.1.10 到 1.0.0-rc1）：保留 1.0.0-rc1
+  assert.deepEqual(bumpVersion.prepare('version=1.0.0-rc1\n', 'version=0.1.10\n'),
+    { version: '1.0.0-rc1', content: 'version=1.0.0-rc1\n' });
+  // 在同版本预发布上再次触发构建：自动递增预览号（rc1 -> rc2）
+  assert.deepEqual(bumpVersion.prepare('version=1.0.0-rc1\n', 'version=1.0.0-rc1\n'),
+    { version: '1.0.0-rc2', content: 'version=1.0.0-rc2\n' });
+  // 显式升级到更高预发布版本（如从 rc1 升级到 rc3）：采用显式声明的 rc3
+  assert.equal(bumpVersion.prepare('version=1.0.0-rc3\n', 'version=1.0.0-rc1\n').version, '1.0.0-rc3');
+  // 从预发布转为正式发布（1.0.0-rc2 -> 1.0.0）：发布首个正式版本 1.0.0 而非跳到 1.0.1
+  assert.equal(bumpVersion.prepare('version=1.0.0\n', 'version=1.0.0-rc2\n').version, '1.0.0');
+});
+
 test('同一集成重跑复用签名提交，不重复增加版本', async () => {
   const f = fixture(); await f.run(); await f.run();
   assert.equal(f.state.writes, 1);

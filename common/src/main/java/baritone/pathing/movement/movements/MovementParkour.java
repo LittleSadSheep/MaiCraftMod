@@ -279,7 +279,8 @@ public class MovementParkour extends Movement {
         } else if (!ctx.playerFeet().equals(src)) {
             if (ctx.playerFeet().equals(src.relative(direction)) || ctx.player().position().y - src.y > 0.0001) {
                 if (Baritone.settings().allowPlace.value // see PR #3775
-                        && ((Baritone) baritone).getInventoryBehavior().hasGenericThrowaway()
+                        // 跳在半空临时补脚下那一块：只用快捷栏和副手的料，主背包的来不及挪
+                        && ((Baritone) baritone).getInventoryBehavior().hasThrowawayAtHand()
                         && !MovementHelper.canWalkOn(ctx, dest.below())
                         && !ctx.player().onGround()
                         && MovementHelper.attemptToPlaceABlock(state, baritone, dest.below(), true, false) == PlaceResult.READY_TO_PLACE

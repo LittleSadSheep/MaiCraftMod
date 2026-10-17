@@ -1,0 +1,296 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.behavior.acquire;
+
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.Map;
+import java.util.List;
+import java.util.Locale;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.function.Supplier;
+
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.tags.TagKey;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.CropBlock;
+import net.minecraft.world.level.block.state.BlockState;
+
+import org.maiwithu.maicraft.game.player.EverydayFood;
+import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.world.BlockScanService;
+import org.maiwithu.maicraft.game.world.ObservationVisibility;
+import org.maiwithu.maicraft.game.world.ScanTargets;
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+
+/**
+ * 按产出扫方块的读端：要一件东西时，把"挖掉会掉它"或"熟了能收它"的方块登记进
+ * 方块扫描服务，再从索引里把这一片的角色附近的候选格找出来。
+ *
+ * <p>方块与产出对不上号的部分如实说没有：客户端读不到掉落表，会掉什么按原版常识对照
+ * （见 VanillaBlockDrops、VanillaCropProducts），对照没有的物品报"附近没有"，
+ * 不冒充找遍了。LLM 给了掉落线索时，线索点名的方块（含方块标签下的）也当作会掉想要的东西去找，
+ * 是作物的熟了才收。扫描分刻推进，没扫完时返回已找到的部分，"没扫完"不冒充"没有"。
+ *
+ * <p>采掘候选不透视：只算从角色眼睛看得见的那几格（与观察、find 同一套遮挡判断），埋在石头里的不算，
+ * 要先下矿洞、挖开或走近。索引只是帮忙快点找到，不是"世界里哪里有矿"的答案。
+ */
+public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
+
+    // 与附近搜索同一套预算：一刻扫不完就分刻扫；候选给够数量，距离与许可由来源再筛。
+    private static final int WANT = 64;
+    // 采掘只认看得见的：最近的几十格里可能全是埋在石头里的，露在洞壁上的排得更远，候选要多取一些再筛。
+    private static final int MINABLE_WANT = 512;
+    private static final int MAX_CHUNK_RADIUS = 6;
+    private static final int BUILD_BUDGET = 4096;
+
+    private final BlockScanService scans;
+    private final Supplier<PlayerContext> context;
+    /** 每次要找的方块都不一样（要煤找煤矿、要土豆找土豆地）：每次查询前按维度补登记。 */
+    private final ScanTargets registered;
+    /** 最近一次查索引有没有把附近扫完；没扫完时空结果不等于没有。 */
+    private boolean lastScanComplete = true;
+
+    public ClientYieldScans(BlockScanService scans, Supplier<PlayerContext> context) {
+        this.scans = Objects.requireNonNull(scans, "scans");
+        this.context = Objects.requireNonNull(context, "context");
+        this.registered = new ScanTargets(scans);
+    }
+
+    @Override
+    public List<MinableSpot> minable(WantedItem wanted, DropsFrom dropsFrom, WorldPosition center, int radiusBlocks) {
+        if (notInWorld()) {
+            return List.of();
+        }
+        List<String> productIds = expand(wanted);
+        Set<Block> targets = new LinkedHashSet<>();
+        for (String productId : productIds) {
+            for (String blockTypeId : VanillaBlockDrops.blocksDropping(productId)) {
+                blockOf(blockTypeId).ifPresent(targets::add);
+            }
+        }
+        // 掉落线索点名的方块（模组矿这类，原版对照里没有）一并登记去找。
+        Set<Block> told = toldBlocks(dropsFrom);
+        targets.addAll(told);
+        List<BlockPos> hits = scan(targets, center, radiusBlocks, MINABLE_WANT);
+        List<MinableSpot> spots = new ArrayList<>();
+        PlayerContext current = context();
+        // 同一根树干在一次扫描里只看一次树冠：键是树干顶。
+        Map<BlockPos, Boolean> trunksChecked = new HashMap<>();
+        for (BlockPos hit : hits) {
+            // 不透视：埋在石头里、六面都被实心方块挡着的先筛掉（便宜），露出来的再按观察同一套遮挡判断
+            // 从眼睛看一眼；看不见的不算候选，要先下矿洞、挖开或走近。
+            if (!exposed(current.level(), hit) || !ObservationVisibility.block(current.localPlayer(), hit)) {
+                continue;
+            }
+            // 只挖地图上自然长出来的：天然地形、矿石、长在树上的原木。机器零件、机壳、房子、平台、刷石机的圆石
+            // 这些搭出来的不管谁搭的都不拆，缺料先从 AE、箱子拿。砍树只砍长着的树，木屋、栅栏柱、横梁的原木不算。
+            // 客户端世界的 hasChunkAt 永远答“加载着”，没加载的格读出来是空气、地表落在世界最底层；按区块真加载没加载判。
+            if (!NaturalBlocks.grown(current.level().getBlockState(hit), hit, current.level(), current.level()::isLoaded,
+                    trunksChecked)) {
+                continue;
+            }
+            // 箱子、熔炉、机器这类带方块实体的是摆着用的设施，不当矿挖：实机要箱子去建进料口，
+            // 把机器的进料箱挖了，掉的箱子还没捡回来。
+            if (current.level().getBlockState(hit).hasBlockEntity()) continue;
+            String blockTypeId = blockTypeIdOf(current, hit);
+            // 线索点名的方块按 LLM 说的算会掉要的东西：挖了掉的是什么，挖完以进包的为准。
+            if (told.contains(current.level().getBlockState(hit).getBlock())) {
+                spots.add(new MinableSpot(hit, blockTypeId, wanted.specifier()));
+                continue;
+            }
+            String dropped = VanillaBlockDrops.droppedBy(blockTypeId);
+            // 同名通例带出的方块未必真的掉想要的东西：掉落对不上这次要的就不报。
+            if (productIds.contains(dropped)) {
+                spots.add(new MinableSpot(hit, blockTypeId, dropped));
+            }
+        }
+        return spots;
+    }
+
+    @Override
+    public boolean anyBlockDrops(WantedItem wanted, DropsFrom dropsFrom) {
+        // 线索点名了本实例注册了的方块：有方块掉它，去看看附近有没有。
+        if (!toldBlocks(dropsFrom).isEmpty()) return true;
+        for (String productId : expand(wanted)) {
+            for (String blockTypeId : VanillaBlockDrops.blocksDropping(productId)) {
+                if (blockOf(blockTypeId).isPresent()) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    @Override
+    public boolean scanComplete() {
+        return lastScanComplete;
+    }
+
+    @Override
+    public boolean buriedUnderfoot(WantedItem wanted) {
+        return expand(wanted).stream().anyMatch(VanillaBlockDrops::buriedUnderfoot);
+    }
+
+    @Override
+    public boolean dropsWanted(WantedItem wanted, DropsFrom dropsFrom, String blockTypeId) {
+        // 往下挖楼梯、长程挖矿的通道正好穿过线索点名的方块，也算挖到了要的东西。
+        if (blockOf(blockTypeId).filter(toldBlocks(dropsFrom)::contains).isPresent()) return true;
+        return expand(wanted).contains(VanillaBlockDrops.droppedBy(blockTypeId));
+    }
+
+    @Override
+    public Optional<String> minableAt(WantedItem wanted, DropsFrom dropsFrom, BlockPos pos) {
+        if (notInWorld()) return Optional.empty();
+        PlayerContext current = context();
+        // 客户端世界的 hasChunkAt 永远答“加载着”，没加载的格读出来是空气；按区块真加载没加载判。
+        if (!current.level().isLoaded(pos)) return Optional.empty();
+        BlockState state = current.level().getBlockState(pos);
+        // 和找候选同一套：只挖地图上自然长的、不拆设施；挖了掉的正是要的东西才算。
+        if (state.isAir() || state.hasBlockEntity()) return Optional.empty();
+        if (!NaturalBlocks.grown(state, pos, current.level(), current.level()::isLoaded, new HashMap<>())) return Optional.empty();
+        String blockTypeId = blockTypeIdOf(current, pos);
+        // 连锁挖逐格核：线索点名的方块与原版对照里掉要的东西的方块都算。
+        boolean yields = toldBlocks(dropsFrom).contains(state.getBlock())
+                || expand(wanted).contains(VanillaBlockDrops.droppedBy(blockTypeId));
+        return yields ? Optional.of(blockTypeId) : Optional.empty();
+    }
+
+    @Override
+    public Optional<String> depositOre(WantedItem wanted) {
+        for (String productId : expand(wanted)) {
+            for (String blockTypeId : VanillaBlockDrops.blocksDropping(productId)) {
+                if (OreHeights.of(blockTypeId).isPresent()) return Optional.of(blockTypeId);
+            }
+        }
+        return Optional.empty();
+    }
+
+    @Override
+    public List<CropSpot> mature(WantedItem wanted, DropsFrom dropsFrom, WorldPosition center, int radiusBlocks) {
+        if (notInWorld()) {
+            return List.of();
+        }
+        Set<Block> targets = new LinkedHashSet<>();
+        for (String productId : expand(wanted)) {
+            for (String blockTypeId : VanillaCropProducts.cropsProducing(productId)) {
+                blockOf(blockTypeId).ifPresent(targets::add);
+            }
+        }
+        // 线索点名的方块里是作物的（模组作物这类）也去找，熟了才收；不是作物的归采掘。
+        for (Block told : toldBlocks(dropsFrom)) {
+            if (told instanceof CropBlock) targets.add(told);
+        }
+        List<BlockPos> hits = scan(targets, center, radiusBlocks, WANT);
+        List<CropSpot> spots = new ArrayList<>();
+        for (BlockPos hit : hits) {
+            BlockState state = context().level().getBlockState(hit);
+            // 只有熟了的才算收成：没熟的被踩掉就白长了，等它长熟再来。
+            if (state.getBlock() instanceof CropBlock crop && crop.isMaxAge(state)) {
+                spots.add(new CropSpot(hit, blockTypeIdOf(context(), hit)));
+            }
+        }
+        return spots;
+    }
+
+    // 登记目标并查索引：只留半径内的命中，由近及远；目标认不出或角色不在世界里时给空。
+    private List<BlockPos> scan(Set<Block> targets, WorldPosition center, int radiusBlocks, int want) {
+        PlayerContext current = context.get();
+        ClientLevel level = current == null ? null : current.level();
+        if (level == null || targets.isEmpty()) {
+            return List.of();
+        }
+        registered.ensure(level, targets);
+        BlockPos at = new BlockPos(center.x(), center.y(), center.z());
+        var result = scans.query(level, at, targets, want,
+                Math.max(1, Math.min(MAX_CHUNK_RADIUS, radiusBlocks / 16 + 1)), BUILD_BUDGET);
+        // 没扫完时只拿到一部分：来源据此回答"再问"，不把没扫完当成没有。
+        lastScanComplete = result.complete();
+        List<BlockPos> hits = new ArrayList<>(result.hits());
+        // 索引给的是这一片的命中：超出这次愿意找的半径的不算数。
+        hits.removeIf(hit -> Math.sqrt(hit.distSqr(at)) > radiusBlocks);
+        hits.sort(Comparator.comparingDouble(hit -> hit.distSqr(at)));
+        return hits;
+    }
+
+    // 有没有一面露在外面：相邻六格里有一格不是挡光的实心方块（空气、水、玻璃、树叶……），这一格才可能被看见。
+    private static boolean exposed(ClientLevel level, BlockPos at) {
+        for (Direction face : Direction.values()) {
+            BlockPos next = at.relative(face);
+            if (!level.getBlockState(next).isSolidRender(level, next)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // 要的东西展开成具体的物品 ID：标签按注册表里挂这个标签的物品展开，写法不合法给空。
+    private static List<String> expand(WantedItem wanted) {
+        if (!wanted.isTag()) {
+            return List.of(wanted.itemId());
+        }
+        // 能吃的口粮按食物组件认，不在注册表的标签里：直接给全部口粮，反查哪些作物、方块掉它们。
+        if (EverydayFood.TAG.equals(wanted.tagId())) {
+            return EverydayFood.all();
+        }
+        ResourceLocation tagId = ResourceLocation.tryParse(wanted.tagId().toLowerCase(Locale.ROOT));
+        if (tagId == null) {
+            return List.of();
+        }
+        List<String> ids = new ArrayList<>();
+        for (var holder : BuiltInRegistries.ITEM.getTagOrEmpty(TagKey.create(Registries.ITEM, tagId))) {
+            ids.add(BuiltInRegistries.ITEM.getKey(holder.value()).toString());
+        }
+        return List.copyOf(ids);
+    }
+
+    private PlayerContext context() {
+        PlayerContext current = context.get();
+        if (current == null || current.level() == null) {
+            throw new IllegalStateException("不在世界里却来读方块产出");
+        }
+        return current;
+    }
+
+    // 角色不在世界或世界还没就绪时，扫描答"没有"，不把没读到的世界当成空场。
+    private boolean notInWorld() {
+        PlayerContext current = context.get();
+        return current == null || current.level() == null;
+    }
+
+    private static String blockTypeIdOf(PlayerContext current, BlockPos at) {
+        return BuiltInRegistries.BLOCK.getKey(current.level().getBlockState(at).getBlock()).toString();
+    }
+
+    // 掉落线索点名的方块：写的方块 ID 与方块标签下的全部方块，本实例没注册的认不出就不算。
+    private static Set<Block> toldBlocks(DropsFrom dropsFrom) {
+        Set<Block> blocks = new LinkedHashSet<>();
+        for (String blockTypeId : dropsFrom.blocks()) {
+            blockOf(blockTypeId).ifPresent(blocks::add);
+        }
+        for (String tag : dropsFrom.blockTags()) {
+            ResourceLocation tagId = ResourceLocation.tryParse(tag.toLowerCase(Locale.ROOT));
+            if (tagId == null) continue;
+            for (var holder : BuiltInRegistries.BLOCK.getTagOrEmpty(TagKey.create(Registries.BLOCK, tagId))) {
+                blocks.add(holder.value());
+            }
+        }
+        return blocks;
+    }
+
+    private static Optional<Block> blockOf(String blockTypeId) {
+        ResourceLocation id = ResourceLocation.tryParse(blockTypeId.toLowerCase(Locale.ROOT));
+        if (id == null || !BuiltInRegistries.BLOCK.containsKey(id)) {
+            return Optional.empty();
+        }
+        return Optional.of(BuiltInRegistries.BLOCK.get(id));
+    }
+}

@@ -1,0 +1,139 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.behavior.survival;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.List;
+import java.util.Set;
+import java.util.Optional;
+
+import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.behavior.acquire.ReadsItemTags;
+import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
+import org.maiwithu.maicraft.game.player.BackpackStack;
+import org.maiwithu.maicraft.game.player.ReadsFoodValues;
+import org.maiwithu.maicraft.game.player.ReadsFoodValues.FoodEffect;
+import org.maiwithu.maicraft.game.player.ReadsFoodValues.FoodValue;
+
+/** 挑哪种吃的：没点名只吃普通食物、再是垃圾食物，珍贵的、会传送的、会中毒的要点名；点名的只认点名的那种。 */
+class FoodPickerTest {
+
+    private static FoodValue food(String id, int nutrition, float saturation, FoodEffect... effects) {
+        return new FoodValue(id, nutrition, saturation, 1.6f, false, List.of(effects));
+    }
+
+    private static FoodPicker.Carried carried(String id, int count, FoodValue value) {
+        return new FoodPicker.Carried(id, count, value);
+    }
+
+    @Test
+    void 没点名时无效果的食物优先_同档里补得多的在前() {
+        List<FoodPicker.Carried> carried = List.of(
+                carried("minecraft:golden_apple", 1,
+                        food("minecraft:golden_apple", 4, 9.6f,
+                                new FoodEffect("minecraft:regeneration", true))),
+                carried("minecraft:bread", 3, food("minecraft:bread", 5, 6.0f)),
+                carried("minecraft:cooked_beef", 2, food("minecraft:cooked_beef", 8, 12.8f)));
+        assertEquals(Optional.of("minecraft:cooked_beef"), FoodPicker.autoPick(carried));
+    }
+
+    @Test
+    void 没点名时没有普通食物就吃腐肉_金苹果留着() {
+        List<FoodPicker.Carried> carried = List.of(
+                carried("minecraft:rotten_flesh", 5, food("minecraft:rotten_flesh", 4, 0.8f,
+                        new FoodEffect("minecraft:hunger", false))),
+                carried("minecraft:golden_apple", 1, food("minecraft:golden_apple", 4, 9.6f,
+                        new FoodEffect("minecraft:absorption", true))));
+        assertEquals(Optional.of("minecraft:rotten_flesh"), FoodPicker.autoPick(carried));
+    }
+
+    @Test
+    void 没点名时金苹果_紫颂果_河豚都不吃() {
+        // 随便吃点不包括这些：金苹果珍贵，紫颂果吃了会随机传送（没有状态效果但饱腹也能吃），河豚会中毒。
+        FoodValue chorus = new FoodValue("minecraft:chorus_fruit", 4, 2.4f, 1.6f, true, List.of());
+        List<FoodPicker.Carried> carried = List.of(
+                carried("minecraft:golden_apple", 1, new FoodValue("minecraft:golden_apple", 4, 9.6f, 1.6f, true,
+                        List.of(new FoodEffect("minecraft:regeneration", true)))),
+                carried("minecraft:chorus_fruit", 3, chorus),
+                carried("minecraft:pufferfish", 2, food("minecraft:pufferfish", 1, 0.2f,
+                        new FoodEffect("minecraft:poison", false), new FoodEffect("minecraft:hunger", false))));
+        assertEquals(Optional.empty(), FoodPicker.autoPick(carried));
+        assertTrue(!FoodPicker.plain(chorus) && !FoodPicker.junk(chorus));
+    }
+
+    @Test
+    void 饿了顺手吃挑补得刚好的普通食物_不拿牛排补一格() {
+        List<FoodPicker.Carried> carried = List.of(
+                carried("minecraft:cooked_beef", 2, food("minecraft:cooked_beef", 8, 12.8f)),
+                carried("minecraft:bread", 3, food("minecraft:bread", 5, 6.0f)),
+                carried("minecraft:cookie", 4, food("minecraft:cookie", 2, 0.4f)));
+        assertEquals(Optional.of("minecraft:cookie"), FoodPicker.forHunger(carried, 19, false));
+        assertEquals(Optional.of("minecraft:bread"), FoodPicker.forHunger(carried, 14, false));
+        assertEquals(Optional.of("minecraft:cooked_beef"), FoodPicker.forHunger(carried, 6, false));
+    }
+
+    @Test
+    void 饿了顺手吃不动金苹果和腐肉_见底掉血时才什么都吃_腐肉先于金苹果() {
+        FoodValue goldenApple = new FoodValue("minecraft:golden_apple", 4, 9.6f, 1.6f, true,
+                List.of(new FoodEffect("minecraft:regeneration", true)));
+        List<FoodPicker.Carried> carried = List.of(
+                carried("minecraft:golden_apple", 1, goldenApple),
+                carried("minecraft:rotten_flesh", 5, food("minecraft:rotten_flesh", 4, 0.8f,
+                        new FoodEffect("minecraft:hunger", false))));
+        assertEquals(Optional.empty(), FoodPicker.forHunger(carried, 5, false));
+        // 见底掉血：先吃腐肉保命，只剩金苹果时才动它。
+        assertEquals(Optional.of("minecraft:rotten_flesh"), FoodPicker.forHunger(carried, 0, true));
+        assertEquals(Optional.of("minecraft:golden_apple"), FoodPicker.forHunger(carried.subList(0, 1), 0, true));
+        assertTrue(FoodPicker.harmless(goldenApple));
+        assertTrue(!FoodPicker.plain(goldenApple));
+    }
+
+    @Test
+    void 点名的在身上就选它_不在就选不出来() {
+        ReadsItemTags tags = id -> Set.of();
+        List<FoodPicker.Carried> carried = List.of(
+                carried("minecraft:bread", 1, food("minecraft:bread", 5, 6.0f)));
+        assertEquals(Optional.of("minecraft:bread"),
+                FoodPicker.named(carried, "minecraft:bread", tags));
+        assertEquals(Optional.empty(), FoodPicker.named(carried, "minecraft:cookie", tags));
+    }
+
+    @Test
+    void 点名标签时按物品挂着的标签匹配() {
+        ReadsItemTags tags =
+                id -> "minecraft:bread".equals(id) ? Set.of("minecraft:foods") : Set.of();
+        List<FoodPicker.Carried> carried = List.of(
+                carried("minecraft:bread", 1, food("minecraft:bread", 5, 6.0f)));
+        assertEquals(Optional.of("minecraft:bread"),
+                FoodPicker.named(carried, "#minecraft:foods", tags));
+        assertTrue(FoodPicker.autoPick(List.of()).isEmpty());
+    }
+
+    @Test
+    void 目标正要用的吃的不当口粮() {
+        // 目标要交 8 块熟海带：身上 10 块只有 2 块算口粮；土豆整份都留着就不算口粮。
+        var stacks = List.of(new BackpackStack("minecraft:dried_kelp", 10, 64, false, true, false, false),
+                new BackpackStack("minecraft:baked_potato", 3, 64, false, true, false, false));
+        ReadsFoodValues foods = id -> Optional.of(food(id, id.endsWith("kelp") ? 1 : 5, 1.0f));
+        ItemsToKeep keeps = id -> id.equals("minecraft:dried_kelp") ? 8 : id.equals("minecraft:baked_potato") ? 3 : 0;
+        List<FoodPicker.Carried> spare = FoodPicker.carried(stacks, foods, keeps);
+        assertEquals(1, spare.size());
+        assertEquals("minecraft:dried_kelp", spare.getFirst().itemId());
+        assertEquals(2, spare.getFirst().count());
+    }
+
+    @Test
+    void 没坏效果的生肉饿了伤了就直接吃_生鸡肉不算普通食物() {
+        // 10-15 直播：三颗心、饱食度 11，身上只有生羊肉和生鸡肉。生羊肉没坏效果，是普通食物，直接吃不先去烤；
+        // 生鸡肉带饥饿效果，没饿到掉血不吃。
+        FoodValue mutton = food("minecraft:mutton", 2, 1.2f);
+        FoodValue chicken = food("minecraft:chicken", 2, 1.2f, new FoodEffect("minecraft:hunger", false));
+        assertTrue(FoodPicker.plain(mutton));
+        assertFalse(FoodPicker.plain(chicken));
+        assertEquals(Optional.of("minecraft:mutton"), FoodPicker.forHunger(
+                List.of(carried("minecraft:chicken", 1, chicken), carried("minecraft:mutton", 1, mutton)), 11, false));
+        assertEquals(Optional.empty(), FoodPicker.forHunger(List.of(carried("minecraft:chicken", 1, chicken)), 11, false));
+    }
+}

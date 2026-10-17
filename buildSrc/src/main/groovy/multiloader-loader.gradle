@@ -4,15 +4,15 @@ plugins {
 
 // 加载器模块可解析公共模块导出的源码和资源目录。
 configurations {
-    commonJava{
+    commonJava {
         canBeResolved = true
     }
-    commonResources{
+    commonResources {
         canBeResolved = true
     }
 }
 
-// 编译依赖公共模块的接口，同时取得它的源码目录；最终是按各加载器环境重新编译共享源码。
+// 编译依赖公共模块的接口，同时取得它的源码目录；最终按各加载器环境重新编译共享源码。
 dependencies {
     compileOnly(project(':common')) {
         capabilities {
@@ -23,8 +23,7 @@ dependencies {
     commonResources project(path: ':common', configuration: 'commonResources')
 }
 
-// 将公共资源登记为真实源集输入，使 Fabric Loom 等加载器工具能够发现并后处理公共 Mixin 配置文件。
-// 把共享资源登记为真正的资源输入，让 Fabric 等工具也能找到并处理公共 Mixin 配置。
+// 把公共资源登记为真正的资源目录，让 Fabric Loom 等加载器工具也能发现并后处理公共 Mixin 配置。
 sourceSets {
     main {
         resources.srcDir(project(':common').file('src/main/resources'))

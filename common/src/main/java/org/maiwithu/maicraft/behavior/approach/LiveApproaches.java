@@ -1,0 +1,90 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.behavior.approach;
+
+import java.util.Objects;
+import java.util.OptionalDouble;
+import java.util.function.Supplier;
+import net.minecraft.core.BlockPos;
+
+import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
+import org.maiwithu.maicraft.behavior.navigation.WalkTo;
+import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
+import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
+import org.maiwithu.maicraft.game.player.PlayerContext;
+
+/**
+ * 靠近的组装：把站位判断、走向站位与走到拼成一个"带我靠近"的动作。
+ *
+ * <p>距离数值每刻从角色的属性读（交互距离被装备撑大后站位判断跟着变）；
+ * 走过去的代价在寻路接缝上回答不了时按直线距离排——靠近只靠它挑先试哪个站位，
+ * 走不走得到由真的走路决定。候选站位全不过时，站位补救为只是被一两格挡住视线的位置挖开遮挡（许可允许时）。
+ */
+public final class LiveApproaches implements BringsPlayerClose {
+
+    /** 服务端对床允许的距离档：站位与床底面中心各轴的偏移不超过它。 */
+    private static final int BED_DISTANCE = 3;
+
+    private final Supplier<PlayerContext> context;
+    private final ApproachWorldView world;
+    private final WalkTo walks;
+    private final PermissionCheck permission;
+
+    public LiveApproaches(Supplier<PlayerContext> context, ApproachWorldView world, WalkTo walks,
+                          PermissionCheck permission) {
+        this.context = Objects.requireNonNull(context, "context");
+        this.world = Objects.requireNonNull(world, "world");
+        this.walks = Objects.requireNonNull(walks, "walks");
+        this.permission = Objects.requireNonNull(permission, "permission");
+    }
+
+    @Override
+    public Action toward(ApproachTarget target, Permissions permissions) {
+        return toward(target, permissions, at -> false);
+    }
+
+    @Override
+    public Action toward(ApproachTarget target, Permissions permissions, ProtectedCells avoid) {
+        return toward(target, permissions, avoid, null);
+    }
+
+    @Override
+    public Action toward(ApproachTarget target, Permissions permissions, TaskRecords records) {
+        return toward(target, permissions, at -> false, records);
+    }
+
+    private Action toward(ApproachTarget target, Permissions permissions, ProtectedCells avoid,
+            TaskRecords records) {
+        // 每个靠近动作各走各的一份：路上能动多少地形按这次任务的许可来，暂停与收尾互不牵连。
+        // 调用方不许踩的格（放方块时的目标格）并进受保护格判断，能不能挖某一格由走到实现方把关；
+        // 站位补救另走一份，挖开遮挡前过许可检查点。
+        ReachRules reach = reachNow();
+        TerrainPermit permit = TerrainPermit.of(permissions);
+        StandOpener opener = new LiveStandOpener(context, permission, permissions, reach,
+                new LiveSpotWalks(walks, permit), avoid);
+        return new Approach(target, reach, world, LiveApproaches::straightCost,
+                avoid, new LiveSpotWalks(walks, permit), opener, permissions, records);
+    }
+
+    /** 当刻的距离数值：交互距离读角色属性，眼高按当时姿态取。 */
+    private ReachRules reachNow() {
+        PlayerContext current = context.get();
+        if (current == null || current.localPlayer() == null) {
+            // 没有角色上下文时给不出真实属性；按原版徒手触达给保底值，站位判断后面还会再核对。
+            return new ReachRules(4.5, 3.0, BED_DISTANCE, 1.62);
+        }
+        var player = current.localPlayer();
+        double blockRange = player.blockInteractionRange();
+        double entityRange = player.entityInteractionRange();
+        return new ReachRules(blockRange, entityRange, BED_DISTANCE, player.getEyeHeight());
+    }
+
+    /** 直线距离的代价：只用来给候选站位排序，走不走得到由真的走路决定。 */
+    private static OptionalDouble straightCost(BlockPos from, BlockPos spot) {
+        double dx = spot.getX() - from.getX();
+        double dy = spot.getY() - from.getY();
+        double dz = spot.getZ() - from.getZ();
+        return OptionalDouble.of(Math.sqrt(dx * dx + dy * dy + dz * dz));
+    }
+}

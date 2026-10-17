@@ -1,0 +1,773 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.behavior.combat;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Optional;
+import java.util.OptionalInt;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.function.Supplier;
+
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import org.maiwithu.maicraft.behavior.navigation.calc.ThreatField;
+import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
+import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
+import org.maiwithu.maicraft.kernel.task.TickContext;
+
+/**
+ * 战斗引擎：每刻读战场 → 定打法 → 脚和手两层一起做。点名战斗与自卫用的是同一个，区别只在名单。
+ *
+ * <p>脚：近处（看得见、差不多同一层、离带子不远）不经寻路，按 {@link Footwork} 每刻挑一步——离目标落在距离带里、
+ * 离别的追兵都在危险半径外，身后是墙就侧移，被夹住就往开口退；远处、隔墙、高低差大的交给寻路，目标是
+ * "距离带 + 绕开每只怪"。手：够得着（眼睛到对方碰撞箱不超过交互距离）就出手，充能与无敌帧由原生攻击自己等；
+ * 冷却中、对手近就举盾。两层互不排斥：退着也挥，拉弓也走。
+ *
+ * <p>躲爆炸先跑后算：当刻按背离苦力怕的方向疾跑，八个方向都迈不出去才交给寻路。撤离往没怪的方向跑、甩开才停，
+ * 被追上就面朝它退着还手；连着三次走不通就背水一战。
+ *
+ * <p>打龙（名单说这一仗打末影龙）时每刻另读一份龙场，打法说按龙的来就交给打龙的脚和手（{@link DragonCombat}）；
+ * 它说先对付贴上来的别的怪，就照普通打法打，打完接着打龙。
+ */
+public final class Battle {
+
+    /** 有弓时走近到射程边上再往里留这么多格，到了就射。 */
+    private static final double BOW_APPROACH_MARGIN = 3.0;
+    private static final Logger LOG = LoggerFactory.getLogger(Battle.class);
+
+    /** 这一刻在做什么。 */
+    public enum State { FIGHTING, SHOOTING, EVADING, RETREATING, HOLDING, ESCAPED, FINISHED, NEEDS_SHELTER }
+
+    /**
+     * 一刻的结果。
+     *
+     * @param progressed 这一刻有真实进展（出手、射出、迈了步、寻路走了）
+     * @param struck     确认打中了一下
+     * @param fired      射出去一箭
+     * @param targetId   这一刻打的、躲的那只（-1 为没有）
+     * @param retreatWhy 撤离的原因；没撤为 null
+     * @param cornered   撤离走不通、退无可退
+     */
+    public record Moment(State state, String doing, boolean progressed, boolean struck, boolean fired,
+                          int targetId, String retreatWhy, boolean cornered) {}
+
+    /** 带子外沿再远这么多以内、看得见、差不多同一层：直接走位，不寻路。 */
+    static final double NEAR_MARGIN = 3.0;
+    /** 上下差这么多以内算同一层。 */
+    static final double LEVEL_GAP = 1.5;
+    /** 别的怪的危险半径外再留这么多。 */
+    static final double SIDE_MARGIN = 0.35;
+    /** 冷却中退到它够不着外最多这么远。 */
+    static final double COOL_FAR = 1.2;
+    /** 拉弓时离每一只都至少这么远：拉满一张弓要一秒。 */
+    static final double BOW_KEEP = 5.0;
+    /** 拉弓的距离带：内沿 6 到 10 格（对手冲过来越快留得越多），外沿再远 4 格。 */
+    static final double BOW_INNER_MIN = 6.0;
+    static final double BOW_INNER_MAX = 10.0;
+    static final double BOW_BAND_WIDTH = 4.0;
+    /** 寻路按格子走，人可能站在格子任何角落：危险半径加半个格子对角线再交给寻路。 */
+    static final double CELL_SLACK = Math.sqrt(2.0) / 2.0;
+    /** 目标跑开这么远才重新寻路。 */
+    static final double REPLAN_AFTER = 3.0;
+    /** 原生攻击连着被拒这么多次才当打不出去，换下一只。 */
+    static final int MAX_REJECTS = 3;
+    /** 被拒一次后这么多刻里绕开刚才那个站位，换个方位再出手。 */
+    static final int REJECT_SIDESTEP_TICKS = 15;
+    /** 绕开刚才站位多远（格）。 */
+    static final double REJECT_SIDESTEP = 1.2;
+    /** 补站位：每这么多刻外沿往里收一步。 */
+    static final int TRIM_EVERY = 5;
+    /** 补站位每步收多少格。 */
+    static final double TRIM_STEP = 0.25;
+    /** 外沿最多收到离它这么近（格）。 */
+    static final double MIN_OUTER = 0.8;
+    /** 补了这么久（刻）还够不着就当走不到。 */
+    static final int TRIM_GIVE_UP = 60;
+    /** 离带子外沿这么近以内才算站到了带里（补站位才开始数）。 */
+    static final double IN_BAND_SLACK = 0.5;
+
+    private final CombatSenses senses;
+    private final BattleMoves moves;
+    private final Battlefield.Roster roster;
+    private final double radius;
+
+    private final RangedCombat bow = new RangedCombat();
+    private final Retreat retreat = new Retreat();
+    private Action strike;
+    private int strikeTarget = -1;
+    private int rejects;
+    private Action walk;
+    private String walkKey;
+    private double[] walkAnchor;
+    private int locked = -1;
+    private boolean retreating;
+    private boolean cornered;
+    private final Set<Integer> unreachable = new HashSet<>();
+    /** 其中因为走不到跟前记下的（不是挥了被拒的）：它自己贴上来就不再算走不到。 */
+    private final Set<Integer> walkedOut = new HashSet<>();
+    /** 上一刻每只的距离：估它冲过来多快，拉弓的距离带按它留。 */
+    private final Map<Integer, Double> lastDistance = new HashMap<>();
+    private String doing = "观察战场";
+    /** 上一行日志对着的那只。 */
+    private int loggedTarget = -1;
+    /** 被拒的那个站位与还要绕开它几刻。 */
+    private double[] rejectedAt;
+    private int sidestepTicks;
+    /** 撤离往哪一侧靠：家（没记过家就是打点）的水平位置 {x, z}；不知道时为空，只按追兵反方向跑。 */
+    private Function<TickContext, double[]> homeSide = context -> null;
+    /** 调用方接得住"挖坑自保"（自卫交给挖三填一）；一仗只要一次。 */
+    private boolean offersShelter;
+    private boolean shelterAsked;
+    /** 就地垫高：试过了没有（一仗只垫一次）、站没站上柱顶、柱顶多高。 */
+    private boolean pillarTried;
+    private boolean perched;
+    private double perchY;
+    private Action pillar;
+    /** 正在打回去的那个火球的动作与编号；没在接为 null / -1。 */
+    private Action returning;
+    private int returningId = -1;
+    /** 补站位：在给哪只补、够不着几刻了。 */
+    private int trimTarget = -1;
+    private int trimTicks;
+    /** 跳劈：什么时候起跳、什么时候按住不砍、什么时候站着砍。 */
+    private final JumpStrike leap = new JumpStrike();
+    /** 这一刻的出手有了结果（打中或被拒）：算"砍出去了"。 */
+    private boolean swingSettled;
+    /** 上一段寻路走不通：逼近的那只记成走不到。 */
+    private boolean lastWalkFailed;
+    /** 开打后追过我、还朝我来的：攻击标记一闪一闪也照样算追兵，离开或看不见满三秒才放下。 */
+    private final StillChasing still = new StillChasing();
+    /** 这一刻手上在换武器（开了背包换进快捷栏、按数字键选中）：不挥、不射、不接火球，等换完。 */
+    private boolean swapping;
+    /** 打龙的脚和手；这一仗不打龙为 null。 */
+    private final DragonCombat dragon;
+    /** 上一刻是按龙的打法做的：能不能被打断问打龙那边。 */
+    private boolean dragonActive;
+
+    /** @param radius 看多远的战场：自卫用警戒半径，区域清扫用清扫半径；撤离时自动看四十格 */
+    public Battle(CombatSenses senses, BattleMoves moves, Battlefield.Roster roster, double radius) {
+        this.senses = senses;
+        this.moves = moves;
+        this.roster = roster;
+        this.radius = radius;
+        this.dragon = roster.fightsDragon() ? new DragonCombat(moves) : null;
+    }
+
+    public Moment tick(TickContext context) {
+        // 撤离时看四十格，这次的追兵一时没在追（隔着坡看不见）也留在场上，甩没甩开才看得准。
+        // 开打后追过我、还朝我来的那只照样算追兵（攻击标记一秒一闪也不让这一仗"逼近↔打完了"来回切）。
+        Battlefield field = Battlefield.read(senses, moves, context,
+                retreating ? ThreatAssessment.FLEE_CLEAR_DISTANCE : radius, roster,
+                retreating ? retreat.pursuers() : Set.of(), still);
+        // 换武器开始了就做完：每刻先推进换到一半的那次，"打完了"、贴到跟前都不中途收掉；换的这几刻手腾不出来。
+        swapping = moves.finishArming(context);
+        if (retreating) retreat.noteChasers(field);
+        // 打龙：先记战况（水晶少了哪颗、龙倒没倒下、回血回到哪儿），再定打法。
+        if (dragon != null) dragon.observe(context, field);
+        // 走不到而记下的那只自己贴上来了（看得见、够得着）：不再当走不到，照常近身打，不对着贴脸的怪拉弓。
+        // 实机 10-14 一只尸壳被记成走不到，贴到 0.6 格时还在拉弓射它。
+        for (Battlefield.Foe foe : field.foes()) {
+            if (walkedOut.contains(foe.id()) && foe.threat().visible() && foe.threat().withinReach(field.me().reach())) {
+                walkedOut.remove(foe.id());
+                unreachable.remove(foe.id());
+            }
+        }
+        // 被打下柱顶（击退、柱子被炸）：不再算站在高处。
+        if (perched && field.me().y() < perchY - 0.5) perched = false;
+        // 有能打回去的火球冲我飞来：先把它打回去，别的打法这几刻让开（恶魂隔着十几格放火球，凑近战够不着它）。
+        Moment back = swapping ? null : returnFire(context, senses.returnableIncoming(context));
+        if (back != null) return back;
+        boolean mayPillar = !pillarTried && cornered && moves.canPillar(context);
+        // 天黑才挖坑；拉开距离后就挖，不必等到退无可退（何时挖由打法按追兵远近定）。
+        boolean mayDigIn = offersShelter && !shelterAsked && moves.night(context);
+        Tactic.Plan plan = Tactic.decide(field, new Tactic.Memory(locked, retreating, cornered, unreachable,
+                bow.givenUp(), bow.shooting(), mayPillar || pillar != null, perched, mayDigIn,
+                dragon == null ? null : dragon.memory(context)));
+        // 普通打法接手（先对付贴上来的别的怪）：打龙那边的出手、寻路、拉了一半的弓收尾。
+        if (dragon != null && dragonActive && !(plan instanceof Tactic.Dragon)) dragon.stand();
+        dragonActive = plan instanceof Tactic.Dragon;
+        if (pillar != null && !(plan instanceof Tactic.PillarUp)) {
+            // 垫到一半处境变了（回了血、来了射手）：垫高收尾，按新打法来。
+            pillar.close();
+            pillar = null;
+        }
+        Moment moment = switch (plan) {
+            case Tactic.EvadeBlast evade -> evade(context, field, evade.bomb());
+            case Tactic.Withdraw withdraw -> withdraw(context, field, withdraw.why());
+            case Tactic.PillarUp pillarUp -> pillarUp(context, field, pillarUp.why());
+            case Tactic.DigIn digIn -> {
+                // 挖坑熬夜是整夜的事，引擎做不了：收起手脚，交给调用方（自卫接挖三填一）。
+                shelterAsked = true;
+                standDown();
+                yield new Moment(State.NEEDS_SHELTER, digIn.why(), false, false, false, -1, digIn.why(), true);
+            }
+            case Tactic.Melee melee -> melee(context, field, melee.target());
+            case Tactic.Shoot shoot -> shoot(context, field, shoot.target());
+            case Tactic.KeepClear keep -> keepClear(context, field, keep.why());
+            case Tactic.Finished finished -> finish();
+            case Tactic.Dragon dragonPlan -> {
+                // 按龙的打法：普通打法这边的出手、寻路、弓先收尾，脚和手交给打龙那边。
+                dropStrike();
+                dropWalk();
+                bow.close();
+                yield dragon.tick(context, field, dragonPlan.move());
+            }
+        };
+        for (Battlefield.Foe foe : field.foes()) lastDistance.put(foe.id(), foe.distance());
+        // 打法、对手换了记一行（对着谁、多远、点没点引信、我在哪），实机出事后对得上当时在做什么。
+        if (!moment.doing().equals(doing) || moment.targetId() != loggedTarget) {
+            loggedTarget = moment.targetId();
+            Battlefield.Foe foe = field.foes().stream().filter(f -> f.id() == moment.targetId()).findFirst().orElse(null);
+            LOG.info("[战斗] {}：{}{}，我在 {}", moment.state(), moment.doing(), foe == null ? ""
+                    : String.format("（%s #%d，%.1f 格，高差 %.1f%s）", foe.threat().type(), foe.id(), foe.distance(),
+                    foe.threat().y() - field.me().y(), foe.fusing() ? "，引信点着" : ""),
+                    String.format("%.1f, %.1f, %.1f", field.me().x(), field.me().y(), field.me().z()));
+        }
+        doing = moment.doing();
+        return moment;
+    }
+
+    // 接火球：换了一个更近的就改接它；站定盯着、够得着就挥（动作里），火球掉头、没了、不再冲我就收手回到原打法。
+    private Moment returnFire(TickContext context, OptionalInt incoming) {
+        if (incoming.isPresent() && incoming.getAsInt() != returningId) {
+            dropReturn();
+            returning = moves.returnProjectile(incoming.getAsInt());
+            returningId = returning == null ? -1 : incoming.getAsInt();
+            if (returning != null) LOG.info("[战斗] 接火球：冲我飞来的 #{}，站定盯着打回去", returningId);
+        }
+        if (returning == null) return null;
+        ActionStatus status = returning.tick(context);
+        if (!(status instanceof ActionStatus.Running running)) {
+            dropReturn();
+            return null;
+        }
+        dropStrike();
+        bow.close();
+        moves.lowerGuard();
+        moves.stepKeepingAim(context, Footwork.Step.STAND);
+        return new Moment(State.FIGHTING, "把飞来的火球打回去", running.progressed(), false, false, -1, null, false);
+    }
+
+    private void dropReturn() {
+        if (returning != null) returning.close();
+        returning = null;
+        returningId = -1;
+    }
+
+    // 躲爆炸：当刻疾跑背离它，出了熄火距离与爆炸波及再停；八个方向都迈不出去才交给寻路找别的路。
+    private Moment evade(TickContext context, Battlefield field, Battlefield.Foe bomb) {
+        dropStrike();
+        bow.close();
+        Battlefield.Me me = field.me();
+        List<Footwork.Hazard> hazards = new ArrayList<>();
+        hazards.add(new Footwork.Hazard(bomb.threat().x(), bomb.threat().z(), bomb.blastClearance()));
+        hazards.addAll(sideHazards(field, bomb.id(), 0));
+        Footwork.Stance stance = new Footwork.Stance(null, hazards, true);
+        String what = "躲开点着引信的 " + bomb.threat().type();
+        if (perched) {
+            // 站在柱顶：跳下去更危险，原地举盾挡爆炸。
+            moves.step(context, bomb.id(), Footwork.Step.STAND);
+            moves.guard(context, bomb.distance(), false);
+            return new Moment(State.EVADING, what + "（在柱顶上举盾）", false, false, false, bomb.id(), null, cornered);
+        }
+        Footwork.Step step = Footwork.choose(me.x(), me.z(), stance, moves.ground(context));
+        if (step.standing() && Footwork.exposed(me.x(), me.z(), stance)) {
+            List<ThreatField.Threat> threats = new ArrayList<>(pathThreats(field, -1));
+            threats.add(new ThreatField.Threat(bomb.threat().x(), bomb.threat().y(), bomb.threat().z(),
+                    bomb.blastClearance() + CELL_SLACK, bomb.blastClearance()));
+            boolean moved = follow(context, "躲爆炸 " + bomb.id(), bomb.threat(), () -> GoalCompiler.awayFrom(threats));
+            return new Moment(State.EVADING, what + "（寻路绕出去）", moved, false, false, bomb.id(), null, cornered);
+        }
+        dropWalk();
+        moves.step(context, -1, step);
+        return new Moment(State.EVADING, what, !step.standing(), false, false, bomb.id(), null, cornered);
+    }
+
+    // 撤离：甩开了就收；被追上就面朝它退着还手；否则往没怪的方向的落点跑，走不通换方向，连着三次走不通背水一战。
+    private Moment withdraw(TickContext context, Battlefield field, String why) {
+        if (!retreating) {
+            retreating = true;
+            retreat.begin(why, field);
+            dropWalk();
+            bow.close();
+        }
+        if (retreat.escaped(field)) {
+            retreating = false;
+            standDown();
+            return new Moment(State.ESCAPED, "甩开了追兵", true, false, false, -1, retreat.why(), false);
+        }
+        Battlefield.Me me = field.me();
+        Battlefield.Foe pursuer = nearestChaser(field);
+        // 真被追上（它已经够得着我）才停下退着还手；只是跟在后面几格就接着疾跑——人跑起来比僵尸快，
+        // 停下来还手反倒被围上。实机 10-14 四只尸壳跟在三格外，角色每隔一下就停下还手，十几秒被追死。
+        if (pursuer != null && pursuer.threat().visible() && pursuer.threat().canHitMe()) {
+            dropWalk();
+            boolean inReach = pursuer.threat().withinReach(me.reach());
+            boolean struck = inReach && !swapping && swing(context, pursuer.id(), me);
+            if (!inReach) dropStrike();
+            moves.guard(context, pursuer.distance(), inReach && me.attackReady());
+            Footwork.Step step = Footwork.choose(me.x(), me.z(),
+                    new Footwork.Stance(null, sideHazards(field, -1, 1.0), false), moves.ground(context));
+            moves.step(context, pursuer.id(), step);
+            return new Moment(State.RETREATING, "撤离途中被追上，退着还手", struck || !step.standing(), struck,
+                    false, pursuer.id(), retreat.why(), cornered);
+        }
+        dropStrike();
+        // 跑的时候盾放下：举着盾走路只有两成速度、也疾跑不了。实机 10-14 撤离时一路举盾，被尸壳贴着追死。
+        moves.lowerGuard();
+        if (walk == null) {
+            double cx = 0;
+            double cz = 0;
+            List<Battlefield.Foe> chasers = field.chasers();
+            for (Battlefield.Foe foe : chasers) {
+                cx += foe.threat().x();
+                cz += foe.threat().z();
+            }
+            cx /= Math.max(1, chasers.size());
+            cz /= Math.max(1, chasers.size());
+            // 这一刻一只追兵都看不见：按最后露面的位置背离着跑，不朝世界原点反方向乱跑。
+            double[] remembered = chasers.isEmpty() ? retreat.pursuersCenter() : null;
+            if (remembered != null) {
+                cx = remembered[0];
+                cz = remembered[1];
+            }
+            // 往家（没记过家就往打点）那一侧跑：背离追兵的左右九十度里挑离家最近的落点，不一路往野外越跑越远。
+            int[] haven = Retreat.haven(me.x(), me.y(), me.z(), cx, cz, retreat.turns(),
+                    (x, y, z) -> moves.standable(context, x, y, z), homeSide.apply(context));
+            List<ThreatField.Threat> threats = pathThreats(field, -1);
+            GoalCompiler.Compiled goal = haven != null
+                    ? GoalCompiler.approachAvoiding(GoalCompiler.near(new BlockPos(haven[0], haven[1], haven[2]), 2.0), threats)
+                    : threats.isEmpty() ? null : GoalCompiler.awayFrom(threats.stream()
+                            .map(threat -> threat.withClearance(Retreat.REACH_OUT)).toList());
+            if (goal != null) {
+                walk = moves.walk(goal);
+                walkKey = "撤离";
+            }
+        }
+        ActionStatus status = walk == null ? null : walk.tick(context);
+        if (status == null || status instanceof ActionStatus.Failed) {
+            dropWalk();
+            if (retreat.routeFailed(me.x(), me.z())) {
+                // 退无可退：回去就地迎战，血线不再触发撤离（没有地方可撤）。
+                cornered = true;
+                retreating = false;
+                return new Moment(State.RETREATING, "撤离路线连着走不通，退无可退，就地迎战", false, false, false,
+                        -1, retreat.why(), true);
+            }
+            return new Moment(State.RETREATING, "撤离走不通，换个方向再试", false, false, false, -1, retreat.why(), cornered);
+        }
+        if (status instanceof ActionStatus.Done) dropWalk();
+        boolean moved = status instanceof ActionStatus.Running running && running.progressed();
+        return new Moment(State.RETREATING, "撤离：" + retreat.why(), moved, false, false, -1, retreat.why(), cornered);
+    }
+
+    // 就地垫高：往上垫三格站到柱顶；垫不成就照旧背水一战，这一仗不再试。
+    private Moment pillarUp(TickContext context, Battlefield field, String why) {
+        dropStrike();
+        dropWalk();
+        bow.close();
+        if (pillar == null) {
+            pillarTried = true;
+            pillar = moves.pillarUp(context);
+            if (pillar == null) return new Moment(State.FIGHTING, "垫不了高，背水一战", false, false, false, -1, why, cornered);
+        }
+        ActionStatus status = pillar.tick(context);
+        if (status instanceof ActionStatus.Running running) {
+            return new Moment(State.FIGHTING, "就地往上垫", running.progressed(), false, false, -1, why, cornered);
+        }
+        pillar.close();
+        pillar = null;
+        if (status instanceof ActionStatus.Done) {
+            perched = true;
+            perchY = moves.selfPosition(context)[1];
+            return new Moment(State.FIGHTING, "垫高了三格，站在柱顶上打够得着的", true, false, false, -1, why, cornered);
+        }
+        return new Moment(State.FIGHTING, "垫不上去，背水一战", false, false, false, -1, why, cornered);
+    }
+
+    // 近身打：手够得着就挥；脚近处按距离带挑步，远处交给寻路（带子 + 绕开每只怪）。
+    private Moment melee(TickContext context, Battlefield field, Battlefield.Foe target) {
+        if (bow.shooting()) bow.close();
+        retarget(target.id());
+        Battlefield.Me me = field.me();
+        CombatSenses.Threat threat = target.threat();
+        boolean inReach = threat.visible() && threat.withinReach(me.reach());
+        // 跳劈（苦力怕不跳）：充能过半起跳、往下落时砍；落地满条、准星在它身上就站着砍，两跳没砍出去站着砍一阵。
+        JumpStrike.Move jump = leap.decide(moves.posture(context), inReach,
+                threat.kind() != ThreatAssessment.Kind.EXPLOSIVE,
+                () -> me.attackReady() && moves.crosshairOn(context, target.id()));
+        boolean jumpNow = jump.jumpNow();
+        boolean holdSwing = jump.holdSwing();
+        // 手上还在换武器（开背包换进快捷栏、按数字键选中）：这几刻不挥，换完再砍。
+        boolean swinging = inReach && !holdSwing && !swapping;
+        swingSettled = false;
+        boolean struck = swinging && swing(context, target.id(), me);
+        if (swingSettled) leap.swung();
+        if (!inReach) {
+            dropStrike();
+            // 还够不着、离得也够远：路上先把剑斧拿到手上，到跟前一出手就是它。
+            moves.arm(context, threat.distance());
+        }
+        if (threat.dangerRadius() > 0) moves.guard(context, threat.distance(), inReach && me.attackReady());
+        else moves.lowerGuard();
+        Footwork.Band band = trimmed(meleeBand(me, threat, me.attackReady()), target.id(), inReach, threat.visible(),
+                threat.distance());
+        boolean moved;
+        if (sidestepTicks > 0) sidestepTicks--;
+        if (perched) {
+            // 站在柱顶：脚不动（一挪就掉下去），只砍够得着的。
+            dropWalk();
+            moves.step(context, target.id(), Footwork.Step.STAND);
+            moved = false;
+        } else if (near(me, threat, band.outer())) {
+            dropWalk();
+            List<Footwork.Hazard> hazards = sideHazards(field, target.id(), SIDE_MARGIN);
+            if (sidestepTicks > 0 && rejectedAt != null) {
+                // 刚被拒了一下：在带子里绕开刚才那个站位，换个方位再出手（方块边角、栅栏缝常挡着那一个角度）。
+                hazards.add(new Footwork.Hazard(rejectedAt[0], rejectedAt[1], REJECT_SIDESTEP));
+            }
+            Footwork.Step step = Footwork.choose(me.x(), me.z(), new Footwork.Stance(band, hazards, false),
+                    moves.ground(context));
+            if (jumpNow) step = new Footwork.Step(step.dx(), step.dz(), true, false);
+            // 这一刻手上正瞄着出手：脚照迈，镜头留给出手的瞄点（它跟着对方横移、夹在碰撞箱里）。
+            // 跳劈起跳前、往上升时镜头先压在出手那一点上，往下落那几刻不用再转镜头就能砍。
+            if (swinging) moves.stepKeepingAim(context, step);
+            else if (holdSwing) moves.stepAimingStrike(context, target.id(), step);
+            else moves.step(context, target.id(), step);
+            moved = !step.standing() || jumpNow;
+        } else if (threat.kind() == ThreatAssessment.Kind.EXPLOSIVE) {
+            moved = creeperFootwork(context, field, me, target, threat);
+        } else {
+            List<ThreatField.Threat> threats = pathThreats(field, -1);
+            Vec3 focus = new Vec3(threat.x(), threat.y(), threat.z());
+            moved = follow(context, "逼近 " + target.id(), threat,
+                    () -> GoalCompiler.approachAvoiding(GoalCompiler.band(focus, 0, band.outer()), threats));
+            if (lastWalkFailed) cannotWalkTo(target.id());
+        }
+        String what = (inReach ? "打 " : "逼近 ") + threat.type();
+        return new Moment(State.FIGHTING, what, struck || moved, struck, false, target.id(), null, cornered);
+    }
+
+    // 射：推进手上这一箭；快放手对准时站住，其余时候按拉弓的距离带走位，离每一只都至少五格。
+    private Moment shoot(TickContext context, Battlefield field, Battlefield.Foe target) {
+        dropStrike();
+        dropWalk();
+        moves.lowerGuard();
+        retarget(target.id());
+        CombatSenses.Threat threat = target.threat();
+        // 手上还在换近战武器：这一刻不拉弓，等换完（两样同时开背包会互相顶掉）。
+        boolean fired = !swapping && bow.tick(context, moves, threat.entityId());
+        boolean moved = false;
+        if (!bow.steady() && !perched) {
+            double inner = bowInner(target);
+            Footwork.Band band = new Footwork.Band(threat.x(), threat.z(), inner, inner + BOW_BAND_WIDTH);
+            List<Footwork.Hazard> hazards = new ArrayList<>();
+            for (Battlefield.Foe foe : field.chasers()) {
+                if (foe.id() == target.id()) continue;
+                hazards.add(new Footwork.Hazard(foe.threat().x(), foe.threat().z(),
+                        Math.max(foe.threat().dangerRadius() + SIDE_MARGIN, BOW_KEEP)));
+            }
+            Footwork.Step step = Footwork.choose(field.me().x(), field.me().z(),
+                    new Footwork.Stance(band, hazards, false), moves.ground(context));
+            moves.step(context, target.id(), step);
+            moved = !step.standing();
+        }
+        return new Moment(State.SHOOTING, "射 " + threat.type(), fired || moved, false, fired, target.id(), null, cornered);
+    }
+
+    // 没有能打的：离开所有追兵的危险半径（点着引信的按爆炸范围），看着最近的那只，不跑远。
+    private Moment keepClear(TickContext context, Battlefield field, String why) {
+        dropStrike();
+        dropWalk();
+        bow.close();
+        Battlefield.Me me = field.me();
+        Battlefield.Foe nearest = nearestChaser(field);
+        Footwork.Step step = perched ? Footwork.Step.STAND : Footwork.choose(me.x(), me.z(),
+                new Footwork.Stance(null, sideHazards(field, -1, SIDE_MARGIN), false), moves.ground(context));
+        moves.step(context, nearest == null ? -1 : nearest.id(), step);
+        if (nearest != null) moves.guard(context, nearest.distance(), false);
+        return new Moment(State.HOLDING, why, !step.standing(), false, false,
+                nearest == null ? -1 : nearest.id(), null, cornered);
+    }
+
+    private Moment finish() {
+        standDown();
+        return new Moment(State.FINISHED, "打完了", false, false, false, -1, null, cornered);
+    }
+
+    /**
+     * 近身的距离带：冷却好了内沿是它够得着我、外沿是我稳稳够得着它；冷却中退到它够不着外 0.35 到 1.2 格。
+     * 两边手一样长（打玩家）没有"我够得着它够不着"的缝，冷却好了才短暂凑进去出手；苦力怕守在点火距离外。
+     */
+    static Footwork.Band meleeBand(Battlefield.Me me, CombatSenses.Threat threat, boolean attackReady) {
+        double standoff = CombatGeometry.meleeStandOff(me.reach(), threat.halfWidth());
+        double danger = threat.dangerRadius();
+        if (!attackReady && danger > 0) {
+            return new Footwork.Band(threat.x(), threat.z(), danger + SIDE_MARGIN, Math.max(danger + COOL_FAR, standoff));
+        }
+        double inner;
+        if (threat.kind() == ThreatAssessment.Kind.EXPLOSIVE) inner = danger + 0.1;
+        else inner = danger < standoff - 0.1 ? danger : Math.max(0, standoff - 0.85);
+        return new Footwork.Band(threat.x(), threat.z(), inner, Math.max(inner + 0.1, standoff));
+    }
+
+    /**
+     * 补站位：站在带里却够不着（被方块边角挡着、它在坑里低一截）时，外沿每过几刻往里收一点，凑近到真够得着；
+     * 收到底还够不着就当这只走不到——有弓去射，没弓换下一只，不原地空转。
+     */
+    private Footwork.Band trimmed(Footwork.Band band, int targetId, boolean inReach, boolean visible, double distance) {
+        // 只在已经站到带子跟前时才数：还在走过去的路上（离带子外沿还远）不算"站在带里够不着"，
+        // 不然走向十几格外、还在朝我来的那只走上三秒就被记成走不到，这一仗当场"打完了"。
+        if (targetId != trimTarget || inReach || !visible || distance > band.outer() + IN_BAND_SLACK) {
+            trimTarget = targetId;
+            trimTicks = 0;
+            return band;
+        }
+        trimTicks++;
+        double trim = Math.min(band.outer() - Math.max(band.inner() + 0.1, MIN_OUTER), (trimTicks / TRIM_EVERY) * TRIM_STEP);
+        if (trimTicks > TRIM_GIVE_UP) {
+            cannotWalkTo(targetId);
+            trimTicks = 0;
+        }
+        return trim <= 0 ? band : new Footwork.Band(band.x(), band.z(), band.inner(), band.outer() - trim);
+    }
+
+    // 拉弓的内沿：对手冲过来越快留得越多，拉满一张弓的一秒半里它能走多远就多留多远。
+    private double bowInner(Battlefield.Foe target) {
+        Double before = lastDistance.get(target.id());
+        double closing = before == null ? 0 : Math.max(0, before - target.distance());
+        return Math.min(BOW_INNER_MAX, BOW_INNER_MIN + closing * 20 * 1.5);
+    }
+
+    // 近处：看得见、差不多同一层、离带子外沿不远。
+    private static boolean near(Battlefield.Me me, CombatSenses.Threat threat, double outer) {
+        return threat.visible() && Math.abs(threat.y() - me.y()) <= LEVEL_GAP && threat.distance() <= outer + NEAR_MARGIN;
+    }
+
+    // 走位要躲的别的怪：除了要打的那只，每只追兵在它危险半径外再留一点；点着引信的按爆炸范围。
+    private static List<Footwork.Hazard> sideHazards(Battlefield field, int exceptId, double margin) {
+        List<Footwork.Hazard> hazards = new ArrayList<>();
+        for (Battlefield.Foe foe : field.chasers()) {
+            if (foe.id() == exceptId) continue;
+            double radius = foe.fusing() ? foe.blastClearance() : foe.threat().dangerRadius() + margin;
+            if (radius > 0) hazards.add(new Footwork.Hazard(foe.threat().x(), foe.threat().z(), radius));
+        }
+        return hazards;
+    }
+
+    // 交给寻路的威胁场：每只追兵（含要打的那只）按危险半径，寻路按格子走再加半个格子对角线。
+    private static List<ThreatField.Threat> pathThreats(Battlefield field, int exceptId) {
+        List<ThreatField.Threat> threats = new ArrayList<>();
+        for (Battlefield.Foe foe : field.chasers()) {
+            if (foe.id() == exceptId) continue;
+            double danger = foe.fusing() ? foe.blastClearance() : foe.threat().dangerRadius();
+            if (danger <= 0) continue;
+            threats.add(new ThreatField.Threat(foe.threat().x(), foe.threat().y(), foe.threat().z(),
+                    danger + CELL_SLACK, danger));
+        }
+        return threats;
+    }
+
+    // 苦力怕的走位：有弓、看得见、在射程外就走近到射程里；否则不寻路凑过去，守在点火距离外等它走过来。
+    // 返回这一刻脚动了没有。
+    private boolean creeperFootwork(TickContext context, Battlefield field, Battlefield.Me me, Battlefield.Foe target,
+                                    CombatSenses.Threat threat) {
+        boolean moved;
+        if (me.canShoot() && threat.visible()
+                && threat.distance() > RangedCombat.ENGAGE_RANGE - BOW_APPROACH_MARGIN) {
+            // 有弓、看得见、在射程外的苦力怕：走近到射程里再射，不当成够不着。走近只到射程边上，离它点火距离远着呢。
+            // 实机 10-14 点名一只三十多格外、高两三格的苦力怕，身上有弓有箭，原地就以"走不到跟前也射不到"收场。
+            List<ThreatField.Threat> threats = pathThreats(field, -1);
+            Vec3 focus = new Vec3(threat.x(), threat.y(), threat.z());
+            moved = follow(context, "走近射 " + target.id(), threat, () -> GoalCompiler.approachAvoiding(
+                    GoalCompiler.band(focus, RangedCombat.ENGAGE_RANGE - 2 * BOW_APPROACH_MARGIN,
+                            RangedCombat.ENGAGE_RANGE - BOW_APPROACH_MARGIN), threats));
+            if (lastWalkFailed) cannotWalkTo(target.id());
+        } else {
+            // 苦力怕不在眼前同一层的平地上（隔着坑、差着高、要绕路搭桥）：不寻路凑过去——绕路、搭桥时人慢，
+            // 它一贴近就点火，实机就是潜行着往苦力怕那边挪被炸。原地守在它的点火距离外，等它走到平地跟前再砍；
+            // 看不见或不在同一层的记成够不着，它真贴上来自卫会再接手。
+            dropWalk();
+            List<Footwork.Hazard> hazards = sideHazards(field, target.id(), SIDE_MARGIN);
+            hazards.add(new Footwork.Hazard(threat.x(), threat.z(), CombatGeometry.CREEPER_IGNITE + SIDE_MARGIN));
+            Footwork.Step step = Footwork.choose(me.x(), me.z(), new Footwork.Stance(null, hazards, false),
+                    moves.ground(context));
+            moves.step(context, target.id(), step);
+            moved = !step.standing();
+            if (!threat.visible() || Math.abs(threat.y() - me.y()) > LEVEL_GAP) cannotWalkTo(target.id());
+        }
+        return moved;
+    }
+
+    // 跟着一段寻路走：同一件事、目标没跑开就沿用，跑开三格以上或换了事才重新算路；走不通记下来。
+    private boolean follow(TickContext context, String key, CombatSenses.Threat anchor,
+                           Supplier<GoalCompiler.Compiled> goal) {
+        lastWalkFailed = false;
+        if (walk != null && (!key.equals(walkKey)
+                || Math.hypot(anchor.x() - walkAnchor[0], anchor.z() - walkAnchor[2]) > REPLAN_AFTER)) {
+            dropWalk();
+        }
+        if (walk == null) {
+            walk = moves.walk(goal.get());
+            walkKey = key;
+            walkAnchor = new double[] {anchor.x(), anchor.y(), anchor.z()};
+        }
+        ActionStatus status = walk.tick(context);
+        if (status instanceof ActionStatus.Failed) {
+            lastWalkFailed = true;
+            dropWalk();
+            return false;
+        }
+        if (status instanceof ActionStatus.Done) dropWalk();
+        return status instanceof ActionStatus.Running running && running.progressed();
+    }
+
+    // 出手一下：同一只沿用进行中的出手；打中了清掉等下一下。被拒一次记下站位、接下来绕开它换个方位再出手，
+    // 连着被拒三次就当这只打不出去，换下一只。
+    private boolean swing(TickContext context, int targetId, Battlefield.Me me) {
+        if (strike != null && strikeTarget != targetId) dropStrike();
+        if (strike == null) {
+            strike = moves.strike(context, targetId);
+            strikeTarget = targetId;
+        }
+        ActionStatus status;
+        try {
+            status = strike.tick(context);
+        } catch (IllegalStateException busy) {
+            // 上一下举盾还在等确认，交互入口这一刻不收这一刀：下一刻再挥。不能因此把整场自卫掀翻——
+            // 实机 10-14 撤离途中被追上还手，刚举的盾没结清，挥刀抛错，自卫出错结束，站着被尸壳打死。
+            return false;
+        }
+        if (status instanceof ActionStatus.Done) {
+            dropStrike();
+            rejects = 0;
+            swingSettled = true;
+            return true;
+        }
+        if (status instanceof ActionStatus.Failed) {
+            dropStrike();
+            swingSettled = true;
+            rejectedAt = new double[] {me.x(), me.z()};
+            sidestepTicks = REJECT_SIDESTEP_TICKS;
+            if (++rejects >= MAX_REJECTS) {
+                unreachable.add(targetId);
+                rejects = 0;
+                sidestepTicks = 0;
+            }
+        }
+        return false;
+    }
+
+    // 走不到它跟前（寻路走不通、收紧站位也够不着、苦力怕隔着坑）：记成够不着，有弓去射、没弓换下一只。
+    private void cannotWalkTo(int id) {
+        unreachable.add(id);
+        walkedOut.add(id);
+    }
+
+    private void retarget(int id) {
+        if (locked != id) {
+            locked = id;
+            rejects = 0;
+        }
+    }
+
+    private static Battlefield.Foe nearestChaser(Battlefield field) {
+        Battlefield.Foe nearest = null;
+        for (Battlefield.Foe foe : field.chasers()) {
+            if (nearest == null || foe.distance() < nearest.distance()) nearest = foe;
+        }
+        return nearest;
+    }
+
+    private void dropStrike() {
+        if (strike != null) strike.close();
+        strike = null;
+        strikeTarget = -1;
+    }
+
+    private void dropWalk() {
+        if (walk != null) walk.close();
+        walk = null;
+        walkKey = null;
+    }
+
+    /** 这一仗真结束了（任务收尾、换去挖坑）：手脚都收尾，换到一半的武器也收尾、开着的背包交给原版关上。 */
+    public void close() {
+        standDown();
+        moves.stopArming();
+    }
+
+    // 不打了（打完了、甩开了、交去挖坑）：出手、寻路、垫高、拉了一半的弓都收尾，盾放下；换到一半的武器不收，
+    // 下一刻接着换完——打完了的观察期、走回打点时照样每刻推进它。
+    private void standDown() {
+        dropReturn();
+        dropStrike();
+        dropWalk();
+        if (pillar != null) pillar.close();
+        pillar = null;
+        bow.close();
+        if (dragon != null) dragon.close();
+        moves.lowerGuard();
+    }
+
+    /** 暂停：寻路与出手停在原处，弓取消。 */
+    public void pause() {
+        if (strike != null) strike.pause();
+        if (walk != null) walk.pause();
+        bow.close();
+        if (dragon != null) dragon.pause();
+    }
+
+    /** 打龙这一仗到此刻的战况；不打龙为空。 */
+    public Optional<DragonCombat.Report> dragonReport() {
+        return dragon == null ? Optional.empty() : Optional.of(dragon.report());
+    }
+
+    /**
+     * 撤离往哪一侧靠：每次挑撤离落点时问一次家（没记过家就给打点）的水平位置 {x, z}，给空就只按追兵反方向跑。
+     * 自卫给它，点名战斗不给。
+     */
+    public void retreatToward(Function<TickContext, double[]> side) {
+        homeSide = side == null ? context -> null : side;
+    }
+
+    /** 调用方接得住挖坑自保：夜里退无可退、打不过时引擎报 {@link State#NEEDS_SHELTER} 交给它。 */
+    public void offerShelter() {
+        offersShelter = true;
+    }
+
+    /** 已在撤离（甩开前不回头）。 */
+    public boolean retreating() {
+        return retreating;
+    }
+
+    /** 寻路说走不到、或出手连着被拒的那些：结果里写够不着谁，自卫记一阵不再为它插进来。 */
+    public Set<Integer> unreachable() {
+        return Set.copyOf(unreachable);
+    }
+
+    /** 撤离连着走不通，正在背水一战。 */
+    public boolean cornered() {
+        return cornered;
+    }
+
+    public Interruptibility interruptibility() {
+        if (dragon != null && dragonActive) return dragon.interruptibility();
+        if (walk != null) return walk.interruptibility();
+        if (strike != null) return strike.interruptibility();
+        return Interruptibility.WORKING;
+    }
+
+    public String describe() {
+        return doing;
+    }
+}

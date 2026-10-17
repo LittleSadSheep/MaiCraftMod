@@ -7,88 +7,122 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import com.google.gson.GsonBuilder;
+import java.util.Optional;
+import java.util.stream.Collectors;
 import java.security.NoSuchAlgorithmException;
-import java.util.Arrays;
-import org.maiwithu.maicraft.core.integration.machine.process.NativeProcessRegistry;
-import org.maiwithu.maicraft.mcp.MetadataSearch;
+import org.maiwithu.maicraft.kernel.knowledge.KnowledgeDocument;
+import org.maiwithu.maicraft.kernel.knowledge.KnowledgeSource;
 
-/** 仅通过元数据发现资源、按需读取 Markdown，并为无法读取资源的宿主提供工具回退。 */
+/**
+ * 知识库：通过目录元数据发现资源、按需读取正文，并为没有资源读取能力的宿主提供搜索回退。
+ *
+ * <p>内置资料随包发布（索引与游戏机制常识）；其余资料由登记的知识来源提供。
+ * 目录与搜索只比较元数据，不读正文，也不读取游戏世界。
+ */
 public final class KnowledgeLibrary {
     public static final String INDEX = "maicraft://knowledge/index";
-    public static final String GUIDE = "maicraft://knowledge/guide";
-    public static final String BLUEPRINT = "maicraft://knowledge/blueprint";
-    public static final String PROCESSES = "maicraft://knowledge/processes";
-    public static final String RECIPES = "maicraft://knowledge/recipes";
-    public static final String PHYSICS = "maicraft://knowledge/physics";
     public static final String GAME_MECHANICS_PREFIX = "maicraft://knowledge/game_mechanics/";
+    public static final String BUILDING_PREFIX = "maicraft://knowledge/building/";
     private static final int PAGE_SIZE = 16;
 
-    /** 游戏机制常识条目：slug、标题、检索描述；描述带中英关键词与注册 ID，精确与近似搜索都按 Entry 元数据匹配。 */
+    /**
+     * 游戏机制常识条目：slug、标题、一句话说明、检索词。一句话说明给目录看；检索词带中英说法与注册 ID，
+     * 搜索按标题、说明和检索词匹配，不读正文。
+     */
     static final String[][] GAME_MECHANICS = {
-            {"gravity-blocks", "重力方块与塌落", "gravel sand 落沙 gravity 塌方 塌落 掩埋掉落物 瞬时 no_path 落方块伤害"},
-            {"fluid-flow", "流体流动与灌满", "water lava 水 岩浆 流动 灌满 倒水 自救 淹 黑曜石 生成 隧道进水"},
-            {"item-drops", "掉落物物理", "item entity 掉落物 拾取半径 漂移 消失 despawn remaining_live_drops 没进背包 对账"},
-            {"drop-rates", "关键掉率与方差", "flint 燧石 10% 掉率 方差 fortune 时运 loot 战利品表 掉落概率 苹果 树苗"},
-            {"tool-tiers", "工具等级与挖掘资格", "tool tier 工具等级 wrong_tool 黑曜石 obsidian diamond_pickaxe 镐 挖不动 不掉落 挖掘资格"},
-            {"mine-source-scope", "mine 源查询的范围语义", "mine 源查询 半径 深度 query_complete known_sources 保留意见 暴露源 埋藏矿 扫描范围"},
-            {"food", "食物与饥饿", "food eat 食物 饥饿 进食 consume 饱食度 saturation 营养 打猎 狩猎 耕种 种植 农田 补种 小麦 胡萝卜 土豆 甜菜 面包 cook 烹饪 熔炉 allow_effects confirm_risky_target"},
-            {"sleep-night", "睡眠与夜晚", "sleep bed 睡觉 床 幻翼 phantom 夜晚 night 刷怪 spawn 羊毛 wool sheep_color 染料 dye 同色 重生点 respawn insomnia 跳夜 maicraft:sleep"},
-            {"tunneling", "下降掘进与寻路死角", "descent digging staircase tunnel 斜向阶梯 竖井 planning_stall no_path 寻路死角 树冠 下掘 水平掘进 矿带 travel may_alter_terrain"},
-            {"lighting", "挖掘工作面照明", "lighting torch 火把 照明 光照 刷怪 spawn 黑暗 洞穴 深掘 营地 auto_light light_area 布光 煤 木棍 合成"},
-            {"tick-rate", "世界刻速与失焦限流", "tps tick 刻速 刻率 失焦 focus 限流 throttle 慢放 停滞 冻结 game_time recent_tps tick_rate 任务变慢 卡死"},
+            {"gravity-blocks", "重力方块与塌落", "挖掉砾石、沙子的下方会整列塌落，地形和掉落物的位置随之改变",
+                    "gravel sand 砾石 沙子 落沙 gravity 塌方 塌落 掩埋掉落物 砸伤 窒息"},
+            {"fluid-flow", "流体流动与灌满", "挖开的空间会被水或岩浆灌满；倒水自救前先看流向",
+                    "water lava 水 岩浆 流动 灌满 倒水 舀水 桶 bucket 自救 黑曜石 圆石 隧道进水"},
+            {"item-drops", "掉落物", "拾取半径约 1 格、会漂走、5 分钟后消失；“方块碎了没进包”的排查顺序",
+                    "item entity 掉落物 拾取 拾取半径 漂走 消失 despawn 没进背包 背包满 拾取冷却 捡东西"},
+            {"drop-rates", "关键掉率与方差", "燧石 10% 掉率是常态，连挖几块不掉不是故障",
+                    "flint 燧石 10% 掉率 方差 fortune 时运 精准采集 战利品表 掉落概率 苹果 树苗 种子"},
+            {"tool-tiers", "工具等级与挖掘资格", "等级不够挖不动或不掉落；黑曜石要钻石镐",
+                    "tool tier 工具等级 镐 pickaxe 黑曜石 obsidian 远古残骸 挖不动 不掉落 挖掘资格 深板岩"},
+            {"ore-heights", "矿物生成高度", "各种矿在哪一层最多；采掘只在角色附近找，先到对应高度再要",
+                    "ore 矿 矿石 找矿 高度 生成 分布 层 钻石 diamond 铁 iron 煤 coal 铜 copper 金 gold 红石 redstone 青金石 lapis 绿宝石 emerald 深板岩 deepslate 粗铁 raw_iron 远古残骸"},
+            {"food", "食物与饥饿", "饥饿与回血规则、食物从哪来、耕地保湿",
+                    "food eat 食物 吃 饿 饥饿 饱和度 saturation 回血 饿死 打猎 狩猎 生肉 熟食 烧熟 耕种 耕地 锄头 种植 小麦 胡萝卜 马铃薯 甜菜 面包 骨粉"},
+            {"sleep-night", "睡眠与夜晚", "黑暗处刷怪、床跳夜与重设重生点、同色羊毛、3 天不睡刷幻翼",
+                    "sleep bed 睡觉 床 幻翼 phantom 夜晚 晚上 night 刷怪 spawn 羊毛 wool 剪羊毛 shears 染料 dye 同色 重生点 respawn 跳夜 封顶 过夜 熬夜 挖三填一"},
+            {"tunneling", "往下挖与地下通行", "不要垂直往下挖；阶梯式下降和两格高的通道更安全",
+                    "dig down staircase tunnel 往下挖 竖井 阶梯 下矿 通道 两格高 矿洞 迷路 入口"},
+            {"tick-rate", "世界刻速与失焦", "游戏窗口失焦时世界可能停住或变慢；任务变慢先想到它",
+                    "tps tick 刻速 刻率 失焦 focus 暂停 pause 限速 throttle 变慢 慢放 卡死 任务变慢"},
+            {"lighting", "照明与刷怪", "方块光照为 0 才刷敌对生物；火把 = 煤或木炭 + 木棍",
+                    "lighting torch 火把 照明 光照 亮 刷怪 spawn 黑暗 洞穴 地下 煤 木炭 木棍 灯笼 萤石"},
     };
-    public interface Source {
-        List<KnowledgeDocument.Entry> entries();
-        KnowledgeDocument read(String uri);
-        default List<KnowledgeDocument.Entry> searchCandidates(String query) { return entries(); }
-        default List<KnowledgeDocument.Entry> searchCandidates(String query, boolean approximate) { return searchCandidates(query); }
-        default JsonArray templates() { return new JsonArray(); }
-        default String status() { return "unavailable"; }
-    }
-    private final Source source;
+
+    /** 建筑资料条目：模型学写图纸的唯一来源，design 能力说明指向它们；格式同上。 */
+    static final String[][] BUILDING = {
+            {"design", "建筑图纸格式", "design 的 drawing 怎么写：顶层字段、坐标与尺寸、材料表与混色、三种对象、十二种图元、组件与实例、阵列镜像旋转、布尔开孔、空心、面与棱、图案",
+                    "design drawing 图纸 格式 schema json 材料 materials mix 图元 primitive cube panel wedge cylinder cone 组件 component instance 阵列 array mirror rotation 开孔 boolean cutter hollow pattern 面 棱 face edge 建筑 建造 盖房"},
+            {"roofs", "参数化屋顶", "ROOF 对象的字段与九种 shape：悬山、庑殿、歇山、攒尖、单坡；曲坡直坡、出檐、翘角、山墙、脊、檐口、底衬、有多高",
+                    "roof 屋顶 屋面 坡顶 悬山 gable 庑殿 hip 歇山 half_hip 攒尖 pyramid 单坡 shed 出檐 overhang 翘角 corner_lift 山墙 脊 ridge 檐口 eave 底衬 soffit 中式 瓦"},
+            {"house", "怎么设计一栋房子", "从要求到图纸的方法：纲要、尺寸怎么算、三种尺度、变化轴、材料分角色、房间骨架、交付前检查",
+                    "house 房子 住宅 设计 方法 纲要 尺寸 净高 净宽 门洞 楼梯 阁楼 材料 配色 角色 骨架 room 房间 通行 入口 窗 变化"},
+            {"styles", "几种风格怎么起手", "欧式木构、欧式石造、东亚院落、现代、工业各自的体量路线、材料和一个局部模块例子",
+                    "style 风格 欧式 木构 timber 石造 stone 城堡 东亚 中式 日式 院落 courtyard 回廊 现代 modern 极简 工业 industrial 厂房 工坊 拱门 深窗 高窗"},
+            {"example-cottage", "完整例子：带门廊的木构小屋", "从委托到一张完整图纸：7×7 主屋、门、窗、柱梁、ROOF 屋顶、门廊，以及怎么改成别的房子",
+                    "example 例子 小屋 cottage 木构 门廊 porch 完整 图纸 房子 住宅 范例 模板"},
+    };
+
+    private final List<KnowledgeSource> sources;
     private final Map<String, KnowledgeDocument> builtins;
+    // 内置资料的目录条目：比正文多一份检索词，目录与搜索都用它。
+    private final Map<String, KnowledgeDocument.Entry> builtinEntries;
 
-    public KnowledgeLibrary(Source source) {
-        this.source = source;
-        // 按组件或具体图元名称查资料时仍发现同一份建筑说明，不新增会直接操作世界的知识入口。
+    /** 只有一个登记来源的知识库。 */
+    public KnowledgeLibrary(KnowledgeSource source) {
+        this(List.of(source));
+    }
+
+    /** 内置资料加上登记的来源：目录合并、正文按来源先后找；联动模组交来的资料来源也从这里进。 */
+    public KnowledgeLibrary(List<KnowledgeSource> sources) {
+        this.sources = List.copyOf(sources);
+        // 内置资料随包发布；缺一篇就在启动时失败，不把空正文当知识交给模型。
         Map<String, KnowledgeDocument> docs = new LinkedHashMap<>();
-        docs.put(INDEX, load("index", "知识索引", "按需发现方块状态、Ponder 教程、游戏机制常识和实际执行能力。"));
-        docs.put(GUIDE, load("guide", "如何使用 Ponder 知识", "演示文字、控制提示、场景坐标和规则证据的边界。"));
-        docs.put(BLUEPRINT, load("blueprint", "建筑场景与统一蓝图 JSON", "Blender 风格建模 v1/v2、组件、阵列、镜像、三角形、斜坡、三棱柱、三角锥、空心、面棱材质、开孔、导出、续建和机器蓝图。"));
-        docs.put(PROCESSES, load("processes", "统一机器生产与原生加工", "按需读取生产v1/v2、附魔报价和AE2水中转化机制契约。"));
-        // 材料需求先选择工艺再考虑设备；入口说明保持独立，默认能力描述不展开整套配方。
-        docs.put(RECIPES, load("recipes", "从材料需求规划工艺和机器", "EMI 配方树、工作站、Ponder 教程、已有设施复用与实际产出验收。"));
-        // 配平资料解释起飞前假设和原生施工回执，避免模型把数学通过当作已经试飞成功。
-        docs.put(PHYSICS, load("physics", "物理组装、起飞前分析与配平", "Sable Aeronautics Offroad 强力胶 蜂蜜胶 物理组装器 重心 惯量 螺旋桨 气球蒙皮 浮力 启停模拟 配重 physics assembly balance"));
-        // 游戏机制常识：原版规则与 mod 行为事实，失败回执指路与契约文案按需指向单条，正文按需读取。
-        for (String[] entry : GAME_MECHANICS)
-            docs.put(GAME_MECHANICS_PREFIX + entry[0], load("game_mechanics/" + entry[0], entry[1], entry[2]));
+        Map<String, KnowledgeDocument.Entry> entries = new LinkedHashMap<>();
+        KnowledgeDocument index = load("index", "知识索引", "按需发现游戏机制常识、已登记的资料来源和检索方式。");
+        docs.put(INDEX, index);
+        entries.put(INDEX, index.entry());
+        for (String[] row : GAME_MECHANICS) register(docs, entries, "game_mechanics/" + row[0], row);
+        for (String[] row : BUILDING) register(docs, entries, "building/" + row[0], row);
         builtins = Map.copyOf(docs);
-    }
-    public static KnowledgeLibrary offline() {
-        return new KnowledgeLibrary(new Source() {
-            public List<KnowledgeDocument.Entry> entries() { return List.of(); }
-            public KnowledgeDocument read(String uri) { return null; }
-        });
+        builtinEntries = Map.copyOf(entries);
     }
 
+    /** 没有任何登记来源时的空知识库：只剩内置资料，来源状态如实标为不可用。 */
+    public static KnowledgeLibrary offline() {
+        return new KnowledgeLibrary(List.of());
+    }
+
+    /** 知识请求的四类操作：列目录、读模板、读正文、搜索；未知操作明确报错。 */
     public JsonObject request(JsonObject request) {
         return switch (request.get("action").getAsString()) {
             case "list" -> list(string(request, "cursor"));
             case "templates" -> {
                 if (string(request, "cursor") != null) throw new IllegalArgumentException("Invalid template cursor");
-                JsonObject result = new JsonObject(); result.add("resourceTemplates", source.templates()); yield result;
+                JsonObject result = new JsonObject();
+                JsonArray templates = new JsonArray();
+                for (KnowledgeSource source : sources) templates.addAll(source.templates());
+                result.add("resourceTemplates", templates);
+                yield result;
             }
             case "read" -> {
-                JsonObject result = new JsonObject(); JsonArray contents = new JsonArray();
-                contents.add(read(required(request, "uri")).content()); result.add("contents", contents); yield result;
+                JsonObject result = new JsonObject();
+                JsonArray contents = new JsonArray();
+                contents.add(read(required(request, "uri")).content());
+                result.add("contents", contents);
+                yield result;
             }
             case "search" -> request.has("approximate") && request.get("approximate").getAsBoolean()
                     ? searchApproximate(required(request, "query"), request.has("limit") ? request.get("limit").getAsInt() : 10)
@@ -97,155 +131,249 @@ public final class KnowledgeLibrary {
         };
     }
 
-    public static JsonObject perceptionRequest(JsonObject arguments) {
-        JsonObject request = new JsonObject(); String uri = string(arguments, "resource_uri");
-        request.addProperty("action", uri == null ? "search" : "read");
-        if (uri != null) request.addProperty("uri", uri);
-        else {
-            String query = string(arguments, "query");
-            request.addProperty("query", query == null ? string(arguments, "focus") : query);
-            request.addProperty("approximate", query != null);
-            request.addProperty("limit", arguments.has("limit") ? arguments.get("limit").getAsInt() : 10);
-        }
-        return request;
-    }
-
     public KnowledgeDocument read(String uri) {
         if (uri.length() > 2048) throw new IllegalArgumentException("Resource URI is too long");
         KnowledgeDocument document = builtins.get(uri);
-        if (document == null) document = BuildingModelContractResources.read(uri);
-        if (document == null) document = MachineAssemblyResources.read(uri);
-        if (PROCESSES.equals(uri) && document != null) {
-            // 只有显式读这一页才展开机制参数；这里报告适配器契约，真实配方、菜单和材料仍由现场观察确认。
-            String contracts = new GsonBuilder().setPrettyPrinting().create().toJson(
-                    NativeProcessRegistry.contracts());
-            return new KnowledgeDocument(document.uri(), document.name(), document.title(), document.description(),
-                    document.text() + "\n## 已注册原生机制契约\n\n```json\n" + contracts + "\n```\n");
+        for (KnowledgeSource source : sources) {
+            if (document != null) break;
+            document = source.read(uri);
         }
-        if (document == null && uri.startsWith(BuildingSceneResources.PREFIX)) document = BuildingSceneResources.read(uri);
-        if (document == null) document = source.read(uri);
+        // 目录之外的地址不偷换成相近正文；调用方须重新发现目录。
         if (document == null) throw KnowledgeException.missing(uri);
         return document;
     }
 
-    private List<KnowledgeDocument.Entry> catalog() {
-        Map<String, KnowledgeDocument.Entry> entries = new LinkedHashMap<>();
-        BuildingModelContractResources.entries().forEach(entry -> entries.put(entry.uri(),entry));
-        MachineAssemblyResources.entries().forEach(entry -> entries.put(entry.uri(), entry));
-        builtins.values().forEach(doc -> entries.put(doc.uri(), doc.entry()));
-        source.entries().forEach(entry -> entries.putIfAbsent(entry.uri(), entry));
-        return entries.values().stream().sorted(Comparator.comparing(KnowledgeDocument.Entry::uri)).toList();
+    /** 给 lookup 的资料目录：内置常识与登记来源的全部条目，按地址排序；索引那一篇不列，目录本身就是索引。 */
+    public List<KnowledgeDocument.Entry> listing() {
+        return catalog().stream().filter(entry -> !entry.uri().equals(INDEX)).toList();
     }
 
+    /**
+     * 按 lookup 的 id 找一篇：给完整地址就按地址读；给物品或方块的注册 ID（例如 create:mechanical_mixer）读它的物品资料页；
+     * 只给末段名（例如 food）时找末段对得上的那一篇，和查能力时可以省掉 maicraft: 前缀一样。
+     * 找不到、或末段名对上不止一篇时返回空，不拿相近的顶替。
+     */
+    public Optional<KnowledgeDocument> find(String id) {
+        String wanted = id.strip();
+        if (ItemPages.looksLikeItemId(wanted.toLowerCase(Locale.ROOT))) {
+            // LLM 手里常常只有物品 ID：直接读这件物品的资料页。
+            wanted = ItemPages.uri(wanted.toLowerCase(Locale.ROOT));
+        } else if (!wanted.contains("://")) {
+            String suffix = "/" + wanted.toLowerCase(Locale.ROOT);
+            List<String> uris = catalog().stream().map(KnowledgeDocument.Entry::uri)
+                    .filter(uri -> uri.toLowerCase(Locale.ROOT).endsWith(suffix)).toList();
+            if (uris.size() != 1) return Optional.empty();
+            wanted = uris.getFirst();
+        }
+        try {
+            return Optional.of(read(wanted));
+        } catch (IllegalArgumentException missing) {
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * 各登记来源此刻的现状，一个来源一句（例如"Create 思索：可用，312 个场景"）；资料目录最后附上，
+     * 让 LLM 知道这个实例能查到什么、为什么查不到。没登记的来源不出现：没列出来的就是这个实例没有。
+     */
+    public List<String> sourceStatuses() {
+        return sources.stream().map(KnowledgeSource::status).filter(status -> status != null && !status.isBlank()).toList();
+    }
+
+    /** 各来源里跟这件物品或方块有关的条目，按来源先后、同一地址只出一次；物品资料页的"相关资料"就是它。 */
+    public List<KnowledgeDocument.Entry> about(String registryId) {
+        Map<String, KnowledgeDocument.Entry> entries = new LinkedHashMap<>();
+        for (KnowledgeSource source : sources) {
+            source.entriesAbout(registryId).forEach(entry -> entries.putIfAbsent(entry.uri(), entry));
+        }
+        return List.copyOf(entries.values());
+    }
+
+    /**
+     * 给 lookup 的关键词搜索，只比较目录元数据（标题、一句话说明、检索词），不读正文。
+     * 搜的是内置常识加各来源的全部搜索候选，不只是目录那几行：思索场景、任务书条目都在这里找得到。
+     * LLM 常把关键词写成一句不带空格的话（"钻石在哪一层"），所以两头都比：问句里的词出现在条目里，
+     * 或条目的标题、检索词出现在问句里，都算命中；命中越多排得越前，同分按地址排。
+     */
+    public List<KnowledgeDocument.Entry> matching(String query) {
+        String asked = query.strip().toLowerCase(Locale.ROOT);
+        List<String> terms = Arrays.stream(asked.split("[\\s,，、;；。?？!！]+")).filter(term -> !term.isEmpty()).toList();
+        Map<KnowledgeDocument.Entry, Integer> scores = new LinkedHashMap<>();
+        for (KnowledgeDocument.Entry entry : searchable(asked)) {
+            String searchable = entry.searchable();
+            int score = 0;
+            for (String term : terms) {
+                if (searchable.contains(term)) score += 2;
+            }
+            for (String word : (entry.title() + " " + entry.keywords()).toLowerCase(Locale.ROOT).split("\\s+")) {
+                if (!word.isEmpty() && asked.contains(word)) score++;
+            }
+            if (score > 0) scores.put(entry, score);
+        }
+        return scores.entrySet().stream()
+                .sorted(Comparator.comparing((Map.Entry<KnowledgeDocument.Entry, Integer> hit) -> -hit.getValue())
+                        .thenComparing(hit -> hit.getKey().uri()))
+                .map(Map.Entry::getKey)
+                .toList();
+    }
+
+    // 搜索候选：内置常识（索引那一篇除外）加各来源按查询词给出的候选，同一地址只算一次。
+    private List<KnowledgeDocument.Entry> searchable(String query) {
+        Map<String, KnowledgeDocument.Entry> entries = new LinkedHashMap<>();
+        builtinEntries.values().stream().filter(entry -> !entry.uri().equals(INDEX))
+                .sorted(Comparator.comparing(KnowledgeDocument.Entry::uri))
+                .forEach(entry -> entries.putIfAbsent(entry.uri(), entry));
+        for (KnowledgeSource source : sources) {
+            source.searchCandidates(query).forEach(entry -> entries.putIfAbsent(entry.uri(), entry));
+        }
+        return List.copyOf(entries.values());
+    }
+
+    /** 各登记来源的状态并成一句；一个来源都没有时如实说不可用，空结果不冒充"没有这回事"。 */
+    private String providerStatus() {
+        if (sources.isEmpty()) return "unavailable";
+        return sources.stream().map(KnowledgeSource::status).collect(Collectors.joining("; "));
+    }
+
+    private List<KnowledgeDocument.Entry> catalog() {
+        Map<String, KnowledgeDocument.Entry> entries = new LinkedHashMap<>();
+        entries.putAll(builtinEntries);
+        for (KnowledgeSource source : sources) {
+            source.entries().forEach(entry -> entries.putIfAbsent(entry.uri(), entry));
+        }
+        return entries.values().stream()
+                .sorted(Comparator.comparing(KnowledgeDocument.Entry::uri)).toList();
+    }
+
+    /** 资源目录分页；游标绑定目录版本，目录变了旧游标明确报错而不是悄悄换页。 */
     private JsonObject list(String cursor) {
         List<JsonObject> all = new ArrayList<>();
-        JsonObject attention = new JsonObject(); attention.addProperty("uri", "maicraft://attention");
-        attention.addProperty("name", "Task attention"); attention.addProperty("mimeType", "application/json");
-        attention.addProperty("description", "Primary task monitor: authoritative task state, decisions, results and important game events. Subscribe/read, or use perceive with next_attention for task-scoped waiting and reliable cursor continuation.");
-        JsonObject priority = new JsonObject(); priority.addProperty("priority", 1.0);
-        JsonArray audience = new JsonArray(); audience.add("assistant"); priority.add("audience", audience);
-        attention.add("annotations", priority);
-        JsonObject chatflow = new JsonObject(); chatflow.addProperty("uri", "maicraft://chatflow");
-        chatflow.addProperty("name", "ChatFlow"); chatflow.addProperty("mimeType", "application/json");
-        chatflow.addProperty("description", "Received in-game chat: player messages and system messages as untrusted external text, for a dedicated companion chat agent. Subscribe/read; task attention never carries chat.");
-        JsonObject chatPriority = new JsonObject(); chatPriority.addProperty("priority", 0.9);
-        JsonArray chatAudience = new JsonArray(); chatAudience.add("assistant"); chatPriority.add("audience", chatAudience);
-        chatflow.add("annotations", chatPriority);
-        // 安装环境只给宿主挑选模组玩法用，不进模型的知识搜索；列在这里方便客户端发现入口。
-        JsonObject environment = new JsonObject(); environment.addProperty("uri", "maicraft://environment");
-        environment.addProperty("name", "Installed environment"); environment.addProperty("mimeType", "application/json");
-        environment.addProperty("description", "Loader, Minecraft version and every loaded mod id with its version, frozen at client startup. Client installation only; not proof of server configuration or current executability.");
-        all.add(attention); all.add(chatflow); all.add(environment); catalog().forEach(entry -> all.add(entry.metadata()));
+        catalog().forEach(entry -> all.add(entry.metadata()));
         String revision = digest(all.toString());
         int offset = 0;
         if (cursor != null) {
             if (!cursor.matches("k1\\.[0-9a-f]{16}\\.[0-9]+")) throw new IllegalArgumentException("Invalid resource cursor");
             String[] fields = cursor.split("\\.");
             if (!fields[1].equals(revision)) throw new IllegalArgumentException("Resource catalog changed; restart resources/list");
-            try { offset = Integer.parseInt(fields[2]); }
-            catch (NumberFormatException invalid) { throw new IllegalArgumentException("Invalid resource cursor"); }
+            try {
+                offset = Integer.parseInt(fields[2]);
+            } catch (NumberFormatException invalid) {
+                throw new IllegalArgumentException("Invalid resource cursor");
+            }
             if (offset <= 0 || offset >= all.size() || offset % PAGE_SIZE != 0) throw new IllegalArgumentException("Invalid resource cursor");
         }
         JsonArray page = new JsonArray();
         all.subList(offset, Math.min(all.size(), offset + PAGE_SIZE)).forEach(page::add);
-        JsonObject result = new JsonObject(); result.add("resources", page);
+        JsonObject result = new JsonObject();
+        result.add("resources", page);
         if (offset + PAGE_SIZE < all.size()) result.addProperty("nextCursor", "k1." + revision + "." + (offset + PAGE_SIZE));
         return result;
     }
 
     private JsonObject search(String query, int limit) {
         if (limit < 1 || limit > 20) throw new IllegalArgumentException("Knowledge limit must be 1..20");
-        query = query == null ? "" : query.strip().toLowerCase(Locale.ROOT);
-        if (query.length() > 256) throw new IllegalArgumentException("Knowledge query is too long");
+        String cleaned = query == null ? "" : query.strip().toLowerCase(Locale.ROOT);
+        if (cleaned.length() > 256) throw new IllegalArgumentException("Knowledge query is too long");
         Map<String, KnowledgeDocument.Entry> candidates = new LinkedHashMap<>();
-        // 按欧式、院落或网格等词发现教材时只返回目录摘要，角色不会因此读正文或开始建房。
-        BuildingModelContractResources.entries().forEach(entry -> candidates.put(entry.uri(), entry));
-        MachineAssemblyResources.entries().forEach(entry -> candidates.put(entry.uri(), entry));
-        builtins.values().forEach(doc -> candidates.put(doc.uri(), doc.entry()));
-        source.searchCandidates(query).forEach(entry -> candidates.putIfAbsent(entry.uri(), entry));
-        String[] terms = query.isEmpty() ? new String[0] : query.split("\\s+");
+        candidates.putAll(builtinEntries);
+        for (KnowledgeSource source : sources) {
+            source.searchCandidates(cleaned).forEach(entry -> candidates.putIfAbsent(entry.uri(), entry));
+        }
+        String[] terms = cleaned.isEmpty() ? new String[0] : cleaned.split("\\s+");
         List<KnowledgeDocument.Entry> matches = candidates.values().stream()
                 .filter(entry -> Arrays.stream(terms).allMatch(entry.searchable()::contains))
                 .sorted(Comparator.comparingInt((KnowledgeDocument.Entry entry) -> entry.uri().equals(INDEX) ? 0 : 1)
                         .thenComparing(KnowledgeDocument.Entry::uri)).toList();
-        JsonArray hits = new JsonArray(); matches.stream().limit(limit).forEach(entry -> hits.add(entry.metadata()));
-        JsonObject result = new JsonObject(); result.add("resources", hits);
-        result.addProperty("total_matches", matches.size()); result.addProperty("truncated", matches.size() > limit);
-        result.addProperty("provider_status", source.status()); result.addProperty("content_loaded", false);
-        // 材料搜索也只看注册名称；不为了排序查询EMI配方或编译未请求的教程，正文在下一次按需读取时展开。
-        // 搜索任务书同样只比对可见标题和编号，不提前读剧情正文或把动态队伍进度写进目录。
-        result.addProperty("search_scope", "Bundled building tutorial titles/summaries, visible FTB quest/chapter titles and IDs, registered item/component names, IDs, tags, schematic names and localized Create Shift/Ctrl descriptions; quest bodies, recipe trees and unrequested scene bodies are not loaded or searched.");
-        result.addProperty("next_step", "Read a returned URI with resources/read or perceive(view=knowledge, resource_uri=...). No matches do not prove no relevant mechanic exists.");
+        JsonArray hits = new JsonArray();
+        matches.stream().limit(limit).forEach(entry -> hits.add(entry.metadata()));
+        JsonObject result = new JsonObject();
+        result.add("resources", hits);
+        result.addProperty("total_matches", matches.size());
+        result.addProperty("truncated", matches.size() > limit);
+        result.addProperty("provider_status", providerStatus());
+        result.addProperty("content_loaded", false);
+        // 搜索只比较目录元数据；正文、配方与动态进度不在搜索时展开。
+        result.addProperty("search_scope",
+                "Bundled titles, summaries and keywords plus registered catalog metadata; document bodies are not loaded or searched.");
+        result.addProperty("next_step",
+                "Read a returned URI with resources/read. No matches do not prove no relevant mechanic exists.");
         return result;
     }
 
+    /** 近似搜索：允许条目名有错字、漏字；命中依据随条目返回，排序值不是概率。 */
     private JsonObject searchApproximate(String query, int limit) {
         if (limit < 1 || limit > 20) throw new IllegalArgumentException("Knowledge limit must be 1..20");
         var matcher = new MetadataSearch.Query(query);
         Map<String, KnowledgeDocument.Entry> candidates = new LinkedHashMap<>();
-        BuildingModelContractResources.entries().forEach(entry -> candidates.put(entry.uri(), entry));
-        MachineAssemblyResources.entries().forEach(entry -> candidates.put(entry.uri(), entry));
-        builtins.values().forEach(doc -> candidates.put(doc.uri(), doc.entry()));
+        candidates.putAll(builtinEntries);
         // 候选召回也必须允许错字；否则目标在精确过滤阶段已经消失，后续排序无法补救。
-        source.searchCandidates(query, true).forEach(entry -> candidates.putIfAbsent(entry.uri(), entry));
+        for (KnowledgeSource source : sources) {
+            source.searchCandidates(query, true).forEach(entry -> candidates.putIfAbsent(entry.uri(), entry));
+        }
         var matches = new ArrayList<JsonObject>();
         for (var entry : candidates.values()) {
-            // 文档标题可能附有“材料与工艺”等说明，精确名称排序以原始注册名为准。
+            // 文档标题可能附有说明文字，精确名称排序以原始注册名为准。
             var match = matcher.match(entry.subjectId() == null ? entry.name() : entry.subjectId(),
                     entry.subjectName() == null ? entry.title() : entry.subjectName(), entry.searchable());
             if (match == null) continue;
-            var row = entry.metadata(); row.add("match", match.toJson()); matches.add(row);
+            var row = entry.metadata();
+            row.add("match", match.toJson());
+            matches.add(row);
         }
-        JsonArray hits = new JsonArray(); MetadataSearch.ranked(matches, "uri").stream().limit(limit).forEach(hits::add);
-        JsonObject result = new JsonObject(); result.add("resources", hits);
-        result.addProperty("query", query); result.addProperty("total_matches", matches.size());
-        // 与能力搜索共用零命中反馈，调用者可以收缩关键词而不必重载整份配方目录。
+        JsonArray hits = new JsonArray();
+        MetadataSearch.ranked(matches, "uri").stream().limit(limit).forEach(hits::add);
+        JsonObject result = new JsonObject();
+        result.add("resources", hits);
+        result.addProperty("query", query);
+        result.addProperty("total_matches", matches.size());
+        // 与其他搜索共用零命中反馈，调用者可以收缩关键词而不必重载整份目录。
         matcher.describe(result, matches.isEmpty());
-        result.addProperty("truncated", matches.size() > limit); result.addProperty("content_loaded", false);
-        result.addProperty("provider_status", source.status());
-        result.addProperty("search_scope", "Names, identifiers and declared metadata only; recipe graphs and document bodies are not loaded.");
-        result.addProperty("match_policy", "Exact identifiers/names rank first. Keywords are literal; 3..48 character terms allow bounded name/identifier edits. ranking_score is ordering evidence, not a probability.");
-        result.addProperty("next_step", "Select a candidate using its exact URI and identity, then read resource_uri. Ambiguous or absent matches require narrower keywords; search does not change the requested goal.");
+        result.addProperty("truncated", matches.size() > limit);
+        result.addProperty("content_loaded", false);
+        result.addProperty("provider_status", providerStatus());
+        result.addProperty("search_scope", "Names, identifiers and declared metadata only; document bodies are not loaded.");
+        result.addProperty("match_policy",
+                "Exact identifiers/names rank first. Keywords are literal; 3..48 character terms allow bounded name/identifier edits. ranking_score is ordering evidence, not a probability.");
+        result.addProperty("next_step",
+                "Select a candidate using its exact URI and identity, then read it. Ambiguous or absent matches require narrower keywords; search does not change the requested goal.");
         return result;
     }
 
     public static String digest(String value) {
-        try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)), 0, 8); }
-        catch (NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
+        try {
+            return HexFormat.of().formatHex(
+                    MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)), 0, 8);
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException(impossible);
+        }
     }
+
+    // 一篇内置资料：正文随包读出来，目录条目多一份检索词。
+    private static void register(Map<String, KnowledgeDocument> docs, Map<String, KnowledgeDocument.Entry> entries, String path, String[] row) {
+        KnowledgeDocument document = load(path, row[1], row[2]);
+        docs.put(document.uri(), document);
+        entries.put(document.uri(), new KnowledgeDocument.Entry(
+                document.uri(), document.name(), document.title(), document.description(), row[3]));
+    }
+
     private static KnowledgeDocument load(String path, String title, String description) {
         String name = "/assets/maicraft/knowledge/" + path + ".md";
         try (var stream = KnowledgeLibrary.class.getResourceAsStream(name)) {
             if (stream == null) throw new IllegalStateException("Missing bundled knowledge: " + name);
             return new KnowledgeDocument("maicraft://knowledge/" + path, "knowledge." + path, title, description,
                     new String(stream.readAllBytes(), StandardCharsets.UTF_8));
-        } catch (IOException failure) { throw new IllegalStateException("Cannot read bundled knowledge", failure); }
+        } catch (IOException failure) {
+            throw new IllegalStateException("Cannot read bundled knowledge", failure);
+        }
     }
+
     private static String string(JsonObject object, String key) {
         if (!object.has(key) || object.get(key).isJsonNull()) return null;
-        if (!object.get(key).isJsonPrimitive() || !object.getAsJsonPrimitive(key).isString()) throw new IllegalArgumentException(key + " must be a string");
+        if (!object.get(key).isJsonPrimitive() || !object.getAsJsonPrimitive(key).isString())
+            throw new IllegalArgumentException(key + " must be a string");
         return object.get(key).getAsString();
     }
+
     private static String required(JsonObject object, String key) {
         String value = string(object, key);
         if (value == null || value.isBlank()) throw new IllegalArgumentException(key + " is required");

@@ -3,7 +3,7 @@ plugins {
     id 'maven-publish'
 }
 
-// 统一产物名字，包含 Mod 名、模块名和 Minecraft 版本。
+// 统一产物名字，包含 Mod 名、模块名和 Minecraft 版本；发布流程按这个公式寻找两个加载器的安装包。
 base {
     archivesName = "${mod_id}-${project.name}-${minecraft_version}"
 }
@@ -14,7 +14,7 @@ java {
     withSourcesJar()
 }
 
-// 联网查百科时由同一 HTML 解析器保留正文与表格，两个加载器和离线回归使用一致的解析行为。
+// 联网查百科时由同一 HTML 解析器保留正文与表格，两个加载器和离线测试使用一致的解析行为。
 dependencies {
     implementation "org.jsoup:jsoup:${jsoup_version}"
 }
@@ -22,7 +22,6 @@ dependencies {
 // 设置编译依赖仓库；Sponge 与 Parchment 的指定坐标走各自限定仓库，减少错误来源匹配。
 repositories {
     mavenCentral()
-    // https://docs.gradle.org/current/userguide/declaring_repositories.html#declaring_content_exclusively_found_in_one_repository
     exclusiveContent {
         forRepository {
             maven {
@@ -45,15 +44,9 @@ repositories {
         )
         filter { includeGroup('org.parchmentmc.data') }
     }
-    maven {
-        name = 'BlameJared'
-        url = 'https://maven.blamejared.com'
-    }
 }
 
-// 在输出配置上声明 capabilities。
-// 相关说明见 https://docs.gradle.org/current/userguide/component_capabilities.html#sec:declaring-additional-capabilities-for-a-local-component。
-// 声明产物可被依赖方识别的坐标。按当前 archivesName 公式，前两个 capability 名字相同。
+// 在输出配置上声明 capabilities，让加载器模块能按坐标找到公共模块的产物。
 ['apiElements', 'runtimeElements', 'sourcesElements'].each { variant ->
     configurations."$variant".outgoing {
         capability("$group:${base.archivesName.get()}:$version")
@@ -65,7 +58,7 @@ repositories {
     }
 }
 
-// 源码包与普通 Jar 都附带许可证；下面的 Jar 清单只记录版本、名称等元信息。
+// 源码包与普通 Jar 都附带许可证；Jar 清单只记录版本、名称等元信息。
 sourcesJar {
     from(rootProject.file('LICENSE')) {
         rename { "${it}_${mod_name}" }
@@ -90,11 +83,11 @@ jar {
     }
 }
 
-// 资源文件里的版本和 Mod 信息占位符在这里展开；新增用于资源的属性要加入这张表，不是在根 build.gradle 找表。
+// 资源文件里的版本和 Mod 信息占位符在这里展开；新增用于资源的属性要加入这张表。
 processResources {
     var expandProps = [
             'version'                      : version,
-            'group'                        : project.group, //Else we target the task's group.
+            'group'                        : project.group,
             'minecraft_version'            : minecraft_version,
             'minecraft_version_range'      : minecraft_version_range,
             'fabric_version'               : fabric_version,
@@ -114,6 +107,18 @@ processResources {
         expand expandProps
     }
     inputs.properties(expandProps)
+}
+
+// 测试统一走 JUnit 平台；架构护栏和决策类测试都是普通单元测试，build 与 check 会自动运行。
+// 测试进程堆放到 1 GB：架构检查用 ArchUnit 导入全部类，Gradle 默认的 512 MB 在全量单测跑到 LayerRulesTest 时堆溢出（本机与 CI 都出现过）。
+// 2026-10-16 在 2443 个用例上实测：ArchUnit 导入缓存被挤掉、要重新导入的最坏情况下，回收后存活最高约 560 MB，1 GB 留四成余量。
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
+    maxHeapSize = '1g'
+    testLogging {
+        events 'failed'
+        exceptionFormat 'full'
+    }
 }
 
 // 配置 Maven 发布方式，只有执行发布任务才使用；目标地址由 local_maven_url 环境变量提供。

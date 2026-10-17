@@ -1,0 +1,257 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.compat.ae2;
+
+import org.maiwithu.maicraft.game.player.BackpackStack;
+import org.maiwithu.maicraft.game.player.BackpackView;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.nio.file.Path;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.function.Predicate;
+
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.phys.AABB;
+
+import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
+import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
+import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
+import org.maiwithu.maicraft.behavior.spi.PlayerServices;
+import org.maiwithu.maicraft.behavior.interaction.Interactions;
+import org.maiwithu.maicraft.behavior.inventory.GearChanges;
+import org.maiwithu.maicraft.behavior.menu.MenuLayout;
+import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
+import org.maiwithu.maicraft.behavior.menu.MenuSlots;
+import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
+import org.maiwithu.maicraft.behavior.permission.Protection;
+import org.maiwithu.maicraft.compat.CompatRegistry;
+import org.maiwithu.maicraft.compat.CompatModule;
+import org.maiwithu.maicraft.compat.SupportedMod;
+import org.maiwithu.maicraft.compat.VerifiedVersions;
+import org.maiwithu.maicraft.game.loader.LoaderEnvironment;
+import org.maiwithu.maicraft.game.player.GearSlotName;
+import org.maiwithu.maicraft.game.serverlink.ServerReads;
+import org.maiwithu.maicraft.game.world.BlockScanService;
+import org.maiwithu.maicraft.game.world.FurnaceFuels;
+import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.kernel.task.Action;
+
+/** ME 终端来源：联动入口交出终端界面的布局证明与途径 ae2 的来源；挑终端的结论如实写成报价。 */
+class Ae2TerminalSourceTest {
+
+    private static final Instant NOW = Instant.parse("2026-10-10T12:00:00Z");
+
+    private static final Ae2Terminals.Terminal TERMINAL = new Ae2Terminals.Terminal(
+            new BlockPos(3, 64, 0), Direction.NORTH, new AABB(3.125, 64.125, 0, 3.875, 64.875, 0.125), "ae2:terminal");
+
+    private static ItemRequest torches(int count) {
+        return new ItemRequest(WantedItem.ofItem("minecraft:torch"), count, "照明");
+    }
+
+    /** 不在世界里的玩家行为：角色为空，靠近与交互都碰不到；只够建出来源、回答"不在世界里"。 */
+    private static PlayerServices offlineServices() {
+        Protection nobodyOwns = new Protection((dimension, x, y, z) -> Optional.empty(), List::of,
+                name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self");
+        return new PlayerServices(() -> null, (target, permissions) -> null, new Interactions(null),
+                itemId -> Optional.empty(), new NoGear(), inner -> inner, (request, permissions) -> null, nobodyOwns,
+                itemId -> Set.of(), MenuLayouts.VANILLA, new BlockScanService(), ServerReads.NONE, emptyBackpack());
+    }
+
+    /** 背包视图的替身：身上什么都没有，AE2 的测试用不到它。 */
+    private static BackpackView emptyBackpack() {
+        return new BackpackView() {
+            @Override public List<BackpackStack> stacks() { return List.of(); }
+            @Override public int usedSlots() { return 0; }
+            @Override public int totalSlots() { return 36; }
+        };
+    }
+
+    /** 读写端的替身：附近没有终端，界面什么都读不到；这里只看联动入口交了什么。 */
+    private static Ae2Compat compat() {
+        return new Ae2Compat(new Ae2Terminals() {
+            @Override public List<Ae2Terminals.Terminal> near(ClientLevel level, BlockPos center, int radius) {
+                return List.of();
+            }
+
+            @Override public boolean stillThere(ClientLevel level, BlockPos block, Direction side) {
+                return false;
+            }
+        }, new Ae2TerminalMenu() {
+            @Override public boolean belongsTo(AbstractContainerMenu menu, ClientLevel level, BlockPos block,
+                    Direction side) {
+                return false;
+            }
+
+            @Override public Optional<Boolean> linked(AbstractContainerMenu menu) {
+                return Optional.empty();
+            }
+
+            @Override public Optional<List<StockEntry>> stock(AbstractContainerMenu menu) {
+                return Optional.empty();
+            }
+
+            @Override public void takeStack(AbstractContainerMenu menu, long serial) {}
+
+            @Override public void takeOne(AbstractContainerMenu menu, long serial) {}
+
+            @Override public void putBack(AbstractContainerMenu menu) {}
+        }, new NoGrid());
+    }
+
+    /** 一个界面的槽位描述替身：前 otherSlots 格是视图元件、合成格这类不是背包的格子，后面 36 格是角色背包。 */
+    private static MenuSlots terminalSlots(String menuType, int otherSlots) {
+        return new MenuSlots() {
+            @Override public String menuTypeId() { return menuType; }
+            @Override public int slotCount() { return otherSlots + 36; }
+            @Override public boolean playerBacked(int slot) { return slot >= otherSlots; }
+        };
+    }
+
+    @Test
+    void 联动入口交出终端界面的布局证明与途径为ae2的来源() {
+        SupportedMod<CompatModule> supported = new SupportedMod<>(Ae2Compat.MOD_ID, "应用能源2", new VerifiedVersions("19.2.17", "19.3"),
+                Ae2TerminalSourceTest::compat);
+        CompatRegistry registry = CompatRegistry.load(List.of(supported), loaderWith("19.2.17"));
+
+        // 合成终端除了 36 格背包还有视图元件格与合成格：都不算容器那一侧，网络里的货不在格子里。
+        MenuLayout.Supported layout = assertInstanceOf(MenuLayout.Supported.class,
+                registry.menuLayouts().classify(terminalSlots("ae2:craftingterm", 15)));
+        assertEquals(36, layout.playerSlots().size());
+        assertTrue(layout.containerSlots().isEmpty());
+        assertInstanceOf(MenuLayout.Unsupported.class,
+                registry.menuLayouts().classify(terminalSlots("ae2:pattern_access_terminal", 0)));
+
+        List<ItemSource> sources = registry.itemSources(offlineServices());
+        assertEquals(1, sources.size());
+        assertEquals("ae2", sources.getFirst().via().name());
+        assertEquals("ME 终端", sources.getFirst().describe());
+    }
+
+    @Test
+    void 角色不在世界里就给不了() {
+        Ae2TerminalSource source = new Ae2TerminalSource(compat(), offlineServices(),
+                (terminal, dimension, request, permissions, records) -> Optional.empty(), new SeenNetworkStock(), () -> NOW);
+        SourceQuote quote = source.quote(torches(8),
+                new SourceContext(WorldPosition.here(0, 64, 0), Permissions.DEFAULT));
+        assertInstanceOf(SourceQuote.Unavailable.class, quote);
+    }
+
+    @Test
+    void 记得有货_报明确数量且不超过这次要的() {
+        TerminalChooser.Candidate candidate = new TerminalChooser.Candidate(TERMINAL, 12, true,
+                Optional.of(new SeenNetworkStock.Sighting(true, Map.of("minecraft:torch", 200L), NOW.minusSeconds(90))));
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class,
+                Ae2TerminalSource.quoteFrom(new TerminalChooser.Known(candidate, 200), torches(8), "ME 终端", NOW));
+        assertEquals(8, offer.obtainableCount());
+        assertEquals(12, offer.cost().distanceBlocks());
+        assertEquals(0, offer.cost().waitTicks(), "现货够，取了就走，不用等");
+        assertTrue(offer.risk().contains("1 分钟前"), offer.risk());
+        assertEquals("3,64,0,north", offer.hint());
+    }
+
+    @Test
+    void 记得网络有样板_现货不够也按够数报_说明写现货几件() {
+        TerminalChooser.Candidate candidate = new TerminalChooser.Candidate(TERMINAL, 12, true,
+                Optional.of(new SeenNetworkStock.Sighting(true, Map.of("minecraft:torch", 3L), NOW,
+                        Set.of("minecraft:torch"))));
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class,
+                Ae2TerminalSource.quoteFrom(new TerminalChooser.Known(candidate, 3, true), torches(8), "ME 终端", NOW));
+        assertEquals(8, offer.obtainableCount(), "不够的在终端里下单补上，不把缺口拆给手搓");
+        assertTrue(offer.risk().contains("现货 3 件，不够的在网络里下单合成"), offer.risk());
+        assertEquals(CraftWait.expectedTicks(5), offer.cost().waitTicks(), "缺的 5 件要站在终端前等网络做好");
+
+        SourceQuote.Offer wireless = assertInstanceOf(SourceQuote.Offer.class, Ae2TerminalSource.wirelessQuote(
+                "ae2:wireless_terminal", torches(8), Optional.of(new SeenNetworkStock.Sighting(true,
+                        Map.of("minecraft:torch", 3L), NOW, Set.of("minecraft:torch"))), "minecraft:torch"::equals));
+        assertEquals(8, wireless.obtainableCount(), "身上的无线终端也一样：有样板就按够数报");
+        assertEquals(CraftWait.expectedTicks(5), wireless.cost().waitTicks(), "无线终端下单也一样要等");
+    }
+
+    @Test
+    void 没看过或上次不行的终端报不知道有多少_都用不上就给不了() {
+        TerminalChooser.Candidate candidate = new TerminalChooser.Candidate(TERMINAL, 5, true, Optional.empty());
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class,
+                Ae2TerminalSource.quoteFrom(new TerminalChooser.Unknown(candidate, Optional.empty()), torches(8),
+                        "ME 终端", NOW));
+        assertTrue(offer.countUnknown());
+        SourceQuote.Offer again = assertInstanceOf(SourceQuote.Offer.class, Ae2TerminalSource.quoteFrom(
+                new TerminalChooser.Unknown(candidate, Optional.of("上次看没连上网络（没电或没频道）")), torches(8),
+                "ME 终端", NOW));
+        assertTrue(again.risk().startsWith("上次看没连上网络"), again.risk());
+
+        SourceQuote.Unavailable unavailable = assertInstanceOf(SourceQuote.Unavailable.class,
+                Ae2TerminalSource.quoteFrom(new TerminalChooser.None("附近 64 格内没有 ME 终端"), torches(8),
+                        "ME 终端", NOW));
+        assertEquals("附近 64 格内没有 ME 终端", unavailable.reason());
+    }
+
+    @Test
+    void 身上的无线终端不用走路_没开过先看一眼_记得有货或有样板就报够数() {
+        Predicate<String> torch = "minecraft:torch"::equals;
+        SourceQuote.Offer fresh = assertInstanceOf(SourceQuote.Offer.class, Ae2TerminalSource.wirelessQuote(
+                "ae2:wireless_crafting_terminal", torches(8), Optional.empty(), torch));
+        assertEquals(8, fresh.obtainableCount(), "像玩家一样先看一眼 AE：按够数报，没有的话引擎划掉再换路");
+        assertEquals(0, fresh.cost().distanceBlocks(), "带在身上，不用走路");
+        assertEquals("wireless:ae2:wireless_crafting_terminal", fresh.hint());
+        assertEquals("ME 终端", fresh.source(), "与装着的终端同名：开了一趟没拿到，引擎能把它划掉");
+
+        SourceQuote.Offer known = assertInstanceOf(SourceQuote.Offer.class, Ae2TerminalSource.wirelessQuote(
+                "ae2:wireless_crafting_terminal", torches(8),
+                Optional.of(new SeenNetworkStock.Sighting(true, Map.of("minecraft:torch", 200L), NOW)), torch));
+        assertEquals(8, known.obtainableCount());
+
+        SourceQuote.Offer outOfRange = assertInstanceOf(SourceQuote.Offer.class, Ae2TerminalSource.wirelessQuote(
+                "ae2:wireless_crafting_terminal", torches(8),
+                Optional.of(new SeenNetworkStock.Sighting(false, Map.of(), NOW)), torch));
+        assertTrue(outOfRange.countUnknown() && outOfRange.risk().contains("没连上"), "上次超出范围照样报，写明上次的情况");
+
+        SourceQuote.Offer byPattern = assertInstanceOf(SourceQuote.Offer.class, Ae2TerminalSource.wirelessQuote(
+                "ae2:wireless_crafting_terminal", torches(8),
+                Optional.of(new SeenNetworkStock.Sighting(true, Map.of(), NOW, Set.of("minecraft:torch"))), torch));
+        assertEquals(8, byPattern.obtainableCount(), "没现货但有样板：到了在网络里下单");
+        assertEquals(CraftWait.expectedTicks(8), byPattern.cost().waitTicks(), "一件现货都没有，八件都要等网络做");
+        assertEquals(0, fresh.cost().waitTicks(), "还没打开过：不知道要不要下单，不按等待算");
+
+        assertInstanceOf(SourceQuote.Unavailable.class, Ae2TerminalSource.wirelessQuote(
+                "ae2:wireless_crafting_terminal", torches(8),
+                Optional.of(new SeenNetworkStock.Sighting(true, Map.of(), NOW)), torch), "刚看过既没有也没样板：不再去开");
+    }
+
+    /** 只装了 AE2、版本给定的加载器环境替身。 */
+    private static LoaderEnvironment loaderWith(String version) {
+        return new LoaderEnvironment() {
+            @Override public String loaderName() { return "test"; }
+            @Override public boolean isModLoaded(String modId) { return modId.equals(Ae2Compat.MOD_ID); }
+            @Override public Optional<String> modVersion(String modId) {
+                return isModLoaded(modId) ? Optional.of(version) : Optional.empty();
+            }
+            @Override public Path gameDirectory() { return Path.of("."); }
+            @Override public Path configDirectory() { return Path.of("."); }
+            @Override public boolean isDevelopment() { return true; }
+            @Override public FurnaceFuels furnaceFuels() { return stack -> 0; }
+        };
+    }
+
+    /** 换不了装备的替身：这里的测试不穿卸、不放副手。 */
+    private static final class NoGear implements GearChanges {
+        @Override public Optional<Action> wear(String itemId, GearSlotName slot) {
+            return Optional.empty();
+        }
+
+        @Override public Optional<Action> takeOff(GearSlotName slot) {
+            return Optional.empty();
+        }
+    }
+}

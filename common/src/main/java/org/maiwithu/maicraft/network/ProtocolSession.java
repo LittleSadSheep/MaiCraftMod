@@ -13,7 +13,7 @@ final class ProtocolSession {
     final String nonce;
     final String dimension;
     final Map<String, ServerFeature> features = new LinkedHashMap<>();
-    final RequestLedger ledger = new RequestLedger();
+    final ServerRequestLedger ledger = new ServerRequestLedger();
     final long createdTick;
     long lastTick;
     long controlGeneration;
@@ -56,8 +56,8 @@ final class ProtocolSession {
         JsonObject limits = new JsonObject();
         limits.addProperty("maxEnvelopeChars", ProtocolJson.MAX_ENVELOPE_CHARS);
         limits.addProperty("maxRequestChars", ProtocolJson.MAX_REQUEST_CHARS);
-        limits.addProperty("maxRequests", RequestLedger.MAX_REQUESTS);
-        limits.addProperty("recentReadResults", RequestLedger.RECENT_READ_RESULTS);
+        limits.addProperty("maxRequests", ServerRequestLedger.MAX_REQUESTS);
+        limits.addProperty("recentReadResults", ServerRequestLedger.RECENT_READ_RESULTS);
         limits.addProperty("readOnlyScopeMayExpire", true);
         limits.addProperty("retentionTicks", RETENTION_TICKS);
         limits.addProperty("maxRequestsPerTick", ServerProtocolDispatcher.MAX_REQUESTS_PER_TICK);

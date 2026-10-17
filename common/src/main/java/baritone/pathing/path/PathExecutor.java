@@ -36,12 +36,17 @@ import net.minecraft.core.Vec3i;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.util.Tuple;
 import net.minecraft.world.phys.Vec3;
-import org.maiwithu.maicraft.core.pathing.baritone.MovementStall;
-import org.maiwithu.maicraft.core.pathing.baritone.SubmergedWaterTravelPolicy;
-import org.maiwithu.maicraft.core.pathing.baritone.TravelJumpPolicy;
+
+
+
 import java.util.*;
 
 import static baritone.api.pathing.movement.MovementStatus.*;
+import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
+import org.maiwithu.maicraft.behavior.navigation.baritone.SubmergedWaterTravelPolicy;
+import org.maiwithu.maicraft.behavior.navigation.baritone.MovementStall;
+import org.maiwithu.maicraft.behavior.navigation.baritone.GroundJumpContinuation;
+import org.maiwithu.maicraft.behavior.navigation.baritone.TravelJumpPolicy;
 
 /**
  * Behavior to execute a precomputed path
@@ -87,8 +92,8 @@ public class PathExecutor implements IPathExecutor, Helper {
     private final PathTickBudget tickBudget = new PathTickBudget();
     private boolean advanceAgain;
     private boolean jumpAfterAdvance;
-    private org.maiwithu.maicraft.core.pathing.baritone.GroundJumpContinuation groundJump =
-            new org.maiwithu.maicraft.core.pathing.baritone.GroundJumpContinuation();
+    private GroundJumpContinuation groundJump =
+            new GroundJumpContinuation();
 
     public PathExecutor(PathingBehavior behavior, IPath path) {
         this.behavior = behavior;
@@ -304,9 +309,9 @@ public class PathExecutor implements IPathExecutor, Helper {
         return false;
     }
 
+    // 走路正在跑一次落地救援（空中放东西、等确认）：这一掉有自己的时限，通用的超时与"下一段没加载就停"不能把它丢下。
     private static boolean ownsUnsettledLanding(Movement movement) {
-        return movement instanceof MovementFall fall
-                && (fall.landingAssist() != null || fall.landingBoat() != null) && !movement.safeToCancel();
+        return BaritoneInternals.landingInProgress();
     }
 
     private boolean cancelIfTimedOut(Movement movement) {
@@ -476,8 +481,8 @@ public class PathExecutor implements IPathExecutor, Helper {
 
         // if the movement requested sprinting, then we're done
         if (requested) {
-            // 赶路跑跳:已经决定疾跑,且跳跃可达走廊里任何落点都无摔伤(深洞/流体/立柱
-            // 会否决这一跳),按住跳跃把疾跑换成跑跳;顶头走廊自动获得更短的连跳节奏。
+            // 赶路跑跳：已经决定疾跑，且跳跃可达走廊里任何落点都无摔伤（深洞、流体、立柱会否决这一跳），
+            // 按住跳跃把疾跑换成跑跳；顶头走廊自动获得更短的连跳节奏。
             if (TravelJumpPolicy.shouldTravelJump(behavior.baritone, path.movements(), pathPosition,
                     runway -> groundJump.launch(current.getSrc().getY(), ctx.player().getY(), runway))) {
                 behavior.baritone.getInputOverrideHandler().setInputForceState(Input.JUMP, true);
@@ -495,7 +500,7 @@ public class PathExecutor implements IPathExecutor, Helper {
                     // frostwalker only works if you cross the edge of the block on ground so in some cases we may not overshoot
                     // Since MovementDescend can't know the next movement we have to tell it
                     if (next instanceof MovementTraverse || next instanceof MovementParkour) {
-                        boolean couldPlaceInstead = Baritone.settings().allowPlace.value && behavior.baritone.getInventoryBehavior().hasGenericThrowaway() && next instanceof MovementParkour; // traverse doesn't react fast enough
+                        boolean couldPlaceInstead = Baritone.settings().allowPlace.value && behavior.baritone.getInventoryBehavior().hasThrowawayAtHand() && next instanceof MovementParkour; // traverse doesn't react fast enough；半空补块只用手边的料
                         // this is true if the next movement does not ascend or descends and goes into the same cardinal direction (N-NE-E-SE-S-SW-W-NW) as the descend
                         // in that case current.getDirection() is e.g. (0, -1, 1) and next.getDirection() is e.g. (0, 0, 3) so the cross product of (0, 0, 1) and (0, 0, 3) is taken, which is (0, 0, 0) because the vectors are colinear (don't form a plane)
                         // since movements in exactly the opposite direction (e.g. descend (0, -1, 1) and traverse (0, 0, -1)) would also pass this check we also have to rule out that case
@@ -585,8 +590,6 @@ public class PathExecutor implements IPathExecutor, Helper {
     }
 
     private Tuple<Vec3, BlockPos> overrideFall(MovementFall movement) {
-        // A longer landing skips the selected aid and its receipt/recovery owner.
-        if (movement.landingAssist() != null || movement.landingBoat() != null) return null;
         Vec3i dir = movement.getDirection();
         if (dir.getY() < -3) {
             return null;
@@ -842,7 +845,7 @@ public class PathExecutor implements IPathExecutor, Helper {
      */
     public int waterVerticalIntent() {
         if (waterTravel.active()) {
-            return waterTravel.verticalIntent();
+            return waterTravel.desiredVertical();
         }
         if (pathPosition < 0 || pathPosition >= path.movements().size()
                 || ctx.player() == null || !ctx.player().isInWater()) {

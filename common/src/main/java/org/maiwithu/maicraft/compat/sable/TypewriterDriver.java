@@ -1,0 +1,155 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.compat.sable;
+
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
+
+import org.maiwithu.maicraft.ability.vehicle.spi.VehicleDriver;
+import org.maiwithu.maicraft.behavior.spi.PlayerServices;
+import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.compat.StepsInOrder;
+import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.kernel.result.Problem;
+import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.TickContext;
+
+/**
+ * 接管无线红石打字机开载具：驾驶位是离角色最近的那台无线红石打字机，坐着够得着它的座位里挑最近的一个当驾驶座；
+ * 没有这样的座位就站在无线红石打字机旁。角色不在船上、或在船上但够不着驾驶位，先告诉驾驶能力走到驾驶位旁的甲板格。
+ */
+final class TypewriterDriver implements VehicleDriver {
+
+    /** 座位离无线红石打字机多近（方块中心之间，格）算坐着够得着。 */
+    static final double SEAT_REACH = 3.5;
+
+    private final SimulatedCompat compat;
+    private final PlayerServices services;
+
+    TypewriterDriver(SimulatedCompat compat, PlayerServices services) {
+        this.compat = Objects.requireNonNull(compat, "compat");
+        this.services = Objects.requireNonNull(services, "services");
+    }
+
+    /** 驾驶位：一台无线红石打字机，和坐着够得着它的座位（没有为 null）。地块坐标。 */
+    record Station(BlockPos typewriter, BlockPos seat) {
+
+        /** 角色要待的那一格：有座位是座位，没有是无线红石打字机。 */
+        BlockPos spot() {
+            return seat != null ? seat : typewriter;
+        }
+    }
+
+    // 已经在这艘船上、离驾驶位够得着就不用走；不然给离驾驶位最近、站得住的甲板格。
+    @Override public Optional<WorldPosition> boardAt(String structureId) {
+        PlayerContext context = services.context().get();
+        ClientLevel level = context == null ? null : context.level();
+        LocalPlayer player = context == null ? null : context.localPlayer();
+        if (level == null || player == null) return Optional.empty();
+        Optional<SableStructures.Structure> ship = compat.structure(level, player, structureId);
+        if (ship.isEmpty()) return Optional.empty();
+        Optional<Station> station = station(level, player, ship.get());
+        if (station.isEmpty()) return Optional.empty();
+        Vec3 spot = ship.get().pose().toWorld(Vec3.atCenterOf(station.get().spot()));
+        if (ship.get().carriesPlayer() && player.getEyePosition().distanceTo(spot) <= StructureBlockUse.REACH - 0.5) {
+            return Optional.empty();
+        }
+        return StructureGeometry.deck(ship.get(), local -> compat.block(level, ship.get().id(), local)).stream()
+                .min(Comparator.comparingDouble(cell -> cell.world().distanceToSqr(spot)))
+                .map(cell -> new WorldPosition((int) Math.floor(cell.world().x), (int) Math.floor(cell.world().y + 0.01),
+                        (int) Math.floor(cell.world().z), level.dimension().location().toString()));
+    }
+
+    // 走到驾驶位旁：在船上就在甲板上走过去；不在船上先挑离驾驶位近的那一边上船，再在甲板上走过去。
+    @Override public Optional<Action> board(String structureId, Permissions permissions) {
+        PlayerContext context = services.context().get();
+        ClientLevel level = context == null ? null : context.level();
+        LocalPlayer player = context == null ? null : context.localPlayer();
+        if (level == null || player == null) return Optional.empty();
+        Optional<SableStructures.Structure> found = compat.structure(level, player, structureId);
+        if (found.isEmpty()) return Optional.empty();
+        SableStructures.Structure ship = found.get();
+        Optional<Station> station = station(level, player, ship);
+        if (station.isEmpty()) return Optional.empty();
+        Vec3 spot = ship.pose().toWorld(Vec3.atCenterOf(station.get().spot()));
+        if (ship.carriesPlayer() && player.getEyePosition().distanceTo(spot) <= StructureBlockUse.REACH - 0.5) {
+            return Optional.empty();
+        }
+        Optional<StructureGeometry.Deck> near = DeckMode.deck(compat, level, ship).stream()
+                .min(Comparator.comparingDouble(cell -> cell.world().distanceToSqr(spot)));
+        if (near.isEmpty()) return Optional.of(failing("船上找不到能站的地方，走不到驾驶位旁"));
+        StructureGeometry.Deck cell = near.get();
+        if (ship.carriesPlayer()) {
+            return Optional.of(new DeckLeg(compat, services, permissions, DeckMode.Kind.ACROSS, ship.id(), cell.local(), null));
+        }
+        DeckMode.Boarding boarding = DeckMode.boarding(compat, level, player, ship, spot, 1.0);
+        if (boarding.pair() == null) return Optional.of(failing(boarding.problem()));
+        DeckMode.Pair pair = boarding.pair();
+        return Optional.of(new StepsInOrder("走到驾驶位旁", List.of(
+                new StepsInOrder.Step("上船", () -> new DeckLeg(compat, services, permissions, DeckMode.Kind.BOARD,
+                        ship.id(), pair.deck().local(), pair.ground())),
+                new StepsInOrder.Step("在船上走到驾驶位旁", () -> pair.deck().local().equals(cell.local()) ? null
+                        : new DeckLeg(compat, services, permissions, DeckMode.Kind.ACROSS, ship.id(), cell.local(), null)))));
+    }
+
+    // 一个立刻以"到不了"失败的动作：上不去的原因交给调用方照实说。
+    private static Action failing(String why) {
+        return new Action() {
+            @Override public ActionStatus tick(TickContext context) {
+                return ActionStatus.failed(Problem.of(Problem.Kind.UNREACHABLE, why));
+            }
+
+            @Override public String describe() {
+                return "走到驾驶位旁";
+            }
+        };
+    }
+
+    @Override public Optional<Run> test(TestRequest request) {
+        // 一条无线红石打字机的输入都没有（只按遥控器）：不是这种办法管的。
+        if (request.inputs().stream().noneMatch(press -> TypewriterKeys.addressed(press.control()))) return Optional.empty();
+        PlayerContext context = services.context().get();
+        ClientLevel level = context == null ? null : context.level();
+        LocalPlayer player = context == null ? null : context.localPlayer();
+        if (level == null || player == null) return Optional.empty();
+        Optional<SableStructures.Structure> ship = compat.structure(level, player, request.structureId());
+        if (ship.isEmpty()) return Optional.empty();
+        return station(level, player, ship.get()).map(station -> {
+            List<TypewriterTrial.Planned> planned = new ArrayList<>();
+            for (Press press : request.inputs()) {
+                planned.add(new TypewriterTrial.Planned(press.control(), TypewriterKeys.key(press.control()), press.ticks()));
+            }
+            return new TypewriterTrial(compat, services, ship.get().id(), station, planned);
+        });
+    }
+
+    @Override public Optional<Run> drive(DriveRequest request) {
+        PlayerContext context = services.context().get();
+        ClientLevel level = context == null ? null : context.level();
+        LocalPlayer player = context == null ? null : context.localPlayer();
+        if (level == null || player == null) return Optional.empty();
+        Optional<SableStructures.Structure> ship = compat.structure(level, player, request.structureId());
+        if (ship.isEmpty()) return Optional.empty();
+        return station(level, player, ship.get()).map(station -> new TypewriterDrive(compat, services, request, station));
+    }
+
+    // 离角色最近的无线红石打字机，和坐着够得着它的座位里最近的一个。
+    private Optional<Station> station(ClientLevel level, LocalPlayer player, SableStructures.Structure ship) {
+        StructureGeometry.Scan scan = compat.scan(level, ship);
+        Vec3 eye = player.getEyePosition();
+        return scan.partsOf(StructureGeometry.TYPEWRITER).stream()
+                .min(Comparator.comparingDouble(local -> ship.pose().toWorld(Vec3.atCenterOf(local)).distanceToSqr(eye)))
+                .map(typewriter -> new Station(typewriter, scan.seats().stream()
+                        .filter(seat -> Vec3.atCenterOf(seat).distanceTo(Vec3.atCenterOf(typewriter)) <= SEAT_REACH)
+                        .min(Comparator.comparingDouble(seat -> seat.distSqr(typewriter))).orElse(null)));
+    }
+}

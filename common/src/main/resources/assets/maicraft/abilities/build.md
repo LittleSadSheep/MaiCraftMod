@@ -1,0 +1,61 @@
+按图纸在 target 处施工：先对图核一遍，缺什么料自己去拿，挡着的挖掉，从底往上一层层砌，够不着就垫临时方块、用完收走，最后对图检查并把门关好。材料不够就建到材料尽头如实停下，再下达一次同样的目标会从没建完的地方接着做。玩家的东西不动，碰到会问你。蓝图没写的格子不会被清空；要清空的格子写 minecraft:air。只放一个方块给 block 就行。机械动力的方向机器（机械手、压机这类）站着、蹲着都放不出要的朝向时，身上有扳手就照放、放下后用扳手转到位，转动记进 changes。
+
+## 怎么用
+
+- `design_id`、`cells`、`block`、`file` 四选一。`cells` 是逐格清单：`[{"offset":[x,y,z],"block":"minecraft:stone","properties":{"facing":"north"}}]`，offset 相对锚点；水源、岩浆源表示倒桶，实心格砌完后倒；同一层按清单里写的先后倒（先倒哪桶决定水和岩浆在哪碰上）。`block` 配 `properties` 只放一格。
+- `file` 是 `schematics/` 目录下的结构文件名（可不写扩展名）：原版 `.nbt` / `.snbt`、Litematica `.litematic`、Sponge `.schem`，以及 design 导出的 `.json`。文件原点落在锚点；原版文件里明写的空气格就是清空，另两种格式的空白不算。朝向、轴向、上下半、半砖类型、旋转、门轴、开关这些放置时定下的属性照文件验收，连接、形状、含水、点亮按原生落法接受。结构方块这类建不了的、流动的水整格跳过；展示框、盔甲架、画这些摆设实体一个都不装，结果里写有几个；箱子里的东西、告示牌的字这些方块实体数据不搬。
+- `target` 必填，是锚点：设计原点或 offset [0,0,0] 落在这里。`here` 是脚下；坐标省略 y 时取那一列的地表；记得的地点按名字；观察编号查它在哪。
+- `rotation` 绕锚点转 0 / 90 / 180 / 270 度，只配 `design_id` 或 `file`。
+- 许可里的 `change_blocks` 决定能拆什么（默认 `natural`）；`none` 时只放不拆，`temporary` 时只能垫临时方块。
+- `name` 是这一栋的档案名（不给就用图纸名，同名的一栋在别处时加上 `@x,y,z`）。
+
+## 建筑档案与改建
+
+用 `design_id`、`cells`、`file` 盖完会记一份建筑档案：名字、照哪一版图纸、锚点、朝向、整栋蓝图，`observe(what="world_memory")` 里看得到，按名字也指得过去。
+
+改一栋已有的房子：`target` 写 `{"kind":"landmark","name":"档案名"}`。
+
+- 锚点和朝向照档案，`rotation` 不用给（给了不一样的会被拒：换朝向就是另盖一栋）。
+- `design_id` 给新一版图纸：整份换掉档案里的蓝图，按图补盖（对上的格跳过，不对的拆换）。
+- `cells` 是补丁：`offset` 相对档案的锚点，按现场的东南西北写；同一格以补丁为准，档案里其余的格留着。
+- `block` 放在某一栋范围里的一格，也算那一栋的补丁。
+- 新一版图纸是照档案当初那一版改出来的，按档案的朝向转；是 `design(read_site)` 读现场读出来的（或另画的）就照现场的东南西北，不再转。
+- 不知道一栋长什么样、门洞在哪：先 `design(operation="read_site", target=…)` 读成层图看清楚，改图后再按图补建。
+- 收场时对整栋比一遍：结果的 `check` 列出没对上的每一格（拆墙时碰掉的火把、流进来的水都在里面），施工本身照施工的结果算；改建还带上这一栋的 `layout`。
+
+## 做完收拾现场
+
+施工完、换了方案之后，像人一样回头看一眼周围，别留烂摊子：试错留下的方块、改版后不用的旧部分、
+垫脚搭的柱子和台子、挖开没填的坑，都顺手收拾掉。施工自己垫的临时方块会自己收走，这一条说的是别的。
+
+- 要清的格一次写进 `cells`，`block` 写 `minecraft:air`；一格格 `gather` 太慢。坑按周围的地形填回去。
+- 收拾前先认清哪些还在用：连着正在用的机器的传动、漏斗、溜槽不动，拿不准先 `machine_inspect` 看；
+  玩家的东西不碰，碰到会问你。
+- 拆下来还能用的料用 `deposit` 存回去，零碎照整理背包的办法处理。
+
+## 结果怎么读
+
+| 字段 | 含义 |
+| --- | --- |
+| `anchor`、`bounds_min`、`bounds_max` | 锚点与包围盒 |
+| `cells` | 每种结局几格：`matches` / `placed` / `cleared` / `poured` / `wrong_block` / `wrong_state` / `missing` / `unknown` / `impossible` / `protected` / `checked_by_machine` |
+| `problems[]` | 没做成的格按原因分组：原因、几格、全部坐标 |
+| `materials_used` | 用掉的材料（物品 → 件数） |
+| `temporary_blocks_left[]` | 没收回的临时方块，下一次施工接着收 |
+| `fixtures_skipped` | 结构文件里没装的摆设实体数（只有 `file` 施工才有） |
+| `archive` | 这一栋的档案：`name`、`anchor`、`rotation`、`design_id`；存不进去时有 `problem` |
+| `check` | 整栋比对：`complete`（每格都看到了）、`counts`、`differences[]`（每格 `at`、`state`、`wanted`、`found`，不截断）、`extra[]`（范围里没声明却有东西的格，只作信息） |
+| `layout` | 改建时这一栋的布局：`floors`、`doors`、`openings`、`windows`、`beds`、`climbs`、`facilities`、`free_floor` |
+
+`changes` 记放下、挖掉、倒桶与开关门、用掉的材料；`remaining` 写"还有 N 格没砌"；全部对了是完成，否则部分完成带问题。
+
+## 问题种类
+
+- `NEED_APPROVAL`：有格是玩家的东西或在玩家的地盘里，没动；一次列出全部。确实要拆改，把 `change_blocks` 设为 `any` 再下达一次。
+- `NEED_ITEM`：材料用完了，写明还缺什么；拿到后再下达一次同样的目标。
+- `UNREACHABLE`：有格够不着，也找不到能垫临时方块接过去的路，或身上的建材不够垫。
+- `STUCK`：有临时方块没收回（下面落不稳、走不到）；下一次施工接着收。
+- `UNSUPPORTED`：有格放好了但点名的属性对不上，施工调不了。
+- `NOT_FOUND`：`schematics/` 里没有叫 `file` 的文件。
+- `INVALID_PARAMETER`：四选一没给对、`cells` 写错（带下标）、`file` 读不懂或超过上限、`rotation` 不是四个取值之一或和改建的那一栋朝向不同、`target` 给不了。
+- 档案名和一个记过的地点同名、两处不在一起时会先问你指哪个：`building` 改那一栋，`place` 在那个地点另盖，`cancel` 不盖了。

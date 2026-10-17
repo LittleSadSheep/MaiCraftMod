@@ -15,8 +15,10 @@
  */
 
 package baritone.behavior;
-import org.maiwithu.maicraft.core.pathing.calc.PlanningWorkProgress;
 
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import baritone.Baritone;
 import baritone.api.behavior.IPathingBehavior;
 import baritone.api.event.events.*;
@@ -48,12 +50,17 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
-import org.maiwithu.maicraft.core.pathing.calc.PathPlannerPool;
-import org.maiwithu.maicraft.core.pathing.baritone.MovementStall;
-import org.maiwithu.maicraft.core.pathing.baritone.SwimTravelControl;
-import org.maiwithu.maicraft.core.Constants;
+import org.maiwithu.maicraft.behavior.navigation.baritone.SwimTravelControl;
+import org.maiwithu.maicraft.behavior.navigation.baritone.PlanningWorkProgress;
+import org.maiwithu.maicraft.behavior.navigation.baritone.PathPlannerPool;
+import org.maiwithu.maicraft.behavior.navigation.baritone.MovementStall;
+import org.maiwithu.maicraft.behavior.navigation.baritone.GroundPathSmoothing;
+
+
+
 
 public final class PathingBehavior extends Behavior implements IPathingBehavior, Helper {
+    private static final Logger LOG = LoggerFactory.getLogger(PathingBehavior.class);
 
     private PathExecutor current;
     private PathExecutor next;
@@ -81,6 +88,8 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
     private Level calculationWorld;
     private long calculationTimeoutMillis;
     private PathCalculationResult.Type lastCalculationResult;
+    /** 最近一次算路程序出错时的异常说明；最近一次不是程序出错为 null。 */
+    private String lastCalculationFailure;
     private boolean calculationStalled;
     private int searchRecoveries;
     private BlockPos recoveryOrigin;
@@ -95,7 +104,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
     private LoadedFrontier workFrontier;
     private BlockPos failedPlanAheadStart;
     private LoadedFrontier calculationFrontier, failedPlanAheadFrontier;
-    private final SwimTravelControl.BodyState swimBodyState = new SwimTravelControl.BodyState();
+    private final SwimTravelControl.PlayerSwimState swimBodyState = new SwimTravelControl.PlayerSwimState();
 
     private boolean lastAutoJump;
 
@@ -429,6 +438,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         // 新导航不能继承旧进程的暂停、失败标签或执行上下文；实际旧失败已由任务在退役前冻结。
         pauseRequestedLastTick = false; pausedThisTick = false; unpausedLastTick = false;
         context = null; customCalculationContext = null; lastCalculationResult = null; calculationStalled = false;
+        lastCalculationFailure = null;
     }
 
     public CalculationContext secretInternalGetCalculationContext() {
@@ -534,7 +544,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         if (recoveryOrigin == null || recoveryOrigin.distSqr(start) > 4 || !Objects.equals(recoveryGoal, goal) || recoveryWorld != ctx.world()) {
             searchRecoveries = 0; recoveryOrigin = start.immutable(); recoveryGoal = goal; recoveryWorld = ctx.world(); lastRecovery = Map.of();
         }
-        calculationStalled = false; lastCalculationResult = null;
+        calculationStalled = false; lastCalculationResult = null; lastCalculationFailure = null;
         calculationTimeoutMillis = Math.max(10_000L, (Baritone.settings().slowPath.value
                 ? Baritone.settings().slowPathTimeoutMS.value : failureTimeout) + 5_000L);
         AbstractNodeCostSearch pathfinder = createPathfinder(start, goal,
@@ -572,7 +582,8 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
             result = pendingCalculation.getNow(null);
         } catch (RuntimeException failure) {
             logDirect("Path calculation failed: " + failure);
-            result = new PathCalculationResult(PathCalculationResult.Type.EXCEPTION);
+            // 计算线程没交回结论（排队被拒、线程里抛了 Error 等）：同样是程序出错，异常照原样带上。
+            result = PathCalculationResult.error(failure.getCause() != null ? failure.getCause() : failure);
         }
         BlockPos start = calculationStart;
         Goal requestedGoal = calculationGoal;
@@ -592,10 +603,11 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         if (path.isEmpty() && (!Objects.equals(requestedGoal, goal)
                 || !Objects.equals(start, current == null ? expectedSegmentStart : current.getPath().getDest()))) return;
         lastCalculationResult = result.getType();
+        lastCalculationFailure = result.getFailure().orElse(null);
         if (current == null) {
             if (path.isPresent()) {
                 if (path.get().positions().contains(expectedSegmentStart)) {
-                    current = new PathExecutor(this, org.maiwithu.maicraft.core.pathing.baritone.GroundPathSmoothing.apply(baritone, path.get()));
+                    current = new PathExecutor(this, GroundPathSmoothing.apply(baritone, path.get()));
                     resetEstimatedTicksToGoal(start);
                     queuePathEvent(PathEvent.CALC_FINISHED_NOW_EXECUTING);
                 } else {
@@ -609,7 +621,7 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         } else if (next == null) {
             if (path.isPresent()) {
                 if (path.get().getSrc().equals(current.getPath().getDest())) {
-                    next = new PathExecutor(this, org.maiwithu.maicraft.core.pathing.baritone.GroundPathSmoothing.apply(baritone, path.get()));
+                    next = new PathExecutor(this, GroundPathSmoothing.apply(baritone, path.get()));
                     queuePathEvent(PathEvent.NEXT_SEGMENT_CALC_FINISHED);
                 } else {
                     logDebug("Discarding next path whose start no longer matches this segment");
@@ -632,10 +644,10 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         if (recovered) {
             searchRecoveries++;
             if (current == null) context = null; // 前瞻卡住时仍保留正在落地的执行上下文。
-            Constants.LOG.warn("[maicraft-path] planning_stall: isolated search generation and retrying the same route; {}", lastRecovery);
+            LOG.warn("[maicraft-path] planning_stall: isolated search generation and retrying the same route; {}", lastRecovery);
         } else {
             calculationStalled = true;
-            Constants.LOG.warn("[maicraft-path] planning_stall: bounded recovery unavailable or exhausted; {}", lastRecovery);
+            LOG.warn("[maicraft-path] planning_stall: bounded recovery unavailable or exhausted; {}", lastRecovery);
             queuePathEvent(PathEvent.CALC_FAILED);
         }
     }
@@ -658,6 +670,10 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         return stall;
     }
     public boolean calculationErrored() { return lastCalculationResult == PathCalculationResult.Type.EXCEPTION; }
+    /** 最近一次算路程序出错时的异常说明：走到据此单独报程序出错；不是程序出错为 null。 */
+    public String calculationFailure() {
+        return calculationErrored() ? (lastCalculationFailure == null ? "未知异常" : lastCalculationFailure) : null;
+    }
 
     /** 默认回执分别呈现真正无解、搜索停滞与已有执行路线，不能仅以“没有位移”反推搜索结论。 */
     public Map<String, Object> searchDiagnostics() {

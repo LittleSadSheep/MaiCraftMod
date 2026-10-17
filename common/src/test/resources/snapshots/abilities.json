@@ -1,0 +1,1779 @@
+{
+  "listing": {
+    "installed_mods": [],
+    "abilities": [
+      {
+        "ability": "maicraft:use",
+        "summary": "对一个方块或实体用一下手上的东西（开门、按钮、拉杆、开箱看看、骑乘、剪毛、点火……）",
+        "parameters": "item?: string, block?: string, entity?: string, count: integer = 1, radius: integer = 32, text?: string, keep_trying: integer = 0, face?: string",
+        "targets": [
+          "here",
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:eat",
+        "summary": "吃身上带的食物",
+        "parameters": "item?: string, count: integer = 1",
+        "targets": [],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:equip",
+        "summary": "穿装备或卸装备",
+        "parameters": "operation: string, slot?: string, item?: string",
+        "targets": [],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:drop",
+        "summary": "把身上带的东西丢出去",
+        "parameters": "item: string, count: integer",
+        "targets": [
+          "position"
+        ],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:suicide",
+        "summary": "开着死亡不掉落时主动死一次，回出生点或床边",
+        "parameters": "via?: string, radius: integer = 24, max_seconds: integer = 120, keep_inventory_confirmed?: boolean",
+        "targets": [],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:obtain",
+        "summary": "让背包里某样东西再多几件；可用 via 指定途径",
+        "parameters": "item: string, count: integer = 1, via?: string, radius?: integer, max_distance?: integer, prefer?: array, drops_from?: array",
+        "targets": [],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:deposit",
+        "summary": "把背包里的东西存进容器",
+        "parameters": "items?: array, count?: integer, radius: integer = 32, into: string = container",
+        "targets": [
+          "here",
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:enchant",
+        "summary": "在附魔台给一件东西附魔：选料、看三档报价、按选定档，附出什么如实列出",
+        "parameters": "item: string, tier: integer = 1, radius: integer = 32",
+        "targets": [
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:sleep",
+        "summary": "找一张床躺下睡觉，白天会先备好今晚的床再报告睡不了；也能开、关、查夜里自动去睡（默认开）",
+        "parameters": "operation: string = sleep",
+        "targets": [
+          "here",
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:gather",
+        "summary": "采掉、收获、捡起世界里指定的东西；点名展示框就打一下取出里面的东西",
+        "parameters": "block?: string, item?: string",
+        "targets": [
+          "position",
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:design",
+        "summary": "画一张建筑图纸、改它、看它、投影到世界里预览，或导出成结构文件；图纸不绑地点",
+        "parameters": "operation: string, drawing?: object, design_id?: string, edits?: object, name?: string, radius?: integer, page: integer = 0, rotation: integer = 0, format: string = json",
+        "targets": [
+          "here",
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "memory_only"
+      },
+      {
+        "ability": "maicraft:build",
+        "summary": "按图纸、逐格清单、结构文件或单格在 target 处施工：缺料自己拿、挡着的挖掉、从底往上砌、够不着就垫临时方块再收走；盖完记建筑档案，target 写档案名就是改那一栋",
+        "parameters": "design_id?: string, cells?: array, block?: string, properties?: object, file?: string, rotation: integer = 0, name?: string",
+        "targets": [
+          "here",
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:machine_inspect",
+        "summary": "看一台机器或一片机器区：组成、运行状态、进出口、挂在哪些网络上；指档案名时再和档案整机比对；operation=read_site 把 target 那一台读成机器蓝图并建档（只读）",
+        "parameters": "radius: integer = 16, item?: string, balance?: string, operation: string = inspect, name?: string",
+        "targets": [
+          "here",
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "read_only"
+      },
+      {
+        "ability": "maicraft:machine_review",
+        "summary": "审阅一份机器蓝图：能建吗、工序做得了吗、要哪些材料、身上缺什么（只读）",
+        "parameters": "blueprint?: object, design_id?: string",
+        "targets": [],
+        "mode": "read_only"
+      },
+      {
+        "ability": "maicraft:machine_configure",
+        "summary": "改一台机器的设置：侧面、过滤、模式、样板（按已装模组的机器类型）",
+        "parameters": "settings: object, item?: string, inventory_slot?: integer",
+        "targets": [
+          "here",
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:machine_run",
+        "summary": "用一台机器做东西：备料、投料、开机、等产物、收产物",
+        "parameters": "item?: string, count: integer = 1, collect: boolean = true, max_seconds: integer = 300, file?: string, anchor?: object, rotation: integer = 0",
+        "targets": [
+          "here",
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:machine_build",
+        "summary": "按机器蓝图在 target 处建一台机器：逐格施工、装安装段与部件、改装后设置，建成入档；target 指已有档案就是修改，operation=remove 拆档案里的整台",
+        "parameters": "blueprint?: object, design_id?: string, name?: string, operation: string = build",
+        "targets": [
+          "here",
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:machine_connect",
+        "summary": "把 target 那台机器接进一张网络（应力、ME、能量……按已装的联动）：已经接着就不动，没接上就规划线路、铺好再核对两端同网与运行读数",
+        "parameters": "network: string, source?: string, radius: integer = 32",
+        "targets": [
+          "here",
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:light",
+        "summary": "给一片区域补光：量好哪里暗、自己备够火把、把灯插下去、再量一遍直到够亮；或开、关、查随行补光（走路经过暗处顺手插一支）",
+        "parameters": "operation: string = area, radius?: integer, item?: string, coverage: string = all, minimum_light?: integer",
+        "targets": [
+          "here",
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:fight",
+        "summary": "打指定的目标，或清掉附近一片区域的敌对生物；看着打不过也照打并写明差在哪，血见底会先撤",
+        "parameters": "entity?: string, radius: integer = 32, count?: integer",
+        "targets": [
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:follow",
+        "summary": "跟着一位玩家或一个实体，保持几格距离：它走就跟、它停就停，跟着上车、过门，它在打怪时上去帮忙",
+        "parameters": "distance: integer = 3",
+        "targets": [
+          "player",
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:wait",
+        "summary": "站在原地等一个条件：等一段时间、等天黑天亮、等血回满或不再饥饿；不想占着身体等用 timer",
+        "parameters": "condition: string = elapsed, after_seconds: integer = 0",
+        "targets": [],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:timer",
+        "summary": "不占身体的计时：过 N 秒（游戏时间）在事件里叫你一声并带回备注，角色照常干别的；不是红石或模组的计时器方块",
+        "parameters": "operation: string = set, after_seconds?: integer, note?: string, timer_id?: integer",
+        "targets": [],
+        "mode": "memory_only"
+      },
+      {
+        "ability": "maicraft:fish",
+        "summary": "在附近的水边钓鱼：自己找钓位、抛竿、咬钩就收，钓上来的照单全收",
+        "parameters": "count?: integer, max_seconds?: integer",
+        "targets": [],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:travel",
+        "summary": "走到一个地方：给坐标、地点名、看得见的东西或往某方向走多远；给维度就是去那个维度",
+        "parameters": "radius: number = 2.0, max_distance: number = 128.0, max_seconds?: integer, via?: string",
+        "targets": [
+          "dimension",
+          "direction",
+          "here",
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:find",
+        "summary": "在附近找某种方块、生物或结构，找到的每一样给一个观察编号，可以直接拿它下达别的指令",
+        "parameters": "block?: string, blocks?: array, entity?: array, structure?: string, count: integer = 1, radius?: integer",
+        "targets": [],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:explore",
+        "summary": "朝某个方向把外面的地形跑一遍：自由看看这一片，或去找一种群系、一块能站的平台、回露天的地面",
+        "parameters": "target: string, direction?: string, angle_degrees?: integer, min_distance?: integer, max_distance: integer = 768, max_seconds?: integer, interests?: array",
+        "targets": [],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:chat",
+        "summary": "向游戏聊天发一句话，或发一条普通玩家命令（对全体玩家可见）",
+        "parameters": "message: string",
+        "targets": [],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:remember",
+        "summary": "记住或忘掉一个按名字叫的地点，或把一片地方圈成玩家地盘",
+        "parameters": "name: string, operation: string = remember, radius?: integer",
+        "targets": [
+          "here",
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "memory_only"
+      },
+      {
+        "ability": "maicraft:sequence",
+        "summary": "按顺序做几件事：steps 里每一步是一个完整的目标",
+        "parameters": "",
+        "targets": [],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:quest",
+        "summary": "对 FTB 任务书里的一个条目做一次动作：交物品、勾选、领奖",
+        "parameters": "operation: string, quest: string, requirement?: string, reward?: string, choice?: string",
+        "targets": [],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:vehicle_assemble",
+        "summary": "把建好胶好的方块组装成会动的结构（物理组装器拉一次杆），或拆回方块",
+        "parameters": "operation: string = assemble",
+        "targets": [
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:vehicle_drive",
+        "summary": "坐上驾驶座开载具：drive 开到一个地方停稳，test 逐条按住控制件看它怎么动再松开",
+        "parameters": "vehicle?: string, operation: string = drive, inputs?: array, cruise_altitude?: integer",
+        "targets": [
+          "direction",
+          "landmark",
+          "position"
+        ],
+        "mode": "controls_player"
+      }
+    ]
+  },
+  "abilities": [
+    {
+      "ability": "maicraft:use",
+      "summary": "对一个方块或实体用一下手上的东西（开门、按钮、拉杆、开箱看看、骑乘、剪毛、点火……）",
+      "parameters": [
+        {
+          "name": "item",
+          "type": "string",
+          "required": false,
+          "doc": "手上拿什么；不给就空手。标签表示其中任意一种，例如 #minecraft:hoes"
+        },
+        {
+          "name": "block",
+          "type": "string",
+          "required": false,
+          "doc": "没指定是哪一个时按它找最近的；指定了时核对目标是不是它"
+        },
+        {
+          "name": "entity",
+          "type": "string",
+          "required": false,
+          "doc": "对实体用时它的类型；同 block，对实体"
+        },
+        {
+          "name": "count",
+          "type": "integer",
+          "required": false,
+          "doc": "做几次；某一次没有效果就停下",
+          "default": 1,
+          "min": 1,
+          "max": 64
+        },
+        {
+          "name": "radius",
+          "type": "integer",
+          "required": false,
+          "doc": "按 block、entity 找目标的范围（格）",
+          "default": 32,
+          "min": 1,
+          "max": 128
+        },
+        {
+          "name": "text",
+          "type": "string",
+          "required": false,
+          "doc": "写到告示牌上的文字，用换行分行，最多 4 行；给了 text 就必须空手"
+        },
+        {
+          "name": "keep_trying",
+          "type": "integer",
+          "required": false,
+          "doc": "点下去没反应时接着点，最多这么多秒：传送带上跑着的东西要连着点才抓得到。不给就点一下没反应就停（不重复点，免得做两次）",
+          "default": 0,
+          "min": 0,
+          "max": 10
+        },
+        {
+          "name": "face",
+          "type": "string",
+          "required": false,
+          "doc": "点方块朝哪一面（方块外形上朝这边的表面都算）；不给就点看得见的任一面。用扳手转机器时点哪一面决定绕哪根轴转",
+          "choices": [
+            "up",
+            "down",
+            "north",
+            "south",
+            "east",
+            "west"
+          ]
+        }
+      ],
+      "targets": [
+        "here",
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/use.md"
+    },
+    {
+      "ability": "maicraft:eat",
+      "summary": "吃身上带的食物",
+      "parameters": [
+        {
+          "name": "item",
+          "type": "string",
+          "required": false,
+          "doc": "要吃的物品 ID；不给时只在普通食物里挑，没有再吃腐肉这类垃圾食物，金苹果、紫颂果、河豚要点名"
+        },
+        {
+          "name": "count",
+          "type": "integer",
+          "required": false,
+          "doc": "吃几件",
+          "default": 1,
+          "min": 1,
+          "max": 64
+        }
+      ],
+      "targets": [],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/eat.md"
+    },
+    {
+      "ability": "maicraft:equip",
+      "summary": "穿装备或卸装备",
+      "parameters": [
+        {
+          "name": "operation",
+          "type": "string",
+          "required": true,
+          "doc": "equip 穿上 / unequip 卸下",
+          "choices": [
+            "equip",
+            "unequip"
+          ]
+        },
+        {
+          "name": "slot",
+          "type": "string",
+          "required": false,
+          "doc": "目标栏位；armor 只配合 unequip，表示整套护甲卸下",
+          "choices": [
+            "mainhand",
+            "offhand",
+            "head",
+            "chest",
+            "legs",
+            "feet",
+            "armor"
+          ]
+        },
+        {
+          "name": "item",
+          "type": "string",
+          "required": false,
+          "doc": "要穿的物品 ID 或标签；护甲栏候选唯一时可以不给，手上拿什么得点名"
+        }
+      ],
+      "targets": [],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/equip.md"
+    },
+    {
+      "ability": "maicraft:drop",
+      "summary": "把身上带的东西丢出去",
+      "parameters": [
+        {
+          "name": "item",
+          "type": "string",
+          "required": true,
+          "doc": "要丢的物品 ID"
+        },
+        {
+          "name": "count",
+          "type": "integer",
+          "required": true,
+          "doc": "要丢几件；超过实际持有时会按实际持有的丢",
+          "min": 1,
+          "max": 999
+        }
+      ],
+      "targets": [
+        "position"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/drop.md"
+    },
+    {
+      "ability": "maicraft:suicide",
+      "summary": "开着死亡不掉落时主动死一次，回出生点或床边",
+      "parameters": [
+        {
+          "name": "via",
+          "type": "string",
+          "required": false,
+          "doc": "死法：lava 现成岩浆 / fall 摔得死的落差 / cactus 仙人掌 / hostile_mob 敌对生物 / fire 随身点火 / lava_bucket 随身倒岩浆；不给按死得快慢自己挑，给了只用它",
+          "choices": [
+            "lava",
+            "fall",
+            "fire",
+            "cactus",
+            "hostile_mob",
+            "lava_bucket"
+          ]
+        },
+        {
+          "name": "radius",
+          "type": "integer",
+          "required": false,
+          "doc": "找现成死法的范围（格）",
+          "default": 24,
+          "min": 4,
+          "max": 64
+        },
+        {
+          "name": "max_seconds",
+          "type": "integer",
+          "required": false,
+          "doc": "最多花多少秒去死；死亡、暂停、穿回护甲的时间不算",
+          "default": 120,
+          "min": 10,
+          "max": 600
+        },
+        {
+          "name": "keep_inventory_confirmed",
+          "type": "boolean",
+          "required": false,
+          "doc": "你确认这个服务器开着死亡不掉落；连别人的服务器时给 true，单人世界以游戏规则为准"
+        }
+      ],
+      "targets": [],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/suicide.md"
+    },
+    {
+      "ability": "maicraft:obtain",
+      "summary": "让背包里某样东西再多几件；可用 via 指定途径",
+      "parameters": [
+        {
+          "name": "item",
+          "type": "string",
+          "required": true,
+          "doc": "要多拿的物品 ID，或 # 开头的标签；#maicraft:foods/edible 是能吃的口粮一大类（含模组食物）"
+        },
+        {
+          "name": "count",
+          "type": "integer",
+          "required": false,
+          "doc": "再多拿几件（不是背包里的总数）",
+          "default": 1,
+          "min": 1,
+          "max": 2147483647
+        },
+        {
+          "name": "via",
+          "type": "string",
+          "required": false,
+          "doc": "只走指定途径，不给就按总代价自己挑：container 记得的箱子、现场看到的容器；craft 工作台上做出来（含石切台）；smelt 熔炉里烧出来（记得附近有高炉、烟熏炉时在那里烧，快一倍）；mine 挖掉会掉出它的方块；harvest 收成熟的作物；trade 和村民交易（会花绿宝石等付款，只有点名 via=trade 才做）；hunt 打掉会掉出它的动物或生物；fill 拿空桶去水边装一桶（只舀舀了会自己补回来的水）；reclaim 拆回自己放下的床、工作台、熔炉（家附近的不收）",
+          "choices": [
+            "container",
+            "craft",
+            "smelt",
+            "mine",
+            "harvest",
+            "trade",
+            "hunt",
+            "fill",
+            "reclaim"
+          ]
+        },
+        {
+          "name": "radius",
+          "type": "integer",
+          "required": false,
+          "doc": "容器与采掘的搜索范围（格）；给了就冻结在这个范围里",
+          "min": 1,
+          "max": 64
+        },
+        {
+          "name": "max_distance",
+          "type": "integer",
+          "required": false,
+          "doc": "愿意为此走多远（格）",
+          "min": 1,
+          "max": 2147483647
+        },
+        {
+          "name": "prefer",
+          "type": "array",
+          "required": false,
+          "doc": "倾向用的材料（物品 ID 或 # 标签的列表）：几种做法都行时用到它们的排前面，备料时沿配方链往下传；只影响先后，不禁用别的做法"
+        },
+        {
+          "name": "drops_from",
+          "type": "array",
+          "required": false,
+          "doc": "要的东西从哪些方块挖得到、哪些生物打得到（方块 ID、# 方块标签或实体类型 ID 的列表），模组矿、模组生物掉什么认不出时用，例如要 create:raw_zinc 写 [\"create:zinc_ore\"]；采掘、收庄稼、狩猎照它去挖去打，拿到几件以实际进包为准；只管 item 这一样，备料不往下传"
+        }
+      ],
+      "targets": [],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/obtain.md"
+    },
+    {
+      "ability": "maicraft:deposit",
+      "summary": "把背包里的东西存进容器",
+      "parameters": [
+        {
+          "name": "items",
+          "type": "array",
+          "required": false,
+          "doc": "存哪些（物品 ID 或 # 标签的列表）；不给就把随身要留的东西以外的全部存掉"
+        },
+        {
+          "name": "count",
+          "type": "integer",
+          "required": false,
+          "doc": "一共存几件；不给就全存",
+          "min": 1,
+          "max": 576
+        },
+        {
+          "name": "radius",
+          "type": "integer",
+          "required": false,
+          "doc": "自己挑容器时的范围（格）",
+          "default": 32,
+          "min": 1,
+          "max": 128
+        },
+        {
+          "name": "into",
+          "type": "string",
+          "required": false,
+          "doc": "存进哪里：container 箱子、木桶这类容器；network 身上无线终端连着的 ME 网络（拿出终端打开、快速移动进去，不用走路，target 不用给）",
+          "default": "container",
+          "choices": [
+            "container",
+            "network"
+          ]
+        }
+      ],
+      "targets": [
+        "here",
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/deposit.md"
+    },
+    {
+      "ability": "maicraft:enchant",
+      "summary": "在附魔台给一件东西附魔：选料、看三档报价、按选定档，附出什么如实列出",
+      "parameters": [
+        {
+          "name": "item",
+          "type": "string",
+          "required": true,
+          "doc": "附魔哪件：物品 ID 或 # 标签（身上第一件匹配且台子肯收的）"
+        },
+        {
+          "name": "tier",
+          "type": "integer",
+          "required": false,
+          "doc": "选三档报价里的第几档；第 n 档消耗 n 级和 n 个青金石，各档另有等级门槛",
+          "default": 1,
+          "min": 1,
+          "max": 3
+        },
+        {
+          "name": "radius",
+          "type": "integer",
+          "required": false,
+          "doc": "不给 target 时找台子的范围（格）",
+          "default": 32,
+          "min": 1,
+          "max": 9223372036854775807
+        }
+      ],
+      "targets": [
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/enchant.md"
+    },
+    {
+      "ability": "maicraft:sleep",
+      "summary": "找一张床躺下睡觉，白天会先备好今晚的床再报告睡不了；也能开、关、查夜里自动去睡（默认开）",
+      "parameters": [
+        {
+          "name": "operation",
+          "type": "string",
+          "required": false,
+          "doc": "sleep 现在去睡（默认）/ auto_off 关掉夜里自动去睡（有人说晚上别睡时用） / auto_on 打开 / auto_status 查开没开",
+          "default": "sleep",
+          "choices": [
+            "sleep",
+            "auto_on",
+            "auto_off",
+            "auto_status"
+          ]
+        }
+      ],
+      "targets": [
+        "here",
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/sleep.md"
+    },
+    {
+      "ability": "maicraft:gather",
+      "summary": "采掉、收获、捡起世界里指定的东西；点名展示框就打一下取出里面的东西",
+      "parameters": [
+        {
+          "name": "block",
+          "type": "string",
+          "required": false,
+          "doc": "配 position 目标用：要采的方块 ID"
+        },
+        {
+          "name": "item",
+          "type": "string",
+          "required": false,
+          "doc": "认为会掉出的东西，用于确认；不给按实际掉落记录"
+        }
+      ],
+      "targets": [
+        "position",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/gather.md"
+    },
+    {
+      "ability": "maicraft:design",
+      "summary": "画一张建筑图纸、改它、看它、投影到世界里预览，或导出成结构文件；图纸不绑地点",
+      "parameters": [
+        {
+          "name": "operation",
+          "type": "string",
+          "required": true,
+          "doc": "create 新建；update 按名合并修改成新的一版；inspect 看；preview 投到 target 预览；export 导出；read_site 把 target 处已有的一栋建筑读成一版层图，带楼层、门、门洞、床这些布局",
+          "choices": [
+            "create",
+            "update",
+            "inspect",
+            "preview",
+            "export",
+            "read_site"
+          ]
+        },
+        {
+          "name": "drawing",
+          "type": "object",
+          "required": false,
+          "doc": "create 用：图纸正文，格式看 lookup(topic=knowledge, id=building/design)，屋顶看 lookup(topic=knowledge, id=building/roofs)"
+        },
+        {
+          "name": "design_id",
+          "type": "string",
+          "required": false,
+          "doc": "update / inspect / preview / export 用：设计编号"
+        },
+        {
+          "name": "edits",
+          "type": "object",
+          "required": false,
+          "doc": "update 用：按名合并的修改，字段 objects、materials、components、remove_objects、remove_components、block_state_axes、overlap_policy、name"
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "doc": "inspect 用：看某个对象（展开路径也行）；看组件在名字前加 component:。read_site 用：新图纸的名字，这一栋还没有建筑档案时用这个名字建档"
+        },
+        {
+          "name": "radius",
+          "type": "integer",
+          "required": false,
+          "doc": "read_site 用：不自动框整栋，改读以 target 为中心、边长 2×radius+1 的方盒",
+          "min": 0,
+          "max": 15
+        },
+        {
+          "name": "page",
+          "type": "integer",
+          "required": false,
+          "doc": "inspect 的页码，从 0 起；结果带 next_page 才有下一页",
+          "default": 0,
+          "min": 0,
+          "max": 1000000
+        },
+        {
+          "name": "rotation",
+          "type": "integer",
+          "required": false,
+          "doc": "preview 用：绕锚点转 0 / 90 / 180 / 270 度",
+          "default": 0,
+          "min": 0,
+          "max": 270
+        },
+        {
+          "name": "format",
+          "type": "string",
+          "required": false,
+          "doc": "export 用：写成 json（与 build 的 cells 同格式）或原版 nbt",
+          "default": "json",
+          "choices": [
+            "json",
+            "nbt"
+          ]
+        }
+      ],
+      "targets": [
+        "here",
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "memory_only",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/design.md"
+    },
+    {
+      "ability": "maicraft:build",
+      "summary": "按图纸、逐格清单、结构文件或单格在 target 处施工：缺料自己拿、挡着的挖掉、从底往上砌、够不着就垫临时方块再收走；盖完记建筑档案，target 写档案名就是改那一栋",
+      "parameters": [
+        {
+          "name": "design_id",
+          "type": "string",
+          "required": false,
+          "doc": "按 design 存的图纸施工（四选一）；target 是档案名时整份换掉那一栋的图"
+        },
+        {
+          "name": "cells",
+          "type": "array",
+          "required": false,
+          "doc": "逐格蓝图（四选一）：[{\"offset\":[x,y,z],\"block\":\"minecraft:stone\",\"properties\":{...}}]，block 为 minecraft:air 表示清空，水源、岩浆源表示倒桶；target 是档案名时 offset 相对档案锚点，是并进那一栋的补丁"
+        },
+        {
+          "name": "block",
+          "type": "string",
+          "required": false,
+          "doc": "只放一格（四选一）：放在 target 那一格；落在某一栋的范围里就并进那一栋"
+        },
+        {
+          "name": "properties",
+          "type": "object",
+          "required": false,
+          "doc": "配 block：要求的方块状态属性，例如 {\"facing\":\"north\"}"
+        },
+        {
+          "name": "file",
+          "type": "string",
+          "required": false,
+          "doc": "schematics 目录下的结构文件名（四选一）：.nbt / .snbt / .litematic / .schem，或 design 导出的 .json；摆设实体不装"
+        },
+        {
+          "name": "rotation",
+          "type": "integer",
+          "required": false,
+          "doc": "绕锚点转 0 / 90 / 180 / 270 度；只配 design_id 或 file；改建不用给：照档案那一版改出来的图按档案的朝向，读现场读出来的照现场",
+          "default": 0,
+          "min": 0,
+          "max": 270
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "doc": "新建筑的档案名；不给就用图纸名，撞名加 @x,y,z；target 已经是档案时不用给"
+        }
+      ],
+      "targets": [
+        "here",
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/build.md"
+    },
+    {
+      "ability": "maicraft:machine_inspect",
+      "summary": "看一台机器或一片机器区：组成、运行状态、进出口、挂在哪些网络上；指档案名时再和档案整机比对；operation=read_site 把 target 那一台读成机器蓝图并建档（只读）",
+      "parameters": [
+        {
+          "name": "radius",
+          "type": "integer",
+          "required": false,
+          "doc": "看多大范围，单位格；给了目标就是以它为中心，没给以角色为中心",
+          "default": 16,
+          "min": 1,
+          "max": 32
+        },
+        {
+          "name": "item",
+          "type": "string",
+          "required": false,
+          "doc": "看身上物品自己的设置（过滤器的规则）时写物品 ID：每一件分别列出在哪一格、现在是什么规则"
+        },
+        {
+          "name": "balance",
+          "type": "string",
+          "required": false,
+          "doc": "看载具（target 给 s#）时要不要受力：forces 开着与关着动力两种情况往哪边倒、升力比重量；ballast 再给几处放配重的位置",
+          "choices": [
+            "forces",
+            "ballast"
+          ]
+        },
+        {
+          "name": "operation",
+          "type": "string",
+          "required": false,
+          "doc": "inspect 看（默认）；read_site 把 target 指的那一台机器读成能直接喂回 machine_build 的机器蓝图（结果 site.blueprint），并按 name 建一份档案；指档案名时不另建档，给整机比对",
+          "default": "inspect",
+          "choices": [
+            "inspect",
+            "read_site"
+          ]
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "doc": "read_site 时新档案的名字；不给按锚点起\"机器@x,y,z\""
+        }
+      ],
+      "targets": [
+        "here",
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "read_only",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/machine_inspect.md"
+    },
+    {
+      "ability": "maicraft:machine_review",
+      "summary": "审阅一份机器蓝图：能建吗、工序做得了吗、要哪些材料、身上缺什么（只读）",
+      "parameters": [
+        {
+          "name": "blueprint",
+          "type": "object",
+          "required": false,
+          "doc": "机器蓝图的正文（JSON 对象）：cells 逐格、parts 部件、installations 安装段、settings 装后设置、processes 声明工序；和 design_id 二选一"
+        },
+        {
+          "name": "design_id",
+          "type": "string",
+          "required": false,
+          "doc": "已保存的设计编号：按它存的方块清单审（没有机器附加条目）"
+        }
+      ],
+      "targets": [],
+      "mode": "read_only",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/machine_review.md"
+    },
+    {
+      "ability": "maicraft:machine_configure",
+      "summary": "改一台机器的设置：侧面、过滤、模式、样板（按已装模组的机器类型）",
+      "parameters": [
+        {
+          "name": "settings",
+          "type": "object",
+          "required": true,
+          "doc": "要改成什么：键是这台机器认的设置项，值写字符串，例如 {\"side.north\": \"output:items\"}；能设哪些项先 lookup 查这台机器"
+        },
+        {
+          "name": "item",
+          "type": "string",
+          "required": false,
+          "doc": "改身上物品自己的设置（过滤器写规则）时写物品 ID，这时不看 target"
+        },
+        {
+          "name": "inventory_slot",
+          "type": "integer",
+          "required": false,
+          "doc": "配 item：身上有几件时改第几格那件（0~35，副手 40）；不给改第一件",
+          "min": 0,
+          "max": 40
+        }
+      ],
+      "targets": [
+        "here",
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/machine_configure.md"
+    },
+    {
+      "ability": "maicraft:machine_run",
+      "summary": "用一台机器做东西：备料、投料、开机、等产物、收产物",
+      "parameters": [
+        {
+          "name": "item",
+          "type": "string",
+          "required": false,
+          "doc": "要做出什么；不给就只开机"
+        },
+        {
+          "name": "count",
+          "type": "integer",
+          "required": false,
+          "doc": "要做几件",
+          "default": 1,
+          "min": 1,
+          "max": 64
+        },
+        {
+          "name": "collect",
+          "type": "boolean",
+          "required": false,
+          "doc": "做完要不要把出口的东西拿进背包；不要就留在出口",
+          "default": true
+        },
+        {
+          "name": "max_seconds",
+          "type": "integer",
+          "required": false,
+          "doc": "最多等产物多久；到点没出够按部分完成收场",
+          "default": 300,
+          "min": 1,
+          "max": 3600
+        },
+        {
+          "name": "file",
+          "type": "string",
+          "required": false,
+          "doc": "蓝图桌、蓝图加农炮用：schematics 目录下的 .nbt 蓝图文件名（和 build 的 file 同一个目录）"
+        },
+        {
+          "name": "anchor",
+          "type": "object",
+          "required": false,
+          "doc": "蓝图加农炮用：蓝图原点落在哪一格 {\"x\":..,\"y\":..,\"z\":..}；配 file"
+        },
+        {
+          "name": "rotation",
+          "type": "integer",
+          "required": false,
+          "doc": "蓝图加农炮用：蓝图绕原点转 0 / 90 / 180 / 270 度；配 anchor",
+          "default": 0,
+          "min": 0,
+          "max": 270
+        }
+      ],
+      "targets": [
+        "here",
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/machine_run.md"
+    },
+    {
+      "ability": "maicraft:machine_build",
+      "summary": "按机器蓝图在 target 处建一台机器：逐格施工、装安装段与部件、改装后设置，建成入档；target 指已有档案就是修改，operation=remove 拆档案里的整台",
+      "parameters": [
+        {
+          "name": "blueprint",
+          "type": "object",
+          "required": false,
+          "doc": "机器蓝图的正文（JSON 对象）：cells 逐格、parts 部件、installations 安装段、settings 装后设置；和 design_id 二选一，operation=remove 时不给"
+        },
+        {
+          "name": "design_id",
+          "type": "string",
+          "required": false,
+          "doc": "已保存的设计编号：按它存的方块清单建（没有机器附加条目）"
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "doc": "新机器的档案名；不给就按锚点起名。修改已有档案时不用给"
+        },
+        {
+          "name": "operation",
+          "type": "string",
+          "required": false,
+          "doc": "build 建或改（默认）/ remove 拆档案里的整台（target 指档案名）",
+          "default": "build"
+        }
+      ],
+      "targets": [
+        "here",
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/machine_build.md"
+    },
+    {
+      "ability": "maicraft:machine_connect",
+      "summary": "把 target 那台机器接进一张网络（应力、ME、能量……按已装的联动）：已经接着就不动，没接上就规划线路、铺好再核对两端同网与运行读数",
+      "parameters": [
+        {
+          "name": "network",
+          "type": "string",
+          "required": true,
+          "doc": "接哪种网：取值由已登记的网络读取器自报，例如 kinetic（应力）、me、energy"
+        },
+        {
+          "name": "source",
+          "type": "string",
+          "required": false,
+          "doc": "接到哪：写法与 target 相同（观察编号、[x,y,z] 坐标、名字）；不给就在 radius 内找"
+        },
+        {
+          "name": "radius",
+          "type": "integer",
+          "required": false,
+          "doc": "没给 source 时找来源的范围，单位格",
+          "default": 32
+        }
+      ],
+      "targets": [
+        "here",
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/machine_connect.md"
+    },
+    {
+      "ability": "maicraft:light",
+      "summary": "给一片区域补光：量好哪里暗、自己备够火把、把灯插下去、再量一遍直到够亮；或开、关、查随行补光（走路经过暗处顺手插一支）",
+      "parameters": [
+        {
+          "name": "operation",
+          "type": "string",
+          "required": false,
+          "doc": "area 补光一片区域（默认）/ enable 开随行补光 / disable 关 / status 查",
+          "default": "area",
+          "choices": [
+            "area",
+            "enable",
+            "disable",
+            "status"
+          ]
+        },
+        {
+          "name": "radius",
+          "type": "integer",
+          "required": false,
+          "doc": "以 target 为圆心的半径（格）；不给就是照亮整间屋、整条矿道（从 target 走出去连得着的范围）",
+          "min": 1,
+          "max": 32
+        },
+        {
+          "name": "item",
+          "type": "string",
+          "required": false,
+          "doc": "光源物品 ID；不给默认火把。发射量到不了验收亮度的灯不会用"
+        },
+        {
+          "name": "coverage",
+          "type": "string",
+          "required": false,
+          "doc": "all 全部样本达标（默认）/ most 九成达标 / crops 只按作物与耕地验收（全部达标，灯插在田边）",
+          "default": "all",
+          "choices": [
+            "all",
+            "most",
+            "crops"
+          ]
+        },
+        {
+          "name": "minimum_light",
+          "type": "integer",
+          "required": false,
+          "doc": "验收亮度：方块光要达到的等级（1..15）；不给时 all / most 档按 8，crops 档按 9（作物要光照够 9 才长）；随行 enable 取 1..13",
+          "min": 1,
+          "max": 15
+        }
+      ],
+      "targets": [
+        "here",
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/light.md"
+    },
+    {
+      "ability": "maicraft:fight",
+      "summary": "打指定的目标，或清掉附近一片区域的敌对生物；看着打不过也照打并写明差在哪，血见底会先撤",
+      "parameters": [
+        {
+          "name": "entity",
+          "type": "string",
+          "required": false,
+          "doc": "区域清扫时只清这种实体类型；省略即全部敌对生物"
+        },
+        {
+          "name": "radius",
+          "type": "integer",
+          "required": false,
+          "doc": "区域清扫的范围，单位格",
+          "default": 32,
+          "min": 1,
+          "max": 64
+        },
+        {
+          "name": "count",
+          "type": "integer",
+          "required": false,
+          "doc": "区域清扫时最多处理几只；省略即开打那一刻看得见的这一批",
+          "min": 1,
+          "max": 64
+        }
+      ],
+      "targets": [
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/fight.md"
+    },
+    {
+      "ability": "maicraft:follow",
+      "summary": "跟着一位玩家或一个实体，保持几格距离：它走就跟、它停就停，跟着上车、过门，它在打怪时上去帮忙",
+      "parameters": [
+        {
+          "name": "distance",
+          "type": "integer",
+          "required": false,
+          "doc": "保持的距离，单位格",
+          "default": 3,
+          "min": 2,
+          "max": 16
+        }
+      ],
+      "targets": [
+        "player",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/follow.md"
+    },
+    {
+      "ability": "maicraft:wait",
+      "summary": "站在原地等一个条件：等一段时间、等天黑天亮、等血回满或不再饥饿；不想占着身体等用 timer",
+      "parameters": [
+        {
+          "name": "condition",
+          "type": "string",
+          "required": false,
+          "doc": "等什么：elapsed（只等时间，默认）/ day / night / health_full / not_hungry",
+          "default": "elapsed",
+          "choices": [
+            "elapsed",
+            "day",
+            "night",
+            "health_full",
+            "not_hungry"
+          ]
+        },
+        {
+          "name": "after_seconds",
+          "type": "integer",
+          "required": false,
+          "doc": "最短先等多少秒再开始查条件（elapsed 条件下过了这段时间即完成）",
+          "default": 0,
+          "min": 0,
+          "max": 3600
+        }
+      ],
+      "targets": [],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/wait.md"
+    },
+    {
+      "ability": "maicraft:timer",
+      "summary": "不占身体的计时：过 N 秒（游戏时间）在事件里叫你一声并带回备注，角色照常干别的；不是红石或模组的计时器方块",
+      "parameters": [
+        {
+          "name": "operation",
+          "type": "string",
+          "required": false,
+          "doc": "set 设一个计时（默认），cancel 按 timer_id 取消一个，list 看还挂着哪些",
+          "default": "set",
+          "choices": [
+            "set",
+            "cancel",
+            "list"
+          ]
+        },
+        {
+          "name": "after_seconds",
+          "type": "integer",
+          "required": false,
+          "doc": "只用于 set：过多少秒（游戏时间，单人游戏暂停时不走）叫你",
+          "min": 1,
+          "max": 3600
+        },
+        {
+          "name": "note",
+          "type": "string",
+          "required": false,
+          "doc": "只用于 set：到点时原样带回的一句备注（最多 200 字），写清到时要看什么、做什么决定"
+        },
+        {
+          "name": "timer_id",
+          "type": "integer",
+          "required": false,
+          "doc": "只用于 cancel：要取消的计时编号（set 的结果里给的）",
+          "min": 1,
+          "max": 2147483647
+        }
+      ],
+      "targets": [],
+      "mode": "memory_only",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/timer.md"
+    },
+    {
+      "ability": "maicraft:fish",
+      "summary": "在附近的水边钓鱼：自己找钓位、抛竿、咬钩就收，钓上来的照单全收",
+      "parameters": [
+        {
+          "name": "count",
+          "type": "integer",
+          "required": false,
+          "doc": "钓到几次收竿（垃圾、宝藏也算一次）；不给就一直钓（常驻）",
+          "min": 1,
+          "max": 9223372036854775807
+        },
+        {
+          "name": "max_seconds",
+          "type": "integer",
+          "required": false,
+          "doc": "最多钓多久（秒）；到时按没进展结束，已钓到的照算",
+          "min": 1,
+          "max": 9223372036854775807
+        }
+      ],
+      "targets": [],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/fish.md"
+    },
+    {
+      "ability": "maicraft:travel",
+      "summary": "走到一个地方：给坐标、地点名、看得见的东西或往某方向走多远；给维度就是去那个维度",
+      "parameters": [
+        {
+          "name": "radius",
+          "type": "number",
+          "required": false,
+          "doc": "到达容差，单位格，默认 2；给 0 表示必须站进那一格",
+          "default": 2.0,
+          "min": 0,
+          "max": 2048
+        },
+        {
+          "name": "max_distance",
+          "type": "number",
+          "required": false,
+          "doc": "找传送门的范围，单位格，默认 128；查遍已加载区没有门才建门",
+          "default": 128.0,
+          "min": 16,
+          "max": 2048
+        },
+        {
+          "name": "max_seconds",
+          "type": "integer",
+          "required": false,
+          "doc": "最多走多久（秒）；超时以卡住结束，写明停在哪、离目标多远"
+        },
+        {
+          "name": "via",
+          "type": "string",
+          "required": false,
+          "doc": "只用这种方式去（首尾免不了的步行除外），用不了会说明原因，不悄悄改走路；不给就近处走、远处挑最快的：walk 只走路（挖垫照许可）；end_gateway 过末地折跃门：对着门扔一颗末影珍珠，传到主岛与外岛的另一头（只在末地；身上没有珍珠先去弄）；boat 自己放船划过水面：隔着水时放船坐上划到对岸，下船接着走（身上要有船物品，或岸边停着没人坐的船）；minecart 坐原版矿车：沿铺好的铁轨坐到离目的地最近的轨道格下车（要有通电的动力铁轨或一路下坡，矿车自己带或轨道上停着一辆）",
+          "choices": [
+            "walk",
+            "end_gateway",
+            "boat",
+            "minecart"
+          ]
+        }
+      ],
+      "targets": [
+        "dimension",
+        "direction",
+        "here",
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/travel.md"
+    },
+    {
+      "ability": "maicraft:find",
+      "summary": "在附近找某种方块、生物或结构，找到的每一样给一个观察编号，可以直接拿它下达别的指令",
+      "parameters": [
+        {
+          "name": "block",
+          "type": "string",
+          "required": false,
+          "doc": "找哪种方块（ID 或 # 标签）；与 blocks、entity、structure 三选一"
+        },
+        {
+          "name": "blocks",
+          "type": "array",
+          "required": false,
+          "doc": "找哪几种方块（ID 或 # 标签）；与 block、entity、structure 三选一"
+        },
+        {
+          "name": "entity",
+          "type": "array",
+          "required": false,
+          "doc": "找哪种实体（类型 ID，可给几种）；与 block、blocks、structure 三选一"
+        },
+        {
+          "name": "structure",
+          "type": "string",
+          "required": false,
+          "doc": "找哪种结构（命名空间 ID）；按记过的产地线索找，没记过就看眼前这一片凑不凑得齐它的地表特征，到附近还要亲眼确认；要塞附近没有线索时扔末影之眼指路、一路走过去；与 block、blocks、entity 三选一"
+        },
+        {
+          "name": "count",
+          "type": "integer",
+          "required": false,
+          "doc": "要找到几个，找满即收工",
+          "default": 1,
+          "min": 1,
+          "max": 32
+        },
+        {
+          "name": "radius",
+          "type": "integer",
+          "required": false,
+          "doc": "扫描半径，单位格；方块默认 48，实体默认 64；只扫已加载区",
+          "min": 4,
+          "max": 128
+        }
+      ],
+      "targets": [],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/find.md"
+    },
+    {
+      "ability": "maicraft:explore",
+      "summary": "朝某个方向把外面的地形跑一遍：自由看看这一片，或去找一种群系、一块能站的平台、回露天的地面",
+      "parameters": [
+        {
+          "name": "target",
+          "type": "string",
+          "required": true,
+          "doc": "探索目标：survey 自由跑图 / 群系 ID 或 # 标签 / platform 找平台 / surface 回露天；探索不接受已定位终点，找海岸给 minecraft:beach"
+        },
+        {
+          "name": "direction",
+          "type": "string",
+          "required": false,
+          "doc": "扇形朝向；platform 必配，其余可选，出发时按当时朝向固定",
+          "choices": [
+            "forward",
+            "backward",
+            "left",
+            "right",
+            "north",
+            "south",
+            "east",
+            "west"
+          ]
+        },
+        {
+          "name": "angle_degrees",
+          "type": "integer",
+          "required": false,
+          "doc": "扇形开口角（度）；有方向默认 90，无方向必须省略或 360",
+          "min": 1,
+          "max": 360
+        },
+        {
+          "name": "min_distance",
+          "type": "integer",
+          "required": false,
+          "doc": "忽略更近的目标匹配（格）；有方向默认 16，无方向默认 0",
+          "min": 0,
+          "max": 2048
+        },
+        {
+          "name": "max_distance",
+          "type": "integer",
+          "required": false,
+          "doc": "探索半径（格），默认 768；到范围边上就收工",
+          "default": 768,
+          "min": 64,
+          "max": 2048
+        },
+        {
+          "name": "max_seconds",
+          "type": "integer",
+          "required": false,
+          "doc": "最多做多久（秒）；观察与走行有真实进展就续期"
+        },
+        {
+          "name": "interests",
+          "type": "array",
+          "required": false,
+          "doc": "途中留意清单：地形要素（lava_pool）、结构 ID、方块 ID 或 # 标签、实体类型；看见了记下来并发一条发现事件，不改路线、不算抵达"
+        }
+      ],
+      "targets": [],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/explore.md"
+    },
+    {
+      "ability": "maicraft:chat",
+      "summary": "向游戏聊天发一句话，或发一条普通玩家命令（对全体玩家可见）",
+      "parameters": [
+        {
+          "name": "message",
+          "type": "string",
+          "required": true,
+          "doc": "要发到游戏聊天的话，全体玩家可见；以 / 开头的按游戏命令发：/msg、/home、/help 这类普通玩家命令照发，/tp、/give、/gamemode 这类管理员命令角色不执行"
+        }
+      ],
+      "targets": [],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/chat.md"
+    },
+    {
+      "ability": "maicraft:remember",
+      "summary": "记住或忘掉一个按名字叫的地点，或把一片地方圈成玩家地盘",
+      "parameters": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "doc": "地点或地盘的名字；首尾空白去掉后原样比较，不改大小写"
+        },
+        {
+          "name": "operation",
+          "type": "string",
+          "required": false,
+          "doc": "remember 记住地点（默认，同名覆盖），forget 忘掉同名的地点与地盘，region 以目标为中心圈一块玩家地盘（里面的方块不拆、箱子不取用）",
+          "default": "remember",
+          "choices": [
+            "remember",
+            "forget",
+            "region"
+          ]
+        },
+        {
+          "name": "radius",
+          "type": "integer",
+          "required": false,
+          "doc": "只用于 region：地盘半径，单位格，默认 8",
+          "min": 1,
+          "max": 64
+        }
+      ],
+      "targets": [
+        "here",
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "memory_only",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/remember.md"
+    },
+    {
+      "ability": "maicraft:sequence",
+      "summary": "按顺序做几件事：steps 里每一步是一个完整的目标",
+      "parameters": [],
+      "targets": [],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/sequence.md"
+    },
+    {
+      "ability": "maicraft:quest",
+      "summary": "对 FTB 任务书里的一个条目做一次动作：交物品、勾选、领奖",
+      "parameters": [
+        {
+          "name": "operation",
+          "type": "string",
+          "required": true,
+          "doc": "submit 交物品 / confirm 手动勾选 / claim 领奖",
+          "choices": [
+            "submit",
+            "confirm",
+            "claim"
+          ]
+        },
+        {
+          "name": "quest",
+          "type": "string",
+          "required": true,
+          "doc": "任务书里任务的编号（16 位十六进制，lookup 的任务书资料里给的）"
+        },
+        {
+          "name": "requirement",
+          "type": "string",
+          "required": false,
+          "doc": "任务里那条要求的编号；submit、confirm 必填"
+        },
+        {
+          "name": "reward",
+          "type": "string",
+          "required": false,
+          "doc": "本任务的根奖励编号；claim 必填"
+        },
+        {
+          "name": "choice",
+          "type": "string",
+          "required": false,
+          "doc": "领选择奖励时选哪个候选（Mod 提问时列出的候选编号）"
+        }
+      ],
+      "targets": [],
+      "mode": "controls_player",
+      "required_mods": [
+        "ftbquests"
+      ],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/quest.md"
+    },
+    {
+      "ability": "maicraft:vehicle_assemble",
+      "summary": "把建好胶好的方块组装成会动的结构（物理组装器拉一次杆），或拆回方块",
+      "parameters": [
+        {
+          "name": "operation",
+          "type": "string",
+          "required": false,
+          "doc": "assemble 组装（默认）/ disassemble 拆回方块",
+          "default": "assemble",
+          "choices": [
+            "assemble",
+            "disassemble"
+          ]
+        }
+      ],
+      "targets": [
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [
+        "create"
+      ],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/vehicle_assemble.md"
+    },
+    {
+      "ability": "maicraft:vehicle_drive",
+      "summary": "坐上驾驶座开载具：drive 开到一个地方停稳，test 逐条按住控制件看它怎么动再松开",
+      "parameters": [
+        {
+          "name": "vehicle",
+          "type": "string",
+          "required": false,
+          "doc": "开哪辆：物理结构的观察编号 s#（observe 的 mod_things.structure）；只用遥控器试按时可以不给"
+        },
+        {
+          "name": "operation",
+          "type": "string",
+          "required": false,
+          "doc": "drive 开到 target（默认）/ test 逐条按 inputs 看反应",
+          "default": "drive",
+          "choices": [
+            "drive",
+            "test"
+          ]
+        },
+        {
+          "name": "inputs",
+          "type": "array",
+          "required": false,
+          "doc": "test 逐条按的输入：[{\"control\": \"打字机:W\", \"ticks\": 20}]；control 写控制件和键，ticks 按住几刻（1～200），最多 16 条"
+        },
+        {
+          "name": "cruise_altitude",
+          "type": "integer",
+          "required": false,
+          "doc": "只对飞艇：巡航高度（船底的世界 y）；不给按当前与目的地高的那个 + 32",
+          "min": -64,
+          "max": 320
+        }
+      ],
+      "targets": [
+        "direction",
+        "landmark",
+        "position"
+      ],
+      "mode": "controls_player",
+      "required_mods": [
+        "create"
+      ],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/vehicle_drive.md"
+    }
+  ]
+}

@@ -1,0 +1,109 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.behavior.interaction;
+
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.phys.AABB;
+
+import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
+
+/**
+ * 玩家行为层的交互动作入口：任务按这一刻要做的交互取一个动作，
+ * 动作内部自己完成瞄准、核对命中、提交与逐刻确认。确认条件由调用方
+ * （能力的手势）传入，这里不认识任何具体手势；站位与靠近由调用方负责，
+ * 动作发现命中不了目标时用"到不了"的问题表达，由调用方换站位后重试。
+ */
+public final class Interactions {
+
+    private final UseKeyProjection heldProjection;
+
+    /**
+     * @param heldProjection 按住使用键的投影；持续使用（进食、拉弓）靠它逐刻续期。
+     *                       启动接线完成前可以传 null，此时持续使用仍能做，只是原版
+     *       可能在确认期间看到松键，吃不完一块面包。
+     */
+    /** 按住使用键的投影：拉弓、举盾这类自己逐刻续按的动作也用这一份。 */
+    public UseKeyProjection heldProjection() {
+        return heldProjection;
+    }
+
+    public Interactions(UseKeyProjection heldProjection) {
+        this.heldProjection = heldProjection;
+    }
+
+    /** 右键一格方块（放置、开门、点火这类），生效与否按给定的确认条件核对。 */
+    public AimAndInteract useBlock(BlockPos target, InteractionConfirmation confirmation) {
+        return new AimAndInteract(new InteractionTarget.BlockTarget(target), confirmation,
+                FirstPersonScene::of);
+    }
+
+    /**
+     * 右键方块上的一个部件（例如挂在线缆上的终端面板）：瞄准点只在部件框里找，准星必须落在框里才提交；
+     * 同一格上的线缆或别的面板挡在前面时按"点到了别的"重新找瞄准点，找不到就是站位问题。
+     *
+     * @param part 部件框，世界坐标；读写端按模组的模型给出
+     */
+    public AimAndInteract useBlockPart(BlockPos target, AABB part, InteractionConfirmation confirmation) {
+        return new AimAndInteract(new InteractionTarget.BlockTarget(target, part), confirmation,
+                FirstPersonScene::of);
+    }
+
+    /**
+     * 右键一格，只等几刻看有没有反应：连着点抓传送带上跑着的东西时用，没点中马上点下一下，不等满一秒。
+     */
+    public AimAndInteract useBlockQuickly(BlockPos target, InteractionConfirmation confirmation) {
+        return new AimAndInteract(new InteractionTarget.BlockTarget(target), AimAndInteract.Gesture.USE,
+                InteractionHand.MAIN_HAND, confirmation, FirstPersonScene::of, AimAndInteract.QUICK_CONFIRM_TICKS);
+    }
+
+    /**
+     * 点方块外形上朝 face 的那一面（放方块）：瞄准点在外形每个框朝这个方向的面上找，准星点中这一格、面朝对了才提交。
+     */
+    public AimAndInteract useBlockFace(BlockPos target, Direction face, InteractionConfirmation confirmation) {
+        return new AimAndInteract(InteractionTarget.BlockTarget.facing(target, face), confirmation,
+                FirstPersonScene::of);
+    }
+
+    /**
+     * 朝一格使用手里的物品：物品按自己的射线规则作用到那一格（水桶把水倒进去），生效与否按给定的确认条件核对。
+     *
+     * @param affected 物品要作用到的那一格，例如水该落进的那一格
+     */
+    public AimAndInteract useHeldItemToward(BlockPos affected, InteractionHand hand,
+                                            InteractionConfirmation confirmation) {
+        return new AimAndInteract(new InteractionTarget.BlockTarget(affected), AimAndInteract.Gesture.USE_HELD_ITEM,
+                hand, confirmation, FirstPersonScene::of);
+    }
+
+    /** 右键一只实体（剪毛、挤奶、骑乘这类），准星必须真的落在它身上。 */
+    public AimAndInteract useEntity(Entity target, InteractionConfirmation confirmation) {
+        return new AimAndInteract(new InteractionTarget.EntityTarget(target), confirmation,
+                FirstPersonScene::of);
+    }
+
+    /**
+     * 按住使用手中物品：吃东西、拉弓这类持续手势。
+     *
+     * @param done          什么时候算做成了（由调用方按手势给确认条件）
+     * @param maxHoldTicks  最多按住多少刻；零或负数表示等物品自行结束
+     */
+    public SustainedUse useHeldItem(InteractionHand hand, InteractionConfirmation done, int maxHoldTicks) {
+        return new SustainedUse(hand, done, heldProjection, maxHoldTicks, FirstPersonScene::of);
+    }
+
+    /**
+     * 对着一格方块按住使用：刷子刷可疑的沙子、沙砾这类对着方块一直按住的手势。
+     * 动作自己完成瞄准与开始确认；按住期间保持对准，被原版松开就重新瞄准再点，
+     * 做成与否按给定的确认条件核对（刷子：那一格变回普通方块）。
+     *
+     * @param cell         要对着按住的那一格
+     * @param done         什么时候算做成
+     * @param maxHoldTicks 最多按住多少刻（含重新接上的按住）；到期按没能做成如实收场
+     */
+    public SustainedUse useBlockSustained(BlockPos cell, InteractionConfirmation done, int maxHoldTicks) {
+        return new SustainedUse(InteractionHand.MAIN_HAND, done, heldProjection, maxHoldTicks,
+                FirstPersonScene::of, cell);
+    }
+}

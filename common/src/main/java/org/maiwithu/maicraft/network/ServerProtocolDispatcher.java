@@ -80,7 +80,7 @@ public final class ServerProtocolDispatcher {
         ProtocolSession session = new ProtocolSession(request, peer);
         JsonObject welcome = session.welcome(peer.tick());
         ProtocolJson.encode(welcome);
-        // 新作用域会撤销已有修改权限，同时保留回执的查询能力。
+        // 新作用域会撤销已有修改权限，同时保留请求记录的查询能力。
         invalidateWorld();
         sessions.put(session.id, session);
         return welcome;

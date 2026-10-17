@@ -1,0 +1,99 @@
+# 命名检查的词表，由 SourceRulesTest 读取。完整的命名原则与术语表见 docs/design/09-命名与术语.md。
+#
+# word <英文词> <原因与改法>
+#   自己声明的类型（类、接口、枚举、record）名字里不许出现这个词（按驼峰拆词后整词比较）。
+# term <中文说法> <原因与改法>
+#   Java 源码（含注释与字符串）和能力说明资源里不许再出现这个说法。
+# keep <中文说法> <原因>
+#   含着旧说法、本身却是正式名字的说法（模组方块的官方中文名）：查旧说法前先从那一行里去掉它。
+#
+# 新增一行前，先在术语表里写清"不看上下文会被理解成什么"和改用的说法。
+
+word Manager 空泛，看名字不知道它干什么；按它实际做的事起名
+word Helper 空泛；按它实际做的事起名，或者把方法放回真正拥有这件事的类
+word Util 空泛；按它实际做的事起名，或者把方法放回真正拥有这件事的类
+word Utils 空泛；按它实际做的事起名，或者把方法放回真正拥有这件事的类
+word Misc 空泛；拆开，各自放回所属的类
+word Common 空泛，而且和 common 模块同名；按它实际做的事起名
+word Info 空泛；说清是什么信息，例如 AbilitySpec
+word Data 空泛；说清是什么数据，例如 TaskInput、ResultDetails
+word Executor Java 程序员会以为是线程池；任务叫 Task，新任务继承 PhasedTask
+word Port 会被读成网络端口；按用途起名，例如 PlayerInput
+word Receipt 说清是哪一种：任务的结果用 TaskResult，游戏对交互的确认用 Confirmation
+word Lease 说清占用的是什么，例如本刻的交互机会
+word Handle 说清它是什么，例如一次任务运行是 TaskRun
+word Mandate 已改名：任务的许可用 Permissions
+word Blocker 已改名：任务卡在哪用 Problem
+word Outcome 已改名：任务结果用 TaskResult
+word Intent 已改名：LLM 想要的结果用 Goal，能力对一步的决定用 StepDecision
+word Upkeep 已改名：生存需求用 SurvivalNeed
+word Reflex 会和 Java 反射混淆；生存需求用 SurvivalNeed
+word Body 已改名：Mod 控制的本地玩家叫角色，代码里用 Player
+word Actor 已改名：控制本地玩家的每刻入口按实际职责起名，例如 PlayerControlBoundary
+word Contract 已改名：写给 LLM 的用法用 AbilityDoc，能力的静态信息用 AbilitySpec
+word Descriptor 已改名：能力的静态信息用 AbilitySpec
+word Gateway 会被读成 API 网关；MCP 入口在 mcp 包
+word Integration 会被读成集成测试；联动模组在 compat 包
+word Platform 在多加载器模板里专指加载器抽象；和游戏打交道的代码在 game 包
+word Bridge 会被读成反射桥或网桥；直接调用模组类的那一层叫模组读写端，放在 NeoForge 模块的 neoforge.compat.<模组>；搭方块走过空当的游戏动作起名用 Bridging（搭桥）
+word Reflection 联动不用反射：要调用的类和方法以事实清单为准，在模组读写端直接写
+
+term 回执 说清是哪一种：任务的"结果"，或游戏对交互的"确认"
+term 卡点 改说"问题"（Problem）
+term 差事 改说"临时任务"（生存需求创建的任务）
+term 工位 改说"站位"
+term 仲裁 改说"打断规则"
+term 句柄 改说"观察编号"
+term 作证 改说"提供确认信息"
+term 旁证 改说"服务端确认"
+term 底座 改说"基础代码"
+term 护栏 改说"架构检查"
+term 契约 改说"能力说明"
+term 精细 打断程度改说"停下不安全"（UNSAFE_TO_STOP）
+term 精致 打断程度改说"停下不安全"（UNSAFE_TO_STOP）
+term 身体维护 改说"生存需求"
+term 身体仲裁 改说"打断规则"
+term 身体需求 改说"生存需求"
+term 接管身体 改说"控制角色"
+term 伙伴 改说"角色"（Mod 控制的本地玩家）
+term 讲道理 默认许可改说"像正常玩家一样"
+term 执行器 改说"任务"；所有任务继承分阶段任务 PhasedTask
+term 心跳 改说"每刻推进"
+term 装配 改说"启动时创建、登记"
+term 对账 改说"确认"
+term 授权 任务的许可改说"许可"；MCP 连接的身份校验写"鉴权"
+term task_id 对外编号叫 goal_id；内核的任务 Task 不对外
+term 清册 改说"旧逻辑清单"
+term 换芯 改说"重写"
+word Navigator 已改名：对外的寻路入口叫 WalkTo（走到），一次运行叫 WalkRun（走到运行）
+term 导航器 已改名：对外的寻路入口叫走到（WalkTo），一次运行叫走到运行（WalkRun）
+term 扇区 已改名：探索候选的范围约束叫扇形（ExplorationSector）；指罗盘八向的一段时说"方位"或"八向"
+term 前沿腿 已改名：探索里一段一段的走路叫航点与走行段
+term 航段 已改名：探索里一段一段的走路叫走行段
+term 换锚 已改名：探索走不动时横移重来叫换出发点
+
+# 成员名里词的本义正好就是要说的，逐个放行（MemberNamesTest 读）
+allow mcp.transport.McpConfig.port MCP 服务真的在监听这个网络端口
+allow mcp.transport.EmbeddedMcpService.port MCP 服务真的在监听这个网络端口
+allow debug.StatusSnapshot$Connection.mcpPort MCP 服务的网络端口
+allow mcp.knowledge.web.WebFetch$Page.body HTTP 响应体
+allow mcp.transport.EmbeddedMcpService.readBody 读 HTTP 请求体
+allow mcp.transport.EmbeddedMcpService.executor 真的是处理 HTTP 请求的线程池
+allow behavior.navigation.baritone.PathPlannerPool$Generation.executor 真的是算路的线程池
+allow mcp.transport.EmbeddedMcpService.handle 动词：处理一个 HTTP 请求
+allow mcp.transport.EmbeddedMcpService.handlePost 动词：处理 POST 请求
+allow mcp.transport.EmbeddedMcpService.handleDelete 动词：处理 DELETE 请求
+allow mcp.transport.EmbeddedMcpService.handleInitialize 动词：处理 MCP 的 initialize 请求
+allow behavior.navigation.baritone.BaritoneWalkRun.handleStall 动词：处理卡住
+
+term 打字机 比喻叫法；这个行为说「逐字打字」，动作类型是 TypeChatDraft
+keep 无线红石打字机 Simulated 的方块 linked_typewriter 的官方中文名，载具的控制件，不是聊天打字的比喻
+keep 打字机: 驾驶载具时输入的写法（打字机:W），指无线红石打字机的一个键
+keep 打字机： 同上，全角冒号
+
+# 钓鱼与附魔规格定下的说法
+term 附魔预算 不再有预算参数（费用由档位决定）：第 n 档固定扣 n 级 n 个青金石，选档用 tier
+term 就地造台 附近没有附魔台就如实说（NOT_FOUND 写明找过的范围），不会就地造一个；造台是 build 加 obtain 的组合活
+# 照明：v0 的两个入口收成能力 light（operation=area / enable / disable / status），旧工具名不再出现
+term light_area 两个 v0 入口收成了能力 light：区域补光是 operation=area，随行补光是 enable / disable / status
+term auto_light 两个 v0 入口收成了能力 light：区域补光是 operation=area，随行补光是 enable / disable / status

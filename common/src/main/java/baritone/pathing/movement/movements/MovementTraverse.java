@@ -44,6 +44,7 @@ import net.minecraft.world.phys.Vec3;
 
 import java.util.Optional;
 import java.util.Set;
+import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 
 public class MovementTraverse extends Movement {
 
@@ -242,7 +243,7 @@ public class MovementTraverse extends Movement {
             }
             // The abstract water-surface cell is still the selected route. Keep horizontal control
             // while the real first-person body briefly occupies the efficient layer below it;
-            // EmbeddedBaritoneRuntime independently supplies the proven vertical intent.
+            // BaritoneInternals independently supplies the proven vertical intent.
             MovementHelper.moveTowards(ctx, state, positionsToBreak[0]);
             return state.setInput(Input.MOVE_FORWARD, executor.submergedWaterMovingForward())
                     .setInput(Input.SPRINT, executor.submergedWaterSprinting())

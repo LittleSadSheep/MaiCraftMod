@@ -24,9 +24,9 @@ import baritone.pathing.precompute.PrecomputedData;
 import baritone.utils.BlockStateInterface;
 import baritone.utils.ToolSet;
 import baritone.utils.pathing.BetterWorldBorder;
-import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritonePolicy;
-import org.maiwithu.maicraft.core.pathing.settings.ClearanceWhitelist;
-import org.maiwithu.maicraft.core.pathing.baritone.FallDamageBudget;
+
+
+
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
@@ -41,14 +41,33 @@ import net.minecraft.world.level.block.state.BlockState;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Predicate;
 
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import it.unimi.dsi.fastutil.longs.LongSets;
 import net.minecraft.world.level.block.Blocks;
-import org.maiwithu.maicraft.core.pathing.calc.NavGoal;
+import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
 
 import static baritone.api.pathing.movement.ActionCosts.COST_INF;
+import org.maiwithu.maicraft.game.player.FallDamage;
+import org.maiwithu.maicraft.behavior.landing.WaterLandingWindow;
+import org.maiwithu.maicraft.behavior.landing.LandingPlan;
+import org.maiwithu.maicraft.behavior.landing.LandingOptions;
+import org.maiwithu.maicraft.behavior.navigation.spi.FlyUpGear;
+import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
+import org.maiwithu.maicraft.behavior.landing.LandingGeometry;
+import org.maiwithu.maicraft.behavior.landing.BoatOptions;
+import org.maiwithu.maicraft.behavior.landing.BoatPlan;
+import org.maiwithu.maicraft.behavior.landing.LandingAid;
+import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationProtection;
+import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationObstacles;
+import org.maiwithu.maicraft.behavior.navigation.baritone.WalkDropPolicy;
+import org.maiwithu.maicraft.behavior.navigation.baritone.MaiCraftGoals;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import org.maiwithu.maicraft.behavior.navigation.baritone.ClearanceWhitelist;
+import org.maiwithu.maicraft.behavior.navigation.HazardEscapePolicy;
 
 /**
  * @author Brady
@@ -63,10 +82,6 @@ public class CalculationContext {
     public final WorldData worldData;
     public final BlockStateInterface bsi;
     public final ToolSet toolSet;
-    public final org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan.InventorySnapshot landingInventory;
-    public final org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingSnapshot landingBoats;
-    private final org.maiwithu.maicraft.core.pathing.baritone.landing.WaterLandingWindow waterLandingWindow;
-    private final boolean automaticLandingSupply;
     public final boolean hasThrowaway;
     public final boolean canSprint;
     protected final double placeBlockCost; // protected because you should call the function instead
@@ -83,7 +98,9 @@ public class CalculationContext {
     public final boolean allowDiagonalAscend;
     public final boolean allowDownward;
     public int minFallHeight;
-    public final FallDamageBudget fallDamageBudget;
+    public final FallDamage fallDamageBudget;
+    /** 开算这一刻的最大生命：往下跳摔完要剩它的一半才照跳。 */
+    private final float maxHealth;
     private final BlockPos fallOrigin;
     private final double fallOriginY;
     public final double waterWalkSpeed;
@@ -94,7 +111,19 @@ public class CalculationContext {
     public final boolean allowWalkOnMagmaBlocks;
     public final BetterWorldBorder worldBorder;
     /** Frozen task safety policy; safe for the calculation worker. */
-    public final EmbeddedBaritonePolicy.Snapshot maicraftPolicy;
+    public final NavigationProtection.Snapshot maicraftPolicy;
+    /** 这次算路里查过的树干（键是树干顶）：同一棵树的原木挖不挖只数一次叶子。 */
+    private final Map<BlockPos, Boolean> trunksChecked = new ConcurrentHashMap<>();
+    /** 这次算路能用的落地办法：出发前取一份，搜索全程一致；会摔伤的一跳只有落点接得住人才收。 */
+    public final LandingOptions landingOptions;
+    /** 这一趟一次最多能飞上几格（穿着、气够的喷气背包）；不能飞为 0。算路开始时读一次，整趟按它算。 */
+    public final int flyUpMaxBlocks;
+    /** 往上飞一格大约几刻；不能飞时不用。 */
+    public final double flyUpTicksPerBlock;
+    /** 用船接住的条件：身上带着哪种船、附近停着哪些空船、够得着的距离；不许用落地办法时为 null。 */
+    private final BoatOptions boatOptions;
+    /** 有计划地往下跳时，留不留得出倒水的那一刻。 */
+    private final WaterLandingWindow waterLandingWindow;
 
     /**
      * 允许脚位进入的下界传送门内格键：只收导航目标本身要求站进的格子（exact 站位、走近类目标的中心格）。
@@ -117,14 +146,14 @@ public class CalculationContext {
      * 起点在岩浆致死邻域内时的脱困放行策略；无危险邻域时为 INACTIVE，
      * 常规危险回避原样生效。检测在上下文构造时冻结一次，搜索全程一致。
      */
-    public final org.maiwithu.maicraft.core.pathing.HazardEscapePolicy hazardEscape;
+    public final HazardEscapePolicy hazardEscape;
 
     public CalculationContext(IBaritone baritone) {
         this(baritone, false);
     }
 
     public CalculationContext(IBaritone baritone, boolean forUseOnAnotherThread) {
-        this(baritone, forUseOnAnotherThread, false, EmbeddedBaritonePolicy.snapshot());
+        this(baritone, forUseOnAnotherThread, false, NavigationProtection.snapshot());
     }
 
     /**
@@ -139,7 +168,7 @@ public class CalculationContext {
      */
     public static CalculationContext forTerrainProbe(
             IBaritone baritone,
-            EmbeddedBaritonePolicy.Snapshot frozenPolicy) {
+            NavigationProtection.Snapshot frozenPolicy) {
         return new CalculationContext(baritone, true, true,
                 Objects.requireNonNull(frozenPolicy, "frozenPolicy"));
     }
@@ -148,7 +177,7 @@ public class CalculationContext {
             IBaritone baritone,
             boolean forUseOnAnotherThread,
             boolean forceTerrainMutation,
-            EmbeddedBaritonePolicy.Snapshot frozenPolicy) {
+            NavigationProtection.Snapshot frozenPolicy) {
         this.precomputedData = new PrecomputedData();
         this.safeForThreadedUse = forUseOnAnotherThread;
         this.baritone = baritone;
@@ -156,29 +185,22 @@ public class CalculationContext {
         this.world = baritone.getPlayerContext().world();
         this.worldData = (WorldData) baritone.getPlayerContext().worldData();
         this.bsi = new BlockStateInterface(baritone.getPlayerContext(), forUseOnAnotherThread);
-        this.hazardEscape = org.maiwithu.maicraft.core.pathing.HazardEscapePolicy.detect(
+        this.hazardEscape = HazardEscapePolicy.detect(
                 bsi.access, baritone.getPlayerContext().playerFeet().immutable(),
                 pos -> bsi.worldContainsLoadedChunk(pos.getX(), pos.getZ()));
         this.collisionGeometry = new CollisionGeometry(bsi.access, forUseOnAnotherThread,
                 player.position(), baritone.getPlayerContext().playerFeet(),
-                org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime::physicalObstacles,
+                // 会动的结构（联动登记的障碍来源）当障碍：后台算路冻结开算这一刻的那份，主线程每刻按当刻的问。
+                () -> NavigationObstacles.capture(world, player).all(),
                 player.getBbWidth(), player.getBbHeight());
-        this.fallDamageBudget = FallDamageBudget.capture(player);
+        this.fallDamageBudget = FallDamage.capture(player);
+        this.maxHealth = player.getMaxHealth();
         this.fallOrigin = baritone.getPlayerContext().playerFeet().immutable();
         this.fallOriginY = player.getY();
-        this.waterLandingWindow = new org.maiwithu.maicraft.core.pathing.baritone.landing.WaterLandingWindow(
-                player.getAttributeValue(Attributes.GRAVITY), player.blockInteractionRange(),
-                Math.max(1.62, player.getEyeHeight()), Math.max(0, -player.getDeltaMovement().y));
         this.toolSet = new ToolSet(player);
         this.hasThrowaway = forceTerrainMutation
                 || (Baritone.settings().allowPlace.value
                 && ((Baritone) baritone).getInventoryBehavior().hasGenericThrowaway());
-        this.landingInventory = org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan.InventorySnapshot.capture(
-                player, org.maiwithu.maicraft.core.pathing.moves.TerrainPermit.LANDING_ONLY,
-                world.dimensionType().ultraWarm());
-        this.automaticLandingSupply = org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPolicy.automaticSupplyAllowed();
-        this.landingBoats = landingInventory.othersAllowed()
-                ? org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingAssist.capture(player) : null;
         this.canSprint = Baritone.settings().allowSprint.value && player.getFoodData().getFoodLevel() > 6;
         this.placeBlockCost = Baritone.settings().blockPlacementPenalty.value;
         this.allowBreak = forceTerrainMutation || Baritone.settings().allowBreak.value;
@@ -250,8 +272,17 @@ public class CalculationContext {
         // then you get a wildly inconsistent path that isn't optimal for either scenario.
         this.worldBorder = new BetterWorldBorder(world.getWorldBorder());
         this.maicraftPolicy = Objects.requireNonNull(frozenPolicy, "frozenPolicy");
+        this.landingOptions = LandingOptions.capture(player,
+                forceTerrainMutation || Baritone.settings().allowWaterBucketFall.value);
+        this.boatOptions = landingOptions.allowed() ? BoatOptions.capture(player) : null;
+        // 身上能直接飞上高处的装备：有就让"飞上去"和垫方块往上搭比开销，没有这一步就不存在。
+        var flyUp = BaritoneInternals.flyUpReach();
+        this.flyUpMaxBlocks = flyUp.map(FlyUpGear.Reach::maxBlocks).orElse(0);
+        this.flyUpTicksPerBlock = flyUp.map(FlyUpGear.Reach::ticksPerBlock).orElse(0.0);
+        this.waterLandingWindow = new WaterLandingWindow(fallDamageBudget.gravity(), player.blockInteractionRange(),
+                player.getEyeHeight(), Math.max(0, -player.getDeltaMovement().y));
         this.portalEntryCells = portalEntryCells(
-                org.maiwithu.maicraft.core.pathing.baritone.MaiCraftGoals.unwrap(
+                MaiCraftGoals.unwrap(
                         baritone.getPathingBehavior().getGoal()));
     }
 
@@ -259,62 +290,28 @@ public class CalculationContext {
         return baritone;
     }
 
-    public List<org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan> landingPlans(BlockPos feet) {
-        return landingPlans(feet, false);
-    }
-
-    public List<org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan> existingLandingPlans(BlockPos feet) {
-        return landingPlans(feet, true);
-    }
-
-    private List<org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan> landingPlans(BlockPos feet, boolean existingOnly) {
-        if (!bsi.worldContainsLoadedChunk(feet.getX(), feet.getZ())) return List.of();
-        // 沿下落柱只寻找已有缓冲物时，先排除新放方案；不为尚未取得的水桶、船等重复检查整套落地碰撞。
-        java.util.function.Predicate<BlockPos> protectedCell = pos -> isPossiblyProtected(pos.getX(), pos.getY(), pos.getZ());
-        var candidates = existingOnly ? landingInventory.plans(bsi.access, feet, protectedCell)
-                : landingInventory.automaticCandidates(bsi.access, feet, protectedCell, automaticLandingSupply);
-        return candidates.stream().filter(plan -> !existingOnly || plan.existing())
-                .filter(plan -> org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistGeometry.safe(
-                        bsi.access, pos -> bsi.worldContainsLoadedChunk(pos.getX(), pos.getZ()), plan,
-                        landingInventory.width(), landingInventory.height(), maicraftPolicy.forbiddenBodyCells())).toList();
-    }
-
-    public List<org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan> landingPlans(BlockPos feet, int drop) {
-        return landingPlansForDrop(landingPlans(feet), feet, drop);
-    }
-
-    public List<org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan> existingLandingPlans(BlockPos feet, int drop) {
-        return landingPlansForDrop(existingLandingPlans(feet), feet, drop);
-    }
-
-    private List<org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan> landingPlansForDrop(
-            List<org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan> plans, BlockPos feet, int drop) {
-        // 即使复用已有落点的查询入口，每次仍按当前跌落高度核对伤害与操作时间窗，不能把干草当成绝对免伤。
-        return plans.stream().filter(plan -> plan.survives(fallDamageBudget, feet.getY() + drop, true))
-                .filter(plan -> plan.kind()!=org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan.Kind.BOAT
-                    || landingBoats!=null && landingBoats.airborneWindow(drop,fallDamageBudget.gravity(),waterLandingWindow.initialDownwardSpeed()))
-                .filter(plan -> plan.existing()
-                || plan.kind() != org.maiwithu.maicraft.core.pathing.baritone.landing.LandingAssistPlan.Kind.WATER
-                || waterLandingWindow.permits(feet.getY() + drop - plan.placementHeight(bsi.access))).toList();
-    }
-
     public boolean canLandWithoutDamage(int x, int y, int z, int effectiveStartHeight,
                                        int destX, int supportY, int destZ, BlockState support) {
         return fallDamageBudget.damage(fallDistance(x, y, z, effectiveStartHeight, destX, supportY, destZ),
-                FallDamageBudget.Landing.of(support), initialFall(x, y, z, effectiveStartHeight)) == 0;
+                FallDamage.Landing.of(support), initialFall(x, y, z, effectiveStartHeight)) == 0;
     }
 
-    public org.maiwithu.maicraft.core.pathing.baritone.landing.BoatLandingSnapshot.Plan landingBoatPlan(BlockPos source, BlockPos feet) {
-        if (landingBoats == null || isPossiblyProtected(feet.getX(), feet.getY(), feet.getZ())) return null;
-        return landingBoats.plan(bsi.access, source, feet,
-                pos -> bsi.worldContainsLoadedChunk(pos.getX(), pos.getZ()));
+    /**
+     * 会摔伤的一跳折成的代价：摔完还剩一半以上的血就照跳，扣的血按每点约四格路加进去；剩不到一半为 COST_INF，
+     * 交给落地办法或绕路。按开算这一刻的身体算，出发前还会按当刻再算一次。
+     */
+    public double fallInjuryCost(int x, int y, int z, int effectiveStartHeight,
+                                 int destX, int supportY, int destZ, BlockState support) {
+        return WalkDropPolicy.injuryCost(fallDamageBudget, maxHealth,
+                fallDistance(x, y, z, effectiveStartHeight, destX, supportY, destZ),
+                FallDamage.Landing.of(support), initialFall(x, y, z, effectiveStartHeight));
     }
 
     /** Survival estimate; route admission separately requires protecting any predicted injury. */
     public boolean canSurviveFall(int x, int y, int z, int effectiveStartHeight,
                                  int destX, int supportY, int destZ, BlockState support) {
         return fallDamageBudget.survives(fallDistance(x, y, z, effectiveStartHeight, destX, supportY, destZ),
-                FallDamageBudget.Landing.of(support), initialFall(x, y, z, effectiveStartHeight));
+                FallDamage.Landing.of(support), initialFall(x, y, z, effectiveStartHeight));
     }
 
     private double fallDistance(int x, int y, int z, int effectiveStartHeight, int destX, int supportY, int destZ) {
@@ -363,7 +360,7 @@ public class CalculationContext {
         if (!hasThrowaway) { // only true if allowPlace is true, see constructor
             return COST_INF;
         }
-        if (isPossiblyProtected(x, y, z)) {
+        if (isPossiblyProtected(x, y, z, current)) {
             return COST_INF;
         }
         if (!worldBorder.canPlaceAt(x, z)) {
@@ -380,14 +377,51 @@ public class CalculationContext {
 
     public double breakCostMultiplierAt(int x, int y, int z, BlockState current) {
         // 名单外障碍不作为可挖路线候选，让搜索直接选择绕行；地形许可和例外名单不能越过这道限制。
-        if (!ClearanceWhitelist.allows(current)) return COST_INF;
+        // 原木要长在天然树上、树叶要自然长的才算地形：房子的原木地板、屋顶不挖，从门走。
+        if (!ClearanceWhitelist.allowsAt(current, new BlockPos(x, y, z), bsi.access,
+                pos -> bsi.worldContainsLoadedChunk(pos.getX(), pos.getZ()), trunksChecked)) {
+            return COST_INF;
+        }
         if (!allowBreak && !allowBreakAnyway.contains(current.getBlock())) {
             return COST_INF;
         }
-        if (isPossiblyProtected(x, y, z)) {
+        if (isPossiblyProtected(x, y, z, current)) {
             return COST_INF;
         }
         return 1;
+    }
+
+    /**
+     * 落在 feet、要掉 drop 格时能用的落地办法：放好后身体放得下、干草减完伤还活着、
+     * 新放的水留得出倒水的那一刻。没有就是这一跳会摔伤又没东西接，不走。
+     */
+    public List<LandingPlan> landingPlans(BlockPos feet, int drop) {
+        if (!landingOptions.allowed()) return List.of();
+        Predicate<BlockPos> loaded = pos -> bsi.worldContainsLoadedChunk(pos.getX(), pos.getZ());
+        List<LandingPlan> usable = new ArrayList<>();
+        for (LandingPlan plan : landingOptions.plans(bsi.access, feet,
+                pos -> isPossiblyProtected(pos.getX(), pos.getY(), pos.getZ()))) {
+            if (!LandingGeometry.safe(bsi.access, loaded, plan, landingOptions.width(), landingOptions.height(),
+                    maicraftPolicy.noEntryCells())) continue;
+            if (!plan.survives(fallDamageBudget, feet.getY() + drop, true)) continue;
+            if (!plan.existing() && plan.aid() == LandingAid.WATER
+                    && !waterLandingWindow.permits(feet.getY() + drop - plan.placementHeight(bsi.access))) continue;
+            usable.add(plan);
+        }
+        return usable;
+    }
+
+    /**
+     * 放东西都接不住时用船：站在出发点就够得着落点的，放好船直接坐进去；否则边掉边放、边掉边坐，
+     * 要留得出放船、上船、等确认的那几刻。都不行为 null。
+     */
+    public BoatPlan landingBoat(BlockPos source, BlockPos feet, int drop) {
+        if (boatOptions == null || isPossiblyProtected(feet.getX(), feet.getY(), feet.getZ())) return null;
+        Predicate<BlockPos> loaded = pos -> bsi.worldContainsLoadedChunk(pos.getX(), pos.getZ());
+        BoatPlan fromEdge = boatOptions.fromEdge(bsi.access, source, feet, loaded);
+        if (fromEdge != null) return fromEdge;
+        BoatPlan midair = boatOptions.midair(bsi.access, feet, loaded);
+        return midair != null && boatOptions.airborneWindow(drop, fallDamageBudget.gravity(), 0) ? midair : null;
     }
 
     public double placeBucketCost() {
@@ -395,18 +429,26 @@ public class CalculationContext {
     }
 
     public boolean isPossiblyProtected(int x, int y, int z) {
-        return maicraftPolicy.protects(x, y, z);
+        return isPossiblyProtected(x, y, z, get(x, y, z));
+    }
+
+    /**
+     * 这一趟的保护格之外，还要过这个世界的保护判断：别人放的方块、记住的区域、归属拿不准的格子、像玩家放的门都不挖不垫。
+     * 方块用搜索自己读到的那份（current）：算路在后台线程上，世界的保护判断不能回头去读当刻现场。
+     */
+    public boolean isPossiblyProtected(int x, int y, int z, BlockState current) {
+        return maicraftPolicy.protects(x, y, z) || NavigationProtection.worldProtects(x, y, z, current);
     }
 
     /** A semantic parent may forbid occupying exact body cells without changing block costs. */
     public boolean isBodyCellForbidden(int x, int y, int z) {
-        return maicraftPolicy.forbidsBody(x, y, z);
+        return maicraftPolicy.forbidsEntry(x, y, z);
     }
 
     /** Height-only policies also need the movement-lattice check even without explicit body cells. */
     public boolean hasForbiddenBodyCells() {
         return maicraftPolicy.minimumFeetY() != Integer.MIN_VALUE
-                || !maicraftPolicy.forbiddenBodyCells().isEmpty();
+                || !maicraftPolicy.noEntryCells().isEmpty();
     }
 
     /**
@@ -415,9 +457,14 @@ public class CalculationContext {
      * 时才放行——受控跨维度流程把门格作为最终走近点、exact travel 直接进格，都走这条放行。
      */
     public boolean mayEnterPortalCell(BlockPos pos) {
-        return portalEntryCells.contains(pos.asLong())
-                || portalEntryCells.contains(pos.below().asLong())
-                || portalEntryCells.contains(pos.below().below().asLong());
+        return mayEnterPortalCell(portalEntryCells, pos);
+    }
+
+    /** {@link #mayEnterPortalCell(BlockPos)} 的纯判断核心：给一份放行名单回答一格能不能进，离线可测。 */
+    public static boolean mayEnterPortalCell(LongSet passCells, BlockPos pos) {
+        return passCells.contains(pos.asLong())
+                || passCells.contains(pos.below().asLong())
+                || passCells.contains(pos.below().below().asLong());
     }
 
     static LongSet portalEntryCells(NavGoal goal) {

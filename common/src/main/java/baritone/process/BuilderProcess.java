@@ -45,7 +45,7 @@ import baritone.utils.schematic.SelectionSchematic;
 import baritone.utils.schematic.SchematicSystem;
 import baritone.utils.schematic.litematica.LitematicaHelper;
 import baritone.utils.schematic.schematica.SchematicaHelper;
-import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
+
 import com.google.common.collect.ImmutableSet;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.core.BlockPos;
@@ -80,6 +80,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static baritone.api.pathing.movement.ActionCosts.COST_INF;
+import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 
 public final class BuilderProcess extends BaritoneProcessHelper implements IBuilderProcess {
 
@@ -567,7 +568,7 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
         if (toPlace.isPresent() && isSafeToCancel && ctx.player().onGround() && ticks <= 0) {
             Rotation rot = toPlace.get().rot;
             baritone.getLookBehavior().updateTarget(rot, true);
-            boolean selected = EmbeddedBaritoneRuntime.ensureHotbarSelected(
+            boolean selected = BaritoneInternals.ensureHotbarSelected(
                     ctx.player(), toPlace.get().hotbarSelection);
             baritone.getInputOverrideHandler().setInputForceState(Input.SNEAK, true);
             if (selected && ((ctx.isLookingAt(toPlace.get().placeAgainst) && ((BlockHitResult) ctx.objectMouseOver()).getDirection().equals(toPlace.get().side)) || ctx.playerRotations().isReallyCloseTo(rot))) {
@@ -1129,7 +1130,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
 
         @Override
         public double costOfPlacingAt(int x, int y, int z, BlockState current) {
-            if (isPossiblyProtected(x, y, z) || !worldBorder.canPlaceAt(x, z)) { // make calculation fail properly if we can't build
+            // 施工垫块也拿搜索读到的这格方块问保护：别人的、像玩家放的门不往上垫。
+            if (isPossiblyProtected(x, y, z, current) || !worldBorder.canPlaceAt(x, z)) { // make calculation fail properly if we can't build
                 return COST_INF;
             }
             BlockState sch = getSchematic(x, y, z, current);
@@ -1163,7 +1165,8 @@ public final class BuilderProcess extends BaritoneProcessHelper implements IBuil
 
         @Override
         public double breakCostMultiplierAt(int x, int y, int z, BlockState current) {
-            if ((!allowBreak && !allowBreakAnyway.contains(current.getBlock())) || isPossiblyProtected(x, y, z)) {
+            // 施工拆方块同样按搜索读到的这格方块问保护，后台算路线程上不回头读当刻现场。
+            if ((!allowBreak && !allowBreakAnyway.contains(current.getBlock())) || isPossiblyProtected(x, y, z, current)) {
                 return COST_INF;
             }
             BlockState sch = getSchematic(x, y, z, current);

@@ -1,0 +1,266 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.ability.sleep;
+
+import java.util.HashSet;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.function.Supplier;
+
+import java.util.List;
+
+import net.minecraft.core.BlockPos;
+
+import org.maiwithu.maicraft.behavior.acquire.CollectsBlocks;
+import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
+import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
+import org.maiwithu.maicraft.behavior.permission.Protection;
+import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
+import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
+import org.maiwithu.maicraft.behavior.survival.AutoSleep;
+import org.maiwithu.maicraft.behavior.survival.NightfallNeed;
+import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
+import org.maiwithu.maicraft.behavior.travel.DestinationResolver;
+import org.maiwithu.maicraft.behavior.interaction.Interactions;
+import org.maiwithu.maicraft.game.interaction.OverlayMessages;
+import org.maiwithu.maicraft.game.player.BackpackView;
+import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.world.BlockScanService;
+import org.maiwithu.maicraft.game.world.WorldTime;
+import org.maiwithu.maicraft.kernel.ability.AbilityDoc;
+import org.maiwithu.maicraft.kernel.ability.AbilityModule;
+import org.maiwithu.maicraft.kernel.ability.AbilitySpec;
+import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
+import org.maiwithu.maicraft.kernel.ability.Listing;
+import org.maiwithu.maicraft.kernel.goal.Goal;
+import org.maiwithu.maicraft.kernel.goal.StepContext;
+import org.maiwithu.maicraft.kernel.goal.StepDecision;
+import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.maiwithu.maicraft.kernel.goal.TargetKind;
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.kernel.param.ParamSpec;
+import org.maiwithu.maicraft.kernel.param.ParamSpecs;
+import org.maiwithu.maicraft.kernel.param.ParamType;
+import org.maiwithu.maicraft.kernel.result.Problem;
+import org.maiwithu.maicraft.kernel.result.TaskResult;
+import org.maiwithu.maicraft.kernel.task.Task;
+import org.maiwithu.maicraft.kernel.task.TaskFactories;
+import org.maiwithu.maicraft.kernel.task.TickContext;
+
+/**
+ * 睡觉能力：找一张能用的床躺下，躺下即完成，不保证睡到天亮。白天不干等：先把今晚的床备好
+ * （附近没有、身上没有，就走拿到物品引擎去弄一张），然后以"现在睡不了"结束；
+ * 夜里附近没床时放下自带的床或现做一张。下界与末地的床会爆炸，直接结束不尝试。
+ *
+ * <p>能力是薄的：选床、靠近、放床、拿床都组合玩家行为层已有的模型；这里的知识只有
+ * 睡觉特有的判断——备不备床、现在睡不睡得、床从哪来。夜间自动休息（生存需求）复用
+ * 同一套选床与躺下流程，从这里拿判断与任务。
+ */
+public final class SleepModule implements AbilityModule, NightfallNeed.NightRestMoves {
+
+    private final Supplier<PlayerContext> context;
+    private final LiveBedFinder beds;
+    private final PlacesBed placer;
+    private final ItemNeeds obtain;
+    private final BringsPlayerClose approaches;
+    private final CollectsBlocks collects;
+    private final ReadsRememberedPlaces rememberedPlaces;
+    private final DestinationResolver destinations;
+    /** 动作栏的读端：原版拒绝入睡时把为什么写在这里，躺下的确认靠它认出这一下没生效。 */
+    private final Supplier<OverlayMessages.Shown> actionBar;
+    private final Interactions interactions;
+    /** 夜里自动去睡的开关：operation=auto_off / auto_on 改它，夜晚生存需求读它。 */
+    private final AutoSleep autoSleep;
+    /** 可睡窗口的读缝：生产实现读本地玩家的世界。 */
+    private final SleepTask.ReadsSleepWindow sleepWindow =
+            moment -> moment.player() != null && WorldTime.canAttemptSleep(moment.player().level());
+    /** 本夜试过且睡不上的床：夜休任务来来去去，黑名单跟夜晚走，跨天清空。 */
+    private final Set<BlockPos> nightTriedBeds = new HashSet<>();
+    private long nightTriedDayIndex = -1;
+
+    public SleepModule(Supplier<PlayerContext> context, BlockScanService scans, Protection protection,
+            BackpackView backpack, OffhandContents offhand,
+            Interactions interactions, BringsPlayerClose approaches, CollectsBlocks collects,
+            WorldMemory rememberedPlaces, DestinationResolver destinations,
+            ItemNeeds obtain, Supplier<OverlayMessages.Shown> actionBar) {
+        this(context, scans, protection, backpack, offhand, interactions, approaches, collects, rememberedPlaces,
+                destinations, obtain, actionBar, new AutoSleep());
+    }
+
+    /** @param autoSleep 夜里自动去睡的开关，与夜晚生存需求共用一份 */
+    public SleepModule(Supplier<PlayerContext> context, BlockScanService scans, Protection protection,
+            BackpackView backpack, OffhandContents offhand,
+            Interactions interactions, BringsPlayerClose approaches, CollectsBlocks collects,
+            WorldMemory rememberedPlaces, DestinationResolver destinations,
+            ItemNeeds obtain, Supplier<OverlayMessages.Shown> actionBar, AutoSleep autoSleep) {
+        this.autoSleep = Objects.requireNonNull(autoSleep, "autoSleep");
+        this.context = Objects.requireNonNull(context, "context");
+        // 找床也看世界记忆里自己睡过的床，躺下后记住这一张。
+        this.beds = new LiveBedFinder(context, scans, protection, backpack, offhand, rememberedPlaces);
+        this.interactions = Objects.requireNonNull(interactions, "interactions");
+        this.placer = new ClientBedPlacer(interactions,
+                new ClientMovesToMainhand(context), context);
+        this.obtain = Objects.requireNonNull(obtain, "obtain");
+        this.approaches = Objects.requireNonNull(approaches, "approaches");
+        this.collects = Objects.requireNonNull(collects, "collects");
+        this.rememberedPlaces = Objects.requireNonNull(rememberedPlaces, "rememberedPlaces");
+        this.destinations = Objects.requireNonNull(destinations, "destinations");
+        this.actionBar = Objects.requireNonNull(actionBar, "actionBar");
+    }
+
+    @Override
+    public AbilitySpec spec() {
+        return new AbilitySpec("maicraft:sleep", "找一张床躺下睡觉，白天会先备好今晚的床再报告睡不了；"
+                        + "也能开、关、查夜里自动去睡（默认开）",
+                AbilityDoc.forAbility("sleep"),
+                ParamSpecs.of(
+                        ParamSpec.of("operation", ParamType.CHOICE).defaultValue("sleep")
+                                .choices("sleep", "auto_on", "auto_off", "auto_status")
+                                .doc("sleep 现在去睡（默认）/ auto_off 关掉夜里自动去睡（有人说晚上别睡时用）"
+                                        + " / auto_on 打开 / auto_status 查开没开").build()),
+                Set.of(TargetKind.HERE, TargetKind.LANDMARK, TargetKind.POSITION, TargetKind.SEEN),
+                ExecutionMode.CONTROLS_PLAYER,
+                Set.of(), List.of(), Listing.LISTED);
+    }
+
+    @Override
+    public StepDecision decide(StepContext step) {
+        // 开关夜里自动去睡：当场改好就结束，不用进游戏动手；已经躺下的不叫醒，只管以后的夜里。
+        String operation = step.goal().params().has("operation") ? step.goal().params().text("operation") : "sleep";
+        switch (operation) {
+            case "auto_off" -> {
+                autoSleep.disable();
+                return finished(TaskResult.done("夜里自动去睡已关：天黑了不会自己找床睡，露天打不过照旧挖坑自保；"
+                        + "要睡时下达 sleep，或用 auto_on 打开"));
+            }
+            case "auto_on" -> {
+                autoSleep.enable();
+                return finished(TaskResult.done("夜里自动去睡已开：天黑了有床就在干活间隙自己去睡"));
+            }
+            case "auto_status" -> {
+                return finished(TaskResult.done(autoSleep.enabled() ? "夜里自动去睡开着" : "夜里自动去睡关着"));
+            }
+            default -> {
+            }
+        }
+        PlayerContext current = context.get();
+        if (current == null || current.level() == null) {
+            return StepDecision.NOT_READY;
+        }
+        // 在下界、末地睡会爆炸：不尝试，直接结束并说明，不提问。
+        if (SleepRules.bedsExplodeHere(current.level())) {
+            return finished(TaskResult.builder(TaskResult.Status.FAILED, "睡不了：这个维度的床会爆炸")
+                    .problem(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "这个维度的床会爆炸，睡不了", null))
+                    .build());
+        }
+        // 白天被叫去睡不干等：先把今晚的床备好，然后报告"现在睡不了"，天黑后夜间自动休息自己去睡。
+        if (!WorldTime.canAttemptSleep(current.level())) {
+            return decideForDaytime(step, current);
+        }
+        Optional<WorldPosition> area = bedArea(step.goal());
+        if (area.isEmpty() && step.goal().target() != null) {
+            // 给了目标对象却解析不出（地标没记过、观察编号失效）：如实结束，换个说法重新下达。
+            return finished(bedAreaUnclear(step));
+        }
+        // 没给目标对象就在全范围找：夜里附近有床就该去睡，不强迫说清床区。
+        return new StepDecision.Run(new SleepInput(area.orElse(null)));
+    }
+
+    // 白天的两步：先备床（跑一次备床任务），备好了或备不成，都以"现在睡不了"收场并交代床备好没有。
+    private StepDecision decideForDaytime(StepContext step, PlayerContext current) {
+        long minutes = SleepRules.minutesUntilSleepable(current.level());
+        String notYet = "现在睡不了，约 " + minutes + " 分钟后可睡";
+        boolean bedReady = beds.bedReady(step.tick());
+        if (bedReady) {
+            return finished(daytimeResult(notYet, true, null));
+        }
+        if (step.taskResults().isEmpty()) {
+            // 还没备过床：先跑备床，跑完回来重新决定这一步。
+            return new StepDecision.Run(PrepareBedInput.INSTANCE, true);
+        }
+        // 备床已经跑过：成了就报备好，不成带着备床给的原因结束。
+        TaskResult prepare = step.taskResults().get(step.taskResults().size() - 1);
+        if (prepare.status() == TaskResult.Status.DONE && beds.bedReady(step.tick())) {
+            return finished(daytimeResult(notYet, true, null));
+        }
+        return finished(daytimeResult("现在睡不了，也没弄到今晚要睡的床", false,
+                prepare.problem() != null ? prepare.problem()
+                        : Problem.of(Problem.Kind.NEED_ITEM, "没有床，做床还缺材料", null)));
+    }
+
+    // 白天的收场：以时间不对结束，remaining 写明入睡，细节交代今晚的床备好没有。
+    private TaskResult daytimeResult(String summary, boolean bedReady, Problem problem) {
+        TaskResult.Builder builder = TaskResult.builder(TaskResult.Status.PARTIAL, summary)
+                .remaining("入睡")
+                .details(new SleepDetails(false, SleepDetails.BedSource.WORLD, bedReady, false, false));
+        if (problem != null) {
+            builder.problem(problem);
+        }
+        return builder.build();
+    }
+
+    // 目标对象落成床区：给了就在这片里选床，没给全范围找。
+    private Optional<WorldPosition> bedArea(Goal goal) {
+        if (goal.target() == null) {
+            return Optional.empty();
+        }
+        var resolution = destinations.resolve(goal.target(), BedChooser.BED_AREA_RADIUS_BLOCKS);
+        if (resolution instanceof DestinationResolver.Resolution.Ready ready) {
+            return Optional.of(ready.destination().position());
+        }
+        if (resolution instanceof DestinationResolver.Resolution.AlreadyThere there) {
+            return Optional.of(there.spot());
+        }
+        return Optional.empty();
+    }
+
+    // 目标对象说不清（地标没记过、观察编号失效）：如实结束，换个说法重新下达。
+    private TaskResult bedAreaUnclear(StepContext step) {
+        return TaskResult.failed("睡觉的地方说不清",
+                Problem.of(Problem.Kind.NOT_FOUND, "目标对象解析不出在哪：用坐标、地点名或观察编号说明在哪片床区睡",
+                        "重新下达并给 target"));
+    }
+
+    private StepDecision finished(TaskResult result) {
+        return new StepDecision.Finish(result);
+    }
+
+    @Override
+    public void registerTasks(TaskFactories factories) {
+        factories.register(SleepInput.class, input ->
+                new SleepTask(input, currentPermissions(), beds, placer, obtain, approaches,
+                        interactions::useBlock, actionBar, beds::carriedBed, sleepWindow,
+                        new HashSet<>()));
+        factories.register(PrepareBedInput.class, input ->
+                new PrepareBedTask(obtain, currentPermissions(), beds::carriedBed));
+    }
+
+    // 任务的许可用默认值：睡觉自己不读许可参数，保护与战斗档位由各模型按默认许可把关。
+    private Permissions currentPermissions() {
+        return Permissions.DEFAULT;
+    }
+
+    /** 夜间自动休息怎么落地：读床、放床、拿床、收床与回站位都从这里组合。 */
+    @Override
+    public Task nightRest(TickContext tick) {
+        // 跨夜清黑名单：新的一夜，试过的床重新可试；日期读不出（角色不在）时保持原样。
+        if (tick.player() != null) {
+            long day = WorldTime.dayIndexOf(tick.player().level().getDayTime());
+            if (day != nightTriedDayIndex) {
+                nightTriedDayIndex = day;
+                nightTriedBeds.clear();
+            }
+        }
+        return new NightRestTask(new SleepInput(null), currentPermissions(), beds, placer, obtain, approaches,
+                interactions::useBlock, actionBar, beds::carriedBed, collects, rememberedPlaces,
+                moment -> moment.player() != null && moment.player().localPlayer() != null
+                        && moment.player().localPlayer().isSleeping(),
+                sleepWindow, nightTriedBeds);
+    }
+
+    /** 夜晚这项生存需求读的"今晚有没有床"：附近有能用的床或身上带着床。 */
+    public NightfallNeed.ReadsBedAvailability bedAvailability() {
+        return beds;
+    }
+}

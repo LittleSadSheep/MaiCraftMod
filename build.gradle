@@ -1,4 +1,4 @@
-// 在根项目声明两种加载器插件的版本，具体模块再启用；这里的 apply false 不会直接把插件应用到根项目。
+// 在根项目声明两种加载器插件的版本，具体模块再启用；apply false 不会把插件应用到根项目。
 plugins {
     // 新版本信息见 https://fabricmc.net/develop/。
     id 'fabric-loom' version '1.8-SNAPSHOT' apply false
@@ -6,15 +6,10 @@ plugins {
     id 'net.neoforged.moddev' version '2.0.141' apply false
 }
 
-// 所有子项目产物统一过滤只供编译的第三方接口和未启用的 Baritone 钩子，避免打进游戏后出现两套控制逻辑。
+// 内嵌 Baritone 源码随 Mod 一起编译，产物里排除它独立启动时使用的接线和未启用的 Mixin，避免游戏里出现两套控制逻辑。
 subprojects {
     tasks.withType(Jar).configureEach {
-        // 这些是编译时借用的接口外形，不能当成对应 Mod 的真实实现一起发布。
-        exclude 'fi/dy/**'
-        exclude 'com/github/lunatrius/**'
-
-        // MaiCraft 自己驱动 Baritone，因此排除它独立启动时使用的接线和未启用的 Mixin。
-        // 配置里实际保留的五个 Mixin 不在下列排除项中。
+        // MaiCraft 自己驱动 Baritone，只保留配置里实际使用的五个 Mixin，其余不进包。
         exclude 'baritone/launch/BaritoneMixinConnector*'
         exclude 'baritone/launch/mixins/MixinClientPlayNetHandler*'
         exclude 'baritone/launch/mixins/MixinClientPlayerEntity*'
@@ -29,5 +24,8 @@ subprojects {
         exclude 'baritone/launch/mixins/MixinPalettedContainer*'
         exclude 'baritone/launch/mixins/MixinScreen*'
         exclude 'baritone/launch/mixins/MixinWorldRenderer*'
+        // Litematica 与 Schematica 只有编译期垫片，游戏里不装这两个模组时不把垫片类打进包。
+        exclude 'fi/dy/**'
+        exclude 'com/github/lunatrius/**'
     }
 }

@@ -1,126 +1,119 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.neoforge;
 
+import com.google.gson.JsonObject;
+import java.util.concurrent.atomic.AtomicReference;
 import net.minecraft.client.Minecraft;
-import net.minecraft.commands.Commands;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
-import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.ClientChatReceivedEvent;
-import net.neoforged.neoforge.client.event.RegisterClientCommandsEvent;
+import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
+import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.RenderGuiEvent;
+import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
+import net.neoforged.neoforge.client.event.ScreenEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.GameShuttingDownEvent;
-import org.maiwithu.maicraft.client.runtime.ClientRuntime;
-import org.maiwithu.maicraft.client.chat.ChatMonitor;
-import org.maiwithu.maicraft.client.command.MaiCraftAgentCommandsCommand;
-import org.maiwithu.maicraft.client.command.MaiCraftClearTaskCommand;
-import org.maiwithu.maicraft.client.command.MaiCraftPortCommand;
-import org.maiwithu.maicraft.client.command.MaiCraftStatus;
-import org.maiwithu.maicraft.client.debug.DebugHudController;
-import org.maiwithu.maicraft.client.debug.DebugHudRenderer;
-import org.maiwithu.maicraft.client.preview.PreviewCommands;
-import org.maiwithu.maicraft.client.preview.PreviewController;
-import org.maiwithu.maicraft.core.Constants;
-import org.maiwithu.maicraft.core.MaiCraftCore;
-import org.maiwithu.maicraft.mcp.MaiCraftRuntimeFacade;
-import net.neoforged.neoforge.client.event.ScreenEvent;
-import org.maiwithu.maicraft.client.actor.MenuVisibility;
-import org.maiwithu.maicraft.core.build.BuildingBudgets;
-import org.maiwithu.maicraft.core.pathing.settings.ClearanceWhitelist;
-import org.maiwithu.maicraft.mcp.knowledge.web.KnowledgeEnvironment;
-import net.neoforged.fml.ModList;
-import net.minecraft.SharedConstants;
-import java.util.stream.Collectors;
+import net.neoforged.neoforge.network.PacketDistributor;
+import org.maiwithu.maicraft.bootstrap.Bootstrap;
+import org.maiwithu.maicraft.bootstrap.ClientLifecycle;
+import org.maiwithu.maicraft.game.ModIdentity;
+import org.maiwithu.maicraft.game.serverlink.LinkTransport;
+import org.maiwithu.maicraft.network.MaiCraftPayload;
+import org.maiwithu.maicraft.neoforge.compat.ClientCompatCatalog;
 
 /**
- * NeoForge 的客户端入口，作用与 Fabric 入口相同，只是事件类型和注册方式不同。
- * @Mod 的 dist=CLIENT 才是这份入口只在客户端执行的直接限制。
+ * NeoForge 的客户端入口：dist=CLIENT 限定它只在客户端加载，只把客户端事件转给公共代码，不写业务。
+ * 新增客户端事件时，先在 {@link ClientLifecycle} 加方法，再在这里和 Fabric 入口各接一行。
  */
-@Mod(value = Constants.MOD_ID, dist = Dist.CLIENT)
+@Mod(value = ModIdentity.MOD_ID, dist = Dist.CLIENT)
 public final class MaiCraftNeoForgeClient {
-    // 只在客户端加载；设置阶段挂到 Mod 事件总线，游戏每刻、聊天、命令和退出挂到全局事件总线。
+    private final ClientLifecycle client;
+
     public MaiCraftNeoForgeClient(IEventBus modBus) {
+        // 与服务端 MaiCraft 的发送通道；接收由公共入口的载荷登记转给 NeoForgeClientLink 再到这里。
+        client = Bootstrap.startClient(new NeoForgeLoaderEnvironment(), new LinkTransport() {
+            @Override public boolean available() {
+                var connection = Minecraft.getInstance().getConnection();
+                return connection != null && connection.hasChannel(MaiCraftPayload.TYPE);
+            }
+            @Override public void send(JsonObject envelope) {
+                PacketDistributor.sendToServer(MaiCraftPayload.of(envelope));
+            }
+        }, ClientCompatCatalog.mods());
+        // 客户端准备完成后创建内核与能力 -> 每刻结束推进角色当前的任务与会话 -> 退出前收尾。
         modBus.addListener(this::onClientSetup);
         NeoForge.EVENT_BUS.addListener(this::onClientTick);
-        NeoForge.EVENT_BUS.addListener(this::onRenderHud);
-        NeoForge.EVENT_BUS.addListener(this::onChatReceived);
-        NeoForge.EVENT_BUS.addListener(this::onRegisterClientCommands);
+        NeoForge.EVENT_BUS.addListener(this::onLoggingOut);
         NeoForge.EVENT_BUS.addListener(this::onGameShuttingDown);
+        NeoForge.EVENT_BUS.addListener(this::onChatReceived);
+        NeoForge.EVENT_BUS.addListener(this::onHudRendered);
         NeoForge.EVENT_BUS.addListener(this::onScreenRendered);
+        NeoForge.EVENT_BUS.addListener(this::onLevelRendered);
     }
 
-    // 把初始化排到客户端工作队列，登记公共功能并启动 MCP 运行时。
+    // 调试面板画在原版 HUD 层之上；容器界面打开时界面每帧画完后再补画一次，调试界面流程时也看得到。
+    private void onHudRendered(RenderGuiEvent.Post event) {
+        client.renderDebugPanel(event.getGuiGraphics());
+    }
+
+    private void onScreenRendered(ScreenEvent.Render.Post event) {
+        client.renderDebugPanel(event.getGuiGraphics());
+    }
+
+    // 世界整个画完（AFTER_LEVEL）后画导航路线（路线开关开着时）。
+    private void onLevelRendered(RenderLevelStageEvent event) {
+        if (event.getStage() == RenderLevelStageEvent.Stage.AFTER_LEVEL) {
+            client.renderWorldOverlay(event.getCamera(), event.getModelViewMatrix(), event.getProjectionMatrix());
+        }
+    }
+
+    // 创建工作排到客户端主线程的工作队列，保证访问游戏对象时在正确的线程上。
     private void onClientSetup(FMLClientSetupEvent event) {
-        // 初始化安排到客户端工作队列，先完成注册，再开放 MCP 接单。
         event.enqueueWork(() -> {
-            // 客户端接单前读取本实例的建筑预算，避免工具注册时缓存旧的目标数和请求大小。
-            BuildingBudgets.initialize(Minecraft.getInstance().gameDirectory.toPath());
-            // 与 Fabric 一样在接单前载入清障名单，缺少有效配置时不允许自动挖路。
-            ClearanceWhitelist.initialize(Minecraft.getInstance().gameDirectory.toPath());
-            NeoForgeOptionalServerClient.install();
-            // 与 Fabric 一样只冻结已安装版本；外部教程是否适配当前整合包仍需结合原生配方确认。
-            KnowledgeEnvironment.install("neoforge", SharedConstants.getCurrentVersion().getName(),
-                    ModList.get().getMods().stream().collect(Collectors.toMap(
-                            mod -> mod.getModId(), mod -> mod.getVersion().toString(), (first, second) -> first)));
-            MaiCraftCore.init();
-            // 启动验收前可直接核对实际加载的类位置和人工审图开关，避免旧打包 Mod 冒充刚编译的修复。
-            var source = PreviewController.class.getProtectionDomain().getCodeSource();
-            Constants.LOG.info("MaiCraft client runtime source={} preview_review={}",
-                    source == null ? "unknown" : source.getLocation(), PreviewController.enabled());
-            ClientRuntime.start(MaiCraftRuntimeFacade.instance());
+            client.started();
+            NeoForgeClientLink.install(client);
         });
     }
 
     private void onClientTick(ClientTickEvent.Post event) {
-        // 每次客户端 tick 结束后推进共享运行时，具体业务逻辑不放在加载器事件里。
-        ClientRuntime.tick(Minecraft.getInstance());
-        PreviewController.tick(Minecraft.getInstance());
-        DebugHudController.tick(Minecraft.getInstance());
+        client.tickEnd(Minecraft.getInstance());
     }
 
-    // F9 调试面板画在原版 HUD 层之上；界面打开时这一层不渲染，屏幕层入口负责补画。
-    private void onRenderHud(RenderGuiEvent.Post event) {
-        DebugHudRenderer.render(event.getGuiGraphics());
+    private void onLoggingOut(ClientPlayerNetworkEvent.LoggingOut event) {
+        client.serverLinkDisconnected(Minecraft.getInstance());
     }
 
-    // 模组界面可能覆盖绘制入口而不调用原版实现，因此通过加载器事件登记真实可见帧。
-    // 菜单流调试时原版 HUD 层不渲染，屏幕每帧绘制后补画调试面板。
-    private void onScreenRendered(ScreenEvent.Render.Post event) {
-        MenuVisibility.rendered(event.getScreen());
-        DebugHudRenderer.renderScreen(event.getGuiGraphics());
-    }
-
-    // 系统提示没有发送者；普通消息尽量从当前连接查玩家名字，查不到时保留 UUID 和文字。
-    private void onChatReceived(ClientChatReceivedEvent event) {
-        if (event.isSystem()) {
-            ChatMonitor.system(event.getMessage().getString(),
-                    event instanceof ClientChatReceivedEvent.System system && system.isOverlay());
-            return;
-        }
-        var senderId = event.getSender();
-        String senderName = null;
-        if (senderId != null && Minecraft.getInstance().getConnection() != null) {
-            var info = Minecraft.getInstance().getConnection().getPlayerInfo(senderId);
-            senderName = info == null ? null : info.getProfile().getName();
-        }
-        ChatMonitor.player(senderName, senderId, event.getMessage().getString());
-    }
-
-    // 本地命令显示状态、搬移端口、清理任务、放行 AI 管理员命令、处理预览，执行逻辑仍由公共 PreviewCommands 与命令类提供。
-    private void onRegisterClientCommands(RegisterClientCommandsEvent event) {
-        event.getDispatcher().register(PreviewCommands.attach(Commands.literal("maicraft")
-                .then(Commands.literal("status").executes(context ->
-                        MaiCraftStatus.showInChat()))
-                .then(MaiCraftPortCommand.node()))
-                .then(MaiCraftClearTaskCommand.node())
-                .then(MaiCraftAgentCommandsCommand.node()));
-    }
-
-    // 退出时停止运行时与相关服务，避免继续保留玩家控制和监听。
     private void onGameShuttingDown(GameShuttingDownEvent event) {
-        ClientRuntime.stop();
+        client.stopping();
+    }
+
+    // 聊天栏收到的消息分三种：系统消息、有签名的玩家消息（带原话与 UUID）、没签名的玩家消息（只有整行），有什么给什么。
+    private void onChatReceived(ClientChatReceivedEvent event) {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (event instanceof ClientChatReceivedEvent.System system) {
+            client.systemMessageReceived(minecraft, system.getMessage(), system.isOverlay());
+        } else if (event instanceof ClientChatReceivedEvent.Player player) {
+            client.playerChatReceived(minecraft, player.getMessage(), player.getPlayerChatMessage().decoratedContent(),
+                    player.getSender(), null, player.getBoundChatType());
+        } else {
+            client.playerChatReceived(minecraft, event.getMessage(), null, null, null, event.getBoundChatType());
+        }
+    }
+}
+
+/** 公共入口与客户端入口之间的接缝：两个入口是各自加载的实例，服务端发来的信封从这里转给客户端部分。 */
+final class NeoForgeClientLink {
+    private static final AtomicReference<ClientLifecycle> CLIENT = new AtomicReference<>();
+
+    private NeoForgeClientLink() {}
+
+    static void install(ClientLifecycle client) { CLIENT.set(client); }
+
+    static void received(String json) {
+        var client = CLIENT.get();
+        if (client != null) client.serverLinkReceived(Minecraft.getInstance(), json);
     }
 }

@@ -49,6 +49,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
+import org.maiwithu.maicraft.behavior.navigation.baritone.PathPlannerPool;
 
 /**
  * @author Brady

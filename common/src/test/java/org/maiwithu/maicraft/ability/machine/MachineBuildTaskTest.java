@@ -1,0 +1,565 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.ability.machine;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+
+import net.minecraft.SharedConstants;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.server.Bootstrap;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.maiwithu.maicraft.ability.machine.spi.Installation;
+import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
+import org.maiwithu.maicraft.ability.machine.spi.PartCell;
+import org.maiwithu.maicraft.behavior.acquire.DigsBlocks;
+import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
+import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
+import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
+import org.maiwithu.maicraft.behavior.construction.ConstructionDetails;
+import org.maiwithu.maicraft.behavior.construction.ConstructionSeams;
+import org.maiwithu.maicraft.behavior.construction.ConstructionServices;
+import org.maiwithu.maicraft.behavior.construction.PlacementConfirmation;
+import org.maiwithu.maicraft.behavior.construction.PlacementPrediction;
+import org.maiwithu.maicraft.behavior.construction.PlannedCell;
+import org.maiwithu.maicraft.behavior.construction.ReadsBlocks;
+import org.maiwithu.maicraft.behavior.construction.spi.PlacementRules;
+import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
+import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
+import org.maiwithu.maicraft.behavior.recipe.GameRecipeTable;
+import org.maiwithu.maicraft.behavior.recipe.RecipeLookup;
+import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
+import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
+import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.kernel.result.Problem;
+import org.maiwithu.maicraft.kernel.result.TaskResult;
+import org.maiwithu.maicraft.kernel.storage.DocumentStore;
+import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.CloseReason;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
+import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.maiwithu.maicraft.kernel.task.TickResult;
+import java.time.Instant;
+import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
+import org.maiwithu.maicraft.behavior.construction.Blueprint;
+import org.maiwithu.maicraft.game.player.PlayerContext;
+
+/**
+ * 按机器蓝图施工的任务：已满足一个动作不做、施工与安装段部件设置按顺序做、机器的格引擎不放、
+ * 施工缺料不回滚已放的、拆整台逐格挖并标档案、补丁并进档案；施工与改设置跟着建机器暂停、收尾。
+ */
+class MachineBuildTaskTest {
+
+    private static final String DIM = "minecraft:overworld";
+    private static final BlockPos ANCHOR = new BlockPos(100, 64, 100);
+    private static BlockState FURNACE;
+
+    @TempDir
+    Path tempDir;
+
+    @BeforeAll
+    static void bootMinecraft() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+        FURNACE = Blocks.FURNACE.defaultBlockState();
+    }
+
+    /** 一份最小蓝图：锚点上一格熔炉；参数按需要加部件、安装段与设置。 */
+    private static MachineBlueprint blueprint(MachineBlueprint.Part part, MachineBlueprint.Segment segment,
+            MachineBlueprint.Setting setting) {
+        return new MachineBlueprint(List.of(PlannedCell.block(new BlockPos(0, 0, 0), FURNACE, Set.of())),
+                part == null ? List.of() : List.of(part),
+                segment == null ? List.of() : List.of(segment),
+                setting == null ? List.of() : List.of(setting),
+                List.of());
+    }
+
+    private static MachineBuildInput buildInput(MachineBlueprint merged, MachineArchive archive, String name) {
+        return new MachineBuildInput(false, merged, new WorldPosition(ANCHOR.getX(), ANCHOR.getY(),
+                ANCHOR.getZ(), DIM), name, archive, Permissions.DEFAULT, "测试施工");
+    }
+
+    @Test
+    void 开始时已和蓝图一致_一个动作都不做() {
+        Rig rig = new Rig(tempDir);
+        MachineBlueprint plan = blueprint(null, null, new MachineBlueprint.Setting(BlockPos.ZERO, "mode", "fast"));
+        rig.type.settingValues.put("mode", "fast");
+        rig.world.blocks.put(ANCHOR, FURNACE);
+        MachineArchive archive = MachineArchive.fresh("压机", DIM, ANCHOR, plan, null);
+        TaskResult result = rig.run(buildInput(plan, archive, "压机"));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertTrue(result.changes().isEmpty(), "没动手就不该有变化");
+        assertTrue(rig.type.touched.isEmpty(), "一个动作都不做");
+        assertEquals("压机", ((MachineBuildDetails) result.details()).archiveName());
+    }
+
+    @Test
+    void 施工完了装段再装部件再改设置() {
+        Rig rig = new Rig(tempDir);
+        MachineBlueprint.Segment segment = new MachineBlueprint.Segment("test:belt",
+                List.of(new BlockPos(0, 1, 0)));
+        MachineBlueprint.Part part = new MachineBlueprint.Part(BlockPos.ZERO, Direction.NORTH, "test:part");
+        MachineBlueprint.Setting setting = new MachineBlueprint.Setting(BlockPos.ZERO, "mode", "fast");
+        MachineBlueprint plan = blueprint(part, segment, setting);
+        rig.type.installationOk = installation -> true;
+        rig.type.partOk = partCell -> true;
+        rig.type.installActions.add(new MachineTestDoubles.Scripted(1,
+                () -> rig.type.installedOk = installation -> true));
+        rig.type.mountActions.add(new MachineTestDoubles.Scripted(1,
+                () -> rig.type.mountedOk = partCell -> true));
+        rig.type.settingValues.put("mode", "slow");
+        rig.type.onChange.put("mode", () -> rig.type.settingValues.put("mode", "fast"));
+        TaskResult result = rig.run(buildInput(plan, null, "压机"));
+        assertEquals(TaskResult.Status.DONE, result.status(),
+                result.summary() + " / 问题:" + result.problem() + " / 试过:" + result.attempts());
+        MachineBuildDetails details = (MachineBuildDetails) result.details();
+        assertTrue(details.installations().get(0).installed(), result.summary());
+        assertTrue(details.parts().get(0).mounted(), result.summary());
+        assertTrue(details.settings().get(0).applied(), result.summary());
+        assertEquals("fast", details.settings().get(0).readback());
+        assertEquals(List.of("install:test:belt", "mount:test:part", "change:mode"), rig.type.touched,
+                "安装段 → 部件 → 设置，按顺序做");
+        assertEquals(1, details.cells().getOrDefault("checked_by_machine", 0), "安装段的格由机器核对");
+        assertEquals(1, details.cells().getOrDefault("placed", 0), "普通格由引擎放");
+        assertEquals(FURNACE, rig.world.blocks.get(ANCHOR));
+        // 建成入档：蓝图与位置对上，世界记忆里能看到这台机器。
+        MachineArchive stored = rig.archives.find("压机").orElseThrow();
+        assertEquals(plan, stored.blueprint());
+        assertEquals(ANCHOR, stored.anchor());
+        assertTrue(rig.memory.allRecords().stream().anyMatch(record ->
+                record.kind() == MemoryKind.MACHINE
+                        && "压机".equals(record.blockType())));
+    }
+
+    @Test
+    void 施工缺料_已放的不回滚按缺料收场() {
+Rig rig = new Rig(tempDir);
+        rig.site.fail = true;
+        MachineBlueprint plan = blueprint(null, null, null);
+        TaskResult result = rig.run(buildInput(plan, null, "压机"));
+        assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
+        assertEquals(Problem.Kind.NEED_ITEM, result.problem().kind());
+        assertTrue(rig.world.blocks.get(ANCHOR) == null || rig.world.blocks.get(ANCHOR).isAir(),
+                "没放成就是没放成，不冒充");
+    }
+
+    @Test
+    void 拆整台_逐格挖掉档案标拆除() {
+        Rig rig = new Rig(tempDir);
+        MachineBlueprint plan = blueprint(null, null, null);
+        rig.world.blocks.put(ANCHOR, FURNACE);
+        MachineArchive archive = MachineArchive.fresh("旧压机", DIM, ANCHOR, plan, null);
+        rig.archives.save(archive);
+        rig.memory.rememberMachine(new WorldPosition(ANCHOR.getX(), ANCHOR.getY(), ANCHOR.getZ(), DIM),
+                "旧压机", Instant.now());
+        TaskResult result = rig.run(new MachineBuildInput(true, null,
+                new WorldPosition(ANCHOR.getX(), ANCHOR.getY(), ANCHOR.getZ(), DIM), "旧压机", archive,
+                Permissions.DEFAULT, "拆掉机器"));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertTrue(rig.world.blocks.get(ANCHOR).isAir(), "机器格被挖掉");
+        assertTrue(rig.archives.find("旧压机").orElseThrow().removed(), "档案标为已拆除，蓝图保留");
+        assertTrue(rig.memory.allRecords().stream().noneMatch(record ->
+                record.kind() == MemoryKind.MACHINE), "拆掉的机器从记忆抹掉");
+    }
+
+    @Test
+    void 拆整台_安装段连到的另一头不拆_这一段自己放的跟着拆() {
+        // 链条连到主城那台、机械臂的取放点：不是这台机器的，拆整台不能拆到；机械臂、线缆这类这一段自己放下的跟着拆。
+        Rig rig = new Rig(tempDir);
+        BlockPos far = new BlockPos(5, 0, 0);
+        BlockPos arm = new BlockPos(0, 1, 0);
+        MachineBlueprint plan = blueprint(null, new MachineBlueprint.Segment("test:chain", List.of(BlockPos.ZERO, far)), null);
+        MachineBlueprint withArm = new MachineBlueprint(plan.cells(), plan.parts(), List.of(plan.installations().getFirst(),
+                new MachineBlueprint.Segment("test:arm", List.of(arm, far))), plan.settings(), plan.processes());
+        rig.world.blocks.put(ANCHOR, FURNACE);
+        rig.world.blocks.put(ANCHOR.offset(far), Blocks.STONE.defaultBlockState());
+        rig.world.blocks.put(ANCHOR.offset(arm), Blocks.STONE.defaultBlockState());
+        rig.type.placed = installation -> installation.kind().equals("test:arm")
+                ? Optional.of(List.of(installation.cells().getFirst())) : Optional.of(List.of());
+        MachineArchive archive = MachineArchive.fresh("接线", DIM, ANCHOR, withArm, null);
+        rig.archives.save(archive);
+        TaskResult result = rig.run(new MachineBuildInput(true, null,
+                new WorldPosition(ANCHOR.getX(), ANCHOR.getY(), ANCHOR.getZ(), DIM), "接线", archive,
+                Permissions.DEFAULT, "拆掉接线"));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertTrue(rig.world.blocks.get(ANCHOR).isAir(), "cells 里的格被挖掉");
+        assertTrue(rig.world.blocks.get(ANCHOR.offset(arm)).isAir(), "这一段自己放的机械臂跟着拆");
+        assertEquals(Blocks.STONE.defaultBlockState(), rig.world.blocks.get(ANCHOR.offset(far)), "另一头不是这台的，留着");
+    }
+
+    @Test
+    void 补丁并进已有档案_按档案锚点施工() {
+        Rig rig = new Rig(tempDir);
+        MachineBlueprint original = blueprint(null, null, null);
+        rig.world.blocks.put(ANCHOR, FURNACE);
+        MachineArchive archive = MachineArchive.fresh("压机", DIM, ANCHOR, original, null);
+        MachineBlueprint added = new MachineBlueprint(
+                List.of(PlannedCell.block(new BlockPos(1, 0, 0), Blocks.STONE.defaultBlockState(), Set.of())),
+                List.of(), List.of(), List.of(), List.of());
+        MachineBlueprint merged = MachinePatch.merge(original, added);
+        TaskResult result = rig.run(buildInput(merged, archive, "压机"));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertNotNull(rig.world.blocks.get(ANCHOR.offset(new BlockPos(1, 0, 0))), "新增的格放出来了");
+        assertEquals(2, rig.archives.find("压机").orElseThrow().blueprint().cells().size(), "档案并入了补丁");
+    }
+
+    @Test
+    void 安装段两端写了方块的先由引擎放好_再交给机器装段() {
+        Rig rig = new Rig(tempDir);
+        BlockPos first = new BlockPos(0, 0, 0);
+        BlockPos last = new BlockPos(2, 0, 0);
+        BlockState shaft = Blocks.OAK_LOG.defaultBlockState();
+        MachineBlueprint.Segment segment = new MachineBlueprint.Segment("test:belt",
+                List.of(first, new BlockPos(1, 0, 0), last));
+        MachineBlueprint plan = new MachineBlueprint(List.of(PlannedCell.block(first, shaft, Set.of()),
+                PlannedCell.block(last, shaft, Set.of())), List.of(), List.of(segment), List.of(), List.of());
+        rig.type.installationOk = installation -> true;
+        // 装段的那一刻两端的"轴"要已经放好：传送带物品只认点在轴上。
+        rig.type.installActions.add(new MachineTestDoubles.Scripted(1, () -> {
+            assertEquals(shaft, rig.world.blocks.get(ANCHOR.offset(first)), "装段前左端已放好");
+            assertEquals(shaft, rig.world.blocks.get(ANCHOR.offset(last)), "装段前右端已放好");
+            rig.type.installedOk = installation -> true;
+        }));
+        TaskResult result = rig.run(buildInput(plan, null, "带子"));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary() + " / 问题:" + result.problem());
+        assertTrue(((MachineBuildDetails) result.details()).installations().get(0).installed());
+    }
+
+    @Test
+    void 已经装成的安装段整段交给机器_引擎不把带子拆回轴() {
+        Rig rig = new Rig(tempDir);
+        BlockPos first = new BlockPos(1, 0, 0);
+        BlockPos last = new BlockPos(2, 0, 0);
+        MachineBlueprint.Segment segment = new MachineBlueprint.Segment("test:belt", List.of(first, last));
+        MachineBlueprint plan = new MachineBlueprint(List.of(PlannedCell.block(BlockPos.ZERO, FURNACE, Set.of()),
+                PlannedCell.block(first, Blocks.OAK_LOG.defaultBlockState(), Set.of())), List.of(), List.of(segment),
+                List.of(), List.of());
+        // 现场：两端早就变成了"带子"（这里用石头代替），机器类型说这段已经装成。
+        rig.world.blocks.put(ANCHOR.offset(first), Blocks.STONE.defaultBlockState());
+        rig.world.blocks.put(ANCHOR.offset(last), Blocks.STONE.defaultBlockState());
+        rig.type.installationOk = installation -> true;
+        rig.type.installedOk = installation -> true;
+        TaskResult result = rig.run(buildInput(plan, null, "带子"));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary() + " / 问题:" + result.problem());
+        assertEquals(Blocks.STONE.defaultBlockState(), rig.world.blocks.get(ANCHOR.offset(first)), "带子没被拆回轴");
+        assertTrue(rig.type.touched.isEmpty(), "装成的段不再装一遍");
+    }
+
+    @Test
+    void 压在安装段上的格_装完段再放() {
+        Rig rig = new Rig(tempDir);
+        BlockPos first = new BlockPos(0, 0, 0);
+        BlockPos middle = new BlockPos(1, 0, 0);
+        BlockPos last = new BlockPos(2, 0, 0);
+        BlockPos onBelt = new BlockPos(1, 1, 0);
+        BlockState shaft = Blocks.OAK_LOG.defaultBlockState();
+        // 带漏斗的替身：玻璃压在带子中间那格上，联动放置规则说它要等下面那格先好。
+        rig.site.rules.add(new PlacementRules() {
+            @Override public Optional<Placement> placementFor(BlockState state, BlockPos at, ReadsBlocks world) {
+                return Optional.empty();
+            }
+
+            @Override public List<BlockPos> placeAfter(BlockState state) {
+                return state.is(Blocks.GLASS) ? List.of(new BlockPos(0, -1, 0)) : List.of();
+            }
+        });
+        MachineBlueprint.Segment segment = new MachineBlueprint.Segment("test:belt", List.of(first, middle, last));
+        MachineBlueprint plan = new MachineBlueprint(List.of(PlannedCell.block(first, shaft, Set.of()),
+                PlannedCell.block(last, shaft, Set.of()), PlannedCell.block(onBelt, Blocks.GLASS.defaultBlockState(), Set.of())),
+                List.of(), List.of(segment), List.of(), List.of());
+        rig.type.installationOk = installation -> true;
+        rig.type.installActions.add(new MachineTestDoubles.Scripted(1, () -> {
+            assertFalse(rig.world.blocks.containsKey(ANCHOR.offset(onBelt)), "装段前压在上面的格还没放");
+            rig.world.blocks.put(ANCHOR.offset(middle), Blocks.STONE.defaultBlockState());
+            rig.type.installedOk = installation -> true;
+        }));
+        TaskResult result = rig.run(buildInput(plan, null, "带子"));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary() + " / 问题:" + result.problem());
+        assertEquals(Blocks.GLASS.defaultBlockState(), rig.world.blocks.get(ANCHOR.offset(onBelt)), "装完段后放上了");
+    }
+
+    @Test
+    void 压着的安装段没装成_上面的格不放照实记下() {
+        Rig rig = new Rig(tempDir);
+        BlockPos first = new BlockPos(0, 0, 0);
+        BlockPos last = new BlockPos(2, 0, 0);
+        BlockPos onBelt = new BlockPos(1, 1, 0);
+        rig.site.rules.add(new PlacementRules() {
+            @Override public Optional<Placement> placementFor(BlockState state, BlockPos at, ReadsBlocks world) {
+                return Optional.empty();
+            }
+
+            @Override public List<BlockPos> placeAfter(BlockState state) {
+                return state.is(Blocks.GLASS) ? List.of(new BlockPos(0, -1, 0)) : List.of();
+            }
+        });
+        MachineBlueprint.Segment segment = new MachineBlueprint.Segment("test:belt",
+                List.of(first, new BlockPos(1, 0, 0), last));
+        MachineBlueprint plan = new MachineBlueprint(List.of(PlannedCell.block(first, Blocks.OAK_LOG.defaultBlockState(), Set.of()),
+                PlannedCell.block(onBelt, Blocks.GLASS.defaultBlockState(), Set.of())),
+                List.of(), List.of(segment), List.of(), List.of());
+        rig.type.installationOk = installation -> true;
+        rig.type.installActions.add(new MachineTestDoubles.Scripted(1, () -> { }));
+        TaskResult result = rig.run(buildInput(plan, null, "带子"));
+        assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
+        assertFalse(rig.world.blocks.containsKey(ANCHOR.offset(onBelt)), "带子没装成，压在上面的格不放");
+        assertTrue(result.attempts().stream().anyMatch(attempt -> attempt.result().contains("压着的安装段没装成")));
+    }
+
+    @Test
+    void 没有联动认安装段_照实记下不冒充建成() {
+        Rig rig = new Rig(tempDir);
+        MachineBlueprint.Segment segment = new MachineBlueprint.Segment("test:belt", List.of(new BlockPos(0, 1, 0)));
+        MachineBlueprint plan = blueprint(null, segment, null);
+        rig.type.installationOk = installation -> true;
+        TaskResult result = rig.run(buildInput(plan, null, "压机"));
+        assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
+        MachineBuildDetails details = (MachineBuildDetails) result.details();
+        assertFalse(details.installations().get(0).installed());
+        assertTrue(details.installations().get(0).note().contains("没有机器类型认"), result.summary());
+    }
+
+    @Test
+    void 施工跟着建机器暂停与收尾_能不能停看施工手上的() {
+        // 普通格交施工引擎按动作推进：施工正走向那一格时，建机器的暂停、先到安全处再停、收尾转到施工手上，能不能停也看它的。
+        Rig rig = new Rig(tempDir);
+        MachineTestDoubles.Held walking = new MachineTestDoubles.Held();
+        rig.site.approach = walking;
+        MachineBuildTask task = rig.runUntilBusy(buildInput(blueprint(null, null, null), null, "压机"), walking);
+        assertTrue(task.describe().contains("施工"), task.describe());
+
+        assertEquals(Interruptibility.UNSAFE_TO_STOP, task.interruptibility(rig.tick()),
+                "施工手上那一下停不得，建机器就停不得");
+        assertTrue(task.stopSafely(), "叫建机器先到安全处再停，转给施工手上那一下去落地");
+        assertEquals(1, walking.stops, "走着的那一下收到先停稳");
+        assertFalse(task.stoppedSafely(), "那一下还没停稳，建机器也没停稳");
+        task.pause();
+        assertEquals(1, walking.pauses, "建机器暂停，施工跟着停下松手");
+        task.close(CloseReason.CANCELLED);
+        assertEquals(1, walking.closes, "建机器收尾，施工跟着收尾");
+    }
+
+    @Test
+    void 改设置跟着建机器暂停_先停稳与收尾() {
+        // 熔炉已经在位，施工没什么要放；改设置按动作推进：正对着机器切换时，建机器的暂停、先到安全处再停、收尾都转过去。
+        Rig rig = new Rig(tempDir);
+        rig.world.blocks.put(ANCHOR, FURNACE);
+        rig.type.settingValues.put("mode", "slow");
+        MachineTestDoubles.Held switching = new MachineTestDoubles.Held();
+        rig.type.changing = switching;
+        MachineBuildTask task = rig.runUntilBusy(buildInput(blueprint(null, null,
+                new MachineBlueprint.Setting(BlockPos.ZERO, "mode", "fast")), null, "压机"), switching);
+        assertTrue(task.describe().contains("改装后设置"), task.describe());
+
+        assertEquals(Interruptibility.UNSAFE_TO_STOP, task.interruptibility(rig.tick()),
+                "切换那一下停不得，建机器就停不得");
+        assertTrue(task.stopSafely(), "叫建机器先到安全处再停，转给改设置去收尾");
+        assertEquals(1, switching.stops, "切换那一下收到先停稳");
+        assertFalse(task.stoppedSafely(), "那一下还没停稳，建机器也没停稳");
+        task.pause();
+        assertEquals(1, switching.pauses, "建机器暂停，改设置跟着停下松手");
+        task.close(CloseReason.CANCELLED);
+        assertEquals(1, switching.closes, "建机器收尾，改设置跟着收尾");
+    }
+
+    /** 一套离线替身：现场与施工引擎的接缝全在一个假对象上，什么都能一刻做完。 */
+    private static final class FakeSite implements ConstructionSeams.ReadsSite, ConstructionSeams.PlansPlacement,
+            ConstructionSeams.Clicks, DigsBlocks, ItemNeeds, ConstructionSeams.HoldsItem, ConstructionSeams.Guards,
+            ConstructionSeams.Ledger, BringsPlayerClose {
+        /** 与机器现场视图共用的同一张世界表：引擎放成什么，机器比对读到的就是什么。 */
+        final Map<BlockPos, BlockState> world;
+        final Map<String, Integer> carried = new HashMap<>();
+        final List<BlockPos> temporaries = new ArrayList<>();
+        final List<PlacementRules> rules = new ArrayList<>();
+        boolean fail;
+        /** 施工走近时交出的动作；没给就一刻走到。用来演"施工正走在半路"。 */
+        Action approach;
+
+        FakeSite(Map<BlockPos, BlockState> sharedWorld) {
+            this.world = sharedWorld;
+        }
+
+        @Override public boolean loaded(BlockPos pos) { return true; }
+        @Override public BlockState state(BlockPos pos) { return world.getOrDefault(pos, Blocks.AIR.defaultBlockState()); }
+        @Override public String dimension() { return DIM; }
+        @Override public BlockPos feet() { return ANCHOR.west(); }
+        @Override public int carried(String itemId) { return carried.getOrDefault(itemId, 0); }
+        @Override public boolean creative() { return false; }
+        @Override public boolean unbreakable(BlockPos pos) { return false; }
+        @Override public Optional<String> temporaryMaterial() { return Optional.of("minecraft:cobblestone"); }
+
+        @Override public Optional<PlacementPrediction.Placement> predict(PlannedCell cell, BlockPos clicked, Direction face) {
+            return Optional.of(new PlacementPrediction.Placement(clicked, face, cell.state()));
+        }
+
+        @Override public boolean requiresSneak(BlockPos clicked) { return false; }
+
+        @Override public Click place(PlannedCell cell, PlacementPrediction.Placement placement, boolean sneak,
+                PlacementConfirmation confirmation) {
+            return click(() -> world.put(cell.pos(), placement.predicted()));
+        }
+
+        @Override public Click pour(PlannedCell cell, InteractionConfirmation confirmation) {
+            return click(() -> world.put(cell.pos(), cell.state()));
+        }
+
+        @Override public Click scoop(BlockPos source, InteractionConfirmation confirmation) {
+            return click(() -> world.put(source, Blocks.AIR.defaultBlockState()));
+        }
+
+        @Override public Click use(BlockPos block, InteractionConfirmation confirmation) {
+            return click(() -> { });
+        }
+
+        private Click click(Runnable effect) {
+            return new Click(immediate(effect), () -> InteractionResult.applied("替身确认"));
+        }
+
+        @Override public Optional<Action> dig(BlockPos target) {
+            return Optional.of(immediate(() -> world.put(target, Blocks.AIR.defaultBlockState())));
+        }
+
+        @Override public Action actionFor(ItemRequest request, Permissions permissions) {
+            if (fail) {
+                return failing("附近找不到 " + request.wanted().itemId());
+            }
+            return immediate(() -> carried.merge(request.wanted().itemId(), request.count(), Integer::sum));
+        }
+
+        @Override public ConstructionSeams.HoldPlan hold(String itemId) {
+            return new ConstructionSeams.HoldPlan.Ready();
+        }
+
+        /** 一步就报失败的动作。 */
+        private Action failing(String why) {
+            return new Action() {
+                @Override public ActionStatus tick(TickContext context) {
+                    return ActionStatus.failed(Problem.of(Problem.Kind.NOT_FOUND, why, null));
+                }
+
+                @Override public String describe() {
+                    return "替身失败";
+                }
+            };
+        }
+
+        @Override public Optional<Problem> allows(PermissionCheck.WorldAction action, BlockPos pos, String blockType) {
+            return Optional.empty();
+        }
+
+        @Override public void siteStarted(Blueprint blueprint) { }
+        @Override public void temporaryPlaced(BlockPos pos, String blockType, String purpose) { temporaries.add(pos); }
+        @Override public void temporaryRemoved(BlockPos pos) { temporaries.remove(pos); }
+        @Override public List<BlockPos> temporaries() { return List.copyOf(temporaries); }
+        @Override public Action toward(ApproachTarget target, Permissions permissions) {
+            return approach != null ? approach : immediate(() -> { });
+        }
+
+        ConstructionServices services() {
+            return new ConstructionServices(this, this, this, this, this, this, this, this, this, null, List.of(), rules);
+        }
+    }
+
+    /** 一刻做完的动作。 */
+    private record Immediate(Runnable effect) implements Action {
+        @Override public ActionStatus tick(TickContext context) {
+            effect.run();
+            return ActionStatus.done();
+        }
+
+        @Override public String describe() { return "替身动作"; }
+    }
+
+    private static Immediate immediate(Runnable effect) {
+        return new Immediate(effect);
+    }
+
+    /** 一套搭建好的环境：机器类型、现场视图、档案库、世界记忆与施工服务替身。 */
+    private static final class Rig {
+        final MachineTestDoubles.FakeMachineType type =
+                new MachineTestDoubles.FakeMachineType("test:press", "测试压机", MachineRole.PROCESSING,
+                        state -> state.is(Blocks.FURNACE));
+        final MachineTestDoubles.FakeWorld world = new MachineTestDoubles.FakeWorld();
+        final MachineTestDoubles.FakeClicks clicks = new MachineTestDoubles.FakeClicks();
+        final FakeSite site = new FakeSite(world.blocks);
+        final MachineArchives archives;
+        final WorldMemory memory;
+        final MachineServices services;
+
+        Rig(Path tempDir) {
+            world.dimension = DIM;
+            world.playerAt = ANCHOR.west();
+            // 脚下一片实地：站位判断要站得稳、看得见。
+            for (int x = ANCHOR.getX() - 3; x <= ANCHOR.getX() + 3; x++) {
+                for (int z = ANCHOR.getZ() - 3; z <= ANCHOR.getZ() + 3; z++) {
+                    world.blocks.put(new BlockPos(x, ANCHOR.getY() - 1, z), Blocks.STONE.defaultBlockState());
+                }
+            }
+            DocumentStore documents = new DocumentStore(tempDir.resolve("state.sqlite"));
+            archives = new MachineArchives(documents, "world1");
+            memory = new WorldMemory(documents, "world1");
+            services = new MachineServices(() -> null, world, List.of(type), List.of(),
+                    new MachineTestDoubles.FakeArea(), new RecipeLookup(List.of(), new GameRecipeTable(Optional::empty)),
+                    site, site, clicks, new MachineTestDoubles.FakeSeen(), new MachineTestDoubles.FakePlaces());
+        }
+
+        /** 推进建机器直到那一下开始做；途中收场说明没走到那一步。 */
+        MachineBuildTask runUntilBusy(MachineBuildInput input, MachineTestDoubles.Held held) {
+            MachineBuildTask task = new MachineBuildTask(input, services, archives, memory,
+                    permissions -> site.services());
+            task.start(tick());
+            for (int i = 0; i < 400 && held.ticks == 0; i++) {
+                assertFalse(task.tick(tick()) instanceof TickResult.Finished, "建机器没走到那一下就收场了");
+            }
+            assertTrue(held.ticks > 0, "走到了那一下");
+            return task;
+        }
+
+        TaskResult run(MachineBuildInput input) {
+            MachineBuildTask task = new MachineBuildTask(input, services, archives, memory,
+                    permissions -> site.services());
+            task.start(tick());
+            for (long i = 0; i < 20000; i++) {
+                if (task.tick(tick()) instanceof TickResult.Finished finished) {
+                    return finished.result();
+                }
+            }
+            throw new AssertionError("两万刻都没做完");
+        }
+
+        private TickContext tick() {
+            long now = ++ticks;
+            return new TickContext() {
+                @Override public long gameTick() {
+                    return now;
+                }
+
+                @Override public PlayerContext player() {
+                    return null;
+                }
+            };
+        }
+
+        private long ticks;
+    }
+}

@@ -17,7 +17,8 @@
 package baritone.utils;
 
 import baritone.api.utils.IPlayerContext;
-import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
+import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
+
 
 /**
  * @author Brady
@@ -27,6 +28,6 @@ public final class BlockBreakHelper {
     BlockBreakHelper(IPlayerContext ignored) {}
 
     public void stopBreakingBlock() {
-        EmbeddedBaritoneRuntime.requestStopBreaking();
+        BaritoneInternals.requestStopBreaking();
     }
 }

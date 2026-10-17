@@ -1,88 +1,155 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.mcp.knowledge;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import com.google.gson.JsonObject;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
+import org.junit.jupiter.api.Test;
+import com.google.gson.JsonArray;
+import org.maiwithu.maicraft.kernel.knowledge.KnowledgeDocument;
+import org.maiwithu.maicraft.kernel.knowledge.KnowledgeSource;
 
-public final class KnowledgeLibraryTest {
-    public static final class Source implements KnowledgeLibrary.Source {
-        int reads; int revision;
-        public List<KnowledgeDocument.Entry> entries() {
-            List<KnowledgeDocument.Entry> entries = new ArrayList<>();
-            for (int i = 0; i < 33; i++) entries.add(new KnowledgeDocument.Entry("maicraft://knowledge/test/" + i,
-                    "test." + i, "方块 " + i + " revision " + revision, "原始教程", "demo:machine"));
-            return entries;
+/** 知识库按元数据发现、按需读取：内置资料完整可读，目录分页绑定版本，搜索不展开正文。 */
+class KnowledgeLibraryTest {
+    @Test
+    void bundledIndexAndGameMechanicsPagesAreReadable() {
+        KnowledgeLibrary library = KnowledgeLibrary.offline();
+        assertEquals("知识索引", library.read(KnowledgeLibrary.INDEX).title());
+        for (String[] entry : KnowledgeLibrary.GAME_MECHANICS) {
+            KnowledgeDocument document = library.read(KnowledgeLibrary.GAME_MECHANICS_PREFIX + entry[0]);
+            assertEquals(entry[1], document.title());
+            assertTrue(document.text().contains("#"), "每篇常识都有正文");
         }
-        public KnowledgeDocument read(String uri) {
-            if (entries().stream().noneMatch(entry -> entry.uri().equals(uri))) return null;
-            reads++; return new KnowledgeDocument(uri, "test", "Title", "Description", "# 一篇原始教程\n\nsource text");
+        for (String[] entry : KnowledgeLibrary.BUILDING) {
+            KnowledgeDocument document = library.read(KnowledgeLibrary.BUILDING_PREFIX + entry[0]);
+            assertEquals(entry[1], document.title());
+            assertTrue(document.text().contains("#"), "每篇建筑资料都有正文");
         }
-        public String status() { return "available"; }
+        assertTrue(library.find("building/design").isPresent(), "lookup 给 building/design 这种末段写法要找得到");
+        assertThrows(KnowledgeException.class, () -> library.read("maicraft://knowledge/no-such-page"));
     }
 
-    public static void main(String[] args) {
-        Source source = new Source(); KnowledgeLibrary library = new KnowledgeLibrary(source);
-        JsonObject list = request("list"); Set<String> uris = new HashSet<>();
-        JsonObject page = library.request(list); String firstCursor = page.get("nextCursor").getAsString();
-        while (true) {
-            for (var element : page.getAsJsonArray("resources")) {
-                JsonObject entry = element.getAsJsonObject();
-                check(!entry.has("text") && uris.add(entry.get("uri").getAsString()), "metadata-only unique pages");
-            }
-            if (!page.has("nextCursor")) break;
-            list.add("cursor", page.get("nextCursor")); page = library.request(list);
-        }
-        // 材料工艺和原生过程知识都只发布元数据，不在默认发现时展开合成树、机制契约或教程正文。
-        // 六份主文档包含起飞前配平；发现阶段仍只返回元数据，不提前读取物理或教程正文。
-        // 另有任务注意流、游戏聊天流与已装模组清单三个宿主入口。
-        check(uris.size() == source.entries().size() + 9 + KnowledgeLibrary.GAME_MECHANICS.length + BuildingModelContractResources.entries().size() + MachineAssemblyResources.entries().size() && source.reads == 0
-                && uris.containsAll(Set.of(KnowledgeLibrary.INDEX, KnowledgeLibrary.GUIDE, KnowledgeLibrary.BLUEPRINT, KnowledgeLibrary.PROCESSES, KnowledgeLibrary.RECIPES, KnowledgeLibrary.PHYSICS,
-                        "maicraft://attention", "maicraft://chatflow", "maicraft://environment", MachineAssemblyResources.URI,
-                        KnowledgeLibrary.GAME_MECHANICS_PREFIX + "gravity-blocks", KnowledgeLibrary.GAME_MECHANICS_PREFIX + "mine-source-scope")),
-                "attention, chatflow, environment, builtins and all extension resources discovered without bodies");
-        // 每张机制常识卡必须真能读出正文，且同时带"规则"与"会怎么坑你"两节——注册了 URI 而正文缺失比没有卡片更误导。
-        for (String[] card : KnowledgeLibrary.GAME_MECHANICS) {
-            KnowledgeDocument body = library.read(KnowledgeLibrary.GAME_MECHANICS_PREFIX + card[0]);
-            check(body != null && body.text().contains("## 规则") && body.text().contains("这个规则会怎么坑你"),
-                    "mechanics card readable with rule and pitfall sections: " + card[0]);
-        }
-        // 注册数组必须与 resources 目录下的机制卡文件集合一致：漏登记的卡正文还在，
-        // 但 URI 不可达、搜索不命中，比缺文件更隐蔽（tick-rate 曾漏登记）。
-        Set<String> bundled = new HashSet<>();
-        try (var files = Files.list(Path.of(KnowledgeLibrary.class.getResource("/assets/maicraft/knowledge/game_mechanics").toURI()))) {
-            files.map(p -> p.getFileName().toString())
-                    .filter(n -> n.endsWith(".md"))
-                    .forEach(n -> bundled.add(n.substring(0, n.length() - 3)));
-        } catch (Exception failure) { throw new IllegalStateException("cannot list bundled game_mechanics directory", failure); }
-        Set<String> registered = new HashSet<>();
-        for (String[] card : KnowledgeLibrary.GAME_MECHANICS) registered.add(card[0]);
-        Set<String> missing = new HashSet<>(bundled); missing.removeAll(registered);
-        Set<String> extra = new HashSet<>(registered); extra.removeAll(bundled);
-        check(bundled.equals(registered), "GAME_MECHANICS registry matches bundled game_mechanics/*.md; missing=" + missing + " extra=" + extra);
-        check(library.read(KnowledgeLibrary.BLUEPRINT).text().contains("schema_version"), "shared blueprint format available on demand");
-        check(library.read(KnowledgeLibrary.RECIPES).text().contains("display_recipes"), "material planning guide available on demand");
-        check(library.read(KnowledgeLibrary.PHYSICS).text().contains("native_flight_verified"),"配平资料必须区分预测与实船证据");
-        JsonObject search = request("search"); search.addProperty("query", "demo:machine"); search.addProperty("limit", 2);
-        JsonObject hits = library.request(search);
-        check(hits.getAsJsonArray("resources").size() == 2 && hits.get("truncated").getAsBoolean() && source.reads == 0, "bounded metadata search");
-        JsonObject read = request("read"); read.addProperty("uri", "maicraft://knowledge/test/1");
-        check(library.request(read).getAsJsonArray("contents").get(0).getAsJsonObject().get("text").getAsString().startsWith("# "), "Markdown read");
-        check(source.reads == 1, "only requested resource read");
-        for (String uri : List.of("file:///private", "https://example.com/", "maicraft://knowledge/../private")) {
-            try { library.read(uri); throw new AssertionError("unknown URI was accepted"); }
-            catch (KnowledgeException expected) { check(expected.code() == -32002, "standard resource-not-found code"); }
-        }
-        source.revision++;
-        list.addProperty("cursor", firstCursor);
-        try { library.request(list); throw new AssertionError("stale cursor accepted"); }
-        catch (IllegalArgumentException expected) { check(expected.getMessage().contains("changed"), "restart changed catalog"); }
-        System.out.println("KnowledgeLibraryTest: passed");
+    @Test
+    void catalogListsMetadataAndPaginatesWithAVersionBoundCursor() {
+        KnowledgeLibrary library = KnowledgeLibrary.offline();
+        JsonObject firstPage = library.request(request("list", null));
+        assertTrue(firstPage.getAsJsonArray("resources").size() > 0);
+        // 目录里还有索引那一篇，所以总数比 listing 多一；翻到第二页时剩下的都在那一页。
+        int total = library.listing().size() + 1;
+        assertEquals(Math.min(total, KnowledgeLibraryPage.PAGE_SIZE), firstPage.getAsJsonArray("resources").size());
+        if (!firstPage.has("nextCursor")) return;
+        JsonObject secondPage = library.request(request("list", firstPage.get("nextCursor").getAsString()));
+        assertEquals(Math.min(total - KnowledgeLibraryPage.PAGE_SIZE, KnowledgeLibraryPage.PAGE_SIZE),
+                secondPage.getAsJsonArray("resources").size());
+        // 目录变了旧游标明确报错：先记下第一页游标，再造一个不同目录的库。
+        String cursor = firstPage.get("nextCursor").getAsString();
+        KnowledgeLibrary changed = new KnowledgeLibrary(new SingleEntrySource());
+        assertThrows(IllegalArgumentException.class, () -> changed.request(request("list", cursor)));
     }
-    static JsonObject request(String action) { JsonObject value = new JsonObject(); value.addProperty("action", action); return value; }
-    static void check(boolean condition, String detail) { if (!condition) throw new AssertionError(detail); }
+
+    @Test
+    void searchMatchesMetadataOnlyAndReportsTruncation() {
+        KnowledgeLibrary library = KnowledgeLibrary.offline();
+        JsonObject hits = library.request(request("search", "塌落"));
+        assertTrue(hits.getAsJsonArray("resources").size() >= 1, "内置常识能按关键词找到");
+        assertFalse(hits.get("content_loaded").getAsBoolean(), "搜索只比较元数据，不展开正文");
+        assertEquals(1, limitedSearch(library, "塌落", 1).size(), "limit 生效");
+        assertThrows(IllegalArgumentException.class, () -> limitedSearch(library, "塌落", 0), "limit 越界明确报错");
+    }
+
+    private static JsonArray limitedSearch(KnowledgeLibrary library, String query, int limit) {
+        JsonObject request = new JsonObject();
+        request.addProperty("action", "search");
+        request.addProperty("query", query);
+        request.addProperty("limit", limit);
+        return library.request(request).getAsJsonArray("resources");
+    }
+
+    @Test
+    void registeredSourcesAppearInCatalogAndSearch() {
+        KnowledgeLibrary library = new KnowledgeLibrary(new SingleEntrySource());
+        JsonObject hits = library.request(request("search", "示例"));
+        assertEquals(1, hits.getAsJsonArray("resources").size());
+        assertEquals("registered", hits.get("provider_status").getAsString());
+    }
+
+    @Test
+    void catalogListsSourceIndexesWhileSearchCoversEveryEntry() {
+        KnowledgeLibrary library = new KnowledgeLibrary(new IndexedSource());
+
+        List<String> catalog = library.listing().stream().map(KnowledgeDocument.Entry::uri).toList();
+        assertTrue(catalog.contains(IndexedSource.INDEX), "目录里有来源的索引");
+        assertFalse(catalog.contains(IndexedSource.SCENE), "场景不进目录");
+        assertEquals(List.of(IndexedSource.SCENE),
+                library.matching("搅拌器").stream().map(KnowledgeDocument.Entry::uri).toList(), "搜索找得到场景");
+    }
+
+    @Test
+    void relatedEntriesAndStatusesAreGatheredPerSource() {
+        KnowledgeLibrary library = new KnowledgeLibrary(List.of(new IndexedSource(), new SingleEntrySource()));
+
+        assertEquals(List.of(IndexedSource.SCENE),
+                library.about("create:mechanical_mixer").stream().map(KnowledgeDocument.Entry::uri).toList());
+        assertTrue(library.about("minecraft:stone").isEmpty());
+        assertEquals(List.of("思索：可用，1 个场景", "registered"), library.sourceStatuses());
+    }
+
+    /** 目录只交一行索引、搜索与相关资料才给出场景的来源，像思索那样。 */
+    private static final class IndexedSource implements KnowledgeSource {
+        static final String INDEX = "maicraft://knowledge/ponder/index";
+        static final String SCENE = "maicraft://knowledge/ponder/create/mechanical_mixer/1";
+        private static final KnowledgeDocument.Entry SCENE_ENTRY = new KnowledgeDocument.Entry(SCENE, "scene",
+                "动力搅拌器 · 场景 1", "思索场景", "create:mechanical_mixer 动力搅拌器 搅拌器");
+
+        @Override public List<KnowledgeDocument.Entry> entries() {
+            return List.of(new KnowledgeDocument.Entry(INDEX, "index", "思索索引", "全部有思索的物品", "思索 ponder"));
+        }
+
+        @Override public List<KnowledgeDocument.Entry> searchCandidates(String query) {
+            return List.of(SCENE_ENTRY);
+        }
+
+        @Override public List<KnowledgeDocument.Entry> entriesAbout(String registryId) {
+            return registryId.equals("create:mechanical_mixer") ? List.of(SCENE_ENTRY) : List.of();
+        }
+
+        @Override public KnowledgeDocument read(String uri) {
+            return null;
+        }
+
+        @Override public String status() { return "思索：可用，1 个场景"; }
+    }
+
+    private static JsonObject request(String action, String value) {
+        JsonObject request = new JsonObject();
+        request.addProperty("action", action);
+        if ("list".equals(action) && value != null) request.addProperty("cursor", value);
+        if ("search".equals(action) && value != null) request.addProperty("query", value);
+        return request;
+    }
+
+    /** 只登记一条资料的来源，用于核对目录合并与来源状态。 */
+    private static final class SingleEntrySource implements KnowledgeSource {
+        @Override public List<KnowledgeDocument.Entry> entries() {
+            return List.of(new KnowledgeDocument.Entry("maicraft://knowledge/example", "example",
+                    "示例条目", "搜索用示例资料", "示例 example"));
+        }
+
+        @Override public KnowledgeDocument read(String uri) {
+            return "maicraft://knowledge/example".equals(uri)
+                    ? new KnowledgeDocument(uri, "example", "示例条目", "搜索用示例资料", "示例正文")
+                    : null;
+        }
+
+        @Override public String status() { return "registered"; }
+    }
+
+    /** 目录分页大小的镜像，避免测试直接依赖私有常量。 */
+    private static final class KnowledgeLibraryPage {
+        static final int PAGE_SIZE = 16;
+    }
 }

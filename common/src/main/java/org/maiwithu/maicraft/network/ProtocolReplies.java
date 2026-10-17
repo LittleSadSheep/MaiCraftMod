@@ -3,10 +3,11 @@ package org.maiwithu.maicraft.network;
 
 import com.google.gson.JsonObject;
 
-final class ProtocolReplies {
+/** 服务端应答信封的组装：把请求身份带回，标明状态、效果与服务端刻号。 */
+public final class ProtocolReplies {
     private ProtocolReplies() {}
 
-    static JsonObject response(String kind, JsonObject request, String status, String effect, long tick) {
+    public static JsonObject response(String kind, JsonObject request, String status, String effect, long tick) {
         JsonObject reply = new JsonObject();
         reply.addProperty("bootstrap", ProtocolJson.BOOTSTRAP);
         reply.addProperty("kind", kind);
@@ -20,14 +21,14 @@ final class ProtocolReplies {
         return reply;
     }
 
-    static JsonObject error(JsonObject request, String status, String effect, String code, String message, long tick) {
+    public static JsonObject error(JsonObject request, String status, String effect, String code, String message, long tick) {
         JsonObject reply = response("receipt", request, status, effect, tick);
         reply.addProperty("code", code);
         reply.addProperty("message", message == null ? code : message.substring(0, Math.min(message.length(), 256)));
         return reply;
     }
 
-    static JsonObject reject(JsonObject request, String code, String message, long tick) {
+    public static JsonObject reject(JsonObject request, String code, String message, long tick) {
         return error(request, "rejected", "not_applied", code, message, tick);
     }
 }

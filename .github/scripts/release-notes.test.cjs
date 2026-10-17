@@ -65,3 +65,9 @@ test('CRLF 日志与带附加文字的标题仍能取出正文', () => {
   const text = '# 更新日志\r\n\r\n## [未发布]\r\n\r\n暂无。\r\n\r\n## [0.1.10] - 2026-10-08 (回补)\r\n\r\n- 换行符不影响。\r\n';
   assert.equal(extract(text, '0.1.10').body, '- 换行符不影响。');
 });
+
+test('支持预发布版本说明提取，未命名时退回未发布段落', () => {
+  const rcLog = '# 更新日志\n\n## [未发布]\n\n- 预览功能。\n\n## [1.0.0-rc1] - 2026-10-17\n\n- RC1 特性。\n';
+  assert.equal(extract(rcLog, '1.0.0-rc1').body, '- RC1 特性。');
+  assert.equal(extract(rcLog, '1.0.0-rc2').source, '[未发布]');
+});

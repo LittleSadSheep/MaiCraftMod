@@ -1,0 +1,148 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.behavior.navigation.baritone;
+
+import java.util.Objects;
+import java.util.function.UnaryOperator;
+
+import net.minecraft.core.BlockPos;
+import org.maiwithu.maicraft.behavior.navigation.WalkArrival;
+import org.maiwithu.maicraft.behavior.navigation.WalkReport;
+import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
+import org.maiwithu.maicraft.kernel.result.Problem;
+
+/**
+ * 一次走到运行的逐刻判断：只读观察，给出一刻的走到情况与要做的动作。
+ * 身体在空中时不响应停下请求——等到落回地面或站上支撑才真正交出身体，
+ * 免得把一次可以避免的坠落换成中途撒手。到达判断交给 {@link WalkArrival}，
+ * 这里不按目标类型分别写一遍。
+ */
+final class WalkRunProgress {
+
+    /** 需要执行方做的动作；NONE 之外的动作只在状态切换的一刻给出。 */
+    enum Action { NONE, CANCEL_ROUTE, FINISH }
+
+    /**
+     * 一刻的观察：脚下格与身体状态来自角色，路线状态来自寻路引擎。
+     * {@code routePresent} 与 {@code calculating} 分别表示已有可走的路线和仍在搜索。
+     * {@code calcError} 是算路程序出错时的异常说明：有它时这次没算出路线是程序的问题，不是没有路。
+     */
+    record Observation(BlockPos feet, boolean onGround, boolean inWater,
+                       boolean routePresent, boolean calculating, boolean calcFailed, String calcError) {
+
+        Observation(BlockPos feet, boolean onGround, boolean inWater,
+                    boolean routePresent, boolean calculating, boolean calcFailed) {
+            this(feet, onGround, inWater, routePresent, calculating, calcFailed, null);
+        }
+    }
+
+    record Conclusion(WalkReport report, Action action, boolean done, boolean progressed) {}
+
+    private NavGoal goal;
+    private WalkReport report = WalkReport.planning();
+    private boolean crossedWater;
+    private boolean stopRequested;
+    /** 走不通的问题补过现场没有。 */
+    private boolean failureExplained;
+
+    WalkRunProgress(NavGoal goal) {
+        // 没有目标就无从判断到没到：这是调用方的程序错误，建的时候就拒绝，不在走的路上兜底。
+        this.goal = Objects.requireNonNull(goal, "goal");
+    }
+
+    /** 走着换了目标点：到没到从这一刻起按新目标判；已经有结论的不改。 */
+    void retarget(NavGoal next) {
+        this.goal = Objects.requireNonNull(next, "goal");
+    }
+
+    WalkReport report() {
+        return report;
+    }
+
+    /** 请求中途停下；到达或失败后请求不再改变结果。 */
+    void requestStop() {
+        stopRequested = true;
+    }
+
+    /**
+     * 交出身体时就地按"已停下"结算：停在最近一次看到的位置；已经有结论的不改。
+     * 还在算路、一步没迈就交出身体时，最近一次看到的位置还没有，用交出时角色脚下的格子；
+     * 那也读不到就按"还没上路就让出了身体"失败收场——无论如何都要有结论，交出身体这一步不能卡住。
+     *
+     * @param feetNow 交出身体这一刻角色脚下的格子；读不到为 null
+     */
+    void stopWhereLastSeen(BlockPos feetNow) {
+        if (done()) return;
+        BlockPos feet = report.feet() != null ? report.feet() : feetNow;
+        report = feet != null
+                ? WalkReport.stopped(feet, crossedWater)
+                : WalkReport.failed(Problem.of(Problem.Kind.STUCK, "还在算路就让出了身体，这一趟没有上路", null),
+                        null, crossedWater);
+    }
+
+    boolean stopRequested() {
+        return stopRequested;
+    }
+
+    /** 由执行方在路线确实无法继续时写入失败（长时间没有进展、引擎内部出错等）。 */
+    void fail(Problem problem, BlockPos feet) {
+        if (done()) return;
+        report = WalkReport.failed(problem, feet, crossedWater);
+    }
+
+    /** 已经走不通了：把问题换成补了现场的那一份；只补一次，后面的观察不再改它。 */
+    void explainFailure(UnaryOperator<Problem> explain) {
+        if (report.state() != WalkReport.State.FAILED || failureExplained) return;
+        failureExplained = true;
+        report = WalkReport.failed(explain.apply(report.problem()), report.feet(), report.crossedWater());
+    }
+
+    /** 算路程序出错的问题：写明是程序的问题和异常本身，建议先做不用走路的事。 */
+    static Problem programError(String calcError) {
+        return Problem.of(Problem.Kind.INTERNAL_ERROR, "寻路程序出错，这次没算出路线，不是没有路：" + calcError,
+                "这是程序的问题，不是地形挡路：换目标、换方向、带垫脚料都绕不开，先做不用走路的事");
+    }
+
+    boolean done() {
+        var state = report.state();
+        return state == WalkReport.State.ARRIVED || state == WalkReport.State.STOPPED
+                || state == WalkReport.State.FAILED;
+    }
+
+    Conclusion observe(Observation o) {
+        if (done()) {
+            return new Conclusion(report, Action.NONE, true, false);
+        }
+        // 泅渡发生在路上就如实记账；到达后不再把水里的漂动算进这段路。
+        crossedWater |= o.inWater && o.routePresent;
+
+        if (o.calcFailed && !o.routePresent) {
+            // 算路程序出错与真的没有路分开说：程序出错时换目标、带垫料都绕不开，不能让调用方当成地形问题反复试。
+            report = WalkReport.failed(o.calcError != null ? programError(o.calcError)
+                    : Problem.of(Problem.Kind.UNREACHABLE, "没有能走到目标的路线", null), o.feet, crossedWater);
+            return new Conclusion(report, Action.CANCEL_ROUTE, true, false);
+        }
+
+        // 到达以身体为准：目标格判断通过且站实落地；宽松目标允许水里漂进范围。
+        if (WalkArrival.reached(goal, o.feet, o.onGround, o.inWater)) {
+            report = WalkReport.arrived(o.feet, crossedWater);
+            return new Conclusion(report, Action.FINISH, true, true);
+        }
+
+        // 中途停下分两步：请求先记下，身体仍在空中时继续沿路线走到安全边界再交出。
+        if (stopRequested && o.onGround) {
+            report = WalkReport.stopped(o.feet, crossedWater);
+            Action action = o.routePresent ? Action.CANCEL_ROUTE : Action.NONE;
+            return new Conclusion(report, action, true, true);
+        }
+
+        // 已请求停下而身体还在空中：路线保留，执行段继续把身体带回支撑，落地一刻再取消并交出；
+        // 只要还有路线在路上走，走到情况就仍是在路上，不冒充停稳。
+        var state = o.routePresent ? WalkReport.State.ON_THE_WAY : WalkReport.State.PLANNING;
+        if (state == WalkReport.State.ON_THE_WAY) {
+            report = WalkReport.onTheWay(o.feet, crossedWater);
+        } else {
+            report = WalkReport.planning();
+        }
+        return new Conclusion(report, Action.NONE, false, false);
+    }
+}

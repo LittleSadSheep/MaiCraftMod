@@ -1,0 +1,261 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.behavior.approach;
+
+import net.minecraft.core.BlockPos;
+import net.minecraft.util.Mth;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+import java.util.OptionalDouble;
+
+/**
+ * 站位判断：围着目标找能落脚的格子，按能到、够得着、看得见、站得稳四项筛，再按走过去的代价排好序。
+ * 只站正面那一侧的目标（写告示牌）先按正背筛，背面那一侧的候选不进排序。
+ * 纯函数：所有世界事实都从只读视图问，所有距离数值都从够得着规则拿，这里只做计算，不动角色。
+ *
+ * <p>候选不过四项时不丢掉事实：每个被拒的位置带着败在哪一项记进结果，
+ * 换站位用它交代试过什么，站位补救从"只差一点"的被拒位置里挑补救对象。
+ */
+public final class StandSpots {
+
+    /** 脚下落差超过这么多格就不站：再深就是往下跳，不是走过去。类别：玩家常识。 */
+    static final double MAX_DROP = 3.0;
+
+    /** 围着目标扫候选站位的水平半径（格）：盖住交互距离属性被装备撑大后的范围。 */
+    private static final int SCAN_RADIUS = 5;
+
+    /**
+     * 候选脚位比目标低多少格还要扫：眼睛比脚高一格半，低于目标五格的脚位仍可能够到天花板上的矿。
+     * 类别：游戏事实（眼高与方块触及距离）。
+     */
+    private static final int SCAN_BELOW = 5;
+
+    /** 候选脚位比目标高多少格还要扫：站在高处往下够坑里的东西。 */
+    private static final int SCAN_ABOVE = 3;
+
+    /** 床距离的高度差上限：服务端对床横向卡三格、高度只允许差两格。类别：游戏事实。 */
+    private static final int BED_VERTICAL_LIMIT = 2;
+
+    /**
+     * 挑床边的候选站位时横向要留的余量（格）：走到站位只保证站进那一格，人常停在进格子那一侧的边上，
+     * 离床最远能比格子中心多出半格；原版按人的精确位置量床距，离床三格的那一圈停在外沿就"床太远了"。
+     * 所以候选只挑横向两格以内的格子，走到哪一边都够得着。类别：游戏事实（原版床距按精确位置量）。
+     */
+    private static final double BED_CELL_SLACK = 0.5;
+
+    /** 原版 Q 丢出的东西从眼睛下方这么多格出手。类别：游戏事实。 */
+    private static final double TOSS_RELEASE_DROP = 0.3;
+
+    /**
+     * 往一格里扔东西时，出手点至少比接住东西的地方高这么多格：再低东西飞平了，撞上那一格的侧面。
+     * 高出三格以上，竖直方向的随机偏差在下落途中放大，落点散出那一格。类别：游戏事实（丢出物的抛物线）。
+     */
+    private static final double TOSS_MIN_RISE = 0.2;
+    private static final double TOSS_MAX_RISE = 3.0;
+
+    /**
+     * 往一格里扔东西时，眼睛离那一格中心的水平距离：只站正挨着它的那四格（一格远）。
+     * 斜对角或再远一格，丢出物竖直方向的随机偏差会让落点散出那一格；站在它正上方也不行，锯会割脚。
+     * 类别：游戏事实（丢出物的抛物线与随机偏差）。
+     */
+    private static final double TOSS_MIN_FLAT = 0.5;
+    private static final double TOSS_MAX_FLAT = 1.1;
+
+    /** 一次站位搜索的结果：能用的排好序，被拒的带着失败项。 */
+    public record Ranking(List<StandSpot> spots, List<RejectedSpot> rejected) {
+    }
+
+    private StandSpots() {}
+
+    /**
+     * 找目标周围的候选站位。顺序按走过去的代价从小到大，没有代价信息（寻路没接上）时按远近排。
+     * 没加载的格子直接跳过：既不能站，也不算"附近没有站位"的理由。
+     */
+    public static Ranking find(ApproachTarget target, ReachRules reach,
+                               ApproachWorldView world, WalkCost walking, ProtectedCells guarded) {
+        List<StandSpot> spots = new ArrayList<>();
+        List<RejectedSpot> rejected = new ArrayList<>();
+        BlockPos anchor = target.anchorBlock();
+        BlockPos current = world.currentFeet();
+        for (int dx = -SCAN_RADIUS; dx <= SCAN_RADIUS; dx++) {
+            for (int dy = -SCAN_BELOW; dy <= SCAN_ABOVE; dy++) {
+                for (int dz = -SCAN_RADIUS; dz <= SCAN_RADIUS; dz++) {
+                    review(new BlockPos(anchor.getX() + dx, anchor.getY() + dy, anchor.getZ() + dz),
+                            target, reach, world, walking, guarded, current, spots, rejected);
+                }
+            }
+        }
+        spots.sort(null);
+        return new Ranking(spots, rejected);
+    }
+
+    /**
+     * 到了之后的核对：角色站在给定的位置上，够得着吗、看得见吗、落地了吗。
+     * 通过返回 empty；不过时返回最先不过的那一项，用玩家能懂的话说。
+     */
+    public static Optional<String> checkArrival(ApproachTarget target, ReachRules reach,
+                                                ApproachWorldView world, ProtectedCells guarded) {
+        return checkArrival(target, reach, world, guarded, false);
+    }
+
+    /**
+     * 到了之后的核对；{@code mayStandOnTarget} 为真时允许站在要挖的那格上（就地挖的兜底用，
+     * 那时下面是实地或摔不坏才放行）。其余判定与公开重载一致。
+     */
+    static Optional<String> checkArrival(ApproachTarget target, ReachRules reach,
+                                                 ApproachWorldView world, ProtectedCells guarded,
+                                                 boolean mayStandOnTarget) {
+        BlockPos feet = world.currentFeet();
+        if (!world.onGround()) return Optional.of("还没落地");
+        // 站的这格不能站（要往这里放东西、或受保护）：先挪开。实机让它就地放工作台，人站在要放的那格里，
+        // 原版放不下去，原地试了八千多次。
+        if (guarded.contains(feet)) return Optional.of("站的这格要放东西或受保护，得挪开");
+        // 写告示牌这类只站正面的目标，人已经站在背面时先报背面：在这里点下去编辑的是背面那一面。
+        String behind = sideFailure(feet, target);
+        if (behind != null) return Optional.of(behind);
+        // 已经站在这里：床距按人此刻的精确位置量，不留余量，和原版点床时的判定一模一样。
+        String reachFailure = reachFailure(target, reach, world.currentPosition(), 0.0, world.currentEye());
+        if (reachFailure != null) return Optional.of(reachFailure);
+        if (!world.visibleFrom(world.currentEye(), target)) return Optional.of("看不见");
+        // 要挖的那格正好踩在脚下：先看一眼下面，岩浆或看不见底的洞不在这里动手，换旁边一格。
+        if (target.removesBlock() && !mayStandOnTarget) {
+            String under = standingOnTargetFailure(feet, target, world);
+            if (under != null) return Optional.of(under);
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * 人正好踩在要挖的那格上时的下看判断：下面是岩浆或看不见底的洞，就不站在这里挖（返回败项）；
+     * 下面是实地、或掉下去摔不坏，原地挖。非站在目标上时返回 null。
+     */
+    static String standingOnTargetFailure(BlockPos feet, ApproachTarget target, ApproachWorldView world) {
+        if (!target.removesBlock() || !feet.below().equals(target.block())) return null;
+        return underfootFailure(target.block(), world);
+    }
+
+    /**
+     * 要挖的那格下面是什么的结论：岩浆掉进去就是死，看不见底的洞摔不死也爬不上来，
+     * 这两种都不在它上面挖；实地或落差不超过 {@link #MAX_DROP} 的坑摔不坏，原地挖。
+     */
+    static String underfootFailure(BlockPos targetCell, ApproachWorldView world) {
+        if (world.lavaUnder(targetCell)) return "要挖的那格下面是岩浆";
+        if (world.dropBelow(targetCell) > MAX_DROP) return "要挖的那格下面看不见底";
+        return null;
+    }
+
+    /** 一个候选位置过一遍四项检查；过得去就带着代价进候选表，过不去就带着失败项进被拒表。 */
+    private static void review(BlockPos feet, ApproachTarget target, ReachRules reach,
+                               ApproachWorldView world, WalkCost walking, ProtectedCells guarded,
+                               BlockPos current, List<StandSpot> spots, List<RejectedSpot> rejected) {
+        if (!world.isLoaded(feet)) return;
+        String steady = steadyFailure(feet, world, guarded);
+        if (steady != null) {
+            rejected.add(new RejectedSpot(feet, steady));
+            return;
+        }
+        // 候选正好踩在要挖的那格上：先看一眼下面，岩浆或看不见底的洞不当站位，免得挖穿脚下掉进去。
+        String underfoot = standingOnTargetFailure(feet, target, world);
+        if (underfoot != null) {
+            rejected.add(new RejectedSpot(feet, underfoot));
+            return;
+        }
+        // 只站正面的目标（写告示牌）先按正背筛：背面那一侧的位置连距离与视线都不用看。
+        String behind = sideFailure(feet, target);
+        if (behind != null) {
+            rejected.add(new RejectedSpot(feet, behind));
+            return;
+        }
+        Vec3 eye = new Vec3(feet.getX() + 0.5, feet.getY() + reach.eyeHeight(), feet.getZ() + 0.5);
+        // 还没走过去：按格子中心估，床距留出"停在格子哪一边都够得着"的余量。
+        String tooFar = reachFailure(target, reach, Vec3.atBottomCenterOf(feet), BED_CELL_SLACK, eye);
+        if (tooFar != null) {
+            rejected.add(new RejectedSpot(feet, tooFar));
+            return;
+        }
+        if (!world.visibleFrom(eye, target)) {
+            rejected.add(new RejectedSpot(feet, "看不见"));
+            return;
+        }
+        OptionalDouble cost = walking.from(current, feet);
+        // 寻路没接上或走不过去都记成"到不了"；有代价的按代价排，没有的按远近排到末尾。
+        if (cost.isEmpty()) {
+            rejected.add(new RejectedSpot(feet, "到不了"));
+            return;
+        }
+        spots.add(new StandSpot(feet, cost.getAsDouble()));
+    }
+
+    /** 站得稳检查：脚下实心、头顶两格空、落差不大、不在液体里、旁边没岩浆、不踩受保护的格子。 */
+    private static String steadyFailure(BlockPos feet, ApproachWorldView world, ProtectedCells guarded) {
+        if (guarded.contains(feet)) return "受保护";
+        if (!world.solidFloor(feet)) return "脚下悬空";
+        if (!world.headroom(feet)) return "头顶没空间";
+        if (world.dropBelow(feet) > MAX_DROP) return "落差太深";
+        if (world.inFluid(feet)) return "泡在液体里";
+        if (world.lavaBeside(feet)) return "旁边有岩浆";
+        return null;
+    }
+
+    /**
+     * 只站正面那一侧的目标（写告示牌）：站位不在正面那一侧时拒为"背面"，没有这个约束的目标都算正面。
+     * 判断和原版决定"这次编辑正面还是背面"用同一个式子：站位中心相对告示牌中心的水平方位角，
+     * 与正面朝向角相差不超过直角算正面，站到另一半平面点下去会落在告示牌背面。
+     */
+    private static String sideFailure(BlockPos feet, ApproachTarget target) {
+        if (target.frontYaw() == null) return null;
+        double offsetX = feet.getX() + 0.5 - (target.block().getX() + 0.5);
+        double offsetZ = feet.getZ() + 0.5 - (target.block().getZ() + 0.5);
+        float angleFromSign = (float) (Mth.atan2(offsetZ, offsetX) * 180.0F / Math.PI) - 90.0F;
+        return Mth.degreesDifferenceAbs(target.frontYaw().floatValue(), angleFromSign) > 90.0F ? "背面" : null;
+    }
+
+    /**
+     * 够得着检查：按交互种类取距离规则，返回失败项，够得着返回 null。
+     *
+     * @param standing 脚底的位置：已经站着就是精确位置，候选站位取格子底面中心
+     * @param bedSlack 床距横向要留的余量：候选站位留出停在格子边上的半格，已经站着不留
+     */
+    private static String reachFailure(ApproachTarget target, ReachRules reach, Vec3 standing, double bedSlack,
+                                       Vec3 eye) {
+        return switch (target.kind()) {
+            // 方块与实体：从眼睛到目标边缘的直线距离不超属性值，和角色自己伸手判定同源。
+            case BLOCK -> eye.distanceTo(nearestPoint(target.bounds(), eye)) > reach.blockRange() ? "够不着" : null;
+            case ENTITY -> eye.distanceTo(nearestPoint(target.bounds(), eye)) > reach.entityRange() ? "够不着" : null;
+            // 床：服务端按床底面中心分轴卡距离，横向不超过床距离档，高度差不超过两格。
+            case BED -> bedOutOfRange(standing, target.block(), reach.bedDistance() - bedSlack) ? "够不着" : null;
+            // 往一格里扔：不看交互距离，看出手点比接住东西的地方高多少、离那一格多近。
+            case TOSS -> tossFailure(target, eye);
+        };
+    }
+
+    /** 往一格里扔东西的站位：出手点比接住东西的高度高一截又不太高，人站在那一格正旁边、不在它正上方。 */
+    private static String tossFailure(ApproachTarget target, Vec3 eye) {
+        double rise = eye.y - TOSS_RELEASE_DROP - target.bounds().minY;
+        if (rise < TOSS_MIN_RISE) return "比落点低，扔不进去";
+        if (rise > TOSS_MAX_RISE) return "比落点高太多，扔下去会偏";
+        double flat = Math.hypot(eye.x - target.center().x, eye.z - target.center().z);
+        if (flat < TOSS_MIN_FLAT) return "站在它正上方";
+        if (flat > TOSS_MAX_FLAT) return "离得太远，扔不准";
+        return null;
+    }
+
+    /** 包围盒上离给定点最近的点：把点的三个坐标各自夹进盒子的范围。 */
+    private static Vec3 nearestPoint(AABB box, Vec3 point) {
+        return new Vec3(
+                Math.clamp(point.x, box.minX, box.maxX),
+                Math.clamp(point.y, box.minY, box.maxY),
+                Math.clamp(point.z, box.minZ, box.maxZ));
+    }
+
+    // 原版量床距：人脚底的位置和床那一格的底面中心比，东西、南北各不超过横向上限，高度差不超过两格。
+    private static boolean bedOutOfRange(Vec3 standing, BlockPos bed, double horizontalLimit) {
+        Vec3 bottom = Vec3.atBottomCenterOf(bed);
+        return Math.abs(standing.x - bottom.x) > horizontalLimit
+                || Math.abs(standing.z - bottom.z) > horizontalLimit
+                || Math.abs(standing.y - bottom.y) > BED_VERTICAL_LIMIT;
+    }
+}

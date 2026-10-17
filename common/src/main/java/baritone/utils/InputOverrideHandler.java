@@ -21,10 +21,11 @@ import baritone.api.event.events.TickEvent;
 import baritone.api.utils.IInputOverrideHandler;
 import baritone.api.utils.input.Input;
 import baritone.behavior.Behavior;
-import org.maiwithu.maicraft.core.pathing.baritone.EmbeddedBaritoneRuntime;
+
 
 import java.util.HashMap;
 import java.util.Map;
+import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 
 /**
  * An interface with the game's control system allowing the ability to
@@ -87,12 +88,8 @@ public final class InputOverrideHandler extends Behavior implements IInputOverri
         if (isInputForcedDown(Input.CLICK_LEFT)) {
             setInputForceState(Input.CLICK_RIGHT, false);
         }
-        // Clicks are receipts owned by MaiCraft's actor boundary. Never let the legacy helpers
-        // call MultiPlayerGameMode directly or treat its immediate return value as success.
-        EmbeddedBaritoneRuntime.applyActionState(this);
-        // Never install PlayerMovementInput: MaiCraft's actor boundary is the sole LocalPlayer.input
-        // owner. Forward this tick's low-level decisions through its one-tick body lease instead.
-        EmbeddedBaritoneRuntime.applyInputState(this);
+        // 按键不在这里推给角色输入层：走到的实现方每刻读取本接口的按键状态，
+        // 自己合成移动输入提交；挖掘与右键点击仍由这里保持强制状态。
     }
 
     public BlockBreakHelper getBlockBreakHelper() {

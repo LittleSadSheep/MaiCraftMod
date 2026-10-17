@@ -153,9 +153,8 @@ public class MovementDescend extends Movement {
             // and potentially replace the water we're going to fall into
             return false;
         }
-        // 下落柱的通行检查只利用现场已有缓冲物，准备新放用品的完整证明留给真正的最终落点。
-        if (!MovementHelper.canWalkThrough(context, destX, y - 2, destZ, below)
-                && context.existingLandingPlans(new BlockPos(destX, y - 2, destZ)).isEmpty()) {
+        // 下落柱往下第二格得穿得过去才算一条下落路；落在哪、摔得疼不疼留给下面逐格往下找落点时判断。
+        if (!MovementHelper.canWalkThrough(context, destX, y - 2, destZ, below)) {
             return false;
         }
         double costSoFar = 0;
@@ -171,11 +170,6 @@ public class MovementDescend extends Movement {
             BlockState ontoBlock = context.get(destX, newY, destZ);
             int unprotectedFallHeight = fallHeight - (y - effectiveStartHeight); // equal to fallHeight - y + effectiveFallHeight, which is equal to -newY + effectiveFallHeight, which is equal to effectiveFallHeight - newY
             double tentativeCost = WALK_OFF_BLOCK_COST + FALL_N_BLOCKS_COST[unprotectedFallHeight] + frontBreak + costSoFar;
-            if (reachedMinimum && !context.existingLandingPlans(new BlockPos(destX, newY, destZ), effectiveStartHeight - newY).isEmpty()
-                    && MovementHelper.canWalkOn(context, destX, newY - 1, destZ)) {
-                res.x = destX; res.y = newY; res.z = destZ; res.cost = tentativeCost;
-                return true;
-            }
             if (reachedMinimum && MovementHelper.isWater(ontoBlock)) {
                 if (!MovementHelper.canWalkThrough(context, destX, newY, destZ, ontoBlock)) {
                     return false;
@@ -225,24 +219,34 @@ public class MovementDescend extends Movement {
             if (ontoBlock.getBlock() == Blocks.FARMLAND) {
                 return false; // 长距离坠落在农田上会把耕地踩回泥土,落点禁耕地
             }
-            boolean harmless = context.canLandWithoutDamage(x, y, z, effectiveStartHeight, destX, newY, destZ, ontoBlock);
-            var dropPlans = reachedMinimum && !harmless
-                    ? context.landingPlans(new BlockPos(destX, newY + 1, destZ), effectiveStartHeight - newY - 1)
-                    : List.of();
-            var dropBoat = reachedMinimum && !harmless
-                    ? context.landingBoatPlan(new BlockPos(x, y, z), new BlockPos(destX, newY + 1, destZ))
-                    : null;
-            if (reachedMinimum && !harmless && dropPlans.isEmpty() && dropBoat == null) {
-                // 有预测伤害且既无既有辅助也不可自动布置：准入闸门在此拒绝，样本留给接近回执对账。
+            // 落地会掉血的一跳：摔完还剩一半以上的血就像玩家那样直接跳，扣的血折成路程代价，附近能走下去就走下去；
+            // 再高才看落点有没有接得住人的办法（现成的水、蛛网，或身上带着水桶、干草这类），
+            // 多算一次放东西的代价，由走路在出发点备好、空中放下、落地收回；都没有就不让角色白挨摔，路线另找下法。
+            if (reachedMinimum && !context.canLandWithoutDamage(x, y, z, effectiveStartHeight,
+                    destX, newY, destZ, ontoBlock)) {
+                double injury = context.fallInjuryCost(x, y, z, effectiveStartHeight, destX, newY, destZ, ontoBlock);
+                if (injury < COST_INF) {
+                    res.x = destX;
+                    res.y = newY + 1;
+                    res.z = destZ;
+                    res.cost = tentativeCost + injury;
+                    return false;
+                }
+                BlockPos landing = new BlockPos(destX, newY + 1, destZ);
+                int drop = effectiveStartHeight - newY - 1;
+                if (!context.landingPlans(landing, drop).isEmpty()
+                        || context.landingBoat(new BlockPos(x, y, z), landing, drop) != null) {
+                    res.x = destX;
+                    res.y = newY + 1;
+                    res.z = destZ;
+                    res.cost = tentativeCost + context.placeBucketCost();
+                    return true;
+                }
                 DescentAdmissionLog.rejected(BlockPos.asLong(destX, newY, destZ), effectiveStartHeight - newY,
                         "injurious_drop_without_protection");
+                return false;
             }
-            if (reachedMinimum && !harmless && (!dropPlans.isEmpty() || dropBoat != null)) {
-                res.x = destX; res.y = newY + 1; res.z = destZ;
-                res.cost = tentativeCost + context.placeBucketCost();
-                return true;
-            }
-            if (reachedMinimum && harmless && context.canSurviveFall(x, y, z, effectiveStartHeight,
+            if (reachedMinimum && context.canSurviveFall(x, y, z, effectiveStartHeight,
                     destX, newY, destZ, ontoBlock)) {
                 res.x = destX;
                 res.y = newY + 1;

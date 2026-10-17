@@ -324,6 +324,55 @@ public enum Moves {
         }
     },
 
+    // 穿着喷气背包、气够时直接飞上两格以上的高处，落到这一边头一个站得住的地方；不再一块块垫方块往上搭。
+    FLY_UP_NORTH(0, +2, -1, false, true) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementFlyUp.cost(context, src, Direction.NORTH);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementFlyUp.cost(context, x, y, z, Direction.NORTH, result);
+        }
+    },
+
+    FLY_UP_SOUTH(0, +2, +1, false, true) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementFlyUp.cost(context, src, Direction.SOUTH);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementFlyUp.cost(context, x, y, z, Direction.SOUTH, result);
+        }
+    },
+
+    FLY_UP_EAST(+1, +2, 0, false, true) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementFlyUp.cost(context, src, Direction.EAST);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementFlyUp.cost(context, x, y, z, Direction.EAST, result);
+        }
+    },
+
+    FLY_UP_WEST(-1, +2, 0, false, true) {
+        @Override
+        public Movement apply0(CalculationContext context, BetterBlockPos src) {
+            return MovementFlyUp.cost(context, src, Direction.WEST);
+        }
+
+        @Override
+        public void apply(CalculationContext context, int x, int y, int z, MutableMoveResult result) {
+            MovementFlyUp.cost(context, x, y, z, Direction.WEST, result);
+        }
+    },
+
     PARKOUR_NORTH(0, 0, -4, true, true) {
         @Override
         public Movement apply0(CalculationContext context, BetterBlockPos src) {

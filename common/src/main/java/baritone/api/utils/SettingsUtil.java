@@ -48,6 +48,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 
 public class SettingsUtil {
 
@@ -95,7 +96,7 @@ public class SettingsUtil {
             });
         } catch (NoSuchFileException ignored) {
             // Embedded build: every navigation configures the settings it needs programmatically
-            // (see EmbeddedBaritoneRuntime.configure), so a missing persisted file is the normal
+            // (see BaritoneInternals.configure), so a missing persisted file is the normal
             // first-run state. Upstream broadcasts "Baritone settings file not found, resetting."
             // to chat here; that message is pure noise for us, so it stays silent.
         } catch (Exception ex) {

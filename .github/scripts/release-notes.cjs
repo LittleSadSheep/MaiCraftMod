@@ -5,10 +5,12 @@ const fs = require('node:fs');
 const UNRELEASED = '未发布';
 const CHANGELOG = 'CHANGELOG.md';
 
-// 版本号决定 Release 的标签和标题，必须是递增后的三段数字，不接受标签前缀等其他写法。
+const VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*))?$/;
+
+// 版本号决定 Release 的标签和标题，支持递增后的三段数字及预发布后缀，不接受标签前缀等其他写法。
 function assertVersion(version) {
-  if (typeof version !== 'string' || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) {
-    throw new Error(`发布版本必须是 主版本.次版本.补丁版本，收到 ${String(version)}`);
+  if (typeof version !== 'string' || !VERSION_PATTERN.test(version)) {
+    throw new Error(`发布版本必须是 主版本.次版本.补丁版本[-预发布标识]，收到 ${String(version)}`);
   }
   return version;
 }

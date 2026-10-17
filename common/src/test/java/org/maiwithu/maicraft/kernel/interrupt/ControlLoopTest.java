@@ -1,0 +1,854 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.kernel.interrupt;
+
+import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.kernel.result.Change;
+import org.maiwithu.maicraft.kernel.result.Problem;
+import org.maiwithu.maicraft.kernel.result.TaskResult;
+import org.maiwithu.maicraft.kernel.task.CloseReason;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
+import org.maiwithu.maicraft.kernel.task.KeepsTempTaskFacts;
+import org.maiwithu.maicraft.kernel.task.Task;
+import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.maiwithu.maicraft.kernel.task.TickResult;
+import org.maiwithu.maicraft.kernel.task.Urgency;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.Supplier;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * 控制循环的调度：不打断时主任务照常推进；找空当的只在两个动作之间插进来；
+ * 停下不安全时忍住；必须立刻处理的打断一切；临时任务做完后主任务从原地接着做。
+ */
+class ControlLoopTest {
+
+    private static final TickContext TICK = new TestContext(1);
+
+    @Test
+    void noNeedFiresSoMainTaskAdvances() {
+        FakeTask main = new FakeTask("挖矿", Interruptibility.WORKING);
+        ControlLoop loop = new ControlLoop(List.of(FakeNeed.never("饥饿")));
+        loop.setMainTask(main);
+
+        ControlLoop.Decision decision = loop.tick(TICK);
+
+        ControlLoop.Decision.Advanced advanced = assertAdvanced(decision);
+        assertSame(main, advanced.task());
+        assertNull(advanced.interrupting());
+        assertNull(advanced.deferred());
+        assertNull(advanced.finished());
+        assertEquals(1, main.started);
+        assertEquals(1, main.ticks);
+        assertEquals(0, main.pauses);
+    }
+
+    @Test
+    void nothingToRunWithNoTaskAndNoNeed() {
+        ControlLoop loop = new ControlLoop(List.of(FakeNeed.never("饥饿")));
+        assertSame(ControlLoop.Decision.IDLE, loop.tick(TICK));
+    }
+
+    @Test
+    void noTaskSoEvenLaterNeedGetsItsTurn() {
+        // 手上没有任务就没有东西要保护：饿了也能马上开吃，不用等空当。
+        ControlLoop loop = new ControlLoop(List.of(FakeNeed.always("饥饿", Urgency.LATER)));
+
+        ControlLoop.Decision.Advanced advanced = assertAdvanced(loop.tick(TICK));
+
+        assertEquals("饥饿", advanced.interrupting().name());
+        assertNull(advanced.deferred());
+    }
+
+    @Test
+    void laterNeedWaitsForGapBetweenActions() {
+        // 挖矿挖到一半饿了：忍到两个动作之间再吃。
+        FakeTask main = new FakeTask("挖矿", Interruptibility.BETWEEN_ACTIONS);
+        ControlLoop loop = new ControlLoop(List.of(FakeNeed.always("饥饿", Urgency.LATER)));
+        loop.setMainTask(main);
+
+        assertAdvancedIsTempTask(loop.tick(TICK), "饥饿");
+
+        assertEquals(1, main.pauses);
+    }
+
+    @Test
+    void laterNeedHoldsBackWhileWorking() {
+        FakeTask main = new FakeTask("挖矿", Interruptibility.WORKING);
+        FakeNeed hunger = FakeNeed.always("饥饿", Urgency.LATER);
+        ControlLoop loop = new ControlLoop(List.of(hunger));
+        loop.setMainTask(main);
+
+        ControlLoop.Decision.Advanced advanced = assertAdvanced(loop.tick(TICK));
+
+        // 手上正在干活：饿了忍住，主任务继续；被按住的需求留给调用方提醒。
+        assertSame(main, advanced.task());
+        assertNull(advanced.interrupting());
+        assertSame(hunger, advanced.deferred());
+        assertEquals(0, hunger.created);
+        assertEquals(0, main.pauses);
+    }
+
+    @Test
+    void soonNeedHoldsBackWhenStoppingIsUnsafe() {
+        // 悬空搭桥时被怪打了：先把这一格放稳，不中途停手。
+        FakeTask main = new FakeTask("搭桥", Interruptibility.UNSAFE_TO_STOP);
+        FakeNeed mob = FakeNeed.always("自卫", Urgency.SOON);
+        ControlLoop loop = new ControlLoop(List.of(mob));
+        loop.setMainTask(main);
+
+        ControlLoop.Decision.Advanced advanced = assertAdvanced(loop.tick(TICK));
+
+        assertSame(main, advanced.task());
+        assertSame(mob, advanced.deferred());
+        assertEquals(0, mob.created);
+        assertEquals(0, main.pauses);
+        assertEquals(new ControlLoop.HeldBackNeed("自卫", Urgency.SOON), loop.heldBackNeed(), "面板说得出是谁被按住、多急");
+        assertEquals(Interruptibility.UNSAFE_TO_STOP, loop.askedInterruptibility(), "面板说得出为什么插不进来");
+    }
+
+    @Test
+    void soonNeedAsksAFlyingTaskToLandFirst() {
+        // 飞着的时候饿了：不急，先叫它就近落地；落稳了（能打断了）再去吃，不悬在空中干等，也不松手往下掉。
+        LandingTask main = new LandingTask("飞过去");
+        FakeNeed hunger = FakeNeed.always("吃饭", Urgency.SOON);
+        ControlLoop loop = new ControlLoop(List.of(hunger));
+        loop.setMainTask(main);
+
+        long ask = ControlLoop.ASK_SAFE_STOP_AFTER_TICKS;
+        loop.tick(new TestContext(1));
+        loop.tick(new TestContext(ask));
+        assertEquals(0, main.stopAsks, "一会儿就过去的停不下：先等它自己过去");
+        loop.tick(new TestContext(1 + ask));
+        assertEquals(1, main.stopAsks, "一直停下不安全：叫它先落地");
+        loop.tick(new TestContext(2 + ask));
+        assertEquals(1, main.stopAsks, "已经在收尾，不再叫");
+        assertEquals(0, hunger.created);
+        main.landed = true;
+        ControlLoop.Decision.Advanced advanced = assertAdvanced(loop.tick(new TestContext(3 + ask)));
+
+        assertAdvancedIsTempTask(advanced, "吃饭");
+        assertEquals(1, main.pauses, "插进来时照常让它停手");
+        assertFalse(main.stopping, "停手后不再收尾，回来照原样接着做");
+    }
+
+    @Test
+    void needThatGoesAwayLetsTheFlyingTaskCarryOn() {
+        // 叫它先落地之后需求没了（自己回了血）：叫它照原样接着飞，不白白落下来。
+        LandingTask main = new LandingTask("飞过去");
+        FakeNeed hunger = FakeNeed.of("吃饭", Urgency.SOON, Urgency.SOON, null);
+        ControlLoop loop = new ControlLoop(List.of(hunger));
+        loop.setMainTask(main);
+
+        loop.tick(new TestContext(1));
+        loop.tick(new TestContext(1 + ControlLoop.ASK_SAFE_STOP_AFTER_TICKS));
+        assertTrue(main.stopping);
+        loop.tick(new TestContext(2 + ControlLoop.ASK_SAFE_STOP_AFTER_TICKS));
+
+        assertFalse(main.stopping, "需求没了：不用再收尾");
+        assertEquals(1, main.pauses);
+        assertEquals(0, hunger.created);
+    }
+
+    @Test
+    void soonNeedInterruptsNormalWork() {
+        FakeTask main = new FakeTask("挖矿", Interruptibility.WORKING);
+        ControlLoop loop = new ControlLoop(List.of(FakeNeed.always("自卫", Urgency.SOON)));
+        loop.setMainTask(main);
+
+        assertAdvancedIsTempTask(loop.tick(TICK), "自卫");
+
+        assertEquals(1, main.pauses);
+    }
+
+    @Test
+    void nowNeedInterruptsEvenWhenStoppingIsUnsafe() {
+        // 正往虚空掉：悬空也得马上自救，因为继续手上的活只会死得更快。
+        FakeTask main = new FakeTask("搭桥", Interruptibility.UNSAFE_TO_STOP);
+        ControlLoop loop = new ControlLoop(List.of(FakeNeed.always("坠落", Urgency.NOW)));
+        loop.setMainTask(main);
+
+        assertAdvancedIsTempTask(loop.tick(TICK), "坠落");
+
+        assertEquals(1, main.pauses);
+    }
+
+    @Test
+    void mostUrgentNeedWinsWhenSeveralFire() {
+        // 又饿又被围殴：先挨打的自卫（SOON），饿了（LATER）继续等。
+        FakeTask main = new FakeTask("挖矿", Interruptibility.WORKING);
+        FakeNeed hunger = FakeNeed.always("饥饿", Urgency.LATER);
+        FakeNeed mob = FakeNeed.always("自卫", Urgency.SOON);
+        ControlLoop loop = new ControlLoop(List.of(hunger, mob));
+        loop.setMainTask(main);
+
+        assertAdvancedIsTempTask(loop.tick(TICK), "自卫");
+
+        assertEquals(0, hunger.created);
+    }
+
+    @Test
+    void firstRegisteredNeedWinsWhenEquallyUrgent() {
+        FakeTask main = new FakeTask("挖矿", Interruptibility.WORKING);
+        ControlLoop loop = new ControlLoop(List.of(
+                FakeNeed.always("自卫", Urgency.SOON), FakeNeed.always("换气", Urgency.SOON)));
+        loop.setMainTask(main);
+
+        assertAdvancedIsTempTask(loop.tick(TICK), "自卫");
+    }
+
+    @Test
+    void mainTaskResumesAfterTempTaskFinishes() {
+        FakeTask main = new FakeTask("挖矿", Interruptibility.WORKING);
+        ControlLoop loop = new ControlLoop(List.of(FakeNeed.of("换气",
+                () -> new FakeTask("换气临时", Interruptibility.WORKING).finishingAfter(2),
+                Urgency.NOW, null)));
+        loop.setMainTask(main);
+        assertAdvancedIsTempTask(loop.tick(TICK), "换气");
+
+        // 临时任务这一刻做完了；它是被换气插进来的，结束的一刻仍算在它头上。
+        ControlLoop.Decision.Advanced finished = assertAdvanced(loop.tick(TICK));
+        assertEquals("换气", finished.interrupting().name());
+        assertEquals(TaskResult.Status.DONE, finished.finished().status());
+
+        // 下一刻轮到主任务：从原地接着做，不再 start，也没有再被暂停；被打断的那两刻没有轮到它。
+        ControlLoop.Decision.Advanced resumed = assertAdvanced(loop.tick(TICK));
+        assertSame(main, resumed.task());
+        assertNull(resumed.interrupting());
+        assertEquals(1, main.started);
+        assertEquals(1, main.pauses);
+        assertEquals(1, main.ticks);
+    }
+
+    @Test
+    void displacedTempTaskParksWorkButNotTravel() {
+        // 打完架人已经不在打点：挖矿这种守着原地的主任务停在半路等 LLM，LLM 让接着做就撤掉停住。
+        FakeTask mine = new FakeTask("挖矿", Interruptibility.WORKING);
+        ControlLoop loop = new ControlLoop(List.of(FakeNeed.of("自卫",
+                () -> new MovedTask("自卫临时"), Urgency.NOW, null)));
+        loop.setMainTask(mine);
+        assertAdvancedIsTempTask(loop.tick(TICK), "自卫");
+        assertTrue(loop.tick(TICK) instanceof ControlLoop.Decision.Parked, "回不到原地：主任务停住");
+        assertEquals("离打点 20 格", loop.parkedWhere());
+        loop.unparkMain();
+        assertNull(loop.parkedWhere());
+        assertSame(mine, assertAdvanced(loop.tick(TICK)).task());
+
+        // 去某地本来就在挪地方：被撤离到哪都从新地点接着走，不停下来干等。
+        FakeTask travel = new FakeTask("去某地", Interruptibility.WORKING) {
+            @Override public boolean resumesAnywhere() {
+                return true;
+            }
+        };
+        ControlLoop moving = new ControlLoop(List.of(FakeNeed.of("自卫",
+                () -> new MovedTask("自卫临时"), Urgency.NOW, null)));
+        moving.setMainTask(travel);
+        assertAdvancedIsTempTask(moving.tick(TICK), "自卫");
+        assertFalse(moving.tick(TICK) instanceof ControlLoop.Decision.Parked, "出行不因被撤离而停住");
+        assertNull(moving.parkedWhere());
+        assertSame(travel, assertAdvanced(moving.tick(TICK)).task());
+
+        // 被陌生玩家打了：还不还手由 LLM 定，在哪做都一样的主任务也停下等它发话。
+        FakeTask travelAgain = new FakeTask("去某地", Interruptibility.WORKING) {
+            @Override public boolean resumesAnywhere() {
+                return true;
+            }
+        };
+        ControlLoop hit = new ControlLoop(List.of(FakeNeed.of("自卫",
+                () -> new MovedTask("自卫临时", true), Urgency.NOW, null)));
+        hit.setMainTask(travelAgain);
+        assertAdvancedIsTempTask(hit.tick(TICK), "自卫");
+        assertTrue(hit.tick(TICK) instanceof ControlLoop.Decision.Parked, "等 LLM 发话的：出行也停住");
+    }
+
+    @Test
+    void needsSeeTheAbilityTaskInsideTheGoalShell() {
+        // 目标外壳里正在跑的是打架任务：需求看到的是打架任务本身，才认得出"它自己在打"。
+        FakeTask fight = new FakeTask("打架", Interruptibility.WORKING);
+        FakeTask goal = new FakeTask("目标", Interruptibility.WORKING) {
+            @Override public Task activeTask() {
+                return fight;
+            }
+        };
+        List<Task> seen = new ArrayList<>();
+        SurvivalNeed watcher = new SurvivalNeed() {
+            @Override public String name() {
+                return "看一眼";
+            }
+
+            @Override public Urgency urgency(TickContext context) {
+                return null;
+            }
+
+            @Override public Urgency urgency(TickContext context, Task currentTask) {
+                seen.add(currentTask);
+                return null;
+            }
+
+            @Override public Task createTask(TickContext context) {
+                return null;
+            }
+        };
+        ControlLoop loop = new ControlLoop(List.of(watcher));
+        loop.setMainTask(goal);
+        loop.tick(TICK);
+        assertSame(fight, seen.get(seen.size() - 1));
+    }
+
+    @Test
+    void needDoesNotRelaunchWhileItsTempTaskIsStillLive() {
+        FakeNeed breath = FakeNeed.always("换气", Urgency.NOW);
+        ControlLoop loop = new ControlLoop(List.of(breath));
+        loop.setMainTask(new FakeTask("挖矿", Interruptibility.WORKING));
+        assertAdvancedIsTempTask(loop.tick(TICK), "换气");
+        loop.tick(TICK);
+        loop.tick(TICK);
+
+        // 它的临时任务还在推进（做完的另说），不再为同一个需求创建第二个临时任务。
+        assertEquals(1, breath.created);
+    }
+
+    @Test
+    void finishingTaskIsClosedOnceAndLoopGoesIdle() {
+        FakeTask main = new FakeTask("挖矿", Interruptibility.WORKING).finishingAfter(1);
+        ControlLoop loop = new ControlLoop(List.of(FakeNeed.never("饥饿")));
+        loop.setMainTask(main);
+
+        ControlLoop.Decision.Advanced finished = assertAdvanced(loop.tick(TICK));
+        assertSame(main, finished.task());
+        assertEquals(TaskResult.Status.DONE, finished.finished().status());
+        assertTrue(main.closed);
+        assertEquals(CloseReason.FINISHED, main.closeReason);
+
+        assertSame(ControlLoop.Decision.IDLE, loop.tick(TICK));
+        assertNull(loop.currentTask());
+    }
+
+    @Test
+    void setMainTaskReplacesRunningMainWithReplacedReason() {
+        FakeTask old = new FakeTask("旧活", Interruptibility.WORKING);
+        ControlLoop loop = new ControlLoop(List.of(FakeNeed.never("饥饿")));
+        loop.setMainTask(old);
+        loop.tick(TICK);
+
+        FakeTask replacement = new FakeTask("新活", Interruptibility.WORKING);
+        loop.setMainTask(replacement);
+        ControlLoop.Decision.Advanced advanced = assertAdvanced(loop.tick(TICK));
+
+        assertSame(replacement, advanced.task());
+        assertTrue(old.closed);
+        assertEquals(CloseReason.REPLACED, old.closeReason);
+    }
+
+    @Test
+    void setMainTaskWhileTempTaskRunningReplacesTheSuspendedMain() {
+        FakeTask old = new FakeTask("旧活", Interruptibility.WORKING);
+        ControlLoop loop = new ControlLoop(List.of(FakeNeed.of("换气",
+                () -> new FakeTask("换气临时", Interruptibility.WORKING).finishingAfter(2),
+                Urgency.NOW, null)));
+        loop.setMainTask(old);
+        assertAdvancedIsTempTask(loop.tick(TICK), "换气");
+
+        // 主任务被压在临时任务下面时被替换：临时任务不受影响，做完后轮到的是新主任务。
+        FakeTask replacement = new FakeTask("新活", Interruptibility.WORKING);
+        loop.setMainTask(replacement);
+        assertTrue(old.closed);
+        assertEquals(CloseReason.REPLACED, old.closeReason);
+
+        ControlLoop.Decision.Advanced finished = assertAdvanced(loop.tick(TICK));
+        assertEquals("换气", finished.interrupting().name());
+        ControlLoop.Decision.Advanced resumed = assertAdvanced(loop.tick(TICK));
+        assertSame(replacement, resumed.task());
+        assertEquals(1, replacement.started);
+    }
+
+    @Test
+    void nowNeedNestsAnotherTempTaskOnTopOfOneAlreadyRunning() {
+        // 正在换气时往虚空掉了：立刻处理的连临时任务也打断。
+        FakeTask main = new FakeTask("挖矿", Interruptibility.WORKING);
+        FakeTask breath = new FakeTask("换气临时", Interruptibility.WORKING).finishingAfter(3);
+        // 换气先插进来；第二刻才开始往虚空掉，处理完之后各自不再急。
+        FakeNeed breathNeed = FakeNeed.of("换气", () -> breath, Urgency.SOON, null);
+        FakeNeed fall = FakeNeed.of("坠落",
+                () -> new FakeTask("坠落临时", Interruptibility.WORKING).finishingAfter(2),
+                null, Urgency.NOW, null);
+        ControlLoop loop = new ControlLoop(List.of(breathNeed, fall));
+        loop.setMainTask(main);
+        assertAdvancedIsTempTask(loop.tick(TICK), "换气");
+
+        assertAdvancedIsTempTask(loop.tick(TICK), "坠落");
+        assertEquals(1, breath.pauses);
+
+        // 坠落这一刻做完并收尾；下一刻回到换气，换气做完后回到主任务。
+        ControlLoop.Decision.Advanced fallFinished = assertAdvanced(loop.tick(TICK));
+        assertEquals("坠落", fallFinished.interrupting().name());
+        assertEquals(TaskResult.Status.DONE, fallFinished.finished().status());
+        assertAdvancedIsTempTask(loop.tick(TICK), "换气");
+        ControlLoop.Decision.Advanced breathFinished = assertAdvanced(loop.tick(TICK));
+        assertEquals("换气", breathFinished.interrupting().name());
+        assertEquals(TaskResult.Status.DONE, breathFinished.finished().status());
+        assertSame(main, assertAdvanced(loop.tick(TICK)).task());
+        assertEquals(1, main.started);
+    }
+
+    private void assertAdvancedIsTempTask(ControlLoop.Decision decision, String needName) {
+        ControlLoop.Decision.Advanced advanced = assertAdvanced(decision);
+        assertEquals(needName, advanced.interrupting().name());
+        assertNull(advanced.deferred());
+        assertNull(advanced.finished());
+    }
+
+    private ControlLoop.Decision.Advanced assertAdvanced(ControlLoop.Decision decision) {
+        assertTrue(decision instanceof ControlLoop.Decision.Advanced, "应是推进，实际是 " + decision);
+        return (ControlLoop.Decision.Advanced) decision;
+    }
+
+    /** 本刻上下文替身：离线测试不碰游戏。 */
+    @Test
+    void needWhoseTempTaskFailedWaitsBeforeTakingOverAgain() {
+        // 被埋却刨不动（头上是基岩）：没做成就先缓一阵，主任务有机会动，而不是每刻重建一个刨不动的临时任务。
+        FakeTask main = new FakeTask("挖矿", Interruptibility.WORKING);
+        FakeNeed buried = FakeNeed.always("刨出", Urgency.NOW, () -> new FailingTask("刨出临时"));
+        ControlLoop loop = new ControlLoop(List.of(buried));
+        loop.setMainTask(main);
+
+        for (long tick = 0; tick < ControlLoop.RETRY_AFTER_FAILED_TICKS; tick++) {
+            loop.tick(new TestContext(tick));
+        }
+
+        assertEquals(1, buried.created, "同样急的需求在缓冲期内不再重建临时任务");
+        assertTrue(main.ticks > 0, "缓冲期里主任务照常推进");
+        loop.tick(new TestContext(ControlLoop.RETRY_AFTER_FAILED_TICKS + 1));
+        assertEquals(2, buried.created, "缓冲期过了再试一次");
+    }
+
+    @Test
+    void needThatDoesNotWaitAfterFailureTakesOverAgainRightAway() {
+        // 施工时被僵尸打：自卫没追上（失败）也不缓，下一刻还在挨打就接着插，不让角色站着挨打。
+        FakeTask main = new FakeTask("施工", Interruptibility.WORKING);
+        FakeNeed attacked = new FakeNeed("自卫", new Urgency[] {Urgency.SOON},
+                () -> new FailingTask("自卫临时")) {
+            @Override public boolean waitsAfterFailure() {
+                return false;
+            }
+        };
+        ControlLoop loop = new ControlLoop(List.of(attacked));
+        loop.setMainTask(main);
+
+        for (long tick = 0; tick < 6; tick++) {
+            loop.tick(new TestContext(tick));
+        }
+
+        assertTrue(attacked.created >= 2, "没做成后立刻重来，实际只建了 " + attacked.created + " 次");
+    }
+
+    @Test
+    void mainTaskThatTurnedSurvivalNeedsOffIsNeverInterrupted() {
+        // 寻死这类任务把 survival_needs 关掉：快淹死也不插换气，手上的事照常推进。
+        FakeTask main = new SurvivalOffTask();
+        FakeNeed breath = FakeNeed.always("换气", Urgency.NOW);
+        ControlLoop loop = new ControlLoop(List.of(breath));
+        loop.setMainTask(main);
+
+        for (long tick = 0; tick < 5; tick++) {
+            loop.tick(new TestContext(tick));
+        }
+
+        assertEquals(0, breath.created, "生存需求关掉时不建临时任务");
+        assertTrue(main.ticks > 0, "主任务照常推进");
+    }
+
+    /** 许可里关掉了生存需求的主任务替身。 */
+    static final class SurvivalOffTask extends FakeTask implements SurvivalNeedsOff {
+        SurvivalOffTask() {
+            super("寻死", Interruptibility.WORKING);
+        }
+
+        @Override public boolean survivalNeedsOff() {
+            return true;
+        }
+    }
+
+    @Test
+    void needThatKeepsFailingWaitsLongerEachTime() {
+        // 饿了却弄不到吃的：接连没做成，等待逐次加倍，不每隔五秒就打断一次手上的活。
+        FakeTask main = new FakeTask("挖矿", Interruptibility.WORKING);
+        FakeNeed hunger = FakeNeed.always("饥饿", Urgency.SOON, () -> new FailingTask("进食临时"));
+        ControlLoop loop = new ControlLoop(List.of(hunger));
+        loop.setMainTask(main);
+
+        long secondTry = ControlLoop.RETRY_AFTER_FAILED_TICKS;
+        long thirdTry = secondTry + 2 * ControlLoop.RETRY_AFTER_FAILED_TICKS;
+        for (long tick = 0; tick < thirdTry; tick++) {
+            loop.tick(new TestContext(tick));
+        }
+
+        assertEquals(2, hunger.created, "第二次没做成后要等两倍的时间");
+        loop.tick(new TestContext(thirdTry));
+        assertEquals(3, hunger.created, "加倍后的等待过了再试一次");
+    }
+
+    @Test
+    void needThatGotMoreUrgentDoesNotWaitOutItsBackoff() {
+        FakeTask main = new FakeTask("挖矿", Interruptibility.WORKING);
+        FakeNeed breath = FakeNeed.of("换气", () -> new FailingTask("换气临时"),
+                Urgency.SOON, Urgency.SOON, Urgency.NOW);
+        ControlLoop loop = new ControlLoop(List.of(breath));
+        loop.setMainTask(main);
+
+        loop.tick(new TestContext(0));
+        loop.tick(new TestContext(1));
+        loop.tick(new TestContext(2));
+
+        assertEquals(2, breath.created, "从尽快升到立刻，不等缓冲期就再试");
+    }
+
+    @Test
+    void brokenTempTaskBecomesAResultInsteadOfCrashingTheLoop() {
+        FakeTask main = new FakeTask("挖矿", Interruptibility.WORKING);
+        FakeNeed broken = FakeNeed.always("坏需求", Urgency.NOW, () -> new FakeTask("坏临时", Interruptibility.WORKING) {
+            @Override public TickResult tick(TickContext context) {
+                throw new IllegalStateException("临时任务出错");
+            }
+        });
+        ControlLoop loop = new ControlLoop(List.of(broken));
+        loop.setMainTask(main);
+
+        ControlLoop.Decision.Advanced advanced = assertAdvanced(loop.tick(TICK));
+
+        assertEquals(Problem.Kind.INTERNAL_ERROR, advanced.finished().problem().kind());
+        assertSame(main, loop.currentTask(), "出错的临时任务弹出，主任务还在");
+    }
+
+    @Test
+    void replacingOrEndingTheMainTaskHandsBackWhatItDid() {
+        FakeTask first = new FakeTask("挖矿", Interruptibility.WORKING);
+        FakeTask second = new FakeTask("砍树", Interruptibility.WORKING);
+        ControlLoop loop = new ControlLoop(List.of());
+        loop.setMainTask(first);
+        loop.tick(TICK);
+
+        TaskResult replaced = loop.setMainTask(second);
+
+        assertEquals("挖矿收尾", replaced.summary(), "被替换的主任务交代的结果交回给调用方");
+        assertEquals(CloseReason.REPLACED, first.closeReason);
+        TaskResult ended = loop.endMainTask(CloseReason.CANCELLED);
+        assertEquals("砍树收尾", ended.summary(), "还没推进过的主任务也要收尾交代");
+        assertEquals(CloseReason.CANCELLED, second.closeReason);
+        assertSame(ControlLoop.Decision.IDLE, loop.tick(TICK));
+    }
+
+    @Test
+    void tempTaskFactsReachTheMainTaskSoChangesStayAuditable() {
+        // 出行路上顺手插了一支火把：临时任务做成的事递给主任务，收尾时 changes 里对得上账，
+        // 不因为临时任务自己有结果就从目标的结果里消失。
+        RecordingMain main = new RecordingMain();
+        ControlLoop loop = new ControlLoop(List.of(FakeNeed.of("太暗",
+                TorchPlacingTask::new, Urgency.SOON, null)));
+        loop.setMainTask(main);
+        assertAdvancedIsTempTask(loop.tick(TICK), "太暗");
+
+        assertAdvanced(loop.tick(TICK));
+        assertEquals(1, main.received.size());
+        assertEquals(TaskResult.Status.DONE, main.received.getFirst().status());
+        assertTrue(main.received.getFirst().changes().stream()
+                .anyMatch(change -> change.kind() == Change.Kind.BLOCK_PLACED
+                        && "minecraft:torch".equals(change.what())));
+    }
+
+    /** 会收临时任务事实的主任务替身。 */
+    static final class RecordingMain extends FakeTask implements KeepsTempTaskFacts {
+        final List<TaskResult> received = new ArrayList<>();
+
+        RecordingMain() {
+            super("出行", Interruptibility.WORKING);
+        }
+
+        @Override public void keepTempTaskFacts(TaskResult result) {
+            received.add(result);
+        }
+    }
+
+    /** 顺手插一支火把的临时任务替身：推进一刻、第二刻做成并交代一条方块变化。 */
+    static final class TorchPlacingTask extends FakeTask {
+        TorchPlacingTask() {
+            super("顺手插火把", Interruptibility.WORKING);
+        }
+
+        @Override public TickResult tick(TickContext context) {
+            ticks++;
+            if (ticks < 2) return TickResult.RUNNING;
+            return TickResult.finished(TaskResult.builder(TaskResult.Status.DONE, "顺手插了一支火把照亮脚下")
+                    .change(new Change(Change.Kind.BLOCK_PLACED, "minecraft:torch", 1, "顺手插在 (1, 64, 1)"))
+                    .build());
+        }
+    }
+
+    @Test
+    void layersListTheMainTaskFirstAndTheInterruptingNeedOnTop() {
+        // 调试面板照这个画运行栈：最底是主任务，插进来的临时任务在上面，写明是哪个需求、插进来时多急。
+        FakeTask main = new FakeTask("挖矿", Interruptibility.WORKING);
+        ControlLoop loop = new ControlLoop(List.of(FakeNeed.always("自卫", Urgency.SOON)));
+        loop.setMainTask(main);
+        loop.tick(TICK);
+
+        List<ControlLoop.Layer> layers = loop.layers();
+
+        assertEquals(2, layers.size());
+        assertSame(main, layers.get(0).task());
+        assertNull(layers.get(0).needName(), "主任务不是哪个需求插进来的");
+        assertEquals("自卫", layers.get(1).needName());
+        assertEquals(Urgency.SOON, layers.get(1).urgency());
+        assertEquals(Interruptibility.WORKING, loop.askedInterruptibility(), "本刻问过主任务能不能打断");
+    }
+
+    @Test
+    void failedTempTaskLeavesARetryWaitThatSaysWhy() {
+        // 刨不动：面板要说得出"上次为什么没做成、还要等多久、接连没做成几次"，而不是只说"缓一阵"。
+        FakeTask main = new FakeTask("挖矿", Interruptibility.WORKING);
+        ControlLoop loop = new ControlLoop(List.of(
+                FakeNeed.always("刨出", Urgency.NOW, () -> new FailingTask("刨出临时"))));
+        loop.setMainTask(main);
+        loop.tick(new TestContext(10));
+
+        List<ControlLoop.RetryWait> waits = loop.retryWaits();
+
+        assertEquals(1, waits.size());
+        assertEquals("刨出", waits.get(0).needName());
+        assertEquals("做不了", waits.get(0).why(), "原因用问题本身的说法");
+        assertEquals(1, waits.get(0).failures());
+        assertEquals(10 + ControlLoop.RETRY_AFTER_FAILED_TICKS, waits.get(0).untilTick());
+    }
+
+    /** 一推进就失败的临时任务：模拟刨不动、换不上气这类自救没成功的处境。 */
+    static class FailingTask extends FakeTask {
+        FailingTask(String name) {
+            super(name, Interruptibility.UNSAFE_TO_STOP);
+        }
+
+        @Override public TickResult tick(TickContext context) {
+            ticks++;
+            return TickResult.finished(TaskResult.failed("没做成", Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "做不了")));
+        }
+    }
+
+    private record TestContext(long gameTick) implements TickContext {
+        @Override public PlayerContext player() {
+            return null;
+        }
+    }
+
+    /** 任务替身：按脚本报告可打断性，做到指定刻数后结束；记下被 start、推进、暂停、收尾的次数。 */
+    @Test
+    void sameUrgencyNeedRegisteredLaterDoesNotTakeOverATempTask() {
+        // 自卫打到一半天黑了：夜晚和自卫一样急，但排在自卫后面，不能把自卫抢去找床（实机这样被僵尸追着打死）。
+        FakeNeed defense = FakeNeed.always("自卫", Urgency.SOON);
+        FakeNeed night = FakeNeed.always("夜晚", Urgency.SOON);
+        ControlLoop loop = new ControlLoop(List.of(defense, night));
+        loop.setMainTask(new FakeTask("挖矿", Interruptibility.WORKING));
+
+        loop.tick(TICK);
+        Task fighting = loop.currentTask();
+        loop.tick(TICK);
+        loop.tick(TICK);
+        assertSame(fighting, loop.currentTask(), "自卫还在打");
+        assertEquals(0, night.created, "夜晚没插进来");
+    }
+
+    @Test
+    void sameUrgencyNeedRegisteredEarlierTakesOverATempTask() {
+        // 找床的路上挨打：自卫排在夜晚前面，照样先自卫。
+        FakeNeed defense = FakeNeed.of("自卫", (Urgency) null, Urgency.SOON);
+        FakeNeed night = FakeNeed.always("夜晚", Urgency.SOON);
+        ControlLoop loop = new ControlLoop(List.of(defense, night));
+        loop.setMainTask(new FakeTask("挖矿", Interruptibility.WORKING));
+
+        loop.tick(TICK);
+        assertEquals(1, night.created, "前置：先插进来的是找床");
+        ControlLoop.Decision.Advanced advanced = assertInstanceOf(ControlLoop.Decision.Advanced.class, loop.tick(TICK));
+        assertSame(defense, advanced.interrupting(), "自卫抢下找床");
+    }
+
+    @Test
+    void lessUrgentNeedWaitsForATempTask() {
+        // 自卫正急着，饿了（找空当）也不插进来吃东西。
+        FakeNeed defense = FakeNeed.always("自卫", Urgency.SOON, () -> new FakeTask("自卫临时", Interruptibility.BETWEEN_ACTIONS));
+        FakeNeed hunger = FakeNeed.always("饥饿", Urgency.LATER);
+        ControlLoop loop = new ControlLoop(List.of(defense, hunger));
+        loop.setMainTask(new FakeTask("挖矿", Interruptibility.BETWEEN_ACTIONS));
+
+        loop.tick(TICK);
+        loop.tick(TICK);
+        assertEquals(0, hunger.created, "自卫没打完不吃");
+    }
+
+    static class FakeTask implements Task {
+        private final String name;
+        private final List<Interruptibility> script;
+        private long finishAfterTicks = Long.MAX_VALUE;
+        int started;
+        int ticks;
+        int pauses;
+        boolean closed;
+        CloseReason closeReason;
+
+        FakeTask(String name, Interruptibility... interruptibility) {
+            this.name = name;
+            this.script = List.of(interruptibility);
+        }
+
+        FakeTask finishingAfter(long ticks) {
+            this.finishAfterTicks = ticks;
+            return this;
+        }
+
+        @Override public void start(TickContext context) {
+            started++;
+        }
+
+        @Override public TickResult tick(TickContext context) {
+            ticks++;
+            return ticks >= finishAfterTicks
+                    ? TickResult.finished(TaskResult.done(name + "做完了"))
+                    : TickResult.RUNNING;
+        }
+
+        @Override public void pause() {
+            pauses++;
+        }
+
+        @Override public TaskResult close(CloseReason reason) {
+            closed = true;
+            closeReason = reason;
+            return TaskResult.done(name + "收尾");
+        }
+
+        @Override public Interruptibility interruptibility(TickContext context) {
+            return script.get(Math.min(ticks, script.size() - 1));
+        }
+
+        @Override public String describe() {
+            return name;
+        }
+    }
+
+    /** 被撤离的临时任务替身：第二刻做完，收尾时人已经回不到原来的岗位。 */
+    static final class MovedTask extends FakeTask implements DisplacedTask {
+        private final boolean waitsForOrders;
+
+        MovedTask(String name) {
+            this(name, false);
+        }
+
+        /** @param waitsForOrders 要等 LLM 发话（被陌生玩家打了）：主任务在哪做都一样也停下 */
+        MovedTask(String name, boolean waitsForOrders) {
+            super(name, Interruptibility.WORKING);
+            this.waitsForOrders = waitsForOrders;
+            finishingAfter(2);
+        }
+
+        @Override public boolean cannotResumeInPlace() {
+            return true;
+        }
+
+        @Override public boolean waitsForOrders() {
+            return waitsForOrders;
+        }
+
+        @Override public String stoppedWhere() {
+            return "离打点 20 格";
+        }
+    }
+
+    /** 飞着的任务替身：停下不安全；被叫先落地后，落稳了就能打断；暂停时不再收尾。 */
+    static final class LandingTask extends FakeTask {
+        int stopAsks;
+        boolean stopping;
+        boolean landed;
+
+        LandingTask(String name) {
+            super(name, Interruptibility.UNSAFE_TO_STOP);
+        }
+
+        @Override public boolean stopSafely() {
+            stopAsks++;
+            stopping = true;
+            return true;
+        }
+
+        @Override public boolean stoppedSafely() {
+            return !stopping || landed;
+        }
+
+        @Override public void pause() {
+            super.pause();
+            stopping = false;
+        }
+
+        @Override public Interruptibility interruptibility(TickContext context) {
+            return landed ? Interruptibility.WORKING : Interruptibility.UNSAFE_TO_STOP;
+        }
+    }
+
+    /** 生存需求替身：按调用次序回答急迫程度，脚本用完后重复最后一个（null 表示不再需要处理）。 */
+    static class FakeNeed implements SurvivalNeed {
+        private final String name;
+        private final Urgency[] script;
+        private final Supplier<Task> factory;
+        private int calls;
+        int created;
+
+        FakeNeed(String name, Urgency[] script, Supplier<Task> factory) {
+            this.name = name;
+            this.script = script;
+            this.factory = factory;
+        }
+
+        /** 每刻都以同样的急迫程度需要处理。 */
+        static FakeNeed always(String name, Urgency urgency) {
+            return of(name, urgency);
+        }
+
+        static FakeNeed always(String name, Urgency urgency, Supplier<Task> factory) {
+            return of(name, factory, urgency);
+        }
+
+        /** 从不需要处理。 */
+        static FakeNeed never(String name) {
+            return of(name, new Urgency[0]);
+        }
+
+        /** 按次序回答急迫程度，脚本用完后重复最后一个；写 null 表示那一次不再需要处理。 */
+        static FakeNeed of(String name, Urgency... script) {
+            return new FakeNeed(name, script, () -> new FakeTask(name + "临时", Interruptibility.WORKING));
+        }
+
+        static FakeNeed of(String name, Supplier<Task> factory, Urgency... script) {
+            return new FakeNeed(name, script, factory);
+        }
+
+        @Override public String name() {
+            return name;
+        }
+
+        @Override public Urgency urgency(TickContext context) {
+            if (script.length == 0) return null;
+            Urgency urgency = script[Math.min(calls, script.length - 1)];
+            calls++;
+            return urgency;
+        }
+
+        @Override public Task createTask(TickContext context) {
+            created++;
+            return factory.get();
+        }
+    }
+}

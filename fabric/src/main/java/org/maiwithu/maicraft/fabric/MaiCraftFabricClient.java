@@ -1,85 +1,57 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.fabric;
 
+import com.google.gson.JsonObject;
 import net.fabricmc.api.ClientModInitializer;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
-import org.maiwithu.maicraft.client.runtime.ClientRuntime;
-import org.maiwithu.maicraft.client.chat.ChatMonitor;
-import org.maiwithu.maicraft.client.command.MaiCraftAgentCommandsCommand;
-import org.maiwithu.maicraft.client.command.MaiCraftClearTaskCommand;
-import org.maiwithu.maicraft.client.command.MaiCraftPortCommand;
-import org.maiwithu.maicraft.client.command.MaiCraftStatus;
-import org.maiwithu.maicraft.client.debug.DebugHudController;
-import org.maiwithu.maicraft.client.debug.DebugHudRenderer;
-import org.maiwithu.maicraft.client.preview.PreviewCommands;
-import org.maiwithu.maicraft.client.preview.PreviewController;
-import org.maiwithu.maicraft.core.MaiCraftCore;
-import org.maiwithu.maicraft.mcp.MaiCraftRuntimeFacade;
+import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.minecraft.client.Minecraft;
-import org.maiwithu.maicraft.client.actor.MenuVisibility;
-import org.maiwithu.maicraft.core.build.BuildingBudgets;
-import org.maiwithu.maicraft.core.pathing.settings.ClearanceWhitelist;
-import org.maiwithu.maicraft.mcp.knowledge.web.KnowledgeEnvironment;
-import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.SharedConstants;
-import java.util.stream.Collectors;
+import org.maiwithu.maicraft.bootstrap.Bootstrap;
+import org.maiwithu.maicraft.bootstrap.ClientLifecycle;
+import org.maiwithu.maicraft.game.serverlink.LinkTransport;
+import org.maiwithu.maicraft.network.MaiCraftPayload;
+import java.util.List;
 
 /**
- * Fabric 的客户端接线入口，把加载器事件连接到公共运行时、预览和消息观察。
- * 它不另写一套任务调度或身体动作，两个加载器尽量共用同一实现。
+ * Fabric 的客户端入口：只把客户端事件转给公共代码，不写业务。
+ * 新增客户端事件时，先在 {@link ClientLifecycle} 加方法，再在这里和 NeoForge 入口各接一行。
  */
 public final class MaiCraftFabricClient implements ClientModInitializer {
-    @Override
-    // 先登记公共工具和任务，再把启动、每刻更新、退出接到 Fabric 事件上；真正的玩法逻辑仍在公共模块。
-    public void onInitializeClient() {
-        // 先读取本实例的建筑预算，再登记工具；大模型的公开限制与随后施工使用同一份启动配置。
-        BuildingBudgets.initialize(
-                Minecraft.getInstance().gameDirectory.toPath());
-        // 接单前载入清障类型白名单，让挖路和施工第一次下手就遵守同一份玩家配置。
-        ClearanceWhitelist.initialize(Minecraft.getInstance().gameDirectory.toPath());
-        FabricOptionalServerClient.install();
-        // 查阅模组教程前记下实际客户端版本，联网线程不再触碰游戏世界或读取服务端配置。
-        KnowledgeEnvironment.install("fabric", SharedConstants.getCurrentVersion().getName(),
-                FabricLoader.getInstance().getAllMods().stream().collect(Collectors.toMap(
-                        mod -> mod.getMetadata().getId(), mod -> mod.getMetadata().getVersion().getFriendlyString(), (first, second) -> first)));
-        // 先建立工具和任务执行器的对应关系，客户端启动后再开放 MCP 接单。
-        MaiCraftCore.init();
-        ClientLifecycleEvents.CLIENT_STARTED.register(client ->
-                ClientRuntime.start(MaiCraftRuntimeFacade.instance()));
-        // 持续任务由游戏 tick 推进；网络请求本身只负责提交和查询任务。
-        ClientTickEvents.END_CLIENT_TICK.register(ClientRuntime::tick);
-        ClientTickEvents.END_CLIENT_TICK.register(PreviewController::tick);
-        ClientTickEvents.END_CLIENT_TICK.register(DebugHudController::tick);
-        // F9 调试面板画在原版 HUD 层之上；界面打开时这一层不渲染，屏幕层入口负责补画。
-        HudRenderCallback.EVENT.register((graphics, tickCounter) -> DebugHudRenderer.render(graphics));
-        ClientLifecycleEvents.CLIENT_STOPPING.register(client -> ClientRuntime.stop());
-        ScreenEvents.AFTER_INIT.register((client, screen, width, height) ->
-                ScreenEvents.afterRender(screen).register((rendered, graphics, mouseX, mouseY, delta) -> {
-                    MenuVisibility.rendered(rendered);
-                    // 菜单流调试时原版 HUD 层不渲染，屏幕每帧绘制后补画调试面板。
-                    DebugHudRenderer.renderScreen(graphics);
-                }));
-        // 聊天区消息进入独立聊天流，保留发送者；动作栏提示不混入玩家对话。
-        ClientReceiveMessageEvents.CHAT.register((message, signedMessage, sender, params, receivedAt) -> {
-            // Fabric 允许资料或签名消息缺失；有签名身份时仍保留它，不能因未同步名字而丢掉整条聊天。
-            var senderId = sender != null ? sender.getId() : signedMessage == null ? null : signedMessage.sender();
-            ChatMonitor.player(sender == null ? null : sender.getName(), senderId, message.getString());
-        });
-        ClientReceiveMessageEvents.GAME.register((message, overlay) ->
-                ChatMonitor.system(message.getString(), overlay));
-        // 注册本地 maicraft 状态、端口搬移、清理任务、AI 管理员命令放行与预览命令，不向服务器登记同名管理员命令。
-        ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) ->
-                dispatcher.register(PreviewCommands.attach(ClientCommandManager.literal("maicraft")
-                        .then(ClientCommandManager.literal("status").executes(context ->
-                                MaiCraftStatus.showInChat()))
-                        .then(MaiCraftPortCommand.node()))
-                        .then(MaiCraftClearTaskCommand.node())
-                        .then(MaiCraftAgentCommandsCommand.node())));
+    @Override public void onInitializeClient() {
+        // 与服务端 MaiCraft 的发送通道；服务端发来的信封由下面的全局接收器转给客户端部分。
+        // Fabric 一侧暂时没有联动模组，联动清单传空。
+        ClientLifecycle client = Bootstrap.startClient(new FabricLoaderEnvironment(), new LinkTransport() {
+            @Override public boolean available() { return ClientPlayNetworking.canSend(MaiCraftPayload.TYPE); }
+            @Override public void send(JsonObject envelope) { ClientPlayNetworking.send(MaiCraftPayload.of(envelope)); }
+        }, List.of());
+        ClientLifecycleEvents.CLIENT_STARTED.register(minecraft -> client.started());
+        ClientTickEvents.END_CLIENT_TICK.register(client::tickEnd);
+        ClientLifecycleEvents.CLIENT_STOPPING.register(minecraft -> client.stopping());
+        ClientPlayNetworking.registerGlobalReceiver(MaiCraftPayload.TYPE, (payload, context) ->
+                client.serverLinkReceived(Minecraft.getInstance(), payload.json()));
+        ClientPlayConnectionEvents.DISCONNECT.register((handler, minecraft) ->
+                client.serverLinkDisconnected(minecraft));
+        // 聊天栏收到的消息：玩家说的话（有签名的带原话与 UUID，没签名的只有整行）与系统消息，有什么给什么。
+        ClientReceiveMessageEvents.CHAT.register((message, signedMessage, sender, chatType, receivedAt) ->
+                client.playerChatReceived(Minecraft.getInstance(), message,
+                        signedMessage == null ? null : signedMessage.decoratedContent(),
+                        sender != null ? sender.getId() : signedMessage == null ? null : signedMessage.sender(),
+                        sender == null ? null : sender.getName(), chatType));
+        ClientReceiveMessageEvents.GAME.register((message, actionBar) ->
+                client.systemMessageReceived(Minecraft.getInstance(), message, actionBar));
+        // 调试面板画在原版 HUD 层之上；容器界面打开时界面每帧画完后再补画一次，调试界面流程时也看得到。
+        HudRenderCallback.EVENT.register((graphics, tickCounter) -> client.renderDebugPanel(graphics));
+        ScreenEvents.AFTER_INIT.register((minecraft, screen, width, height) ->
+                ScreenEvents.afterRender(screen).register((rendered, graphics, mouseX, mouseY, delta) ->
+                        client.renderDebugPanel(graphics)));
+        // 世界画完后画导航路线（路线开关开着时）。
+        WorldRenderEvents.END.register(context ->
+                client.renderWorldOverlay(context.camera(), context.positionMatrix(), context.projectionMatrix()));
     }
 }

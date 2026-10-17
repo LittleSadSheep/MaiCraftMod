@@ -148,7 +148,8 @@ public abstract class AbstractNodeCostSearch implements IPathFinder, Helper {
         } catch (Exception e) {
             Helper.HELPER.logDirect("Pathing exception: " + e);
             e.printStackTrace();
-            return new PathCalculationResult(PathCalculationResult.Type.EXCEPTION);
+            // 搜索里抛异常是程序出错，不是地形无解：把异常带出去，走到的结果按程序出错如实说。
+            return PathCalculationResult.error(e);
         } finally {
             // this is run regardless of what exception may or may not be raised by calculate0
             isFinished = true;

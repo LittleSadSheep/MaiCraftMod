@@ -1,0 +1,159 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.maiwithu.maicraft.game.player;
+
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.tags.DamageTypeTags;
+import net.minecraft.tags.EntityTypeTags;
+import net.minecraft.world.damagesource.CombatRules;
+import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.item.enchantment.EnchantmentEffectComponents;
+import net.minecraft.world.item.enchantment.effects.AddValue;
+import net.minecraft.world.level.block.BedBlock;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.loot.predicates.DamageSourceCondition;
+
+/**
+ * 摔落伤害：按当前生命、黄心、摔落相关属性（安全摔落距离、摔落伤害倍率）、落点方块、药水效果和能理解的附魔，
+ * 估算某个落差会扣多少血、能不能活下来。出行判断能不能往下跳、生存需求判断这一掉会不会摔死都用它，
+ * 同一条游戏事实只算这一处。计算前取样，实际离地前仍要复查。
+ * 抗性与缓降效果要能持续到估计的落地时刻才计入；模组自定义伤害和不能理解的附魔效果不在完整模拟范围内。
+ */
+public record FallDamage(float health, float absorption, float safeFallDistance,
+        double damageMultiplier, float protection, int resistanceLevel, int resistanceTicks,
+        int slowFallingTicks, double gravity, float accumulatedFallDistance, boolean immune) {
+
+    public enum Landing {
+        ORDINARY(1, 1), CUSHIONED(1, 0.2F), BED(0.5F, 1);
+        final float distanceScale, damageScale;
+        Landing(float distanceScale, float damageScale) {
+            this.distanceScale = distanceScale;
+            this.damageScale = damageScale;
+        }
+        public static Landing of(BlockState support) {
+            if (support.is(Blocks.HAY_BLOCK) || support.is(Blocks.HONEY_BLOCK)) return CUSHIONED;
+            // 仅接受确切的原版类别：未知模组子类可能覆写 fallOn。
+            if (support.getBlock().getClass() == BedBlock.class) return BED;
+            return ORDINARY; // 特别是，在黏液块上潜行并不会减缓坠落。
+        }
+    }
+
+    public static FallDamage capture(LocalPlayer player) {
+        // 只在客户端线程读取游戏状态；线程由调用方保证。
+        DamageSource fall = player.damageSources().fall();
+        var resistance = player.getEffect(MobEffects.DAMAGE_RESISTANCE);
+        var slow = player.getEffect(MobEffects.SLOW_FALLING);
+        boolean effects = !fall.is(DamageTypeTags.BYPASSES_EFFECTS);
+        double gravity = player.getAttributeValue(Attributes.GRAVITY);
+        if (slow != null) gravity = Math.min(gravity, 0.01);
+        // 漂浮效果会使着陆时间无法确定；不能依赖有限时长的增益效果之后自行结束。
+        if (player.hasEffect(MobEffects.LEVITATION)) gravity = 0;
+        return new FallDamage(player.getHealth(), player.getAbsorptionAmount(),
+                (float) player.getAttributeValue(Attributes.SAFE_FALL_DISTANCE),
+                player.getAttributeValue(Attributes.FALL_DAMAGE_MULTIPLIER),
+                effects && !fall.is(DamageTypeTags.BYPASSES_ENCHANTMENTS) ? protection(player, fall) : 0,
+                resistance != null && effects && !fall.is(DamageTypeTags.BYPASSES_RESISTANCE)
+                        ? resistance.getAmplifier() + 1 : 0,
+                duration(resistance), duration(slow), gravity,
+                player.onGround() ? 0 : player.fallDistance,
+                player.getAbilities().mayfly || player.getType().is(EntityTypeTags.FALL_DAMAGE_IMMUNE));
+    }
+
+    // 扣除预计伤害和可吸收部分后，生命必须仍大于零；这只判断能活下来，并不要求完全不受伤。
+    public boolean survives(double remainingDistance, Landing landing, boolean includeAccumulated) {
+        float damage = damage(remainingDistance, landing, includeAccumulated);
+        return Float.isFinite(health) && health > 0 && Float.isFinite(absorption) && absorption >= 0
+                && Float.isFinite(damage) && health - Math.max(damage - absorption, 0) > 0;
+    }
+
+    /** 摔完还剩多少血：黄心先扣，扣完的才从血里扣；算不出（距离非法、数据不对）为负无穷。 */
+    public float healthAfter(double remainingDistance, Landing landing, boolean includeAccumulated) {
+        float damage = damage(remainingDistance, landing, includeAccumulated);
+        if (!Float.isFinite(health) || !Float.isFinite(absorption) || absorption < 0 || !Float.isFinite(damage)) {
+            return Float.NEGATIVE_INFINITY;
+        }
+        return health - Math.max(damage - absorption, 0);
+    }
+
+    /**
+     * 摔完还剩至少一半的血（按最大生命算，满血 20 时是 10 点、五颗心）：玩家这么高的坎会直接跳，
+     * 走路往下跳与踩空要不要开救援都按这一条，同一条线只算这一处。
+     */
+    public boolean keepsHalf(float maxHealth, double remainingDistance, Landing landing, boolean includeAccumulated) {
+        return Float.isFinite(maxHealth) && maxHealth > 0
+                && healthAfter(remainingDistance, landing, includeAccumulated) >= maxHealth / 2;
+    }
+
+    /**
+     * 摔完还剩至少 keep 点血的最大整格落差：普通落点、从站着起跳（不算已经在掉的那段），最多查到 limit 格。
+     * 一格都不行为 0；免伤、缓降撑得到落地时直接给 limit。
+     */
+    public int maxDropKeeping(float keep, int limit) {
+        int best = 0;
+        for (int drop = 1; drop <= limit; drop++) {
+            // 伤害随落差只增不减：这一格摔完血不够，再高的也不够，不用往下查。
+            if (healthAfter(drop, Landing.ORDINARY, false) < keep) break;
+            best = drop;
+        }
+        return best;
+    }
+
+    public float damage(double remainingDistance, Landing landing, boolean includeAccumulated) {
+        if (!Double.isFinite(remainingDistance) || remainingDistance < 0
+                || !Float.isFinite(safeFallDistance) || !Double.isFinite(damageMultiplier)
+                || damageMultiplier < 0 || !Float.isFinite(accumulatedFallDistance)
+                || accumulatedFallDistance < 0 || !Float.isFinite(protection)) return Float.POSITIVE_INFINITY;
+        if (immune) return 0;
+        double ticks = landingTickBound(remainingDistance);
+        if (lasts(slowFallingTicks, ticks)) return 0;
+        double distance = remainingDistance + (includeAccumulated ? accumulatedFallDistance : 0);
+        // LivingEntity.calculateFallDamage 会先以 float 计算距离和方块倍率，再乘属性倍率。床会减半距离；干草或蜂蜜会在向上取整前缩放伤害。
+        float excess = (float) distance * landing.distanceScale - safeFallDistance;
+        float damage = (float) Math.max(0, Math.ceil((double) (excess * landing.damageScale) * damageMultiplier));
+        if (lasts(resistanceTicks, ticks) && resistanceLevel > 0) {
+            damage = Math.max(damage * Math.max(0, 25 - Math.min(resistanceLevel, 5) * 5) / 25.0F, 0);
+        }
+        return CombatRules.getDamageAfterMagicAbsorb(damage, protection);
+    }
+
+    // 用保守的时间上界判断药效是否够长；这不是精确的落地倒计时。
+    private double landingTickBound(double distance) {
+        // 从静止开始时，第一刻之后的每个下降 tick 至少移动 gravity*0.98。此处使用刻意宽松的界限，也预留一秒让角色离开支撑边缘。
+        return gravity > 0 && Double.isFinite(gravity) ? 22 + Math.ceil(distance / (gravity * 0.98))
+                : Double.POSITIVE_INFINITY;
+    }
+
+    private static boolean lasts(int ticks, double required) { return ticks == -1 || ticks > required; }
+    private static int duration(MobEffectInstance effect) { return effect == null ? 0 : effect.getDuration(); }
+
+    private static float protection(LocalPlayer player, DamageSource fall) {
+        float total = 0;
+        for (EquipmentSlot slot : EquipmentSlot.values()) {
+            var enchants = player.getItemBySlot(slot).getEnchantments();
+            for (var holder : enchants.keySet()) {
+                if (!holder.value().matchingSlot(slot)) continue;
+                var components = holder.value().getEffects(EnchantmentEffectComponents.DAMAGE_PROTECTION);
+                if (components.isEmpty()) continue;
+                // 只认"固定加值、只按伤害类型筛选"的保护效果：火焰保护这类只对别的伤害类型生效的按类型跳过，
+                // 看不懂的效果（还要看来源实体等）就不计入任何保护值，宁可少算保护、早一点自救。
+                for (var component : components) {
+                    if (!(component.effect() instanceof AddValue add)) return 0;
+                    if (component.requirements().isPresent()) {
+                        if (!(component.requirements().get() instanceof DamageSourceCondition condition)
+                                || condition.predicate().isEmpty()) return 0;
+                        var predicate = condition.predicate().get();
+                        if (predicate.directEntity().isPresent() || predicate.sourceEntity().isPresent()
+                                || predicate.isDirect().isPresent()) return 0;
+                        if (predicate.tags().stream().anyMatch(tag -> !tag.matches(fall.typeHolder()))) continue;
+                    }
+                    total += add.value().calculate(enchants.getLevel(holder));
+                }
+            }
+        }
+        return total;
+    }
+}
