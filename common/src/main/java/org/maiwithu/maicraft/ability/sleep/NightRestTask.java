@@ -54,6 +54,8 @@ final class NightRestTask extends SleepTask implements AnnouncesFinish {
     private final CollectsBlocks collects;
     private final ReadsRememberedPlaces rememberedPlaces;
     private final ReadsSleepState sleepState;
+    /** 失败上报的节流：同一夜同一句"没睡成"只报第一次，记忆跨任务活着。 */
+    private final NightRestReports reports;
 
     /** 身上睡没睡着的读缝：生产实现读本地玩家，测试给固定值。 */
     @FunctionalInterface
@@ -80,12 +82,13 @@ final class NightRestTask extends SleepTask implements AnnouncesFinish {
             ItemNeeds obtain, BringsPlayerClose approaches, UsesBeds usesBeds,
             Supplier<OverlayMessages.Shown> actionBar, Supplier<Optional<String>> carriedBed,
             CollectsBlocks collects, ReadsRememberedPlaces rememberedPlaces, ReadsSleepState sleepState,
-            SleepTask.ReadsSleepWindow sleepWindow, Set<BlockPos> sharedExclusions) {
+            SleepTask.ReadsSleepWindow sleepWindow, Set<BlockPos> sharedExclusions, NightRestReports reports) {
         super(input, permissions, scanner, placer, obtain, approaches, usesBeds, actionBar, carriedBed,
                 sleepWindow, sharedExclusions);
         this.collects = Objects.requireNonNull(collects, "collects");
         this.rememberedPlaces = Objects.requireNonNull(rememberedPlaces, "rememberedPlaces");
         this.sleepState = Objects.requireNonNull(sleepState, "sleepState");
+        this.reports = Objects.requireNonNull(reports, "reports");
     }
 
     @Override
@@ -311,7 +314,8 @@ final class NightRestTask extends SleepTask implements AnnouncesFinish {
     }
 
     // 夜里自己去睡了一觉要告诉 LLM：时间一下跳到天亮、人挪过地方，不说它就不知道。实机 10-14 角色夜里自己睡了两回，
-    // 事件流里一条都没有，测试员下 sleep 只看到"现在睡不了"，前后对不上。没睡成也说一声为什么。
+    // 事件流里一条都没有，测试员下 sleep 只看到"现在睡不了"，前后对不上。没睡成也说一声为什么——
+    // 但同一夜同一句失败只报第一次（实机 10-16 一晚 53 条），换了原因或换了夜再说。
     // 自己放的床没收回来（收不了、放在家里、没睡上就天亮了）也在这里说清床在哪、重生点改没改。
     @Override
     public String finishedNote(TaskResult result) {
@@ -321,6 +325,9 @@ final class NightRestTask extends SleepTask implements AnnouncesFinish {
                     + "；" + result.summary();
         } else {
             note = result.status() == TaskResult.Status.DONE ? null : "天黑了想去睡，没睡成：" + result.summary();
+        }
+        if (note != null && !reports.shouldAnnounce(note)) {
+            return null;
         }
         String left = bedLeftBehind();
         if (left == null || note != null && note.contains(left)) {

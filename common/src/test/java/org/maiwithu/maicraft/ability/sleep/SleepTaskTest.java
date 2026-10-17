@@ -222,7 +222,7 @@ class SleepTaskTest {
         return new NightRestTask(new SleepInput(null), Permissions.DEFAULT, scanner, new StubPlacer(),
                 new StubObtain(), approaches, usesBeds, () -> null, Optional::empty,
                 (cell, permissions) -> Optional.empty(), place -> Optional.empty(), moment -> false,
-                sleepWindow, sharedExclusions);
+                sleepWindow, sharedExclusions, new NightRestReports(() -> 1));
     }
 
     private static NightRestTask nightRest(FakeScanner scanner, StubPlacer placer, StubObtain obtain,
@@ -230,7 +230,7 @@ class SleepTaskTest {
             NightRestTask.ReadsSleepState sleepState) {
         return new NightRestTask(new SleepInput(null), Permissions.DEFAULT, scanner, placer, obtain, approaches,
                 usesBeds, () -> null, carried, (cell, permissions) -> Optional.empty(), place -> Optional.empty(),
-                sleepState, moment -> true, new HashSet<>());
+                sleepState, moment -> true, new HashSet<>(), new NightRestReports(() -> 1));
     }
 
     // 推进若干刻，任务提前结束就交出结果；没结束返回 null。
@@ -597,7 +597,7 @@ class SleepTaskTest {
                 () -> new OverlayMessages.Shown("你现在不能休息，周围有怪物在游荡", 60),
                 () -> usesBeds.clicked.isEmpty() ? Optional.of("minecraft:white_bed") : Optional.empty(),
                 (cell, permissions) -> Optional.empty(), place -> Optional.empty(), moment -> false,
-                moment -> true, new HashSet<>());
+                moment -> true, new HashSet<>(), new NightRestReports(() -> 1));
         TaskResult result = runToCompletion(rest);
         assertEquals(TaskResult.Status.FAILED, result.status());
         String left = "自己放的床留在 -86, 66, 50，重生点也改到了这张床";

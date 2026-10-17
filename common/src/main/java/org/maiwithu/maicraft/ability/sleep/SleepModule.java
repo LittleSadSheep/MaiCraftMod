@@ -78,6 +78,8 @@ public final class SleepModule implements AbilityModule, NightfallNeed.NightRest
     /** 本夜试过且睡不上的床：夜休任务来来去去，黑名单跟夜晚走，跨天清空。 */
     private final Set<BlockPos> nightTriedBeds = new HashSet<>();
     private long nightTriedDayIndex = -1;
+    /** 夜休失败上报的节流：同一夜同一句"没睡成"只报第一次（实机 10-16 一晚灌了 53 条），记忆跨任务活着。 */
+    private final NightRestReports nightRestReports;
 
     public SleepModule(Supplier<PlayerContext> context, BlockScanService scans, Protection protection,
             BackpackView backpack, OffhandContents offhand,
@@ -96,6 +98,11 @@ public final class SleepModule implements AbilityModule, NightfallNeed.NightRest
             ItemNeeds obtain, Supplier<OverlayMessages.Shown> actionBar, AutoSleep autoSleep) {
         this.autoSleep = Objects.requireNonNull(autoSleep, "autoSleep");
         this.context = Objects.requireNonNull(context, "context");
+        this.nightRestReports = new NightRestReports(() -> {
+            PlayerContext current = context.get();
+            return current == null || current.level() == null
+                    ? -1 : WorldTime.dayIndexOf(current.level().getDayTime());
+        });
         // 找床也看世界记忆里自己睡过的床，躺下后记住这一张。
         this.beds = new LiveBedFinder(context, scans, protection, backpack, offhand, rememberedPlaces);
         this.interactions = Objects.requireNonNull(interactions, "interactions");
@@ -256,7 +263,7 @@ public final class SleepModule implements AbilityModule, NightfallNeed.NightRest
                 interactions::useBlock, actionBar, beds::carriedBed, collects, rememberedPlaces,
                 moment -> moment.player() != null && moment.player().localPlayer() != null
                         && moment.player().localPlayer().isSleeping(),
-                sleepWindow, nightTriedBeds);
+                sleepWindow, nightTriedBeds, nightRestReports);
     }
 
     /** 夜晚这项生存需求读的"今晚有没有床"：附近有能用的床或身上带着床。 */
