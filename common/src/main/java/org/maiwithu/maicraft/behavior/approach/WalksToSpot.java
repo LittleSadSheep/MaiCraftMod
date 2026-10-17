@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.approach;
 import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -23,4 +24,22 @@ public interface WalksToSpot {
 
     /** 不再走向当前目标：松开移动按键，交还占着的寻路。 */
     void stop();
+
+    /** 此刻能不能被打断，按走路说：悬空、正在跳时停不得；默认正常干活。 */
+    default Interruptibility interruptibility() {
+        return Interruptibility.WORKING;
+    }
+
+    /**
+     * 先到安全处再停：转给走路，悬空的先落地，落地后原地等着、不当成走到了；返回假表示现在就能停。
+     * 之后再 {@link #pause} 就照被打断处理，接着推进时从原地重新上路。默认现在就能停。
+     */
+    default boolean stopSafely() {
+        return false;
+    }
+
+    /** 收尾做完了（落地站稳）；没在收尾为真。 */
+    default boolean stoppedSafely() {
+        return true;
+    }
 }

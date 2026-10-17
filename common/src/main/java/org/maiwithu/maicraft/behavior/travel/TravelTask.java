@@ -161,7 +161,9 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
         WalkReport report = walk.report();
         observe(context, report);
         // 生存需求打断时请求过停；停稳了就从原地重新上路，接着走完剩下的路。
+        // 被叫先到安全处再停、走路落地停稳了：站着等外层停下，暂停过后接着做时再从原地上路。
         if (report.state() == WalkReport.State.STOPPED) {
+            if (stopping()) return Next.stay();
             recordProgress("从原地接着走");
             return Next.go(Phase.WALK, "上一段走到已停稳，从原地接着走");
         }

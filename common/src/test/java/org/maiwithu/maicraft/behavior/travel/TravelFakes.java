@@ -227,6 +227,9 @@ final class TravelFakes {
         private WalkReport last = WalkReport.planning();
         int stopRequests;
         int pauseRequests;
+        /** 悬在半空走着：叫它先停稳就答应收尾，落地报"已停下"才算停稳；落地的过程由报告脚本演出来。 */
+        boolean airborne;
+        int safeStops;
 
         /** 被生存需求打断：只记请求；停下的过程由测试用报告脚本演出来。 */
         @Override public void pause() {
@@ -276,6 +279,16 @@ final class TravelFakes {
             stopRequests++;
             Boolean answer = stopAnswers.poll();
             return answer == null || answer;
+        }
+
+        @Override public boolean stopSafely() {
+            if (!airborne) return false;
+            safeStops++;
+            return true;
+        }
+
+        @Override public boolean stoppedSafely() {
+            return safeStops == 0 || last.state() == WalkReport.State.STOPPED;
         }
 
         @Override public String describe() {

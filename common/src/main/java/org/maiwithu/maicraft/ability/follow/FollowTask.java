@@ -192,10 +192,15 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
             if (portalRun != null) portalRun.pause();
         }
 
-        // 被叫先到安全处再停：过门那一段转给它（悬空的先落地），它没停稳跟随也不报停稳；别的几样此刻当场停。
-        @Override public boolean stopSafely() { return portalRun != null && portalRun.stopSafely(); }
+        // 被叫先到安全处再停：走着的路、过门那一段转给它们（悬空的先落地），没停稳跟随也不报停稳；上下车、帮打当场停。
+        // 跟丢进过门前先收掉了路，两样不会同时在手上。
+        @Override public boolean stopSafely() {
+            return walk != null ? walk.stopSafely() : portalRun != null && portalRun.stopSafely();
+        }
 
-        @Override public boolean stoppedSafely() { return portalRun == null || portalRun.stoppedSafely(); }
+        @Override public boolean stoppedSafely() {
+            return (walk == null || walk.stoppedSafely()) && (portalRun == null || portalRun.stoppedSafely());
+        }
 
         // 换阶段时基类也会叫收尾：手上的路、车、仗要带进下一阶段接着做，不收。
         // 真正结束（完成、失败、被取消、被替换）才把每一样都结清，不留一趟没人推进的路、一场没人管的仗悬着。

@@ -26,12 +26,13 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** 出行任务：拿着解析好的目的地上路，到达、中途停下、失败与打断后的接续都按现场如实结算。 */
+/** 出行任务：拿着解析好的目的地上路，到达、中途停下、先到安全处再停、失败与打断后的接续都按现场如实结算。 */
 class TravelTaskTest {
 
     private static final BlockPos HOME = new BlockPos(12, 64, -2);
@@ -171,6 +172,39 @@ class TravelTaskTest {
 
         assertEquals(TaskResult.Status.DONE, result.status());
         assertEquals(2, walks.started.size(), "被打断后从原地重新上路");
+    }
+
+    @Test
+    void askedToStopSafelyInMidAirLandsThenWaitsWithoutSettingOffAgain() {
+        // 走在半空被叫先到安全处再停：转给走路去落地，落地前不报停稳；落地停稳后站着等，不从原地重新上路；
+        // 暂停过后接着做，才从原地上路走完。
+        ScriptedWalk firstLeg = new ScriptedWalk(
+                WalkReport.onTheWay(new BlockPos(2, 64, 0), false),
+                WalkReport.onTheWay(new BlockPos(3, 65, 0), false),
+                WalkReport.stopped(new BlockPos(4, 64, -1), false));
+        firstLeg.airborne = true;
+        ScriptedWalk secondLeg = new ScriptedWalk(WalkReport.arrived(HOME, false));
+        walks.enqueue(firstLeg);
+        walks.enqueue(secondLeg);
+        TravelTask travel = task(new Target.Position(12, 64, -2, null));
+        travel.start(tick);
+        assertTrue(travel.tick(tick) instanceof TickResult.Running);
+        tick.nextTick();
+
+        assertTrue(travel.stopSafely(), "悬在半空，要先落地");
+        assertEquals(1, firstLeg.safeStops, "走路收到先停稳");
+        assertFalse(travel.stoppedSafely(), "还没落地");
+        for (int i = 0; i < 4; i++) {
+            assertTrue(travel.tick(tick) instanceof TickResult.Running, "收尾途中不收场");
+            tick.nextTick();
+        }
+        assertTrue(travel.stoppedSafely(), "落地停稳了");
+        assertEquals(1, walks.started.size(), "收尾途中不从原地重新上路");
+
+        travel.pause();
+        TaskResult result = runToFinish(travel);
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertEquals(2, walks.started.size(), "暂停过后从原地重新上路走完");
     }
 
     @Test

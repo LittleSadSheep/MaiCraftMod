@@ -125,6 +125,9 @@ class FollowTaskTest {
         boolean closed;
         int retargets;
         boolean sprint = true;
+        /** 悬在半空：叫它先停稳就请求停下，下一刻落地按已停下结算；落地前没停稳。 */
+        boolean airborne;
+        int safeStops;
 
         FakeWalk(GoalCompiler.Compiled target) {
             this.target = target;
@@ -156,6 +159,17 @@ class FollowTaskTest {
         @Override public boolean stop() {
             stopRequested = true;
             return false;
+        }
+
+        @Override public boolean stopSafely() {
+            if (!airborne) return false;
+            safeStops++;
+            stopRequested = true;
+            return true;
+        }
+
+        @Override public boolean stoppedSafely() {
+            return safeStops == 0 || state == WalkReport.State.STOPPED;
         }
 
         @Override public boolean retarget(GoalCompiler.Compiled next) {
@@ -377,6 +391,22 @@ class FollowTaskTest {
         view.him.gap = 2.8;
         step(follow);
         assertTrue(walk.stopRequested, "进了设定距离就叫停，不走到他跟前");
+    }
+
+    @Test
+    void walkingInMidAirIsAskedToLandFirst() {
+        // 跟着走、正悬在半空：叫跟随先到安全处再停，转给走着的路去落地，落地前跟随不报停稳。
+        view.him.gap = 10;
+        FollowTask follow = task(3, Permissions.DEFAULT);
+        run(follow, 2);
+        FakeWalk walk = walks.last();
+        walk.airborne = true;
+        assertTrue(follow.stopSafely(), "悬在半空走着，要先落地");
+        assertEquals(1, walk.safeStops, "走着的路收到先停稳");
+        assertFalse(follow.stoppedSafely(), "还没落地，跟随没停稳");
+        step(follow);
+        assertEquals(WalkReport.State.STOPPED, walk.state, "接着推进它，落地停下了");
+        assertTrue(follow.stoppedSafely(), "落地了，跟随停稳");
     }
 
     @Test

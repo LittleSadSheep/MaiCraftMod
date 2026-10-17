@@ -8,6 +8,7 @@ import org.maiwithu.maicraft.kernel.result.Attempt;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 import java.util.ArrayDeque;
@@ -91,6 +92,20 @@ public final class Approach implements Action {
     // 被生存需求打断：走向站位先停住、记着去处，回来时接着走，不把这一趟丢了干等。
     @Override public void pause() {
         moves.pause();
+    }
+
+    // 走向站位途中能不能打断按走路说（悬空、正在跳时停不得）；挑站位、核对、补救时是正常干活。
+    @Override public Interruptibility interruptibility() {
+        return stage == Stage.WALKING ? moves.interruptibility() : Interruptibility.WORKING;
+    }
+
+    // 被叫先到安全处再停：走向站位途中转给走路，悬空的先落地、落地后原地等着；挑站位、核对时现在就能停。
+    @Override public boolean stopSafely() {
+        return stage == Stage.WALKING && moves.stopSafely();
+    }
+
+    @Override public boolean stoppedSafely() {
+        return moves.stoppedSafely();
     }
 
     @Override public void close() {

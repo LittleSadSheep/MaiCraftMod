@@ -294,6 +294,17 @@ final class BaritoneWalkRun implements WalkRun {
         return progress.done() && progress.report().state() == WalkReport.State.STOPPED;
     }
 
+    // 被叫先到安全处再停（暂停、取消目标，不急的需求一直等不到空当）：身体在空中、正在跳、正踩在搭桥柱跳的半截，
+    // 就请求停下但不松手，调用方照常推进，沿路线走到落地站稳再撤路线、按"已停下"结算；站在地上或水里现在就能停。
+    @Override public boolean stopSafely() {
+        if (interruptibility() != Interruptibility.UNSAFE_TO_STOP) return false;
+        progress.requestStop();
+        return true;
+    }
+
+    // 停稳了没有：没请求过停下，或者请求过、已经落地按"已停下"结算（或这一趟已经走到、走不通）。
+    @Override public boolean stoppedSafely() { return !progress.stopRequested() || progress.done(); }
+
     @Override
     public ActionStatus tick(TickContext tick) {
         // 排队、上路与身体驱动都由实现方统一裁决；这里只根据最近一刻的情况回答动作状态。

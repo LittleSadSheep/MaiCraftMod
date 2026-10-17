@@ -5,6 +5,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 import java.util.ArrayDeque;
@@ -22,6 +23,9 @@ final class StubMoves implements WalksToSpot {
     final Deque<ActionStatus> script = new ArrayDeque<>();
     int stops;
     int pauses;
+    /** 悬在半空走着：能不能打断说停不得，叫先停稳就答应收尾；测试把它置回假就算落地了。 */
+    boolean airborne;
+    int safeStops;
     /** 每次真的走到（step 吐出 Done）之后调用，测试用它摆出"走过去时世界变了"的场景。 */
     Runnable onArrive = () -> {};
     private BlockPos heading;
@@ -53,6 +57,20 @@ final class StubMoves implements WalksToSpot {
 
     @Override public void pause() {
         pauses++;
+    }
+
+    @Override public Interruptibility interruptibility() {
+        return airborne ? Interruptibility.UNSAFE_TO_STOP : Interruptibility.WORKING;
+    }
+
+    @Override public boolean stopSafely() {
+        if (!airborne) return false;
+        safeStops++;
+        return true;
+    }
+
+    @Override public boolean stoppedSafely() {
+        return safeStops == 0 || !airborne;
     }
 
     /** 测试里把角色挪回原点用。 */

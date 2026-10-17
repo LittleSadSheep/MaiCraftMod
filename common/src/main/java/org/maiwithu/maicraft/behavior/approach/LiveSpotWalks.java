@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -29,6 +30,8 @@ public final class LiveSpotWalks implements WalksToSpot {
     private BlockPos feet;
     /** 被打断过：走到停稳后报的"已停下"不是到了，要重新上路。 */
     private boolean paused;
+    /** 被叫先到安全处再停、走路说要先落地：落地报的"已停下"原地等着，不马上重新上路；暂停时清掉。 */
+    private boolean stopping;
 
     /** @param permit 这次任务许可折算出的地形许可 */
     public LiveSpotWalks(WalkTo walks, TerrainPermit permit) {
@@ -49,6 +52,8 @@ public final class LiveSpotWalks implements WalksToSpot {
         // 站进目标格并落地是做完，还在走是进行中，这条路走不了是失败——三种情况都出自走到情况。
         if (walk == null) return ActionStatus.running();
         ActionStatus status = walk.tick(context);
+        // 收尾途中落地停稳了：原地等外层停下，暂停过后接着推进时再从原地上路去同一格。
+        if (stopping && walk.report().state() == WalkReport.State.STOPPED) return ActionStatus.running();
         if (paused && walk.report().state() == WalkReport.State.STOPPED) {
             // 被打断时走到停稳了、报的是"已停下"：不是到了，从原地重新上路去同一格。
             paused = false;
@@ -63,10 +68,31 @@ public final class LiveSpotWalks implements WalksToSpot {
     // 被打断：走到自己松键撤路线、保留去处，恢复后接着推进时重新算路。
     @Override
     public void pause() {
+        stopping = false;
         if (walk != null) {
             paused = true;
             walk.pause();
         }
+    }
+
+    // 走着能不能打断按走路说：悬空、正在跳时停不得。
+    @Override
+    public Interruptibility interruptibility() {
+        return walk == null ? Interruptibility.WORKING : walk.interruptibility();
+    }
+
+    // 被叫先到安全处再停：转给走路，悬空的先落地；落地报的"已停下"不是到了，接着做时从原地重新上路。
+    @Override
+    public boolean stopSafely() {
+        if (walk == null || !walk.stopSafely()) return false;
+        stopping = true;
+        paused = true;
+        return true;
+    }
+
+    @Override
+    public boolean stoppedSafely() {
+        return !stopping || walk == null || walk.stoppedSafely();
     }
 
     @Override

@@ -7,16 +7,18 @@ import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 靠近动作：原地可用就一步不走；核对不过换下一个候选；都不行按许可决定要不要补救，
- * 补救也不行就按到不了结束，问题里带着试过哪些站位、败在哪。
+ * 补救也不行就按到不了结束，问题里带着试过哪些站位、败在哪；走向站位途中能不能打断、先停稳都按走路说。
  */
 class ApproachTest {
 
@@ -51,6 +53,28 @@ class ApproachTest {
         assertEquals(ActionStatus.progressed(), approach.tick(new StubTick(2)));
         assertEquals(ActionStatus.done(), approach.tick(new StubTick(3)));
         assertEquals(1, moves.begun.size());
+    }
+
+    @Test
+    void 走向站位途中能不能打断与先停稳都按走路说() {
+        // 悬空走向站位：能不能打断按走路说（停不得），先到安全处再停转给走路，落地前不报停稳；还没上路时现在就能停。
+        world.grounded = false;
+        StubMoves moves = new StubMoves(world, ActionStatus.running(), ActionStatus.running());
+        moves.airborne = true;
+        Approach approach = approach(moves, null, Permissions.DEFAULT);
+        assertEquals(Interruptibility.WORKING, approach.interruptibility(), "还在看原地，正常干活");
+        assertFalse(approach.stopSafely(), "还没上路，现在就能停");
+        approach.tick(new StubTick(1));
+        approach.tick(new StubTick(2));
+        approach.tick(new StubTick(3));
+        assertEquals(1, moves.begun.size(), "走在去站位的路上");
+
+        assertEquals(Interruptibility.UNSAFE_TO_STOP, approach.interruptibility(), "悬空走着停不得");
+        assertTrue(approach.stopSafely(), "转给走路先落地");
+        assertEquals(1, moves.safeStops, "走路收到先停稳");
+        assertFalse(approach.stoppedSafely(), "还没落地");
+        moves.airborne = false;
+        assertTrue(approach.stoppedSafely(), "落地站稳了");
     }
 
     @Test
