@@ -50,6 +50,7 @@ import org.maiwithu.maicraft.behavior.lighting.LightingWorld;
 import org.maiwithu.maicraft.behavior.perception.DimensionChanges;
 import org.maiwithu.maicraft.behavior.perception.HurtEpisodes;
 import org.maiwithu.maicraft.behavior.perception.SkyChanges;
+import org.maiwithu.maicraft.ability.timer.Timers;
 import org.maiwithu.maicraft.behavior.survival.BreathNeed;
 import org.maiwithu.maicraft.behavior.combat.ModRangedWeapons;
 import org.maiwithu.maicraft.behavior.survival.DarknessNeed;
@@ -321,6 +322,8 @@ public final class Bootstrap {
         // 换维度与天色变化（天黑天亮、下雨雨停）：每刻看一眼，变了发事件，LLM 靠后者安排睡觉和户外的活。
         private final DimensionChanges dimensionChanges = new DimensionChanges(taskEvents);
         private final SkyChanges skyChanges = new SkyChanges(taskEvents);
+        // LLM 用 timer 挂的计时：每刻看一眼游戏时间，到点往任务事件流发 timer_due；离开世界清空。
+        private final Timers timers = new Timers(taskEvents);
         // 聊天事件流一份：聊天栏收到的消息进它，events(topic=chat) 从这里读；和任务事件分开，刷屏挤不掉目标的事件。
         private final ChatEventLog chatEvents = new ChatEventLog();
         private final WorldScope[] worldScope = new WorldScope[1];
@@ -631,7 +634,7 @@ public final class Bootstrap {
                         subtitles, interactions, useKeyProjection, walks, combatSenses,
                         abilities, interactionSender, menuActions, instanceConfig, furnaceFuels,
                         compat, survivalWiring, loader.configDirectory(), blueprintOverlay, itemsInUse, dropConfirmations,
-                        taskEvents, lightLevels, lightingWorld, followLighting);
+                        taskEvents, lightLevels, lightingWorld, followLighting, timers);
                 worldScope[0] = scope;
                 // 随行补光的会话设置回默认：开关与阈值不跨世界残留，仍暗的路线格作废。
                 followLighting.reset();
@@ -656,6 +659,8 @@ public final class Bootstrap {
             if (hurtEpisodes != null) hurtEpisodes.forget();
             dimensionChanges.forget();
             skyChanges.forget();
+            // 没到点的计时属于刚离开的那个世界，不跟到下一个。
+            timers.clear();
             if (worldScope[0] != null) {
                 goals.leaveWorld();
                 worldScope[0].leave();
@@ -703,6 +708,8 @@ public final class Bootstrap {
             if (hurtEpisodes != null) tickGuard.run("挨打片段", () -> hurtEpisodes.tick(current));
             tickGuard.run("换维度", () -> dimensionChanges.tick(current));
             tickGuard.run("天色变化", () -> skyChanges.tick(current));
+            // 计时到点照样叫：人按 F8 接过角色时也发，计时是 LLM 自己的事。
+            tickGuard.run("计时", () -> timers.tick(current));
             clientWork.drain(new ClientTickContext(gameTick, current));
             boolean owned = playerControl.input().automationOwnsControls();
             if (owned != automationOwned) {

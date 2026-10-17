@@ -219,10 +219,17 @@
       },
       {
         "ability": "maicraft:wait",
-        "summary": "在游戏里等一个条件：等一段时间、等天黑天亮、等血回满或不再饥饿",
+        "summary": "站在原地等一个条件：等一段时间、等天黑天亮、等血回满或不再饥饿；不想占着身体等用 timer",
         "parameters": "condition: string = elapsed, after_seconds: integer = 0",
         "targets": [],
         "mode": "controls_player"
+      },
+      {
+        "ability": "maicraft:timer",
+        "summary": "不占身体的计时：过 N 秒（游戏时间）在事件里叫你一声并带回备注，角色照常干别的；不是红石或模组的计时器方块",
+        "parameters": "operation: string = set, after_seconds?: integer, note?: string, timer_id?: integer",
+        "targets": [],
+        "mode": "memory_only"
       },
       {
         "ability": "maicraft:fish",
@@ -1294,7 +1301,7 @@
     },
     {
       "ability": "maicraft:wait",
-      "summary": "在游戏里等一个条件：等一段时间、等天黑天亮、等血回满或不再饥饿",
+      "summary": "站在原地等一个条件：等一段时间、等天黑天亮、等血回满或不再饥饿；不想占着身体等用 timer",
       "parameters": [
         {
           "name": "condition",
@@ -1325,6 +1332,51 @@
       "required_mods": [],
       "knowledge": [],
       "doc_resource": "assets/maicraft/abilities/wait.md"
+    },
+    {
+      "ability": "maicraft:timer",
+      "summary": "不占身体的计时：过 N 秒（游戏时间）在事件里叫你一声并带回备注，角色照常干别的；不是红石或模组的计时器方块",
+      "parameters": [
+        {
+          "name": "operation",
+          "type": "string",
+          "required": false,
+          "doc": "set 设一个计时（默认），cancel 按 timer_id 取消一个，list 看还挂着哪些",
+          "default": "set",
+          "choices": [
+            "set",
+            "cancel",
+            "list"
+          ]
+        },
+        {
+          "name": "after_seconds",
+          "type": "integer",
+          "required": false,
+          "doc": "只用于 set：过多少秒（游戏时间，单人游戏暂停时不走）叫你",
+          "min": 1,
+          "max": 3600
+        },
+        {
+          "name": "note",
+          "type": "string",
+          "required": false,
+          "doc": "只用于 set：到点时原样带回的一句备注（最多 200 字），写清到时要看什么、做什么决定"
+        },
+        {
+          "name": "timer_id",
+          "type": "integer",
+          "required": false,
+          "doc": "只用于 cancel：要取消的计时编号（set 的结果里给的）",
+          "min": 1,
+          "max": 2147483647
+        }
+      ],
+      "targets": [],
+      "mode": "memory_only",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/timer.md"
     },
     {
       "ability": "maicraft:fish",

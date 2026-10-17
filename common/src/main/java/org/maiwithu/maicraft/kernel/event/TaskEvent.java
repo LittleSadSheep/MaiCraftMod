@@ -70,7 +70,12 @@ public record TaskEvent(long cursor, Kind kind, long goalRunId, String message, 
          * 天色变了：天黑（到了能睡的时间）、天亮（过了能睡的时间）、开始下雨、雨停，只在变的那一刻发一条；
          * 此刻的时间与天气在消息里。没有昼夜的维度不发。
          */
-        SKY_CHANGED
+        SKY_CHANGED,
+        /**
+         * 计时到点：LLM 自己设下的计时到了（不占身体，角色这期间照常干别的）；
+         * 计时编号、设时写的备注、设了多少秒、到点时的游戏时间在消息里。
+         */
+        TIMER_DUE
     }
 
     /** 不附自身摘要的事件：开始、提问、暂停、生存需求这些都是这一种。 */

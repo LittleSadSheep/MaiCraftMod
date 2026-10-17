@@ -1,6 +1,6 @@
 {
   "parameter_names": {
-    "after_seconds": "先至少经过多少秒，再开始做检查",
+    "after_seconds": "从现在起过多少秒（游戏时间）：wait 先至少等这么久再开始查条件，timer 过了这么久叫你",
     "anchor": "蓝图原点落在哪一格 {x,y,z}：target 指的是别的东西（例如蓝图加农炮）时另给",
     "angle_degrees": "扇形开口角（度），1..360；配 direction 使用，有方向默认 90",
     "balance": "看载具时要不要受力：forces 两种情况往哪边倒 / ballast 再给配重建议",
@@ -40,6 +40,7 @@
     "minimum_light": "验收亮度：方块光要达到的等级（1..15）；crops 档默认 9，其余默认 8；随行补光取 1..13",
     "name": "名字，例如要记住的地点名",
     "network": "接哪种网络：取值由已登记的网络读取器自报，例如 kinetic / me / energy",
+    "note": "到点时原样带回给你的一句备注：写清到时要看什么、做什么决定",
     "operation": "一个能力内部的几种操作选哪一种，例如 enable、disable、status",
     "page": "分页看结果时的页码，从 0 起",
     "prefer": "倾向用的材料（物品 ID 或 # 标签的列表）：几种做法都行时用到它们的排前面，只影响先后",
@@ -56,6 +57,7 @@
     "target": "探索目标：survey 自由跑图 / 群系 ID 或 # 标签 / platform 找平台 / surface 回露天",
     "text": "要发送或书写的文字",
     "tier": "附魔台三档报价里选第几档（1..3）：第 n 档消耗 n 级和 n 个青金石",
+    "timer_id": "计时编号：timer 设下时结果里给的数字，取消时用",
     "vehicle": "开哪辆载具：物理结构的观察编号 s#",
     "via": "指定途径，例如拿东西时指定合成、烧炼或采掘"
   },
@@ -169,7 +171,8 @@
     "hurt",
     "dimension_changed",
     "follow_status",
-    "sky_changed"
+    "sky_changed",
+    "timer_due"
   ],
   "chat_kinds": [
     "player",

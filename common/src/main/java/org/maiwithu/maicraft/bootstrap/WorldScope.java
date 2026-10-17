@@ -78,6 +78,7 @@ import org.maiwithu.maicraft.compat.CompatRegistry;
 import org.maiwithu.maicraft.game.world.RegistryBlockTags;
 import org.maiwithu.maicraft.mcp.view.MenuView;
 import org.maiwithu.maicraft.mcp.view.SelfBrief;
+import org.maiwithu.maicraft.ability.timer.Timers;
 
 /**
  * 进世界时创建、退世界时丢弃的这一份现场：世界记忆、感知场景，并把能力按清单登记进客户端共用的注册表。
@@ -139,7 +140,7 @@ public final class WorldScope {
             InstanceConfig instanceConfig, FurnaceFuels furnaceFuels, CompatRegistry compat,
             SurvivalWiring survivalWiring, Path configDirectory, ShowsPreview preview, ItemsInUse itemsInUse,
             DropConfirmations dropConfirmations, TaskEventSink events, ReadsLightLevels lightLevels,
-            LightingWorld lightingWorld, FollowLighting followLighting) {
+            LightingWorld lightingWorld, FollowLighting followLighting, Timers timers) {
         // 游戏接口层认出是哪个存档或服务器，内核的世界身份只拿编号与目录。
         SaveIdentity save = SaveIdentity.current(minecraft)
                 .orElseThrow(() -> new IllegalStateException("进了世界却识别不出世界身份，记忆无处安放"));
@@ -217,7 +218,7 @@ public final class WorldScope {
                 compat,
                 kinds,
                 survivalWiring, configDirectory, preview, documents, identity.key(), itemsInUse, dropConfirmations,
-                instanceConfig.machineBlockLimits(), events, lightLevels, lightingWorld, followLighting), abilities);
+                instanceConfig.machineBlockLimits(), events, lightLevels, lightingWorld, followLighting, timers), abilities);
     }
 
     /**

@@ -66,6 +66,8 @@ import org.maiwithu.maicraft.ability.remember.RememberAbility;
 import org.maiwithu.maicraft.ability.sequence.SequenceModule;
 import org.maiwithu.maicraft.ability.sleep.SleepModule;
 import org.maiwithu.maicraft.ability.suicide.SuicideModule;
+import org.maiwithu.maicraft.ability.timer.TimerAbility;
+import org.maiwithu.maicraft.ability.timer.Timers;
 import org.maiwithu.maicraft.ability.travel.TravelAbility;
 import org.maiwithu.maicraft.ability.use.UseModule;
 import org.maiwithu.maicraft.ability.wait.WaitModule;
@@ -268,7 +270,9 @@ public final class AbilityCatalog {
             /** 照明看现场的只读视图：一格是什么方块、支撑面结不结实。 */
             LightingWorld lightingWorld,
             /** 随行补光的会话设置：太暗需求与 light 能力共用一份，进世界重置为默认。 */
-            FollowLighting followLighting) {
+            FollowLighting followLighting,
+            /** 挂着的计时：启动侧每刻看钟、到点发事件，timer 能力往里挂；客户端全程一份，退世界清空。 */
+            Timers timers) {
 
         public Deps {
             Objects.requireNonNull(context, "context");
@@ -292,6 +296,7 @@ public final class AbilityCatalog {
             Objects.requireNonNull(lightLevels, "lightLevels");
             Objects.requireNonNull(lightingWorld, "lightingWorld");
             Objects.requireNonNull(followLighting, "followLighting");
+            Objects.requireNonNull(timers, "timers");
         }
     }
 
@@ -549,7 +554,7 @@ public final class AbilityCatalog {
         };
     }
 
-    /** 不和别的能力共用现场部件的那些能力：战斗、跟随、等待、钓鱼、出行、聊天、记地点、按顺序做事、任务书。 */
+    /** 不和别的能力共用现场部件的那些能力：战斗、跟随、等待、计时、钓鱼、出行、聊天、记地点、按顺序做事、任务书。 */
     private static void registerStandalone(AbilityRegistry registry, Deps deps, Shared shared,
             Function<Permissions, ConstructionServices> construction) {
         PermissionCheck permission = shared.permission();
@@ -579,8 +584,9 @@ public final class AbilityCatalog {
                                 new ModRangedWeapons(deps.compat()::rangedWeapons, deps.foods()))),
                 deps.events()));
 
-        // 等待：只看世界，不依赖接缝。
+        // 等待占着身体站在原地等；不占身体的"过 N 秒叫我"归计时，往启动侧每刻看钟的那份计时表里挂。
         registry.register(new WaitModule());
+        registry.register(new TimerAbility(deps.timers()));
 
         // 钓鱼：钓位几何与咬钩收竿都接上了；缺竿回到拿到物品的内需入口，捡钓获用顺手捡起同一套。
         registry.register(new FishModule(deps.context(), shared.innerNeeds(), shared.toMainhand(),

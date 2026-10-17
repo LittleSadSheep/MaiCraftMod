@@ -39,6 +39,8 @@ import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 import org.maiwithu.maicraft.compat.CompatRegistry;
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 import org.maiwithu.maicraft.behavior.perception.FakeBlockTags;
+import org.maiwithu.maicraft.ability.timer.Timers;
+import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 
 import java.nio.file.Path;
 import java.util.Map;
@@ -158,6 +160,8 @@ final class OfflineCatalog {
                     @Override public OptionalInt skyLight(BlockPos pos) { return OptionalInt.empty(); }
                 },
                 new UnloadedWorld(),
-                new FollowLighting());
+                new FollowLighting(),
+                // 计时到点的事件离线没人听，能力照常登记、参数照常校验。
+                new Timers(TaskEventSink.NONE));
     }
 }

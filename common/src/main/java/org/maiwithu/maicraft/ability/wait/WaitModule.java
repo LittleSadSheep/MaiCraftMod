@@ -29,7 +29,8 @@ public final class WaitModule implements AbilityModule {
 
     private final AbilitySpec spec = new AbilitySpec(
             "maicraft:wait",
-            "在游戏里等一个条件：等一段时间、等天黑天亮、等血回满或不再饥饿",
+            // 一句话里写明占着身体：小模型想"过一会儿回来看"时常先想到 wait，指给它不占身体的 timer。
+            "站在原地等一个条件：等一段时间、等天黑天亮、等血回满或不再饥饿；不想占着身体等用 timer",
             AbilityDoc.forAbility("wait"),
             ParamSpecs.of(
                     ParamSpec.of("condition", ParamType.CHOICE)

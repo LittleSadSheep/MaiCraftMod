@@ -105,6 +105,8 @@ final class Timeline {
             case FOLLOW_STATUS -> PanelColor.MINOR;
             // 天黑天亮、下雨雨停只是一个经过，主播顺带看一眼
             case SKY_CHANGED -> PanelColor.MINOR;
+            // 计时到点是 LLM 给自己定的回头看一眼，和提醒一样用等待色，主播看得出它该回来处理了
+            case TIMER_DUE -> PanelColor.WAITING;
             case STEP_FINISHED, TEMPORARY_TASK_FINISHED, DEATH_RECOVERY_APPLIED -> PanelColor.MINOR;
             case DISCOVERED -> PanelColor.MINOR;
             case FINISHED -> event.status() == null ? PanelColor.MINOR : switch (event.status()) {

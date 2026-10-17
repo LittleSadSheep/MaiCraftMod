@@ -39,8 +39,9 @@ public final class ClientEnvironmentSight implements EnvironmentSight {
     /**
      * 时间的一句话说法：夜里才报离天亮多久——白天报"距天亮"没有意义。
      * 天亮按世界时间规则的凌晨起点算；纯函数，离线测试直接喂时刻。
+     * 计时到点的事件也用这一句报到点时的游戏时间，和 observe 里看到的说法一致。
      */
-    static String timeText(long dayTime) {
+    public static String timeText(long dayTime) {
         long timeOfDay = WorldTime.timeOfDayOf(dayTime);
         return switch (WorldTime.phase(dayTime)) {
             case DAWN -> "凌晨";
