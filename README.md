@@ -4,8 +4,8 @@
 ![Java 21](https://img.shields.io/badge/Java-21-e76f00)
 ![Fabric & NeoForge](https://img.shields.io/badge/Loader-Fabric%20%7C%20NeoForge-6f4cbb)
 ![License GPL-3.0-only](https://img.shields.io/badge/License-GPL--3.0--only-blue)
-[![CI](https://github.com/LittleSadSheep/MaiCraftMod/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/LittleSadSheep/MaiCraftMod/actions/workflows/ci.yml)
-[![CodeQL](https://github.com/LittleSadSheep/MaiCraftMod/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/LittleSadSheep/MaiCraftMod/actions/workflows/codeql.yml)
+[![CI](https://github.com/Mai-with-u/MaiCraftMod/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Mai-with-u/MaiCraftMod/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/Mai-with-u/MaiCraftMod/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/Mai-with-u/MaiCraftMod/actions/workflows/codeql.yml)
 
 > 让 LLM 以第一人称玩 Minecraft。
 
@@ -23,7 +23,7 @@ MaiCraft 不内置大模型，也不需要额外运行别的服务；你需要�
 - 动作全部由客户端以第一人称完成（看、走、挖、放、点界面、合成、打、骑），服务端只提供确认、方块归属与模组数据。服务器也需要安装 MaiCraft；没装的普通玩家仍可正常进服。
 - 对外只有五个 MCP 工具，每个只做一件事：`observe` 看世界和自己，`lookup` 查能力与资料，`execute` 下达目标，`goal` 查看与管理目标，`events` 读角色身上发生的事。所有工具用同一个返回格式，所有能力用同一个任务结果结构。
 - 能力覆盖出行与寻路、采集与取物、存取与整理、合成与烧制、建造与改建、战斗与陪伴、睡觉与饮食、钓鱼与附魔、交易、载具与出行方式、探索与寻找、末影龙，以及 Create、AE2、Mekanism 等联动模组的机器建造与使用。
-- 旧的 0.1.x 保留在 [`v0`](https://github.com/LittleSadSheep/MaiCraftMod/tree/v0) 分支，只修影响使用的问题，不再加功能。
+- 旧的 0.1.x 保留在 [`v0`](https://github.com/Mai-with-u/MaiCraftMod/tree/v0) 分支，只修影响使用的问题，不再加功能。
 
 每个版本的具体变化见 [`CHANGELOG.md`](CHANGELOG.md)。
 
@@ -37,7 +37,7 @@ MaiCraft 不内置大模型，也不需要额外运行别的服务；你需要�
 | NeoForge | `21.1.233+` |
 | 安装位置 | 服务端必装；AI 控制的玩家客户端必装；普通玩家客户端可选 |
 
-1. 从 [Releases](https://github.com/LittleSadSheep/MaiCraftMod/releases) 下载对应加载器的 JAR，放进 `mods` 目录。
+1. 从 [Releases](https://github.com/Mai-with-u/MaiCraftMod/releases) 下载对应加载器的 JAR，放进 `mods` 目录。
 2. 启动装有 MaiCraft 的客户端并进入世界。
 3. 在支持 Streamable HTTP 的 MCP 客户端里添加：
 
