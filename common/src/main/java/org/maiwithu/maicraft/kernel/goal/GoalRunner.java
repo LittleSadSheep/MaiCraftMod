@@ -451,15 +451,16 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, KeepsTempTaskFa
     }
 
     @Override public String describe() {
+        // 编号带着：日志与事件里说"目标 420"，对面按 goal_id 记账的人不用再猜是哪条。
         return switch (run.state()) {
-            case AWAITING_ANSWER -> "目标 " + goal.ability() + " 在等回答：" + run.question().text();
-            case PAUSED -> "目标 " + goal.ability() + " 已暂停（第 " + run.stepIndex() + " 步）" + run.pauseNote("：");
-            case FINISHED -> "目标 " + goal.ability() + " 已结束：" + result.summary();
+            case AWAITING_ANSWER -> "目标 " + run.id() + " " + goal.ability() + " 在等回答：" + run.question().text();
+            case PAUSED -> "目标 " + run.id() + " " + goal.ability() + " 已暂停（第 " + run.stepIndex() + " 步）" + run.pauseNote("：");
+            case FINISHED -> "目标 " + run.id() + " " + goal.ability() + " 已结束：" + result.summary();
             case RUNNING -> child != null && !child.finished()
-                    ? "目标 " + goal.ability() + (ending == null ? "" : ending == Ending.PAUSE ? "（先到安全的地方再暂停）"
+                    ? "目标 " + run.id() + " " + goal.ability() + (ending == null ? "" : ending == Ending.PAUSE ? "（先到安全的地方再暂停）"
                             : "（先到安全的地方再取消）") + "：" + child.describe()
-                    : waiting != null ? "目标 " + goal.ability() + " 在等：" + waiting.describe()
-                    : "目标 " + goal.ability() + " 第 " + run.stepIndex() + " 步：看现场决定下一件做什么";
+                    : waiting != null ? "目标 " + run.id() + " " + goal.ability() + " 在等：" + waiting.describe()
+                    : "目标 " + run.id() + " " + goal.ability() + " 第 " + run.stepIndex() + " 步：看现场决定下一件做什么";
         };
     }
 

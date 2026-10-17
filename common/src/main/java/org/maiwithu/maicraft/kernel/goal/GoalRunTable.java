@@ -207,7 +207,12 @@ public final class GoalRunTable {
             // answer 成功后同一次工具调用还会回来查视图，这里漏特判会把已经成功的回答污染成"编号不存在"。
             return Optional.of(deathRecovery.describe());
         }
-        GoalRunner runner = require(id);
+        GoalRunner runner = runners.get(id);
+        if (runner == null) {
+            // 表里没有、存盘里还有：角色离开世界时停成暂停的那条（实机 10-16 角色死亡退出后，
+            // 查询答"没有编号"，对面的任务台账永远等不到这条目标的下文）。照实回答它停在哪。
+            return storedRun(id).map(this::storedRunDoing);
+        }
         if (!runner.run().unfinished()) return Optional.empty();
         String describe = runner.describe();
         if (runner.run().state() == GoalRunState.RUNNING && !handover.automationOwnsControls()) {
@@ -218,6 +223,13 @@ public final class GoalRunTable {
             return Optional.of("等待控制权交接（下一刻生效）：" + describe);
         }
         return Optional.of(describe);
+    }
+
+    // 存盘里的目标在做什么：它随角色离开世界停成暂停，没有推进器，说明就说到这里。
+    private String storedRunDoing(GoalRun run) {
+        String purpose = run.goal().purpose();
+        return "随角色离开世界，停在暂停（进这个世界时会恢复）：" + run.goal().ability()
+                + (purpose == null || purpose.isBlank() ? "" : "（" + purpose + "）");
     }
 
     /**
@@ -238,13 +250,22 @@ public final class GoalRunTable {
         return runner == null || !runner.run().unfinished() ? Optional.empty() : Optional.of(runner.run());
     }
 
-    /** 按编号查目标运行；不在表里（编号不存在，或结束太久已经不保留）时为空。挂着的死亡恢复决策也按编号查得到。 */
+    /** 按编号查目标运行；不在表里时到存盘里找（角色离开世界时停成暂停的那几条），都没有才为空。
+     *  挂着的死亡恢复决策也按编号查得到。 */
     public Optional<GoalRun> find(long id) {
         if (deathRecovery.owns(id)) {
             return deathRecovery.decisionRun();
         }
         GoalRunner runner = runners.get(id);
-        return runner == null ? Optional.empty() : Optional.of(runner.run());
+        if (runner != null) {
+            return Optional.of(runner.run());
+        }
+        return storedRun(id);
+    }
+
+    // 表里没有的目标从存盘里找：离开世界时停成暂停、下次进这个世界恢复的那几条。
+    private Optional<GoalRun> storedRun(long id) {
+        return store.unfinished().stream().filter(run -> run.id() == id).findFirst();
     }
 
     /** 这个目标此刻在等的问题（sequence 时是正在跑的那一步的问题）；不在等回答时为空。死亡恢复的问题也从这里看。 */
@@ -252,7 +273,11 @@ public final class GoalRunTable {
         if (deathRecovery.owns(id)) {
             return Optional.ofNullable(deathRecovery.pendingQuestion());
         }
-        return Optional.ofNullable(require(id).pendingQuestion());
+        GoalRunner runner = runners.get(id);
+        if (runner == null) {
+            return storedRun(id).map(run -> run.question()).filter(Objects::nonNull);
+        }
+        return Optional.ofNullable(runner.pendingQuestion());
     }
 
     /** 表里的目标运行，最近下达的在前；挂着死亡恢复决策时它排在最前面。 */

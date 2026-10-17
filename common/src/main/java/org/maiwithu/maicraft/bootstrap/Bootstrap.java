@@ -359,6 +359,8 @@ public final class Bootstrap {
         private Interactions interactions;
         private ToolDispatcher tools;
         private GoalRunTable goals;
+        /** 当期会发事件的目标存储：停滞提醒每刻在这里查（离开世界时摘下）。 */
+        private EventPublishingGoalRunStore publishingGoalRuns;
         // 启动自动接管开关：maicraft.automation.on_join 开启时，进世界逐刻请求控制权直到拿到（默认关）。
         // 它只管"进世界就接管"这一段：拿到之后开关就不再管，之后由目标下达的时机决定何时再请求，人类按 F8 抢回不会被开关立刻夺回；重新进世界（现场重建）时重新生效。
         private final boolean automationOnJoin = Boolean.getBoolean("maicraft.automation.on_join");
@@ -643,8 +645,9 @@ public final class Bootstrap {
                 // 换了世界，任务事件流换一条新的，宿主手里的旧游标如实作废；再把这个世界上次没做完的目标读回来，
                 // 全部恢复为暂停，等 LLM 决定接不接着做。读回时的暂停事件进的是新的这条流。
                 taskEvents.restart();
-                goals.enterWorld(scope.memory(), new EventPublishingGoalRunStore(
-                        new NotesGoalGains(scope.goalRuns(), itemsInUse), taskEvents, selfBriefs));
+                publishingGoalRuns = new EventPublishingGoalRunStore(
+                        new NotesGoalGains(scope.goalRuns(), itemsInUse), taskEvents, selfBriefs);
+                goals.enterWorld(scope.memory(), publishingGoalRuns);
                 // 开关开启时，这次进世界要逐刻请求控制权直到拿到；还没有目标时也守得住角色。
                 startupAutomationPending = automationOnJoin;
             } else if (minecraft.level == null) {
@@ -661,6 +664,7 @@ public final class Bootstrap {
             skyChanges.forget();
             // 没到点的计时属于刚离开的那个世界，不跟到下一个。
             timers.clear();
+            publishingGoalRuns = null;
             if (worldScope[0] != null) {
                 goals.leaveWorld();
                 worldScope[0].leave();
@@ -710,6 +714,8 @@ public final class Bootstrap {
             tickGuard.run("天色变化", () -> skyChanges.tick(current));
             // 计时到点照样叫：人按 F8 接过角色时也发，计时是 LLM 自己的事。
             tickGuard.run("计时", () -> timers.tick(current));
+            // 目标停滞每刻看一眼：太久没有任何事件、又没有终态的目标发一条提醒，受理方不用自己干等。
+            if (publishingGoalRuns != null) tickGuard.run("目标停滞", publishingGoalRuns::tick);
             clientWork.drain(new ClientTickContext(gameTick, current));
             boolean owned = playerControl.input().automationOwnsControls();
             if (owned != automationOwned) {

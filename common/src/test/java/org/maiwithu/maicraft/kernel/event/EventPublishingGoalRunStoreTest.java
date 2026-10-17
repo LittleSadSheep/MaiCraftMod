@@ -15,6 +15,7 @@ import java.util.Optional;
 import java.util.OptionalLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 /** 目标运行的处境变化变成任务事件；sequence 的步骤记在整个 sequence 的编号上。 */
@@ -135,5 +136,65 @@ class EventPublishingGoalRunStoreTest {
         assertEquals("在 minecraft:overworld 12, 64, -8；血 18，饱食 15；两手空着", events.get(1).selfBrief());
         assertNull(events.get(2).selfBrief(), "读不到角色时不附，事件照发");
         assertEquals("都做完了", events.get(2).message(), "结论句不变，摘要另放一处");
+    }
+
+    @Test
+    void aGoalWithoutAnyEventForTenMinutesGetsOneStallNotice() throws InterruptedException {
+        // 实机 10-16：目标挂在进行中直到进程关闭，对面的任务台账每半小时报一次"无进展"共 25 条，
+        // 都是它自己计时的。现在目标十分钟没有任何事件就发一条停滞提醒；同一个停滞不重复，来了新事件重新计时。
+        long[] now = {0};
+        TaskEventLog log = new TaskEventLog();
+        EventPublishingGoalRunStore store = new EventPublishingGoalRunStore(new InMemoryGoalRunStore(), log,
+                ReadsSelfBrief.NONE, () -> now[0]);
+        GoalRun run = new GoalRun(store.nextId(), GOAL);
+        run.start(0);
+        store.save(run);
+        now[0] = 10L * 60 * 1_000_000_000L + 1;
+        store.tick();
+        store.tick();
+        store.tick();
+
+        List<TaskEvent> events = events(log);
+        assertEquals(2, events.size(), "同一个停滞只提醒一次");
+        assertEquals(TaskEvent.Kind.STALLED, events.get(1).kind());
+        assertEquals(run.id(), events.get(1).goalRunId());
+        assertTrue(events.get(1).message().contains("10 分钟"), events.get(1).message());
+
+        // 目标动了（又有事件）→ 重新计时，此后十分钟内不再提醒。
+        now[0] += 60_000_000_000L;
+        store.save(run);
+        now[0] += 60_000_000_000L;
+        store.tick();
+        assertEquals(2, events(log).size());
+        now[0] += 10L * 60 * 1_000_000_000L;
+        store.tick();
+        assertEquals(3, events(log).size());
+
+        // 结束了：不再有停滞提醒。
+        run.finish(TaskResult.done("做完了"), 100);
+        store.save(run);
+        now[0] += 20L * 60 * 1_000_000_000L;
+        store.tick();
+        List<TaskEvent> after = events(log);
+        assertEquals(4, after.size());
+        assertEquals(TaskEvent.Kind.FINISHED, after.get(3).kind());
+    }
+
+    @Test
+    void aPausedGoalIsNotStalled() throws InterruptedException {
+        // 暂停有自己的事件（谁停的、停在哪）；恢复是 LLM 的决定，不按停滞反复催。
+        long[] now = {0};
+        TaskEventLog log = new TaskEventLog();
+        EventPublishingGoalRunStore store = new EventPublishingGoalRunStore(new InMemoryGoalRunStore(), log,
+                ReadsSelfBrief.NONE, () -> now[0]);
+        GoalRun run = new GoalRun(store.nextId(), GOAL);
+        run.start(0);
+        store.save(run);
+        run.pause();
+        store.save(run);
+        now[0] += 30L * 60 * 1_000_000_000L;
+        store.tick();
+        assertEquals(List.of(TaskEvent.Kind.STARTED, TaskEvent.Kind.PAUSED),
+                events(log).stream().map(TaskEvent::kind).toList());
     }
 }

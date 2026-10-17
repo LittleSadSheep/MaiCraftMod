@@ -96,7 +96,8 @@ final class Timeline {
     private static PanelColor color(TaskEvent event) {
         return switch (event.kind()) {
             case STARTED, RESUMED -> PanelColor.DOING;
-            case ASKED, PAUSED, TEMPORARY_TASK_STARTED, NEED_UNHANDLED, REMINDER -> PanelColor.WAITING;
+            // 停滞提醒是"这件事可能要你回头处理"，与提醒同一个色
+            case ASKED, PAUSED, TEMPORARY_TASK_STARTED, NEED_UNHANDLED, REMINDER, STALLED -> PanelColor.WAITING;
             // 人死了和装备用坏了都是已经发生的损失，用问题色提醒
             case CHARACTER_DIED, GEAR_BROKEN -> PanelColor.PROBLEM;
             // 挨打是正在发生的麻烦，用等待色提醒主播看一眼；换维度只是一个经过

@@ -38,6 +38,8 @@ public record TaskEvent(long cursor, Kind kind, long goalRunId, String message, 
         STEP_FINISHED,
         /** 目标结束，完整结果按编号查。 */
         FINISHED,
+        /** 目标长时间没有任何新事件仍未结束：没有终态也没有动静，agent 好提前处置，不用干等。 */
+        STALLED,
         /** 临时任务开始：生存需求自己派活（自卫、回洞、退开）顶上，主任务让路。 */
         TEMPORARY_TASK_STARTED,
         /** 临时任务结束：威胁解除或条件恢复，主任务接着做。 */

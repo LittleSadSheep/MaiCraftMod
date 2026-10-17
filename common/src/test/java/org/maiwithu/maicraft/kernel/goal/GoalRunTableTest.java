@@ -351,6 +351,23 @@ class GoalRunTableTest {
     }
 
     @Test
+    void aParkedGoalIsStillAnsweredAfterLeavingBeforeComingBack() {
+        // 实机 10-16：角色死亡退出后，对面的任务台账还在按 goal_id 查这条目标，
+        // 表已清空，查询落成"没有编号为 N 的目标"，它永远等不到这条目标的下文。
+        // 现在表里没有时到存盘里找，如实回答它停在暂停。
+        table.enterWorld(new GoalRunnerTest.TestMemory(), store);
+        ability.shared().keepRunning("挖矿");
+        ability.next(new StepDecision.Run(new GoalTestAbility.TestInput("挖矿")));
+        long id = table.launch(GOAL, null).runner().run().id();
+        runTicks(2);
+        table.leaveWorld();
+
+        assertEquals(GoalRunState.PAUSED, table.find(id).orElseThrow().state());
+        assertTrue(table.doing(id).orElseThrow().contains("停在暂停"), table.doing(id).orElse(""));
+        assertTrue(table.pendingQuestion(id).isEmpty());
+    }
+
+    @Test
     void rememberingFollowsTheWorldItIsInAndStopsAfterLeaving() {
         // 进了世界，记地点落到这个世界的记忆；离开之后同一种决定按程序错误收场，不悄悄丢掉。
         GoalRunnerTest.TestMemory attached = new GoalRunnerTest.TestMemory();

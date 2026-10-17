@@ -326,8 +326,10 @@ public final class ControlLoop {
         DeathFacts facts = body.deathFacts();
         String cause = facts == null || facts.cause() == null ? "" : "（" + facts.cause() + "）";
         String where = facts == null ? "" : String.format("，已经在 %.0f, %.0f, %.0f 重生", facts.x(), facts.y(), facts.z());
+        String main = stack.isEmpty() ? "手上没有主任务"
+                : "它下的目标从重生的地方接着做：" + stack.getFirst().task.describe();
         events.publish(TaskEvent.Kind.CHARACTER_DIED,
-                "角色死了" + cause + where + "（服务器立即重生）；插着的任务已结束，主任务从重生的地方接着做");
+                "角色死了" + cause + where + "（服务器立即重生）；插着的任务已结束，" + main);
         LOG.info("角色死亡并立即重生：插着的临时任务收尾");
         return new Decision.WaitingRespawn(stack.isEmpty() ? null : stack.getFirst().task);
     }
@@ -361,8 +363,11 @@ public final class ControlLoop {
             DeathFacts facts = body == null ? null : body.deathFacts();
             // 死因照死亡界面上那句原话带上（被谁、怎么死的），LLM 才知道下回该防什么。
             String cause = facts == null || facts.cause() == null ? "" : "（" + facts.cause() + "）";
+            // 主任务是谁带着：对面按编号记账，只说"主任务"它对不上是哪条目标停了。
+            String main = stack.isEmpty() ? "手上没有主任务"
+                    : "它下的目标停在原地：" + stack.getFirst().task.describe();
             events.publish(TaskEvent.Kind.CHARACTER_DIED,
-                    "角色死了" + cause + "，等重生；插着的任务已结束，主任务停在原地，重生后接着做");
+                    "角色死了" + cause + "，等重生；" + main + "，重生后接着做");
             deathDecisions.characterDied(facts, body != null && body.connection() != null);
             LOG.info("角色死亡：控制循环停摆，等重生");
         } else {

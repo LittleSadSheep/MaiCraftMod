@@ -82,6 +82,7 @@ final class PanelWords {
             case RESUMED -> "恢复";
             case STEP_FINISHED -> "一步做完";
             case FINISHED -> "结束";
+            case STALLED -> "停滞提醒";
             case TEMPORARY_TASK_STARTED -> "临时任务开始";
             case TEMPORARY_TASK_FINISHED -> "临时任务结束";
             case NEED_UNHANDLED -> "处理不了";
